@@ -35,7 +35,9 @@ OpenAC does not ship any game data. You supply your own data files.
 ## Status
 
 OpenAC is in **beta**: it is fully playable against an ACEmulator server, and
-it is under active development. Today it does the following:
+it is under active development. Expect bugs, plenty of them; the perfect is
+the enemy of the good, and this is out so people can play it and report what
+breaks. Today it does the following:
 
 - Log in, create and select characters, enter the world, and log out cleanly.
 - Stream the outdoor world, towns, buildings, cellars, and dungeons with the
@@ -84,7 +86,8 @@ it anywhere, and run it:
 | Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
 
 The launcher installs the client, prepares your data files, keeps itself and
-the client up to date, and stores your server profiles.
+the client up to date, and stores your server profiles. It is the plainest
+part of the project today; launcher updates are coming.
 
 You will need:
 
@@ -121,12 +124,20 @@ lands, [docs/plugin-ui-markup.md](docs/plugin-ui-markup.md) covers the panel
 markup and the interfaces in `src/AcDream.Plugin.Abstractions` are the
 reference, with `src/AcDream.Plugins.MossTank` as the worked example.
 
-**MossTank** is the bundled plugin, in development: a re-implementation of
-VirindiTank, the automation plugin most Asheron's Call players ran for years.
-It reads VirindiTank's own profile and navigation files so existing setups
-carry over, and it aims at the same tabs, the same behavior, and the same
-vocabulary. Full credit to Virindi for the original; MossTank exists because
-that design was right.
+**MossTank** is the bundled plugin: a re-implementation of VirindiTank, the
+automation plugin most Asheron's Call players ran for years. It reads
+VirindiTank's own profile and navigation files so existing setups carry over,
+and it aims at the same tabs, the same behavior, and the same vocabulary.
+Full credit to Virindi for the original; MossTank exists because that design
+was right. **What ships here is a proof of concept. It is not working yet
+and is not expected to;** most of the real work lives on another branch and
+lands when it is ready.
+
+**Custom shader packs** are an experiment. The render packs under `samples/`
+are plugins that swap in their own shader stages (an atmospheric tier, a
+shadows-only tier, a no-op pack), and they exist so people can play with the
+rendering pipeline without touching the client. Try them, break them, and
+say what you found.
 
 ## AI-assisted development
 
