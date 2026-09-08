@@ -8,4 +8,3 @@
 | `run-release-gate.ps1` | The complete bounded local test gate: locked restore, Release build, every test assembly in its own timed process, TRX and hash evidence under `artifacts/release-gate/`. Its default `-TestFilter` is the portable filter CI copies. |
 | `publish-bin.ps1` | Builds the self-contained client and launcher payloads and `manifest.json`. CI runs it in the release job; locally it is for inspection. |
 | `update-package-locks.ps1` | Regenerates every neutral and RID NuGet lock file after a dependency change. |
-| `run-*.ps1`, `launch-atmospheric-preview.ps1`, `audit-test-inventory.ps1`, `connected-*.route.txt`, `*-common.ps1` | Connected and offline gate scripts and the routes they drive. Contract tests in `tests/AcDream.App.Tests/Diagnostics` read these files to pin their shape; running them needs a data directory and, for the connected ones, a server. |
