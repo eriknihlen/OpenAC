@@ -10,6 +10,14 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 | Push to `main` | self-hosted `openac-windows` | self-hosted `openac-linux` | self-hosted `openac-windows` (NVIDIA GPU) | not run |
 | Push of a `v*` tag | self-hosted | self-hosted | self-hosted | self-hosted, after all three are green |
 
+Changes that touch only Markdown files, `docs/`, `LICENSE`, or the issue
+templates skip the workflow entirely (`paths-ignore` on both triggers); a
+typo fix does not need a full test run. Tag pushes ignore path filters, so a
+release always runs every gate. If the gate jobs are ever made required
+status checks, docs-only pull requests would wait on checks that never
+report; GitHub's answer for that case is a second workflow with the inverse
+`paths` filter that reports the same job names as passed.
+
 Pull requests from forks run only on GitHub-hosted runners, so untrusted code
 never executes on a maintainer's machine. The repository requires approval
 before a workflow runs for an outside contributor. Pushes to `main` and tags
