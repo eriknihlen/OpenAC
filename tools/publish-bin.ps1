@@ -110,6 +110,7 @@ function New-PayloadZip {
         $false)
 
     Set-PayloadEntryModes $ZipPath $RequiredFiles
+    Set-ZipCreatorHostUnix $ZipPath
 }
 
 function Set-PayloadEntryModes {
@@ -138,6 +139,44 @@ function Set-PayloadEntryModes {
     } finally {
         $archive.Dispose()
     }
+}
+
+function Set-ZipCreatorHostUnix {
+    param([Parameter(Mandatory)][string]$ZipPath)
+
+    $bytes = [IO.File]::ReadAllBytes($ZipPath)
+
+    $eocd = -1
+    $floor = [Math]::Max(0, $bytes.Length - 22 - 65535)
+    for ($i = $bytes.Length - 22; $i -ge $floor; $i--) {
+        if ($bytes[$i] -eq 0x50 -and $bytes[$i + 1] -eq 0x4B -and
+            $bytes[$i + 2] -eq 0x05 -and $bytes[$i + 3] -eq 0x06) {
+            $eocd = $i
+            break
+        }
+    }
+    if ($eocd -lt 0) { throw "No end-of-central-directory record in '$ZipPath'." }
+
+    $entryCount = [BitConverter]::ToUInt16($bytes, $eocd + 10)
+    $directoryOffset = [BitConverter]::ToUInt32($bytes, $eocd + 16)
+    if ($entryCount -eq 0xFFFF -or $directoryOffset -eq 0xFFFFFFFF) {
+        throw "'$ZipPath' is a ZIP64 archive; Set-ZipCreatorHostUnix handles the classic layout only."
+    }
+
+    $position = [int64]$directoryOffset
+    for ($n = 0; $n -lt $entryCount; $n++) {
+        if (-not ($bytes[$position] -eq 0x50 -and $bytes[$position + 1] -eq 0x4B -and
+                  $bytes[$position + 2] -eq 0x01 -and $bytes[$position + 3] -eq 0x02)) {
+            throw "Central directory header $n of '$ZipPath' is malformed."
+        }
+        $bytes[$position + 5] = 3
+        $nameLength = [BitConverter]::ToUInt16($bytes, $position + 28)
+        $extraLength = [BitConverter]::ToUInt16($bytes, $position + 30)
+        $commentLength = [BitConverter]::ToUInt16($bytes, $position + 32)
+        $position += 46 + $nameLength + $extraLength + $commentLength
+    }
+
+    [IO.File]::WriteAllBytes($ZipPath, $bytes)
 }
 
 function Get-Artifact {
