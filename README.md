@@ -191,3 +191,5 @@ in [NOTICE.md](NOTICE.md).
 Asheron's Call and all associated names, art, and data files are the property
 of their respective owners. This project distributes no game assets and is not
 affiliated with Microsoft, Turbine, or Warner Bros. Entertainment.
+
+<p align="center">From Sweden with love 🇸🇪</p>
