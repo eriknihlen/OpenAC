@@ -196,6 +196,14 @@
         "resolved": "0.1.1",
         "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
       },
+      "acdream.content": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Core": "[1.0.0, )",
+          "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
+          "SixLabors.ImageSharp": "[3.1.12, )"
+        }
+      },
       "acdream.core": {
         "type": "Project",
         "dependencies": {
@@ -207,8 +215,27 @@
           "StbImageSharp": "[2.30.16, )"
         }
       },
+      "acdream.core.net": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Core": "[1.0.0, )"
+        }
+      },
+      "acdream.platform": {
+        "type": "Project"
+      },
       "acdream.plugin.abstractions": {
         "type": "Project"
+      },
+      "acdream.runtime": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Content": "[1.0.0, )",
+          "AcDream.Core": "[1.0.0, )",
+          "AcDream.Core.Net": "[1.0.0, )",
+          "AcDream.Platform": "[1.0.0, )",
+          "AcDream.Plugin.Abstractions": "[1.0.0, )"
+        }
       },
       "BCnEncoder.Net": {
         "type": "CentralTransitive",
@@ -217,6 +244,17 @@
         "contentHash": "tI5+/OQo0kciLqWrViRjpOH+IL3FjexYnoWZajiGV41g/EM9CGbWsxsPzBDmpoxNkrV9uox/EtIhCIi9chBSFw==",
         "dependencies": {
           "CommunityToolkit.HighPerformance": "8.4.0"
+        }
+      },
+      "BCnEncoder.Net.ImageSharp": {
+        "type": "CentralTransitive",
+        "requested": "[1.1.2, )",
+        "resolved": "1.1.2",
+        "contentHash": "qUi8L+bNfHJii95BMBcV6MhBchkKU2VV6sd6D1yyzgm77YhMt+aFT0keh5uf70bvTsRrq/ZKQnE4UQScNU6XAA==",
+        "dependencies": {
+          "BCnEncoder.Net": "2.2.0",
+          "CommunityToolkit.HighPerformance": "8.4.0",
+          "SixLabors.ImageSharp": "3.1.7"
         }
       },
       "Chorizite.Core": {
@@ -265,8 +303,8 @@
       "SixLabors.ImageSharp": {
         "type": "CentralTransitive",
         "requested": "[3.1.12, )",
-        "resolved": "3.1.11",
-        "contentHash": "JfPLyigLthuE50yi6tMt7Amrenr/fA31t2CvJyhy/kQmfulIBAqo5T/YFUSRHtuYPXRSaUHygFeh6Qd933EoSw=="
+        "resolved": "3.1.12",
+        "contentHash": "iAg6zifihXEFS/t7fiHhZBGAdCp3FavsF4i2ZIDp0JfeYeDVzvmlbY1CNhhIKimaIzrzSi5M/NBFcWvZT2rB/A=="
       },
       "StbImageSharp": {
         "type": "CentralTransitive",

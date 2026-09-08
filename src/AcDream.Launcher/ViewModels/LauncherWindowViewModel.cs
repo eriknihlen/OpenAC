@@ -431,6 +431,10 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
         {
             OperationStatus = "Checking for game updates…";
             await UpdatePrompt.StartupCheckAsync().ConfigureAwait(true);
+            if (!_disposed)
+            {
+                OperationStatus = DescribeStartupUpdateCheckOutcome();
+            }
         }
 
         if (!_disposed)
@@ -444,6 +448,18 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(InstallationStatus));
             RefreshFromCore();
         }
+    }
+
+    private string DescribeStartupUpdateCheckOutcome()
+    {
+        if (!UpdatePrompt.StartupCheckSucceeded)
+        {
+            return "Update check unavailable; the launcher works offline.";
+        }
+
+        return UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable
+            ? "Update available."
+            : "Up to date.";
     }
 
     private void OnOrchestratorStateChanged(object? sender, EventArgs e) =>

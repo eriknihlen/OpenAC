@@ -99,6 +99,81 @@ public sealed class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task StartupStatusReportsWhenTheUpdateFeedIsUnreachable()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Session = FakeLauncherOrchestrator.CreateSession(
+                LauncherActivityState.Exited,
+                "Exited cleanly."),
+        };
+        var installer = new FakeLauncherInstaller();
+        var updater = new StartupOrderUpdater
+        {
+            CheckException = new LauncherUpdateException("The update feed is unreachable."),
+        };
+        using var viewModel = new LauncherWindowViewModel(
+            orchestrator,
+            new ImmediateUiDispatcher(),
+            installer,
+            updater);
+
+        viewModel.Initialize();
+        await viewModel.StartBackgroundInitializationAsync();
+
+        Assert.Equal(
+            "Update check unavailable; the launcher works offline.",
+            viewModel.OperationStatus);
+        Assert.Null(viewModel.LastError);
+    }
+
+    [Fact]
+    public async Task StartupStatusReportsUpToDateWhenNothingIsAvailable()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Session = FakeLauncherOrchestrator.CreateSession(
+                LauncherActivityState.Exited,
+                "Exited cleanly."),
+        };
+        var installer = new FakeLauncherInstaller();
+        var updater = new StartupOrderUpdater { ClientUpdateAvailable = false };
+        using var viewModel = new LauncherWindowViewModel(
+            orchestrator,
+            new ImmediateUiDispatcher(),
+            installer,
+            updater);
+
+        viewModel.Initialize();
+        await viewModel.StartBackgroundInitializationAsync();
+
+        Assert.StartsWith("Up to date", viewModel.OperationStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartupStatusReportsAnAvailableUpdate()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Session = FakeLauncherOrchestrator.CreateSession(
+                LauncherActivityState.Exited,
+                "Exited cleanly."),
+        };
+        var installer = new FakeLauncherInstaller();
+        var updater = new StartupOrderUpdater { ClientUpdateAvailable = true };
+        using var viewModel = new LauncherWindowViewModel(
+            orchestrator,
+            new ImmediateUiDispatcher(),
+            installer,
+            updater);
+
+        viewModel.Initialize();
+        await viewModel.StartBackgroundInitializationAsync();
+
+        Assert.Equal("Update available.", viewModel.OperationStatus);
+    }
+
+    [Fact]
     public async Task RequiredWorldDataWorkIsExplainedAndNeverStartsWithoutConfirmation()
     {
         using var orchestrator = new FakeLauncherOrchestrator
@@ -1178,6 +1253,8 @@ public sealed class LauncherWindowViewModelTests
 
         public TaskCompletionSource<bool>? CheckGate { get; init; }
 
+        public Exception? CheckException { get; init; }
+
         public ClientVersionResolution CurrentClient => _resolution;
 
         public Task<ClientVersionResolution> InitializeAsync(
@@ -1194,6 +1271,11 @@ public sealed class LauncherWindowViewModelTests
             if (CheckGate is not null)
             {
                 _ = await CheckGate.Task.WaitAsync(cancellationToken);
+            }
+
+            if (CheckException is not null)
+            {
+                throw CheckException;
             }
 
             var artifact = new ReleaseArtifact(
