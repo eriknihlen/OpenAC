@@ -397,6 +397,7 @@ public sealed class LiveSessionCommandRouterTests
         Assert.Throws<ObjectDisposedException>(router.Activate);
     }
 
+    [Trait("Lane", "Timing")]
     [Fact]
     public async Task ConcurrentDispose_WaitsForInFlightTransportThenMakesRouterInert()
     {
