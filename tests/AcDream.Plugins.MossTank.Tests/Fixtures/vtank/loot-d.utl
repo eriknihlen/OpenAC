@@ -1,0 +1,121 @@
+UTL
+1
+90
+***** Trophies *****
+
+0;1;9999;1
+6
+true
+24
+leave this disabled
+1
+
+
+0;1;9999
+6
+true
+   ** Aetheria **
+
+0;1;1
+16
+do not edit
+1
+    (T) Aetheria (5)
+
+0;1;1;12
+13
+Aetheria
+1
+18
+27704
+218103849
+    (T) Aetheria (4+)
+
+0;1;1;3
+13
+Aetheria
+1
+18
+27703
+218103849
+    (T) Aetheria (3+)
+
+0;1;1;3;9999
+13
+Aetheria
+1
+18
+27702
+218103849
+6
+true
+    (T) Aetheria (All)
+
+0;1;1;9999
+23
+Coalesced Aetheria
+1
+6
+true
+    (T) Aetheria (Red only)
+
+0;1;1;12;9999
+23
+Coalesced Aetheria
+1
+18
+42636
+218103808
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Armor **
+
+0;1;1
+16
+do not edit
+1
+    (T) Rynthid Masks
+
+0;1;1;7
+12
+Rynthid
+1
+3
+2
+
+
+0;1;9999
+6
+true
+   ** Consumables **
+
+0;1;1
+16
+do not edit
+1
+    (T) Stamina Philtre
+
+0;1;1
+20
+Stamina Philtre
+1
+    (T) Health Philtre
+
+0;1;1
+19
+Health Philtre
+1
+    (T) Mana Philtre
+
+0;1;1;9999
+17
+Mana Philtre
+1
+6
+true
+    (T) Stamina Elixir

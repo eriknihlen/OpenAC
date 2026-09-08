@@ -1,0 +1,30 @@
+# Build output
+bin/
+obj/
+out/
+**/TestResults/
+.test-out/
+
+# IDEs
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local content and captures — never commit a prepared package or a run log
+*.pak
+logs/
+artifacts/
+launch*.log
+/*.jsonl
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc
+
+# Local agent/session state
+.claude/

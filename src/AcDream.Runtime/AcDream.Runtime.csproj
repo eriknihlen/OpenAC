@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>AcDream.Runtime</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Runtime.Tests" />
+    <InternalsVisibleTo Include="AcDream.App" />
+    <InternalsVisibleTo Include="AcDream.App.Tests" />
+    <InternalsVisibleTo Include="AcDream.Core.Tests" />
+    <InternalsVisibleTo Include="acdream-headless" />
+    <InternalsVisibleTo Include="AcDream.Headless.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Core\AcDream.Core.csproj" />
+    <ProjectReference Include="..\AcDream.Core.Net\AcDream.Core.Net.csproj" />
+    <ProjectReference Include="..\AcDream.Content\AcDream.Content.csproj" />
+    <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
+    <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

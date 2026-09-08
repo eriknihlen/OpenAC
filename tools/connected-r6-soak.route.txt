@@ -1,0 +1,193 @@
+
+sleep 15000
+input press AcdreamCycleTimeOfDay
+input press AcdreamCycleTimeOfDay
+input press AcdreamCycleTimeOfDay
+
+command /teleloc 0xC95B0001 14.8 0.3 12.005 1 0 0 0
+wait materialized 1 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 20000
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 900
+input up MovementForward
+sleep 800
+input down MovementJump
+sleep 350
+input up MovementJump
+sleep 1800
+input press CombatToggleCombat
+sleep 1200
+input down MovementForward
+sleep 500
+input up MovementForward
+sleep 700
+input press CombatToggleCombat
+sleep 27000
+screenshot caul-baseline 10000
+checkpoint caul-baseline
+sleep 3000
+
+# Sawato baseline.
+command /teleloc 0x3032001C 83.3 89.2 133.005 1 0 0 0
+wait materialized 2 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot sawato-baseline 10000
+checkpoint sawato-baseline
+sleep 3000
+
+# Rynthid world-edge streaming.
+command /teleloc 0xF6820033 145.7 49.855 58.010 1 0 0 0
+wait materialized 3 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot rynthid 10000
+checkpoint rynthid
+sleep 3000
+
+# Aerlinthe dense island.
+command /teleloc 0x09040008 11.4 188.6 87.705 1 0 0 0
+wait materialized 4 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot aerlinthe 10000
+checkpoint aerlinthe
+sleep 3000
+
+# Same-location lifecycle revisit.
+command /teleloc 0x3032001C 83.3 89.2 133.005 1 0 0 0
+wait materialized 5 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot sawato-return 10000
+checkpoint sawato-return
+sleep 3000
+
+# Holtburg mixed-town workload + local exercise.
+command /teleloc 0xA9B40019 84.0 7.1 94.005 1 0 0 0
+wait materialized 6 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 20000
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 900
+input up MovementForward
+sleep 800
+input down MovementJump
+sleep 350
+input up MovementJump
+sleep 1800
+input press CombatToggleCombat
+sleep 1200
+input down MovementForward
+sleep 500
+input up MovementForward
+sleep 700
+input press CombatToggleCombat
+sleep 27000
+screenshot holtburg 10000
+checkpoint holtburg
+sleep 3000
+
+command /teleloc 0xC95B0001 14.8 0.3 12.005 1 0 0 0
+wait materialized 7 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 20000
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 150
+input up MovementForward
+sleep 350
+input down MovementForward
+sleep 900
+input up MovementForward
+sleep 800
+input down MovementJump
+sleep 350
+input up MovementJump
+sleep 1800
+input press CombatToggleCombat
+sleep 1200
+input down MovementForward
+sleep 500
+input up MovementForward
+sleep 700
+input press CombatToggleCombat
+sleep 27000
+screenshot caul-return 10000
+checkpoint caul-return
+sleep 3000
+
+command /teleloc 0x3032001C 83.3 89.2 133.005 1 0 0 0
+wait materialized 8 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot sawato-plateau 10000
+checkpoint sawato-plateau
+sleep 3000
+
+command /teleloc 0xC95B0001 14.8 0.3 12.005 1 0 0 0
+wait materialized 9 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot caul-plateau 10000
+checkpoint caul-plateau
+sleep 3000

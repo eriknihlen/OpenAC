@@ -1,0 +1,10 @@
+{
+  "$schema": "../../docs/render-packs/plugin-manifest-v1.schema.json",
+  "id": "sample.atmospheric-tier2",
+  "displayName": "Atmospheric Tier 2 SDK Sample",
+  "version": "1.0.0",
+  "entryDll": "AcDream.RenderPacks.AtmosphericTier2.dll",
+  "apiVersion": 1,
+  "dependencies": [],
+  "kinds": ["renderPack"]
+}

@@ -1,0 +1,373 @@
+{
+  "note": "Campaign V slice V6c. Regenerate with tools/compile-shaders.ps1.",
+  "shaders": [
+    {
+      "name": "atmospheric_bloom_blur",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "96fe028e052d3dc477b6199b6ef228f04dc7b25b28d8780e9f5329261ce91692",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "atmospheric_bloom_downsample",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "5c67ca263f804f4cdece1a7ff1d9e7500ce44fedc87330124fc84b2f76f417c2",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "atmospheric_filmic",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "9521e8192b59dd223940ba8f067d5a98e8302c8347438373426448a64ea307dd",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "atmospheric_sun_occlusion",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "9b502e7d105c81bb7304808224e090c66a8ccb0bf324f8e3b914c1313eb20607",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "atmospheric_sun_rays",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "e9e671b38fc04a6797dc74dad56faa18ab8b48617eea580efc70f2cfaf4de32c",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "atmospheric_volumetric",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "81222e42a52d0b560f5916b0f312bcc5370e42e596c821477d71c61883c3d025",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "1f8b7a13689bc4d750d57d98f801b2dbf068369a21f3ec71529bae4d3c37b7a1",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "debug_line",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "2eba53935e914729f1a93932e03f125e08bedd054ff5838c454812c2b0a8a2e2",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "5db0714b88329f2465f4b8b949116e4295e37bf17360d81c108eacccb102a336",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_terrain",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "4d45daa26896bb3201d43315edc4da9ac58db0cf90a968ca2ec2656293dfb691",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "2b9ebbabc96c3ba53ce58cea175c52932c81d1d93820550f29a0734131dba5a3",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_terrain_multiview",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "73fcdd31154cd1d91ea46de81a88d8fe5b3913d0d546c074d5216a4e9821d0dd",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "2b9ebbabc96c3ba53ce58cea175c52932c81d1d93820550f29a0734131dba5a3",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_world_cutout",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "9f8725973f66501a15758d01a59686d0c30bbdb215384eda89acf42eab675876",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "cd9c404a9379715061358cb18a99b9310acbdd5062f0ad982ee9a37cd9f99922",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_world_cutout_multiview",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "d3dc9acc4f028ba51222a007596648e6557af68217cae53b5dde7d8e54b4ed78",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "cd9c404a9379715061358cb18a99b9310acbdd5062f0ad982ee9a37cd9f99922",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_world_opaque",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "d476edca4bb9e63e6194bdbb9d4fb6a301584f0ffb1337741e29c2eef99ea691",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "2b9ebbabc96c3ba53ce58cea175c52932c81d1d93820550f29a0734131dba5a3",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "directional_shadow_world_opaque_multiview",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "c0e75ea9f7867c684a9b323d9bdb6da28ad477b097eeb6f87ab67ad952948e1b",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "2b9ebbabc96c3ba53ce58cea175c52932c81d1d93820550f29a0734131dba5a3",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "mesh_atmospheric",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "bd34db942f912ea6defef9b9b8de225d777bfced64a552654221f76385ad7941",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "b2407174b0c05c3ae16e9c04c33c3af5b88c1fe2bd042fe84feaf516acb34439",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "mesh_modern",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "1aa69f27e7865d6c213f81afcf33f7ae09ce397dedd8168b352ec990b5dea994",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "ee405f05b85e7d54db21946d38df9e3d48ca3f73a4beee158b1b35e092bd1028",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "particle",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "687633f9863036ecebda83487c84ae0b8b1050a9c846bac15c333516b5f96985",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "6442acab14fcd9d9dd80f78cd511edd8b12388b0d889770b4fbd24e8f3fa68e2",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "particle_mesh",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "b1b96302af64c2cf85d3e74c400d22e22389bc2d9614933f42d7b19e4b972af2",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "d824c2e72dd8bdba041ae483e980ec131c31ae7f457cc168285da77462bc673c",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "portal_depth",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "d62e6a1e10b632f1fa8b65179a04f0cbb4a12f0fbaae2df62063184a6b752f3c",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "d84218e7d773cb07241529e88ce5241b4a40534e51dc217066fa41d60b76ae5c",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "sky",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "640d3d7e0c404234d5e8d1278268a562e9d7fbdbcb3ace34003f6dbbe3f4457e",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "c287c6e541cd40d1ba226b11e77e51e2ee77cae37985a0507fcaff6791c90dc9",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "terrain_atmospheric",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "025ab874afa1ae1f9ca6cc82def6c35a8055a0cdbad2dda1c4902fe62f48c433",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "d821c54da4634b2cf3c6f880afb31f51eda2d2bd0dc168ab53d6b9cbec43de66",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "terrain_modern",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "6cd7fb724198eb1d5ad3e8256aeeba71491042b8f879dab07c0832e5d4f5fd2e",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "049a6a73652ed846d794a7bfb94f92dd0a8d1df47b66d33ffa5809d289d1b35d",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "ui_text",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "5d206921c2c4efa9f368220263ed390a0a4e1612e980b8396f0470ae16866638",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "6594b38e0e4f8fd132f9ef5eb4e99c7669142e64738123ea81b2fbffca4c6ba9",
+          "compiled": true
+        }
+      ]
+    },
+    {
+      "name": "vk_probe",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "3ccb41461327b1267a76ea9469cee18291eaf5619286cdb7de50ac2902694135",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "6b198b0d00de0d34b14e8faec1a49915839c164485a715442574fe9356fe894f",
+          "compiled": true
+        }
+      ]
+    }
+  ]
+}

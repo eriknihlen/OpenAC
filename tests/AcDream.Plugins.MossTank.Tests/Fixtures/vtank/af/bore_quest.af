@@ -1,0 +1,186 @@
+~~
+~~	Bore Dungeon Quest Meta
+~~	Navigates to the Bore dungeon, fights through to the boss,
+~~	loots the quest item, returns to town to turn in.
+~~	Includes death recovery.
+~~
+
+STATE: {Default}
+	IF: Death
+		DO: SetState {Death}
+	IF: ItemCountGE 1 {Bore Trophy}
+		DO: SetState {TurnIn}
+	IF: ItemCountLE 50 {Prismatic Taper}
+		DO: DoAll
+				Chat {Running low on tapers, restocking.}
+				SetState {Restock}
+	IF: Always
+		DO: DoAll
+				EmbedNav navToBore {Navigate to Bore dungeon entrance}
+				SetWatchdog 10.0 180.0 {Stuck}
+
+STATE: {EnterDungeon}
+	IF: Death
+		DO: SetState {Death}
+	IF: IntoPortal
+		DO: SetState {InsideDungeon}
+	IF: SecsInStateGE 30
+		DO: SetState {Default}
+
+STATE: {InsideDungeon}
+	IF: Death
+		DO: SetState {Death}
+	IF: ExitPortal
+		DO: DoAll
+				SetOpt {enablecombat} {true}
+				SetOpt {enablelooting} {true}
+				EmbedNav navDungeonRoute {Run through dungeon to boss}
+				SetWatchdog 10.0 120.0 {Stuck}
+
+STATE: {BossRoom}
+	IF: Death
+		DO: SetState {Death}
+	IF: MobsInDist_Name 1 30.0 {Bore Boss}
+		DO: DoAll
+				SetOpt {enablecombat} {true}
+				SetState {Fighting}
+	IF: All
+			NavEmpty
+			NoMobsInDist 25.0
+		DO: SetState {LootBoss}
+	IF: Always
+		DO: None
+
+STATE: {Fighting}
+	IF: Death
+		DO: SetState {Death}
+	IF: NoMobsInDist 25.0
+		DO: SetState {LootBoss}
+	IF: SecsInStateGE 300
+		DO: SetState {BossRoom}
+
+STATE: {LootBoss}
+	IF: Death
+		DO: SetState {Death}
+	IF: ItemCountGE 1 {Bore Trophy}
+		DO: SetState {ExitDungeon}
+	IF: SecsInStateGE 30
+		DO: DoAll
+				Chat {No trophy found, exiting anyway.}
+				SetState {ExitDungeon}
+	IF: Always
+		DO: DoAll
+				SetOpt {enablelooting} {true}
+				None
+
+STATE: {ExitDungeon}
+	IF: Death
+		DO: SetState {Death}
+	IF: All
+			NavEmpty
+		DO: DoAll
+				SetOpt {enablecombat} {false}
+				SetOpt {enablelooting} {false}
+				SetState {TurnIn}
+	IF: Always
+		DO: DoAll
+				EmbedNav navExitDungeon {Exit the dungeon}
+				SetWatchdog 10.0 120.0 {Stuck}
+
+STATE: {TurnIn}
+	IF: Death
+		DO: SetState {Death}
+	IF: All
+			NavEmpty
+		DO: DoAll
+				Chat {/ub givep Bore Trophy to Bore Quest NPC}
+				Chat {/ub prepclick yes 3}
+				SetState {WaitTurnIn}
+	IF: Always
+		DO: DoAll
+				EmbedNav navToNPC {Go to turn-in NPC}
+				SetWatchdog 10.0 120.0 {Stuck}
+
+STATE: {WaitTurnIn}
+	IF: ChatMatch {^Bore Quest NPC tells you,}
+		DO: SetState {TurnInComplete}
+	IF: ChatCapture {You have solved this quest too recently!} {}
+		DO: SetState {QuestCooldown}
+	IF: SecsInStateGE 15
+		DO: SetState {TurnIn}
+
+STATE: {TurnInComplete}
+	IF: Always
+		DO: DoAll
+				Chat {Quest turn-in complete! Restarting.}
+				SetState {Default}
+
+STATE: {QuestCooldown}
+	IF: Always
+		DO: DoAll
+				Chat {Quest on cooldown, waiting...}
+				SetState {Default}
+
+STATE: {Restock}
+	IF: Death
+		DO: SetState {Death}
+	IF: All
+			NavEmpty
+			VendorOpen
+		DO: SetState {Selling}
+	IF: Always
+		DO: DoAll
+				EmbedNav navRestock {Go to vendor to restock}
+				SetWatchdog 10.0 120.0 {Stuck}
+
+STATE: {Selling}
+	IF: VendorClosed
+		DO: SetState {Default}
+	IF: SecsInStateGE 30
+		DO: SetState {Default}
+
+STATE: {Stuck}
+	IF: Always
+		DO: DoAll
+				Chat {/ub face}
+				SetState {Default}
+
+STATE: {Death}
+	IF: ExitPortal
+		DO: SetState {Default}
+
+~~ ============================================================
+~~ NAV ROUTES
+~~ ============================================================
+
+NAV: navToBore once
+	~~ Route from lifestone to Bore dungeon entrance
+	rcl 0.0 0.0 0.0 {Lifestone Recall}
+	pnt 0.0 0.0 0.0
+	pnt 0.0 0.0 0.0
+	ptl 0.0 0.0 0.0 0.0 0.0 0.0 14 {Bore Dungeon}
+
+NAV: navDungeonRoute once
+	~~ Route through dungeon to boss room
+	pnt 0.0 0.0 0.0
+	pnt 0.0 0.0 0.0
+	pnt 0.0 0.0 0.0
+	pnt 0.0 0.0 0.0
+
+NAV: navExitDungeon once
+	~~ Route from boss room back to exit portal
+	pnt 0.0 0.0 0.0
+	pnt 0.0 0.0 0.0
+	ptl 0.0 0.0 0.0 0.0 0.0 0.0 14 {Exit Portal}
+
+NAV: navToNPC once
+	~~ Route to quest turn-in NPC
+	rcl 0.0 0.0 0.0 {Lifestone Recall}
+	pnt 0.0 0.0 0.0
+	tlk 0.0 0.0 0.0 0.0 0.0 0.0 37 {Bore Quest NPC}
+
+NAV: navRestock once
+	~~ Route to vendor for restocking tapers
+	rcl 0.0 0.0 0.0 {Lifestone Recall}
+	pnt 0.0 0.0 0.0
+	vnd 0.0 0.0 0.0 00000000 {Vendor}

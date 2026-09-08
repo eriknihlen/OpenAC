@@ -1,0 +1,10 @@
+{
+  "$schema": "../../docs/render-packs/plugin-manifest-v1.schema.json",
+  "id": "sample.no-op-render-pack",
+  "displayName": "No-op Render Pack Sample",
+  "version": "1.0.0",
+  "entryDll": "AcDream.RenderPacks.NoOp.dll",
+  "apiVersion": 1,
+  "dependencies": [],
+  "kinds": ["renderPack"]
+}

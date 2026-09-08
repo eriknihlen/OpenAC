@@ -1,0 +1,50 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AcDream.App/AcDream.App.csproj" />
+    <Project Path="src/AcDream.Bake/AcDream.Bake.csproj" />
+    <Project Path="src/AcDream.Cli/AcDream.Cli.csproj" />
+    <Project Path="src/AcDream.Content/AcDream.Content.csproj" />
+    <Project Path="src/AcDream.Core/AcDream.Core.csproj" />
+    <Project Path="src/AcDream.Core.Net/AcDream.Core.Net.csproj" />
+    <Project Path="src/AcDream.Headless/AcDream.Headless.csproj" />
+    <Project Path="src/AcDream.Launcher/AcDream.Launcher.csproj" />
+    <Project Path="src/AcDream.Launcher.Core/AcDream.Launcher.Core.csproj" />
+    <Project Path="src/AcDream.Platform/AcDream.Platform.csproj" />
+    <Project Path="src/AcDream.Plugin.Abstractions/AcDream.Plugin.Abstractions.csproj" />
+    <Project Path="src/AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.csproj" />
+    <Project Path="src/AcDream.Runtime/AcDream.Runtime.csproj" />
+    <Project Path="src/AcDream.UI.Abstractions/AcDream.UI.Abstractions.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/AcDream.RenderPacks.AtmosphericTier2/AcDream.RenderPacks.AtmosphericTier2.csproj" />
+    <Project Path="samples/AcDream.RenderPacks.NoOp/AcDream.RenderPacks.NoOp.csproj" />
+    <Project Path="samples/AcDream.RenderPacks.ShadowsOnlyTier2/AcDream.RenderPacks.ShadowsOnlyTier2.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/RenderPackValidator/AcDream.Tools.RenderPackValidator.csproj" />
+    <Project Path="tools/ShaderCompiler/ShaderCompiler.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AcDream.App.Tests/AcDream.App.Tests.csproj" />
+    <Project Path="tests/AcDream.Bake.Tests/AcDream.Bake.Tests.csproj" />
+    <Project Path="tests/AcDream.Cli.Tests/AcDream.Cli.Tests.csproj" />
+    <Project Path="tests/AcDream.Content.Tests/AcDream.Content.Tests.csproj" />
+    <Project Path="tests/AcDream.Core.Tests.Fixtures.HelloPlugin/AcDream.Core.Tests.Fixtures.HelloPlugin.csproj" />
+    <Project Path="tests/AcDream.Core.Tests/AcDream.Core.Tests.csproj" />
+    <Project Path="tests/AcDream.Core.Net.Tests/AcDream.Core.Net.Tests.csproj" />
+    <Project Path="tests/AcDream.Headless.Tests/AcDream.Headless.Tests.csproj" />
+    <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder/AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder.csproj" />
+    <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.ConsoleSignalChild/AcDream.Launcher.Core.Tests.Fixtures.ConsoleSignalChild.csproj" />
+    <Project Path="tests/AcDream.Launcher.Core.Tests.Fixtures.ConsolelessSupervisorParent/AcDream.Launcher.Core.Tests.Fixtures.ConsolelessSupervisorParent.csproj" />
+    <Project Path="tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj" />
+    <Project Path="tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj" />
+    <Project Path="tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj" />
+    <Project Path="tests/AcDream.Plugins.MossTank.Tests/AcDream.Plugins.MossTank.Tests.csproj" />
+    <Project Path="tests/AcDream.Plugin.Tests.Fixtures.HostPlugin/AcDream.Plugin.Tests.Fixtures.HostPlugin.csproj" />
+    <Project Path="tests/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal.csproj" />
+    <Project Path="tests/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackMultiple/AcDream.Plugin.Tests.Fixtures.InvalidRenderPackMultiple.csproj" />
+    <Project Path="tests/AcDream.RenderPackValidator.Tests/AcDream.RenderPackValidator.Tests.csproj" />
+    <Project Path="tests/AcDream.Runtime.Tests/AcDream.Runtime.Tests.csproj" />
+    <Project Path="tests/AcDream.UI.Abstractions.Tests/AcDream.UI.Abstractions.Tests.csproj" />
+  </Folder>
+</Solution>

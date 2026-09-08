@@ -1,0 +1,120 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>AcDream.App</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>..\..\assets\icons\acdream-client.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Core.Tests" />
+    <InternalsVisibleTo Include="AcDream.App.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Chorizite.Core" />
+    <PackageReference Include="BCnEncoder.Net.ImageSharp" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="Arch" />
+    <PackageReference Include="Silk.NET.Vulkan" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" />
+    <PackageReference Include="Silk.NET.Windowing" />
+    <PackageReference Include="Silk.NET.Input" />
+    <PackageReference Include="Silk.NET.OpenAL" />
+    <PackageReference Include="Silk.NET.OpenAL.Extensions.Creative" />
+    <PackageReference Include="Silk.NET.OpenAL.Extensions.EXT" />
+    <PackageReference Include="Silk.NET.OpenAL.Soft.Native" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="StbTrueTypeSharp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
+    <ProjectReference Include="..\AcDream.Core\AcDream.Core.csproj" />
+    <ProjectReference Include="..\AcDream.Core.Net\AcDream.Core.Net.csproj" />
+    <ProjectReference Include="..\AcDream.Content\AcDream.Content.csproj" />
+    <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
+    <ProjectReference Include="..\AcDream.UI.Abstractions\AcDream.UI.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Rendering\Shaders\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Rendering\Shaders\spv\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="UI\assets\**\*.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\icons\acdream-client-16.png"
+                      LogicalName="AcDream.App.Rendering.Icons.acdream-client-16.png" />
+    <EmbeddedResource Include="..\..\assets\icons\acdream-client-32.png"
+                      LogicalName="AcDream.App.Rendering.Icons.acdream-client-32.png" />
+    <EmbeddedResource Include="..\..\assets\icons\acdream-client-48.png"
+                      LogicalName="AcDream.App.Rendering.Icons.acdream-client-48.png" />
+    <EmbeddedResource Include="..\..\assets\icons\acdream-client-256.png"
+                      LogicalName="AcDream.App.Rendering.Icons.acdream-client-256.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <_MossTankPluginMarkup Include="$(MSBuildProjectDirectory)/../AcDream.Plugins.MossTank/mosstank*.xml" />
+  </ItemGroup>
+  <Target
+    Name="CopyMossTankPluginToBuildOutput"
+    AfterTargets="Build"
+    Condition="'$(IsCrossTargetingBuild)' != 'true'">
+    <PropertyGroup>
+      <_MossTankDestDir>$(OutputPath)plugins/AcDream.Plugins.MossTank</_MossTankDestDir>
+    </PropertyGroup>
+    <MSBuild
+      Projects="$(MSBuildProjectDirectory)/../AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier);OutputPath=$(OutputPath)">
+      <Output TaskParameter="TargetOutputs" ItemName="_MossTankPluginBuildTarget" />
+    </MSBuild>
+    <MakeDir Directories="$(_MossTankDestDir)" />
+    <Copy
+      SourceFiles="@(_MossTankPluginBuildTarget);@(_MossTankPluginMarkup)"
+      DestinationFolder="$(_MossTankDestDir)"
+      SkipUnchangedFiles="true" />
+    <WriteLinesToFile
+      File="$(_MossTankDestDir)/plugin.json"
+      Overwrite="true"
+      Lines="{ &quot;id&quot;: &quot;acdream.mosstank&quot;, &quot;displayName&quot;: &quot;MossTank&quot;, &quot;version&quot;: &quot;0.1.0&quot;, &quot;entryDll&quot;: &quot;AcDream.Plugins.MossTank.dll&quot;, &quot;apiVersion&quot;: 1 }" />
+  </Target>
+
+  <Target
+    Name="CopyMossTankPluginToPublishOutput"
+    AfterTargets="Publish"
+    Condition="'$(IsCrossTargetingBuild)' != 'true'">
+    <PropertyGroup>
+      <_MossTankPublishDestDir>$(PublishDir)plugins/AcDream.Plugins.MossTank</_MossTankPublishDestDir>
+    </PropertyGroup>
+    <MSBuild
+      Projects="$(MSBuildProjectDirectory)/../AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier);OutputPath=$(OutputPath)">
+      <Output TaskParameter="TargetOutputs" ItemName="_MossTankPluginPublishTarget" />
+    </MSBuild>
+    <MakeDir Directories="$(_MossTankPublishDestDir)" />
+    <Copy
+      SourceFiles="@(_MossTankPluginPublishTarget);@(_MossTankPluginMarkup)"
+      DestinationFolder="$(_MossTankPublishDestDir)"
+      SkipUnchangedFiles="true" />
+    <WriteLinesToFile
+      File="$(_MossTankPublishDestDir)/plugin.json"
+      Overwrite="true"
+      Lines="{ &quot;id&quot;: &quot;acdream.mosstank&quot;, &quot;displayName&quot;: &quot;MossTank&quot;, &quot;version&quot;: &quot;0.1.0&quot;, &quot;entryDll&quot;: &quot;AcDream.Plugins.MossTank.dll&quot;, &quot;apiVersion&quot;: 1 }" />
+  </Target>
+</Project>

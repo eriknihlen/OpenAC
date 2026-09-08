@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>AcDream.Core.Net</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Core\AcDream.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Core.Net.Tests" />
+    <InternalsVisibleTo Include="AcDream.App.Tests" />
+    <InternalsVisibleTo Include="AcDream.Runtime" />
+    <InternalsVisibleTo Include="AcDream.Runtime.Tests" />
+    <InternalsVisibleTo Include="AcDream.Headless.Tests" />
+  </ItemGroup>
+</Project>

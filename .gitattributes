@@ -1,0 +1,16 @@
+* text=auto eol=lf
+*.ps1 text eol=lf
+
+# VTank file-compatibility fixtures: real VTank .usd/.ast/.utl profiles and real
+# metaf .af/.met/.nav samples whose exact CRLF-vs-LF byte layout is asserted by
+# round-trip tests. `-text` disables git's line-ending normalization so a
+# checkout on any OS or core.autocrlf setting reproduces the committed bytes.
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.usd -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.ast -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.utl -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.af -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.met -text
+tests/AcDream.Plugins.MossTank.Tests/Fixtures/vtank/**/*.nav -text
+# The bundled plugin's default profile is the same byte-exact VTank format.
+src/AcDream.Plugins.MossTank/*.usd -text
+src/AcDream.Plugins.MossTank/*.ast -text

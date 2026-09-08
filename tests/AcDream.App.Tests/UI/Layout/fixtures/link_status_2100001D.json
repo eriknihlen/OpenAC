@@ -1,0 +1,1101 @@
+{
+  "Id": 268435815,
+  "Type": 268435485,
+  "X": 0,
+  "Y": 0,
+  "Width": 300,
+  "Height": 362,
+  "OriginalParentWidth": 0,
+  "OriginalParentHeight": 0,
+  "HasOriginalParentSize": false,
+  "Left": 2,
+  "Top": 1,
+  "Right": 1,
+  "Bottom": 1,
+  "ReadOrder": 0,
+  "ZLevel": 0,
+  "States": {
+    "4294967295": {
+      "Id": 4294967295,
+      "Name": "",
+      "PassToChildren": false,
+      "IncorporationFlags": 31,
+      "Image": null,
+      "Cursor": null,
+      "Properties": {
+        "Values": {
+          "88": {
+            "Kind": 0,
+            "MasterPropertyId": 88,
+            "UnsignedValue": 1,
+            "IntegerValue": 0,
+            "FloatValue": 0,
+            "BoolValue": false,
+            "StringInfoValue": {
+              "Token": 0,
+              "StringId": 0,
+              "TableId": 0,
+              "Override": 0,
+              "English": 0,
+              "Comment": 0
+            },
+            "ColorValue": {
+              "Blue": 0,
+              "Green": 0,
+              "Red": 0,
+              "Alpha": 0
+            },
+            "VectorValue": {
+              "X": 0,
+              "Y": 0,
+              "Z": 0
+            },
+            "ArrayValue": [],
+            "StructValue": {}
+          },
+          "87": {
+            "Kind": 0,
+            "MasterPropertyId": 87,
+            "UnsignedValue": 268435465,
+            "IntegerValue": 0,
+            "FloatValue": 0,
+            "BoolValue": false,
+            "StringInfoValue": {
+              "Token": 0,
+              "StringId": 0,
+              "TableId": 0,
+              "Override": 0,
+              "English": 0,
+              "Comment": 0
+            },
+            "ColorValue": {
+              "Blue": 0,
+              "Green": 0,
+              "Red": 0,
+              "Alpha": 0
+            },
+            "VectorValue": {
+              "X": 0,
+              "Y": 0,
+              "Z": 0
+            },
+            "ArrayValue": [],
+            "StructValue": {}
+          },
+          "268435529": {
+            "Kind": 1,
+            "MasterPropertyId": 268435529,
+            "UnsignedValue": 0,
+            "IntegerValue": 0,
+            "FloatValue": 0,
+            "BoolValue": true,
+            "StringInfoValue": {
+              "Token": 0,
+              "StringId": 0,
+              "TableId": 0,
+              "Override": 0,
+              "English": 0,
+              "Comment": 0
+            },
+            "ColorValue": {
+              "Blue": 0,
+              "Green": 0,
+              "Red": 0,
+              "Alpha": 0
+            },
+            "VectorValue": {
+              "X": 0,
+              "Y": 0,
+              "Z": 0
+            },
+            "ArrayValue": [],
+            "StructValue": {}
+          }
+        }
+      }
+    }
+  },
+  "DefaultStateId": 0,
+  "FontDid": 0,
+  "HJustify": 1,
+  "VJustify": 1,
+  "FontColor": null,
+  "Outline": false,
+  "OutlineColor": null,
+  "StateMedia": {},
+  "StateCursors": {},
+  "DefaultStateName": "",
+  "Children": [
+    {
+      "Id": 268435816,
+      "Type": 3,
+      "X": 0,
+      "Y": 25,
+      "Width": 300,
+      "Height": 337,
+      "OriginalParentWidth": 300,
+      "OriginalParentHeight": 362,
+      "HasOriginalParentSize": true,
+      "Left": 1,
+      "Top": 1,
+      "Right": 1,
+      "Bottom": 1,
+      "ReadOrder": 3,
+      "ZLevel": 0,
+      "States": {
+        "4294967295": {
+          "Id": 4294967295,
+          "Name": "",
+          "PassToChildren": false,
+          "IncorporationFlags": 31,
+          "Image": {
+            "File": 100682946,
+            "DrawMode": 1
+          },
+          "Cursor": null,
+          "Properties": {
+            "Values": {}
+          }
+        }
+      },
+      "DefaultStateId": 0,
+      "FontDid": 0,
+      "HJustify": 1,
+      "VJustify": 1,
+      "FontColor": null,
+      "Outline": false,
+      "OutlineColor": null,
+      "StateMedia": {
+        "": {
+          "Item1": 100682946,
+          "Item2": 1
+        }
+      },
+      "StateCursors": {},
+      "DefaultStateName": "",
+      "Children": [
+        {
+          "Id": 268435817,
+          "Type": 12,
+          "X": 8,
+          "Y": 0,
+          "Width": 284,
+          "Height": 337,
+          "OriginalParentWidth": 300,
+          "OriginalParentHeight": 337,
+          "HasOriginalParentSize": true,
+          "Left": 0,
+          "Top": 0,
+          "Right": 0,
+          "Bottom": 0,
+          "ReadOrder": 1,
+          "ZLevel": 0,
+          "States": {
+            "4294967295": {
+              "Id": 4294967295,
+              "Name": "",
+              "PassToChildren": false,
+              "IncorporationFlags": 30,
+              "Image": null,
+              "Cursor": null,
+              "Properties": {
+                "Values": {
+                  "35": {
+                    "Kind": 4,
+                    "MasterPropertyId": 35,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "26": {
+                    "Kind": 7,
+                    "MasterPropertyId": 26,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 2,
+                        "MasterPropertyId": 24,
+                        "UnsignedValue": 1073741825,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 0,
+                          "Green": 0,
+                          "Red": 0,
+                          "Alpha": 0
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  },
+                  "37": {
+                    "Kind": 4,
+                    "MasterPropertyId": 37,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "27": {
+                    "Kind": 7,
+                    "MasterPropertyId": 27,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 6,
+                        "MasterPropertyId": 25,
+                        "UnsignedValue": 0,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 255,
+                          "Green": 255,
+                          "Red": 255,
+                          "Alpha": 255
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  },
+                  "20": {
+                    "Kind": 0,
+                    "MasterPropertyId": 20,
+                    "UnsignedValue": 1,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "21": {
+                    "Kind": 0,
+                    "MasterPropertyId": 21,
+                    "UnsignedValue": 1,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  }
+                }
+              }
+            },
+            "13": {
+              "Id": 13,
+              "Name": "Ghosted",
+              "PassToChildren": false,
+              "IncorporationFlags": 0,
+              "Image": null,
+              "Cursor": null,
+              "Properties": {
+                "Values": {
+                  "27": {
+                    "Kind": 7,
+                    "MasterPropertyId": 27,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 6,
+                        "MasterPropertyId": 25,
+                        "UnsignedValue": 0,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 76,
+                          "Green": 76,
+                          "Red": 76,
+                          "Alpha": 255
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  }
+                }
+              }
+            }
+          },
+          "DefaultStateId": 0,
+          "FontDid": 1073741825,
+          "HJustify": 1,
+          "VJustify": 1,
+          "FontColor": {
+            "X": 1,
+            "Y": 1,
+            "Z": 1,
+            "W": 1
+          },
+          "Outline": false,
+          "OutlineColor": null,
+          "StateMedia": {},
+          "StateCursors": {},
+          "DefaultStateName": "",
+          "Children": [],
+          "TabTable": [],
+          "TemplateList": [],
+          "LedCheckedSprite": 0,
+          "LedUncheckedSprite": 0,
+          "ScrollbarElementId": 0
+        }
+      ],
+      "TabTable": [],
+      "TemplateList": [],
+      "LedCheckedSprite": 0,
+      "LedUncheckedSprite": 0,
+      "ScrollbarElementId": 0
+    },
+    {
+      "Id": 268435708,
+      "Type": 1,
+      "X": 276,
+      "Y": 0,
+      "Width": 24,
+      "Height": 25,
+      "OriginalParentWidth": 300,
+      "OriginalParentHeight": 362,
+      "HasOriginalParentSize": true,
+      "Left": 1,
+      "Top": 1,
+      "Right": 1,
+      "Bottom": 2,
+      "ReadOrder": 1,
+      "ZLevel": 0,
+      "States": {
+        "4294967295": {
+          "Id": 4294967295,
+          "Name": "",
+          "PassToChildren": false,
+          "IncorporationFlags": 30,
+          "Image": null,
+          "Cursor": null,
+          "Properties": {
+            "Values": {
+              "18": {
+                "Kind": 0,
+                "MasterPropertyId": 18,
+                "UnsignedValue": 268435465,
+                "IntegerValue": 0,
+                "FloatValue": 0,
+                "BoolValue": false,
+                "StringInfoValue": {
+                  "Token": 0,
+                  "StringId": 0,
+                  "TableId": 0,
+                  "Override": 0,
+                  "English": 0,
+                  "Comment": 0
+                },
+                "ColorValue": {
+                  "Blue": 0,
+                  "Green": 0,
+                  "Red": 0,
+                  "Alpha": 0
+                },
+                "VectorValue": {
+                  "X": 0,
+                  "Y": 0,
+                  "Z": 0
+                },
+                "ArrayValue": [],
+                "StructValue": {}
+              }
+            }
+          }
+        },
+        "3": {
+          "Id": 3,
+          "Name": "Normal_pressed",
+          "PassToChildren": false,
+          "IncorporationFlags": 0,
+          "Image": {
+            "File": 100668308,
+            "DrawMode": 1
+          },
+          "Cursor": null,
+          "Properties": {
+            "Values": {}
+          }
+        },
+        "1": {
+          "Id": 1,
+          "Name": "Normal",
+          "PassToChildren": false,
+          "IncorporationFlags": 0,
+          "Image": {
+            "File": 100668307,
+            "DrawMode": 1
+          },
+          "Cursor": null,
+          "Properties": {
+            "Values": {}
+          }
+        }
+      },
+      "DefaultStateId": 1,
+      "FontDid": 0,
+      "HJustify": 1,
+      "VJustify": 1,
+      "FontColor": null,
+      "Outline": false,
+      "OutlineColor": null,
+      "StateMedia": {
+        "Normal": {
+          "Item1": 100668307,
+          "Item2": 1
+        },
+        "Normal_pressed": {
+          "Item1": 100668308,
+          "Item2": 1
+        }
+      },
+      "StateCursors": {},
+      "DefaultStateName": "Normal",
+      "Children": [],
+      "TabTable": [],
+      "TemplateList": [],
+      "LedCheckedSprite": 0,
+      "LedUncheckedSprite": 0,
+      "ScrollbarElementId": 0
+    },
+    {
+      "Id": 268435709,
+      "Type": 3,
+      "X": 0,
+      "Y": 0,
+      "Width": 276,
+      "Height": 25,
+      "OriginalParentWidth": 300,
+      "OriginalParentHeight": 362,
+      "HasOriginalParentSize": true,
+      "Left": 1,
+      "Top": 1,
+      "Right": 1,
+      "Bottom": 2,
+      "ReadOrder": 2,
+      "ZLevel": 0,
+      "States": {
+        "4294967295": {
+          "Id": 4294967295,
+          "Name": "",
+          "PassToChildren": false,
+          "IncorporationFlags": 31,
+          "Image": {
+            "File": 100683002,
+            "DrawMode": 3
+          },
+          "Cursor": null,
+          "Properties": {
+            "Values": {}
+          }
+        }
+      },
+      "DefaultStateId": 0,
+      "FontDid": 0,
+      "HJustify": 1,
+      "VJustify": 1,
+      "FontColor": null,
+      "Outline": false,
+      "OutlineColor": null,
+      "StateMedia": {
+        "": {
+          "Item1": 100683002,
+          "Item2": 3
+        }
+      },
+      "StateCursors": {},
+      "DefaultStateName": "",
+      "Children": [
+        {
+          "Id": 268435710,
+          "Type": 12,
+          "X": 0,
+          "Y": 0,
+          "Width": 276,
+          "Height": 25,
+          "OriginalParentWidth": 276,
+          "OriginalParentHeight": 25,
+          "HasOriginalParentSize": true,
+          "Left": 0,
+          "Top": 0,
+          "Right": 0,
+          "Bottom": 0,
+          "ReadOrder": 1,
+          "ZLevel": 0,
+          "States": {
+            "4294967295": {
+              "Id": 4294967295,
+              "Name": "",
+              "PassToChildren": false,
+              "IncorporationFlags": 30,
+              "Image": null,
+              "Cursor": null,
+              "Properties": {
+                "Values": {
+                  "35": {
+                    "Kind": 4,
+                    "MasterPropertyId": 35,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "26": {
+                    "Kind": 7,
+                    "MasterPropertyId": 26,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 2,
+                        "MasterPropertyId": 24,
+                        "UnsignedValue": 1073741825,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 0,
+                          "Green": 0,
+                          "Red": 0,
+                          "Alpha": 0
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  },
+                  "37": {
+                    "Kind": 4,
+                    "MasterPropertyId": 37,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "27": {
+                    "Kind": 7,
+                    "MasterPropertyId": 27,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 6,
+                        "MasterPropertyId": 25,
+                        "UnsignedValue": 0,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 255,
+                          "Green": 255,
+                          "Red": 255,
+                          "Alpha": 255
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  },
+                  "20": {
+                    "Kind": 0,
+                    "MasterPropertyId": 20,
+                    "UnsignedValue": 1,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "21": {
+                    "Kind": 0,
+                    "MasterPropertyId": 21,
+                    "UnsignedValue": 1,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  },
+                  "23": {
+                    "Kind": 5,
+                    "MasterPropertyId": 23,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 187694290,
+                      "TableId": 587202561,
+                      "Override": 0,
+                      "English": 1,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [],
+                    "StructValue": {}
+                  }
+                }
+              }
+            },
+            "13": {
+              "Id": 13,
+              "Name": "Ghosted",
+              "PassToChildren": false,
+              "IncorporationFlags": 0,
+              "Image": null,
+              "Cursor": null,
+              "Properties": {
+                "Values": {
+                  "27": {
+                    "Kind": 7,
+                    "MasterPropertyId": 27,
+                    "UnsignedValue": 0,
+                    "IntegerValue": 0,
+                    "FloatValue": 0,
+                    "BoolValue": false,
+                    "StringInfoValue": {
+                      "Token": 0,
+                      "StringId": 0,
+                      "TableId": 0,
+                      "Override": 0,
+                      "English": 0,
+                      "Comment": 0
+                    },
+                    "ColorValue": {
+                      "Blue": 0,
+                      "Green": 0,
+                      "Red": 0,
+                      "Alpha": 0
+                    },
+                    "VectorValue": {
+                      "X": 0,
+                      "Y": 0,
+                      "Z": 0
+                    },
+                    "ArrayValue": [
+                      {
+                        "Kind": 6,
+                        "MasterPropertyId": 25,
+                        "UnsignedValue": 0,
+                        "IntegerValue": 0,
+                        "FloatValue": 0,
+                        "BoolValue": false,
+                        "StringInfoValue": {
+                          "Token": 0,
+                          "StringId": 0,
+                          "TableId": 0,
+                          "Override": 0,
+                          "English": 0,
+                          "Comment": 0
+                        },
+                        "ColorValue": {
+                          "Blue": 76,
+                          "Green": 76,
+                          "Red": 76,
+                          "Alpha": 255
+                        },
+                        "VectorValue": {
+                          "X": 0,
+                          "Y": 0,
+                          "Z": 0
+                        },
+                        "ArrayValue": [],
+                        "StructValue": {}
+                      }
+                    ],
+                    "StructValue": {}
+                  }
+                }
+              }
+            }
+          },
+          "DefaultStateId": 0,
+          "FontDid": 1073741825,
+          "HJustify": 1,
+          "VJustify": 1,
+          "FontColor": {
+            "X": 1,
+            "Y": 1,
+            "Z": 1,
+            "W": 1
+          },
+          "Outline": false,
+          "OutlineColor": null,
+          "StateMedia": {},
+          "StateCursors": {},
+          "DefaultStateName": "",
+          "Children": [],
+          "TabTable": [],
+          "TemplateList": [],
+          "LedCheckedSprite": 0,
+          "LedUncheckedSprite": 0,
+          "ScrollbarElementId": 0
+        }
+      ],
+      "TabTable": [],
+      "TemplateList": [],
+      "LedCheckedSprite": 0,
+      "LedUncheckedSprite": 0,
+      "ScrollbarElementId": 0
+    }
+  ],
+  "TabTable": [],
+  "TemplateList": [],
+  "LedCheckedSprite": 0,
+  "LedUncheckedSprite": 0,
+  "ScrollbarElementId": 0
+}

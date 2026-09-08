@@ -1,0 +1,46 @@
+
+wait world-ready 90000
+wait world-visible 30000
+
+command /teleloc 0x09040008 11.4 188.6 87.705
+wait materialized 1 90000
+wait world-visible 30000
+sleep 5000
+renderpack select retail
+wait render-pack retail 90000
+sleep 3000
+screenshot exposure_outdoor_retail 15000
+
+renderpack select high
+wait render-pack high 90000
+sleep 3000
+screenshot exposure_outdoor_atmospheric_high 15000
+
+renderpack disable
+wait render-pack retail 90000
+
+# Facility Hub interior: EnvCell lighting, no outdoor directional-shadow path.
+command /teleloc 0x8A020164 70.35 -40.66 -5.9
+wait materialized 2 90000
+wait world-visible 30000
+sleep 5000
+screenshot exposure_interior_retail 15000
+
+renderpack select high
+wait render-pack high 90000
+sleep 3000
+screenshot exposure_interior_atmospheric_high 15000
+
+renderpack disable
+wait render-pack retail 90000
+
+# Return outdoors and exercise the first/default selectable preset last.
+command /teleloc 0x09040008 11.4 188.6 87.705
+wait materialized 3 90000
+wait world-visible 30000
+sleep 3000
+renderpack select low
+wait render-pack low 90000
+sleep 3000
+screenshot exposure_outdoor_atmospheric_low 15000
+checkpoint atmospheric_exposure_comparison

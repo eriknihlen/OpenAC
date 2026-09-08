@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-gate:
+    # Pull requests (which may come from forks) run on GitHub-hosted runners;
+    # pushes to main and tags run on the maintainer's machine. The label is a
+    # plain string on both paths so runs-on needs no array juggling.
+    runs-on: ${{ github.event_name == 'pull_request' && 'windows-latest' || 'openac-windows' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the pinned .NET SDK (hosted runners only)
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build AcDream.slnx -c Release --nologo
+
+      # Not tools/run-release-gate.ps1: that script redirects child output to
+      # log files, which leaves the step silent for minutes. Running the test
+      # projects directly keeps output streaming. The script stays the canonical
+      # LOCAL gate; the filter below is copied from its default and a contract
+      # test (GitHubWorkflowFilterContractTests) fails if the two ever differ.
+      - name: Test (lane-filtered, streaming)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $filter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
+          $failed = @()
+          foreach ($proj in Get-ChildItem tests -Directory | Sort-Object Name) {
+            $csproj = Join-Path $proj.FullName "$($proj.Name).csproj"
+            if (-not (Test-Path $csproj)) { continue }
+            Write-Host "::group::$($proj.Name)"
+            dotnet test $csproj -c Release --no-build --nologo --filter $filter
+            if ($LASTEXITCODE -ne 0) { $failed += $proj.Name }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count) { throw "Failed test projects: $($failed -join ', ')" }
+
+  linux-portable:
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openac-linux' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the pinned .NET SDK (hosted runners only)
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Portable closure (Linux lanes run here, not on Windows)
+        run: |
+          set -e
+          dotnet --version
+          # Core.Net runs single-threaded here: its sessions do real socket
+          # work on background threads and the assembly fails under default
+          # parallelism on a small container while passing in ten seconds with
+          # one thread. Windows has the cores and regressed when serialized.
+          echo '::group::AcDream.Core.Net.Tests (single-threaded)'
+          dotnet test tests/AcDream.Core.Net.Tests/AcDream.Core.Net.Tests.csproj \
+            -c Release --nologo \
+            --filter 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure' \
+            -- xUnit.MaxParallelThreads=1
+          echo '::endgroup::'
+
+          for p in \
+            tests/AcDream.Platform.Tests \
+            tests/AcDream.Core.Tests \
+            tests/AcDream.Content.Tests \
+            tests/AcDream.Runtime.Tests \
+            tests/AcDream.Headless.Tests \
+            tests/AcDream.Launcher.Core.Tests \
+            tests/AcDream.UI.Abstractions.Tests ; do
+            echo "::group::$p"
+            dotnet test "$p" -c Release --nologo \
+              --filter 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
+            echo "::endgroup::"
+          done
+
+  vulkan-hardware:
+    # Real-GPU lane. Only on pushes (never for fork PRs) and only on the
+    # NVIDIA runner, which runs in an interactive session so a device opens.
+    if: github.event_name == 'push'
+    needs: [windows-gate]
+    runs-on: openac-windows
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build the App test assembly
+        shell: pwsh
+        run: dotnet build tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --nologo
+
+      - name: Test the Vulkan hardware lane
+        shell: pwsh
+        run: |
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter "Lane=Vulkan"
+
+  release:
+    # Tag pushes only, and only after every gate is green: `needs` guarantees a
+    # red gate cannot publish.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-gate, linux-portable, vulkan-hardware]
+    runs-on: openac-windows
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build payloads with release-asset URLs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          ./tools/publish-bin.ps1 -Version $version -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OpenAC ${{ github.ref_name }}
+          body: |
+            **Download `launcher-win-x64.zip`**, unzip it anywhere, and run `acdream-launcher.exe`.
+            It installs the client, prepares your data files, and keeps itself and the client up to date.
+
+            `client-win-x64.zip` is the bare client and headless host for people who do not want the launcher.
+          files: |
+            bin/client-win-x64.zip
+            bin/launcher-win-x64.zip
+            bin/manifest.json
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          # Never pre-release: the launcher reads /releases/latest/download/,
+          # which skips pre-releases. The beta state lives in the version.
+          prerelease: false
+          make_latest: true

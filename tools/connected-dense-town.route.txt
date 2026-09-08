@@ -1,0 +1,15 @@
+
+sleep 15000
+input press AcdreamCycleTimeOfDay
+input press AcdreamCycleTimeOfDay
+input press AcdreamCycleTimeOfDay
+command /telepoi Arwic
+wait materialized 1 60000
+sleep 8000
+input down MovementTurnRight
+sleep 6000
+input up MovementTurnRight
+sleep 27000
+screenshot arwic-dense 10000
+checkpoint arwic-dense
+sleep 3000

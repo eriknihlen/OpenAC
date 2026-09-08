@@ -1,0 +1,10 @@
+{
+  "$schema": "../../docs/render-packs/plugin-manifest-v1.schema.json",
+  "id": "sample.shadows-only-tier2",
+  "displayName": "Shadows-Only Tier 2 SDK Sample",
+  "version": "1.0.0",
+  "entryDll": "AcDream.RenderPacks.ShadowsOnlyTier2.dll",
+  "apiVersion": 1,
+  "dependencies": [],
+  "kinds": ["renderPack"]
+}
