@@ -420,11 +420,9 @@ public sealed class ClientVersionStore
         string rid,
         bool launcherPayload)
     {
-        string suffix = rid.StartsWith("win-", StringComparison.Ordinal) ? ".exe" : string.Empty;
-        string[] required = launcherPayload
-            ? ["acdream-launcher" + suffix]
-            : ["AcDream.App" + suffix, "acdream-headless" + suffix];
-        foreach (string path in required)
+        foreach (string path in PayloadExecutableNames.RequiredForPayload(
+                     rid,
+                     launcherPayload))
         {
             ExtractedFileRecord? file = files.SingleOrDefault(candidate =>
                 string.Equals(candidate.Path, path, StringComparison.Ordinal));
@@ -731,12 +729,9 @@ public sealed class ClientVersionStore
             prior = file.Path;
         }
 
-        string suffix = rid.StartsWith("win-", StringComparison.Ordinal) ? ".exe" : string.Empty;
-        foreach (string required in new[]
-                 {
-                     "AcDream.App" + suffix,
-                     "acdream-headless" + suffix,
-                 })
+        foreach (string required in PayloadExecutableNames.RequiredForPayload(
+                     rid,
+                     launcherPayload: false))
         {
             if (!paths.Contains(required))
             {

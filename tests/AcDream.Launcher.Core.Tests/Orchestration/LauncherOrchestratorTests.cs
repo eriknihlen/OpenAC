@@ -424,12 +424,12 @@ public sealed class LauncherOrchestratorTests : IDisposable
     }
 
     [Fact]
-    public async Task LinuxRejectsBothGraphicalModesBeforeCompositionOrSpawnWithUnsupportedPlatformExplanation()
+    public async Task UnsupportedPlatformRejectsBothGraphicalModesBeforeCompositionOrSpawnWithUnsupportedPlatformExplanation()
     {
         var config = new RecordingConfigService();
         var supervisors = new FakeSupervisorFactory();
         using LauncherOrchestrator orchestrator = CreateOrchestrator(
-            platform: LinuxCapabilities(),
+            platform: UnsupportedPlatformCapabilities(),
             configService: config,
             supervisorFactory: supervisors);
 
@@ -441,11 +441,10 @@ public sealed class LauncherOrchestratorTests : IDisposable
                     "testaccount",
                     "+Acdream",
                     mode));
-            Assert.Contains("Slice L", exception.Message, StringComparison.Ordinal);
-            Assert.Contains("parked at L1", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("supported on Windows and Linux", exception.Message, StringComparison.Ordinal);
         }
 
-        Assert.True(orchestrator.GetLaunchCapability(LaunchMode.Headless).IsAvailable);
+        Assert.False(orchestrator.GetLaunchCapability(LaunchMode.Headless).IsAvailable);
         Assert.Equal(0, config.PlayCallCount);
         Assert.Empty(supervisors.Created);
     }
@@ -674,14 +673,14 @@ public sealed class LauncherOrchestratorTests : IDisposable
     private static LauncherPlatformCapabilities WindowsCapabilities() =>
         new(true, false, true, true, "Windows", null);
 
-    private static LauncherPlatformCapabilities LinuxCapabilities() =>
+    private static LauncherPlatformCapabilities UnsupportedPlatformCapabilities() =>
         new(
             false,
-            true,
-            true,
             false,
-            "Linux",
-            LauncherPlatformCapabilities.LinuxGraphicalLaunchDisabledReason);
+            false,
+            false,
+            "Unsupported",
+            LauncherPlatformCapabilities.UnsupportedPlatformGraphicalLaunchDisabledReason);
 
     private static ConnectedStatusEvent Connected(string sessionId) =>
         new()

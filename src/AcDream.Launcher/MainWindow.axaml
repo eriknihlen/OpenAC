@@ -71,10 +71,10 @@
       <Border Classes="card"
               Padding="12"
               Background="#24344B"
-              IsVisible="{Binding ShowLinuxGraphicalNotice}">
+              IsVisible="{Binding ShowGraphicalLaunchNotice}">
         <StackPanel Spacing="3">
-          <TextBlock Text="Linux graphical launch gate" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding LinuxGraphicalNotice}" TextWrapping="Wrap" />
+          <TextBlock Text="Graphical launch unavailable" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding GraphicalLaunchNotice}" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
     </StackPanel>

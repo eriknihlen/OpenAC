@@ -24,11 +24,23 @@ public sealed class SafeZipExtractor
     private const int UnixRegularFile = 0x8000;
     private const int UnixDirectory = 0x4000;
     private const int UnixPermissionMask = 0x1FF;
-    private readonly SafeZipExtractionLimits _limits;
 
-    public SafeZipExtractor(SafeZipExtractionLimits? limits = null)
+    /// <summary>0755 — the mode a payload executable must land at.</summary>
+    private const int ExecutableMode = 0x1ED;
+
+    /// <summary>0644 — the mode an ordinary payload file lands at.</summary>
+    private const int RegularFileMode = 0x1A4;
+
+    private readonly SafeZipExtractionLimits _limits;
+    private readonly Action<string, UnixFileMode>? _applyUnixFileMode;
+
+    public SafeZipExtractor(
+        SafeZipExtractionLimits? limits = null,
+        Action<string, UnixFileMode>? applyUnixFileMode = null)
     {
         _limits = limits ?? new SafeZipExtractionLimits();
+        _applyUnixFileMode = applyUnixFileMode
+            ?? (OperatingSystem.IsWindows() ? null : File.SetUnixFileMode);
         if (_limits.MaximumEntries <= 0
             || _limits.MaximumEntryBytes <= 0
             || _limits.MaximumTotalBytes <= 0
@@ -44,10 +56,14 @@ public sealed class SafeZipExtractor
     public async Task<IReadOnlyList<ExtractedFileRecord>> ExtractAsync(
         string archivePath,
         string destinationDirectory,
+        IReadOnlyList<string>? executableNames = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+        var executables = new HashSet<string>(
+            executableNames ?? [],
+            StringComparer.Ordinal);
         string archive = Path.GetFullPath(archivePath);
         string destination = Path.GetFullPath(destinationDirectory);
 
@@ -151,11 +167,13 @@ public sealed class SafeZipExtractor
                         $"ZIP entry '{entry.RelativePath}' length changed while extracting.");
                 }
 
-                int unixMode = entry.UnixMode & UnixPermissionMask;
-                if (OperatingSystem.IsLinux() && unixMode != 0)
-                {
-                    File.SetUnixFileMode(outputPath, (UnixFileMode)unixMode);
-                }
+                int declaredMode = entry.UnixMode & UnixPermissionMask;
+                int unixMode = executables.Contains(entry.RelativePath)
+                    ? ExecutableMode
+                    : declaredMode != 0
+                        ? declaredMode
+                        : RegularFileMode;
+                _applyUnixFileMode?.Invoke(outputPath, (UnixFileMode)unixMode);
 
                 files.Add(new ExtractedFileRecord(
                     entry.RelativePath,

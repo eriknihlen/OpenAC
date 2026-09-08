@@ -448,8 +448,7 @@ public static class LauncherSelfUpdateBootstrap
     }
 
     private static string GetLauncherFileName(string rid) =>
-        "acdream-launcher"
-        + (rid.StartsWith("win-", StringComparison.Ordinal) ? ".exe" : string.Empty);
+        PayloadExecutableNames.Launcher + PayloadExecutableNames.SuffixForRid(rid);
 
     private static void ValidateCanonicalStartup(
         SelfUpdatePlan plan,

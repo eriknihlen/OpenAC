@@ -225,6 +225,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
                 IReadOnlyList<ExtractedFileRecord> files = await _extractor.ExtractAsync(
                         archive,
                         staging,
+                        PayloadExecutableNames.ForPayload(_rid, launcherPayload: false),
                         cancellationToken)
                     .ConfigureAwait(false);
                 Report(

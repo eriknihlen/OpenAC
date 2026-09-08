@@ -41,15 +41,20 @@ git push origin v0.1.0-beta.1
 ```
 
 When the three gate jobs are green, the `release` job runs
-`tools/publish-bin.ps1`, which publishes self-contained `win-x64` payloads and
-writes a manifest whose asset URLs point at the release for that tag, then
-creates the GitHub Release with:
+`tools/publish-bin.ps1 -IncludeLinux`, which publishes self-contained
+`win-x64` and `linux-x64` payloads and writes a manifest whose asset URLs point
+at the release for that tag, then creates the GitHub Release with:
 
 ```
-client-win-x64.zip      AcDream.App.exe + acdream-headless.exe
-launcher-win-x64.zip    acdream-launcher.exe + acdream-bake.exe
-manifest.json           version, minimum launcher version, asset URLs, SHA-256s
+client-win-x64.zip        AcDream.App.exe + acdream-headless.exe
+launcher-win-x64.zip      acdream-launcher.exe + acdream-bake.exe
+client-linux-x64.zip      AcDream.App + acdream-headless
+launcher-linux-x64.zip    acdream-launcher + acdream-bake
+manifest.json             version, minimum launcher version, asset URLs, SHA-256s
 ```
+
+The Linux zips carry Unix file modes, so the executables extract with the
+execute bit set; the launcher's own extractor applies them too.
 
 Releases are never flagged pre-release. The launcher polls
 `https://github.com/eriknihlen/OpenAC/releases/latest/download/manifest.json`,

@@ -515,7 +515,30 @@ public sealed class LauncherWindowViewModelTests
 
 
     [Fact]
-    public void LinuxKeepsLauncherAndHeadlessAvailableButExplainsDisabledGuiModes()
+    public void UnsupportedPlatformDisablesGuiAndHeadlessAndExplainsWhy()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Platform = UnsupportedPlatform(),
+        };
+        using var viewModel = CreateInitialized(orchestrator);
+        SelectCharacter(viewModel);
+
+        Assert.True(viewModel.ShowGraphicalLaunchNotice);
+        Assert.False(viewModel.CanLaunchGui);
+        Assert.False(viewModel.CanLaunchAccountGuiSelect);
+        Assert.False(viewModel.CanLaunchHeadless);
+        Assert.Equal(
+            LauncherPlatformCapabilities.UnsupportedPlatformGraphicalLaunchDisabledReason,
+            viewModel.GraphicalLaunchNotice);
+        Assert.Contains(
+            "supported on Windows and Linux",
+            viewModel.GuiLaunchDisabledReason,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxPlatformShowsNoGraphicalLaunchNoticeAndEnablesGui()
     {
         using var orchestrator = new FakeLauncherOrchestrator
         {
@@ -524,15 +547,8 @@ public sealed class LauncherWindowViewModelTests
         using var viewModel = CreateInitialized(orchestrator);
         SelectCharacter(viewModel);
 
-        Assert.True(viewModel.ShowLinuxGraphicalNotice);
-        Assert.False(viewModel.CanLaunchGui);
-        Assert.False(viewModel.CanLaunchAccountGuiSelect);
-        Assert.True(viewModel.CanLaunchHeadless);
-        Assert.Equal(
-            LauncherPlatformCapabilities.LinuxGraphicalLaunchDisabledReason,
-            viewModel.LinuxGraphicalNotice);
-        Assert.Contains("Slice L", viewModel.GuiLaunchDisabledReason, StringComparison.Ordinal);
-        Assert.Contains("parked at L1", viewModel.GuiLaunchDisabledReason, StringComparison.Ordinal);
+        Assert.False(viewModel.ShowGraphicalLaunchNotice);
+        Assert.True(viewModel.CanLaunchGui);
     }
 
     [Fact]
@@ -890,14 +906,22 @@ public sealed class LauncherWindowViewModelTests
         viewModel.SelectedNode = Assert.Single(
             Assert.Single(Assert.Single(viewModel.Servers).Children).Children);
 
+    private static LauncherPlatformCapabilities UnsupportedPlatform() => new(
+        IsWindows: false,
+        IsLinux: false,
+        CanRunHeadless: false,
+        CanLaunchGraphicalClient: false,
+        PlatformName: "Unsupported",
+        GraphicalLaunchDisabledReason:
+            LauncherPlatformCapabilities.UnsupportedPlatformGraphicalLaunchDisabledReason);
+
     private static LauncherPlatformCapabilities LinuxPlatform() => new(
         IsWindows: false,
         IsLinux: true,
         CanRunHeadless: true,
-        CanLaunchGraphicalClient: false,
+        CanLaunchGraphicalClient: true,
         PlatformName: "Linux",
-        GraphicalLaunchDisabledReason:
-            LauncherPlatformCapabilities.LinuxGraphicalLaunchDisabledReason);
+        GraphicalLaunchDisabledReason: null);
 
     private sealed class FakeLauncherOrchestrator : ILauncherOrchestrator
     {

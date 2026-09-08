@@ -8,7 +8,12 @@
   OpenAC does not distribute them.
 - **A server.** OpenAC connects to ACEmulator. The examples use a local server
   at `127.0.0.1:9000`.
-- For the graphical client, a **Vulkan 1.3** capable GPU and driver.
+- For the graphical client, a **Vulkan 1.3** capable GPU and driver. On
+  Linux that means your distribution's Vulkan ICD for your GPU (for example
+  `mesa-vulkan-drivers` on Ubuntu) and an X11 or Wayland desktop.
+
+Windows and Linux (x64) are both supported. The examples below use
+PowerShell; the bash equivalents differ only in how variables are set.
 
 ## Build and test
 
@@ -48,6 +53,15 @@ $env:ACDREAM_TEST_PORT = "9000"
 $env:ACDREAM_TEST_USER = "youraccount"
 $env:ACDREAM_TEST_PASS = "yourpassword"
 
+dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release
+```
+
+On Linux:
+
+```bash
+export ACDREAM_DAT_DIR="$HOME/ac" ACDREAM_PAK_PATH="$HOME/ac/acdream.pak"
+export ACDREAM_LIVE=1 ACDREAM_TEST_HOST=127.0.0.1 ACDREAM_TEST_PORT=9000
+export ACDREAM_TEST_USER=youraccount ACDREAM_TEST_PASS=yourpassword
 dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release
 ```
 

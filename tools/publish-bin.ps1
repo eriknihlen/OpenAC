@@ -108,6 +108,36 @@ function New-PayloadZip {
         $ZipPath,
         [IO.Compression.CompressionLevel]::Optimal,
         $false)
+
+    Set-PayloadEntryModes $ZipPath $RequiredFiles
+}
+
+function Set-PayloadEntryModes {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string[]]$Executables
+    )
+
+    $regularFile = 0x81A4 # 0644
+    $executable = 0x81ED  # 0755
+    $names = [Collections.Generic.HashSet[string]]::new(
+        [string[]]$Executables,
+        [StringComparer]::Ordinal)
+
+    $archive = [IO.Compression.ZipFile]::Open($ZipPath, 'Update')
+    try {
+        foreach ($entry in $archive.Entries) {
+            if ($entry.FullName.EndsWith('/')) { continue }
+            $mode = if ($names.Contains($entry.FullName.Replace('\', '/'))) {
+                $executable
+            } else {
+                $regularFile
+            }
+            $entry.ExternalAttributes = $mode -shl 16
+        }
+    } finally {
+        $archive.Dispose()
+    }
 }
 
 function Get-Artifact {

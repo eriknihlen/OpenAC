@@ -128,20 +128,23 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          ./tools/publish-bin.ps1 -Version $version -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          ./tools/publish-bin.ps1 -Version $version -IncludeLinux -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
 
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: OpenAC ${{ github.ref_name }}
           body: |
-            **Download `launcher-win-x64.zip`**, unzip it anywhere, and run `acdream-launcher.exe`.
-            It installs the client, prepares your data files, and keeps itself and the client up to date.
+            **Windows:** download `launcher-win-x64.zip`, unzip it anywhere, and run `acdream-launcher.exe`.
+            **Linux:** download `launcher-linux-x64.zip`, unzip it anywhere, and run `./acdream-launcher`.
+            The launcher installs the client, prepares your data files, and keeps itself and the client up to date.
 
-            `client-win-x64.zip` is the bare client and headless host for people who do not want the launcher.
+            The `client-*.zip` files are the bare client and headless host for people who do not want the launcher.
           files: |
             bin/client-win-x64.zip
             bin/launcher-win-x64.zip
+            bin/client-linux-x64.zip
+            bin/launcher-linux-x64.zip
             bin/manifest.json
           fail_on_unmatched_files: true
           generate_release_notes: true

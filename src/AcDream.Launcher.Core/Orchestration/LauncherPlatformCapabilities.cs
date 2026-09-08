@@ -18,10 +18,8 @@ public sealed record LauncherPlatformCapabilities(
     string PlatformName,
     string? GraphicalLaunchDisabledReason)
 {
-    public const string LinuxGraphicalLaunchDisabledReason =
-        "GUI launches require the Linux graphical client (Modern Runtime Slice L), "
-        + "which is parked at L1 and will resume later. The launcher, character "
-        + "probe, and headless sessions remain available on Linux.";
+    public const string UnsupportedPlatformGraphicalLaunchDisabledReason =
+        "Graphical client launches are supported on Windows and Linux.";
 
     public static LauncherPlatformCapabilities Detect()
     {
@@ -42,9 +40,9 @@ public sealed record LauncherPlatformCapabilities(
                 IsWindows: false,
                 IsLinux: true,
                 CanRunHeadless: true,
-                CanLaunchGraphicalClient: false,
+                CanLaunchGraphicalClient: true,
                 PlatformName: "Linux",
-                GraphicalLaunchDisabledReason: LinuxGraphicalLaunchDisabledReason);
+                GraphicalLaunchDisabledReason: null);
         }
 
         return new LauncherPlatformCapabilities(
@@ -53,9 +51,7 @@ public sealed record LauncherPlatformCapabilities(
             CanRunHeadless: false,
             CanLaunchGraphicalClient: false,
             PlatformName: "Unsupported",
-            GraphicalLaunchDisabledReason:
-                "Graphical client launches are supported on Windows. Linux support "
-                + "requires Modern Runtime Slice L.");
+            GraphicalLaunchDisabledReason: UnsupportedPlatformGraphicalLaunchDisabledReason);
     }
 
     public LauncherCapability ForLaunchMode(LaunchMode mode)

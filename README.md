@@ -57,30 +57,39 @@ it is under active development. Today it does the following:
 if you hit anything else that the original client did and OpenAC does not, an
 issue with a screenshot is the fastest way to get it on the list too.
 
-**Platforms.** Windows is the supported platform today, for both the graphical
-client and the headless host. The headless host also runs on Linux. A Linux
-graphical release is not working yet and is coming soon; macOS support for
+**Platforms.** Windows and Linux, 64-bit, for the launcher, the graphical
+client, and the headless host. Windows is where most of the play-testing
+happens; the Linux client is newer and has had less time in front of players,
+so reports from Linux desktops are especially welcome. macOS support for
 Apple silicon is on the roadmap.
 
 ## Roadmap
 
-- **Linux graphical client: coming soon.** The engine, renderer, and headless host
-  already build and run on Linux; the windowed client has not yet been tested on
-  a Linux desktop with a GPU, and CI does not exercise it. That work is next.
-- **macOS on Apple silicon:** on the roadmap after Linux.
-- **First beta release** through the launcher, from this repository's Releases page.
+- **Linux in CI.** The Linux graphical client builds, installs through the
+  launcher, and plays, but CI runs its rendering tests on Windows hardware
+  only. A Linux rendering lane is next.
+- **macOS on Apple silicon.**
+- **Housing and chest looting.**
+- **A documented plugin API.**
 
 ## Download
 
-Grab `launcher-win-x64.zip` from the
+Grab the launcher for your platform from the
 [latest release](https://github.com/eriknihlen/OpenAC/releases/latest), unzip
-it anywhere, and run `acdream-launcher.exe`. The launcher installs the client,
-prepares your data files, keeps itself and the client up to date, and stores
-your server profiles.
+it anywhere, and run it:
+
+| Platform | Download | Run |
+|---|---|---|
+| Windows | `launcher-win-x64.zip` | `acdream-launcher.exe` |
+| Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
+
+The launcher installs the client, prepares your data files, keeps itself and
+the client up to date, and stores your server profiles.
 
 You will need:
 
-- **Windows 10 or 11**, 64-bit, with a **Vulkan 1.3** capable GPU and driver.
+- **Windows 10 or 11**, or a **64-bit Linux desktop** (X11 or Wayland), with a
+  **Vulkan 1.3** capable GPU and driver.
 - **Your own Asheron's Call data files** (`client_portal.dat`,
   `client_cell_1.dat`, `client_highres.dat`, `client_local_English.dat`).
 - **A server to connect to.** OpenAC speaks ACEmulator's protocol; a local

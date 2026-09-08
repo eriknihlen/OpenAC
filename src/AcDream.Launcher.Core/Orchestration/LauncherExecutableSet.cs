@@ -123,10 +123,14 @@ public sealed class LauncherExecutableSet
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         string fullDirectory = Path.GetFullPath(directory);
-        string executableSuffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+        string executableSuffix = PayloadExecutableNames.SuffixForCurrentOs();
         return new LauncherExecutableSet(
-            Path.Combine(fullDirectory, "AcDream.App" + executableSuffix),
-            Path.Combine(fullDirectory, "acdream-headless" + executableSuffix),
+            Path.Combine(
+                fullDirectory,
+                PayloadExecutableNames.GraphicalHost + executableSuffix),
+            Path.Combine(
+                fullDirectory,
+                PayloadExecutableNames.HeadlessHost + executableSuffix),
             fullDirectory);
     }
 
@@ -168,10 +172,14 @@ public sealed class LauncherExecutableSet
     private static ExecutablePaths FromDirectoryPaths(string directory)
     {
         string fullDirectory = Path.GetFullPath(directory);
-        string executableSuffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+        string executableSuffix = PayloadExecutableNames.SuffixForCurrentOs();
         return new ExecutablePaths(
-            Path.Combine(fullDirectory, "AcDream.App" + executableSuffix),
-            Path.Combine(fullDirectory, "acdream-headless" + executableSuffix),
+            Path.Combine(
+                fullDirectory,
+                PayloadExecutableNames.GraphicalHost + executableSuffix),
+            Path.Combine(
+                fullDirectory,
+                PayloadExecutableNames.HeadlessHost + executableSuffix),
             fullDirectory);
     }
 

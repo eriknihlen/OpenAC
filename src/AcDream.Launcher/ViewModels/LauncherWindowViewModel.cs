@@ -217,9 +217,11 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
     public string InstallationStatus => _snapshot?.InstallationStatus
         ?? "Installation state is loading.";
 
-    public bool ShowLinuxGraphicalNotice => _snapshot?.Platform.IsLinux == true;
+    public bool ShowGraphicalLaunchNotice =>
+        _snapshot?.Platform.CanLaunchGraphicalClient == false
+        && !string.IsNullOrEmpty(_snapshot?.Platform.GraphicalLaunchDisabledReason);
 
-    public string LinuxGraphicalNotice =>
+    public string GraphicalLaunchNotice =>
         _snapshot?.Platform.GraphicalLaunchDisabledReason ?? string.Empty;
 
     public bool CanLaunchGui => CanLaunch(LaunchMode.Gui);
@@ -545,8 +547,8 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsFirstRunRequired));
         OnPropertyChanged(nameof(ShowInstallationBanner));
         OnPropertyChanged(nameof(InstallationStatus));
-        OnPropertyChanged(nameof(ShowLinuxGraphicalNotice));
-        OnPropertyChanged(nameof(LinuxGraphicalNotice));
+        OnPropertyChanged(nameof(ShowGraphicalLaunchNotice));
+        OnPropertyChanged(nameof(GraphicalLaunchNotice));
         OnPropertyChanged(nameof(CanLaunchGui));
         OnPropertyChanged(nameof(CanLaunchHeadless));
         OnPropertyChanged(nameof(CanLaunchAccountGuiSelect));

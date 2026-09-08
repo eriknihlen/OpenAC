@@ -40,6 +40,124 @@ public sealed class SafeZipExtractorTests : IDisposable
         Assert.Equal("value", await File.ReadAllTextAsync(Path.Combine(destination, "data", "value.txt")));
     }
 
+    [Fact]
+    public async Task WindowsBuiltPayloadStillMarksItsExecutablesOnAUnixHost()
+    {
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("AcDream.App", Encoding.UTF8.GetBytes("gui"), null),
+            ("acdream-headless", Encoding.UTF8.GetBytes("headless"), null),
+            ("assets/readme.txt", Encoding.UTF8.GetBytes("readme"), null),
+        ]);
+        string zip = WriteArchive("windows-built.zip", archive);
+        string destination = Path.Combine(_root, "windows-built");
+        var applied = new Dictionary<string, UnixFileMode>(StringComparer.Ordinal);
+
+        IReadOnlyList<ExtractedFileRecord> files = await new SafeZipExtractor(
+                applyUnixFileMode: (path, mode) => applied[Path.GetFileName(path)] = mode)
+            .ExtractAsync(
+                zip,
+                destination,
+                PayloadExecutableNames.ForPayload("linux-x64", launcherPayload: false));
+
+        Assert.Equal(Executable, applied["AcDream.App"]);
+        Assert.Equal(Executable, applied["acdream-headless"]);
+        Assert.Equal(Readable, applied["readme.txt"]);
+        Assert.Equal(0x1ED, ModeOf(files, "AcDream.App"));
+        Assert.Equal(0x1ED, ModeOf(files, "acdream-headless"));
+        Assert.Equal(0x1A4, ModeOf(files, "assets/readme.txt"));
+
+        ClientVersionStore.ValidateRequiredExecutables(
+            files,
+            "linux-x64",
+            launcherPayload: false);
+    }
+
+    [Fact]
+    [Trait("Lane", "Linux")]
+    public async Task LinuxWritesTheMarkedModesToTheRealFileSystem()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+        }
+
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("AcDream.App", Encoding.UTF8.GetBytes("gui"), null),
+            ("acdream-headless", Encoding.UTF8.GetBytes("headless"), null),
+            ("assets/readme.txt", Encoding.UTF8.GetBytes("readme"), null),
+        ]);
+        string zip = WriteArchive("linux-modes.zip", archive);
+        string destination = Path.Combine(_root, "linux-modes");
+
+        _ = await new SafeZipExtractor().ExtractAsync(
+            zip,
+            destination,
+            PayloadExecutableNames.ForPayload("linux-x64", launcherPayload: false));
+
+        Assert.Equal(
+            Executable,
+            File.GetUnixFileMode(Path.Combine(destination, "AcDream.App")));
+        Assert.Equal(
+            Executable,
+            File.GetUnixFileMode(Path.Combine(destination, "acdream-headless")));
+        Assert.Equal(
+            Readable,
+            File.GetUnixFileMode(Path.Combine(destination, "assets", "readme.txt")));
+    }
+
+    [Fact]
+    public async Task DeclaredUnixModesStillWinForEveryNonExecutableEntry()
+    {
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("acdream-launcher", Encoding.UTF8.GetBytes("launcher"), 0x81A4),
+            ("support.dat", Encoding.UTF8.GetBytes("support"), 0x8180),
+            ("tools/helper", Encoding.UTF8.GetBytes("helper"), 0x81ED),
+        ]);
+        string zip = WriteArchive("declared-modes.zip", archive);
+        string destination = Path.Combine(_root, "declared-modes");
+        var applied = new Dictionary<string, UnixFileMode>(StringComparer.Ordinal);
+
+        IReadOnlyList<ExtractedFileRecord> files = await new SafeZipExtractor(
+                applyUnixFileMode: (path, mode) => applied[Path.GetFileName(path)] = mode)
+            .ExtractAsync(
+                zip,
+                destination,
+                PayloadExecutableNames.ForPayload("linux-x64", launcherPayload: true));
+
+        // The declared 0600 and 0755 survive; only the payload's own
+        // executable is forced up to 0755 despite its declared 0644.
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            applied["support.dat"]);
+        Assert.Equal(Executable, applied["helper"]);
+        Assert.Equal(Executable, applied["acdream-launcher"]);
+        Assert.Equal(0x180, ModeOf(files, "support.dat"));
+        Assert.Equal(0x1ED, ModeOf(files, "tools/helper"));
+        Assert.Equal(0x1ED, ModeOf(files, "acdream-launcher"));
+    }
+
+    [Fact]
+    public async Task AnAbsentExecutableNameIsNotAnExtractionError()
+    {
+        byte[] archive = UpdateTestData.CreateZip(
+            [("acdream-launcher", Encoding.UTF8.GetBytes("launcher"), null)]);
+        string zip = WriteArchive("absent-executable.zip", archive);
+        string destination = Path.Combine(_root, "absent-executable");
+
+        IReadOnlyList<ExtractedFileRecord> files = await new SafeZipExtractor(
+                applyUnixFileMode: (_, _) => { })
+            .ExtractAsync(
+                zip,
+                destination,
+                PayloadExecutableNames.ForPayload("linux-x64", launcherPayload: true));
+
+        Assert.Equal(["acdream-launcher"], files.Select(file => file.Path));
+        Assert.Equal(0x1ED, ModeOf(files, "acdream-launcher"));
+    }
+
     [Theory]
     [InlineData("../escape")]
     [InlineData("a/../../escape")]
@@ -187,9 +305,30 @@ public sealed class SafeZipExtractorTests : IDisposable
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new SafeZipExtractor().ExtractAsync(zip, cancelled, cancellation.Token));
+            new SafeZipExtractor().ExtractAsync(
+                zip,
+                cancelled,
+                cancellationToken: cancellation.Token));
         Assert.False(Directory.Exists(cancelled));
     }
+
+    private const UnixFileMode Executable =
+        UnixFileMode.UserRead
+        | UnixFileMode.UserWrite
+        | UnixFileMode.UserExecute
+        | UnixFileMode.GroupRead
+        | UnixFileMode.GroupExecute
+        | UnixFileMode.OtherRead
+        | UnixFileMode.OtherExecute;
+
+    private const UnixFileMode Readable =
+        UnixFileMode.UserRead
+        | UnixFileMode.UserWrite
+        | UnixFileMode.GroupRead
+        | UnixFileMode.OtherRead;
+
+    private static int ModeOf(IReadOnlyList<ExtractedFileRecord> files, string path) =>
+        files.Single(file => file.Path == path).UnixMode;
 
     private string WriteArchive(string name, byte[] content)
     {

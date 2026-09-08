@@ -200,6 +200,7 @@ public sealed class LauncherSelfUpdateManager
             IReadOnlyList<ExtractedFileRecord> extracted = await _extractor.ExtractAsync(
                     archivePath,
                     payloadDirectory,
+                    PayloadExecutableNames.ForPayload(rid, launcherPayload: true),
                     cancellationToken)
                 .ConfigureAwait(false);
             ClientVersionStore.ValidateRequiredExecutables(
@@ -559,8 +560,7 @@ public sealed class LauncherSelfUpdateManager
     }
 
     private static string GetLauncherFileName(string rid) =>
-        "acdream-launcher"
-        + (rid.StartsWith("win-", StringComparison.Ordinal) ? ".exe" : string.Empty);
+        PayloadExecutableNames.Launcher + PayloadExecutableNames.SuffixForRid(rid);
 
     private async Task<IReadOnlyList<SelfUpdateApplyEntry>> BuildApplyJournalAsync(
         SelfUpdatePlan plan,
