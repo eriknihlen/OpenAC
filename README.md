@@ -55,8 +55,7 @@ breaks. Today it does the following:
   and automated testing, on Windows and Linux.
 - Plugins, with a bundled example that reproduces a familiar automation tool.
 
-**Not yet implemented.** Housing, and looting from chests. Both are on the list;
-if you hit anything else that the original client did and OpenAC does not, an
+**Not yet implemented.** Plenty of things we forgot. When you find something that the original client did and OpenAC does not, an
 issue with a screenshot is the fastest way to get it on the list too.
 
 **Platforms.** Windows and Linux, 64-bit, for the launcher, the graphical
@@ -137,7 +136,7 @@ lands when it is ready.
 are plugins that swap in their own shader stages (an atmospheric tier, a
 shadows-only tier, a no-op pack), and they exist so people can play with the
 rendering pipeline without touching the client. Try them, break them, and
-say what you found.
+say what you found. They can be enabled in game under the graphics settings.
 
 ## AI-assisted development
 
