@@ -30,6 +30,8 @@ public sealed class RetailFrameWalk
 
     public bool AlwaysDrawObjects = true;
 
+    public int ObjectRingLimit = 4;
+
     public RetailFrameWalk() { }
 
     internal RetailFrameWalk(BuildingDegradeController degradation)
@@ -121,10 +123,13 @@ public sealed class RetailFrameWalk
 
                 if (block.CellBuildings[cellIndex] is WalkBuilding building)
                     DrawBuilding(building, activeViews, ctx, sink);
-                sink.OnLandscapeCellTurn(
-                    block.LandblockId,
-                    block.SideCellCount,
-                    cellIndex);
+                if (block.SideCellCount == 8 || block.Ring <= ObjectRingLimit)
+                {
+                    sink.OnLandscapeCellTurn(
+                        block.LandblockId,
+                        block.SideCellCount,
+                        cellIndex);
+                }
 
                 sink.OnSortCellExit(
                     block.LandblockId,

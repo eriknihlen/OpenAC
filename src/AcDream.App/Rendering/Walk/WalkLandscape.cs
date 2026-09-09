@@ -8,6 +8,8 @@ public sealed class WalkLandBlock
     public float MaxZ;
     public float MinZ;
 
+    public int Ring;
+
     public WalkBuilding?[] CellBuildings = [];
 
     // ---- per-frame visibility (draw_check_blocks / landcell_check) ----
@@ -150,6 +152,15 @@ public sealed class WalkLandscape
         }
     }
 
+    private static readonly float[][] CellGridScratch = CreateCellGridScratch();
+
+    private static float[][] CreateCellGridScratch()
+    {
+        var grid = new float[2 * 9][];
+        for (int i = 0; i < grid.Length; i++) grid[i] = new float[32];
+        return grid;
+    }
+
     private void LandCellCheck(
         WalkLandBlock block, int bx, int by,
         in WalkPlane cyPlane, WalkPlane[] edgePlanes)
@@ -170,8 +181,7 @@ public sealed class WalkLandscape
         float x0 = ViewerWorldOriginX + (bx - ViewerBlockX) * BlockLength;
         float y0 = ViewerWorldOriginY + (by - ViewerBlockY) * BlockLength;
         int cornerRow = n + 1;
-        var grid = new float[2 * cornerRow][];
-        for (int i = 0; i < grid.Length; i++) grid[i] = new float[32];
+        float[][] grid = CellGridScratch;
         for (int j = 0; j <= n; j++)
             WalkVisibilityMath.FillClipHeights(
                 x0, j * CellLength + y0, cyPlane, edgePlanes, grid[j]);

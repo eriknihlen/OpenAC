@@ -192,6 +192,8 @@ internal sealed class RetailPViewRenderer
             }
             walkDriver = _walkFrameDriverScratch;
 
+            _frameWalk.ObjectRingLimit = ctx.RenderRadius;
+
             try
             {
                 walkDriver.Collect(

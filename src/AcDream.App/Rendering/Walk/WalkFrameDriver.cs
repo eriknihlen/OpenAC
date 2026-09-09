@@ -735,6 +735,9 @@ internal sealed class WalkFrameDriver : IWalkEventSink, IWalkLookInViewSource
         if ((uint)cellIndex >= (uint)(sideCellCount * sideCellCount))
             throw new ArgumentOutOfRangeException(nameof(cellIndex));
 
+        if (sideCellCount == 1)
+            return;
+
         uint blockPrefix = landblockId & 0xFFFF0000u;
         if (sideCellCount == 8)
         {

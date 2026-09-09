@@ -137,6 +137,7 @@ public sealed class WalkLandscapeAssembler
         {
             LandblockId = (uint)bx << 24 | (uint)by << 16,
             SideCellCount = sideCellCount,
+            Ring = RingOf(gx, gy),
             MaxZ = data.MaxZ,
             MinZ = data.MinZ,
         };

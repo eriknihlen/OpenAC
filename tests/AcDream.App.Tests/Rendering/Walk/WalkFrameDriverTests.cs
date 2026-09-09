@@ -1388,12 +1388,105 @@ public sealed partial class WalkFrameDriverTests
     }
 
     [Fact]
-    public void CoarseLandscapeCellTurn_ExpandsToEveryCoveredAuthoritativeOwnerCell()
+    public void FarTierSingleCellLandscapeTurn_DrawsNoObjects()
     {
+        const int sideCellCount = 1;
+        const int cellIndex = 0;
         using var fx = new DispatcherFixture();
         const ulong gfxObj = 0x0200_0022UL;
         InjectRenderData(fx.Manager, gfxObj, MakeFlatMesh(
             MakeBatch(0x08100022u, TranslucencyKind.Opaque, 0, 0, 3, 1)));
+
+        var worldData = new FakeWorldData();
+        for (uint cell = 1; cell <= 64; cell++)
+        {
+            worldData.OutdoorStaticsByCell[0xE43D0000u | cell] = new WalkFrameStaticRecords(
+                new[] { MakeRecord(300u + cell, 0, Vector3.Zero, [new MeshRef((uint)gfxObj, Matrix4x4.Identity)]) },
+                0xE43Du);
+        }
+        var driver = new WalkFrameDriver(
+            fx.Dispatcher,
+            new RecordingLeafRenderer(new List<string>()),
+            worldData);
+        var ctx = new TestContext();
+
+        using DrawScope draw = fx.BeginDraw();
+        driver.BeginFrame(ctx, Matrix4x4.Identity, Vector3.Zero);
+        var activeViews = new WalkPortalView();
+        WalkCopyView.AppendFullViewportQuad(
+            activeViews,
+            ctx.Rays,
+            ctx.WorldViewpoint,
+            ctx.ViewportWidth,
+            ctx.ViewportHeight);
+        ((IWalkEventSink)driver).OnLandscapeViews(activeViews);
+        ((IWalkEventSink)driver).OnLandscapeCellTurn(0xE43DFFFFu, sideCellCount, cellIndex);
+        driver.EndFrame();
+        driver.Replay(draw.Frame, draw.Pass);
+
+        Assert.Empty(driver.VisitedLandscapeCellIds);
+        Assert.Empty(fx.Device.Calls.OfType<GpuRecordedMultiDrawIndirect>());
+    }
+
+    [Theory]
+    [InlineData(2, 3, 4, 7)]
+    [InlineData(4, 15, 6, 7)]
+    public void NearTierCoarseLandscapeTurn_DrawsEveryCoveredOwnerCell(
+        int sideCellCount,
+        int cellIndex,
+        int firstXy,
+        int lastXy)
+    {
+        using var fx = new DispatcherFixture();
+        const ulong gfxObj = 0x0200_0025UL;
+        InjectRenderData(fx.Manager, gfxObj, MakeFlatMesh(
+            MakeBatch(0x08100025u, TranslucencyKind.Opaque, 0, 0, 3, 1)));
+
+        var worldData = new FakeWorldData();
+        for (uint cell = 1; cell <= 64; cell++)
+        {
+            worldData.OutdoorStaticsByCell[0xE43D0000u | cell] = new WalkFrameStaticRecords(
+                new[] { MakeRecord(400u + cell, 0, Vector3.Zero, [new MeshRef((uint)gfxObj, Matrix4x4.Identity)]) },
+                0xE43Du);
+        }
+        var driver = new WalkFrameDriver(
+            fx.Dispatcher,
+            new RecordingLeafRenderer(new List<string>()),
+            worldData);
+        var ctx = new TestContext();
+
+        using DrawScope draw = fx.BeginDraw();
+        driver.BeginFrame(ctx, Matrix4x4.Identity, Vector3.Zero);
+        var activeViews = new WalkPortalView();
+        WalkCopyView.AppendFullViewportQuad(
+            activeViews,
+            ctx.Rays,
+            ctx.WorldViewpoint,
+            ctx.ViewportWidth,
+            ctx.ViewportHeight);
+        ((IWalkEventSink)driver).OnLandscapeViews(activeViews);
+        ((IWalkEventSink)driver).OnLandscapeCellTurn(0xE43DFFFFu, sideCellCount, cellIndex);
+        driver.EndFrame();
+        driver.Replay(draw.Frame, draw.Pass);
+
+        var expected = new HashSet<uint>();
+        for (int x = firstXy; x <= lastXy; x++)
+        for (int y = firstXy; y <= lastXy; y++)
+            expected.Add(0xE43D0000u | (uint)(x * 8 + y + 1));
+        Assert.Equal(expected, driver.VisitedLandscapeCellIds.ToHashSet());
+        uint drawn = 0;
+        foreach (GpuRecordedMultiDrawIndirect call in fx.Device.Calls.OfType<GpuRecordedMultiDrawIndirect>())
+            drawn += call.DrawCount;
+        Assert.Equal((uint)expected.Count, drawn);
+    }
+
+    [Fact]
+    public void FullDetailLandscapeCellTurn_DrawsThatCellsObjects()
+    {
+        using var fx = new DispatcherFixture();
+        const ulong gfxObj = 0x0200_0024UL;
+        InjectRenderData(fx.Manager, gfxObj, MakeFlatMesh(
+            MakeBatch(0x08100024u, TranslucencyKind.Opaque, 0, 0, 3, 1)));
 
         var worldData = new FakeWorldData();
         worldData.OutdoorStaticsByCell[0xE43D0040u] = new WalkFrameStaticRecords(
@@ -1415,7 +1508,7 @@ public sealed partial class WalkFrameDriverTests
             ctx.ViewportWidth,
             ctx.ViewportHeight);
         ((IWalkEventSink)driver).OnLandscapeViews(activeViews);
-        ((IWalkEventSink)driver).OnLandscapeCellTurn(0xE43DFFFFu, 2, 3);
+        ((IWalkEventSink)driver).OnLandscapeCellTurn(0xE43DFFFFu, 8, 63);
         driver.EndFrame();
         driver.Replay(draw.Frame, draw.Pass);
 
@@ -1483,7 +1576,76 @@ public sealed partial class WalkFrameDriverTests
     }
 
     [Fact]
-    public void OutdoorRoot_LandCellPrecedesItsOwnCellsObjectTurn_ThenFlushesAtReplaysEnd()
+    public void OutdoorRoot_FullDetailLandCellPrecedesItsOwnCellsObjectTurn_ThenFlushesAtReplaysEnd()
+    {
+        using var fx = new DispatcherFixture();
+        var log = new List<string>();
+        var leaf = new RecordingLeafRenderer(log);
+        leaf.CellsWithoutEmitters.UnionWith(CoarseLandscapeBuckets(0xF4180000u));
+        leaf.CellsWithoutEmitters.Remove(0xF4180001u);
+        var ctx = new TestContext();
+        var driver = new WalkFrameDriver(fx.Dispatcher, leaf, new FakeWorldData());
+        var walk = new RetailFrameWalk();
+        var landscape = new WalkLandscape { MidWidth = 1, Blocks = new WalkLandBlock?[1] };
+        var block = new WalkLandBlock
+        {
+            LandblockId = 0xF4180000u, SideCellCount = 8, MaxZ = 10f, MinZ = 0f,
+        };
+        block.EnsureCellArrays();
+        landscape.Blocks[0] = block;
+
+        using DrawScope draw = fx.BeginDraw();
+        driver.BeginFrame(ctx, Matrix4x4.Identity, Vector3.Zero);
+        walk.DrawLandscape(landscape, OneDegenerateView(), ctx, driver);
+        driver.EndFrame();
+        driver.Replay(draw.Frame, draw.Pass);
+
+        Assert.Equal("SKY", log[0]);
+        int particles = log.IndexOf("PARTICLES:f4180001");
+        Assert.True(particles > 0, "cell 0's object turn never drew its particles");
+        Assert.Equal("LANDCELL:f4180000:8:0", log[particles - 1]);
+        Assert.Equal("SORTCELLEXIT", log[particles + 1]);
+        Assert.Equal(1, log.Count(line => line.StartsWith("PARTICLES:", StringComparison.Ordinal)));
+        Assert.Equal(64, log.Count(line => line == "SORTCELLEXIT"));
+    }
+
+    [Theory]
+    [InlineData(2, 2, true)]   // ring 2 within a limit of 2: objects draw
+    [InlineData(3, 2, false)]  // ring 3 past the limit: terrain and valve only
+    [InlineData(4, 4, true)]   // the High preset's near tier
+    public void OutdoorRoot_NearTierCoarseBlock_DrawsObjectsOnlyWithinObjectRingLimit(
+        int ring, int limit, bool expectObjects)
+    {
+        using var fx = new DispatcherFixture();
+        var log = new List<string>();
+        var leaf = new RecordingLeafRenderer(log);
+        leaf.CellsWithoutEmitters.UnionWith(CoarseLandscapeBuckets(0xF4180000u));
+        leaf.CellsWithoutEmitters.Remove(0xF4180001u);
+        var ctx = new TestContext();
+        var driver = new WalkFrameDriver(fx.Dispatcher, leaf, new FakeWorldData());
+        var walk = new RetailFrameWalk { ObjectRingLimit = limit };
+        var landscape = new WalkLandscape { MidWidth = 1, Blocks = new WalkLandBlock?[1] };
+        var block = new WalkLandBlock
+        {
+            LandblockId = 0xF4180000u, SideCellCount = 2, Ring = ring, MaxZ = 10f, MinZ = 0f,
+        };
+        block.EnsureCellArrays();
+        landscape.Blocks[0] = block;
+
+        using DrawScope draw = fx.BeginDraw();
+        driver.BeginFrame(ctx, Matrix4x4.Identity, Vector3.Zero);
+        walk.DrawLandscape(landscape, OneDegenerateView(), ctx, driver);
+        driver.EndFrame();
+        driver.Replay(draw.Frame, draw.Pass);
+
+        Assert.Equal(4, log.Count(line => line == "SORTCELLEXIT"));
+        Assert.Equal(4, log.Count(line => line.StartsWith("LANDCELL:", StringComparison.Ordinal)));
+        Assert.Equal(expectObjects, log.Contains("PARTICLES:f4180001"));
+        Assert.Equal(expectObjects ? 64 : 0, driver.VisitedLandscapeCellIds.Count);
+    }
+
+    [Fact]
+    public void OutdoorRoot_CoarseLandCell_HasNoObjectTurn_ButStillFlushesAtItsExit()
     {
         using var fx = new DispatcherFixture();
         var log = new List<string>();
@@ -1507,10 +1669,10 @@ public sealed partial class WalkFrameDriverTests
         driver.EndFrame();
         driver.Replay(draw.Frame, draw.Pass);
 
-        Assert.Equal(
-            new[] { "SKY", "LANDCELL:f4180000:1:0", "PARTICLES:f4180001", "SORTCELLEXIT" }, log);
+        Assert.Equal(new[] { "SKY", "LANDCELL:f4180000:1:0", "SORTCELLEXIT" }, log);
         Assert.Equal(new (uint LandblockId, int SideCellCount, int CellIndex)[] { (0xF4180000u, 1, 0) },
             Assert.Single(leaf.LandCellBatches));
+        Assert.Empty(driver.VisitedLandscapeCellIds);
     }
 
     [Theory]
