@@ -52,6 +52,9 @@ public sealed class RuntimeSpellCastState
     public RuntimeSpellCastCompletion LastCompletion { get; private set; }
     public event Action? StateChanged;
 
+    public bool HasRequiredComponents(uint spellId) =>
+        _operations.HasRequiredComponents(spellId);
+
     public bool IsTargetReady(uint spellId) =>
         EvaluateCastGate(spellId)
             is SpellCastGate.NoTargetNeeded or SpellCastGate.TargetCompatible;

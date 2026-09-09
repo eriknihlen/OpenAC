@@ -7,6 +7,7 @@ public sealed class MossTankPlugin : IAcDreamPlugin
     private IPluginHost? _host;
     private MossTankPanel? _panel;
     private Action<double>? _tick;
+    private Action<double>? _autostartTick;
     private IDisposable? _commandRegistration;
 
     public void Initialize(IPluginHost host)
@@ -82,6 +83,9 @@ public sealed class MossTankPlugin : IAcDreamPlugin
         _tick = _panel.OnTick;
         _host.Events.Tick += _tick;
 
+        _autostartTick = _ => _panel.TickAutostart();
+        _host.Events.Tick += _autostartTick;
+
         _host.Log.Info(
             _host.Automation.IsAvailable
                 ? "MossTank enabled"
@@ -93,9 +97,12 @@ public sealed class MossTankPlugin : IAcDreamPlugin
     {
         if (_host is not null && _tick is not null)
             _host.Events.Tick -= _tick;
+        if (_host is not null && _autostartTick is not null)
+            _host.Events.Tick -= _autostartTick;
         _commandRegistration?.Dispose();
         _commandRegistration = null;
         _tick = null;
+        _autostartTick = null;
         _panel?.Disable();
         _host?.Log.Info("MossTank disabled");
     }

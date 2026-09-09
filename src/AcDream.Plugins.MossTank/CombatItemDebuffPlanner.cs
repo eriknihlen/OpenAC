@@ -48,7 +48,40 @@ internal static class CombatItemDebuffPlanner
         HashSet<DebuffIdentity> required = DebuffSpellCatalog.Required(actions);
         if (required.Count == 0)
             return Array.Empty<CombatDebuffSource>();
+        return Collect(required, settings, character, spells, items, isDue);
+    }
 
+    public static IReadOnlyList<CombatDebuffSource> Sources(
+        DebuffIdentity identity,
+        CombatSettings settings,
+        ICharacterInfo character,
+        ISpellCatalog spells,
+        IReadOnlyList<PluginInventoryItem> items,
+        Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(character);
+        ArgumentNullException.ThrowIfNull(spells);
+        ArgumentNullException.ThrowIfNull(items);
+        return Collect(
+            new HashSet<DebuffIdentity> { identity },
+            settings,
+            character,
+            spells,
+            items,
+            isDue: null,
+            log);
+    }
+
+    private static IReadOnlyList<CombatDebuffSource> Collect(
+        IReadOnlySet<DebuffIdentity> required,
+        CombatSettings settings,
+        ICharacterInfo character,
+        ISpellCatalog spells,
+        IReadOnlyList<PluginInventoryItem> items,
+        Func<DebuffIdentity, PluginSpellInfo, bool>? isDue,
+        Action<string>? log = null)
+    {
         var result = new List<CombatDebuffSource>();
         foreach (PluginSpellInfo spell in spells.KnownCombatSpells)
         {
@@ -64,11 +97,33 @@ internal static class CombatItemDebuffPlanner
 
         foreach (PluginInventoryItem item in items)
         {
-            if (settings.CombatItemObjectIds.Contains(item.ObjectId)
-                || settings.CombatItemNames.Contains(item.Name))
+            bool profiled = settings.CombatItemObjectIds.Contains(item.ObjectId)
+                || settings.CombatItemNames.Contains(item.Name);
+            bool consumable = settings.ConsumableNames.Contains(item.Name);
+            if (!profiled && !consumable)
+                continue;
+            string text = $"{item.Name} [{item.ObjectId}]";
+            log?.Invoke($"Find debuff choice ({text}): Begin");
+            int before = result.Count;
+            if (profiled)
                 AddProfileItem(result, required, item, spells, isDue);
-            if (settings.ConsumableNames.Contains(item.Name))
+            if (consumable)
                 AddGrenade(result, required, item, character, spells, isDue);
+            if (result.Count == before)
+            {
+                // dz.cs:303 — the item is not one of the object types this
+                // debuff can be applied from.
+                log?.Invoke($"Find debuff choice ({text}): Stop, wrong object type");
+                continue;
+            }
+            log?.Invoke(
+                "Find debuff choice ("
+                + text
+                + "): Item set to be used, quality "
+                + result[^1].Spell.Quality.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + ".");
+            log?.Invoke($"Find debuff choice ({text}): Item tests done.");
         }
 
         result.Sort((left, right) => Compare(
@@ -83,7 +138,7 @@ internal static class CombatItemDebuffPlanner
         IReadOnlySet<DebuffIdentity> required,
         PluginInventoryItem item,
         ISpellCatalog spells,
-        Func<DebuffIdentity, PluginSpellInfo, bool> isDue)
+        Func<DebuffIdentity, PluginSpellInfo, bool>? isDue)
     {
         if ((item.ItemType & Caster) != 0u
             && item.SpellId != 0u
@@ -130,7 +185,7 @@ internal static class CombatItemDebuffPlanner
         PluginInventoryItem item,
         ICharacterInfo character,
         ISpellCatalog spells,
-        Func<DebuffIdentity, PluginSpellInfo, bool> isDue)
+        Func<DebuffIdentity, PluginSpellInfo, bool>? isDue)
     {
         if ((item.ItemType & MissileWeapon) == 0u
             || item.CombatUse != 0
@@ -157,14 +212,14 @@ internal static class CombatItemDebuffPlanner
         CombatDebuffSourceKind kind,
         uint itemObjectId,
         int sourceSkill,
-        Func<DebuffIdentity, PluginSpellInfo, bool> isDue)
+        Func<DebuffIdentity, PluginSpellInfo, bool>? isDue)
     {
         if (!DebuffSpellCatalog.TryClassify(
                 spell,
                 out DebuffIdentity identity,
                 out int actionOrder)
             || !required.Contains(identity)
-            || !isDue(identity, spell))
+            || isDue?.Invoke(identity, spell) == false)
         {
             return;
         }

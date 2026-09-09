@@ -7,7 +7,7 @@ internal sealed class DispelController
     private const uint EradicateLifeMagicSelf =
         (uint)SpellId.EradicateLifeMagicSelf;
     private const double ActionTimeoutSeconds = 15d;
-    private const float AllyDispelRangeMeters = 5f;
+    private const float AllyDispelRangeMeters = 50f;
     private const uint CreatureEnchantmentSkill = 31u;
     private const uint ArcaneLoreSkill = 14u;
     private const uint DispelProtectionSpell = 3179u;
@@ -29,17 +29,33 @@ internal sealed class DispelController
 
     private readonly IPluginHost _host;
     private readonly VitalSettings _settings;
+
+    /// <summary>
+    /// The Items profile, which is what <c>af.cs:84</c>'s
+    /// <c>PluginCore.PC.ec</c> scan reads.
+    /// </summary>
+    private readonly CombatSettings _combatSettings;
+
     private Pending? _pending;
     private double _pendingSeconds;
     private double _retryDelay;
 
-    public DispelController(IPluginHost host, VitalSettings settings)
+    public DispelController(
+        IPluginHost host,
+        VitalSettings settings,
+        CombatSettings? combatSettings = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _combatSettings = combatSettings ?? new CombatSettings();
     }
 
     public string Status { get; private set; } = "Dispel idle";
+
+    private CombatModeGate? _gate;
+
+    internal void BindCombatModeGate(CombatModeGate gate) =>
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
 
     public bool Tick(double elapsedSeconds, bool canAct)
     {
@@ -114,7 +130,13 @@ internal sealed class DispelController
             return false;
         }
 
-        if (automation.Combat.Snapshot.Mode != PluginCombatMode.Magic)
+        if (_gate is not null
+            && !_gate.TryPrepare(PluginCombatMode.Magic))
+        {
+            Status = _gate.Status;
+            return true;
+        }
+        if (_gate is null && automation.Combat.Snapshot.Mode != PluginCombatMode.Magic)
         {
             PluginCombatCommandResult mode = automation.Combat.EnterMode(
                 PluginCombatMode.Magic);
@@ -190,14 +212,28 @@ internal sealed class DispelController
 
     private bool TryStartAllyDispel(IAutomationSurface automation)
     {
+        // af.cs:79-82 — `if (m_a.o.n.b(ActionLockType.ItemUse)) return false;`.
+        if (automation.Items.IsBusy)
+            return false;
         if (!automation.Fellowship.IsInFellowship
-            || !TrySelectAwakener(automation, out PluginInventoryItem drum)
+            || !TrySelectAwakener(automation, _combatSettings, out PluginInventoryItem drum)
             || !TrySelectAlly(automation, out PluginFellowMember target))
         {
             return false;
         }
 
-        if (automation.Combat.Snapshot.Mode != PluginCombatMode.Magic)
+        if (_gate is not null)
+        {
+            if (!_gate.TryPrepare(
+                    PluginCombatMode.Magic,
+                    overrideItemId: drum.ObjectId,
+                    autoSelect: false))
+            {
+                Status = _gate.Status;
+                return true;
+            }
+        }
+        else if (automation.Combat.Snapshot.Mode != PluginCombatMode.Magic)
         {
             PluginCombatCommandResult mode = automation.Combat.EnterMode(
                 PluginCombatMode.Magic);
@@ -228,6 +264,7 @@ internal sealed class DispelController
 
     private static bool TrySelectAwakener(
         IAutomationSurface automation,
+        CombatSettings combatSettings,
         out PluginInventoryItem selected)
     {
         selected = default;
@@ -236,30 +273,42 @@ internal sealed class DispelController
                 out PluginSkillInfo creature)
             || !automation.Character.TryGetSkill(
                 ArcaneLoreSkill,
-                out PluginSkillInfo arcane)
-            || arcane.Current < 110u)
+                out PluginSkillInfo arcane))
         {
             return false;
         }
 
+        PluginInventoryItem drum = default;
         foreach (PluginInventoryItem item in automation.Items.CaptureOwnedItems())
         {
-            if (!item.IsEquipped)
+            if (item.Name is not ("Awakener" or "Attenuated Awakener"))
                 continue;
-            bool valid = item.Name switch
+            if (!combatSettings.CombatItemNames.Contains(item.Name))
+                continue;
+            if (item.ContainerObjectId != automation.Character.ObjectId
+                && item.WielderObjectId != automation.Character.ObjectId)
             {
-                "Awakener" => creature.Training == PluginSkillTraining.Specialized,
-                "Attenuated Awakener" => creature.Training
-                    is PluginSkillTraining.Trained
-                        or PluginSkillTraining.Specialized,
-                _ => false,
-            };
-            if (!valid)
                 continue;
-            selected = item;
-            return true;
+            }
+            drum = item;
+            break;   // af.cs:89
         }
-        return false;
+        if (drum.ObjectId == 0u)
+            return false;
+
+        bool valid = drum.Name switch
+        {
+            "Awakener" => creature.Training == PluginSkillTraining.Specialized
+                && arcane.Current >= 110u,
+            _ => creature.Training
+                    is PluginSkillTraining.Trained
+                        or PluginSkillTraining.Specialized
+                && arcane.Current >= 110u,
+        };
+        if (!valid)
+            return false;
+        selected = drum;
+        return true;
     }
 
     private static bool TrySelectAlly(

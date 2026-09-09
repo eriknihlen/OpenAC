@@ -185,6 +185,7 @@ internal static class HeadlessConfigurationLoader
 
         ValidateCharacterOptions(session);
         ValidateLaunchContractFields(session);
+        ValidatePluginSettings(session);
     }
 
     private static void ValidateModeShape(
@@ -297,6 +298,30 @@ internal static class HeadlessConfigurationLoader
         {
             throw new HeadlessConfigurationException(
                 $"Session '{session.Id}' statusFile must be a non-empty path when present.");
+        }
+    }
+
+    private static void ValidatePluginSettings(HeadlessSessionDescriptor session)
+    {
+        if (session.PluginSettings is not { } declared)
+            return;
+
+        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in declared)
+        {
+            if (perPlugin is null)
+            {
+                throw new HeadlessConfigurationException(
+                    $"Session '{session.Id}' pluginSettings['{pluginId}'] cannot be null.");
+            }
+
+            foreach ((string key, string? value) in perPlugin)
+            {
+                if (value is null)
+                {
+                    throw new HeadlessConfigurationException(
+                        $"Session '{session.Id}' pluginSettings['{pluginId}']['{key}'] cannot be null.");
+                }
+            }
         }
     }
 

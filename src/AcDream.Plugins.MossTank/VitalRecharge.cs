@@ -147,6 +147,7 @@ internal static class VitalRechargePlanner
                 && TryHealersHeart(
                     automation,
                     settings,
+                    combatSettings,
                     fellow,
                     out choice))
             {
@@ -183,15 +184,18 @@ internal static class VitalRechargePlanner
     private static bool TryHealersHeart(
         IAutomationSurface automation,
         VitalSettings settings,
+        CombatSettings combatSettings,
         in PluginFellowMember target,
         out VitalRechargeChoice choice)
     {
         choice = default;
-        if (!settings.UseHealersHeart
-            || !automation.Character.TryGetSkill(33u, out PluginSkillInfo life)
+        // fb.cs:71-78 — the setting, then the ItemUse lock.
+        if (!settings.UseHealersHeart || automation.Items.IsBusy)
+            return false;
+        if (!automation.Character.TryGetSkill(33u, out PluginSkillInfo life)
             || life.Current < 245u
-            || !automation.Character.TryGetSkill(14u, out PluginSkillInfo secondary)
-            || secondary.Current < 105u)
+            || !automation.Character.TryGetSkill(14u, out PluginSkillInfo arcaneLore)
+            || arcaneLore.Current < 105u)
         {
             return false;
         }
@@ -200,6 +204,13 @@ internal static class VitalRechargePlanner
         int rank = 0;
         foreach (PluginInventoryItem item in automation.Items.CaptureOwnedItems())
         {
+            if (!combatSettings.CombatItemNames.Contains(item.Name))
+                continue;
+            if (item.ContainerObjectId != automation.Character.ObjectId
+                && item.WielderObjectId != automation.Character.ObjectId)
+            {
+                continue;
+            }
             int candidateRank = item.Name switch
             {
                 "Legendary Seed of Mornings" => 2,
@@ -977,9 +988,15 @@ internal sealed class VitalRechargeController
             ?? throw new ArgumentNullException(nameof(combatSettings));
     }
 
-    public string Status { get; private set; } = "Vitals idle";
+    internal const string IdleStatus = "Vitals idle";
 
-    public bool Tick(double elapsedSeconds, bool enabled, bool noTarget)
+    public string Status { get; private set; } = IdleStatus;
+
+    public bool Tick(
+        double elapsedSeconds,
+        bool enabled,
+        bool noTarget,
+        bool helpers = true)
     {
         IAutomationSurface automation = _host.Automation;
         double elapsed = Math.Max(0d, elapsedSeconds);
@@ -991,7 +1008,7 @@ internal sealed class VitalRechargeController
         {
             _pending = null;
             ClearBoosts();
-            Status = "Vitals idle";
+            Status = IdleStatus;
             return false;
         }
 
@@ -1032,14 +1049,29 @@ internal sealed class VitalRechargeController
             _healthBoostRemaining > 0d ? _settings.RechargeBoostAmount : 0,
             _staminaBoostRemaining > 0d ? _settings.RechargeBoostAmount : 0,
             _manaBoostRemaining > 0d ? _settings.RechargeBoostAmount : 0);
+        if (!helpers && need is null)
+        {
+            Status = "Vitals ready";
+            return false;
+        }
         VitalRechargeChoice helper = default;
-        if (need is null
+        if (need is not null && !helpers)
+        {
+        }
+        else if (need is null
             && !VitalRechargePlanner.TryPlanHelper(
                 automation,
                 _settings,
                 _combatSettings,
                 out helper))
         {
+            Status = "Vitals ready";
+            return false;
+        }
+        if (helpers && need is not null)
+        {
+            // Rows 11/12 (fb/gu) are the HELPER rules; a self need belongs to
+            // row 4 and was already offered there this pass.
             Status = "Vitals ready";
             return false;
         }
@@ -1097,7 +1129,7 @@ internal sealed class VitalRechargeController
         _pendingSeconds = 0d;
         _retryDelay = 0d;
         ClearBoosts();
-        Status = "Vitals idle";
+        Status = IdleStatus;
     }
 
     private void ArmBoost(VitalKind vital)

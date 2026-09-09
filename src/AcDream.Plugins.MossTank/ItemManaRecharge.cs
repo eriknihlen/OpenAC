@@ -17,7 +17,8 @@ internal static class ItemManaRechargePlanner
     public static ItemManaRechargePlan? Plan(
         IReadOnlyList<PluginInventoryItem> inventory,
         ISet<string> consumableNames,
-        int thresholdPercent)
+        int thresholdPercent,
+        IReadOnlyList<uint>? wieldOrder = null)
     {
         ArgumentNullException.ThrowIfNull(inventory);
         ArgumentNullException.ThrowIfNull(consumableNames);
@@ -33,15 +34,26 @@ internal static class ItemManaRechargePlanner
         if (charge.ObjectId == 0u)
             return null;
 
-        PluginInventoryItem target = inventory
+        IEnumerable<PluginInventoryItem> needsCharge = inventory
             .Where(item => item.IsEquipped
                 && item.ItemMaximumMana > 0
                 && 100L * Math.Max(0, item.ItemCurrentMana)
-                    / item.ItemMaximumMana < threshold)
-            .OrderBy(item => 100d * Math.Max(0, item.ItemCurrentMana)
-                / item.ItemMaximumMana)
-            .ThenBy(static item => item.ObjectId)
-            .FirstOrDefault();
+                    / item.ItemMaximumMana < threshold);
+        PluginInventoryItem target = wieldOrder is null
+            ? needsCharge
+                .OrderBy(item => 100d * Math.Max(0, item.ItemCurrentMana)
+                    / item.ItemMaximumMana)
+                .ThenBy(static item => item.ObjectId)
+                .FirstOrDefault()
+            // dy.cs:318-322 — c[0], the oldest still-queued worn item.
+            : needsCharge
+                .OrderBy(item =>
+                {
+                    int position = IndexOf(wieldOrder, item.ObjectId);
+                    return position < 0 ? int.MaxValue : position;
+                })
+                .ThenBy(static item => item.ObjectId)
+                .FirstOrDefault();
         return target.ObjectId == 0u
             ? null
             : new ItemManaRechargePlan(
@@ -52,6 +64,16 @@ internal static class ItemManaRechargePlanner
                 target.ItemCurrentMana,
                 target.ItemMaximumMana);
     }
+
+    private static int IndexOf(IReadOnlyList<uint> order, uint objectId)
+    {
+        for (int i = 0; i < order.Count; i++)
+        {
+            if (order[i] == objectId)
+                return i;
+        }
+        return -1;
+    }
 }
 
 internal sealed class ItemManaRechargeController
@@ -61,6 +83,8 @@ internal sealed class ItemManaRechargeController
     private readonly CombatSettings _profiles;
     private ItemManaRechargePlan? _pending;
     private long _observedCompletion;
+
+    private readonly List<uint> _wieldOrder = [];
 
     public ItemManaRechargeController(
         IPluginHost host,
@@ -93,10 +117,13 @@ internal sealed class ItemManaRechargeController
             return false;
         }
 
+        IReadOnlyList<PluginInventoryItem> owned = items.CaptureOwnedItems();
+        ObserveWieldOrder(owned);
         ItemManaRechargePlan? plan = ItemManaRechargePlanner.Plan(
-            items.CaptureOwnedItems(),
+            owned,
             _profiles.ConsumableNames,
-            _settings.RefillWornManaPercent);
+            _settings.RefillWornManaPercent,
+            _wieldOrder);
         if (plan is not { } next)
         {
             Status = "Worn mana ready";
@@ -115,8 +142,35 @@ internal sealed class ItemManaRechargeController
         return true;
     }
 
+    private void ObserveWieldOrder(IReadOnlyList<PluginInventoryItem> owned)
+    {
+        for (int i = _wieldOrder.Count - 1; i >= 0; i--)
+        {
+            uint queued = _wieldOrder[i];
+            bool stillWorn = false;
+            foreach (PluginInventoryItem item in owned)
+            {
+                if (item.ObjectId == queued && item.IsEquipped)
+                {
+                    stillWorn = true;
+                    break;
+                }
+            }
+            if (!stillWorn)
+                _wieldOrder.RemoveAt(i);
+        }
+        foreach (PluginInventoryItem item in owned)
+        {
+            if (!item.IsEquipped || item.ItemMaximumMana <= 0)
+                continue;
+            if (!_wieldOrder.Contains(item.ObjectId))
+                _wieldOrder.Add(item.ObjectId);
+        }
+    }
+
     public void Reset()
     {
+        _wieldOrder.Clear();
         _pending = null;
         Status = "Worn mana ready";
     }

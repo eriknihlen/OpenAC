@@ -807,6 +807,32 @@ public sealed class RuntimeCharacterStateTests
     }
 
     [Fact]
+    public void EnchantmentsChanged_QuicknessBuff_RaisesRunThroughTheEnchantedFormulaTerm()
+    {
+        SpellTable table = SpellTableWith((1u, "Quickness Self", 0u));
+        using var state = new RuntimeCharacterState(table);
+        state.LocalPlayer.SkillFormulaBonusResolver = (skillId, attrs) =>
+            skillId == RuntimeCharacterState.RunSkillId
+            && attrs.TryGetValue(3u, out uint quickness)
+                ? quickness
+                : 0u;
+        state.LocalPlayer.OnAttributeUpdate(atType: 3u, ranks: 0u, start: 100u, xp: 0u);
+        state.LocalPlayer.OnSkillUpdate(
+            skillId: RuntimeCharacterState.RunSkillId, ranks: 50u, status: 2u,
+            xp: 0u, init: 0u, resistance: 0u, lastUsed: 0d, formulaBonus: 100u);
+        state.UpdateMovementSkillBase(runSkillBase: 150, jumpSkillBase: -1);
+        Assert.Equal(150, state.MovementSkills.RunSkill);
+
+        state.Spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModKey: 3u, StatModValue: 20f, Bucket: 2u));
+
+        // formula(120) + ranks 50 = 170.
+        Assert.Equal(170, state.MovementSkills.RunSkill);
+    }
+
+    [Fact]
     public void EnchantmentsChanged_AfterBaseAlreadyPushed_RecomputesWithoutFreshBase()
     {
         SpellTable table = SpellTableWith((1u, "Vitae", 0u));

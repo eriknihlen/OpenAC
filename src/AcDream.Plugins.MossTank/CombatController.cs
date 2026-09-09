@@ -1,4 +1,4 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank;
 
@@ -15,12 +15,17 @@ internal sealed class CombatController
     private IReadOnlyList<PluginCombatTarget> _targets =
         Array.Empty<PluginCombatTarget>();
     private IReadOnlyList<PluginSpellInfo>? _combatSpellSnapshot;
-    private DebuffSpellCatalog _debuffCatalog =
-        DebuffSpellCatalog.Build(Array.Empty<PluginSpellInfo>());
+    private IReadOnlyList<PluginSpellInfo>? _attackSpellSnapshot;
     private AttackSpellCatalog _attackCatalog =
         AttackSpellCatalog.Build(Array.Empty<PluginSpellInfo>());
     private double _now;
+
+    private double _lastElapsedSeconds;
+
+    private uint _plannedWeapon;
+
     private double _untilScan;
+    private double _acquisitionRange;
     private uint _targetId;
     private ResolvedMonsterRule _targetRule;
     private string _targetName = string.Empty;
@@ -33,6 +38,15 @@ internal sealed class CombatController
     private long _observedAttackCastCompletion;
     private uint _pendingPhysicalTarget;
     private uint _pendingAttackSpell;
+
+    private readonly Dictionary<(MonsterRuleActions Actions, uint Target), MonsterDamageType>
+        _passElements = [];
+    private readonly Dictionary<DebuffIdentity, IReadOnlyList<CombatDebuffSource>>
+        _passDebuffSources = [];
+    private readonly Dictionary<DebuffIdentity, PluginSpellInfo?> _passDebuffSpells = [];
+    private readonly Dictionary<(MonsterDamageType Element, uint Target), bool>
+        _passDeliverable = [];
+    private IReadOnlyList<PluginEquipmentItem>? _passEquipment;
     private uint _pendingAttackTarget;
     private PendingItemDebuff? _pendingItemDebuff;
     private ulong _observedChatSequence;
@@ -40,7 +54,19 @@ internal sealed class CombatController
     private bool _combatPolicySuspended;
     private bool _approachMovementOwned;
     private bool _breakableTurnOwned;
-    private int _dropToPeaceModeRetries;
+
+    private double _approachFaceHeadingStamp =
+        NavigationController.NoFaceHeadingStamp;
+
+    /// <summary>The same stamp for the breakable turn-to.</summary>
+    private double _breakableTurnFaceHeadingStamp =
+        NavigationController.NoFaceHeadingStamp;
+
+    /// <summary>
+    /// VTank's breakable turn-to entry tolerance: the <c>2.0</c> degrees
+    /// <c>gj.cs:505</c> passes to <c>w.a(heading, 2.0, 1000.0, true)</c>.
+    /// </summary>
+    private const float BreakableTurnToleranceDegrees = 2f;
     private Func<string, int, bool>? _requestAmmunitionCraft;
     private Func<string, int, bool>? _canCraftAmmunition;
     private int _randomDamageIndex;
@@ -63,18 +89,31 @@ internal sealed class CombatController
     public CombatController(
         IPluginHost host,
         CombatSettings settings,
-        VitalSettings? vitalSettings = null)
+        VitalSettings? vitalSettings = null,
+        VtankGameInfoDatabase? gameInfo = null,
+        SpellCastTracker? castTracker = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _vitalSettings = vitalSettings ?? new VitalSettings();
+        _gameInfo = gameInfo ?? VtankGameInfoDatabase.Empty;
+        _castTracker = castTracker ?? new SpellCastTracker();
+        _castTracker.Completed += OnCastTrackerOutcome;
     }
+
+    internal SpellCastTracker CastTracker => _castTracker;
+
+    private readonly SpellCastTracker _castTracker;
+
+    private readonly VtankGameInfoDatabase _gameInfo;
 
     public bool Enabled { get; private set; }
     public string Status { get; private set; } = "Combat off";
     public string TargetText => _targetText;
     public string ModeText => _modeText;
     public bool HasTarget => _targetId != 0u;
+
+    internal bool HasPendingItemDebuff => _pendingItemDebuff is not null;
 
     public string ButtonText => Enabled ? "Stop Macro" : "Run Macro";
 
@@ -88,6 +127,49 @@ internal sealed class CombatController
             ?? throw new ArgumentNullException(nameof(request));
     }
 
+    public Action<MacroLogChannel, string>? Log { get; set; }
+
+    internal CombatModeGate Gate =>
+        _gate ??= BindCombatModeGate(new CombatModeGate(
+            _host,
+            _settings,
+            _vitalSettings,
+            notice => Disable(notice)));
+
+    private CombatModeGate? _gate;
+
+    private CombatModeGate BindAmmunition(CombatModeGate gate)
+    {
+        gate.AmmunitionStale = (weapon, element) =>
+        {
+            IEquipmentAutomation equipment = _host.Automation.Equipment;
+            if (!equipment.IsAvailable || weapon == 0u)
+                return false;
+            return ResolveAmmunitionPlan(
+                equipment.CaptureOwnedEquipment(),
+                weapon,
+                element).Kind
+                != AmmunitionPlanKind.Satisfied;
+        };
+        gate.WieldAmmunition = element =>
+        {
+            IEquipmentAutomation equipment = _host.Automation.Equipment;
+            if (!equipment.IsAvailable)
+                return false;
+            IReadOnlyList<PluginEquipmentItem> items =
+                equipment.CaptureOwnedEquipment();
+            return TickAmmunition(items, _plannedWeapon, element);
+        };
+        return gate;
+    }
+
+    internal CombatModeGate BindCombatModeGate(CombatModeGate gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        _gate = BindAmmunition(gate);
+        return _gate;
+    }
+
     public void ClearActionLocks()
     {
         _host.Automation.Combat.AbortPhysicalAttack();
@@ -99,7 +181,7 @@ internal sealed class CombatController
         _pendingAttackTarget = 0u;
         ClearPendingItemDebuff();
         _debuffs.ClearPending();
-        _dropToPeaceModeRetries = 0;
+        Gate.Reset();
         _untilScan = 0d;
         if (Enabled)
             Status = "Action locks cleared";
@@ -206,9 +288,20 @@ internal sealed class CombatController
             Status = "Scanning for targets";
         }
 
-        _now += Math.Max(0d, elapsedSeconds);
+        _passElements.Clear();
+        _passDebuffSources.Clear();
+        _passDebuffSpells.Clear();
+        _passDeliverable.Clear();
+        _passEquipment = null;
+
+        _lastElapsedSeconds = Math.Max(0d, elapsedSeconds);
+        _now += _lastElapsedSeconds;
         PluginCastCompletion castCompletion =
             _host.Automation.Magic.LastCompletion;
+        // The receipt moves the tracker from "did the request land" to "what
+        // did it do" (gj's b -> c edge). Idempotent by revision: the panel
+        // hands it the same snapshot every host frame.
+        _castTracker.ObserveCompletion(castCompletion);
         ObserveSelectionJiggle(castCompletion);
         TickSelectionJiggle();
         DebuffCompletion completion = _debuffs.Observe(
@@ -235,6 +328,7 @@ internal sealed class CombatController
             double acquisitionRange = navigationEnabled
                 ? Math.Max(_settings.MaximumRange, _settings.ApproachDistance)
                 : _settings.MaximumRange;
+            _acquisitionRange = acquisitionRange;
             _targets = _host.Automation.Combat.CaptureHostileTargets(
                 (float)acquisitionRange);
             foreach (uint ghost in _failures.ObserveTargets(
@@ -285,7 +379,8 @@ internal sealed class CombatController
                 _targets,
                 _settings,
                 _now,
-                out string petStatus))
+                out string petStatus,
+                readyToRefillInPeace: ReadyToActInPeace))
         {
             Status = petStatus;
             return;
@@ -298,22 +393,16 @@ internal sealed class CombatController
         if (TickEquipment())
             return;
 
-        combat = _host.Automation.Combat.Snapshot;
-        if (combat.Mode is PluginCombatMode.Unknown or PluginCombatMode.Peace)
-        {
-            PluginCombatCommandResult mode =
-                _host.Automation.Combat.EnterDefaultMode();
-            Status = mode.Status == PluginCombatCommandStatus.Refused
-                ? mode.Notice ?? "Cannot enter combat mode"
-                : "Entering combat mode";
-            return;
-        }
-
-        if (!_targetRule.Actions.Attacks)
+        if (!_targetRule.Actions.Attacks && !_targetRule.Actions.UsesStreak)
         {
             Status = $"Debuffs complete for {_targetName}";
             return;
         }
+
+        if (!TryPrepareAttack())
+            return;
+
+        combat = _host.Automation.Combat.Snapshot;
 
         if (combat.Mode == PluginCombatMode.Magic)
         {
@@ -415,117 +504,361 @@ internal sealed class CombatController
         }
 
         RefreshSpellCatalogs();
-        string? projectileRefusal = null;
-        MonsterRuleActions attackActions = ResolveRandomDamage(
-            _targetRule.Actions);
-        IReadOnlyList<AttackSpellChoice> choices = _attackCatalog.Candidates(
-            attackActions,
-            _settings,
-            FindTarget(_targetId),
-            CountNearbyRingTargets(),
-            _host.Automation.Character);
-        foreach (AttackSpellChoice choice in choices)
-        {
-            if (!CanCastHuntSpell(choice.Spell, FindTarget(_targetId)))
-                continue;
-            if (choice.Spell.IsProjectile
-                && !ProjectilePathIsClear(
-                    _targetId,
-                    choice.Shape == AttackSpellShape.Arc
-                        ? PluginProjectilePathKind.Arc
-                        : PluginProjectilePathKind.Straight,
-                    _settings.AttackHeight,
-                    out PluginProjectilePathResult spellPath))
-            {
-                projectileRefusal = ProjectileStatus(spellPath, _targetName);
-                Status = projectileRefusal;
-                continue;
-            }
-            if (!choice.CastWithoutTarget
-                && !ReadyForBreakableTurn(choice.Spell, _targetId))
-            {
-                return;
-            }
-            PluginCastGate gate = choice.CastWithoutTarget
-                ? magic.EvaluateGate(choice.Spell.SpellId)
-                : magic.EvaluateGate(choice.Spell.SpellId, _targetId);
-            if (gate != PluginCastGate.Ready)
-            {
-                continue;
-            }
-            bool dispatched = choice.CastWithoutTarget
-                ? magic.Cast(choice.Spell.SpellId)
-                : magic.Cast(choice.Spell.SpellId, _targetId);
-            if (!dispatched)
-            {
-                if (_failures.RecordSpellDidNotStart(_targetId, _settings))
-                    DismissGhost(_targetId);
-                continue;
-            }
+        PluginCombatTarget target = FindTarget(_targetId);
+        MonsterRuleActions actions = ResolveRandomDamage(_targetRule.Actions);
+        MonsterDamageType element = ResolveAttackElement(actions, target);
 
-            Status = choice.Shape == AttackSpellShape.Ring
-                ? $"{choice.Spell.Name} around {_targetName}"
-                : $"{choice.Spell.Name} → {_targetName}";
-            if (!choice.CastWithoutTarget)
-            {
-                _pendingAttackSpell = choice.Spell.SpellId;
-                _pendingAttackTarget = _targetId;
-                _failures.BeginAttack(
-                    _targetId,
-                    FindTarget(_targetId).HealthRevision);
-            }
+        if (actions.DamageType == MonsterDamageType.Fists
+            && _attackCatalog.ResolveTuskerFists() is { } fists
+            && IsUsableAttackSpell(target)(fists))
+        {
+            CastAttackSpell(
+                new AttackSpellChoice(
+                    fists,
+                    VtankCombatSpellType.War,
+                    MonsterDamageType.Fists,
+                    CastWithoutTarget: false),
+                target);
             return;
         }
 
-        IReadOnlyList<PluginSpellInfo> fallback =
-            _host.Automation.Spells.KnownAttackSpells;
-        if (choices.Count == 0
-            && attackActions.DamageType == MonsterDamageType.Auto)
+        bool flag3 = actions.UsesPrimaryAttack;                 // !a10.t
+        bool flag4 = actions.UsesRing;                          // a10.j
+        bool flag5 = actions.UsesStreak;                        // a10.s
+        int ringCount = CountNearbyRingTargets();               // dz.p.c
+        AttackSpellChoice? plan;
+
+        if ((flag4 && ringCount >= _settings.MinimumRingTargets)
+            || (flag4 && !flag3 && !flag5 && ringCount > 0))
         {
-            foreach (PluginSpellInfo spell in fallback)
+            plan = element == MonsterDamageType.DrainAuto
+                ? PlanDrain(target, ring: true)
+                : PlanRing(element, target) ?? PlanBoltOrArc(element, target);
+        }
+        else if ((flag3 && !flag5) || (!flag3 && !flag5 && flag4))
+        {
+            // hi.cs:241-257 — the ordinary attack arm.
+            plan = element == MonsterDamageType.DrainAuto
+                ? PlanDrain(target, ring: false)
+                : PlanBoltOrArc(element, target);
+        }
+        else if (!flag3 && flag5)
+        {
+            plan = element == MonsterDamageType.DrainAuto
+                ? PlanDrain(target, ring: false)
+                : PlanStreak(element, target)
+                    ?? WarnNoStreak(element, target);
+        }
+        else
+        {
+            if (!flag3 || !flag5)
             {
-                if (!CanCastHuntSpell(spell, FindTarget(_targetId)))
-                    continue;
-                if (spell.IsProjectile
-                    && !ProjectilePathIsClear(
-                        _targetId,
-                        PluginProjectilePathKind.Straight,
-                        _settings.AttackHeight,
-                        out PluginProjectilePathResult fallbackPath))
-                {
-                    projectileRefusal = ProjectileStatus(
-                        fallbackPath,
-                        _targetName);
-                    Status = projectileRefusal;
-                    continue;
-                }
-                if (!ReadyForBreakableTurn(spell, _targetId))
-                    return;
-                if (magic.EvaluateGate(spell.SpellId, _targetId)
-                        != PluginCastGate.Ready)
-                {
-                    continue;
-                }
-                if (!magic.Cast(spell.SpellId, _targetId))
-                {
-                    if (_failures.RecordSpellDidNotStart(_targetId, _settings))
-                        DismissGhost(_targetId);
-                    continue;
-                }
-                _pendingAttackSpell = spell.SpellId;
-                _pendingAttackTarget = _targetId;
-                _failures.BeginAttack(
-                    _targetId,
-                    FindTarget(_targetId).HealthRevision);
-                Status = $"{spell.Name} → {_targetName}";
+                Status = $"No attack configured for {_targetName}";
                 return;
+            }
+            if (element == MonsterDamageType.DrainAuto)
+            {
+                plan = PlanDrain(target, ring: false);
+            }
+            else
+            {
+                AttackSpellChoice? streak = PlanStreak(element, target);
+                plan = IsFinishingBlow(target, streak)
+                    ? streak ?? WarnNoStreak(element, target)
+                    : PlanBoltOrArc(element, target);
             }
         }
 
-        Status = projectileRefusal
-            ?? (choices.Count == 0 && fallback.Count == 0
-                ? "No direct attack spell known"
-                : "No usable attack spell");
+        if (plan is not { } chosen)
+        {
+            Status ??= "No usable attack spell";
+            return;
+        }
+        CastAttackSpell(chosen, target);
+    }
+
+    private AttackSpellChoice? PlanRing(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        PluginSpellInfo? ring = _attackCatalog.Resolve(
+            element,
+            VtankCombatSpellType.Ring,
+            IsUsableAttackSpell(target));
+        if (ring is not { } spell)
+            return null;
+        return _host.Automation.Magic.EvaluateGate(spell.SpellId)
+            is PluginCastGate.Ready or PluginCastGate.Busy
+            ? new AttackSpellChoice(
+                spell,
+                VtankCombatSpellType.Ring,
+                element,
+                CastWithoutTarget: true)
+            : null;
+    }
+
+    /// <summary>
+    /// <c>hi.cs:266,284</c> — <c>dz.i.c(dz.i.a(element, Streak))</c>, the
+    /// quality-walked streak line.
+    /// </summary>
+    private AttackSpellChoice? PlanStreak(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        PluginSpellInfo? streak = _attackCatalog.Resolve(
+            element,
+            VtankCombatSpellType.Streak,
+            IsUsableAttackSpell(target));
+        return streak is { } spell
+            ? new AttackSpellChoice(
+                spell,
+                VtankCombatSpellType.Streak,
+                element,
+                CastWithoutTarget: false)
+            : null;
+    }
+
+    /// <summary>
+    /// <c>hi.cs:274,305</c> — VTank's own warning text, then bolt/arc.
+    /// </summary>
+    private AttackSpellChoice? WarnNoStreak(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        PostAttackWarning(
+            $"No streak spell usable for element '{ElementName(element)}', "
+            + "using bolt/arc instead.");
+        return PlanBoltOrArc(element, target);
+    }
+
+    private static bool IsFinishingBlow(
+        in PluginCombatTarget target,
+        AttackSpellChoice? streak)
+    {
+        if (streak is not { } choice)
+            return false;
+        if (!target.IsHealthKnown || target.MaximumHealth <= 0)
+            return false;
+        int remaining = (int)Math.Round(
+            target.HealthFraction * target.MaximumHealth);
+        int threshold = choice.Spell.Difficulty / 7;
+        return remaining > 0 && remaining < threshold;
+    }
+
+    private AttackSpellChoice? PlanBoltOrArc(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        bool boltBlocked = false;   // f7.a.c
+        bool arcBlocked = false;    // f7.a.b
+        string? projectileRefusal = null;
+        Func<PluginSpellInfo, bool> usable = IsUsableAttackSpell(target);
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            PluginSpellInfo? bolt = boltBlocked
+                ? null
+                : _attackCatalog.Resolve(element, VtankCombatSpellType.War, usable);
+            PluginSpellInfo? arc = arcBlocked
+                ? null
+                : _attackCatalog.Resolve(element, VtankCombatSpellType.Arc, usable);
+
+            // hi.cs:483-488
+            if (bolt is null && arc is null)
+            {
+                PostAttackWarning(
+                    "Warning: no usable attack spell detected for element \""
+                    + ElementName(element) + "\"");
+                Status = projectileRefusal ?? "No usable attack spell";
+                return null;
+            }
+
+            VtankCombatSpellType type;
+            PluginSpellInfo spell;
+            if (bolt is null)
+            {
+                type = VtankCombatSpellType.Arc;              // hi.cs:489-494
+                spell = arc!.Value;
+            }
+            else if (arc is null)
+            {
+                type = VtankCombatSpellType.War;              // hi.cs:495-500
+                spell = bolt.Value;
+            }
+            else if (bolt.Value.Quality > arc.Value.Quality)
+            {
+                type = VtankCombatSpellType.War;              // hi.cs:503-508
+                spell = bolt.Value;
+            }
+            else if (arc.Value.Quality > bolt.Value.Quality)
+            {
+                type = VtankCombatSpellType.Arc;              // hi.cs:509-514
+                spell = arc.Value;
+            }
+            else
+            {
+                // hi.cs:515-541 — ONLY reached on an exact quality tie.
+                switch (_settings.UseArcs)
+                {
+                    case UseArcsMode.AtRange:
+                        if (target.Distance >= _settings.ArcRange)
+                        {
+                            type = VtankCombatSpellType.Arc;
+                            spell = arc.Value;
+                        }
+                        else
+                        {
+                            type = VtankCombatSpellType.War;
+                            spell = bolt.Value;
+                        }
+                        break;
+                    case UseArcsMode.Yes:
+                        type = VtankCombatSpellType.Arc;
+                        spell = arc.Value;
+                        break;
+                    default: // UseArcsMode.No and hi.cs:537's own default arm
+                        type = VtankCombatSpellType.War;
+                        spell = bolt.Value;
+                        break;
+                }
+            }
+
+            if (spell.IsProjectile
+                && !ProjectilePathIsClear(
+                    _targetId,
+                    type == VtankCombatSpellType.Arc
+                        ? PluginProjectilePathKind.Arc
+                        : PluginProjectilePathKind.Straight,
+                    _settings.AttackHeight,
+                    out PluginProjectilePathResult path))
+            {
+                projectileRefusal = ProjectileStatus(path, _targetName);
+                Status = projectileRefusal;
+                if (type == VtankCombatSpellType.Arc)
+                    arcBlocked = true;
+                else
+                    boltBlocked = true;
+                if (arcBlocked && boltBlocked)
+                    return null;
+                continue;
+            }
+            return new AttackSpellChoice(
+                spell,
+                type,
+                element,
+                CastWithoutTarget: false);
+        }
+        return null;
+    }
+
+    private AttackSpellChoice? PlanDrain(
+        in PluginCombatTarget target,
+        bool ring)
+    {
+        Func<PluginSpellInfo, bool> usable = IsUsableAttackSpell(target);
+        ICharacterInfo character = _host.Automation.Character;
+        bool needsHealth = character.MaxHealth != 0u
+            && character.CurrentHealth / (double)character.MaxHealth < 0.75d;
+        string[] order = needsHealth
+            ? ["Drain Health Other", "Martyr's Hecatomb", "Harm Other"]
+            : ["Martyr's Hecatomb", "Drain Health Other", "Harm Other"];
+        foreach (string family in order)
+        {
+            if (_attackCatalog.ResolveFamily(family, usable) is not { } spell)
+                continue;
+            return new AttackSpellChoice(
+                spell,
+                ring ? VtankCombatSpellType.Ring : VtankCombatSpellType.War,
+                MonsterDamageType.DrainAuto,
+                CastWithoutTarget: false);
+        }
+        return null;
+    }
+
+    private Func<PluginSpellInfo, bool> IsUsableAttackSpell(
+        PluginCombatTarget target) => spell =>
+            !SpellComponentPolicy.UsesBlacklistedComponent(
+                _host.Automation.Spells,
+                spell,
+                _settings.BlacklistedSpellComponents)
+            && CanCastHuntSpell(spell, target);
+
+    /// <summary>VTank's own element word in its warning text (<c>f3.a</c>).</summary>
+    private static string ElementName(MonsterDamageType element) => element switch
+    {
+        MonsterDamageType.Electric => "Lightning",
+        MonsterDamageType.VoidBasic or MonsterDamageType.Nether => "Void",
+        _ => element.ToString(),
+    };
+
+    private void PostAttackWarning(string text)
+    {
+        if (!_postedAttackWarnings.Add(text))
+            return;
+        _host.Automation.Chat.PostSystemMessage("[MossTank] " + text);
+    }
+
+    private readonly HashSet<string> _postedAttackWarnings =
+        new(StringComparer.Ordinal);
+
+    private void CastAttackSpell(
+        AttackSpellChoice choice,
+        in PluginCombatTarget target)
+    {
+        IMagicCommands magic = _host.Automation.Magic;
+        if (!choice.CastWithoutTarget
+            && !ReadyForBreakableTurn(choice.Spell, _targetId))
+        {
+            return;
+        }
+        PluginCastGate gate = choice.CastWithoutTarget
+            ? magic.EvaluateGate(choice.Spell.SpellId)
+            : magic.EvaluateGate(choice.Spell.SpellId, _targetId);
+        if (gate != PluginCastGate.Ready)
+        {
+            Status = gate == PluginCastGate.Busy
+                ? $"Waiting to cast at {_targetName}"
+                : $"Cannot cast {choice.Spell.Name}";
+            return;
+        }
+        long issueRevision = magic.LastCompletion.Revision;
+        bool dispatched = choice.CastWithoutTarget
+            ? magic.Cast(choice.Spell.SpellId)
+            : magic.Cast(choice.Spell.SpellId, _targetId);
+        if (!dispatched)
+        {
+            if (_failures.RecordSpellDidNotStart(_targetId, _settings))
+                DismissGhost(_targetId);
+            Status = $"Could not start {choice.Spell.Name}";
+            return;
+        }
+
+        // gj.cs:543 — VTank's own SpellCast log line.
+        Log?.Invoke(
+            MacroLogChannel.SpellCast,
+            $"Casting: {choice.Spell.Name} on {_targetId} ({_targetName})");
+        Status = choice.Type == VtankCombatSpellType.Ring
+            ? $"{choice.Spell.Name} around {_targetName}"
+            : $"{choice.Spell.Name} → {_targetName}";
+
+        bool selfCast = _targetId != 0u
+            && _targetId == _host.Automation.Character.ObjectId;
+        _castTracker.Begin(
+            choice.Spell.SpellId,
+            choice.Spell.Name,
+            choice.CastWithoutTarget ? 0u : _targetId,
+            choice.CastWithoutTarget
+                ? string.Empty
+                : selfCast ? "yourself" : _targetName,
+            HitsMultipleTargets(choice.Spell),
+            issueRevision,
+            choice.Spell.Saying);
+        Log?.Invoke(MacroLogChannel.CastInfo, "SpellCaster: Begin");
+        if (!choice.CastWithoutTarget)
+        {
+            _pendingAttackSpell = choice.Spell.SpellId;
+            _pendingAttackTarget = _targetId;
+            _failures.BeginAttack(_targetId, target.HealthRevision);
+        }
     }
 
     private MonsterRuleActions ResolveRandomDamage(MonsterRuleActions actions)
@@ -586,6 +919,8 @@ internal sealed class CombatController
 
     private bool TickEquipment()
     {
+        _plannedWeapon = 0u;
+
         MonsterRuleActions actions = _targetRule.Actions;
         bool primaryRequiresWeapon = actions.UsesPrimaryAttack
             || actions.UsesRing;
@@ -608,31 +943,17 @@ internal sealed class CombatController
             actions.WeaponObjectId,
             actions.WeaponName,
             items);
-        if (desiredWeapon == 0u && actions.DamageType == MonsterDamageType.Auto)
+        if (desiredWeapon == 0u)
         {
             desiredWeapon = SelectAutomaticWeapon(
                 items,
-                VtankDamageDatabase.Preferences(FindTarget(_targetId)),
+                ResolveAttackElement(actions, FindTarget(_targetId)),
                 _settings);
         }
-        else if (desiredWeapon == 0u)
-        {
-            desiredWeapon = SelectAutomaticWeapon(
-                items,
-                actions.DamageType,
-                _settings);
-        }
+        _plannedWeapon = desiredWeapon;
 
         if (TryEquipIfNeeded(equipment, items, desiredWeapon, "weapon"))
             return true;
-        if (TickAmmunition(
-                equipment,
-                items,
-                desiredWeapon,
-                actions.DamageType))
-        {
-            return true;
-        }
         if (TryEquipIfNeeded(
             equipment,
             items,
@@ -647,26 +968,46 @@ internal sealed class CombatController
         return false;
     }
 
-    private bool TickAmmunition(
-        IEquipmentAutomation equipment,
+    private enum AmmunitionPlanKind
+    {
+        /// <summary>Not a launcher, or the right stack is already wielded.</summary>
+        Satisfied,
+        Wield,
+        Craft,
+        Unavailable,
+    }
+
+    private readonly record struct AmmunitionPlan(
+        AmmunitionPlanKind Kind,
+        uint ObjectId,
+        string Name,
+        string Notice)
+    {
+        public static AmmunitionPlan Satisfied { get; } = new(
+            AmmunitionPlanKind.Satisfied,
+            0u,
+            string.Empty,
+            string.Empty);
+    }
+
+    private AmmunitionPlan ResolveAmmunitionPlan(
         IReadOnlyList<PluginEquipmentItem> equipmentItems,
         uint desiredWeapon,
         MonsterDamageType configuredDamage)
     {
         PluginEquipmentItem launcher = equipmentItems.FirstOrDefault(
             item => item.ObjectId == desiredWeapon);
-        int launcherType = VtankAmmunitionDatabase.LauncherType(
-            launcher.AmmoType);
+        int launcherType = VtankAmmunitionDatabase.LauncherType(launcher.AmmoType);
         if (launcherType == 0)
-            return false;
+            return AmmunitionPlan.Satisfied;
 
         MonsterDamageType damage = configuredDamage;
-        VtankPrismaticAmmoPolicy prismatic =
-            VtankPrismaticAmmoPolicy.NoPrismatic;
+        VtankPrismaticAmmoPolicy prismatic = VtankPrismaticAmmoPolicy.NoPrismatic;
         if (damage == MonsterDamageType.Auto)
         {
-            damage = VtankDamageDatabase.Preferences(
-                FindTarget(_targetId)).FirstOrDefault();
+            damage = ResolveAttackElement(
+                _targetRule.Actions,
+                FindTarget(_targetId));
             prismatic = VtankPrismaticAmmoPolicy.Any;
         }
         else if (damage == MonsterDamageType.Prismatic)
@@ -679,7 +1020,7 @@ internal sealed class CombatController
             or MonsterDamageType.Harm
             or MonsterDamageType.Nether)
         {
-            return false;
+            return AmmunitionPlan.Satisfied;
         }
 
         IReadOnlyList<PluginInventoryItem> inventory =
@@ -690,8 +1031,7 @@ internal sealed class CombatController
                 static group => group.Key,
                 static group => group.Sum(item => Math.Max(1, item.StackSize)),
                 StringComparer.OrdinalIgnoreCase);
-        var craftable = new Dictionary<string, bool>(
-            StringComparer.OrdinalIgnoreCase);
+        var craftable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         bool IsAvailable(string name)
         {
             if (counts.GetValueOrDefault(name) >= 1)
@@ -703,7 +1043,12 @@ internal sealed class CombatController
             return value;
         }
 
+        // The owner's own gameinfodb.ugd wins over the bundled table when it
+        // is there — one AmmunitionOptions table, read the way e0 reads it.
         VtankAmmunitionOption? selected = VtankAmmunitionDatabase.Select(
+            _gameInfo.AmmunitionOptions.Count > 0
+                ? _gameInfo.AmmunitionOptions
+                : VtankAmmunitionDatabase.Options,
             launcherType,
             damage,
             prismatic,
@@ -712,38 +1057,81 @@ internal sealed class CombatController
             IsAvailable);
         if (selected is not { } option)
         {
-            Status = $"No {damage} ammunition is available";
-            return true;
+            return new AmmunitionPlan(
+                AmmunitionPlanKind.Unavailable,
+                0u,
+                string.Empty,
+                $"No {damage} ammunition is available");
         }
 
+        // bv.cs:156-162 — the wielded stack already IS the winning row.
         PluginEquipmentItem currentAmmo = equipmentItems.FirstOrDefault(
             static item => item.CombatUse == 3 && item.IsEquipped);
-        if (string.Equals(
-                currentAmmo.Name,
-                option.Name,
-                StringComparison.Ordinal))
-            return false;
+        if (string.Equals(currentAmmo.Name, option.Name, StringComparison.Ordinal))
+            return AmmunitionPlan.Satisfied;
 
         PluginEquipmentItem desiredAmmo = equipmentItems.FirstOrDefault(
             item => item.Name.Equals(option.Name, StringComparison.Ordinal)
                 && item.StackSize > 0);
-        if (desiredAmmo.ObjectId != 0u)
-            return TryEquipIfNeeded(
-                equipment,
-                equipmentItems,
+        return desiredAmmo.ObjectId != 0u
+            ? new AmmunitionPlan(
+                AmmunitionPlanKind.Wield,
                 desiredAmmo.ObjectId,
-                "ammunition");
+                option.Name,
+                string.Empty)
+            : new AmmunitionPlan(
+                AmmunitionPlanKind.Craft,
+                0u,
+                option.Name,
+                string.Empty);
+    }
 
-        if (_requestAmmunitionCraft?.Invoke(option.Name, 1) == true)
+    private bool ExecuteAmmunitionPlan(
+        IReadOnlyList<PluginEquipmentItem> equipmentItems,
+        in AmmunitionPlan plan)
+    {
+        switch (plan.Kind)
         {
-            Status = "Crafting " + option.Name;
+            case AmmunitionPlanKind.Satisfied:
+                return false;
+            case AmmunitionPlanKind.Unavailable:
+                Status = plan.Notice;
+                return true;
+        }
+
+        if (!Gate.TryDropToPeace(equipmentItems, plan.Name))
+            return true;
+
+        if (plan.Kind == AmmunitionPlanKind.Wield)
+        {
+            PluginEquipmentCommandResult equip =
+                _host.Automation.Equipment.Equip(plan.ObjectId);
+            Status = equip.Status == PluginEquipmentCommandStatus.Refused
+                ? equip.Notice ?? $"Cannot equip {plan.Name}."
+                : $"Equipping {plan.Name}";
             return true;
         }
-        Status = $"Waiting to craft {option.Name}";
+
+        if (_requestAmmunitionCraft?.Invoke(plan.Name, 1) == true)
+        {
+            Status = "Crafting " + plan.Name;
+            return true;
+        }
+        Status = $"Waiting to craft {plan.Name}";
         return true;
     }
 
-    private static MonsterRuleActions ResolvePhysicalActions(
+    private bool TickAmmunition(
+        IReadOnlyList<PluginEquipmentItem> equipmentItems,
+        uint desiredWeapon,
+        MonsterDamageType configuredDamage) => ExecuteAmmunitionPlan(
+            equipmentItems,
+            ResolveAmmunitionPlan(
+                equipmentItems,
+                desiredWeapon,
+                configuredDamage));
+
+    private MonsterRuleActions ResolvePhysicalActions(
         MonsterRuleActions actions,
         in PluginCombatTarget target,
         IReadOnlyList<PluginInventoryItem> inventory)
@@ -752,7 +1140,7 @@ internal sealed class CombatController
             return actions;
 
         IReadOnlyList<MonsterDamageType> preferences =
-            VtankDamageDatabase.Preferences(target);
+            _gameInfo.DamagePreferences(target.Name);
         foreach (MonsterDamageType damage in preferences)
         {
             int mask = RawDamageType(damage);
@@ -767,6 +1155,49 @@ internal sealed class CombatController
         return preferences.Count == 0
             ? actions
             : actions with { DamageType = preferences[0] };
+    }
+
+    internal bool ReadyToActInPeace() => Gate.TryDropToPeace(
+        _host.Automation.Equipment.IsAvailable
+            ? _host.Automation.Equipment.CaptureOwnedEquipment()
+            : [],
+        "the combat pet");
+
+    private bool TryPrepareAttack()
+    {
+        IEquipmentAutomation equipment = _host.Automation.Equipment;
+        if (!equipment.IsAvailable)
+        {
+            return true;
+        }
+
+        // hi.cs:579-583. The plan is Magic until an owned item backs it.
+        PluginCombatMode wanted = PluginCombatMode.Magic;
+        uint plannedWeapon = 0u;
+        if (_plannedWeapon != 0u)
+        {
+            foreach (PluginEquipmentItem item in equipment.CaptureOwnedEquipment())
+            {
+                if (item.ObjectId != _plannedWeapon)
+                    continue;
+                wanted = CombatModeGate.ModeFor(in item);
+                plannedWeapon = _plannedWeapon;
+                break;
+            }
+        }
+
+        if (Gate.TryPrepare(
+                wanted,
+                overrideItemId: plannedWeapon,
+                autoSelect: plannedWeapon == 0u,
+                element: _targetRule.Rule is null
+                    ? MonsterDamageType.None
+                    : _targetRule.Actions.DamageType))
+        {
+            return true;
+        }
+        Status = Gate.Status;
+        return false;
     }
 
     private bool TryEquipIfNeeded(
@@ -790,45 +1221,11 @@ internal sealed class CombatController
         if (desired is not { } selected || selected.IsEquipped)
             return false;
 
-        PluginCombatMode mode = _host.Automation.Combat.Snapshot.Mode;
-        if (mode != PluginCombatMode.Peace)
+        if (!Gate.TryDropToPeace(items, selected.Name))
         {
-            _dropToPeaceModeRetries++;
-            if (_dropToPeaceModeRetries
-                >= _vitalSettings.DropToPeaceModeRetryCount)
-            {
-                _dropToPeaceModeRetries = 0;
-                PluginEquipmentItem? recovery = SelectRecoveryCaster(items);
-                if (recovery is not { } caster)
-                {
-                    const string error = "You must add at least one wand to "
-                        + "your Items profile.";
-                    Disable(error);
-                    _host.Automation.Chat.PostSystemMessage(
-                        "[MossTank] " + error);
-                    return true;
-                }
-
-                PluginItemCommandResult use =
-                    _host.Automation.Items.Use(caster.ObjectId);
-                Status = use.Status == PluginItemCommandStatus.Started
-                    ? "Warning: stuck combat state; using " + caster.Name
-                        + " to clear it"
-                    : "Combat-state recovery with " + caster.Name + ": "
-                        + use.Status;
-                return true;
-            }
-
-            PluginCombatCommandResult peace =
-                _host.Automation.Combat.EnterMode(PluginCombatMode.Peace);
-            Status = peace.Status == PluginCombatCommandStatus.Refused
-                ? peace.Notice ?? "Cannot enter peace mode to equip "
-                    + selected.Name
-                : "Entering peace mode to equip " + selected.Name;
+            Status = Gate.Status;
             return true;
         }
-
-        _dropToPeaceModeRetries = 0;
 
         PluginEquipmentCommandResult result = equipment.Equip(objectId);
         if (result.Status is PluginEquipmentCommandStatus.Started
@@ -840,23 +1237,6 @@ internal sealed class CombatController
         if (result.Status == PluginEquipmentCommandStatus.Refused)
             Status = $"Cannot equip {role}: {selected.Name}";
         return false;
-    }
-
-    private PluginEquipmentItem? SelectRecoveryCaster(
-        IReadOnlyList<PluginEquipmentItem> items)
-    {
-        const uint casterItemType = 0x00008000u;
-        foreach (PluginEquipmentItem item in items)
-        {
-            if (item.ItemType != casterItemType)
-                continue;
-            if (_settings.CombatItemObjectIds.Contains(item.ObjectId)
-                || _settings.CombatItemNames.Contains(item.Name))
-            {
-                return item;
-            }
-        }
-        return null;
     }
 
     private static uint SelectAutomaticWeapon(
@@ -892,20 +1272,6 @@ internal sealed class CombatController
         return best?.ObjectId ?? 0u;
     }
 
-    private static uint SelectAutomaticWeapon(
-        IReadOnlyList<PluginEquipmentItem> items,
-        IReadOnlyList<MonsterDamageType> preferences,
-        CombatSettings settings)
-    {
-        foreach (MonsterDamageType damage in preferences)
-        {
-            uint objectId = SelectAutomaticWeapon(items, damage, settings);
-            if (objectId != 0u)
-                return objectId;
-        }
-        return 0u;
-    }
-
     private static int RawDamageType(MonsterDamageType damageType) =>
         damageType switch
         {
@@ -933,115 +1299,152 @@ internal sealed class CombatController
         RefreshSpellCatalogs();
         IReadOnlyList<PluginInventoryItem> items =
             _host.Automation.Items.CaptureOwnedItems();
+        PluginCombatTarget target = FindTarget(_targetId);
+        if (target.ObjectId == 0u)
+            return false;
 
-        foreach (RuleCandidate candidate in DebuffScope())
+        MonsterRuleActions actions = _targetRule.Actions;
+        IReadOnlyList<CombatDebuffStep> steps = CombatDebuffChain.Build(
+            actions,
+            ResolveAttackElement(actions, target),
+            ResolveExtraVulnerability(actions, target));
+
+        var suppressed = new List<DebuffIdentity>();
+        for (int attempt = 0; attempt <= steps.Count; attempt++)
         {
-            MonsterRuleActions actions = ResolveAutomaticActions(
-                candidate.Rule.Actions,
-                candidate.Target,
-                items);
-            IReadOnlyList<CombatDebuffSource> choices =
-                CombatItemDebuffPlanner.Candidates(
-                actions,
-                _settings,
-                _host.Automation.Character,
-                _host.Automation.Spells,
-                items,
-                (identity, spell) => _debuffs.IsDue(
-                    candidate.Target.ObjectId,
-                    identity,
-                    spell,
-                    _now,
-                    _settings.DebuffPrecastSeconds));
-
-            foreach (CombatDebuffSource choice in choices)
+            if (CombatDebuffChain.Choose(
+                    steps,
+                    step => !suppressed.Contains(step.Identity)
+                        && IsDebuffStepDue(step, target.ObjectId, items))
+                is not { } due)
             {
-                if (SpellComponentPolicy.UsesBlacklistedComponent(
-                        _host.Automation.Spells,
-                        choice.Spell,
-                        _settings.BlacklistedSpellComponents))
-                {
-                    continue;
-                }
-                if (!ReadyForBreakableTurn(
-                        choice.Spell,
-                        candidate.Target.ObjectId))
-                {
-                    return true;
-                }
-                if (choice.Spell.IsProjectile
-                    && !ProjectilePathIsClear(
-                        candidate.Target.ObjectId,
-                        choice.Spell.Name.Contains(
-                            " Arc",
-                            StringComparison.OrdinalIgnoreCase)
-                            ? PluginProjectilePathKind.Arc
-                            : choice.Kind is CombatDebuffSourceKind.Grenade
-                                or CombatDebuffSourceKind.ProcWeapon
-                                ? PluginProjectilePathKind.Missile
-                                : PluginProjectilePathKind.Straight,
-                        PluginAttackHeight.Medium,
-                        out PluginProjectilePathResult debuffPath))
-                {
-                    Status = ProjectileStatus(
-                        debuffPath,
-                        candidate.Target.Name);
-                    if (_settings.AllowDebuffFallback)
-                        continue;
-                    return true;
-                }
-                if (choice.Kind != CombatDebuffSourceKind.LearnedSpell)
-                {
-                    DebuffStartResult itemResult = TryStartItemDebuff(
-                        choice,
-                        candidate.Target,
-                        combat,
-                        items,
-                        ResolveInventoryObjectId(
-                            actions.OffhandObjectId,
-                            actions.OffhandName,
-                            items));
-                    if (itemResult == DebuffStartResult.Handled)
-                        return true;
-                    continue;
-                }
-
-                if (combat.Mode != PluginCombatMode.Magic)
-                {
-                    EnterDebuffMode(PluginCombatMode.Magic);
-                    return true;
-                }
-                PluginCastGate gate = _host.Automation.Magic.EvaluateGate(
-                    choice.Spell.SpellId,
-                    candidate.Target.ObjectId);
-                if (gate == PluginCastGate.Busy)
-                {
-                    Status = "Waiting to debuff";
-                    return true;
-                }
-                if (gate != PluginCastGate.Ready
-                    || !_host.Automation.Magic.Cast(
-                        choice.Spell.SpellId,
-                        candidate.Target.ObjectId))
-                {
-                    continue;
-                }
-
-                _debuffs.Begin(
-                    candidate.Target.ObjectId,
-                    choice.Identity,
-                    choice.Spell,
-                    _now,
-                    _host.Automation.Magic.LastCompletion.Revision);
-                string targetName = string.IsNullOrWhiteSpace(candidate.Target.Name)
-                    ? $"0x{candidate.Target.ObjectId:X8}"
-                    : candidate.Target.Name;
-                Status = $"{choice.Spell.Name} → {targetName}";
-                return true;
+                return false;
             }
+            DebuffPassResult result = TickDebuffStep(
+                due,
+                actions,
+                target,
+                combat,
+                items);
+            if (result == DebuffPassResult.ColumnDisabled)
+            {
+                suppressed.Add(due.Identity);
+                continue;
+            }
+            return result == DebuffPassResult.Claimed;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// What one turn of <c>hi</c>'s debuff arm did with the pass.
+    /// </summary>
+    private enum DebuffPassResult
+    {
+        Idle,
+
+        /// <summary>Something was issued (or is being waited on).</summary>
+        Claimed,
+
+        ColumnDisabled,
+    }
+
+    private DebuffPassResult TickDebuffStep(
+        CombatDebuffStep due,
+        MonsterRuleActions actions,
+        PluginCombatTarget target,
+        PluginCombatSnapshot combat,
+        IReadOnlyList<PluginInventoryItem> items)
+    {
+        IReadOnlyList<CombatDebuffSource> choices = DebuffSources(
+            due.Identity,
+            items,
+            message => Log?.Invoke(MacroLogChannel.DebuffChoice, message));
+
+        foreach (CombatDebuffSource choice in choices)
+        {
+            if (SpellComponentPolicy.UsesBlacklistedComponent(
+                    _host.Automation.Spells,
+                    choice.Spell,
+                    _settings.BlacklistedSpellComponents))
+            {
+                continue;
+            }
+            if (!ReadyForBreakableTurn(choice.Spell, target.ObjectId))
+                return DebuffPassResult.Claimed;
+            if (choice.Spell.IsProjectile
+                && !ProjectilePathIsClear(
+                    target.ObjectId,
+                    choice.Spell.Name.Contains(
+                        " Arc",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? PluginProjectilePathKind.Arc
+                        : choice.Kind is CombatDebuffSourceKind.Grenade
+                            or CombatDebuffSourceKind.ProcWeapon
+                            ? PluginProjectilePathKind.Missile
+                            : PluginProjectilePathKind.Straight,
+                    PluginAttackHeight.Medium,
+                    out PluginProjectilePathResult debuffPath))
+            {
+                Status = ProjectileStatus(debuffPath, target.Name);
+                if (_settings.AllowDebuffFallback)
+                    continue;
+                return DebuffPassResult.ColumnDisabled;
+            }
+            if (choice.Kind != CombatDebuffSourceKind.LearnedSpell)
+            {
+                DebuffStartResult itemResult = TryStartItemDebuff(
+                    choice,
+                    target,
+                    combat,
+                    items,
+                    ResolveInventoryObjectId(
+                        actions.OffhandObjectId,
+                        actions.OffhandName,
+                        items));
+                if (itemResult == DebuffStartResult.Handled)
+                    return DebuffPassResult.Claimed;
+                continue;
+            }
+
+            if (combat.Mode != PluginCombatMode.Magic)
+            {
+                EnterDebuffMode(PluginCombatMode.Magic);
+                return DebuffPassResult.Claimed;
+            }
+            PluginCastGate gate = _host.Automation.Magic.EvaluateGate(
+                choice.Spell.SpellId,
+                target.ObjectId);
+            if (gate == PluginCastGate.Busy)
+            {
+                Status = "Waiting to debuff";
+                return DebuffPassResult.Claimed;
+            }
+            if (gate != PluginCastGate.Ready
+                || !_host.Automation.Magic.Cast(
+                    choice.Spell.SpellId,
+                    target.ObjectId))
+            {
+                continue;
+            }
+
+            _debuffs.Begin(
+                target.ObjectId,
+                choice.Identity,
+                choice.Spell,
+                _now,
+                _host.Automation.Magic.LastCompletion.Revision);
+            string targetName = string.IsNullOrWhiteSpace(target.Name)
+                ? $"0x{target.ObjectId:X8}"
+                : target.Name;
+            Log?.Invoke(
+                MacroLogChannel.SpellCast,
+                $"Casting: {choice.Spell.Name} on {target.ObjectId} ({targetName})");
+            Status = $"{choice.Spell.Name} → {targetName}";
+            return DebuffPassResult.Claimed;
         }
 
-        return false;
+        return DebuffPassResult.Idle;
     }
 
     private bool ProjectilePathIsClear(
@@ -1104,50 +1507,6 @@ internal sealed class CombatController
                 result.Notice ?? "Projectile collision check failed",
             _ => $"Cannot fire at {target}",
         };
-    }
-
-    private MonsterRuleActions ResolveAutomaticActions(
-        MonsterRuleActions actions,
-        in PluginCombatTarget target,
-        IReadOnlyList<PluginInventoryItem> inventory)
-    {
-        if (actions.DamageType != MonsterDamageType.Auto)
-            return actions;
-
-        IReadOnlyList<MonsterDamageType> preferences =
-            VtankDamageDatabase.Preferences(target);
-        const uint weaponReadyMask = 0x03500000u;
-        foreach (MonsterDamageType damage in preferences)
-        {
-            int rawDamage = RawDamageType(damage);
-            foreach (PluginInventoryItem item in inventory)
-            {
-                bool profiled = _settings.CombatItemObjectIds.Contains(
-                        item.ObjectId)
-                    || _settings.CombatItemNames.Contains(item.Name);
-                if (profiled
-                    && (item.ValidLocations & weaponReadyMask) != 0u
-                    && (item.DamageType & rawDamage) != 0)
-                {
-                    return actions with { DamageType = damage };
-                }
-            }
-        }
-
-        ICharacterInfo character = _host.Automation.Character;
-        if (IsTrained(character, 34u))
-        {
-            return preferences.Count == 0
-                ? actions
-                : actions with { DamageType = preferences[0] };
-        }
-        if (IsTrained(character, 43u))
-            return actions with { DamageType = MonsterDamageType.VoidBasic };
-        if (IsTrained(character, 33u))
-            return actions with { DamageType = MonsterDamageType.DrainAuto };
-        return preferences.Count == 0
-            ? actions
-            : actions with { DamageType = preferences[0] };
     }
 
     private static bool IsTrained(ICharacterInfo character, uint skillId) =>
@@ -1441,6 +1800,15 @@ internal sealed class CombatController
             _observedChatSequence = Math.Max(
                 _observedChatSequence,
                 message.Sequence);
+            _castTracker.ObserveChat(
+                message.Sequence,
+                message.Text,
+                // gj.cs:348 — LOCAL speech only; the same test as
+                // MossTankPanel.ObserveCastTrackerChat (finding R4S-12).
+                ownSpeech: message.Kind == SpellCastTracker.LocalSpeechChatKind
+                    && message.SenderObjectId != 0u
+                    && message.SenderObjectId
+                        == _host.Automation.Character.ObjectId);
             if (_pendingItemDebuff is not { } pending
                 || !IsMatchingCastLine(message.Text, pending.Source.Spell.Name))
             {
@@ -1477,6 +1845,90 @@ internal sealed class CombatController
         Status = $"{itemPending.ItemName} failed (0x{itemCompletion.WeenieError:X})";
         ClearPendingItemDebuff();
     }
+
+    private void OnCastTrackerOutcome(SpellCastOutcomeInfo info)
+    {
+        uint objectId = info.TargetObjectId;
+        switch (info.Outcome)
+        {
+            case SpellCastOutcome.Kill:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    $"SpellCaster: Spell kill reset ({info.Text})");
+                if (objectId == 0u)
+                    return;
+                _failures.ClearBlacklist(objectId);
+                EndKilledTarget(objectId);
+                return;
+
+            case SpellCastOutcome.PermanentFail:
+                // The `!HitsMultipleTargets` gate (gj.cs:403) is applied by the
+                // tracker, which owns `m_g`; reaching here means it passed.
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    $"SpellCaster: Spell permanent fail reset ({info.Text})");
+                if (objectId != 0u)
+                    _failures.ForceBlacklist(objectId, _now, _settings);
+                return;
+
+            case SpellCastOutcome.Fail:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    $"SpellCaster: Spell fail reset ({info.Text})");
+                return;
+
+            case SpellCastOutcome.Success:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    $"SpellCaster: Spell success reset ({info.Text})");
+                if (objectId != 0u)
+                    _failures.ClearBlacklist(objectId);
+                return;
+
+            case SpellCastOutcome.ResultTimeout:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    "SpellCaster: Cast result timeout");
+                if (objectId != 0u && !info.HitsMultipleTargets)
+                    _failures.RecordSuccessfulAttack(objectId, _now, _settings);
+                return;
+
+            case SpellCastOutcome.LaunchTimeout:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    "SpellCaster: Attempt timeout");
+                return;
+
+            case SpellCastOutcome.Rejected:
+                Log?.Invoke(
+                    MacroLogChannel.CastInfo,
+                    $"SpellCaster: Cast refused (0x{info.WeenieError:X4})");
+                return;
+        }
+    }
+
+    private void EndKilledTarget(uint objectId)
+    {
+        _failures.MarkDead(objectId);
+        if (_pendingAttackTarget == objectId)
+        {
+            _pendingAttackSpell = 0u;
+            _pendingAttackTarget = 0u;
+        }
+        if (_targetId != objectId)
+            return;
+        _host.Automation.Combat.AbortPhysicalAttack();
+        ClearTarget();
+        _untilScan = 0d;
+        Status = "Waiting for a target";
+    }
+
+    /// <summary>
+    /// <c>gj</c>'s <c>this.m_g.HitsMultipleTargets</c>, which now lives on the
+    /// tracker that owns <c>m_g</c>.
+    /// </summary>
+    private static bool HitsMultipleTargets(in PluginSpellInfo spell) =>
+        SpellCastTracker.HitsMultipleTargetsFor(spell);
 
     private static bool IsMatchingCastLine(string text, string spellName) =>
         text.StartsWith($"You cast {spellName} on ", StringComparison.Ordinal);
@@ -1573,57 +2025,35 @@ internal sealed class CombatController
 
     private void RefreshSpellCatalogs()
     {
-        IReadOnlyList<PluginSpellInfo> spells =
-            _host.Automation.Spells.KnownCombatSpells;
-        if (ReferenceEquals(spells, _combatSpellSnapshot))
+        ISpellCatalog catalog = _host.Automation.Spells;
+        IReadOnlyList<PluginSpellInfo> spells = catalog.KnownCombatSpells;
+        IReadOnlyList<PluginSpellInfo> attacks = catalog.KnownAttackSpells;
+        if (ReferenceEquals(spells, _combatSpellSnapshot)
+            && ReferenceEquals(attacks, _attackSpellSnapshot))
+        {
             return;
+        }
         _combatSpellSnapshot = spells;
-        _debuffCatalog = DebuffSpellCatalog.Build(spells);
-        _attackCatalog = AttackSpellCatalog.Build(spells);
-    }
+        _attackSpellSnapshot = attacks;
 
-    private IReadOnlyList<RuleCandidate> DebuffScope()
-    {
-        if (_settings.DebuffEachFirst == DebuffEachFirst.One)
+        if (attacks.Count == 0)
         {
-            return _targetId == 0u
-                ? Array.Empty<RuleCandidate>()
-                : [new RuleCandidate(
-                    FindTarget(_targetId),
-                    _targetRule)];
+            _attackCatalog = AttackSpellCatalog.Build(spells);
+            return;
         }
-
-        var candidates = new List<RuleCandidate>();
-        foreach (PluginCombatTarget target in _targets)
+        var union = new List<PluginSpellInfo>(spells.Count + attacks.Count);
+        var seen = new HashSet<uint>();
+        foreach (PluginSpellInfo spell in spells)
         {
-            if (target.Distance < _settings.MinimumRange)
-                continue;
-            if (_failures.Reason(target.ObjectId, _now)
-                != CombatSuppressionReason.None)
-            {
-                continue;
-            }
-            ResolvedMonsterRule rule = _settings.ResolveRule(target);
-            if (rule.Priority < 0)
-                continue;
-            if (_settings.DebuffEachFirst == DebuffEachFirst.Priority
-                && rule.Priority != _targetRule.Priority)
-            {
-                continue;
-            }
-            candidates.Add(new RuleCandidate(target, rule));
+            if (seen.Add(spell.SpellId))
+                union.Add(spell);
         }
-        candidates.Sort(static (left, right) =>
+        foreach (PluginSpellInfo spell in attacks)
         {
-            int priority = right.Rule.Priority.CompareTo(left.Rule.Priority);
-            if (priority != 0)
-                return priority;
-            int distance = left.Target.Distance.CompareTo(right.Target.Distance);
-            return distance != 0
-                ? distance
-                : left.Target.ObjectId.CompareTo(right.Target.ObjectId);
-        });
-        return candidates;
+            if (seen.Add(spell.SpellId))
+                union.Add(spell);
+        }
+        _attackCatalog = AttackSpellCatalog.Build(union);
     }
 
     private PluginCombatTarget FindTarget(uint objectId)
@@ -1664,93 +2094,428 @@ internal sealed class CombatController
             return;
         }
 
-        int highestPriority = -1;
-        var candidates = new List<RuleCandidate>();
+        RefreshSpellCatalogs();
+        IReadOnlyList<PluginInventoryItem> inventory =
+            _host.Automation.Items.CaptureOwnedItems();
+        IReadOnlyList<PluginEquipmentItem> equipment =
+            _host.Automation.Equipment.IsAvailable
+                ? _host.Automation.Equipment.CaptureOwnedEquipment()
+                : Array.Empty<PluginEquipmentItem>();
+        (uint wieldedWeapon, uint wieldedOffhand) = WieldedPair(equipment);
+
+        uint lastTarget = _targetId;
+        var candidates = new List<CombatTargetCandidate>();
         foreach (PluginCombatTarget target in _targets)
         {
-            if (_failures.Reason(target.ObjectId, _now)
-                != CombatSuppressionReason.None)
+            if (TryBuildCandidate(
+                    target,
+                    combat,
+                    lastTarget,
+                    inventory,
+                    equipment,
+                    out CombatTargetCandidate candidate))
             {
-                continue;
+                candidates.Add(candidate);
             }
-            ResolvedMonsterRule resolved = _settings.ResolveRule(target);
-            int priority = resolved.Priority;
-            if (priority < 0)
-                continue;
-            if (priority > highestPriority)
-            {
-                highestPriority = priority;
-                candidates.Clear();
-            }
-            if (priority == highestPriority)
-                candidates.Add(new RuleCandidate(target, resolved));
         }
 
-        if (candidates.Count == 0)
+        CombatTargetCandidate chosen = CombatTargetSelector.Select(
+            candidates,
+            _settings.DebuffEachFirst,
+            _settings.SelectionMethod,
+            _settings.TargetSelectAngleRange,
+            wieldedWeapon,
+            wieldedOffhand);
+
+        // dz.cs:925 — `if (this.a.b != 0) return true;`
+        if (chosen.ObjectId == 0u)
         {
             if (_targetId != 0u)
                 _host.Automation.Combat.AbortPhysicalAttack();
             ClearTarget();
             return;
         }
-
-        // Target Lock gives a manually selected valid monster first refusal,
-        // but never lets it beat a higher-priority monster rule.
-        uint selected = _host.Automation.Combat.Snapshot.SelectedObjectId;
-        if (_settings.TargetLock && selected != 0u)
-        {
-            foreach (RuleCandidate candidate in candidates)
-            {
-                if (candidate.Target.ObjectId == selected)
-                {
-                    SetTarget(candidate.Target, candidate.Rule);
-                    return;
-                }
-            }
-        }
-
-        if (_targetId != 0u)
-        {
-            foreach (RuleCandidate candidate in candidates)
-            {
-                if (candidate.Target.ObjectId == _targetId)
-                {
-                    SetTarget(candidate.Target, candidate.Rule);
-                    return;
-                }
-            }
-        }
-
-        IEnumerable<RuleCandidate> ranked = candidates;
-        if (_settings.SelectionMethod == TargetSelectionMethod.Both)
-        {
-            RuleCandidate[] near = candidates
-                .Where(candidate =>
-                    candidate.Target.Distance <= _settings.TargetSelectAngleRange)
-                .ToArray();
-            ranked = near.Length > 0 ? near : candidates;
-        }
-
-        RuleCandidate chosen = _settings.SelectionMethod switch
-        {
-            TargetSelectionMethod.Angle => ranked
-                .OrderBy(candidate =>
-                    MathF.Abs(candidate.Target.RelativeAngleDegrees))
-                .ThenBy(candidate => candidate.Target.Distance)
-                .First(),
-            TargetSelectionMethod.Both
-                when ranked is RuleCandidate[] { Length: > 0 } near => near
-                    .OrderBy(candidate =>
-                        MathF.Abs(candidate.Target.RelativeAngleDegrees))
-                    .ThenBy(candidate => candidate.Target.Distance)
-                    .First(),
-            _ => ranked
-                .OrderBy(candidate => candidate.Target.Distance)
-                .ThenBy(candidate =>
-                    MathF.Abs(candidate.Target.RelativeAngleDegrees))
-                .First(),
-        };
         SetTarget(chosen.Target, chosen.Rule);
+    }
+
+    private static (uint Weapon, uint Offhand) WieldedPair(
+        IReadOnlyList<PluginEquipmentItem> equipment)
+    {
+        const uint weaponReadyMask = 0x03500000u;
+        const uint shieldMask = 0x00000200u;
+        uint weapon = 0u;
+        uint offhand = 0u;
+        foreach (PluginEquipmentItem item in equipment)
+        {
+            if (!item.IsEquipped)
+                continue;
+            if (weapon == 0u && (item.ValidLocations & weaponReadyMask) != 0u)
+                weapon = item.ObjectId;
+            else if (offhand == 0u && (item.ValidLocations & shieldMask) != 0u)
+                offhand = item.ObjectId;
+        }
+        return (weapon, offhand);
+    }
+
+    /// <summary>
+    /// <c>f7.a(fu, maxDist, minDist, targetLock)</c> (<c>f7.cs:247-297</c>) —
+    /// the six ordered rejection gates, then the fill.
+    /// </summary>
+    private bool TryBuildCandidate(
+        in PluginCombatTarget target,
+        in PluginCombatSnapshot combat,
+        uint lastTarget,
+        IReadOnlyList<PluginInventoryItem> inventory,
+        IReadOnlyList<PluginEquipmentItem> equipment,
+        out CombatTargetCandidate candidate)
+    {
+        candidate = default;
+
+        if (_failures.Reason(target.ObjectId, _now)
+            != CombatSuppressionReason.None)
+        {
+            return false;
+        }
+
+        // Gate 3 (f7.cs:265-270).
+        ResolvedMonsterRule rule = _settings.ResolveRule(target);
+        if (rule.Priority < 0)
+            return false;
+
+        if (target.Distance > _acquisitionRange)
+            return false;
+        if (target.Distance < _settings.MinimumRange)
+            return false;
+
+        MonsterRuleActions actions = rule.Actions;
+        (uint weapon, uint offhand, MonsterDamageType element) = ResolveWieldPlan(
+            actions,
+            target,
+            inventory,
+            equipment);
+        IReadOnlyList<CombatDebuffStep> steps = CombatDebuffChain.Build(
+            actions,
+            element,
+            ResolveExtraVulnerability(actions, target));
+        uint objectId = target.ObjectId;
+        bool needsDebuff = CombatDebuffChain.NeedsDebuff(
+            steps,
+            step => IsDebuffStepDue(step, objectId, inventory));
+
+        if (!needsDebuff && !actions.Attacks && !actions.UsesStreak)
+            return false;
+
+        candidate = new CombatTargetCandidate(
+            target,
+            rule,
+            rule.Priority,
+            target.Distance,
+            Math.Abs(target.RelativeAngleDegrees),
+            DebuffUrgency(target, element, weapon, equipment),
+            needsDebuff,
+            _settings.TargetLock
+                && combat.SelectedObjectId != 0u
+                && combat.SelectedObjectId == target.ObjectId,
+            lastTarget != 0u && target.ObjectId == lastTarget,
+            weapon,
+            offhand);
+        return true;
+    }
+
+    private (uint Weapon, uint Offhand, MonsterDamageType Element) ResolveWieldPlan(
+        MonsterRuleActions actions,
+        in PluginCombatTarget target,
+        IReadOnlyList<PluginInventoryItem> inventory,
+        IReadOnlyList<PluginEquipmentItem> equipment)
+    {
+        MonsterDamageType element = ResolveAttackElement(actions, target);
+        uint weapon = ResolveEquipmentObjectId(
+            actions.WeaponObjectId,
+            actions.WeaponName,
+            equipment);
+        if (weapon == 0u)
+            weapon = SelectAutomaticWeapon(equipment, element, _settings);
+        uint offhand = ResolveEquipmentObjectId(
+            actions.OffhandObjectId,
+            actions.OffhandName,
+            equipment);
+        if (offhand == 0u)
+        {
+            offhand = ResolveInventoryObjectId(
+                actions.OffhandObjectId,
+                actions.OffhandName,
+                inventory);
+        }
+        return (weapon, offhand, element);
+    }
+
+    private MonsterDamageType ResolveAttackElement(
+        MonsterRuleActions actions,
+        in PluginCombatTarget target)
+    {
+        (MonsterRuleActions, uint) key = (actions, target.ObjectId);
+        if (_passElements.TryGetValue(key, out MonsterDamageType cached))
+            return cached;
+        MonsterDamageType resolved = ResolveAttackElementCore(actions, target);
+        _passElements[key] = resolved;
+        return resolved;
+    }
+
+    private MonsterDamageType ResolveAttackElementCore(
+        MonsterRuleActions actions,
+        in PluginCombatTarget target)
+    {
+        MonsterDamageType requested = AttackSpellCatalog.ResolveMagicDamageMode(
+            actions.DamageType,
+            _host.Automation.Character);
+        if (requested != MonsterDamageType.Auto)
+            return requested;
+
+        if (RuleWeaponElement(actions) is { } weaponElement)
+            return weaponElement;
+
+        IReadOnlyList<MonsterDamageType> preferences =
+            _gameInfo.DamagePreferences(target.Name);
+        foreach (MonsterDamageType preference in preferences)
+        {
+            if (preference != MonsterDamageType.None
+                && CanDeliverElement(preference, target))
+            {
+                return preference;
+            }
+        }
+
+        foreach (MonsterDamageType element in VtankDamageDatabase.UnlistedElementOrder)
+        {
+            if (Contains(preferences, element) || !CanDeliverElement(element, target))
+                continue;
+            PostAttackWarning(
+                "Warning: no ammunition available for any of target's possible "
+                + "damage types! Using unlisted damage type: "
+                + ElementName(element));
+            return element;
+        }
+        PostAttackWarning("Warning: no ammunition available!!!");
+        return MonsterDamageType.None;
+    }
+
+    private IReadOnlyList<PluginEquipmentItem> PassEquipment()
+    {
+        if (_passEquipment is not null)
+            return _passEquipment;
+        IEquipmentAutomation equipment = _host.Automation.Equipment;
+        _passEquipment = equipment.IsAvailable
+            ? equipment.CaptureOwnedEquipment()
+            : Array.Empty<PluginEquipmentItem>();
+        return _passEquipment;
+    }
+
+    private static bool Contains(
+        IReadOnlyList<MonsterDamageType> elements,
+        MonsterDamageType element)
+    {
+        for (int i = 0; i < elements.Count; i++)
+        {
+            if (elements[i] == element)
+                return true;
+        }
+        return false;
+    }
+
+    private MonsterDamageType? RuleWeaponElement(MonsterRuleActions actions)
+    {
+        IReadOnlyList<PluginEquipmentItem> owned = PassEquipment();
+        if (owned.Count == 0)
+            return null;
+        uint weapon = ResolveEquipmentObjectId(
+            actions.WeaponObjectId,
+            actions.WeaponName,
+            owned);
+        if (weapon == 0u)
+            return null;
+        foreach (PluginEquipmentItem item in owned)
+        {
+            if (item.ObjectId == weapon)
+                return ProtocolDamageElement(item.DamageType);
+        }
+        return null;
+    }
+
+    private static MonsterDamageType? ProtocolDamageElement(int damageType) =>
+        (damageType & 0x0020) != 0 ? MonsterDamageType.Acid
+        : (damageType & 0x0004) != 0 ? MonsterDamageType.Bludgeon
+        : (damageType & 0x0008) != 0 ? MonsterDamageType.Cold
+        : (damageType & 0x0010) != 0 ? MonsterDamageType.Fire
+        : (damageType & 0x0040) != 0 ? MonsterDamageType.Electric
+        : (damageType & 0x0001) != 0 ? MonsterDamageType.Slash
+        : (damageType & 0x0002) != 0 ? MonsterDamageType.Pierce
+        : (damageType & 0x0400) != 0 ? MonsterDamageType.VoidBasic
+        : null;
+
+    private bool CanDeliverElement(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        (MonsterDamageType, uint) key = (element, target.ObjectId);
+        if (_passDeliverable.TryGetValue(key, out bool cached))
+            return cached;
+        bool deliverable = CanDeliverElementCore(element, target);
+        _passDeliverable[key] = deliverable;
+        return deliverable;
+    }
+
+    private bool CanDeliverElementCore(
+        MonsterDamageType element,
+        in PluginCombatTarget target)
+    {
+        if (PassEquipment() is { Count: > 0 } owned
+            && SelectAutomaticWeapon(owned, element, _settings) != 0u)
+        {
+            return true;
+        }
+        RefreshSpellCatalogs();
+        Func<PluginSpellInfo, bool> usable = IsUsableAttackSpell(target);
+        return _attackCatalog.Resolve(element, VtankCombatSpellType.War, usable)
+                is not null
+            || _attackCatalog.Resolve(element, VtankCombatSpellType.Arc, usable)
+                is not null;
+    }
+
+    private MonsterDamageType ResolveExtraVulnerability(
+        MonsterRuleActions actions,
+        in PluginCombatTarget target)
+    {
+        switch (actions.ExtraVulnerability)
+        {
+            case MonsterDamageType.Pierce:
+            case MonsterDamageType.Bludgeon:
+            case MonsterDamageType.Slash:
+            case MonsterDamageType.Acid:
+            case MonsterDamageType.Electric:
+            case MonsterDamageType.Cold:
+            case MonsterDamageType.Fire:
+                return actions.ExtraVulnerability;
+            case MonsterDamageType.Auto:
+                IReadOnlyList<MonsterDamageType> preferences =
+                    _gameInfo.DamagePreferences(target.Name);
+                return preferences.Count > 0
+                    ? preferences[0]
+                    : MonsterDamageType.None;
+            default:
+                return MonsterDamageType.None;
+        }
+    }
+
+    private int DebuffUrgency(
+        in PluginCombatTarget target,
+        MonsterDamageType element,
+        uint plannedWeapon,
+        IReadOnlyList<PluginEquipmentItem> equipment)
+    {
+        const uint meleeWeapon = 0x00000001u;
+        const uint missileWeapon = 0x00000100u;
+        int score = 0;
+        var vulnerability = new DebuffIdentity(
+            MonsterActionFlags.Vulnerability,
+            element);
+        if (_debuffs.IsApplied(
+                target.ObjectId,
+                vulnerability,
+                FindDebuffSpell(vulnerability),
+                _now))
+        {
+            score++;
+        }
+
+        bool physical = false;
+        if (plannedWeapon != 0u)
+        {
+            foreach (PluginEquipmentItem item in equipment)
+            {
+                if (item.ObjectId != plannedWeapon)
+                    continue;
+                physical = (item.ItemType & (meleeWeapon | missileWeapon)) != 0u;
+                break;
+            }
+        }
+        var identity = new DebuffIdentity(
+            physical ? MonsterActionFlags.Imperil : MonsterActionFlags.Yield,
+            MonsterDamageType.Auto);
+        if (_debuffs.IsApplied(
+                target.ObjectId,
+                identity,
+                FindDebuffSpell(identity),
+                _now))
+        {
+            score += 2;
+        }
+        return score;
+    }
+
+    private PluginSpellInfo? FindDebuffSpell(DebuffIdentity identity)
+    {
+        if (_passDebuffSpells.TryGetValue(identity, out PluginSpellInfo? cached))
+            return cached;
+        PluginSpellInfo? found = FindDebuffSpellCore(identity);
+        _passDebuffSpells[identity] = found;
+        return found;
+    }
+
+    private PluginSpellInfo? FindDebuffSpellCore(DebuffIdentity identity)
+    {
+        PluginSpellInfo? best = null;
+        foreach (PluginSpellInfo spell in _host.Automation.Spells.KnownCombatSpells)
+        {
+            if (!DebuffSpellCatalog.TryClassify(spell, out DebuffIdentity found, out _)
+                || found != identity)
+            {
+                continue;
+            }
+            if (best is not { } current || spell.Tier > current.Tier)
+                best = spell;
+        }
+        return best;
+    }
+
+    private IReadOnlyList<CombatDebuffSource> DebuffSources(
+        DebuffIdentity identity,
+        IReadOnlyList<PluginInventoryItem> inventory,
+        Action<string>? log)
+    {
+        if (_passDebuffSources.TryGetValue(
+                identity,
+                out IReadOnlyList<CombatDebuffSource>? cached))
+        {
+            return cached;
+        }
+        IReadOnlyList<CombatDebuffSource> sources = CombatItemDebuffPlanner.Sources(
+            identity,
+            _settings,
+            _host.Automation.Character,
+            _host.Automation.Spells,
+            inventory,
+            log);
+        _passDebuffSources[identity] = sources;
+        return sources;
+    }
+
+    private bool IsDebuffStepDue(
+        CombatDebuffStep step,
+        uint targetObjectId,
+        IReadOnlyList<PluginInventoryItem> inventory)
+    {
+        IReadOnlyList<CombatDebuffSource> sources = DebuffSources(
+            step.Identity,
+            inventory,
+            log: null);
+        if (sources.Count == 0)
+            return false;
+        return _debuffs.IsDue(
+            targetObjectId,
+            step.Identity,
+            sources[0].Spell,
+            _now,
+            step.ZeroTolerance ? 0d : _settings.DebuffPrecastSeconds);
     }
 
     private bool TryFind(uint objectId, out PluginCombatTarget found)
@@ -1803,7 +2568,7 @@ internal sealed class CombatController
         _combatPolicySuspended = false;
         _targets = Array.Empty<PluginCombatTarget>();
         _combatSpellSnapshot = null;
-        _debuffCatalog = DebuffSpellCatalog.Build(Array.Empty<PluginSpellInfo>());
+        _attackSpellSnapshot = null;
         _attackCatalog = AttackSpellCatalog.Build(Array.Empty<PluginSpellInfo>());
         _debuffs.Reset();
         _failures.Reset();
@@ -1815,7 +2580,11 @@ internal sealed class CombatController
         ClearPendingItemDebuff();
         _observedChatSequence = 0u;
         _observedItemCompletion = 0;
-        _dropToPeaceModeRetries = 0;
+        // gj.cs:271 — d(), the tracker's own reset. A stopped macro must not
+        // leave the busy latch up.
+        _castTracker.Reset();
+        _plannedWeapon = 0u;
+        Gate.Reset();
         _randomDamageIndex = 0;
         _observedJiggleCastCompletion = 0;
         ClearTarget();
@@ -1840,22 +2609,25 @@ internal sealed class CombatController
         float delta = NavigationController.SignedHeadingDelta(
             self.Position.HeadingDegrees,
             desired);
-        float absolute = MathF.Abs(delta);
-        bool turnRight = delta > 4f;
-        bool turnLeft = delta < -4f;
-        bool forward = absolute <= 4f
-            || (_targetDistance > 5f ? absolute <= 45f : absolute <= 15f);
-        PluginNavigationCommandStatus result = navigation.SetMovementIntent(
-            new PluginMovementIntent(
-                Forward: forward,
-                TurnLeft: turnLeft,
-                TurnRight: turnRight,
-                Run: true));
-        _approachMovementOwned =
-            result == PluginNavigationCommandStatus.Accepted;
-        if (_approachMovementOwned)
-            Status = $"Approaching {_targetName} ({_targetDistance:0.0}m)";
-        return _approachMovementOwned;
+
+        if (NavigationController.SteerTowards(
+                navigation,
+                delta,
+                desired,
+                _now,
+                ref _approachFaceHeadingStamp,
+                run: true)
+            != PluginNavigationCommandStatus.Accepted)
+        {
+            _approachMovementOwned = false;
+            return false;
+        }
+
+        _approachMovementOwned = true;
+        Status = MathF.Abs(delta) > NavigationController.HeadingToleranceDegrees
+            ? $"Turning to {_targetName} ({delta:+0.0;-0.0}°)"
+            : $"Approaching {_targetName} ({_targetDistance:0.0}m)";
+        return true;
     }
 
     private bool ReadyForBreakableTurn(
@@ -1889,20 +2661,28 @@ internal sealed class CombatController
         float delta = NavigationController.SignedHeadingDelta(
             self.Position.HeadingDegrees,
             desired);
-        if (MathF.Abs(delta) <= 2f)
+        if (MathF.Abs(delta) <= BreakableTurnToleranceDegrees)
         {
             StopBreakableTurnMovement();
             return true;
         }
 
-        PluginNavigationCommandStatus result = navigation.SetMovementIntent(
-            new PluginMovementIntent(
-                TurnLeft: delta < 0f,
-                TurnRight: delta > 0f));
-        if (result != PluginNavigationCommandStatus.Accepted)
+        if (navigation.ClearMovementIntent()
+            != PluginNavigationCommandStatus.Accepted)
         {
             StopBreakableTurnMovement();
             return true;
+        }
+        if (_now - _breakableTurnFaceHeadingStamp
+            >= NavigationController.FaceHeadingReissueSeconds)
+        {
+            _breakableTurnFaceHeadingStamp = _now;
+            if (navigation.FaceHeading(desired)
+                != PluginNavigationCommandStatus.Accepted)
+            {
+                StopBreakableTurnMovement();
+                return true;
+            }
         }
         _breakableTurnOwned = true;
         Status = $"Turning to {_targetName} ({delta:+0.0;-0.0}°)";
@@ -1911,6 +2691,8 @@ internal sealed class CombatController
 
     private void StopBreakableTurnMovement()
     {
+        _breakableTurnFaceHeadingStamp =
+            NavigationController.NoFaceHeadingStamp;
         if (!_breakableTurnOwned)
             return;
         _host.Automation.Navigation.ClearMovementIntent();
@@ -1919,6 +2701,8 @@ internal sealed class CombatController
 
     private void StopApproachMovement()
     {
+        _approachFaceHeadingStamp =
+            NavigationController.NoFaceHeadingStamp;
         if (!_approachMovementOwned)
             return;
         _ = _host.Automation.Navigation.ClearMovementIntent();
@@ -1982,15 +2766,7 @@ internal sealed class CombatController
         if (cast.Revision <= _observedAttackCastCompletion)
             return;
         _observedAttackCastCompletion = cast.Revision;
-        if (_pendingAttackSpell == cast.SpellId
-            && _pendingAttackTarget == cast.TargetObjectId
-            && cast.IsSuccess)
-        {
-            _failures.RecordSuccessfulAttack(
-                _pendingAttackTarget,
-                _now,
-                _settings);
-        }
+
         if (_pendingAttackSpell == cast.SpellId)
         {
             _pendingAttackSpell = 0u;
@@ -2005,6 +2781,9 @@ internal sealed class CombatController
         string suffix = result.Accepted ? "deleted" : "ignored";
         _host.Automation.Chat.PostSystemMessage(
             $"[MossTank] Ghost target 0x{objectId:X8} {suffix}.");
+        // gj.cs:263-278 — ReleaseObject on the awaited target drops the
+        // tracker to idle; deleting a ghost is our own version of that event.
+        _castTracker.ResetForTarget(objectId);
         if (_targetId == objectId)
         {
             _host.Automation.Combat.AbortPhysicalAttack();

@@ -954,6 +954,45 @@ public sealed class PlayerMovementController
         return true;
     }
 
+    internal bool RequestTurnToHeading(
+        float headingDegrees,
+        bool applyRunHoldKey = false)
+    {
+        EnsurePublishedForRuntimeOperation();
+        // @006b4580: `if (this->vtable->IsActive() == 0) return 0`. The local
+        // analogue is "no MoveToManager bound yet" — the publication that
+        // binds MoveToFactory is what makes this interpreter live.
+        if (!float.IsFinite(headingDegrees) || Movement.MoveTo is null)
+            return false;
+
+        TakeControlFromServer();
+
+        var parameters =
+            new AcDream.Core.Physics.Motion.MovementParameters
+            {
+                // @006b4593  var_1c = arg2
+                DesiredHeading = headingDegrees,
+                Speed = 1f,
+                StopCompletelyFlag = false,
+            };
+        // @006b45af / @006b45b1  var_8_1 = 2
+        if (applyRunHoldKey)
+            parameters.HoldKeyToApply = HoldKey.Run;
+
+        _body.LastMoveWasAutonomous = true;
+        if (Movement.PerformMovement(new MovementStruct
+        {
+            Type = MovementType.TurnToHeading,
+            Params = parameters,
+        }) != WeenieError.None)
+        {
+            return false;
+        }
+
+        _externalMovementEventPending = true;
+        return true;
+    }
+
     internal bool RequestCommandMotion(uint motion)
     {
         EnsurePublishedForRuntimeOperation();

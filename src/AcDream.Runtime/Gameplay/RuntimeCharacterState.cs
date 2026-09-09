@@ -212,8 +212,11 @@ public sealed class RuntimeCharacterState : IDisposable
         float vitae = EnchantmentMath.GetVitaeMultiplier(
             Spellbook.ActiveEnchantments);
         uint advancementClass = LocalPlayer.GetSkill(skillId)?.Status ?? 0u;
+        int enchantedBaseSkill =
+            baseSkill + LocalPlayer.AttributeEnchantmentSkillDelta(skillId);
         return PlayerSkillMath.Calculate(
             baseSkill,
+            enchantedBaseSkill,
             skillId,
             advancementClass,
             _movementSkillAugmentations,

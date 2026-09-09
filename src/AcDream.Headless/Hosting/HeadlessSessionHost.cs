@@ -264,6 +264,17 @@ internal sealed class HeadlessSessionHost : IDisposable
                     failure.Command,
                     failure.Error),
                 _timeProvider);
+            bool SubmitChatText(string text)
+            {
+                SubmitOutcome outcome = ChatCommandRouter.Submit(
+                    text,
+                    new RuntimeChatCommandFeedback(runtime.CommunicationOwner),
+                    chatCommandSurface,
+                    ChatChannelKind.Say);
+                return outcome is not (SubmitOutcome.Empty
+                    or SubmitOutcome.UnknownCommand
+                    or SubmitOutcome.Dropped);
+            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -272,7 +283,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginRoots ?? [],
                 descriptor.Plugins,
                 pluginCommands,
-                vtankProfiles);
+                vtankProfiles,
+                descriptor.PluginSettings,
+                SubmitChatText);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -465,6 +478,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         _localPlayerFrame.RunPostNetworkCommandPhase();
         Runtime.ActionOwner.CombatAttack.Tick();
         _policy.Tick(Runtime, Commands);
+        _pluginSession.Host.FireTick(deltaSeconds);
         ConsolePump?.Invoke();
     }
 

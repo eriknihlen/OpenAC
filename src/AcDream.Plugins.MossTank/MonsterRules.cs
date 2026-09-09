@@ -1,4 +1,4 @@
-namespace AcDream.Plugins.MossTank;
+﻿namespace AcDream.Plugins.MossTank;
 
 [Flags]
 internal enum MonsterActionFlags
@@ -51,6 +51,10 @@ internal sealed record MonsterRuleActions
         MonsterDamageType.Auto;
     public uint WeaponObjectId { get; init; }
     public uint OffhandObjectId { get; init; }
+
+    public int WeaponToUseRaw { get; init; } = -1;
+
+    public int SecondaryEquipRaw { get; init; }
     public string WeaponName { get; init; } = string.Empty;
     public string OffhandName { get; init; } = string.Empty;
     public MonsterDamageType PetDamageType { get; init; } =
@@ -83,13 +87,51 @@ internal sealed class MonsterRule
             _compiled = MonsterExpression.Compile(Expression);
     }
 
+    private MonsterRule(string expression, MonsterRuleActions actions, bool ignored)
+    {
+        Expression = string.IsNullOrWhiteSpace(expression)
+            ? "DEFAULT"
+            : expression.Trim();
+        Actions = actions;
+        IsIgnoredSpec = ignored;
+    }
+
+    public static MonsterRule Compile(
+        string expression,
+        MonsterRuleActions actions,
+        out string? parseError)
+    {
+        ArgumentNullException.ThrowIfNull(actions);
+        try
+        {
+            parseError = null;
+            return new MonsterRule(expression, actions);
+        }
+        catch (FormatException error)
+        {
+            parseError = "Parse error in monster spec: \"" + expression
+                + "\", ignoring entry (" + error.Message + ").";
+            return new MonsterRule(expression, actions, ignored: true);
+        }
+    }
+
+    public const string RetailDefaultName = "<DEFAULT>";
+
     public string Expression { get; }
     public MonsterRuleActions Actions { get; }
-    public int Priority => Actions.BoundedPriority;
-    public bool IsDefault => Expression.Equals(
-        "DEFAULT",
-        StringComparison.OrdinalIgnoreCase);
+    public int Priority => Actions.Priority;
+    public bool IsDefault => IsDefaultName(Expression);
+
+    /// <summary>Either spelling of the fallback row's name.</summary>
+    public static bool IsDefaultName(string? expression) =>
+        expression is not null
+        && (expression.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase)
+            || expression.Equals(
+                RetailDefaultName,
+                StringComparison.OrdinalIgnoreCase));
     public bool IsDynamic => _compiled?.IsDynamic == true;
+
+    public bool IsIgnoredSpec { get; }
 
     public bool Matches(
         in MonsterExpressionContext context,
@@ -98,7 +140,7 @@ internal sealed class MonsterRule
         if (_compiled is null)
         {
             error = null;
-            return IsDefault;
+            return IsDefault && !IsIgnoredSpec;
         }
         return _compiled.IsMatch(context, out error);
     }

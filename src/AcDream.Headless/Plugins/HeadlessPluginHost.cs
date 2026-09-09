@@ -5,16 +5,25 @@ namespace AcDream.Headless.Plugins;
 
 internal sealed class HeadlessPluginHost
     : IPluginHost,
+      IPerPluginSessionSettings,
       IGameState,
       IEvents,
       IRuntimeEventObserver,
       IDisposable
 {
+    private static readonly IReadOnlyDictionary<string, string> EmptySettings =
+        new Dictionary<string, string>();
+
     private readonly GameRuntime _runtime;
     private readonly IDisposable _eventSubscription;
     private readonly object _eventGate = new();
     private readonly List<Subscription> _subscriptions = [];
     private Subscription[] _liveSnapshot = [];
+    private readonly HeadlessAutomationSurface _automation;
+    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
+        _sessionSettingsByPlugin;
+    private readonly object _tickGate = new();
+    private Action<double>? _tick;
     private bool _disposed;
 
     private readonly record struct ReplayEntity(
@@ -34,13 +43,35 @@ internal sealed class HeadlessPluginHost
         GameRuntime runtime,
         IPluginLogger logger,
         IPluginCommandRegistry? commands = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        Func<string, bool>? submitChatText = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
+        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
         _eventSubscription = runtime.Subscribe(this);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
+        CopySessionSettings(
+            IReadOnlyDictionary<string, Dictionary<string, string>>? source)
+    {
+        if (source is null || source.Count == 0)
+            return new Dictionary<string, IReadOnlyDictionary<string, string>>();
+        var copy = new Dictionary<string, IReadOnlyDictionary<string, string>>(
+            source.Count,
+            StringComparer.Ordinal);
+        foreach ((string pluginId, Dictionary<string, string>? perPlugin) in source)
+        {
+            copy[pluginId] = perPlugin is { Count: > 0 }
+                ? new Dictionary<string, string>(perPlugin, StringComparer.Ordinal)
+                : EmptySettings;
+        }
+        return copy;
     }
 
     public bool HasUi => false;
@@ -50,14 +81,59 @@ internal sealed class HeadlessPluginHost
     public IGameState State => this;
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;
-    public IAutomationSurface Automation => NoOpAutomationSurface.Instance;
+    public IAutomationSurface Automation => _automation;
 
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 
+    public IReadOnlyDictionary<string, string> SessionSettings => EmptySettings;
+
+    public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        return _sessionSettingsByPlugin.TryGetValue(
+            pluginId,
+            out IReadOnlyDictionary<string, string>? settings)
+            ? settings
+            : EmptySettings;
+    }
+
     public event Action<double> Tick
     {
-        add { _ = value; }
-        remove { _ = value; }
+        add
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_tickGate)
+                _tick += value;
+        }
+        remove
+        {
+            if (value is null)
+                return;
+            lock (_tickGate)
+                _tick -= value;
+        }
+    }
+
+    internal void FireTick(double elapsedSeconds)
+    {
+        Action<double>? handlers;
+        lock (_tickGate)
+            handlers = _tick;
+        if (handlers is null)
+            return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<double>)handler)(elapsedSeconds);
+            }
+            catch (Exception error)
+            {
+                // Plugin errors don't propagate out of event dispatch — but
+                // they are no longer invisible.
+                Log.Warn($"Plugin tick handler threw: {error}");
+            }
+        }
     }
 
     internal Action? ReplayCapturedForTest { get; set; }
@@ -183,6 +259,8 @@ internal sealed class HeadlessPluginHost
             _subscriptions.Clear();
             _liveSnapshot = [];
         }
+        lock (_tickGate)
+            _tick = null;
         _eventSubscription.Dispose();
     }
 

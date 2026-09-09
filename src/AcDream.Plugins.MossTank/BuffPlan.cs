@@ -54,7 +54,32 @@ public sealed class BuffSettings
 
     public ISet<string> BlacklistedBuffFamilyNames { get; } =
         new HashSet<string>(StringComparer.Ordinal);
+
+    internal IList<BuffItemEnchantRow> ItemEnchantRows { get; } =
+        new List<BuffItemEnchantRow>();
 }
+
+public interface IBuffCastability
+{
+    /// <summary><c>item.HasScarabsInInventory &amp;&amp; !b(item)</c>.</summary>
+    bool IsCastable(PluginSpellInfo tier);
+
+    bool IsCastable(PluginSpellInfo tier, out string? reason)
+    {
+        reason = null;
+        return IsCastable(tier);
+    }
+
+    /// <summary><c>eq.cs:504-508</c>'s once-per-run "buff SKIPPED." line.</summary>
+    void NoteNoCastableTier(BuffLine line);
+
+    void NoteTierPick(
+        BuffLine line, PluginSpellInfo? pick, IReadOnlyList<BuffTierRejection> rejections)
+    {
+    }
+}
+
+public readonly record struct BuffTierRejection(PluginSpellInfo Spell, string Reason);
 
 public static class BuffPlan
 {
@@ -66,9 +91,11 @@ public static class BuffPlan
         BuffSettings settings,
         bool force = false,
         double? rebuffWhenUnderSeconds = null,
-        int characterLevel = 0)
+        int characterLevel = 0,
+        IReadOnlySet<uint>? forcedSpellIds = null,
+        IBuffCastability? castability = null)
     {
-        if (!settings.Enabled && !force)
+        if (!settings.Enabled)
             return [];
         var trainedSkills = new Dictionary<string, PluginSkillInfo>(
             StringComparer.OrdinalIgnoreCase);
@@ -86,18 +113,22 @@ public static class BuffPlan
         foreach (PluginAttributeInfo attribute in attributes)
             attributeNames.Add(attribute.Name);
 
-        // Strongest in-force tier per family, and its remaining time.
-        var inForce = new Dictionary<uint, (int Tier, double Seconds)>();
+        var inForce = new Dictionary<uint, List<(int Tier, double Seconds)>>();
         foreach (PluginActiveEnchantment enchantment in active)
         {
             if (enchantment.Family == 0)
                 continue;
-            if (!inForce.TryGetValue(enchantment.Family, out var held)
-                || enchantment.Tier > held.Tier)
+            double seconds = force
+                || (forcedSpellIds is not null
+                    && forcedSpellIds.Contains(enchantment.SpellId))
+                ? 0d
+                : enchantment.SecondsRemaining;
+            if (!inForce.TryGetValue(enchantment.Family, out var entries))
             {
-                inForce[enchantment.Family] =
-                    (enchantment.Tier, enchantment.SecondsRemaining);
+                entries = [];
+                inForce[enchantment.Family] = entries;
             }
+            entries.Add((enchantment.Tier, seconds));
         }
 
         var skillLevels = new Dictionary<uint, uint>();
@@ -124,10 +155,9 @@ public static class BuffPlan
                         || IsMagicSchoolName(line.TargetName)),
                 BuffTargetKind.Protection =>
                     schoolAvailable && settings.BuffProtections
-                        && ProfileAllows(line, settings, bane: false),
-                BuffTargetKind.Aura => schoolAvailable && settings.BuffAuras,
-                BuffTargetKind.Bane => schoolAvailable && settings.BuffBanes
-                    && ProfileAllows(line, settings, bane: true),
+                        && ProfileAllows(line, settings),
+                BuffTargetKind.Aura => false,
+                BuffTargetKind.Bane => false,
                 BuffTargetKind.Regeneration =>
                     schoolAvailable && settings.BuffRegeneration,
                 BuffTargetKind.Other => schoolAvailable && settings.BuffOther,
@@ -136,15 +166,19 @@ public static class BuffPlan
             if (!wanted)
                 continue;
 
-            if (!TryPickTier(line, skillLevels, settings, out PluginSpellInfo pick))
-                continue;
-
-            if (!force
-                && inForce.TryGetValue(line.Family, out var held)
-                && held.Tier >= pick.Tier
-                && held.Seconds >= (rebuffWhenUnderSeconds
-                    ?? settings.RebuffWhenUnderSeconds))
+            bool resolved = TryPickTier(
+                line, skillLevels, settings, castability, out PluginSpellInfo pick);
+            double threshold = rebuffWhenUnderSeconds
+                ?? settings.RebuffWhenUnderSeconds;
+            if (inForce.TryGetValue(line.Family, out var held)
+                && IsCovered(held, resolved ? pick.Tier : -1, threshold))
             {
+                continue;
+            }
+
+            if (!resolved)
+            {
+                castability?.NoteNoCastableTier(line);
                 continue;
             }
 
@@ -166,17 +200,26 @@ public static class BuffPlan
         return ordered;
     }
 
+    private static bool IsCovered(
+        List<(int Tier, double Seconds)> entries,
+        int quality,
+        double thresholdSeconds)
+    {
+        foreach ((int tier, double seconds) in entries)
+        {
+            if (tier >= quality && seconds >= thresholdSeconds)
+                return true;
+        }
+        return false;
+    }
+
     private static bool ProfileAllows(
         BuffLine line,
-        BuffSettings settings,
-        bool bane)
+        BuffSettings settings)
     {
-        int mode = bane
-            ? settings.BaneProfileMode
-            : settings.ProtectionProfileMode;
-        string enabled = mode switch
+        string enabled = settings.ProtectionProfileMode switch
         {
-            1 => bane ? settings.BaneElements : settings.ProtectionElements,
+            1 => settings.ProtectionElements,
             2 => "ALFCBPS",
             3 => string.Empty,
             4 => "B",
@@ -184,7 +227,7 @@ public static class BuffPlan
             6 => "BPSA",
             7 => "ALFC",
             8 => "BPSAC",
-            _ => "ALFCBPS",
+            _ => string.Empty,
         };
         char element = ElementCode(line);
         return element == '\0' || enabled.IndexOf(element) >= 0;
@@ -220,7 +263,7 @@ public static class BuffPlan
         || name.Equals("Creature Enchantment", StringComparison.OrdinalIgnoreCase)
         || name.Equals("Life Magic", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsSchoolAvailable(
+    internal static bool IsSchoolAvailable(
         uint school,
         IReadOnlyList<PluginSkillInfo> skills,
         BuffSettings settings,
@@ -305,28 +348,99 @@ public static class BuffPlan
         BuffLine line,
         IReadOnlyDictionary<uint, uint> skillLevels,
         BuffSettings settings,
+        out PluginSpellInfo pick) =>
+        TryPickTier(line, skillLevels, settings, castability: null, out pick);
+
+    public static bool TryPickTier(
+        BuffLine line,
+        IReadOnlyDictionary<uint, uint> skillLevels,
+        BuffSettings settings,
+        IBuffCastability? castability,
         out PluginSpellInfo pick)
     {
         pick = default;
         if (line.Tiers.Count == 0)
             return false;
 
+        // fk.cs:189's first five terms, all against the family's reference
+        // spell (fk.a's A_0). See MatchesReference.
+        PluginSpellInfo reference = line.Reference;
+
+        List<BuffTierRejection>? rejections = castability is null ? null : [];
+
+        PluginSpellInfo weakest = default;
+        bool haveWeakest = false;
         foreach (PluginSpellInfo tier in line.Tiers)
         {
-            if (tier.School == 0 || !skillLevels.TryGetValue(tier.School, out uint level))
-                continue;
-            if (level >= tier.Difficulty + settings.SkillExcessOverDifficulty)
+            if (!MatchesReference(tier, reference, out string? mismatchReason))
             {
-                pick = tier;
-                return true;
+                rejections?.Add(new BuffTierRejection(tier, mismatchReason!));
+                continue;
             }
+            weakest = tier;
+            haveWeakest = true;
+            if (tier.School == 0 || !skillLevels.TryGetValue(tier.School, out uint level))
+            {
+                rejections?.Add(new BuffTierRejection(tier, "skill unknown"));
+                continue;
+            }
+            int needed = tier.Difficulty + settings.SkillExcessOverDifficulty;
+            if (level < needed)
+            {
+                rejections?.Add(new BuffTierRejection(tier, $"skill {level} < {needed}"));
+                continue;
+            }
+            if (castability is not null && !castability.IsCastable(tier, out string? castReason))
+            {
+                rejections?.Add(new BuffTierRejection(tier, castReason ?? "not castable"));
+                continue;
+            }
+            pick = tier;
+            castability?.NoteTierPick(line, pick, rejections!);
+            return true;
         }
 
-        PluginSpellInfo weakest = line.Tiers[^1];
+        if (!haveWeakest)
+        {
+            // nothing in the family shares the reference's line
+            castability?.NoteTierPick(line, null, rejections!);
+            return false;
+        }
         if (weakest.School != 0 && skillLevels.ContainsKey(weakest.School))
-            return false;   // school known, but even the weakest tier is out of reach
+        {
+            // school known, but even the weakest tier is out of reach
+            castability?.NoteTierPick(line, null, rejections!);
+            return false;
+        }
+        if (castability is not null && !castability.IsCastable(weakest, out _))
+        {
+            castability.NoteTierPick(line, null, rejections!);
+            return false;
+        }
 
         pick = weakest;
+        castability?.NoteTierPick(line, pick, rejections!);
+        return true;
+    }
+
+    private static bool MatchesReference(
+        in PluginSpellInfo tier,
+        in PluginSpellInfo reference,
+        out string? mismatchReason)
+    {
+        if (tier.School != reference.School
+            || tier.IsFellowship != reference.IsFellowship
+            || tier.IsUntargeted != reference.IsUntargeted)
+        {
+            mismatchReason = "unknown";
+            return false;
+        }
+        if (tier.ComponentSet != reference.ComponentSet)
+        {
+            mismatchReason = "comp set";
+            return false;
+        }
+        mismatchReason = null;
         return true;
     }
 }

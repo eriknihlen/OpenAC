@@ -110,6 +110,7 @@ internal sealed class CombatSettings
     public ISet<uint> CombatItemObjectIds { get; } = new HashSet<uint>();
     public ISet<string> CombatItemNames { get; } =
         new HashSet<string>(StringComparer.Ordinal);
+    public IList<string> CombatItemOrder { get; } = new List<string>();
     public ISet<string> ConsumableNames { get; } =
         new HashSet<string>(StringComparer.Ordinal);
     public IDictionary<string, ConsumableCategory> ConsumableCategories { get; } =

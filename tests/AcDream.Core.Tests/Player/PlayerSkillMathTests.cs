@@ -20,6 +20,7 @@ public sealed class PlayerSkillMathTests
 
         PlayerSkillMath.Value value = PlayerSkillMath.Calculate(
             intrinsicLevel: 100,
+            enchantedIntrinsicLevel: 100,
             skillId: 0x1Fu,
             advancementClass: 3u,
             augmentations,
@@ -29,6 +30,31 @@ public sealed class PlayerSkillMathTests
         Assert.Equal(113, value.UnenchantedLevel); // 100 + all 3 + magic 10
         Assert.Equal(69, value.EffectiveLevel);    // trunc(113 * .5) + JOAT 5 + spec 8
         Assert.Equal(-23, value.VitaeModifier);    // trunc(113 * .8) - 113
+    }
+
+    [Fact]
+    public void Calculate_EnchantedIntrinsicFeedsOnlyTheEffectiveLevel()
+    {
+        var augmentations = new PlayerSkillMath.AugmentationBonuses(
+            AllSkills: 0,
+            JackOfAllTrades: false,
+            SkilledSpecialized: 0,
+            SkilledMelee: false,
+            SkilledMissile: false,
+            SkilledMagic: true);
+
+        PlayerSkillMath.Value value = PlayerSkillMath.Calculate(
+            intrinsicLevel: 331,
+            enchantedIntrinsicLevel: 353,
+            skillId: 0x1Fu,
+            advancementClass: 2u,
+            augmentations,
+            enchantment: new EnchantmentMath.VitalMod(1f, 50f),
+            vitaeMultiplier: 1f);
+
+        Assert.Equal(341, value.UnenchantedLevel); // 331 + magic 10
+        Assert.Equal(413, value.EffectiveLevel);   // (353 + 10) + 50
+        Assert.Equal(0, value.VitaeModifier);
     }
 
     [Theory]

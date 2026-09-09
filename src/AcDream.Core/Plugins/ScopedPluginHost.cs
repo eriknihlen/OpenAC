@@ -5,6 +5,7 @@ namespace AcDream.Core.Plugins;
 internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 {
     private readonly IPluginHost _inner;
+    private readonly string _pluginId;
     private readonly ScopedEvents _events;
     private readonly ScopedSelectionService _selection;
     private readonly ScopedUiRegistry _ui;
@@ -21,6 +22,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
+        _pluginId = pluginId;
         _events = new ScopedEvents(inner.Events);
         _selection = new ScopedSelectionService(inner.Selection);
         _ui = new ScopedUiRegistry(
@@ -44,6 +46,10 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
     public IPluginCommandRegistry Commands => _commands;
     public IPluginLootClassifierRegistry LootClassifiers => _lootClassifiers;
+    public IReadOnlyDictionary<string, string> SessionSettings =>
+        _inner is IPerPluginSessionSettings perPlugin
+            ? perPlugin.SessionSettingsFor(_pluginId)
+            : _inner.SessionSettings;
 
     public IAutomationSurface Automation => _inner.Automation;
 

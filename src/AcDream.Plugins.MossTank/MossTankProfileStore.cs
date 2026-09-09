@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank;
@@ -140,11 +140,36 @@ internal sealed class MossTankProfileStore
         return false;
     }
 
+    public bool Exists(string? name)
+    {
+        string normalized = NormalizeName(name);
+        if (normalized.Length == 0)
+            return false;
+        if (normalized.Equals(ByCharacter, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string? existing = AvailableNames.FirstOrDefault(candidate =>
+                candidate.Equals(normalized, StringComparison.Ordinal))
+            ?? AvailableNames.FirstOrDefault(candidate =>
+                candidate.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            return true;
+
+        string subProfile = VtankProfileDirectory.SubProfilePrefix(_characterName, Server)
+            + normalized + ".usd";
+        if (VtankStorage.IsAvailable && VtankStorage.ReadText(subProfile) is not null)
+            return true;
+
+        return _host.Storage.IsAvailable
+            && _host.Storage.ReadText(LegacyProfileKey(normalized, byCharacter: false)) is not null;
+    }
+
     public bool Create(
         string? name,
         bool copyCurrent,
         VtankSettingsProfileSerializer.AllSettings settings,
         ISet<string> noBuffItemNames,
+        ISet<string> logChannels,
         out string notice)
     {
         string normalized = NormalizeName(name);
@@ -158,14 +183,15 @@ internal sealed class MossTankProfileStore
         if (copyCurrent)
         {
             database = VtankSettingsProfileSerializer.CreateNew(settings);
-            sidecar = SideCarDocument.Capture(settings, noBuffItemNames);
+            sidecar = SideCarDocument.Capture(
+                settings, noBuffItemNames, logChannels);
         }
         else
         {
             database = VtankDefaultSettingsDatabase.Parse();
             ApplyFromDatabase(database, settings);
             sidecar = SideCarDocument.CreateDefaults();
-            sidecar.Apply(settings, noBuffItemNames, _host.Log);
+            sidecar.Apply(settings, noBuffItemNames, logChannels, _host.Log);
         }
         WriteUsdText(fileName, database.Render());
         WriteJson(SideCarKey(fileName), sidecar);
@@ -203,7 +229,8 @@ internal sealed class MossTankProfileStore
 
     public void LoadCurrent(
         VtankSettingsProfileSerializer.AllSettings settings,
-        ISet<string> noBuffItemNames)
+        ISet<string> noBuffItemNames,
+        ISet<string> logChannels)
     {
         SweepLegacyRosterIfNeeded();
         MigrateLegacyIfNeeded(settings, noBuffItemNames);
@@ -215,7 +242,8 @@ internal sealed class MossTankProfileStore
             // template/defaults rather than leaving the live settings alone.
             VtankDatabase fresh = VtankDefaultSettingsDatabase.Parse();
             ApplyFromDatabase(fresh, settings);
-            SideCarDocument.CreateDefaults().Apply(settings, noBuffItemNames, _host.Log);
+            SideCarDocument.CreateDefaults()
+                .Apply(settings, noBuffItemNames, logChannels, _host.Log);
             _currentDatabase = fresh;
             _currentDatabaseFileName = fileName;
             return;
@@ -224,7 +252,10 @@ internal sealed class MossTankProfileStore
         VtankDatabase database;
         try
         {
-            database = VtankSettingsProfileSerializer.Load(text, settings);
+            database = VtankSettingsProfileSerializer.Load(
+                text,
+                settings,
+                message => _host.Log.Warn("MossTank " + message));
         }
         catch (FormatException error)
         {
@@ -233,7 +264,8 @@ internal sealed class MossTankProfileStore
             _host.Log.Warn(RecoveryNotice);
             VtankDatabase fresh = VtankDefaultSettingsDatabase.Parse();
             ApplyFromDatabase(fresh, settings);
-            SideCarDocument.CreateDefaults().Apply(settings, noBuffItemNames, _host.Log);
+            SideCarDocument.CreateDefaults()
+                .Apply(settings, noBuffItemNames, logChannels, _host.Log);
             _currentDatabase = fresh;
             _currentDatabaseFileName = fileName;
             return;
@@ -241,12 +273,13 @@ internal sealed class MossTankProfileStore
         _currentDatabase = database;
         _currentDatabaseFileName = fileName;
         (ReadJson<SideCarDocument>(SideCarKey(fileName)) ?? SideCarDocument.CreateDefaults())
-            .Apply(settings, noBuffItemNames, _host.Log);
+            .Apply(settings, noBuffItemNames, logChannels, _host.Log);
     }
 
     public void SaveCurrent(
         VtankSettingsProfileSerializer.AllSettings settings,
-        ISet<string> noBuffItemNames)
+        ISet<string> noBuffItemNames,
+        ISet<string> logChannels)
     {
         string fileName = CurrentFileName();
         VtankDatabase database = fileName.Equals(_currentDatabaseFileName, StringComparison.Ordinal)
@@ -255,18 +288,22 @@ internal sealed class MossTankProfileStore
                 : VtankSettingsProfileSerializer.CreateNew(settings);
         string text = VtankSettingsProfileSerializer.Save(database, settings);
         WriteUsdText(fileName, text);
-        WriteJson(SideCarKey(fileName), SideCarDocument.Capture(settings, noBuffItemNames));
+        WriteJson(
+            SideCarKey(fileName),
+            SideCarDocument.Capture(settings, noBuffItemNames, logChannels));
         _currentDatabase = database;
         _currentDatabaseFileName = fileName;
     }
 
     public void ClearCurrent(
         VtankSettingsProfileSerializer.AllSettings settings,
-        ISet<string> noBuffItemNames)
+        ISet<string> noBuffItemNames,
+        ISet<string> logChannels)
     {
         VtankDatabase database = VtankDefaultSettingsDatabase.Parse();
         ApplyFromDatabase(database, settings);
-        SideCarDocument.CreateDefaults().Apply(settings, noBuffItemNames, _host.Log);
+        SideCarDocument.CreateDefaults()
+            .Apply(settings, noBuffItemNames, logChannels, _host.Log);
         string fileName = CurrentFileName();
         WriteUsdText(fileName, database.Render());
         WriteJson(SideCarKey(fileName), SideCarDocument.CreateDefaults());
@@ -398,7 +435,12 @@ internal sealed class MossTankProfileStore
                     noBuffItemNames, _host.Log);
                 VtankDatabase database = VtankSettingsProfileSerializer.CreateNew(settings);
                 WriteUsdText(fileName, database.Render());
-                WriteJson(SideCarKey(fileName), SideCarDocument.Capture(settings, noBuffItemNames));
+                WriteJson(
+                    SideCarKey(fileName),
+                    SideCarDocument.Capture(
+                        settings,
+                        noBuffItemNames,
+                        new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
             }
             if (_host.Storage.IsAvailable)
                 _host.Storage.Delete(legacyKey);
@@ -458,7 +500,12 @@ internal sealed class MossTankProfileStore
         legacy.Apply(settings.Combat, settings.Buffs, settings.Vitals, settings.Inventory, noBuffItemNames, _host.Log);
         VtankDatabase database = VtankSettingsProfileSerializer.CreateNew(settings);
         WriteUsdText(fileName, database.Render());
-        WriteJson(SideCarKey(fileName), SideCarDocument.Capture(settings, noBuffItemNames));
+        WriteJson(
+            SideCarKey(fileName),
+            SideCarDocument.Capture(
+                settings,
+                noBuffItemNames,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
         _currentDatabase = database;
         _currentDatabaseFileName = fileName;
         if (_host.Storage.IsAvailable)
@@ -627,13 +674,16 @@ internal sealed class MossTankProfileStore
         public Dictionary<string, ConsumableCategory> ConsumableCategories { get; set; } =
             new(StringComparer.Ordinal);
         public string[] NoBuffItemNames { get; set; } = [];
+
+        public string[] LogChannels { get; set; } = [];
         public float CombatAttackPower { get; set; } = 0.5f;
         public double CombatScanIntervalSeconds { get; set; } = 0.25d;
         public string CombatMetaState { get; set; } = "Default";
         public Dictionary<string, DynamicSettingDocument> CombatDynamicSettings { get; set; } =
             new(StringComparer.OrdinalIgnoreCase);
-        public MonsterRuleDocument[] CombatRules { get; set; } =
-            [MonsterRuleDocument.From(new MonsterRule("DEFAULT", 0))];
+        public MonsterRuleDocument[]? CombatRules { get; set; }
+
+        public MonsterRuleNameDocument[] CombatRuleItemNames { get; set; } = [];
         public bool BuffAttributes { get; set; } = true;
         public bool BuffProtections { get; set; } = true;
         public bool BuffAuras { get; set; } = true;
@@ -643,15 +693,26 @@ internal sealed class MossTankProfileStore
         public bool BuffTrainedSkillsOnly { get; set; } = true;
         public string[] BuffExtraSpellNames { get; set; } = [];
         public string[] BuffBlacklistedFamilyNames { get; set; } = [];
+
+        public ItemEnchantRowDocument[] BuffItemEnchantRows { get; set; } = [];
         public bool VitalsEnabled { get; set; } = true;
         public double InventoryScanIntervalSeconds { get; set; } = 0.25d;
         public string InventoryLootClassifierId { get; set; } = string.Empty;
         public double InventoryLootScanIntervalSeconds { get; set; } = 0.25d;
         public LootRuleDocument[] InventoryLootRules { get; set; } = [];
 
+        /// <summary>One <c>eq.c</c> row (<c>eq.cs:25-36</c>) on disk.</summary>
+        public sealed class ItemEnchantRowDocument
+        {
+            public string ItemName { get; set; } = string.Empty;
+
+            public string SpellName { get; set; } = string.Empty;
+        }
+
         public static SideCarDocument Capture(
             VtankSettingsProfileSerializer.AllSettings settings,
-            ISet<string> noBuffItemNames) => new()
+            ISet<string> noBuffItemNames,
+            ISet<string> logChannels) => new()
         {
             ItemNames = Sorted(settings.Combat.CombatItemNames),
             ConsumableNames = Sorted(settings.Combat.ConsumableNames),
@@ -660,6 +721,7 @@ internal sealed class MossTankProfileStore
                 static pair => pair.Value,
                 StringComparer.Ordinal),
             NoBuffItemNames = Sorted(noBuffItemNames),
+            LogChannels = Sorted(logChannels),
             CombatAttackPower = settings.Combat.AttackPower,
             CombatScanIntervalSeconds = settings.Combat.ScanIntervalSeconds,
             CombatMetaState = settings.Combat.MetaState,
@@ -667,7 +729,11 @@ internal sealed class MossTankProfileStore
                 static pair => pair.Key,
                 static pair => DynamicSettingDocument.From(pair.Value),
                 StringComparer.OrdinalIgnoreCase),
-            CombatRules = settings.Combat.Rules.Select(MonsterRuleDocument.From).ToArray(),
+            CombatRuleItemNames = settings.Combat.Rules
+                .Where(static rule => rule.Actions.WeaponName.Length > 0
+                    || rule.Actions.OffhandName.Length > 0)
+                .Select(MonsterRuleNameDocument.From)
+                .ToArray(),
             BuffAttributes = settings.Buffs.BuffAttributes,
             BuffProtections = settings.Buffs.BuffProtections,
             BuffAuras = settings.Buffs.BuffAuras,
@@ -677,6 +743,13 @@ internal sealed class MossTankProfileStore
             BuffTrainedSkillsOnly = settings.Buffs.BuffTrainedSkillsOnly,
             BuffExtraSpellNames = Sorted(settings.Buffs.ExtraBuffSpellNames),
             BuffBlacklistedFamilyNames = Sorted(settings.Buffs.BlacklistedBuffFamilyNames),
+            BuffItemEnchantRows = settings.Buffs.ItemEnchantRows
+                .Select(static row => new ItemEnchantRowDocument
+                {
+                    ItemName = row.ItemName,
+                    SpellName = row.SpellName,
+                })
+                .ToArray(),
             VitalsEnabled = settings.Vitals.Enabled,
             InventoryScanIntervalSeconds = settings.Inventory.ScanIntervalSeconds,
             InventoryLootClassifierId = settings.Inventory.Loot.ExternalClassifierId,
@@ -695,14 +768,17 @@ internal sealed class MossTankProfileStore
                 Inventory = new InventorySettings(),
                 Navigation = new NavigationSettings(),
             },
-            new HashSet<string>(StringComparer.Ordinal));
+            new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
         public void Apply(
             VtankSettingsProfileSerializer.AllSettings settings,
             ISet<string> noBuffItemNames,
+            ISet<string> logChannels,
             IPluginLogger? logger = null)
         {
             Replace(settings.Combat.CombatItemNames, ItemNames);
+            ReplaceOrder(settings.Combat.CombatItemOrder, ItemNames);
             settings.Combat.CombatItemObjectIds.Clear();
             Replace(settings.Combat.ConsumableNames, ConsumableNames);
             settings.Combat.ConsumableCategories.Clear();
@@ -713,6 +789,7 @@ internal sealed class MossTankProfileStore
                     settings.Combat.ConsumableCategories[itemName] = category;
             }
             Replace(noBuffItemNames, NoBuffItemNames);
+            Replace(logChannels, LogChannels);
             settings.Combat.AttackPower = Math.Clamp(CombatAttackPower, 0f, 1f);
             settings.Combat.ScanIntervalSeconds = Math.Clamp(CombatScanIntervalSeconds, 0.05d, 5d);
             settings.Combat.MetaState = string.IsNullOrWhiteSpace(CombatMetaState)
@@ -724,17 +801,24 @@ internal sealed class MossTankProfileStore
             {
                 settings.Combat.DynamicSettings[optionName] = setting.ToValue();
             }
-            settings.Combat.Rules.Clear();
-            foreach (MonsterRuleDocument rule in CombatRules ?? [])
+            if (CombatRules is { Length: > 0 } migrated
+                && settings.Combat.Rules.Count == 1
+                && settings.Combat.Rules[0].IsDefault)
             {
-                try { settings.Combat.Rules.Add(rule.ToRule()); }
-                catch (FormatException error)
+                settings.Combat.Rules.Clear();
+                foreach (MonsterRuleDocument rule in migrated)
                 {
-                    logger?.Warn($"MossTank could not restore a monster rule: {error.Message}");
+                    try { settings.Combat.Rules.Add(rule.ToRule()); }
+                    catch (FormatException error)
+                    {
+                        logger?.Warn(
+                            $"MossTank could not restore a monster rule: {error.Message}");
+                    }
                 }
             }
             if (!settings.Combat.Rules.Any(static rule => rule.IsDefault))
                 settings.Combat.Rules.Add(new MonsterRule("DEFAULT", 0));
+            ApplyRuleItemNames(settings.Combat);
 
             settings.Buffs.BuffAttributes = BuffAttributes;
             settings.Buffs.BuffProtections = BuffProtections;
@@ -745,6 +829,15 @@ internal sealed class MossTankProfileStore
             settings.Buffs.BuffTrainedSkillsOnly = BuffTrainedSkillsOnly;
             Replace(settings.Buffs.ExtraBuffSpellNames, BuffExtraSpellNames);
             Replace(settings.Buffs.BlacklistedBuffFamilyNames, BuffBlacklistedFamilyNames);
+            settings.Buffs.ItemEnchantRows.Clear();
+            foreach (ItemEnchantRowDocument row in BuffItemEnchantRows)
+            {
+                if (string.IsNullOrEmpty(row.ItemName))
+                    continue;
+                settings.Buffs.ItemEnchantRows.Add(new BuffItemEnchantRow(
+                    row.ItemName,
+                    row.SpellName ?? string.Empty));
+            }
 
             settings.Vitals.Enabled = VitalsEnabled;
 
@@ -757,6 +850,39 @@ internal sealed class MossTankProfileStore
             settings.Inventory.Loot.Rules.Clear();
             foreach (LootRuleDocument rule in InventoryLootRules ?? [])
                 settings.Inventory.Loot.Rules.Add(rule.ToRule());
+        }
+
+        private void ApplyRuleItemNames(CombatSettings combat)
+        {
+            if (CombatRuleItemNames is not { Length: > 0 } names)
+                return;
+            for (int i = 0; i < combat.Rules.Count; i++)
+            {
+                MonsterRule rule = combat.Rules[i];
+                foreach (MonsterRuleNameDocument stored in names)
+                {
+                    // The fallback row's spelling depends on which side wrote
+                    // it — MossTank's editor says DEFAULT, the .usd says
+                    // <DEFAULT> (d1.cs:117) — so match it by identity, not by
+                    // text.
+                    bool matches = MonsterRule.IsDefaultName(stored.Expression)
+                        ? rule.IsDefault
+                        : string.Equals(
+                            stored.Expression,
+                            rule.Expression,
+                            StringComparison.Ordinal);
+                    if (!matches)
+                        continue;
+                    combat.Rules[i] = new MonsterRule(
+                        rule.Expression,
+                        rule.Actions with
+                        {
+                            WeaponName = stored.WeaponName ?? string.Empty,
+                            OffhandName = stored.OffhandName ?? string.Empty,
+                        });
+                    break;
+                }
+            }
         }
     }
 
@@ -774,6 +900,18 @@ internal sealed class MossTankProfileStore
         foreach (string value in values)
         {
             if (!string.IsNullOrWhiteSpace(value))
+                target.Add(value);
+        }
+    }
+
+    private static void ReplaceOrder(IList<string> target, IEnumerable<string>? values)
+    {
+        target.Clear();
+        if (values is null)
+            return;
+        foreach (string value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && !target.Contains(value))
                 target.Add(value);
         }
     }
@@ -825,6 +963,20 @@ internal sealed class MossTankProfileStore
             Action = Action,
             KeepCount = Math.Clamp(KeepCount, 0, 100000),
             Priority = Math.Clamp(Priority, -1000, 1000),
+        };
+    }
+
+    private sealed class MonsterRuleNameDocument
+    {
+        public string Expression { get; set; } = string.Empty;
+        public string WeaponName { get; set; } = string.Empty;
+        public string OffhandName { get; set; } = string.Empty;
+
+        public static MonsterRuleNameDocument From(MonsterRule rule) => new()
+        {
+            Expression = rule.Expression,
+            WeaponName = rule.Actions.WeaponName,
+            OffhandName = rule.Actions.OffhandName,
         };
     }
 
@@ -896,6 +1048,7 @@ internal sealed class MossTankProfileStore
             (Vitals ?? LegacyVitalProfileDocument.Capture(new VitalSettings())).Apply(vitals);
             (Inventory ?? LegacyInventoryProfileDocument.Capture(new InventorySettings())).Apply(inventory);
             Replace(combat.CombatItemNames, ItemNames);
+            ReplaceOrder(combat.CombatItemOrder, ItemNames);
             combat.CombatItemObjectIds.Clear();
             Replace(combat.ConsumableNames, ConsumableNames);
             combat.ConsumableCategories.Clear();

@@ -51,6 +51,49 @@ public sealed class PluginSessionTests
     }
 
     [Fact]
+    public void ScopedHostForwardsSessionSettingsVerbatim()
+    {
+        var settings = new Dictionary<string, string>
+        {
+            ["startMacro"] = "true",
+        };
+        using var scope = new ScopedPluginHost(
+            new StubHost(sessionSettings: settings),
+            "acdream.alpha",
+            "Alpha");
+
+        Assert.Same(settings, scope.SessionSettings);
+    }
+
+    [Fact]
+    public void ScopedHostForwardsDefaultEmptySessionSettingsWhenHostDeclaresNone()
+    {
+        using var scope = new ScopedPluginHost(
+            new StubHost(),
+            "acdream.alpha",
+            "Alpha");
+
+        Assert.Empty(scope.SessionSettings);
+    }
+
+    [Fact]
+    public void ScopedHostProjectsSessionSettingsPerPluginIdWhenHostSupportsIt()
+    {
+        var host = new PerPluginStubHost(new Dictionary<string, Dictionary<string, string>>
+        {
+            ["acdream.alpha"] = new() { ["startMacro"] = "true" },
+            ["acdream.beta"] = new() { ["startMacro"] = "false" },
+        });
+        using var alpha = new ScopedPluginHost(host, "acdream.alpha", "Alpha");
+        using var beta = new ScopedPluginHost(host, "acdream.beta", "Beta");
+        using var gamma = new ScopedPluginHost(host, "acdream.gamma", "Gamma");
+
+        Assert.Equal("true", alpha.SessionSettings["startMacro"]);
+        Assert.Equal("false", beta.SessionSettings["startMacro"]);
+        Assert.Empty(gamma.SessionSettings);
+    }
+
+    [Fact]
     public void ScopedHostNamespacesAndUnregistersLootClassifierOnDispose()
     {
         var global = new PluginLootClassifierRegistry();
@@ -380,7 +423,8 @@ public sealed class PluginSessionTests
     private sealed class StubHost(
         IPluginStorage? storage = null,
         IPluginLootClassifierRegistry? lootClassifiers = null,
-        IPluginStorage? vtankProfiles = null) : IPluginHost
+        IPluginStorage? vtankProfiles = null,
+        IReadOnlyDictionary<string, string>? sessionSettings = null) : IPluginHost
     {
         public bool HasUi => false;
         public IPluginLogger Log { get; } = new StubLogger();
@@ -395,6 +439,26 @@ public sealed class PluginSessionTests
             lootClassifiers ?? NoOpPluginLootClassifierRegistry.Instance;
         public IPluginStorage VtankProfiles { get; } =
             vtankProfiles ?? NoOpPluginStorage.Instance;
+        public IReadOnlyDictionary<string, string> SessionSettings { get; } =
+            sessionSettings ?? new Dictionary<string, string>();
+    }
+
+    private sealed class PerPluginStubHost(
+        IReadOnlyDictionary<string, Dictionary<string, string>> byPlugin)
+        : IPluginHost, IPerPluginSessionSettings
+    {
+        public bool HasUi => false;
+        public IPluginLogger Log { get; } = new StubLogger();
+        public IGameState State { get; } = new StubState();
+        public IEvents Events { get; } = new StubEvents();
+        public ISelectionService Selection { get; } = new SelectionState();
+        public IUiRegistry Ui => NoOpUiRegistry.Instance;
+        public IAutomationSurface Automation => NoOpAutomationSurface.Instance;
+
+        public IReadOnlyDictionary<string, string> SessionSettingsFor(string pluginId) =>
+            byPlugin.TryGetValue(pluginId, out Dictionary<string, string>? settings)
+                ? settings
+                : new Dictionary<string, string>();
     }
 
     private sealed class KeepClassifier : IPluginLootClassifier

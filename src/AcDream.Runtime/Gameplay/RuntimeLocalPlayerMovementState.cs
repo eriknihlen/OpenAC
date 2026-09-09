@@ -207,6 +207,20 @@ public sealed class RuntimeLocalPlayerMovementState
         return _controller?.RequestCommandMotion(motionCommand) == true;
     }
 
+    public bool TurnToHeading(
+        float headingDegrees,
+        bool applyRunHoldKey = false)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!float.IsFinite(headingDegrees))
+            return false;
+        float normalized = headingDegrees % 360f;
+        if (normalized < 0f)
+            normalized += 360f;
+        return _controller?.RequestTurnToHeading(normalized, applyRunHoldKey)
+            == true;
+    }
+
     public bool CancelAutoRun()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

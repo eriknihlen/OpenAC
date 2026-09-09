@@ -37,34 +37,6 @@ public sealed class DebuffSchedulerTests
     }
 
     [Fact]
-    public void DamageAndExtraVulnerabilityBothProduceCandidates()
-    {
-        DebuffSpellCatalog catalog = DebuffSpellCatalog.Build(
-        [
-            Spell(1, "Incantation of Fire Vulnerability Other"),
-            Spell(2, "Incantation of Acid Vulnerability Other"),
-        ]);
-        var actions = new MonsterRuleActions
-        {
-            Flags = MonsterActionFlags.Vulnerability,
-            DamageType = MonsterDamageType.Fire,
-            ExtraVulnerability = MonsterDamageType.Acid,
-        };
-
-        IReadOnlyList<DebuffChoice> choices = catalog.Candidates(
-            actions,
-            DebuffSelectionMethod.SpellLevel,
-            new Character(),
-            static (_, _) => true);
-
-        Assert.Equal(2, choices.Count);
-        Assert.Contains(choices, choice =>
-            choice.Identity.DamageType == MonsterDamageType.Fire);
-        Assert.Contains(choices, choice =>
-            choice.Identity.DamageType == MonsterDamageType.Acid);
-    }
-
-    [Fact]
     public void LureBladeItemSpellIsNotAClassicVulnerabilityLure()
     {
         Assert.False(DebuffSpellCatalog.TryClassify(
@@ -73,32 +45,6 @@ public sealed class DebuffSchedulerTests
             out _));
     }
 
-    [Fact]
-    public void SkillPreferenceUsesBuffedSchoolSkillBeforeSpellTier()
-    {
-        DebuffSpellCatalog catalog = DebuffSpellCatalog.Build(
-        [
-            Spell(1, "Imperil Other VII", tier: 7, school: 33),
-            Spell(2, "Weakening Curse VI", tier: 6, school: 43),
-        ]);
-        var actions = new MonsterRuleActions
-        {
-            Flags = MonsterActionFlags.Imperil | MonsterActionFlags.WeakeningCurse,
-        };
-        var character = new Character(
-        [
-            new PluginSkillInfo(33, "Life Magic", PluginSkillTraining.Trained, 300),
-            new PluginSkillInfo(43, "Void Magic", PluginSkillTraining.Trained, 420),
-        ]);
-
-        IReadOnlyList<DebuffChoice> choices = catalog.Candidates(
-            actions,
-            DebuffSelectionMethod.Skill,
-            character,
-            static (_, _) => true);
-
-        Assert.Equal(2u, choices[0].Spell.SpellId);
-    }
 
     [Fact]
     public void TrackerWaitsForMatchingSuccessfulServerReceipt()
@@ -129,7 +75,7 @@ public sealed class DebuffSchedulerTests
     }
 
     [Fact]
-    public void DamageOverTimeDoesNotUsePrecastWindow()
+    public void ZeroToleranceStepsGetNoPrecastWindow()
     {
         var tracker = new DebuffTracker();
         var identity = new DebuffIdentity(
@@ -142,8 +88,12 @@ public sealed class DebuffSchedulerTests
         tracker.Begin(99, identity, spell, 0, 0);
         tracker.Observe(new PluginCastCompletion(1, 10, 99, 0), 1);
 
-        Assert.False(tracker.IsDue(99, identity, spell, 60, 20));
-        Assert.True(tracker.IsDue(99, identity, spell, 61, 20));
+        Assert.False(tracker.IsDue(99, identity, spell, 60, 0d));
+        Assert.True(tracker.IsDue(99, identity, spell, 61, 0d));
+
+        // ...and with the ordinary precast window the same timer IS due
+        // early, which is exactly what the nine non-zero-tolerance steps get.
+        Assert.True(tracker.IsDue(99, identity, spell, 45, 20));
     }
 
     [Fact]

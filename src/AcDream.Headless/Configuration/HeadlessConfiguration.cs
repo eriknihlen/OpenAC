@@ -64,6 +64,8 @@ internal sealed record HeadlessSessionDescriptor
     public int LoginCommandDelayMs { get; init; } = 500;
 
     public string? StatusFile { get; init; }
+
+    public Dictionary<string, Dictionary<string, string>>? PluginSettings { get; init; }
 }
 
 internal sealed class HeadlessEndpointDescriptor

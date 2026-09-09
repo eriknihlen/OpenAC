@@ -36,7 +36,10 @@ internal sealed class PetAutomation
         IReadOnlyList<PluginCombatTarget> targets,
         CombatSettings settings,
         double now,
-        out string status)
+        out string status,
+        bool allowRefill = true,
+        bool allowSummon = true,
+        Func<bool>? readyToRefillInPeace = null)
     {
         ArgumentNullException.ThrowIfNull(automation);
         ArgumentNullException.ThrowIfNull(character);
@@ -71,10 +74,18 @@ internal sealed class PetAutomation
             character,
             settings,
             automation.ActiveOwnedPetCount,
-            now >= _nextRefillAt,
-            now >= _nextSummonAt);
+            allowRefill && now >= _nextRefillAt,
+            allowSummon && now >= _nextSummonAt);
         if (choice.Kind == PetAutomationActionKind.None)
             return false;
+
+        if (choice.Kind == PetAutomationActionKind.Refill
+            && readyToRefillInPeace is not null
+            && !readyToRefillInPeace())
+        {
+            status = "Entering peace mode to refill the combat pet";
+            return true;
+        }
 
         PluginItemCommandResult result = choice.Kind == PetAutomationActionKind.Refill
             ? automation.Apply(choice.Tool.ObjectId, choice.Device.ObjectId)

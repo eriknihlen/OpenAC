@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Reflection;
 using AcDream.Plugin.Abstractions;
 
@@ -36,7 +36,27 @@ internal static class VtankAmmunitionDatabase
         _ => 0,
     };
 
+    /// <summary>
+    /// The bundled table. Kept as the fallback for a session with no
+    /// <c>gameinfodb.ugd</c> in its profile directory.
+    /// </summary>
     public static VtankAmmunitionOption? Select(
+        int launcherType,
+        MonsterDamageType damage,
+        VtankPrismaticAmmoPolicy prismatic,
+        int enabledSpecialMask,
+        ICharacterInfo character,
+        Func<string, bool> isAvailable) => Select(
+            Loaded.Value,
+            launcherType,
+            damage,
+            prismatic,
+            enabledSpecialMask,
+            character,
+            isAvailable);
+
+    public static VtankAmmunitionOption? Select(
+        IReadOnlyList<VtankAmmunitionOption> options,
         int launcherType,
         MonsterDamageType damage,
         VtankPrismaticAmmoPolicy prismatic,
@@ -44,6 +64,7 @@ internal static class VtankAmmunitionDatabase
         ICharacterInfo character,
         Func<string, bool> isAvailable)
     {
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(character);
         ArgumentNullException.ThrowIfNull(isAvailable);
         int desiredElement = Element(damage);
@@ -52,7 +73,7 @@ internal static class VtankAmmunitionDatabase
 
         VtankAmmunitionOption? best = null;
         int bestQuality = int.MinValue;
-        foreach (VtankAmmunitionOption option in Loaded.Value)
+        foreach (VtankAmmunitionOption option in options)
         {
             if (option.LauncherType != launcherType)
                 continue;

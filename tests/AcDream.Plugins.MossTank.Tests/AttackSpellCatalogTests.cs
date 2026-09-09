@@ -1,323 +1,238 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank.Tests;
 
 public sealed class AttackSpellCatalogTests
 {
     [Theory]
-    [InlineData("Force Bolt VII", "piercing damage", 2)]
-    [InlineData("Shock Wave VII", "bludgeoning damage", 3)]
-    [InlineData("Whirling Blade VII", "slashing damage", 1)]
-    [InlineData("Nether Bolt VII", "nether damage", 8)]
-    public void RetailDescriptionDeterminesDamageElement(
-        string name,
-        string description,
-        int expected)
-    {
-        PluginSpellInfo spell = Spell(1, name, description) with
-        {
-            TargetMask = 0x10,
-            IsProjectile = true,
-        };
+    [InlineData(MonsterDamageType.Acid, VtankCombatSpellType.War, "Acid Stream")]
+    [InlineData(MonsterDamageType.Bludgeon, VtankCombatSpellType.War, "Shock Wave")]
+    [InlineData(MonsterDamageType.Cold, VtankCombatSpellType.War, "Frost Bolt")]
+    [InlineData(MonsterDamageType.Fire, VtankCombatSpellType.War, "Flame Bolt")]
+    [InlineData(MonsterDamageType.Electric, VtankCombatSpellType.War, "Lightning Bolt")]
+    [InlineData(MonsterDamageType.Pierce, VtankCombatSpellType.War, "Force Bolt")]
+    [InlineData(MonsterDamageType.Slash, VtankCombatSpellType.War, "Whirling Blade")]
+    [InlineData(MonsterDamageType.Harm, VtankCombatSpellType.War, "Martyr's Hecatomb")]
+    [InlineData(MonsterDamageType.VoidBasic, VtankCombatSpellType.War, "Nether Bolt")]
+    [InlineData(MonsterDamageType.Acid, VtankCombatSpellType.Arc, "Acid Arc")]
+    [InlineData(MonsterDamageType.Bludgeon, VtankCombatSpellType.Arc, "Shock Arc")]
+    [InlineData(MonsterDamageType.Cold, VtankCombatSpellType.Arc, "Frost Arc")]
+    [InlineData(MonsterDamageType.Fire, VtankCombatSpellType.Arc, "Flame Arc")]
+    [InlineData(MonsterDamageType.Electric, VtankCombatSpellType.Arc, "Lightning Arc")]
+    [InlineData(MonsterDamageType.Pierce, VtankCombatSpellType.Arc, "Force Arc")]
+    [InlineData(MonsterDamageType.Slash, VtankCombatSpellType.Arc, "Blade Arc")]
+    [InlineData(MonsterDamageType.Harm, VtankCombatSpellType.Arc, "Harm Other")]
+    [InlineData(MonsterDamageType.VoidBasic, VtankCombatSpellType.Arc, "Nether Arc")]
+    [InlineData(MonsterDamageType.Acid, VtankCombatSpellType.Ring, "Searing Disc")]
+    [InlineData(MonsterDamageType.Bludgeon, VtankCombatSpellType.Ring, "Tectonic Rifts")]
+    [InlineData(MonsterDamageType.Cold, VtankCombatSpellType.Ring, "Halo of Frost")]
+    [InlineData(MonsterDamageType.Fire, VtankCombatSpellType.Ring, "Cassius' Ring of Fire")]
+    [InlineData(MonsterDamageType.Electric, VtankCombatSpellType.Ring, "Eye of the Storm")]
+    [InlineData(MonsterDamageType.Pierce, VtankCombatSpellType.Ring, "Nuhmudira's Spines")]
+    [InlineData(MonsterDamageType.Slash, VtankCombatSpellType.Ring, "Horizon's Blades")]
+    [InlineData(MonsterDamageType.Harm, VtankCombatSpellType.Ring, "Curse of Raven Fury")]
+    [InlineData(MonsterDamageType.Acid, VtankCombatSpellType.Streak, "Acid Streak")]
+    [InlineData(MonsterDamageType.Bludgeon, VtankCombatSpellType.Streak, "Shock Wave Streak")]
+    [InlineData(MonsterDamageType.Cold, VtankCombatSpellType.Streak, "Frost Streak")]
+    [InlineData(MonsterDamageType.Fire, VtankCombatSpellType.Streak, "Flame Streak")]
+    [InlineData(MonsterDamageType.Electric, VtankCombatSpellType.Streak, "Lightning Streak")]
+    [InlineData(MonsterDamageType.Pierce, VtankCombatSpellType.Streak, "Force Streak")]
+    [InlineData(MonsterDamageType.Slash, VtankCombatSpellType.Streak, "Whirling Blade Streak")]
+    [InlineData(MonsterDamageType.Harm, VtankCombatSpellType.Streak, "Harm Other")]
+    [InlineData(MonsterDamageType.VoidBasic, VtankCombatSpellType.Streak, "Nether Streak")]
+    [InlineData(MonsterDamageType.Acid, VtankCombatSpellType.Vuln, "Acid Vulnerability Other")]
+    [InlineData(MonsterDamageType.Slash, VtankCombatSpellType.Vuln, "Blade Vulnerability Other")]
+    [InlineData(MonsterDamageType.Harm, VtankCombatSpellType.Vuln, "Drain Health Other")]
+    [InlineData(MonsterDamageType.VoidBasic, VtankCombatSpellType.Vuln, "Destructive Curse")]
+    internal void FamilyTableMatchesRetailVerbatim(
+        MonsterDamageType element,
+        VtankCombatSpellType type,
+        string expected) =>
+        Assert.Equal(expected, AttackSpellCatalog.FamilyName(element, type));
 
-        Assert.True(AttackSpellCatalog.TryClassify(spell, out var choice));
-        Assert.Equal((MonsterDamageType)expected, choice.DamageType);
-        Assert.Equal(AttackSpellShape.Direct, choice.Shape);
+    [Theory]
+    [InlineData(MonsterDamageType.Auto)]
+    [InlineData(MonsterDamageType.None)]
+    [InlineData(MonsterDamageType.Random)]
+    [InlineData(MonsterDamageType.Fists)]
+    [InlineData(MonsterDamageType.DrainAuto)]
+    [InlineData(MonsterDamageType.Prismatic)]
+    [InlineData(MonsterDamageType.Physical)]
+    internal void ElementsRetailHasNoCaseForResolveToNothing(MonsterDamageType element)
+    {
+        foreach (VtankCombatSpellType type in Enum.GetValues<VtankCombatSpellType>())
+            Assert.Null(AttackSpellCatalog.FamilyName(element, type));
+    }
+
+    [Fact]
+    public void QualityWalkTakesTheHighestKnownMemberOfTheLine()
+    {
+        AttackSpellCatalog catalog = AttackSpellCatalog.Build(
+        [
+            Spell(1, "Frost Bolt III", difficulty: 100),
+            Spell(2, "Frost Bolt VII", difficulty: 300),
+            Spell(3, "Incantation of Frost Bolt VII", difficulty: 350),
+            Spell(4, "Frost Bolt V", difficulty: 200),
+        ]);
+
+        PluginSpellInfo? resolved = catalog.Resolve(
+            MonsterDamageType.Cold,
+            VtankCombatSpellType.War);
+
+        Assert.Equal(3u, resolved?.SpellId);
+    }
+
+    [Fact]
+    public void WallsBlastsAndVolleysAreNeverCandidates()
+    {
+        AttackSpellCatalog catalog = AttackSpellCatalog.Build(
+        [
+            Spell(1, "Frost Wall VII", difficulty: 400),
+            Spell(2, "Frost Blast VII", difficulty: 380),
+            Spell(3, "Frost Volley VII", difficulty: 370),
+            Spell(4, "Frost Bolt II", difficulty: 50),
+        ]);
+
+        PluginSpellInfo? resolved = catalog.Resolve(
+            MonsterDamageType.Cold,
+            VtankCombatSpellType.War);
+
+        Assert.Equal(4u, resolved?.SpellId);
+        Assert.Null(catalog.Resolve(
+            MonsterDamageType.Cold,
+            VtankCombatSpellType.Arc));
+    }
+
+    [Fact]
+    public void VoidRingIsResolvedBySpellIdNotByName()
+    {
+        // fk.cs:560 — `result = this.m_b.f.c(5361);` is the only entry in the
+        // whole table that is not a name lookup.
+        AttackSpellCatalog catalog = AttackSpellCatalog.Build(
+        [
+            Spell(AttackSpellCatalog.VoidRingSpellId, "Coldeve's Fury", difficulty: 400),
+        ]);
+
+        Assert.Equal(
+            AttackSpellCatalog.VoidRingSpellId,
+            catalog.Resolve(MonsterDamageType.VoidBasic, VtankCombatSpellType.Ring)
+                ?.SpellId);
+        Assert.Equal(
+            AttackSpellCatalog.VoidRingSpellId,
+            catalog.Resolve(MonsterDamageType.Nether, VtankCombatSpellType.Ring)
+                ?.SpellId);
+    }
+
+    [Fact]
+    public void UsabilityPredicateSkipsToTheNextBestMemberOfTheLine()
+    {
+        AttackSpellCatalog catalog = AttackSpellCatalog.Build(
+        [
+            Spell(1, "Flame Bolt VII", difficulty: 300),
+            Spell(2, "Flame Bolt IV", difficulty: 150),
+        ]);
+
+        Assert.Equal(
+            2u,
+            catalog.Resolve(
+                MonsterDamageType.Fire,
+                VtankCombatSpellType.War,
+                spell => spell.Difficulty <= 200)?.SpellId);
+        Assert.Null(catalog.Resolve(
+            MonsterDamageType.Fire,
+            VtankCombatSpellType.War,
+            static _ => false));
     }
 
     [Theory]
-    [InlineData("Incantation of Piercing Lure")]
-    [InlineData("Piercing Vulnerability Other VII")]
-    public void VulnerabilityDebuffsAreNeverClassifiedAsDamageSpells(string name)
-    {
-        PluginSpellInfo spell = Spell(
-            1,
-            name,
-            "Makes the target more vulnerable to piercing damage.") with
-        {
-            TargetMask = 0x10,
-            IsDebuff = true,
-        };
-
-        Assert.False(AttackSpellCatalog.TryClassify(spell, out _));
-    }
-
-    [Fact]
-    public void ArcIsPreferredOnlyAtOrBeyondArcRange()
-    {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Flame Arc VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        var settings = new CombatSettings { UseArcs = UseArcsMode.AtRange, ArcRange = 15 };
-        var actions = new MonsterRuleActions
-        {
-            DamageType = MonsterDamageType.Fire,
-        };
-
-        Assert.Equal(AttackSpellShape.Direct, catalog.Candidates(
-            actions, settings, Target(5), 0, Character.Instance)[0].Shape);
-        Assert.Equal(AttackSpellShape.Arc, catalog.Candidates(
-            actions, settings, Target(20), 0, Character.Instance)[0].Shape);
-    }
-
-    [Fact]
-    public void StreakFlagPrefersStreakAndRetainsDirectFallback()
-    {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Flame Streak VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        var actions = new MonsterRuleActions
-        {
-            Flags = MonsterActionFlags.Attack | MonsterActionFlags.Streak,
-            DamageType = MonsterDamageType.Fire,
-        };
-
-        IReadOnlyList<AttackSpellChoice> choices = catalog.Candidates(
-            actions, new CombatSettings(), Target(5), 0, Character.Instance);
-
-        Assert.Equal(AttackSpellShape.Streak, choices[0].Shape);
-        Assert.Contains(choices, choice => choice.Shape == AttackSpellShape.Direct);
-    }
-
-    [Fact]
-    public void AttackPlusRingRequiresThresholdButRingOnlyRequiresOne()
-    {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Flame Ring", "fire damage outward from the caster") with
-            {
-                TargetMask = 0,
-            },
-        ]);
-        var settings = new CombatSettings { MinimumRingTargets = 4 };
-        var attackAndRing = new MonsterRuleActions
-        {
-            Flags = MonsterActionFlags.Attack | MonsterActionFlags.Ring,
-            DamageType = MonsterDamageType.Fire,
-        };
-        var ringOnly = attackAndRing with { Flags = MonsterActionFlags.Ring };
-
-        Assert.Equal(AttackSpellShape.Direct, catalog.Candidates(
-            attackAndRing, settings, Target(3), 3, Character.Instance)[0].Shape);
-        Assert.Equal(AttackSpellShape.Ring, catalog.Candidates(
-            attackAndRing, settings, Target(3), 4, Character.Instance)[0].Shape);
-        Assert.Equal(AttackSpellShape.Ring, catalog.Candidates(
-            ringOnly, settings, Target(3), 1, Character.Instance)[0].Shape);
-    }
-
-    [Fact]
-    public void HarmAndVoidModesDoNotCrossSelectSpellFamilies()
-    {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Harm Other VII", "Drains the target's Health."),
-            Spell(2, "Nether Bolt VII", "nether damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-
-        Assert.All(catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Harm },
-            new CombatSettings(), Target(3), 0, Character.Instance),
-            choice => Assert.Equal(AttackSpellShape.Harm, choice.Shape));
-        Assert.All(catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.VoidBasic },
-            new CombatSettings(), Target(3), 0, Character.Instance),
-            choice => Assert.Equal(MonsterDamageType.Nether, choice.DamageType));
-    }
+    [InlineData("Frost Bolt VII", "Frost Bolt")]
+    [InlineData("Incantation of Frost Bolt VII", "Frost Bolt")]
+    [InlineData("Cassius' Ring of Fire", "Cassius' Ring of Fire")]
+    [InlineData("Halo of Frost", "Halo of Frost")]
+    [InlineData("Shock Wave Streak III", "Shock Wave Streak")]
+    [InlineData("Harm Other I", "Harm Other")]
+    public void BaseNameStripsOnlyTheTierSuffixAndIncantationPrefix(
+        string name,
+        string expected) =>
+        Assert.Equal(expected, AttackSpellCatalog.BaseName(name));
 
     [Fact]
     public void AutoUsesVoidWhenWarIsUntrainedAndVoidIsTrained()
     {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Nether Bolt VII", "nether damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        var character = new Character(
-        [
-            new PluginSkillInfo(
-                43,
-                "Void Magic",
-                PluginSkillTraining.Trained,
-                400),
-        ]);
-
-        IReadOnlyList<AttackSpellChoice> choices = catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Auto },
-            new CombatSettings(),
-            Target(3),
-            0,
-            character);
-
-        Assert.NotEmpty(choices);
-        Assert.All(choices, choice =>
-            Assert.Equal(MonsterDamageType.Nether, choice.DamageType));
+        Assert.Equal(
+            MonsterDamageType.Auto,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Auto,
+                new Character([Skill(34), Skill(43)])));
+        Assert.Equal(
+            MonsterDamageType.VoidBasic,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Auto,
+                new Character([Skill(43)])));
+        Assert.Equal(
+            MonsterDamageType.DrainAuto,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Auto,
+                new Character([Skill(33)])));
+        Assert.Equal(
+            MonsterDamageType.Auto,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Auto,
+                new Character()));
     }
 
     [Fact]
-    public void AutoUsesOfficialMonsterOverrideBeforeSpellShapeOrTier()
-    {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Frost Arc VI", "cold damage") with
-            {
-                Tier = 6,
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        PluginCombatTarget target = Target(5) with
-        {
-            Name = "Magma Golem",
-            SpeciesId = 1,
-        };
-
-        IReadOnlyList<AttackSpellChoice> choices = catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Auto },
-            new CombatSettings { UseArcs = UseArcsMode.No },
-            target,
-            0,
-            Character.Instance);
-
-        Assert.Equal(MonsterDamageType.Cold, choices[0].DamageType);
-        Assert.Equal(AttackSpellShape.Arc, choices[0].Shape);
-    }
+    public void PrismaticIsAnAmmunitionPolicyAndLeavesMagicOnAuto() =>
+        Assert.Equal(
+            MonsterDamageType.Auto,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Prismatic,
+                new Character([Skill(34)])));
 
     [Fact]
-    public void PrismaticRetainsAutomaticMagicElementSelection()
+    public void AFistsRowPlansBludgeonWhateverTheEnchantmentSays()
     {
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(1, "Flame Bolt VII", "fire damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-            Spell(2, "Frost Bolt VII", "cold damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        PluginCombatTarget target = Target(5) with
-        {
-            Name = "Magma Golem",
-            SpeciesId = 1,
-        };
-
-        IReadOnlyList<AttackSpellChoice> choices = catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Prismatic },
-            new CombatSettings(),
-            target,
-            0,
-            Character.Instance);
-
-        Assert.NotEmpty(choices);
-        Assert.Equal(MonsterDamageType.Cold, choices[0].DamageType);
+        Assert.Equal(
+            MonsterDamageType.Bludgeon,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Fists,
+                new Character()));
+        Assert.Equal(
+            MonsterDamageType.Bludgeon,
+            AttackSpellCatalog.ResolveMagicDamageMode(
+                MonsterDamageType.Fists,
+                new Character(
+                    enchantments: [new PluginActiveEnchantment(0x0B76u, 1, 1, 60)])));
     }
 
-    [Fact]
-    public void FistsUsesTuskerSpellOnlyWhileTuskerFistsEnchantmentIsActive()
-    {
-        const uint tuskerFists = 0x0B76u;
-        var catalog = AttackSpellCatalog.Build(
-        [
-            Spell(tuskerFists, "Tusker Fists", string.Empty) with
-            {
-                TargetMask = 0x10,
-            },
-            Spell(2, "Shock Wave VII", "bludgeoning damage") with
-            {
-                TargetMask = 0x10,
-                IsProjectile = true,
-            },
-        ]);
-        var active = new Character(
-            enchantments:
-            [
-                new PluginActiveEnchantment(
-                    tuskerFists,
-                    Family: tuskerFists,
-                    Tier: 1,
-                    SecondsRemaining: 60),
-            ]);
-
-        Assert.Equal(tuskerFists, catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Fists },
-            new CombatSettings(), Target(3), 0, active)[0].Spell.SpellId);
-        Assert.Equal(MonsterDamageType.Bludgeon, catalog.Candidates(
-            new MonsterRuleActions { DamageType = MonsterDamageType.Fists },
-            new CombatSettings(), Target(3), 0, Character.Instance)[0].DamageType);
-    }
+    private static PluginSkillInfo Skill(uint id) => new(
+        id, $"Skill {id}", PluginSkillTraining.Trained, 300);
 
     private static PluginSpellInfo Spell(
         uint id,
         string name,
-        string description) => new(
+        int difficulty) => new(
             id,
             name,
             Family: id,
             Tier: 7,
-            Difficulty: 300,
+            Difficulty: difficulty,
             ManaCost: 35,
             DurationSeconds: 0,
             School: 34,
-            Description: description,
+            Description: string.Empty,
             IsSelfTargeted: false,
             IsBeneficial: false)
         {
             IsOffensive = true,
+            IsProjectile = true,
+            TargetMask = 0x10,
         };
-
-    private static PluginCombatTarget Target(float distance) => new(
-        10, "Target", 100, distance, 0, true, 1f);
 
     private sealed class Character(
         IReadOnlyList<PluginSkillInfo>? skills = null,
         IReadOnlyList<PluginActiveEnchantment>? enchantments = null) : ICharacterInfo
     {
-        public static Character Instance { get; } = new();
         public bool IsInWorld => true;
         public uint ObjectId => 1;
         public uint CurrentHealth => 100;

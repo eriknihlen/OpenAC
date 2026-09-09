@@ -31,7 +31,7 @@ public sealed class NavigationTests
         Assert.Equal(expected, NavigationController.SignedHeadingDelta(current, desired));
 
     [Fact]
-    public void PointSteeringTurnsInPlaceOutsideFortyFiveDegrees()
+    public void PointSteeringStopsAndFacesTheHeadingOutsideTheFourDegreeBand()
     {
         var automation = new FakeAutomation
         {
@@ -44,14 +44,58 @@ public sealed class NavigationTests
 
         Assert.True(controller.Tick(0.05d, canAct: true));
 
-        PluginMovementIntent intent = Assert.Single(automation.Intents);
-        Assert.False(intent.Forward);
-        Assert.True(intent.TurnRight);
-        Assert.False(intent.TurnLeft);
+        Assert.Empty(automation.Intents);
+        Assert.Equal(1, automation.ClearCount);
+        Assert.Equal(90f, Assert.Single(automation.FacedHeadings));
     }
 
     [Fact]
-    public void PointSteeringMovesWhileTurningInsideFarFortyFiveDegreeCone()
+    public void PointSteeringDoesNotReissueFaceHeadingInsideSevenTenthsOfASecond()
+    {
+        var automation = new FakeAutomation
+        {
+            NavigationSnapshot = Snapshot(Position(0d, 0d, heading: 0f)),
+        };
+        NavigationController controller = Controller(
+            automation,
+            RouteMode.Circular,
+            Waypoint(RouteWaypointType.Point, Position(1d, 0d)));
+
+        Assert.True(controller.Tick(0.293d, canAct: true));
+        Assert.True(controller.Tick(0.293d, canAct: true));
+
+        Assert.Equal(90f, Assert.Single(automation.FacedHeadings));
+
+        Assert.True(controller.Tick(0.293d, canAct: true));
+        Assert.Single(automation.FacedHeadings);
+        Assert.True(controller.Tick(0.293d, canAct: true));
+        Assert.Equal(2, automation.FacedHeadings.Count);
+    }
+
+    [Fact]
+    public void PointSteeringRunsForwardInsideTheFourDegreeBand()
+    {
+        var automation = new FakeAutomation
+        {
+            NavigationSnapshot = Snapshot(Position(0d, 0d, heading: 88f)),
+        };
+        NavigationController controller = Controller(
+            automation,
+            RouteMode.Circular,
+            Waypoint(RouteWaypointType.Point, Position(1d, 0d)));
+
+        Assert.True(controller.Tick(0.05d, canAct: true));
+
+        PluginMovementIntent intent = Assert.Single(automation.Intents);
+        Assert.True(intent.Forward);
+        Assert.True(intent.Run);
+        Assert.False(intent.TurnLeft);
+        Assert.False(intent.TurnRight);
+        Assert.Empty(automation.FacedHeadings);
+    }
+
+    [Fact]
+    public void PointSteeringIssuesNoTurnKeyIntentsAtAnyOffset()
     {
         var automation = new FakeAutomation
         {
@@ -64,9 +108,36 @@ public sealed class NavigationTests
 
         Assert.True(controller.Tick(0.05d, canAct: true));
 
-        PluginMovementIntent intent = Assert.Single(automation.Intents);
-        Assert.True(intent.Forward);
-        Assert.True(intent.TurnRight);
+        Assert.DoesNotContain(
+            automation.Intents,
+            static intent => intent.TurnLeft || intent.TurnRight);
+        Assert.Equal(90f, Assert.Single(automation.FacedHeadings));
+    }
+
+    [Fact]
+    public void ANavigateTierBelowTheWinnerStillClearsTheMovementIntent()
+    {
+        var automation = new FakeAutomation
+        {
+            NavigationSnapshot = Snapshot(Position(0d, 0d, heading: 0f)),
+        };
+        NavigationController controller = Controller(
+            automation,
+            RouteMode.Circular,
+            Waypoint(RouteWaypointType.Point, Position(1d, 0d)));
+        var rule = new ControllerMacroRule(
+            "NavigateRouteIdle",
+            context => controller.Tick(context.ElapsedSeconds, context.CanAct),
+            gate: () => true,
+            onLostTurn: controller.StopForLostTurn,
+            bookkeepWhenBlocked: false);
+
+        Assert.True(rule.ValidNow(new MacroPassContext(0.05d, CanAct: true)));
+        Assert.NotEmpty(automation.FacedHeadings);
+        Assert.Equal(1, automation.ClearCount);
+
+        Assert.False(rule.ValidNow(new MacroPassContext(0.05d, CanAct: false)));
+        Assert.Equal(2, automation.ClearCount);
     }
 
     [Fact]
@@ -360,9 +431,8 @@ public sealed class NavigationTests
         NavigationController controller = Controller(automation, RouteMode.Once, jump);
 
         Assert.True(controller.Tick(0.05d, canAct: true));
-        PluginMovementIntent turn = Assert.Single(automation.Intents);
-        Assert.True(turn.TurnRight);
-        Assert.False(turn.Jump);
+        Assert.Empty(automation.Intents);
+        Assert.Equal(90f, Assert.Single(automation.FacedHeadings));
 
         automation.NavigationSnapshot = Snapshot(Position(0d, 0d, heading: 90f));
         Assert.True(controller.Tick(0.05d, canAct: true));
@@ -905,6 +975,110 @@ public sealed class NavigationTests
         }
     }
 
+    // ── fd.cs:129-138, the nav-minimum-distance idle-peace override ──────
+
+    private static (NavigationController Controller, FakeAutomation Automation)
+        ArrivalOverride(double minimumDistanceMeters, bool idlePeaceMode)
+    {
+        PluginNavigationPosition point = Position(0d, 0d);
+        var automation = new FakeAutomation
+        {
+            NavigationSnapshot = Snapshot(point),
+            CombatSnapshot = new PluginCombatSnapshot
+            {
+                Mode = PluginCombatMode.Peace,
+            },
+            EquipmentItems =
+            [
+                new PluginEquipmentItem(
+                    ObjectId: 800u,
+                    Name: "Recovery Wand",
+                    ItemType: 0x00008000u,
+                    ValidLocations: 0x00100000u,
+                    EquippedLocation: 0x00100000u,
+                    ContainerObjectId: 0u,
+                    WielderObjectId: 1u,
+                    CombatUse: 0,
+                    DamageType: 0,
+                    WeaponSkill: 0,
+                    Damage: 0,
+                    DamageVariance: 0d),
+            ],
+        };
+        var settings = new NavigationSettings
+        {
+            Enabled = true,
+            Mode = RouteMode.Circular,
+            MinimumDistanceMeters = minimumDistanceMeters,
+        };
+        settings.Waypoints.Add(Waypoint(RouteWaypointType.Point, point));
+        settings.Waypoints.Add(
+            Waypoint(RouteWaypointType.Point, Position(1d, 0d)));
+        var combat = new CombatSettings { IdlePeaceMode = idlePeaceMode };
+        var host = new FakeHost(automation);
+        var controller = new NavigationController(host, settings);
+        controller.BindCombatModeGate(
+            new CombatModeGate(host, combat, new VitalSettings(), _ => { }),
+            combat);
+        return (controller, automation);
+    }
+
+    [Fact]
+    public void LowWaypointDistanceInPeaceWarnsOnceAndForcesMagicMode()
+    {
+        (NavigationController controller, FakeAutomation automation) =
+            ArrivalOverride(minimumDistanceMeters: 0.5d, idlePeaceMode: true);
+
+        Assert.True(controller.Tick(1d, canAct: true));
+
+        // Not advanced: the arrival was refused this tick.
+        Assert.Equal(0, controller.CurrentWaypointIndex);
+        Assert.Equal(
+            NavigationController.LowWaypointDistanceWarning,
+            Assert.Single(automation.PostedSystemMessages)
+                .Replace("[MossTank] ", string.Empty, StringComparison.Ordinal));
+        Assert.Equal(["EnterMode:Magic"], automation.ModeRequests);
+
+        // The warning is posted once per approach, not once per pass.
+        automation.ModeRequests.Clear();
+        Assert.True(controller.Tick(1d, canAct: true));
+        Assert.Single(automation.PostedSystemMessages);
+
+        controller.ResetOncePerRunWarnings();
+        Assert.True(controller.Tick(1d, canAct: true));
+        Assert.Equal(2, automation.PostedSystemMessages.Count);
+    }
+
+    /// <summary>
+    /// fd.cs:131 — the SETTING gates only the warning. With Idle Peace off,
+    /// the forced push into Magic mode still happens.
+    /// </summary>
+    [Fact]
+    public void LowWaypointDistanceForcesMagicEvenWithIdlePeaceOff()
+    {
+        (NavigationController controller, FakeAutomation automation) =
+            ArrivalOverride(minimumDistanceMeters: 0.5d, idlePeaceMode: false);
+
+        Assert.True(controller.Tick(1d, canAct: true));
+
+        Assert.Empty(automation.PostedSystemMessages);
+        Assert.Equal(["EnterMode:Magic"], automation.ModeRequests);
+        Assert.Equal(0, controller.CurrentWaypointIndex);
+    }
+
+    [Fact]
+    public void OrdinaryWaypointDistanceArrivesWithoutTouchingCombatMode()
+    {
+        (NavigationController controller, FakeAutomation automation) =
+            ArrivalOverride(minimumDistanceMeters: 2d, idlePeaceMode: true);
+
+        Assert.True(controller.Tick(1d, canAct: true));
+
+        Assert.Equal(1, controller.CurrentWaypointIndex);
+        Assert.Empty(automation.PostedSystemMessages);
+        Assert.Empty(automation.ModeRequests);
+    }
+
     private static NavigationController Controller(
         FakeAutomation automation,
         RouteMode mode,
@@ -966,9 +1140,47 @@ public sealed class NavigationTests
     }
 
     private sealed class FakeAutomation
-        : IAutomationSurface, INavigationAutomation, IPluginChat, IItemAutomation
+        : IAutomationSurface, INavigationAutomation, IPluginChat, IItemAutomation,
+          ICombatAutomation, IEquipmentAutomation
     {
         public bool IsAvailable => true;
+        public ICombatAutomation Combat => this;
+        public IEquipmentAutomation Equipment => this;
+        public PluginCombatSnapshot CombatSnapshot { get; set; }
+        PluginCombatSnapshot ICombatAutomation.Snapshot => CombatSnapshot;
+        public List<string> ModeRequests { get; } = [];
+        public List<string> PostedSystemMessages { get; } = [];
+        public List<PluginEquipmentItem> EquipmentItems { get; set; } = [];
+        bool IEquipmentAutomation.IsAvailable => EquipmentItems.Count > 0;
+        bool IEquipmentAutomation.IsBusy => false;
+        IReadOnlyList<PluginEquipmentItem> IEquipmentAutomation.CaptureOwnedEquipment() =>
+            EquipmentItems;
+        PluginEquipmentCommandResult IEquipmentAutomation.Equip(
+            uint objectId,
+            uint requestedLocation)
+        {
+            ModeRequests.Add($"Equip:{objectId}");
+            return new(PluginEquipmentCommandStatus.Started);
+        }
+
+        IReadOnlyList<PluginCombatTarget> ICombatAutomation.CaptureHostileTargets(
+            float maximumDistance) => [];
+        PluginCombatCommandResult ICombatAutomation.EnterDefaultMode() =>
+            new(PluginCombatCommandStatus.Unavailable);
+        PluginCombatCommandResult ICombatAutomation.EnterMode(PluginCombatMode mode)
+        {
+            ModeRequests.Add($"EnterMode:{mode}");
+            return new(PluginCombatCommandStatus.Started);
+        }
+
+        PluginCombatCommandResult ICombatAutomation.BeginPhysicalAttack(
+            uint targetObjectId,
+            PluginAttackHeight height,
+            float power) => new(PluginCombatCommandStatus.Unavailable);
+        PluginCombatCommandResult ICombatAutomation.ReleasePhysicalAttack() =>
+            new(PluginCombatCommandStatus.Unavailable);
+        PluginCombatCommandResult ICombatAutomation.AbortPhysicalAttack() =>
+            new(PluginCombatCommandStatus.Unavailable);
         public ICharacterInfo Character => NoOpAutomationSurface.Instance;
         public ISpellCatalog Spells => NoOpAutomationSurface.Instance;
         public IMagicCommands Magic { get; set; } = NoOpAutomationSurface.Instance;
@@ -1019,6 +1231,14 @@ public sealed class NavigationTests
             return PluginNavigationCommandStatus.Accepted;
         }
 
+        public List<float> FacedHeadings { get; } = [];
+
+        public PluginNavigationCommandStatus FaceHeading(float headingDegrees)
+        {
+            FacedHeadings.Add(headingDegrees);
+            return PluginNavigationCommandStatus.Accepted;
+        }
+
         public bool Submit(string text)
         {
             SubmittedChat.Add(text);
@@ -1028,7 +1248,8 @@ public sealed class NavigationTests
         public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence) =>
             ChatMessages.Where(message => message.Sequence > afterSequence).ToArray();
 
-        public void PostSystemMessage(string text) { }
+        public void PostSystemMessage(string text) =>
+            PostedSystemMessages.Add(text);
 
         public PluginItemCommandResult Use(uint objectId)
         {

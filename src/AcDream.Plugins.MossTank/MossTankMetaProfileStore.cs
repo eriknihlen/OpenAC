@@ -164,6 +164,25 @@ internal sealed class MossTankMetaProfileStore
         return false;
     }
 
+    public bool Exists(string? name)
+    {
+        string normalized = Normalize(name);
+        if (normalized.Length == 0)
+            return false;
+        if (normalized.Equals(ByCharacter, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string bare = normalized.EndsWith(".af", StringComparison.OrdinalIgnoreCase)
+            ? normalized
+            : normalized + ".af";
+        string plain = $"{VtankProfileDirectory.MetaFolder}/{bare}";
+        if (VtankStorage.IsAvailable && VtankStorage.ReadText(plain) is not null)
+            return true;
+
+        return _host.Storage.IsAvailable
+            && _host.Storage.ReadText(LegacyNamedKey(normalized)) is not null;
+    }
+
     public bool Create(
         string? name,
         bool copyCurrent,

@@ -134,9 +134,9 @@ public sealed class DispelControllerTests
             },
             Members =
             [
-                Fellow(2u, "One vuln", 4f),
-                Fellow(3u, "Two vulns", 5f),
-                Fellow(4u, "Too far", 5.1f),
+                Fellow(2u, "One vuln", 40f),
+                Fellow(3u, "Two vulns", 50f),
+                Fellow(4u, "Too far", 51f),
             ],
             TrackedByTarget = new Dictionary<uint, IReadOnlyList<PluginTrackedEnchantment>>
             {
@@ -145,9 +145,14 @@ public sealed class DispelControllerTests
                 [4u] = [Tracked(4u, fire), Tracked(4u, cold)],
             },
         };
+        // af.cs:84 scans PluginCore.PC.ec, the ITEMS PROFILE, not the whole
+        // inventory.
+        var profile = new CombatSettings();
+        profile.CombatItemNames.Add("Attenuated Awakener");
         var controller = new DispelController(
             new Host(automation),
-            new VitalSettings { UseDispelDrum = true });
+            new VitalSettings { UseDispelDrum = true },
+            profile);
 
         Assert.True(controller.Tick(0d, canAct: true));
         Assert.Equal((50u, 3u), automation.AppliedItem);

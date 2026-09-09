@@ -61,20 +61,13 @@ internal sealed partial class MossTankPanel
             case "stop":
                 if (_combat.Enabled)
                     SetMacroRunning(false);
-                if (_running)
-                    Stop("Force buff canceled.");
                 WriteVtank("Macro stopped.");
                 return;
             case "forcebuff":
-                if (!_running)
-                    StartOrStop();
-                else
-                    WriteVtank("Force buff is already enabled.");
+                _buffRule.StartForce();
                 return;
             case "cancelforcebuff":
-                if (_running)
-                    Stop("Force buff canceled.");
-                WriteVtank("Force buff canceled.");
+                _buffRule.CancelForce();
                 return;
             case "settings":
                 HandleSettingsCommand(arguments);
@@ -243,6 +236,7 @@ internal sealed partial class MossTankPanel
                 copyCurrent: true,
                 _allSettings,
                 _noBuffItemNames,
+                _commandLogTypes,
                 out string notice))
             {
                 ResetProfileConsumers();
@@ -825,11 +819,25 @@ internal sealed partial class MossTankPanel
             return;
         }
         string type = parts[0];
-        if (parts[1] == "on")
-            _commandLogTypes.Add(type);
-        else
-            _commandLogTypes.Remove(type);
+        bool changed = parts[1] == "on"
+            ? _commandLogTypes.Add(type)
+            : _commandLogTypes.Remove(type);
         WriteVtank((parts[1] == "on" ? "Set " : "Reset ") + type);
+        if (changed)
+            SaveProfile();
+    }
+
+    private void EmitMacroLog(MacroLogChannel channel, string message) =>
+        EmitMacroLog(channel, message, chat: true);
+
+    private void EmitMacroLog(
+        MacroLogChannel channel, string message, bool chat)
+    {
+        if (!_commandLogTypes.Contains(channel.ToString()))
+            return;
+        if (chat)
+            _host.Automation.Chat.PostSystemMessage("[MossTank] " + message);
+        _host.Log.Info("[vt log " + channel + "] " + message);
     }
 
     private void DumpObjectTracker()

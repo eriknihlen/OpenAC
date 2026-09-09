@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank;
@@ -16,7 +16,10 @@ internal static class VtankSettingsProfileSerializer
         public required NavigationSettings Navigation { get; init; }
     }
 
-    public static VtankDatabase Load(string text, AllSettings target)
+    public static VtankDatabase Load(
+        string text,
+        AllSettings target,
+        Action<string>? warn = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         VtankDatabase database = VtankDatabase.Parse(text);
@@ -32,6 +35,13 @@ internal static class VtankSettingsProfileSerializer
         {
             string name = row.Cells[nameColumn].AsString();
             Apply(name, row.Cells[valueColumn], target);
+        }
+
+        if (VtankMonsterRuleTable.TryRead(database, warn) is { Count: > 0 } rules)
+        {
+            target.Combat.Rules.Clear();
+            foreach (MonsterRule rule in rules)
+                target.Combat.Rules.Add(rule);
         }
         return database;
     }
@@ -56,6 +66,7 @@ internal static class VtankSettingsProfileSerializer
                 continue;
             row.Cells[valueColumn] = captured;
         }
+        VtankMonsterRuleTable.Write(document, [.. source.Combat.Rules]);
         return document.Render();
     }
 

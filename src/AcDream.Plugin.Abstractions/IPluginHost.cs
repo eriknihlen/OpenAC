@@ -22,4 +22,10 @@ public interface IPluginHost
     IAutomationSurface Automation { get; }
 
     IPluginStorage VtankProfiles => NoOpPluginStorage.Instance;
+
+    IReadOnlyDictionary<string, string> SessionSettings =>
+        EmptySessionSettings;
+
+    private static readonly IReadOnlyDictionary<string, string> EmptySessionSettings =
+        new Dictionary<string, string>();
 }

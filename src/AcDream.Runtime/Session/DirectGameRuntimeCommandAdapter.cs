@@ -446,6 +446,27 @@ public sealed class DirectGameRuntimeCommandAdapter
             RuntimeCommandStatus.Accepted);
     }
 
+    public RuntimeCommandResult TurnToHeading(
+        RuntimeGenerationToken expectedGeneration,
+        float headingDegrees,
+        bool applyRunHoldKey = false)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status =
+            _runtime.MovementOwner.TurnToHeading(
+                headingDegrees,
+                applyRunHoldKey)
+                ? RuntimeCommandStatus.Accepted
+                : RuntimeCommandStatus.Unsupported;
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x103,
+            status);
+    }
+
     public RuntimeCommandResult AddShortcut(
         RuntimeGenerationToken expectedGeneration,
         in RuntimeShortcutCommand command)

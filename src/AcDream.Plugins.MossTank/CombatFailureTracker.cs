@@ -7,6 +7,8 @@ internal enum CombatSuppressionReason
     None,
     Blacklisted,
     Ghost,
+
+    Dead,
 }
 
 internal sealed class CombatFailureTracker
@@ -133,10 +135,42 @@ internal sealed class CombatFailureTracker
         entry.AttackHealthRevision = healthRevision;
     }
 
+    public void ForceBlacklist(
+        uint objectId,
+        double now,
+        CombatSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (objectId == 0u)
+            return;
+        Entry entry = Get(objectId);
+        entry.BlacklistedUntil = now + Math.Max(
+            0d,
+            settings.BlacklistMonsterTimeoutSeconds);
+        entry.SuccessfulMisses = 0;
+    }
+
+    public void ClearBlacklist(uint objectId)
+    {
+        if (objectId == 0u || !_entries.TryGetValue(objectId, out Entry? entry))
+            return;
+        entry.SuccessfulMisses = 0;
+        entry.BlacklistedUntil = 0d;
+    }
+
+    public void MarkDead(uint objectId)
+    {
+        if (objectId == 0u)
+            return;
+        Get(objectId).IsDead = true;
+    }
+
     public CombatSuppressionReason Reason(uint objectId, double now)
     {
         if (!_entries.TryGetValue(objectId, out Entry? entry))
             return CombatSuppressionReason.None;
+        if (entry.IsDead)
+            return CombatSuppressionReason.Dead;
         if (entry.IsGhost)
             return CombatSuppressionReason.Ghost;
         return entry.BlacklistedUntil > now
@@ -164,5 +198,6 @@ internal sealed class CombatFailureTracker
         public double? EngagedAt;
         public double BlacklistedUntil;
         public bool IsGhost;
+        public bool IsDead;
     }
 }

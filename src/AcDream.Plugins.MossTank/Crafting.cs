@@ -295,6 +295,24 @@ internal sealed class CraftingController
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
     }
 
+    private Func<bool>? _readyToCraftInPeace;
+
+    internal void BindPeaceGate(Func<bool> readyToCraftInPeace) =>
+        _readyToCraftInPeace = readyToCraftInPeace
+            ?? throw new ArgumentNullException(nameof(readyToCraftInPeace));
+
+    private bool StartInPeace(IItemAutomation items, CraftingPlan? plan)
+    {
+        if (plan is not { } next)
+            return false;
+        if (_readyToCraftInPeace is { } ready && !ready())
+        {
+            Status = $"Entering peace mode to craft {next.Recipe.ResultItem}";
+            return true;
+        }
+        return Start(items, next);
+    }
+
     public string Status { get; private set; } = "AutoCraft idle";
 
     public bool Request(string resultName, int desiredCount = 1)
@@ -315,7 +333,7 @@ internal sealed class CraftingController
             _host.Automation.Character,
             desiredCount,
             _settings.ArrowheadFletchDifficultyExcess);
-        return plan is { } next && Start(items, next);
+        return StartInPeace(items, plan);
     }
 
     public bool CanRequest(string resultName, int desiredCount = 1)
@@ -339,7 +357,7 @@ internal sealed class CraftingController
     {
         IItemAutomation items = _host.Automation.Items;
         ObserveCompletion(items);
-        if (ObserveSplitCompletion(items, elapsedSeconds))
+        if (ObserveSplitCompletion(items, elapsedSeconds, canAct, advanceClock: true))
             return true;
         if (_pending is not null)
         {
@@ -369,14 +387,14 @@ internal sealed class CraftingController
         plan ??= PlanCategoryCraft(
             inventory,
             idleCounts: false);
-        return plan is { } next && Start(items, next);
+        return StartInPeace(items, plan);
     }
 
     public bool Tick(double elapsedSeconds, bool canAct)
     {
         IItemAutomation items = _host.Automation.Items;
         ObserveCompletion(items);
-        if (ObserveSplitCompletion(items, elapsedSeconds))
+        if (ObserveSplitCompletion(items, elapsedSeconds, canAct, advanceClock: false))
             return true;
         if (_pending is not null)
         {
@@ -414,20 +432,20 @@ internal sealed class CraftingController
             _host.Automation.Character,
             arrowheadFletchDifficultyExcess:
                 _settings.ArrowheadFletchDifficultyExcess);
-        if (plan is not { } next)
+        if (plan is null)
         {
             Status = "AutoCraft idle";
             return false;
         }
 
-        return Start(items, next);
+        return StartInPeace(items, plan);
     }
 
     public bool TickIdle(double elapsedSeconds, bool canAct)
     {
         IItemAutomation items = _host.Automation.Items;
         ObserveCompletion(items);
-        if (ObserveSplitCompletion(items, elapsedSeconds))
+        if (ObserveSplitCompletion(items, elapsedSeconds, canAct, advanceClock: false))
             return true;
         if (_pending is not null)
         {
@@ -455,7 +473,7 @@ internal sealed class CraftingController
                 _settings.IdleComponentMinimum)
             : null;
         plan ??= PlanCategoryCraft(inventory, idleCounts: true);
-        return plan is { } next && Start(items, next);
+        return StartInPeace(items, plan);
     }
 
     private CraftingPlan? PlanCategoryCraft(
@@ -572,12 +590,15 @@ internal sealed class CraftingController
 
     private bool ObserveSplitCompletion(
         IItemAutomation items,
-        double elapsedSeconds)
+        double elapsedSeconds,
+        bool canAct,
+        bool advanceClock)
     {
         if (_pendingSplit is not { } splitPlan)
             return false;
 
-        _splitElapsed += Math.Max(0d, elapsedSeconds);
+        if (advanceClock)
+            _splitElapsed += Math.Max(0d, elapsedSeconds);
         PluginInventoryCompletion completion = items.LastInventoryCompletion;
         if (completion.Revision != 0
             && completion.Revision != _observedInventoryCompletion)
@@ -595,7 +616,7 @@ internal sealed class CraftingController
             }
         }
 
-        if (_splitAcknowledged && TryStartAfterSplit(items, splitPlan))
+        if (canAct && _splitAcknowledged && TryStartAfterSplit(items, splitPlan))
             return true;
         if (_splitElapsed < SplitTimeoutSeconds)
         {

@@ -168,6 +168,132 @@ public sealed class CraftingTests
     }
 
     [Fact]
+    public void ARuleBelowTheWinnerObservesTheSplitButDoesNotResumeTheCraft()
+    {
+        var automation = new Automation
+        {
+            Inventory = [Item(20, "Chorizite Oil") with
+            {
+                ContainerObjectId = 1u,
+                StackSize = 2,
+            }],
+        };
+        var settings = new InventorySettings
+        {
+            AutoCraftItems = true,
+            SplitPeas = false,
+        };
+        var profiles = new CombatSettings();
+        profiles.ConsumableNames.Add("Strong Chorizite Oil");
+        var controller = new CraftingController(
+            new Host(automation),
+            settings,
+            profiles);
+
+        Assert.True(controller.Tick(0d, canAct: true));
+        Assert.Equal([(20u, 1u, 1u)], automation.Moves);
+
+        automation.InventoryCompletion = new PluginInventoryCompletion(
+            1,
+            PluginInventoryCommandKind.SplitToContainer,
+            20u,
+            0u);
+        automation.Busy = false;
+        automation.Inventory =
+        [
+            Item(20, "Chorizite Oil") with
+            {
+                ContainerObjectId = 1u,
+                StackSize = 1,
+            },
+            Item(21, "Chorizite Oil") with
+            {
+                ContainerObjectId = 1u,
+                StackSize = 1,
+            },
+        ];
+
+        // A rule above won this pass. The receipt is still observed...
+        Assert.True(controller.Tick(0.05d, canAct: false));
+        Assert.Empty(automation.Applies);
+
+        Assert.True(controller.Tick(0.05d, canAct: true));
+        Assert.Equal([(20u, 21u)], automation.Applies);
+    }
+
+    [Fact]
+    public void SplitTimeoutIsWallClockNotThreeTimesTheRuleListDepth()
+    {
+        var automation = new Automation
+        {
+            Inventory = [Item(20, "Chorizite Oil") with
+            {
+                ContainerObjectId = 1u,
+                StackSize = 2,
+            }],
+        };
+        var settings = new InventorySettings
+        {
+            AutoCraftItems = true,
+            SplitPeas = false,
+        };
+        var profiles = new CombatSettings();
+        profiles.ConsumableNames.Add("Strong Chorizite Oil");
+        var controller = new CraftingController(
+            new Host(automation),
+            settings,
+            profiles);
+
+        Assert.True(controller.Tick(0d, canAct: true));
+        Assert.Equal([(20u, 1u, 1u)], automation.Moves);
+
+        for (int pass = 0; pass < 9; pass++)
+        {
+            Assert.True(controller.TickCritical(1d, canAct: true));
+            Assert.True(controller.Tick(1d, canAct: true));
+            Assert.True(controller.TickIdle(1d, canAct: true));
+        }
+        Assert.NotEqual("AutoCraft split timed out", controller.Status);
+
+        Assert.True(controller.TickCritical(1.5d, canAct: true));
+        Assert.Equal("AutoCraft split timed out", controller.Status);
+    }
+
+    [Fact]
+    public void CraftingWaitsForPeaceModeBeforeApplyingARecipe()
+    {
+        var automation = new Automation
+        {
+            Inventory =
+            [
+                Item(1, "Chorizite Oil") with { StackSize = 2 },
+            ],
+        };
+        var settings = new InventorySettings
+        {
+            AutoCraftItems = true,
+            SplitPeas = false,
+        };
+        var profiles = new CombatSettings();
+        profiles.ConsumableNames.Add("Strong Chorizite Oil");
+        var controller = new CraftingController(
+            new Host(automation),
+            settings,
+            profiles);
+        bool inPeace = false;
+        controller.BindPeaceGate(() => inPeace);
+
+        Assert.True(controller.Tick(0d, canAct: true));
+        Assert.Empty(automation.Applies);
+        Assert.Empty(automation.Moves);
+        Assert.Contains("peace mode", controller.Status, StringComparison.Ordinal);
+
+        inPeace = true;
+        Assert.True(controller.Tick(0.5d, canAct: true));
+        Assert.NotEmpty(automation.Moves);
+    }
+
+    [Fact]
     public void AmmunitionRequestCraftsEvenWhenGeneralAutoCraftIsDisabled()
     {
         var automation = new Automation

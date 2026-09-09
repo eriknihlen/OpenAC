@@ -523,6 +523,63 @@ public sealed class LocalPlayerStateTests
         Assert.Equal(-99, s.GetSkillVitaeModifier(6u));
     }
 
+    [Fact]
+    public void GetSkillValue_AttributeBuffsRaiseTheFormulaTerm_ColdeveCreatureEnchantmentPin()
+    {
+        var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u), TestSpell(3u)]));
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModKey: 5u, StatModValue: 45f, Bucket: 2u));   // Focus VII
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModKey: 6u, StatModValue: 45f, Bucket: 2u));   // Self VII
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 3u, LayerId: 3u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
+            StatModKey: 0x1Fu, StatModValue: 50f, Bucket: 2u));
+        var s = new LocalPlayerState(book);
+        s.SkillFormulaBonusResolver = (skillId, attrs) => skillId == 0x1Fu
+            ? (uint)Math.Floor((attrs[5u] + attrs[6u]) / 4d + 0.5d)
+            : 0u;
+        s.OnAttributeUpdate(atType: 5u, ranks: 0u, start: 251u, xp: 0u);
+        s.OnAttributeUpdate(atType: 6u, ranks: 0u, start: 251u, xp: 0u);
+        s.OnSkillUpdate(skillId: 0x1Fu, ranks: 200u, status: 2u, xp: 0u,
+            init: 15u, resistance: 0u, lastUsed: 0d, formulaBonus: 126u);
+
+        PlayerSkillMath.Value value = s.GetSkillValue(0x1Fu)!.Value;
+        Assert.Equal(22, s.AttributeEnchantmentSkillDelta(0x1Fu));
+        Assert.Equal(341, value.UnenchantedLevel);
+        Assert.Equal(413, value.EffectiveLevel);
+        Assert.Equal(72, value.EffectiveLevel - value.UnenchantedLevel);
+        Assert.Equal(413, s.GetEffectiveSkill(0x1Fu));
+    }
+
+    [Fact]
+    public void AttributeEnchantmentSkillDelta_IsZeroWithoutAResolverOrWithoutAttributeBuffs()
+    {
+        var book = new Spellbook(SpellTable.Create([TestSpell(1u)]));
+        var s = new LocalPlayerState(book);
+        s.OnAttributeUpdate(atType: 3u, ranks: 0u, start: 100u, xp: 0u);
+        s.OnSkillUpdate(skillId: 24u, ranks: 50u, status: 2u, xp: 0u,
+            init: 0u, resistance: 0u, lastUsed: 0d, formulaBonus: 100u);
+
+        Assert.Equal(0, s.AttributeEnchantmentSkillDelta(24u));
+
+        s.SkillFormulaBonusResolver = (skillId, attrs) => attrs[3u];
+        Assert.Equal(0, s.AttributeEnchantmentSkillDelta(24u));
+        Assert.Equal(150, s.GetEffectiveSkill(24u));
+
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModKey: 3u, StatModValue: 20f, Bucket: 2u));   // Quickness +20
+        Assert.Equal(20, s.AttributeEnchantmentSkillDelta(24u));
+        Assert.Equal(170, s.GetEffectiveSkill(24u));
+        Assert.Equal(150, s.GetSkillValue(24u)!.Value.UnenchantedLevel);
+    }
+
     private static SpellMetadata TestSpell(uint spellId) => new(
         spellId, "Test", "War Magic", 0u, 0u, "", 0f, 0,
         false, false, "", 0, 0, 0u, 0, false, false, true,

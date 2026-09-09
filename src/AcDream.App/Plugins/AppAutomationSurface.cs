@@ -713,6 +713,12 @@ internal sealed class AppAutomationSurface
         BaseRangeModifier = meta.BaseRangeModifier,
         FormulaComponentIds = meta.FormulaComponents,
         IconId = meta.IconId,
+        Saying = meta.Saying,
+        ComponentSet = new PluginSpellComponentSet(
+            meta.ComponentSet.Herb,
+            meta.ComponentSet.Powder,
+            meta.ComponentSet.Potion,
+            meta.ComponentSet.Talisman),
     };
 
     private static uint SchoolSkillId(MagicSchool school) => school switch
@@ -1650,6 +1656,22 @@ internal sealed class AppAutomationSurface
             : PluginNavigationCommandStatus.Rejected;
     }
 
+    public PluginNavigationCommandStatus FaceHeading(float headingDegrees)
+    {
+        CurrentGameRuntimeAdapter? commands;
+        lock (_gate)
+            commands = _sessionCommands;
+        if (commands is null || !IsAvailable)
+            return PluginNavigationCommandStatus.Unavailable;
+        RuntimeCommandResult result =
+            commands.MovementCommands.TurnToHeading(
+                commands.Generation,
+                headingDegrees);
+        return result.Status == RuntimeCommandStatus.Accepted
+            ? PluginNavigationCommandStatus.Accepted
+            : PluginNavigationCommandStatus.Rejected;
+    }
+
     internal static PluginNavigationPosition ProjectNavigationPosition(
         Position position)
     {
@@ -1962,16 +1984,47 @@ internal sealed class AppAutomationSurface
             SpellCastGate.Unknown => PluginCastGate.NotKnown,
             SpellCastGate.NoTargetNeeded => PluginCastGate.Ready,
             SpellCastGate.TargetCompatible => PluginCastGate.Ready,
+            SpellCastGate.NoTargetSelected => PluginCastGate.NoTargetSelected,
+            SpellCastGate.TargetIncompatible => PluginCastGate.TargetIncompatible,
             _ => PluginCastGate.Refused,
         };
     }
 
-    public bool Cast(uint spellId)
+    public bool Cast(uint spellId) =>
+        RequestCast(spellId) == PluginCastRequestResult.Sent;
+
+    public PluginCastRequestResult RequestCast(uint spellId)
     {
         RuntimeSpellCastState? cast;
         lock (_gate)
             cast = _cast;
-        return cast is not null && cast.Cast(spellId) == CastRequestResult.Sent;
+        if (cast is null)
+            return PluginCastRequestResult.Unavailable;
+        return cast.Cast(spellId) switch
+        {
+            CastRequestResult.Sent => PluginCastRequestResult.Sent,
+            CastRequestResult.UnknownSpell => PluginCastRequestResult.UnknownSpell,
+            CastRequestResult.NoTarget => PluginCastRequestResult.NoTarget,
+            CastRequestResult.IncompatibleTarget =>
+                PluginCastRequestResult.IncompatibleTarget,
+            CastRequestResult.MissingComponents =>
+                PluginCastRequestResult.MissingComponents,
+            _ => PluginCastRequestResult.Unavailable,
+        };
+    }
+
+    public PluginCastRequestResult RequestCast(
+        uint spellId, uint targetObjectId) =>
+        SelectExplicitTarget(targetObjectId)
+            ? RequestCast(spellId)
+            : PluginCastRequestResult.IncompatibleTarget;
+
+    public bool HasComponents(uint spellId)
+    {
+        RuntimeSpellCastState? cast;
+        lock (_gate)
+            cast = _cast;
+        return cast is null || cast.HasRequiredComponents(spellId);
     }
 
     public PluginCastCompletion LastCompletion
@@ -2045,7 +2098,7 @@ internal sealed class AppAutomationSurface
             }
             built.Add(new PluginEquipmentItem(
                 item.ObjectId,
-                item.GetAppropriateName(),
+                item.Name,
                 (uint)item.Type,
                 (uint)item.ValidLocations,
                 (uint)item.CurrentlyEquippedLocation,
@@ -2213,89 +2266,7 @@ internal sealed class AppAutomationSurface
         {
             if (!IsPlayerOwned(item, playerId, objects))
                 continue;
-            built.Add(new PluginInventoryItem(
-                item.ObjectId,
-                item.WeenieClassId,
-                item.GetAppropriateName(),
-                (uint)item.Type,
-                item.ContainerId,
-                item.WielderId,
-                (uint)item.ValidLocations,
-                (uint)item.CurrentlyEquippedLocation,
-                item.Useability ?? 0u,
-                item.TargetType ?? 0u,
-                item.PublicWeenieBitfield ?? 0u,
-                item.StackSize,
-                item.Structure,
-                item.MaxStructure,
-                item.SpellId
-                    ?? (item.Properties.DataIds.TryGetValue(
-                        (uint)PropertyDataId.Spell,
-                        out uint itemSpell) ? itemSpell : 0u),
-                item.Properties.GetInt((uint)PropertyInt.PetClass),
-                item.Properties.GetInt((uint)PropertyInt.SummoningMastery),
-                item.Properties.DataIds.TryGetValue(
-                    (uint)PropertyDataId.ProcSpell,
-                    out uint procSpell) ? procSpell : 0u,
-                item.Properties.GetBool((uint)PropertyBool.ProcSpellSelfTargeted),
-                item.Properties.GetFloat((uint)PropertyFloat.ProcSpellRate),
-                item.Properties.GetInt((uint)PropertyInt.WeaponSkill),
-                item.Properties.GetInt((uint)PropertyInt.DamageType),
-                item.Properties.GetInt((uint)PropertyInt.Damage),
-                item.Properties.GetFloat((uint)PropertyFloat.DamageVariance),
-                item.Properties.GetInt((uint)PropertyInt.UseRequiresSkill),
-                item.Properties.GetInt((uint)PropertyInt.UseRequiresSkillLevel),
-                item.Properties.GetInt((uint)PropertyInt.UseRequiresSkillSpec))
-            {
-                CombatUse = item.CombatUse ?? 0,
-                ItemSpellcraft = item.Properties.GetInt(
-                    (uint)PropertyInt.ItemSpellcraft),
-                WieldRequirements = item.Properties.GetInt(
-                    (uint)PropertyInt.WieldRequirements),
-                WieldSkillType = item.Properties.GetInt(
-                    (uint)PropertyInt.WieldSkilltype),
-                WieldDifficulty = item.Properties.GetInt(
-                    (uint)PropertyInt.WieldDifficulty),
-                AttackType = item.Properties.GetInt(
-                    (uint)PropertyInt.AttackType),
-                WeaponType = item.Properties.GetInt(
-                    (uint)PropertyInt.WeaponType),
-                BoosterVital = item.Properties.GetInt(
-                    (uint)PropertyInt.BoosterEnum),
-                BoostValue = item.Properties.GetInt(
-                    (uint)PropertyInt.BoostValue),
-                HealKitModifier = item.Properties.GetFloat(
-                    (uint)PropertyFloat.HealkitMod),
-                AppraisedSpellIds = item.AppraisedSpellIds.Count == 0
-                    ? Array.Empty<uint>()
-                    : item.AppraisedSpellIds.ToArray(),
-                GearDamage = item.Properties.GetInt((uint)PropertyInt.GearDamage),
-                GearDamageResistance = item.Properties.GetInt(
-                    (uint)PropertyInt.GearDamageResist),
-                GearCriticalChance = item.Properties.GetInt(
-                    (uint)PropertyInt.GearCrit),
-                GearCriticalResistance = item.Properties.GetInt(
-                    (uint)PropertyInt.GearCritResist),
-                GearCriticalDamage = item.Properties.GetInt(
-                    (uint)PropertyInt.GearCritDamage),
-                GearCriticalDamageResistance = item.Properties.GetInt(
-                    (uint)PropertyInt.GearCritDamageResist),
-                MaximumStackSize = item.StackSizeMax,
-                ContainerSlot = item.ContainerSlot,
-                ItemsCapacity = item.ItemsCapacity,
-                ContainersCapacity = item.ContainersCapacity,
-                Burden = item.Burden,
-                Value = item.Value,
-                ItemCurrentMana = item.Properties.GetInt(
-                    (uint)PropertyInt.ItemCurMana),
-                ItemMaximumMana = item.Properties.GetInt(
-                    (uint)PropertyInt.ItemMaxMana),
-                Workmanship = item.Workmanship,
-                MaterialType = item.MaterialType ?? 0u,
-                ObjectClass = ClassifyObject(item),
-                Palettes = ProjectPalettes(runtime, item.ObjectId),
-                IconId = item.IconId,
-            });
+            built.Add(ProjectInventoryItem(runtime, item));
         }
         built.Sort(static (left, right) =>
         {
@@ -2728,7 +2699,7 @@ internal sealed class AppAutomationSurface
             result.Add(new PluginLootContainer(
                 candidate.ObjectId,
                 candidate.WeenieClassId,
-                candidate.GetAppropriateName(),
+                candidate.Name,
                 distance,
                 external.HasCorpseBeenOpened(candidate.ObjectId),
                 external.RequestedContainerId == candidate.ObjectId,
@@ -2944,13 +2915,13 @@ internal sealed class AppAutomationSurface
             new Dictionary<uint, uint>(source.DataIds),
             new Dictionary<uint, uint>(source.InstanceIds));
 
-    private PluginInventoryItem ProjectInventoryItem(
+    internal PluginInventoryItem ProjectInventoryItem(
         GameRuntime runtime,
         ClientObject item) =>
         new(
             item.ObjectId,
             item.WeenieClassId,
-            item.GetAppropriateName(),
+            item.Name,
             (uint)item.Type,
             item.ContainerId,
             item.WielderId,
@@ -3022,6 +2993,7 @@ internal sealed class AppAutomationSurface
             MaterialType = item.MaterialType ?? 0u,
             ObjectClass = ClassifyObject(item),
             Palettes = ProjectPalettes(runtime, item.ObjectId),
+            IconId = item.IconId,
         };
 
     private IReadOnlyList<PluginPaletteInfo> ProjectPalettes(

@@ -108,6 +108,22 @@ internal sealed class MossTankRouteProfileStore
         return false;
     }
 
+    public bool Exists(string? name)
+    {
+        string normalized = Normalize(name);
+        if (normalized.Length == 0)
+            return false;
+        if (normalized.Equals(ByCharacter, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string candidate = ToFileName(normalized);
+        if (VtankStorage.IsAvailable && VtankStorage.ReadText(candidate) is not null)
+            return true;
+
+        return _host.Storage.IsAvailable
+            && _host.Storage.ReadText(LegacyProfileKey(normalized, byCharacter: false)) is not null;
+    }
+
     public bool Create(
         string? name,
         bool copyCurrent,

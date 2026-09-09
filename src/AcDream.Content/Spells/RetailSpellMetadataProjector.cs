@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using System.Linq;
 using AcDream.Core.Spells;
 using DatReaderWriter.DBObjs;
@@ -54,6 +55,8 @@ public static class RetailSpellMetadataProjector
         {
             SchoolId = ToCoreSchool(spell.School),
             FormulaComponents = formula,
+            Saying = BuildSaying(spell.Name.Value, formula, componentTable),
+            ComponentSet = BuildComponentSet(formula, componentTable),
             FormulaVersion = spell.FormulaVersion,
             ComponentLoss = spell.ComponentLoss,
             BaseRangeConstant = spell.BaseRangeConstant,
@@ -90,6 +93,63 @@ public static class RetailSpellMetadataProjector
         DatReaderWriter.Enums.MagicSchool.VoidMagic => CoreMagicSchool.VoidMagic,
         _ => CoreMagicSchool.None,
     };
+
+    private static string BuildSaying(
+        string spellName,
+        IReadOnlyList<uint> formula,
+        SpellComponentTable? componentTable)
+    {
+        if (spellName == "Curse of Raven Fury")
+            return "tugakquati";
+        if (componentTable is null)
+            return string.Empty;
+        var builder = new StringBuilder();
+        foreach (uint componentId in formula)
+        {
+            if (componentTable.Components.TryGetValue(
+                    componentId,
+                    out SpellComponentBase? component))
+            {
+                builder.Append(component.Text.Value);
+            }
+        }
+        return builder.ToString();
+    }
+
+    private static SpellComponentSet BuildComponentSet(
+        IReadOnlyList<uint> formula,
+        SpellComponentTable? componentTable)
+    {
+        if (componentTable is null)
+            return default;
+
+        uint herb = 0u, powder = 0u, potion = 0u, talisman = 0u;
+        foreach (uint componentId in formula)
+        {
+            if (!componentTable.Components.TryGetValue(
+                    componentId,
+                    out SpellComponentBase? component))
+            {
+                continue;
+            }
+            switch (component.Type)
+            {
+                case ComponentType.Herb:
+                    herb = componentId;
+                    break;
+                case ComponentType.Powder:
+                    powder = componentId;
+                    break;
+                case ComponentType.Potion:
+                    potion = componentId;
+                    break;
+                case ComponentType.Talisman:
+                    talisman = componentId;
+                    break;
+            }
+        }
+        return new SpellComponentSet(herb, powder, potion, talisman);
+    }
 
     private static string BuildSpellWords(
         IReadOnlyList<uint> formula,

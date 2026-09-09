@@ -474,13 +474,15 @@ public static class GameEventWiring
             var p = GameEvents.ParseDefenderNotification(e.Payload.Span);
             if (p is not null) combat.OnDefenderNotification(
                 p.Value.AttackerName, 0u, p.Value.DamageType,
-                p.Value.Damage, p.Value.HitQuadrant, p.Value.Critical);
+                p.Value.Damage, p.Value.HitQuadrant, p.Value.Critical,
+                p.Value.HealthPercent, p.Value.AttackConditions);
         });
         registrar.Register(GameEventType.AttackerNotification, e =>
         {
             var p = GameEvents.ParseAttackerNotification(e.Payload.Span);
             if (p is not null) combat.OnAttackerNotification(
-                p.Value.DefenderName, p.Value.DamageType, p.Value.Damage, (float)p.Value.HealthPercent);
+                p.Value.DefenderName, p.Value.DamageType, p.Value.Damage,
+                p.Value.HealthPercent, p.Value.Critical, p.Value.AttackConditions);
         });
         registrar.Register(GameEventType.EvasionAttackerNotification, e =>
         {

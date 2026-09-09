@@ -28,6 +28,86 @@ public sealed class MossTankPanelTests
     }
 
     [Fact]
+    public void PanelFillsEveryPositionOfVtanksRuleList()
+    {
+        var panel = new MossTankPanel(new FakeHost(new FakeAutomation()));
+
+        IReadOnlyList<IMacroRule> rules = panel.MacroRules;
+
+        Assert.Equal(66, rules.Count);
+        Assert.All(rules, static rule => Assert.NotNull(rule));
+        Assert.Equal(
+            MacroRuleTable.Entries.Count(static entry => entry.Slot is null),
+            rules.Count(static rule => rule is MacroRuleSentinel));
+        Assert.Equal("IdlePeace", rules[^1].Name);
+        Assert.Equal("Sentinel END", rules[^2].Name);
+        Assert.All(
+            rules.OfType<AbsentMacroRule>(),
+            static rule => Assert.NotEmpty(rule.Reason));
+    }
+
+    [Fact]
+    public void WieldedManaRefillOutranksBuffSelf()
+    {
+        var panel = new MossTankPanel(new FakeHost(new FakeAutomation()));
+        IReadOnlyList<IMacroRule> rules = panel.MacroRules;
+
+        int mana = rules.ToList().FindIndex(
+            static rule => rule.Name == "RefillWieldedMana");
+        int buff = rules.ToList().FindIndex(static rule => rule.Name == "BuffSelf");
+
+        Assert.True(mana >= 0 && buff >= 0);
+        Assert.True(
+            mana < buff,
+            $"RefillWieldedMana at {mana} must outrank BuffSelf at {buff}.");
+    }
+
+    [Fact]
+    public void HelperRechargeSitsBelowBuffSelfAndSelfRechargeAboveIt()
+    {
+        var panel = new MossTankPanel(new FakeHost(new FakeAutomation()));
+        List<IMacroRule> rules = [.. panel.MacroRules];
+
+        int self = rules.FindIndex(static rule => rule.Name == "RechargeSelfNormal");
+        int buff = rules.FindIndex(static rule => rule.Name == "BuffSelf");
+        int helper = rules.FindIndex(static rule => rule.Name == "UseHealersHeart");
+
+        Assert.True(self >= 0 && buff >= 0 && helper >= 0);
+        Assert.True(
+            self < buff,
+            $"RechargeSelfNormal at {self} must outrank BuffSelf at {buff}.");
+        Assert.True(
+            buff < helper,
+            $"BuffSelf at {buff} must outrank UseHealersHeart at {helper}.");
+    }
+
+    [Fact]
+    public void AStagedSelfRechargeIsNotWipedByTheHelperRowsLosingTick()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 10,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            // BoosterVital 2 = VitalKind.Health (VitalPlan.cs:7).
+            ItemEntries = [Item(60, "Bread", 1) with { BoosterVital = 2 }],
+        };
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(60u);
+        panel.AddSelectedConsumable();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([60u], automation.UsedItemIds);
+    }
+
+    [Fact]
     public void CorruptSideCarMonsterRuleIsLoggedNotSilentlySwallowed()
     {
         var storage = new MemoryStorage();
@@ -511,6 +591,1306 @@ public sealed class MossTankPanelTests
     }
 
     [Fact]
+    public void StoppingTheMacroEndsAnAutomaticBuffPassInProgress()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        panel.OnTick(0d);
+        Assert.NotEmpty(automation.CastSpellIds);
+        Assert.StartsWith("Buffing", panel.BuffStatus, StringComparison.Ordinal);
+
+        int castsWhenStopped = automation.CastSpellIds.Count;
+        Assert.True(
+            castsWhenStopped < 3,
+            "the pass must still be mid-queue for this pin to mean anything");
+
+        panel.ToggleCombat();
+
+        for (int i = 0; i < 10; i++)
+            panel.OnTick(1d);
+
+        Assert.Equal(castsWhenStopped, automation.CastSpellIds.Count);
+        Assert.DoesNotContain(
+            "Buffing", panel.BuffStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoppingTheMacroEndsTheBuffPassEvenWhenManaChargesKeepTheLoopAlive()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        Command(panel, "opt set ManaChargesWhenOff true");
+        panel.ToggleCombat();
+        panel.OnTick(0d);
+        int castsWhenStopped = automation.CastSpellIds.Count;
+        Assert.NotEmpty(automation.CastSpellIds);
+
+        panel.ToggleCombat();
+
+        for (int i = 0; i < 10; i++)
+            panel.OnTick(1d);
+
+        Assert.Equal(castsWhenStopped, automation.CastSpellIds.Count);
+        Assert.DoesNotContain(
+            "Buffing", panel.BuffStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ForceBuffWithTheMacroOffCastsNothingUntilRunMacro()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ForceBuff();
+        for (int i = 0; i < 20; i++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+
+        panel.ToggleCombat();
+        for (int i = 0; i < 20; i++)
+            panel.OnTick(0.3d);
+
+        Assert.NotEmpty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void TogglingBuffingWithTheMacroOffCastsNothing()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ForceBuff();
+        panel.SetMetaOption("EnableBuffing", Truthy(false));
+        for (int i = 0; i < 10; i++)
+            panel.OnTick(0.3d);
+        panel.SetMetaOption("EnableBuffing", Truthy(true));
+        for (int i = 0; i < 20; i++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AServerRejectedCastRePicksTheSameSpellInsteadOfAdvancing()
+    {
+        var automation = BuffPassAutomation();
+        automation.NextCastWeenieError = 0x1Du;
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int i = 0; i < 8; i++)
+            panel.OnTick(0.3d);
+
+        Assert.NotEmpty(automation.CastSpellIds);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(1u, id));
+        Assert.Contains("Spell 1", panel.BuffStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnAcknowledgedCastWithNoResultTextKeepsThePassSuspended()
+    {
+        var automation = BuffPassAutomation();
+        automation.SuppressCastResultText = true;
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        panel.OnTick(0d);
+        Assert.Single(automation.CastSpellIds);
+
+        // Three seconds is inside the 4 x 907 ms result budget.
+        for (int i = 0; i < 10; i++)
+            panel.OnTick(0.3d);
+
+        Assert.False(automation.IsCasting);
+        Assert.Single(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AnAcceptedCastAdvancesTheQueueOnItsSuccessfulResult()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int i = 0; i < 8; i++)
+            panel.OnTick(0.3d);
+
+        // The plain fake never marks the enchantment active, so a later scan
+        // re-queues the same three; only the first pass is under test.
+        Assert.Equal([1u, 2u, 3u], automation.CastSpellIds.Take(3));
+    }
+
+    [Fact]
+    public void APermanentlyRefusedSpellIsPickedAgainForeverBecauseRetailNeverGivesUp()
+    {
+        var automation = BuffPassAutomation();
+        automation.NextCastWeenieError = 0x1Du;
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int i = 0; i < 40; i++)
+            panel.OnTick(1d);
+
+        Assert.True(
+            automation.CastSpellIds.Count > 5,
+            "the refused spell was never re-issued");
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(1u, id));
+    }
+
+    [Fact]
+    public void TheCastSuspensionHoldsForTheResultThoughIsCastingNeverLatched()
+    {
+        var automation = BuffPassAutomation();
+        automation.SuppressCastCompletion = true;
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        panel.OnTick(0d);
+        Assert.Single(automation.CastSpellIds);
+
+        for (int i = 0; i < 10; i++)
+            panel.OnTick(0.3d);
+
+        Assert.False(automation.IsCasting);
+        Assert.Single(automation.CastSpellIds);
+
+        // Past the 5000 ms attempt watchdog (gj.cs:319-324) the tracker drops
+        // to idle and re-issues the SAME spell; it never walks the queue.
+        for (int i = 0; i < 12; i++)
+            panel.OnTick(0.3d);
+
+        Assert.True(automation.CastSpellIds.Count > 1);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(1u, id));
+    }
+
+    [Fact]
+    public void AMasteryBuffThatLandsUnlocksTheHigherTierOfTheNextPick()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 100),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+                // The second family: tier 2 needs skill 205, tier 1 needs 15.
+                Spell(2, 20, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 2, Difficulty = 200 },
+                Spell(3, 20, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 1, Difficulty = 10 },
+            ],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            RaiseSkillOnCast = (1u, 1u, 300u),
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u, 2u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void TheIdleTopoffWindowBelongsToRow53NotToTheRebuffRule()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            // 600 s left: over the 300 s rebuff window, under the 1200 s idle one.
+            ActiveEnchantments = [new PluginActiveEnchantment(1u, 10u, 1, 600d)],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.SetMetaOption("IdleBuffTopoff", Truthy(true));
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log ActiveRule on", "/vt log ActiveRule on"));
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        panel.OnTick(0.3d);
+
+        Assert.Contains(
+            automation.Messages,
+            static message => message.StartsWith(
+                "[MossTank] Picked BuffSelfIdle", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            automation.Messages,
+            static message => message.StartsWith(
+                "[MossTank] Picked BuffSelf ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WithIdleTopoffOffTheWiderWindowIsNotConsideredAtAll()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            ActiveEnchantments = [new PluginActiveEnchantment(1u, 10u, 1, 600d)],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AFamilyWhoseTopTierHasNoScarabsFallsToTheCastableLowerTier()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(2, 20, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 2, Difficulty = 200, FormulaComponentIds = [7u] },
+                Spell(3, 20, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 1, Difficulty = 10, FormulaComponentIds = [8u] },
+            ],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            ItemEntries = [Item(50, "Pyreal Scarab", 1)],
+        };
+        automation.Components[7u] = Component(7u, "Lead Scarab");
+        automation.Components[8u] = Component(8u, "Pyreal Scarab");
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([3u], automation.CastSpellIds);
+        Assert.Contains(
+            "[MossTank] Warning: You do not have enough of the item "
+                + "\"Lead Scarab\". Spells using it have been disabled.",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void AFamilyWithNoCastableTierIsSkippedAndTheNextFamilyIsCast()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(2, 20, "Increases the caster's Strength by 10 points.")
+                    with { FormulaComponentIds = [7u] },
+                Spell(3, 21, "Increases the caster's Endurance by 10 points.")
+                    with { FormulaComponentIds = [8u] },
+            ],
+            Attributes =
+            [
+                new PluginAttributeInfo(0, "Strength", 100),
+                new PluginAttributeInfo(1, "Endurance", 100),
+            ],
+            ItemEntries = [Item(50, "Pyreal Scarab", 1)],
+        };
+        automation.Components[7u] = Component(7u, "Lead Scarab");
+        automation.Components[8u] = Component(8u, "Pyreal Scarab");
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([3u], automation.CastSpellIds);
+        Assert.Contains(
+            "[MossTank] No spell known for class including: Spell 2, buff SKIPPED.",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void ARefusedCastSaysWhichSpellAndWhyOnceOnTheCastInfoChannel()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 20, "Increases the caster's Strength by 10 points."),
+            ],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+        };
+        automation.CastRefusals[1u] = PluginCastRequestResult.MissingComponents;
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log CastInfo on", "/vt log CastInfo on"));
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 8; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+        Assert.Single(
+            automation.Messages,
+            message => message.Contains("not issued", StringComparison.Ordinal));
+        Assert.Contains(
+            "[MossTank] SpellCaster: Spell 1 not issued — MissingComponents",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void ATierTheHostHasNoComponentsForIsNotACandidateAndTheWalkDropsToTheNext()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 20, "Increases the caster's Strength by 10 points."),
+                Spell(2, 20, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 6, Difficulty = 250 },
+            ],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+        };
+        automation.MissingComponentSpellIds.Add(2u);
+
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log CastInfo on", "/vt log CastInfo on"));
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 8; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u], automation.CastSpellIds);
+        Assert.DoesNotContain(
+            automation.Messages,
+            message => message.Contains("not issued", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TimersTraceNamesEveryHigherTierAndTheFirstFailingTermWithNumbers()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills = [new PluginSkillInfo(1, "Skill", PluginSkillTraining.Trained, 288)],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            KnownSelfBuffs =
+            [
+                // Lowest Difficulty, self-targeted -> BuffLine.Reference (the
+                // family's own anchor), and the tier the walk should land on:
+                // needed = 250 + 5 = 255 <= 288.
+                Spell(6, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 6, Difficulty = 250 },
+                // needed = 296 + 5 = 301 > 288 -- skill-short.
+                Spell(7, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 7, Difficulty = 296 },
+                Spell(8, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 8, Difficulty = 340, IsFellowship = true },
+            ],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        Command(panel, "log Timers on");
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        panel.OnTick(0.3d);
+
+        Assert.Contains(
+            "[MossTank] Buffing: Spell 6 — picked Spell 6 (gen 6); "
+                + "rejected: Spell 8 unknown, Spell 7 skill 288 < 301",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void NoTimersLineWhenTheHighestKnownTierIsPicked()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills = [new PluginSkillInfo(1, "Skill", PluginSkillTraining.Trained, 300)],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            KnownSelfBuffs =
+            [
+                Spell(1, 91, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 1, Difficulty = 10 },
+                Spell(2, 91, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 2, Difficulty = 20 },
+            ],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        Command(panel, "log Timers on");
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([2u], automation.CastSpellIds);
+        Assert.DoesNotContain(
+            automation.Messages,
+            message => message.Contains("Buffing:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TimersTraceIsNotReemittedAcrossRepeatedIdenticalPasses()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills = [new PluginSkillInfo(1, "Skill", PluginSkillTraining.Trained, 288)],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            KnownSelfBuffs =
+            [
+                Spell(6, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 6, Difficulty = 250 },
+                Spell(7, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 7, Difficulty = 296 },
+                Spell(8, 90, "Increases the caster's Strength by 10 points.")
+                    with { Tier = 8, Difficulty = 340, IsFellowship = true },
+            ],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        Command(panel, "log Timers on");
+        automation.Messages.Clear();
+
+        panel.ToggleCombat();
+        panel.OnTick(0.3d);
+        int afterFirstPass = automation.Messages.Count(
+            message => message.StartsWith(
+                "[MossTank] Buffing: Spell 6", StringComparison.Ordinal));
+        Assert.Equal(1, afterFirstPass);
+
+        for (int tick = 0; tick < 5; tick++)
+            panel.OnTick(0.3d);
+        int afterFiveMorePasses = automation.Messages.Count(
+            message => message.StartsWith(
+                "[MossTank] Buffing: Spell 6", StringComparison.Ordinal));
+        Assert.Equal(1, afterFiveMorePasses);
+    }
+
+    [Fact]
+    public void TheBuffCastRecastLockWidensTheDueWindowRatherThanBlockingPicks()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+                Spell(2, 20, "Increases the caster's Strength by 10 points."),
+            ],
+            Attributes = [new PluginAttributeInfo(0, "Strength", 100)],
+            ActiveEnchantments = [new PluginActiveEnchantment(2, 20, 1, 310)],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u, 2u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void ForceBuffZeroesTheDueStampsAndCancelPutsThemBack()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            ActiveEnchantments = [new PluginActiveEnchantment(1, 10, 1, 1800)],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        // Nothing is due: 1800 s left against a 300 s threshold.
+        panel.ToggleCombat();
+        panel.OnTick(0.3d);
+        Assert.Empty(automation.CastSpellIds);
+
+        // eq.i() - everything now reads as about to expire...
+        panel.ForceBuff();
+        // ...and eq.e() puts it back before the next heartbeat can act.
+        panel.CancelForceBuff();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+        Assert.Empty(automation.CastSpellIds);
+
+        panel.ForceBuff();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+        Assert.Equal([1u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AForcedEntryStopsBeingForcedOnceItIsRecast()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            ActiveEnchantments = [new PluginActiveEnchantment(1, 10, 1, 1800)],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        panel.ForceBuff();
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void TheBuffCastEmitsVtanksSpellCastLogLine()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        Command(panel, "log SpellCast on");
+        panel.ToggleCombat();
+        panel.OnTick(0.3d);
+
+        Assert.Contains(
+            automation.Messages,
+            static value => value.Contains(
+                "Casting: Spell 1 on ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AFizzledBuffIsSimplyStillDueOnTheNextHeartbeat()
+    {
+        var automation = BuffPassAutomation();
+        automation.CastResultText = "Your spell fizzled.";
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 10; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.True(automation.CastSpellIds.Count > 2);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(1u, id));
+    }
+
+    [Fact]
+    public void APermanentFailIsNotADropBecauseEqHasNoSuchBlacklist()
+    {
+        var automation = BuffPassAutomation();
+        automation.CastResultText = "Target is out of range";
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 10; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.True(automation.CastSpellIds.Count > 2);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(1u, id));
+    }
+
+    [Fact]
+    public void AddingAWandPopulatesItsThreeDefaultAurasAndCastsThemAtTheItem()
+    {
+        var automation = ItemEnchantAutomation();
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([101u, 102u, 103u], automation.CastSpellIds);
+        Assert.Equal(10u, host.Selection.SelectedObjectId);
+    }
+
+    [Fact]
+    public void AddingAShieldPopulatesTheSevenBanesAndImpenetrability()
+    {
+        var automation = ItemEnchantAutomation();
+        automation.ItemEntries =
+        [
+            Item(20, "Tower Shield", 2, validLocations: 0x00200000u),
+        ];
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(201, 301, "Blade Bane I", ItemEnchantmentSchoolId),
+            NamedSpell(202, 302, "Impenetrability I", ItemEnchantmentSchoolId),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(20);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([202u, 201u, 201u, 202u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void ShieldBaneRowsFollowTheDamageElementEnumOrder()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        automation.ItemEntries =
+        [
+            Item(20, "Tower Shield", 2, validLocations: 0x00200000u),
+        ];
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(210, 310, "Piercing Bane I", ItemEnchantmentSchoolId),
+            NamedSpell(211, 311, "Acid Bane I", ItemEnchantmentSchoolId),
+            NamedSpell(212, 312, "Flame Bane I", ItemEnchantmentSchoolId),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(20);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal(
+            [211u, 212u, 210u, 210u, 211u, 212u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void UntrainedItemEnchantmentOverTheLevelThresholdBuildsNoItemRows()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        // No Item Enchantment skill at all, and well past
+        // BuffWithUntrained-Item's default 80.
+        automation.Level = 100;
+        var withBanes = new List<PluginSpellInfo>(automation.KnownSelfBuffs)
+        {
+            Bane(341, 441, "Impenetrability I"),
+            Bane(342, 442, "Acid Bane I"),
+        };
+        automation.KnownSelfBuffs = withBanes;
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void UntrainedItemEnchantmentUnderTheLevelThresholdStillBuildsRows()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        automation.Level = 80;
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([101u, 102u, 103u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AWandAddedWithNoBuffsCastsNothingAtIt()
+    {
+        var automation = ItemEnchantAutomation();
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItemNoBuffs();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AnItemAlreadyEnchantedForLongerThanTheThresholdIsNotDue()
+    {
+        var automation = ItemEnchantAutomation();
+        automation.ItemEnchantments[10u] =
+        [
+            new PluginTrackedEnchantment(10u, 101u, 201u, 1, false, 1800d),
+            new PluginTrackedEnchantment(10u, 102u, 202u, 1, false, 1800d),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([103u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void ForceBuffAlsoForcesTheItemEnchantRowsBecauseEqIEndsOnDmD()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        automation.ItemEnchantments[10u] =
+        [
+            new PluginTrackedEnchantment(10u, 101u, 201u, 1, false, 1800d),
+            new PluginTrackedEnchantment(10u, 102u, 202u, 1, false, 1800d),
+            new PluginTrackedEnchantment(10u, 103u, 203u, 1, false, 1800d),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 4; tick++)
+            panel.OnTick(0.3d);
+        Assert.Empty(automation.CastSpellIds);
+
+        panel.ForceBuff();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([101u, 102u, 103u], automation.CastSpellIds);
+    }
+
+    /// <summary>
+    /// <c>eq.a(out, out)</c> walks <c>b()</c> — the SELF list — to exhaustion
+    /// before it ever reaches <c>g()</c> (<c>eq.cs:481</c> then
+    /// <c>eq.cs:510</c>). A self buff that is due therefore always outranks
+    /// every item enchantment.
+    /// Mutation: try the item rows first in TryPickBuff and this fails.
+    /// </summary>
+    [Fact]
+    public void EverySelfBuffIsCastBeforeAnyItemEnchantment()
+    {
+        var automation = ItemEnchantAutomation();
+        automation.Skills =
+        [
+            new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+        ];
+        automation.KnownSelfBuffs =
+        [
+            .. automation.KnownSelfBuffs,
+            Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u, 101u, 102u, 103u], automation.CastSpellIds);
+    }
+
+
+    private static FakeAutomation BaneAutomation(
+        params PluginSpellInfo[] known) => new()
+    {
+        CurrentHealth = 100,
+        MaxHealth = 100,
+        CurrentStamina = 100,
+        MaxStamina = 100,
+        CurrentMana = 100,
+        MaxMana = 100,
+        ObjectId = 0x50000001u,
+        Skills =
+        [
+            new PluginSkillInfo(
+                ItemEnchantmentSchoolId,
+                "Item Enchantment",
+                PluginSkillTraining.Trained,
+                300),
+        ],
+        KnownSelfBuffs = known,
+    };
+
+    private static PluginSpellInfo Bane(uint id, uint family, string name) =>
+        new(
+            id,
+            name,
+            family,
+            Tier: 1,
+            Difficulty: 10,
+            ManaCost: 5,
+            DurationSeconds: 1800f,
+            School: ItemEnchantmentSchoolId,
+            "Increases a shield or piece of armor's resistance by 10%. "
+                + "Target yourself to cast this spell on all of your equipped armor.",
+            IsSelfTargeted: false,
+            IsBeneficial: true);
+
+    [Fact]
+    public void ACharacterTargetedBaneIsCastOnceAndThenCoveredByTheLedger()
+    {
+        FakeAutomation automation = BaneAutomation(
+            Bane(301, 401, "Blade Bane I"));
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([301u], automation.CastSpellIds);
+
+        Assert.Empty(automation.ActiveEnchantments);
+        Assert.False(
+            automation.ItemEnchantments.TryGetValue(
+                automation.ObjectId, out var onCharacter)
+                && onCharacter.Count > 0,
+            "a bane never lands on the character itself");
+    }
+
+    [Fact]
+    public void ImpenetrabilityIsTheFirstCharacterRow()
+    {
+        FakeAutomation automation = BaneAutomation(
+            Bane(311, 411, "Acid Bane I"),
+            Bane(312, 412, "Impenetrability I"));
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([312u, 311u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void BaneRowsFollowTheProfileLettersInReadingOrder()
+    {
+        FakeAutomation automation = BaneAutomation(
+            Bane(321, 421, "Bludgeon Bane I"),
+            Bane(322, 422, "Lightning Bane I"));
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.SetMetaOption(
+            "BuffProfile_Banes",
+            AcDream.Plugins.MossTank.Expressions.ExpressionValue.Number(1));
+        panel.SetMetaOption(
+            "BuffProfile-Banes",
+            AcDream.Plugins.MossTank.Expressions.ExpressionValue.String("LB"));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([322u, 321u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void CharacterRowsClimbTheFamilyPastTheRenamedTiers()
+    {
+        PluginSpellInfo tierOne = Bane(331, 431, "Acid Bane I");
+        FakeAutomation automation = BaneAutomation(
+            tierOne,
+            tierOne with { SpellId = 0x082Cu, Name = "Olthoi's Bane", Tier = 7, Difficulty = 300 },
+            tierOne with { SpellId = 0x1127u, Name = "Incantation of Acid Bane", Tier = 8, Difficulty = 400 });
+        automation.Skills =
+        [
+            new PluginSkillInfo(
+                ItemEnchantmentSchoolId,
+                "Item Enchantment",
+                PluginSkillTraining.Trained,
+                410),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.SetMetaOption(
+            "BuffProfile_Banes",
+            AcDream.Plugins.MossTank.Expressions.ExpressionValue.Number(8));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([0x1127u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void CharacterRowsAreAcceptedAgainstTheirOwnTierOneSpell()
+    {
+        PluginSpellInfo tierOne = Bane(331, 431, "Acid Bane I") with
+        {
+            ComponentSet = new PluginSpellComponentSet(7, 34, 42, 57),
+        };
+        PluginSpellInfo decoy = tierOne with
+        {
+            SpellId = 900u,
+            Name = "Acid Ward Self I",
+            IsSelfTargeted = true,
+            Difficulty = 5,
+            ComponentSet = new PluginSpellComponentSet(7, 34, 42, 61),
+        };
+        FakeAutomation automation = BaneAutomation(
+            tierOne,
+            decoy,
+            tierOne with { SpellId = 0x1127u, Name = "Incantation of Acid Bane", Tier = 8, Difficulty = 400 });
+        automation.Skills =
+        [
+            new PluginSkillInfo(
+                ItemEnchantmentSchoolId,
+                "Item Enchantment",
+                PluginSkillTraining.Trained,
+                410),
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.SetMetaOption(
+            "BuffProfile_Banes",
+            AcDream.Plugins.MossTank.Expressions.ExpressionValue.Number(8));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([0x1127u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void TheBanePresetsAreTheBaneEnumsNotTheProtectionEnums()
+    {
+        FakeAutomation automation = BaneAutomation(
+            Bane(331, 431, "Acid Bane I"),
+            Bane(332, 432, "Blade Bane I"));
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.SetMetaOption(
+            "BuffProfile_Banes",
+            AcDream.Plugins.MossTank.Expressions.ExpressionValue.Number(8));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([331u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void ASelfCastBaneLandsOnArmorAndStampsTheLedgerAtTheCharacter()
+    {
+        FakeAutomation automation = BaneAutomation(
+            Bane(351, 451, "Blade Bane I"));
+        automation.CastResultText =
+            "You cast Blade Bane I on Alduressa Boots, refreshing Blade Bane I";
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log Misc on", "/vt log Misc on"));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 30; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([351u], automation.CastSpellIds);
+
+        Assert.Contains(
+            automation.Messages,
+            message => message.Contains(
+                $"Cast Blade Bane I on {automation.ObjectId} ending at",
+                StringComparison.Ordinal));
+
+        Assert.Contains(
+            automation.Messages,
+            message => message.Contains(
+                $"Buffing: character row {automation.Name} "
+                    + $"({automation.ObjectId}) → Blade Bane I",
+                StringComparison.Ordinal));
+    }
+
+    /// <summary>AC's Item Enchantment skill id, the aura school.</summary>
+    private const uint ItemEnchantmentSchoolId = 32u;
+
+    private static FakeAutomation ItemEnchantAutomation() => new()
+    {
+        CurrentHealth = 100,
+        MaxHealth = 100,
+        CurrentStamina = 100,
+        MaxStamina = 100,
+        CurrentMana = 100,
+        MaxMana = 100,
+        ObjectId = 0x50000001u,
+        Skills = [],
+        KnownSelfBuffs =
+        [
+            NamedSpell(101, 201, "Aura of Defender Self I", ItemEnchantmentSchoolId)
+                with { IsSelfTargeted = true },
+            NamedSpell(102, 202, "Aura of Hermetic Link Self I", ItemEnchantmentSchoolId)
+                with { IsSelfTargeted = true },
+            NamedSpell(103, 203, "Aura of Spirit Drinker Self I", ItemEnchantmentSchoolId)
+                with { IsSelfTargeted = true },
+        ],
+        ItemEntries = [Item(10, "War Wand", 0x8000u, validLocations: 0x01000000u)],
+    };
+
+    private static PluginSpellInfo NamedSpell(
+        uint id,
+        uint family,
+        string name,
+        uint school) => new(
+            id,
+            name,
+            family,
+            Tier: 1,
+            Difficulty: 10,
+            ManaCost: 5,
+            DurationSeconds: 1800f,
+            School: school,
+            "Increases a weapon's damage value by 2 points.",
+            IsSelfTargeted: false,
+            IsBeneficial: true);
+
+    [Fact]
+    public void RandomHelperDrawsItsTargetAtRandomAcrossTheNearbyPlayers()
+    {
+        var automation = RandomHelperAutomation();
+        automation.WorldObjects.Add(NearbyPlayer(0x50000009u, "Fellow A"));
+        automation.WorldObjects.Add(NearbyPlayer(0x5000000Au, "Fellow B"));
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(10);
+        panel.AddSelectedItem();   // the gate needs a profiled wand
+        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
+        panel.ToggleCombat();
+
+        for (int tick = 0; tick < 200; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.True(
+            automation.CastTargets.Count >= 5,
+            $"only {automation.CastTargets.Count} helper casts");
+        Assert.Equal(2, automation.CastTargets.Distinct().Count());
+    }
+
+    [Fact]
+    public void RandomHelperCastsTheBestKnownTierOfTheDrawnStem()
+    {
+        var automation = RandomHelperAutomation();
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(500, 600, "Armor Other I", 33u),
+            NamedSpell(506, 600, "Armor Other VI", 33u) with { Tier = 6 },
+        ];
+        automation.WorldObjects.Add(NearbyPlayer(0x50000009u, "Fellow A"));
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(10);
+        panel.AddSelectedItem();   // the gate needs a profiled wand
+        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
+        panel.ToggleCombat();
+
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.NotEmpty(automation.CastSpellIds);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(506u, id));
+    }
+
+    private static PluginWorldObject NearbyPlayer(uint objectId, string name) =>
+        new(objectId, 123u, name, PluginObjectClass.Player, 0u, 0u, 0u)
+        {
+            HasPosition = true,
+            Position = NavigationAt(0f).Position,
+        };
+
+    private static CombatCapableFakeAutomation RandomHelperAutomation()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            ItemEntries = [Item(10, "War Wand", itemType: 0x00008000u)],
+            EquipmentItems =
+            [
+                EquipmentItem(10, "War Wand", itemType: 0x00008000u),
+            ],
+            Skills =
+            [
+                new PluginSkillInfo(33, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs = [NamedSpell(500, 600, "Armor Other I", 33u)],
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Magic,
+        };
+        return automation;
+    }
+
+    private static FakeAutomation BuffPassAutomation() => new()
+    {
+        CurrentHealth = 100,
+        MaxHealth = 100,
+        CurrentStamina = 100,
+        MaxStamina = 100,
+        CurrentMana = 100,
+        MaxMana = 100,
+        Skills =
+        [
+            new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            new PluginSkillInfo(2, "War Magic", PluginSkillTraining.Trained, 300),
+            new PluginSkillInfo(3, "Item Tinkering", PluginSkillTraining.Trained, 300),
+        ],
+        KnownSelfBuffs =
+        [
+            Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            Spell(2, 20, "Increases the caster's War Magic skill by 10 points."),
+            Spell(3, 30, "Increases the caster's Item Tinkering skill by 10 points."),
+        ],
+    };
+
+    [Fact]
     public void MacroWieldsCasterEntersMagicBuffsThenWieldsWeaponFightsThenIdlePeace()
     {
         PluginSpellInfo buff = Spell(
@@ -552,7 +1932,7 @@ public sealed class MossTankPanelTests
         bool attacked = false;
         for (int tick = 0; tick < 60 && !attacked; tick++)
         {
-            panel.OnTick(0.1);
+            panel.OnTick(0.7);
             attacked = automation.BeginCount > 0;
         }
         Assert.True(
@@ -562,11 +1942,9 @@ public sealed class MossTankPanelTests
         int equipWand = automation.CallLog.IndexOf("Equip:0000000A");
         int enterMagic = automation.CallLog.IndexOf("EnterMode:Magic");
         int cast = automation.CallLog.IndexOf("Cast:1");
-        int enterPeaceForWeapon = cast < 0
-            ? -1
-            : automation.CallLog.FindIndex(cast + 1, entry => entry == "EnterMode:Peace");
         int equipWeapon = automation.CallLog.IndexOf("Equip:00000014");
-        int defaultMode = automation.CallLog.IndexOf("EnterDefaultMode:Melee");
+        int defaultMode = automation.CallLog.FindIndex(
+            entry => entry == "EnterMode:Melee");
         int attack = automation.CallLog.IndexOf("Attack:0000001E");
 
         // Peace(already) -> Equip wand: no separate peace request was needed
@@ -577,14 +1955,15 @@ public sealed class MossTankPanelTests
             automation.CallLog.Take(equipWand));
         Assert.True(enterMagic > equipWand, "Magic requested before the wand was wielded");
         Assert.True(cast > enterMagic, "cast happened before Magic mode was entered");
-        // (pass ends) -> Peace -> Equip weapon -> default mode -> attack
         Assert.True(
-            enterPeaceForWeapon > cast,
-            "no peace request to wield the weapon after the buff pass");
+            equipWeapon > cast,
+            "the weapon was wielded before the buff was cast: "
+                + string.Join(" | ", automation.CallLog));
         Assert.True(
-            equipWeapon > enterPeaceForWeapon,
-            "weapon equipped before peace mode for it was entered");
-        Assert.True(defaultMode > equipWeapon, "default mode entered before the weapon was equipped");
+            defaultMode > equipWeapon,
+            "combat mode entered before the weapon was equipped: "
+                + string.Join(" | ", automation.CallLog));
+        Assert.DoesNotContain("EnterDefaultMode:Melee", automation.CallLog);
         Assert.True(attack > defaultMode, "attack began before the default mode was entered");
 
         // With the hostile gone and Peace Mode When Idle on, the macro
@@ -597,6 +1976,734 @@ public sealed class MossTankPanelTests
             panel.OnTick(0.5);
         }
         Assert.Equal(PluginCombatMode.Peace, automation.CombatSnapshot.Mode);
+    }
+
+    [Fact]
+    public void ACastInFlightFreezesTheWholeMainTrackNotJustTheCastingRules()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            IsCasting = true,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ToggleCombat();
+
+        for (int tick = 0; tick < 10; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.DoesNotContain("EnterMode:Peace", automation.CallLog);
+        Assert.Equal(PluginCombatMode.Melee, automation.CombatSnapshot.Mode);
+
+        automation.IsCasting = false;
+        panel.OnTick(0.01d);
+        panel.OnTick(0.01d);
+
+        Assert.Contains("EnterMode:Peace", automation.CallLog);
+    }
+
+
+    [Fact]
+    public void VtLogActiveRuleOnPostsThePickedLineNamingTheWinner()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log ActiveRule on", "/vt log ActiveRule on"));
+        automation.Messages.Clear(); // drop "/vt log"'s own "Set ActiveRule" echo
+        panel.ToggleCombat();
+
+        panel.OnTick(0.1d);
+
+        Assert.Contains(
+            "[MossTank] Picked IdlePeace P: 65   I=False, N=False, S=False",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void VtLogActiveRuleOnPostsAllRulesInactiveWhenNothingIsValid()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Peace,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode(); // valid only outside Peace — stays silent
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log ActiveRule on", "/vt log ActiveRule on"));
+        automation.Messages.Clear();
+        panel.ToggleCombat();
+
+        panel.OnTick(0.1d);
+
+        Assert.Contains(
+            "[MossTank] All rules inactive.   I=False, N=False, S=False",
+            automation.Messages);
+    }
+
+    [Fact]
+    public void VtLogActiveRuleOffPostsNothing()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ToggleCombat();
+
+        panel.OnTick(0.1d);
+
+        Assert.DoesNotContain(automation.Messages, message => message.StartsWith(
+            "[MossTank] Picked", StringComparison.Ordinal));
+        Assert.DoesNotContain(automation.Messages, message => message.StartsWith(
+            "[MossTank] All rules inactive", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void VtLogRuleInfoOnPostsRuleRunningLine()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log RuleInfo on", "/vt log RuleInfo on"));
+        automation.Messages.Clear();
+        panel.ToggleCombat();
+
+        panel.OnTick(0.1d);
+
+        Assert.Contains("[MossTank] (IdlePeace) Running", automation.Messages);
+    }
+
+    /// <summary>
+    /// The other half of the sink: turning a type off stops posting it
+    /// again, and re-uses the exact <c>Set</c>/<c>Reset</c> echo text
+    /// <c>/vt log</c> itself already had.
+    /// </summary>
+    [Fact]
+    public void VtLogOffStopsPostingAfterHavingBeenOn()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log ActiveRule on", "/vt log ActiveRule on"));
+        panel.ToggleCombat();
+        panel.OnTick(0.1d);
+        Assert.Contains(automation.Messages, message => message.StartsWith(
+            "[MossTank] Picked", StringComparison.Ordinal));
+
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log ActiveRule off", "/vt log ActiveRule off"));
+        automation.Messages.Clear();
+        panel.OnTick(0.1d);
+
+        Assert.DoesNotContain(automation.Messages, message => message.StartsWith(
+            "[MossTank] Picked", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AStuckTransactionReleasesTheSuspensionOnVtanksTrackerWatchdog()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            IsCasting = true,
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleIdlePeaceMode();
+        panel.ToggleCombat();
+
+        for (int tick = 0; tick < 34; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Contains("EnterMode:Peace", automation.CallLog);
+    }
+
+    [Fact]
+    public void RandomHelperPreparesThroughTheSharedGateBeforeCasting()
+    {
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            ItemEntries = [Item(10, "War Wand", itemType: 0x00008000u)],
+            EquipmentItems =
+            [
+                EquipmentItem(10, "War Wand", itemType: 0x00008000u),
+            ],
+        };
+        automation.CombatSnapshot = automation.CombatSnapshot with
+        {
+            Mode = PluginCombatMode.Melee,
+        };
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(500, 600, "Armor Other I", 33u),
+        ];
+        automation.WorldObjects.Add(new PluginWorldObject(
+            0x50000009u,
+            123u,
+            "Fellow",
+            PluginObjectClass.Player,
+            0u,
+            0u,
+            0u)
+        {
+            HasPosition = true,
+            Position = NavigationAt(0f).Position,
+        });
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+
+        int peace = automation.CallLog.IndexOf("EnterMode:Peace");
+        int equip = automation.CallLog.IndexOf("Equip:0000000A");
+        int magic = automation.CallLog.IndexOf("EnterMode:Magic");
+        Assert.True(
+            peace >= 0 && equip > peace && magic > equip,
+            "RandomHelper did not sequence through the gate. CallLog: "
+                + string.Join(" | ", automation.CallLog));
+    }
+
+    [Fact]
+    public void DeathWithStopMacroOnDeathStopsTheMacroAndChangesNoSetting()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.SetMetaOption("StopMacroOnDeath", Truthy(true));
+        panel.SetMetaOption("EnableNav", Truthy(true));
+        panel.SetMetaOption("EnableLooting", Truthy(true));
+        panel.SetMetaOption("EnableBuffing", Truthy(true));
+        panel.SetMetaOption("EnableCombat", Truthy(true));
+        panel.ToggleCombat();
+        panel.OnTick(0.1d);
+        Assert.True(panel.CombatMacroRunning);
+
+        automation.CurrentHealth = 0;
+        panel.OnTick(0.1d);
+
+        Assert.False(panel.CombatMacroRunning);
+        Assert.True(panel.GetMetaOptionForTest("EnableNav"));
+        Assert.True(panel.GetMetaOptionForTest("EnableLooting"));
+        Assert.True(panel.GetMetaOptionForTest("EnableBuffing"));
+        Assert.True(panel.GetMetaOptionForTest("EnableCombat"));
+        Assert.Contains(
+            automation.Messages,
+            static value => value.Contains(
+                "Macro stopped because the character died.",
+                StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            automation.Messages,
+            static value => value.Contains("deathrestore", StringComparison.Ordinal));
+    }
+
+    /// <summary>The reject branch of the same handler: nothing at all.</summary>
+    [Fact]
+    public void DeathWithStopMacroOnDeathOffChangesNothing()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.SetMetaOption("StopMacroOnDeath", Truthy(false));
+        panel.SetMetaOption("EnableNav", Truthy(true));
+        panel.ToggleCombat();
+        panel.OnTick(0.1d);
+
+        automation.CurrentHealth = 0;
+        panel.OnTick(0.1d);
+
+        Assert.True(panel.CombatMacroRunning);
+        Assert.True(panel.GetMetaOptionForTest("EnableNav"));
+        Assert.DoesNotContain(
+            automation.Messages,
+            static value => value.Contains("You died!", StringComparison.Ordinal));
+    }
+
+    private static AcDream.Plugins.MossTank.Expressions.ExpressionValue Truthy(
+        bool value) =>
+        AcDream.Plugins.MossTank.Expressions.ExpressionValue.Boolean(value);
+
+    [Fact]
+    public void ForceBuffGoesThroughTheModeGateBecauseMEIsConsumableNotForce()
+    {
+        PluginSpellInfo buff = Spell(
+            1, 10, "Increases the caster's Life Magic skill by 10 points.");
+        var automation = new CombatCapableFakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs = [buff],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        // No wand anywhere: the gate's own path here is
+        // PostNoWandNoticeAndStop, exactly as ga.cs:1471-1473.
+        panel.ToggleCombat();
+        panel.ForceBuff();
+        for (int tick = 0; tick < 5; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+        Assert.Contains(
+            automation.Messages,
+            static value => value.Contains(
+                CombatModeGate.NoWandNotice,
+                StringComparison.Ordinal));
+        Assert.False(panel.CombatMacroRunning);
+    }
+
+    [Fact]
+    public void TogglingBuffingOffPausesTheForceBuffInsteadOfCancellingIt()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.SetMetaOption("EnableBuffing", Truthy(false));
+
+        panel.ToggleCombat();
+        panel.ForceBuff();
+        for (int tick = 0; tick < 4; tick++)
+            panel.OnTick(0.3d);
+        Assert.Empty(automation.CastSpellIds);   // EnableBuffing holds the pass
+
+        panel.SetMetaOption("EnableBuffing", Truthy(true));
+        for (int tick = 0; tick < 4; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void AForceBuffWithTheMacroOffNeitherBuffsNorTopsUpVitals()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 10,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            // BoosterVital 2 = VitalKind.Health (VitalPlan.cs:7).
+            ItemEntries = [Item(60, "Bread", 1) with { BoosterVital = 2 }],
+        };
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(60u);
+        panel.AddSelectedConsumable();
+
+        // The macro stays OFF, so nothing in the main list runs at all.
+        panel.ForceBuff();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+        Assert.Empty(automation.UsedItemIds);
+    }
+
+    [Fact]
+    public void AnItemRowWhoseSelfAuraLandsOnTheCharacterIsCoveredNextPass()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        // One resolvable row, so the loop would be unmistakable.
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(101, 201, "Aura of Defender Self I", ItemEnchantmentSchoolId)
+                with { IsSelfTargeted = true },
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([101u], automation.CastSpellIds);
+
+        Assert.Contains(
+            automation.ActiveEnchantments,
+            held => held.SpellId == 101u);
+        Assert.False(
+            automation.ItemEnchantments.TryGetValue(10u, out var onWand)
+                && onWand.Count > 0,
+            "the server never enchants the item with a Self aura");
+    }
+
+    [Fact]
+    public void AnItemEnchantRowFallsToTheCastableLowerTierLikeTheSelfWalk()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        automation.Skills =
+        [
+            new PluginSkillInfo(
+                ItemEnchantmentSchoolId,
+                "Item Enchantment",
+                PluginSkillTraining.Trained,
+                300),
+        ];
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(106, 201, "Aura of Defender Self VI", ItemEnchantmentSchoolId)
+                with
+            {
+                IsSelfTargeted = true,
+                Tier = 6,
+                Difficulty = 200,
+                FormulaComponentIds = [7u],
+            },
+            NamedSpell(101, 201, "Aura of Defender Self I", ItemEnchantmentSchoolId)
+                with
+            {
+                IsSelfTargeted = true,
+                Tier = 1,
+                Difficulty = 10,
+                FormulaComponentIds = [8u],
+            },
+        ];
+        automation.Components[7u] = Component(7u, "Lead Scarab");
+        automation.Components[8u] = Component(8u, "Pyreal Scarab");
+        automation.ItemEntries =
+        [
+            Item(10, "War Wand", 0x8000u, validLocations: 0x01000000u),
+            Item(50, "Pyreal Scarab", 1),
+        ];
+
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.NotEmpty(automation.CastSpellIds);
+        Assert.All(automation.CastSpellIds, id => Assert.Equal(101u, id));
+    }
+
+    [Fact]
+    public void AnItemRowPickAndItsLedgerWriteBothSayWhatHappenedOnMisc()
+    {
+        FakeAutomation automation = ItemEnchantAutomation();
+        automation.KnownSelfBuffs =
+        [
+            NamedSpell(101, 201, "Aura of Defender Self I", ItemEnchantmentSchoolId)
+                with { IsSelfTargeted = true },
+        ];
+        var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
+        var panel = new MossTankPanel(host);
+        panel.ExecuteVtankCommand(new PluginCommand(
+            "vt", "log Misc on", "/vt log Misc on"));
+
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        automation.Messages.Clear();
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Contains(
+            automation.Messages,
+            message => message.Contains(
+                "Buffing: item row War Wand (10) \u2192 Aura of Defender Self I",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            automation.Messages,
+            message => message.Contains(
+                "Cast Aura of Defender Self I on 10 ending at",
+                StringComparison.Ordinal)
+                && message.Contains("OVERRIDDEN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ASkippedBuffFamilyWarnsOnceInChatAndMirrorsToTheHostLog()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 5),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+        };
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        Command(panel, "log Misc on");
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 12; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+
+        const string Warning =
+            "No spell known for class including: Spell 1, buff SKIPPED.";
+        Assert.Equal(
+            1,
+            automation.Messages.Count(
+                message => message.Contains(Warning, StringComparison.Ordinal)));
+        Assert.Equal(
+            1,
+            host.Logger.Infos.Count(
+                line => line.Contains(Warning, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void EnablingBuffingWithTheMacroOffCastsNothing()
+    {
+        var automation = BuffPassAutomation();
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        Command(panel, "opt set ManaChargesWhenOff true");
+        panel.SetMetaOption("EnableBuffing", Truthy(false));
+        for (int tick = 0; tick < 5; tick++)
+            panel.OnTick(0.3d);
+
+        panel.SetMetaOption("EnableBuffing", Truthy(true));
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastSpellIds);
+
+        // And the macro still starts it, so the pin is not vacuous.
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 4; tick++)
+            panel.OnTick(0.3d);
+        Assert.NotEmpty(automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void WithTheMacroOffOnlyRefillWieldedManaMayRun()
+    {
+        var automation = new FakeAutomation
+        {
+            CurrentHealth = 10,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            // …and a buff due, so BuffSelf would.
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points."),
+            ],
+            ItemEntries = [Item(60, "Bread", 1) with { BoosterVital = 2 }],
+        };
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(60u);
+        panel.AddSelectedConsumable();
+        Command(panel, "opt set ManaChargesWhenOff true");
+
+        var ranWithMacroOff = new HashSet<string>(StringComparer.Ordinal);
+        for (int tick = 0; tick < 20; tick++)
+        {
+            panel.OnTick(0.3d);
+            foreach (IMacroRule rule in panel.MacroRules)
+            {
+                if (rule.Running)
+                    ranWithMacroOff.Add(rule.Name);
+            }
+        }
+
+        Assert.All(
+            ranWithMacroOff,
+            name => Assert.Equal("RefillWieldedMana", name));
+        Assert.DoesNotContain("RechargeSelfNormal", ranWithMacroOff);
+        Assert.DoesNotContain("BuffSelf", ranWithMacroOff);
+        Assert.Empty(automation.CastSpellIds);
+        Assert.Empty(automation.UsedItemIds);
+
+        // The same world with the macro ON runs both of them — so the
+        // assertions above are about the GATE, not about an empty fixture.
+        panel.ToggleCombat();
+        var ranWithMacroOn = new HashSet<string>(StringComparer.Ordinal);
+        for (int tick = 0; tick < 20; tick++)
+        {
+            panel.OnTick(0.3d);
+            foreach (IMacroRule rule in panel.MacroRules)
+            {
+                if (rule.Running)
+                    ranWithMacroOn.Add(rule.Name);
+            }
+        }
+
+        Assert.Contains("RechargeSelfNormal", ranWithMacroOn);
+        Assert.NotEmpty(automation.UsedItemIds);
+    }
+
+    [Fact]
+    public void AForceEndsWhenTheStampsItZeroedHaveBeenRecast()
+    {
+        var automation = BuffPassAutomation();
+        // Spells 1 and 2 are up with hours left: due ONLY under the force.
+        automation.ActiveEnchantments =
+        [
+            new PluginActiveEnchantment(1u, 10u, 1, 1800d),
+            new PluginActiveEnchantment(2u, 20u, 1, 1800d),
+        ];
+        // Spell 3 is genuinely due and can never land, so the pick is never
+        // empty. It sorts last, so it does not starve the two forced ones.
+        automation.RefusedCastSpellIds.Add(3u);
+
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleCombat();
+        panel.ForceBuff();
+
+        for (int tick = 0; tick < 40; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u, 2u], automation.CastSpellIds);
+
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+        Assert.Equal([1u, 2u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void CancelForceBuffStopsTheForceOnTheCall()
+    {
+        var automation = BuffPassAutomation();
+        automation.ActiveEnchantments =
+        [
+            new PluginActiveEnchantment(1u, 10u, 1, 1800d),
+            new PluginActiveEnchantment(2u, 20u, 1, 1800d),
+            new PluginActiveEnchantment(3u, 30u, 1, 1800d),
+        ];
+        var panel = new MossTankPanel(new FakeHost(automation));
+        panel.ToggleCombat();
+
+        panel.ForceBuff();
+        panel.OnTick(0.3d);
+        int castsBeforeCancel = automation.CastSpellIds.Count;
+
+        panel.CancelForceBuff();
+
+        for (int tick = 0; tick < 20; tick++)
+            panel.OnTick(0.3d);
+        Assert.Equal(castsBeforeCancel, automation.CastSpellIds.Count);
     }
 
     [Fact]
@@ -623,6 +2730,7 @@ public sealed class MossTankPanelTests
         var panel = new MossTankPanel(new FakeHost(automation));
         Command(panel, "opt set FastCastBuffs true");
 
+        panel.ToggleCombat();
         panel.ForceBuff();
         panel.OnTick(0d);
 
@@ -660,6 +2768,7 @@ public sealed class MossTankPanelTests
         var panel = new MossTankPanel(new FakeHost(automation));
         Command(panel, "opt set FastCastBuffs true");
 
+        panel.ToggleCombat();
         panel.ForceBuff();
         panel.OnTick(0d);
 
@@ -779,6 +2888,7 @@ public sealed class MossTankPanelTests
             ],
         };
         var host = new FakeHost(automation);
+        automation.CurrentSelection = () => host.Selection.SelectedObjectId ?? 0u;
         var panel = new MossTankPanel(host);
 
         host.Selection.Select(10);
@@ -959,6 +3069,28 @@ public sealed class MossTankPanelTests
 
         Assert.Equal(["Spell 1"], second.ExtraBuffRows);
         Assert.Equal(["Spell 2"], second.BlacklistedBuffFamilyRows);
+    }
+
+    [Fact]
+    public void TheVtLogChannelSelectionSurvivesAReload()
+    {
+        var storage = new MemoryStorage();
+        var automation = new FakeAutomation { Name = "Log Persist" };
+        var first = new MossTankPanel(new FakeHost(automation, storage));
+
+        Command(first, "log Misc on");
+        Command(first, "log SpellCast on");
+        Command(first, "log RuleInfo on");
+        Command(first, "log RuleInfo off");
+
+        var reloaded = new FakeAutomation { Name = "Log Persist" };
+        var second = new MossTankPanel(new FakeHost(reloaded, storage));
+        Command(second, "log");
+
+        string state = Assert.Single(
+            reloaded.Messages,
+            message => message.StartsWith("Log state:", StringComparison.Ordinal));
+        Assert.Equal("Log state:  Misc SpellCast", state);
     }
 
     [Fact]
@@ -1855,7 +3987,9 @@ public sealed class MossTankPanelTests
             new FakeAutomation { Name = "Rule Maker" },
             storage));
 
-        Assert.Equal(["DEFAULT", "species==drudge"], second.MonsterNameColumn);
+        Assert.Equal(
+            [MonsterRule.RetailDefaultName, "species==drudge"],
+            second.MonsterNameColumn);
         Assert.True(second.MonsterImperilColumn[1]);
         Assert.Equal("Void Basic", second.MonsterDamageColumn[1]);
         Assert.Equal("1", second.MonsterPriorityColumn[1]);
@@ -2873,9 +5007,11 @@ public sealed class MossTankPanelTests
     private static PluginInventoryItem Item(
         uint id,
         string name,
-        uint itemType) => new(
-            id, 0, name, itemType, 1, 0, 0, 0, 0, 0, 0,
-            1, 0, 0, 0, 0, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0);
+        uint itemType,
+        uint validLocations = 0u,
+        int petClass = 0) => new(
+            id, 0, name, itemType, 1, 0, validLocations, 0, 0, 0, 0,
+            1, 0, 0, 0, petClass, 0, 0, false, 0, 0, 0, 0, 0, 0, 0, 0);
 
     private static PluginEquipmentItem EquipmentItem(
         uint id,
@@ -2906,6 +5042,111 @@ public sealed class MossTankPanelTests
         description,
         IsSelfTargeted: true,
         IsBeneficial: true);
+
+    [Fact]
+    public void ADepartedIdIsRetiredEvenWhenTheEntryCountIsUnchanged()
+    {
+        var tracker = new BuffDueTracker();
+        tracker.Observe(
+        [
+            new PluginActiveEnchantment(1u, 10u, 1, 600d),
+            new PluginActiveEnchantment(2u, 20u, 1, 600d),
+        ]);
+        tracker.ForceAll();
+        Assert.Equal([1u, 2u], tracker.ForcedSpellIds.Order());
+
+        // Spell 1 drops; spell 2 gains a second layer. Two entries either way.
+        tracker.Observe(
+        [
+            new PluginActiveEnchantment(2u, 20u, 1, 600d),
+            new PluginActiveEnchantment(2u, 20u, 2, 900d),
+        ]);
+
+        Assert.Equal([2u], tracker.ForcedSpellIds.Order());
+    }
+
+    [Fact]
+    public void AnOwnTellDuringTheLaunchWaitDoesNotDropTheCastLatch()
+    {
+        var automation = new FakeAutomation
+        {
+            ObjectId = 0x50000001u,
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points.")
+                    with { Saying = "abracadabra" },
+            ],
+            // The server has taken the request and said nothing yet, so the
+            // tracker sits in AwaitingLaunch with a Saying to match.
+            SuppressCastCompletion = true,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 3; tick++)
+            panel.OnTick(0.3d);
+        Assert.Equal([1u], automation.CastSpellIds);
+
+        automation.PostChatFrom(0x50000001u, 3, "meet me at the portal");
+        for (int tick = 0; tick < 3; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u], automation.CastSpellIds);
+    }
+
+    [Fact]
+    public void OwnLocalSpeechOfTheSpellWordsIsStillTheGestureEcho()
+    {
+        var automation = new FakeAutomation
+        {
+            ObjectId = 0x50000001u,
+            CurrentHealth = 100,
+            MaxHealth = 100,
+            CurrentStamina = 100,
+            MaxStamina = 100,
+            CurrentMana = 100,
+            MaxMana = 100,
+            Skills =
+            [
+                new PluginSkillInfo(1, "Life Magic", PluginSkillTraining.Trained, 300),
+            ],
+            KnownSelfBuffs =
+            [
+                Spell(1, 10, "Increases the caster's Life Magic skill by 10 points.")
+                    with { Saying = "abracadabra" },
+            ],
+            SuppressCastCompletion = true,
+        };
+        var panel = new MossTankPanel(new FakeHost(automation));
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 3; tick++)
+            panel.OnTick(0.3d);
+        Assert.Equal([1u], automation.CastSpellIds);
+
+        // A DIFFERENT spell's words, spoken locally by us: gj.cs:359's a(gj.b.a)
+        // — this wait is over, the latch drops, and the pass re-derives the
+        // same pick.
+        automation.PostChatFrom(0x50000001u, 0, "hocus pocus");
+        for (int tick = 0; tick < 3; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([1u, 1u], automation.CastSpellIds);
+    }
+
+
+    private static PluginSpellComponentInfo Component(uint id, string name) => new(
+        id, id, name, 1d, 0u, 1d, 0u, id, "Scarab", string.Empty);
 
     private static PluginNavigationSnapshot NavigationAt(float heading) => new(
         IsAvailable: true,
@@ -2953,8 +5194,21 @@ public sealed class MossTankPanelTests
     private sealed class FakeAutomation
         : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
           IPluginChat, IItemAutomation, INavigationAutomation,
-          IWorldObjectAutomation, IRecoveryAutomation
+          IWorldObjectAutomation, IRecoveryAutomation, IEnchantmentAutomation
     {
+        /// <summary>
+        /// Per-object tracked enchantments, VTank's <c>dm</c>
+        /// (<c>dm.cs:287-321</c>) — what an item-enchant row's due test reads.
+        /// </summary>
+        public Dictionary<uint, List<PluginTrackedEnchantment>> ItemEnchantments
+        { get; } = [];
+
+        public IEnchantmentAutomation Enchantments => this;
+
+        public IReadOnlyList<PluginTrackedEnchantment> Capture(uint targetObjectId) =>
+            ItemEnchantments.TryGetValue(targetObjectId, out var held)
+                ? held
+                : [];
         private IReadOnlyList<PluginSpellInfo> _knownSelfBuffs = [];
 
         public bool IsAvailable { get; set; } = true;
@@ -2968,6 +5222,8 @@ public sealed class MossTankPanelTests
         public IRecoveryAutomation Recovery => this;
         public bool IsInWorld => IsAvailable;
         public string Name { get; set; } = "Test Character";
+
+        public int Level { get; set; }
         public uint ObjectId { get; set; } = 1;
         public uint CurrentHealth { get; set; }
         public uint MaxHealth { get; set; }
@@ -2994,6 +5250,24 @@ public sealed class MossTankPanelTests
             return ItemEntries;
         }
         public IReadOnlyList<PluginWorldObject> CaptureObjects() => WorldObjects;
+
+        public bool ItemsBusy { get; set; }
+
+        bool IItemAutomation.IsBusy => ItemsBusy;
+
+        /// <summary>
+        /// Object ids handed to <c>Items.Use</c>, in order. The request is
+        /// accepted and <c>Items.LastCompletion</c> never moves — a server
+        /// that took the use and has not answered yet, which is the window a
+        /// staged recharge has to survive.
+        /// </summary>
+        public List<uint> UsedItemIds { get; } = [];
+
+        public PluginItemCommandResult Use(uint objectId)
+        {
+            UsedItemIds.Add(objectId);
+            return new PluginItemCommandResult(PluginItemCommandStatus.Started);
+        }
 
         bool IWorldObjectAutomation.TryGet(
             uint objectId,
@@ -3058,12 +5332,176 @@ public sealed class MossTankPanelTests
         }
 
         public bool IsCasting { get; set; }
+
+        public uint NextCastWeenieError { get; set; }
+        public bool SuppressCastCompletion { get; set; }
+
+        public bool SuppressCastResultText { get; set; }
+
+        public string? CastResultText { get; set; }
+
+        public List<PluginChatMessage> ChatLines { get; } = [];
+        private ulong _chatSequence;
+
+        public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence)
+        {
+            var result = new List<PluginChatMessage>();
+            foreach (PluginChatMessage message in ChatLines)
+            {
+                if (message.Sequence > afterSequence)
+                    result.Add(message);
+            }
+            return result;
+        }
+
+        public void PostChat(string text) =>
+            ChatLines.Add(new PluginChatMessage(
+                ++_chatSequence, 0u, 0, string.Empty, text, string.Empty));
+        public void PostChatFrom(uint senderObjectId, int kind, string text) =>
+            ChatLines.Add(new PluginChatMessage(
+                ++_chatSequence, senderObjectId, kind, string.Empty, text,
+                string.Empty));
+
+
+        private PluginCastCompletion _lastCompletion;
+        public PluginCastCompletion LastCompletion => _lastCompletion;
+
+        public Dictionary<uint, PluginSpellComponentInfo> Components { get; } = [];
+
+        public bool TryGetComponent(
+            uint componentId, out PluginSpellComponentInfo info) =>
+            Components.TryGetValue(componentId, out info);
+
+        public HashSet<uint> RefusedCastSpellIds { get; } = [];
+
+        /// <summary>
+        /// Spell ids the host answers <c>HasComponents(false)</c> for — the
+        /// authoritative formula test <c>BuffCastability</c> now runs INSIDE
+        /// the tier accept, so these are never picked at all.
+        /// </summary>
+        public HashSet<uint> MissingComponentSpellIds { get; } = [];
+
+        public Dictionary<uint, PluginCastRequestResult> CastRefusals { get; } = [];
+
+        public bool HasComponents(uint spellId) =>
+            !MissingComponentSpellIds.Contains(spellId);
+
+        public PluginCastRequestResult RequestCast(uint spellId)
+        {
+            if (CastRefusals.TryGetValue(
+                    spellId, out PluginCastRequestResult refusal))
+                return refusal;
+            return Cast(spellId)
+                ? PluginCastRequestResult.Sent
+                : PluginCastRequestResult.Unavailable;
+        }
+
         public PluginCastGate EvaluateGate(uint spellId) => PluginCastGate.Ready;
         public bool Cast(uint spellId)
         {
+            if (RefusedCastSpellIds.Contains(spellId))
+                return false;
             CastSpellIds.Add(spellId);
+            if (!SuppressCastCompletion)
+            {
+                _lastCompletion = new PluginCastCompletion(
+                    _lastCompletion.Revision + 1,
+                    spellId,
+                    0u,
+                    NextCastWeenieError);
+            }
+            if (NextCastWeenieError == 0u
+                && !SuppressCastCompletion
+                && !SuppressCastResultText)
+            {
+                string name = TryGet(spellId, out PluginSpellInfo spell)
+                    ? spell.Name
+                    : $"Spell {spellId}";
+                PostChat(CastResultText ?? $"You cast {name} on yourself");
+            }
+
+            if (NextCastWeenieError == 0u
+                && !SuppressCastCompletion
+                && CastResultText is null)
+            {
+                LandEnchantment(spellId);
+                RaiseSkill(spellId);
+            }
             return true;
         }
+
+        public (uint SpellId, uint SkillId, uint Level)? RaiseSkillOnCast { get; set; }
+
+        private void RaiseSkill(uint spellId)
+        {
+            if (RaiseSkillOnCast is not { } raise || raise.SpellId != spellId)
+                return;
+            var next = new List<PluginSkillInfo>();
+            foreach (PluginSkillInfo skill in Skills)
+            {
+                next.Add(skill.SkillId == raise.SkillId
+                    ? skill with { Current = raise.Level }
+                    : skill);
+            }
+            Skills = next;
+        }
+
+        public Func<uint>? CurrentSelection { get; set; }
+
+        /// <summary><c>eq.a(ActiveSpellInfo)</c> (<c>eq.cs:447-475</c>).</summary>
+        private void LandEnchantment(uint spellId)
+        {
+            foreach (PluginSpellInfo spell in KnownSelfBuffs)
+            {
+                if (spell.SpellId != spellId)
+                    continue;
+                uint target = CurrentSelection?.Invoke() ?? 0u;
+
+                if (spell.School == 32u
+                    && !spell.IsSelfTargeted
+                    && target == ObjectId)
+                {
+                    return;
+                }
+
+                if (spell.School == 32u
+                    && !spell.IsSelfTargeted
+                    && target != 0u
+                    && target != ObjectId)
+                {
+                    if (!ItemEnchantments.TryGetValue(target, out var onItem))
+                    {
+                        onItem = [];
+                        ItemEnchantments[target] = onItem;
+                    }
+                    onItem.RemoveAll(held => held.SpellId == spellId);
+                    onItem.Add(new PluginTrackedEnchantment(
+                        target,
+                        spellId,
+                        spell.Family,
+                        spell.Tier,
+                        spell.IsUntargeted,
+                        EnchantmentDurationSeconds));
+                    return;
+                }
+                var next = new List<PluginActiveEnchantment>();
+                foreach (PluginActiveEnchantment held in ActiveEnchantments)
+                {
+                    if (held.SpellId != spellId)
+                        next.Add(held);
+                }
+                next.Add(new PluginActiveEnchantment(
+                    spellId,
+                    spell.Family,
+                    spell.Tier,
+                    EnchantmentDurationSeconds));
+                ActiveEnchantments = next;
+                return;
+            }
+        }
+
+        /// <summary>How long a landed fake buff runs for.</summary>
+        public double EnchantmentDurationSeconds { get; set; } = 1800d;
         public void PostSystemMessage(string text) => Messages.Add(text);
         public bool TryGetObject(uint objectId, out PluginNavigationObject value)
         {
@@ -3085,8 +5523,27 @@ public sealed class MossTankPanelTests
 
     private sealed class CombatCapableFakeAutomation :
         IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
-        IPluginChat, ICombatAutomation, IEquipmentAutomation, IItemAutomation
+        IPluginChat, ICombatAutomation, IEquipmentAutomation, IItemAutomation,
+        INavigationAutomation, IWorldObjectAutomation
     {
+        public INavigationAutomation Navigation => this;
+        public IWorldObjectAutomation Objects => this;
+        public PluginNavigationSnapshot NavigationSnapshot { get; set; } =
+            NavigationAt(0f);
+        public PluginNavigationSnapshot Snapshot => NavigationSnapshot;
+        public List<PluginWorldObject> WorldObjects { get; } = [];
+        public IReadOnlyList<PluginWorldObject> CaptureObjects() => WorldObjects;
+        public bool TryGetObject(uint objectId, out PluginNavigationObject value)
+        {
+            value = default;
+            return false;
+        }
+        public PluginNavigationCommandStatus SetMovementIntent(
+            in PluginMovementIntent intent) =>
+            PluginNavigationCommandStatus.Accepted;
+        public PluginNavigationCommandStatus ClearMovementIntent() =>
+            PluginNavigationCommandStatus.Accepted;
+
         public bool IsAvailable { get; set; } = true;
         public ICharacterInfo Character => this;
         public ISpellCatalog Spells => this;
@@ -3143,11 +5600,72 @@ public sealed class MossTankPanelTests
         // ── magic ─────────────────────────────────────────────────────
         public bool IsCasting { get; set; }
         public List<uint> CastSpellIds { get; } = [];
+
+        public uint NextCastWeenieError { get; set; }
+        private PluginCastCompletion _lastCompletion;
+        public PluginCastCompletion LastCompletion => _lastCompletion;
+
         public PluginCastGate EvaluateGate(uint spellId) => PluginCastGate.Ready;
+        public List<PluginChatMessage> ChatLines { get; } = [];
+        private ulong _chatSequence;
+
+        public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence)
+        {
+            var result = new List<PluginChatMessage>();
+            foreach (PluginChatMessage message in ChatLines)
+            {
+                if (message.Sequence > afterSequence)
+                    result.Add(message);
+            }
+            return result;
+        }
+
+        public void PostChat(string text) =>
+            ChatLines.Add(new PluginChatMessage(
+                ++_chatSequence, 0u, 0, string.Empty, text, string.Empty));
+
+        public List<uint> CastTargets { get; } = [];
+
+        public PluginCastGate EvaluateGate(uint spellId, uint targetObjectId) =>
+            PluginCastGate.Ready;
+
+        public bool Cast(uint spellId, uint targetObjectId)
+        {
+            CastTargets.Add(targetObjectId);
+            return Cast(spellId);
+        }
+
         public bool Cast(uint spellId)
         {
             CastSpellIds.Add(spellId);
             CallLog.Add($"Cast:{spellId}");
+            _lastCompletion = new PluginCastCompletion(
+                _lastCompletion.Revision + 1,
+                spellId,
+                0u,
+                NextCastWeenieError);
+            if (NextCastWeenieError == 0u)
+            {
+                string castName = TryGet(spellId, out PluginSpellInfo cast)
+                    ? cast.Name
+                    : $"Spell {spellId}";
+                PostChat($"You cast {castName} on yourself");
+            }
+            foreach (PluginSpellInfo spell in KnownSelfBuffs)
+            {
+                if (spell.SpellId != spellId)
+                    continue;
+                ActiveEnchantments =
+                [
+                    .. ActiveEnchantments,
+                    new PluginActiveEnchantment(
+                        spellId,
+                        spell.Family,
+                        spell.Tier,
+                        600d),
+                ];
+                break;
+            }
             return true;
         }
 
@@ -3235,7 +5753,9 @@ public sealed class MossTankPanelTests
     private sealed class FakeLogger : IPluginLogger
     {
         public List<string> Warnings { get; } = [];
-        public void Info(string message) { }
+
+        public List<string> Infos { get; } = [];
+        public void Info(string message) => Infos.Add(message);
         public void Warn(string message) => Warnings.Add(message);
         public void Error(string message, Exception? exception = null) { }
     }

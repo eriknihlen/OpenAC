@@ -1,4 +1,4 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank.Tests;
 
@@ -11,6 +11,48 @@ public sealed class VtankAmmunitionDatabaseTests
         Assert.Equal(5, VtankAmmunitionDatabase.LauncherType(0x001u));
         Assert.Equal(6, VtankAmmunitionDatabase.LauncherType(0x080u));
         Assert.Equal(7, VtankAmmunitionDatabase.LauncherType(0x020u));
+    }
+
+    [Fact]
+    public void AnExplicitTableIsSelectedFromInsteadOfTheBundledOne()
+    {
+        var character = new Character(
+        [
+            new PluginSkillInfo(
+                47u,
+                "Missile Weapons",
+                PluginSkillTraining.Trained,
+                300u)
+            {
+                Base = 300u,
+            },
+        ]);
+        VtankAmmunitionOption[] table =
+        [
+            new("Owner's Own Quarrel", 6, 0, 0, 4, 0, 0u, 0),
+        ];
+
+        VtankAmmunitionOption selected = Assert.IsType<VtankAmmunitionOption>(
+            VtankAmmunitionDatabase.Select(
+                table,
+                6,
+                MonsterDamageType.Pierce,
+                VtankPrismaticAmmoPolicy.NoPrismatic,
+                enabledSpecialMask: 0,
+                character,
+                static _ => true));
+
+        Assert.Equal("Owner's Own Quarrel", selected.Name);
+        Assert.NotEqual(
+            selected.Name,
+            Assert.IsType<VtankAmmunitionOption>(
+                VtankAmmunitionDatabase.Select(
+                    6,
+                    MonsterDamageType.Pierce,
+                    VtankPrismaticAmmoPolicy.NoPrismatic,
+                    enabledSpecialMask: 0,
+                    character,
+                    static _ => true)).Name);
     }
 
     [Fact]

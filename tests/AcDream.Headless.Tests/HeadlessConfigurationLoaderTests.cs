@@ -475,6 +475,155 @@ public sealed class HeadlessConfigurationLoaderTests
             () => HeadlessConfigurationLoader.Load(blankPolicy.Path));
     }
 
+    [Fact]
+    public void PluginSettingsWithAllSixKeysParsesAndRoundTrips()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                """
+                "pluginSettings":{
+                    "acdream.mosstank":{
+                        "settingsProfile":"myprofile",
+                        "metaProfile":"myMeta",
+                        "navProfile":"myNav",
+                        "lootProfile":"myLoot",
+                        "startMacro":"true",
+                        "enableMeta":"true"
+                    }
+                }
+                """)));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        Dictionary<string, Dictionary<string, string>>? byPlugin =
+            Assert.Single(configuration.Sessions)!.PluginSettings;
+        Assert.NotNull(byPlugin);
+        Dictionary<string, string> declared = Assert.Single(byPlugin!).Value;
+        Assert.Equal(6, declared.Count);
+        Assert.Equal("myprofile", declared["settingsProfile"]);
+        Assert.Equal("myMeta", declared["metaProfile"]);
+        Assert.Equal("myNav", declared["navProfile"]);
+        Assert.Equal("myLoot", declared["lootProfile"]);
+        Assert.Equal("true", declared["startMacro"]);
+        Assert.Equal("true", declared["enableMeta"]);
+    }
+
+    /// <summary>
+    /// Missing keys — including the whole block, or a plugin id's own
+    /// sub-map — are tolerated: only the keys present are declared, and a
+    /// session with none of the block at all parses like any other session
+    /// without it.
+    /// </summary>
+    [Fact]
+    public void PluginSettingsWithSomeKeysMissingParsesTheOnesPresent()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginSettings\":{\"acdream.mosstank\":{\"startMacro\":\"true\"}}")));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        Dictionary<string, Dictionary<string, string>>? byPlugin =
+            Assert.Single(configuration.Sessions)!.PluginSettings;
+        Assert.NotNull(byPlugin);
+        KeyValuePair<string, Dictionary<string, string>> onlyPlugin =
+            Assert.Single(byPlugin!);
+        Assert.Equal("acdream.mosstank", onlyPlugin.Key);
+        string only = Assert.Single(onlyPlugin.Value).Key;
+        Assert.Equal("startMacro", only);
+    }
+
+    [Fact]
+    public void PluginSettingsWithTwoPluginsSharingAKeyNameParsesEachSeparately()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                """
+                "pluginSettings":{
+                    "acdream.mosstank":{"startMacro":"true"},
+                    "acdream.other":{"startMacro":"false"}
+                }
+                """)));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        Dictionary<string, Dictionary<string, string>>? byPlugin =
+            Assert.Single(configuration.Sessions)!.PluginSettings;
+        Assert.NotNull(byPlugin);
+        Assert.Equal(2, byPlugin!.Count);
+        Assert.Equal("true", byPlugin["acdream.mosstank"]["startMacro"]);
+        Assert.Equal("false", byPlugin["acdream.other"]["startMacro"]);
+    }
+
+    [Fact]
+    public void AbsentPluginSettingsBlockParsesAsNull()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session("bot", "BOT_PASSWORD")));
+
+        HeadlessConfiguration configuration =
+            HeadlessConfigurationLoader.Load(file.Path);
+
+        Assert.Null(Assert.Single(configuration.Sessions)!.PluginSettings);
+    }
+
+    [Fact]
+    public void MisspelledPluginSettingsPropertyNameFailsLoad()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginSetting\":{\"acdream.mosstank\":{\"startMacro\":\"true\"}}")));
+
+        Assert.Throws<JsonException>(
+            () => HeadlessConfigurationLoader.Load(file.Path));
+    }
+
+    [Fact]
+    public void NullPluginSettingsValueFailsLoadNamingTheKey()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginSettings\":{\"acdream.mosstank\":{\"startMacro\":null}}")));
+
+        HeadlessConfigurationException exception = Assert.Throws<
+            HeadlessConfigurationException>(
+                () => HeadlessConfigurationLoader.Load(file.Path));
+
+        Assert.Contains("startMacro", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NullPluginSettingsSubMapFailsLoadNamingThePluginId()
+    {
+        using TemporaryConfiguration file = TemporaryConfiguration.Create(
+            ConfigurationWith(Session(
+                "bot",
+                "BOT_PASSWORD",
+                "\"pluginSettings\":{\"acdream.mosstank\":null}")));
+
+        HeadlessConfigurationException exception = Assert.Throws<
+            HeadlessConfigurationException>(
+                () => HeadlessConfigurationLoader.Load(file.Path));
+
+        Assert.Contains(
+            "acdream.mosstank",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
     private static string ConfigurationWith(params string[] sessions) =>
         $$"""{"version":1,"sessions":[{{string.Join(",", sessions)}}]}""";
 

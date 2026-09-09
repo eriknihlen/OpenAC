@@ -56,6 +56,25 @@ public sealed class RuntimeSpellCastStateTests
     }
 
     [Fact]
+    public void HasRequiredComponents_AnswersTheSamePredicateCastUsesAndDoesNotMoveTheGate()
+    {
+        Spellbook book = MakeBook(flags: 0x8, untargeted: true, targetMask: 0x10);
+        var stocked = new FakeOperations { LocalPlayerId = 42u };
+        var empty = new FakeOperations { LocalPlayerId = 42u, HasComponents = false };
+
+        RuntimeSpellCastState withComponents = Create(book, stocked);
+        RuntimeSpellCastState without = Create(book, empty);
+
+        Assert.True(withComponents.HasRequiredComponents(1));
+        Assert.False(without.HasRequiredComponents(1));
+        Assert.Equal(CastRequestResult.MissingComponents, without.Cast(1));
+        Assert.Equal(0, empty.UntargetedSends);
+        Assert.Equal(
+            withComponents.EvaluateCastGate(1),
+            without.EvaluateCastGate(1));
+    }
+
+    [Fact]
     public void Cast_MissingComponents_DoesNotIncrementBusyOrSend()
     {
         Spellbook book = MakeBook(flags: 0, untargeted: true, targetMask: 0);

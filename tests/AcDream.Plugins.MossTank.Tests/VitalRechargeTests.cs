@@ -271,6 +271,105 @@ public sealed class VitalRechargeTests
         Assert.Equal(0.5d, chance, precision: 10);
     }
 
+    [Fact]
+    public void TheHealersHeartMustBeInTheItemsProfileBeforeItIsUsed()
+    {
+        Surface surface = HealersHeartSurface();
+        var settings = new VitalSettings { UseHealersHeart = true };
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface, settings, new CombatSettings(), out VitalRechargeChoice bare));
+        Assert.Equal(VitalRechargeSourceKind.LearnedSpell, bare.SourceKind);
+
+        var profiled = new CombatSettings();
+        profiled.CombatItemNames.Add("The Healer's Heart");
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface, settings, profiled, out VitalRechargeChoice used));
+        Assert.Equal(VitalRechargeSourceKind.CasterItem, used.SourceKind);
+        Assert.Equal("The Healer's Heart", used.Name);
+        Assert.Equal(71u, used.TargetObjectId);
+    }
+
+    /// <summary>
+    /// <c>fb.cs:85-94</c> — "The Healer's Heart" takes rank 1 and "Legendary
+    /// Seed of Mornings" rank 2, and each arm only overwrites when
+    /// <c>num &lt; rank</c>, so the Seed wins whichever order the scan meets
+    /// them in.
+    /// Mutation: swap the two ranks and this fails.
+    /// </summary>
+    [Fact]
+    public void TheLegendarySeedOutranksTheHealersHeart()
+    {
+        Surface surface = HealersHeartSurface();
+        surface.Items =
+        [
+            .. surface.Items,
+            Item(31u, "Legendary Seed of Mornings"),
+        ];
+        var profiled = new CombatSettings();
+        profiled.CombatItemNames.Add("The Healer's Heart");
+        profiled.CombatItemNames.Add("Legendary Seed of Mornings");
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface,
+            new VitalSettings { UseHealersHeart = true },
+            profiled,
+            out VitalRechargeChoice choice));
+        Assert.Equal("Legendary Seed of Mornings", choice.Name);
+    }
+
+    [Fact]
+    public void TheHealersHeartNeedsLifeMagic245AndArcaneLore105()
+    {
+        var profiled = new CombatSettings();
+        profiled.CombatItemNames.Add("The Healer's Heart");
+        var settings = new VitalSettings { UseHealersHeart = true };
+
+        Surface shortOnLife = HealersHeartSurface();
+        shortOnLife.Skills = [Skill(33u, 244u), Skill(14u, 400u)];
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            shortOnLife, settings, profiled, out VitalRechargeChoice noLife));
+        Assert.Equal(VitalRechargeSourceKind.LearnedSpell, noLife.SourceKind);
+
+        Surface shortOnLore = HealersHeartSurface();
+        shortOnLore.Skills = [Skill(33u, 400u), Skill(14u, 104u)];
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            shortOnLore, settings, profiled, out VitalRechargeChoice noLore));
+        Assert.Equal(VitalRechargeSourceKind.LearnedSpell, noLore.SourceKind);
+
+        Surface ready = HealersHeartSurface();
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            ready, settings, profiled, out VitalRechargeChoice ok));
+        Assert.Equal(VitalRechargeSourceKind.CasterItem, ok.SourceKind);
+    }
+
+    [Fact]
+    public void AnItemUseInFlightBlocksTheHealersHeart()
+    {
+        Surface surface = HealersHeartSurface();
+        surface.ItemsBusy = true;
+        var profiled = new CombatSettings();
+        profiled.CombatItemNames.Add("The Healer's Heart");
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface,
+            new VitalSettings { UseHealersHeart = true },
+            profiled,
+            out VitalRechargeChoice choice));
+        Assert.Equal(VitalRechargeSourceKind.LearnedSpell, choice.SourceKind);
+    }
+
+    private static Surface HealersHeartSurface() => new()
+    {
+        Mode = PluginCombatMode.Magic,
+        Spells = [Spell(300u, "Adja's Grace", 900u, 100)],
+        Lookup = [Spell((uint)SpellId.AdjaSGift, "Adja's Gift", 900u, 100)],
+        InFellowship = true,
+        Skills = [Skill(33u, 400u), Skill(14u, 400u)],
+        Items = [Item(30u, "The Healer's Heart")],
+        Fellows = [Fellow(71u, "Hurt", health: 5, distance: 10f)],
+    };
+
     private static PluginSkillInfo Skill(uint id, uint current) =>
         new(id, string.Empty, PluginSkillTraining.Trained, current);
 
@@ -339,19 +438,23 @@ public sealed class VitalRechargeTests
         public uint MaxStamina { get; init; } = 100u;
         public uint CurrentMana { get; init; } = 100u;
         public uint MaxMana { get; init; } = 100u;
-        public IReadOnlyList<PluginSkillInfo> Skills { get; init; } = [];
+        public IReadOnlyList<PluginSkillInfo> Skills { get; set; } = [];
         public IReadOnlyList<PluginAttributeInfo> Attributes => [];
         public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => [];
         public IReadOnlyList<PluginSpellInfo> Spells { get; set; } = [];
         public IReadOnlyList<PluginSpellInfo> Lookup { get; init; } = [];
         public IReadOnlyList<PluginSpellInfo> KnownSelfBuffs => Spells;
-        public IReadOnlyList<PluginInventoryItem> Items { get; init; } = [];
+        public IReadOnlyList<PluginInventoryItem> Items { get; set; } = [];
+
+        /// <summary><c>ActionLockType.ItemUse</c> (<c>fb.cs:75-78</c>).</summary>
+        public bool ItemsBusy { get; set; }
         public bool InFellowship { get; init; }
         public IReadOnlyList<PluginFellowMember> Fellows { get; init; } = [];
         public PluginCombatMode Mode { get; init; } = PluginCombatMode.Peace;
         public PluginCombatSnapshot Snapshot => new(0u, Mode, default, 0f, 0f,
             false, false, false, false);
         bool IItemAutomation.IsAvailable => true;
+        bool IItemAutomation.IsBusy => ItemsBusy;
         bool IFellowshipAutomation.IsInFellowship => InFellowship;
         public bool IsCasting => false;
 

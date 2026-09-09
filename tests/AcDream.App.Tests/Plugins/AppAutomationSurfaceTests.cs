@@ -317,4 +317,69 @@ public sealed class AppAutomationSurfaceTests
 
         Assert.Equal(0x06000165u, result.IconId);
     }
+
+
+    [Fact]
+    public void FaceHeading_IsUnavailableOnAnUnboundSurface()
+    {
+        using var surface = new AppAutomationSurface();
+
+        Assert.Equal(
+            PluginNavigationCommandStatus.Unavailable,
+            surface.Navigation.FaceHeading(90f));
+    }
+
+    /// <summary>
+    /// The inert surface every host without a live local player falls back
+    /// to — including <c>HeadlessAutomationSurface</c>, which has no
+    /// navigation surface of its own — must refuse rather than pretend.
+    /// </summary>
+    [Fact]
+    public void FaceHeading_IsUnavailableOnTheNoOpSurface()
+    {
+        INavigationAutomation navigation =
+            NoOpAutomationSurface.Instance.Navigation;
+
+        Assert.Equal(
+            PluginNavigationCommandStatus.Unavailable,
+            navigation.FaceHeading(90f));
+    }
+
+    [Fact]
+    public void FaceHeading_IsImplementedByTheGraphicalSurface()
+    {
+        System.Reflection.InterfaceMapping map =
+            typeof(AppAutomationSurface).GetInterfaceMap(
+                typeof(INavigationAutomation));
+        int index = Array.FindIndex(
+            map.InterfaceMethods,
+            static method => method.Name
+                == nameof(INavigationAutomation.FaceHeading));
+
+        Assert.True(index >= 0, "INavigationAutomation.FaceHeading not found.");
+        Assert.Equal(
+            typeof(AppAutomationSurface),
+            map.TargetMethods[index].DeclaringType);
+    }
+
+    [Fact]
+    public void OwnedItemProjectionCarriesTheSingularNameForAStack()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        using var surface = new AppAutomationSurface();
+        var stack = new ClientObject
+        {
+            ObjectId = 0x50000777u,
+            Name = "Lead Scarab",
+            PluralName = "Lead Scarabs",
+            StackSize = 5,
+            StackSizeMax = 100,
+        };
+
+        PluginInventoryItem item = surface.ProjectInventoryItem(runtime, stack);
+
+        Assert.Equal("Lead Scarabs", stack.GetAppropriateName());
+        Assert.Equal("Lead Scarab", item.Name);
+        Assert.Equal(5, item.StackSize);
+    }
 }

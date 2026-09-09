@@ -46,7 +46,17 @@ public readonly record struct PluginSpellInfo(
     public int? QualityOverride { get; init; }
     public int Quality => QualityOverride ?? Difficulty;
     public uint IconId { get; init; }
+
+    public string Saying { get; init; } = string.Empty;
+
+    public PluginSpellComponentSet ComponentSet { get; init; }
 }
+
+public readonly record struct PluginSpellComponentSet(
+    uint Herb,
+    uint Powder,
+    uint Potion,
+    uint Talisman);
 
 public readonly record struct PluginActiveEnchantment(
     uint SpellId,
@@ -93,8 +103,23 @@ public enum PluginCastGate
     Ready,
     NotKnown,
     Busy,
+    NoTargetSelected,
+    TargetIncompatible,
     /// <summary>The host rejected it for a reason not modelled here.</summary>
     Refused,
+}
+
+public enum PluginCastRequestResult
+{
+    /// <summary>The request went out on the wire.</summary>
+    Sent = 0,
+    UnknownSpell,
+    /// <summary>The spell needs a selection and there is none.</summary>
+    NoTarget,
+    /// <summary>The selection is not a legal target for this spell.</summary>
+    IncompatibleTarget,
+    MissingComponents,
+    Unavailable,
 }
 
 public interface ICharacterInfo
@@ -196,6 +221,18 @@ public interface IMagicCommands
         PluginCastGate.Refused;
 
     bool Cast(uint spellId, uint targetObjectId) => false;
+
+    PluginCastRequestResult RequestCast(uint spellId) =>
+        Cast(spellId)
+            ? PluginCastRequestResult.Sent
+            : PluginCastRequestResult.Unavailable;
+
+    PluginCastRequestResult RequestCast(uint spellId, uint targetObjectId) =>
+        Cast(spellId, targetObjectId)
+            ? PluginCastRequestResult.Sent
+            : PluginCastRequestResult.Unavailable;
+
+    bool HasComponents(uint spellId) => true;
 }
 
 public interface IAutomationSurface
@@ -290,6 +327,8 @@ public sealed class NoOpAutomationSurface
         in PluginMovementIntent intent) =>
         PluginNavigationCommandStatus.Unavailable;
     public PluginNavigationCommandStatus ClearMovementIntent() =>
+        PluginNavigationCommandStatus.Unavailable;
+    public PluginNavigationCommandStatus FaceHeading(float headingDegrees) =>
         PluginNavigationCommandStatus.Unavailable;
 
     public bool IsInWorld => false;

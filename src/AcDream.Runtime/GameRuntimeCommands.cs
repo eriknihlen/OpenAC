@@ -156,6 +156,11 @@ public interface IRuntimeMovementCommands
 
     RuntimeCommandResult ClearIntent(
         RuntimeGenerationToken expectedGeneration);
+
+    RuntimeCommandResult TurnToHeading(
+        RuntimeGenerationToken expectedGeneration,
+        float headingDegrees,
+        bool applyRunHoldKey = false);
 }
 
 public interface IRuntimeChatCommands

@@ -29,6 +29,10 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
+    <ProjectReference Include="..\..\src\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

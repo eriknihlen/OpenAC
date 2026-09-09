@@ -97,6 +97,18 @@ internal sealed class MossTankLootProfileStore
         return false;
     }
 
+    public bool Exists(string? name)
+    {
+        string normalized = name?.Trim() ?? string.Empty;
+        if (normalized.Length == 0)
+            return false;
+        if (normalized.Equals(ByCharacter, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string candidate = ToFileName(normalized);
+        return VtankStorage.IsAvailable && VtankStorage.ReadText(candidate) is not null;
+    }
+
     public bool Create(
         string? name,
         bool copyCurrent,

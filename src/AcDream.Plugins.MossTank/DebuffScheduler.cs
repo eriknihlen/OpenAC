@@ -1,4 +1,4 @@
-using AcDream.Plugin.Abstractions;
+﻿using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank;
 
@@ -6,121 +6,27 @@ internal readonly record struct DebuffIdentity(
     MonsterActionFlags Flag,
     MonsterDamageType DamageType);
 
-internal readonly record struct DebuffChoice(
-    DebuffIdentity Identity,
-    PluginSpellInfo Spell,
-    int ActionOrder);
-
-internal sealed class DebuffSpellCatalog
+internal static class DebuffSpellCatalog
 {
-    private static readonly (MonsterActionFlags Flag, int Order)[] OrderedFlags =
+    private static readonly MonsterActionFlags[] Columns =
     [
-        (MonsterActionFlags.Fester, 0),
-        (MonsterActionFlags.Broadside, 1),
-        (MonsterActionFlags.GravityWell, 2),
-        (MonsterActionFlags.Imperil, 3),
-        (MonsterActionFlags.Yield, 4),
-        (MonsterActionFlags.Vulnerability, 5),
-        (MonsterActionFlags.WeakeningCurse, 6),
-        (MonsterActionFlags.FesteringCurse, 7),
-        (MonsterActionFlags.Corruption, 8),
-        (MonsterActionFlags.DestructiveCurse, 9),
-        (MonsterActionFlags.Corrosion, 10),
+        MonsterActionFlags.Fester,
+        MonsterActionFlags.Broadside,
+        MonsterActionFlags.GravityWell,
+        MonsterActionFlags.Imperil,
+        MonsterActionFlags.Yield,
+        MonsterActionFlags.Vulnerability,
+        MonsterActionFlags.WeakeningCurse,
+        MonsterActionFlags.FesteringCurse,
+        MonsterActionFlags.Corruption,
+        MonsterActionFlags.DestructiveCurse,
+        MonsterActionFlags.Corrosion,
     ];
-
-    private readonly DebuffChoice[] _choices;
-
-    private DebuffSpellCatalog(DebuffChoice[] choices) => _choices = choices;
-
-    public static DebuffSpellCatalog Build(IReadOnlyList<PluginSpellInfo> spells)
-    {
-        ArgumentNullException.ThrowIfNull(spells);
-        var choices = new List<DebuffChoice>();
-        foreach (PluginSpellInfo spell in spells)
-        {
-            if (!TryClassify(spell, out DebuffIdentity identity, out int order))
-                continue;
-            choices.Add(new DebuffChoice(identity, spell, order));
-        }
-        return new DebuffSpellCatalog([.. choices]);
-    }
-
-    public IReadOnlyList<DebuffChoice> Candidates(
-        MonsterRuleActions actions,
-        DebuffSelectionMethod selection,
-        ICharacterInfo character,
-        Func<DebuffIdentity, PluginSpellInfo, bool> isDue)
-    {
-        ArgumentNullException.ThrowIfNull(actions);
-        ArgumentNullException.ThrowIfNull(character);
-        ArgumentNullException.ThrowIfNull(isDue);
-
-        HashSet<DebuffIdentity> required = Required(actions);
-        if (required.Count == 0 || _choices.Length == 0)
-            return Array.Empty<DebuffChoice>();
-
-        var candidates = new List<DebuffChoice>();
-        foreach (DebuffChoice choice in _choices)
-        {
-            if (required.Contains(choice.Identity)
-                && isDue(choice.Identity, choice.Spell))
-            {
-                candidates.Add(choice);
-            }
-        }
-
-        candidates.Sort((left, right) => Compare(
-            left, right, selection, character));
-        return candidates;
-    }
-
-    public bool HasKnownRequirement(MonsterRuleActions actions)
-    {
-        HashSet<DebuffIdentity> required = Required(actions);
-        foreach (DebuffChoice choice in _choices)
-        {
-            if (required.Contains(choice.Identity))
-                return true;
-        }
-        return false;
-    }
-
-    private static int Compare(
-        DebuffChoice left,
-        DebuffChoice right,
-        DebuffSelectionMethod selection,
-        ICharacterInfo character)
-    {
-        if (selection == DebuffSelectionMethod.Skill)
-        {
-            uint leftSkill = Skill(character, left.Spell.School);
-            uint rightSkill = Skill(character, right.Spell.School);
-            int skill = rightSkill.CompareTo(leftSkill);
-            if (skill != 0)
-                return skill;
-        }
-
-        int tier = right.Spell.Tier.CompareTo(left.Spell.Tier);
-        if (tier != 0)
-            return tier;
-        int difficulty = right.Spell.Difficulty.CompareTo(left.Spell.Difficulty);
-        if (difficulty != 0)
-            return difficulty;
-        int action = left.ActionOrder.CompareTo(right.ActionOrder);
-        return action != 0
-            ? action
-            : left.Spell.SpellId.CompareTo(right.Spell.SpellId);
-    }
-
-    private static uint Skill(ICharacterInfo character, uint skillId) =>
-        character.TryGetSkill(skillId, out PluginSkillInfo skill)
-            ? skill.Current
-            : 0u;
 
     internal static HashSet<DebuffIdentity> Required(MonsterRuleActions actions)
     {
         var required = new HashSet<DebuffIdentity>();
-        foreach ((MonsterActionFlags flag, _) in OrderedFlags)
+        foreach (MonsterActionFlags flag in Columns)
         {
             if ((actions.Flags & flag) == 0)
                 continue;
@@ -183,11 +89,7 @@ internal sealed class DebuffSpellCatalog
             return false;
         }
 
-        order = Array.FindIndex(
-            OrderedFlags,
-            entry => entry.Flag == flag);
-        if (order < 0)
-            order = int.MaxValue;
+        order = CombatDebuffChain.OrderOf(flag);
         identity = new DebuffIdentity(flag, damage);
         return true;
     }
@@ -252,14 +154,28 @@ internal sealed class DebuffTracker
         DebuffIdentity identity,
         PluginSpellInfo spell,
         double now,
-        double precastSeconds)
+        double toleranceSeconds)
     {
         if (!_applied.TryGetValue((targetObjectId, identity), out Applied applied))
             return true;
         if (applied.SpellId != spell.SpellId && spell.Tier > applied.Tier)
             return true;
-        double lead = spell.IsDamageOverTime ? 0d : Math.Max(0d, precastSeconds);
-        return now >= applied.ExpiresAt - lead;
+        return now >= applied.ExpiresAt - Math.Max(0d, toleranceSeconds);
+    }
+
+    public bool IsApplied(
+        uint targetObjectId,
+        DebuffIdentity identity,
+        PluginSpellInfo? spell,
+        double now)
+    {
+        if (spell is not { } known)
+            return false;
+        if (!_applied.TryGetValue((targetObjectId, identity), out Applied applied))
+            return false;
+        return applied.SpellId == known.SpellId
+            ? now < applied.ExpiresAt
+            : applied.Tier >= known.Tier && now < applied.ExpiresAt;
     }
 
     public void Begin(

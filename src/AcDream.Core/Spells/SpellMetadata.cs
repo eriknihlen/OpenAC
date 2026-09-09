@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace AcDream.Core.Spells;
@@ -27,6 +28,10 @@ public sealed record SpellMetadata(
     uint   TargetMask,
     int    SpellType)
 {
+    public string Saying { get; init; } = string.Empty;
+
+    public SpellComponentSet ComponentSet { get; init; }
+
     public MagicSchool SchoolId { get; init; }
     public IReadOnlyList<uint> FormulaComponents { get; init; } = [];
     public uint FormulaVersion { get; init; }
@@ -47,4 +52,22 @@ public sealed record SpellMetadata(
     public bool IsSelfTargeted => (Flags & (uint)SpellFlags.SelfTargeted) != 0;
     public bool IsBeneficial => (Flags & (uint)SpellFlags.Beneficial) != 0;
     public bool IsProjectile => (Flags & (uint)SpellFlags.Projectile) != 0;
+}
+
+public readonly record struct SpellComponentSet(
+    uint Herb,
+    uint Powder,
+    uint Potion,
+    uint Talisman) : IComparable<SpellComponentSet>
+{
+    public int CompareTo(SpellComponentSet other)
+    {
+        if (Herb != other.Herb)
+            return Herb.CompareTo(other.Herb);
+        if (Powder != other.Powder)
+            return Powder.CompareTo(other.Powder);
+        if (Potion != other.Potion)
+            return Potion.CompareTo(other.Potion);
+        return Talisman.CompareTo(other.Talisman);
+    }
 }

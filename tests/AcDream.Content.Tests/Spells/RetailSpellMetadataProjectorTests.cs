@@ -131,6 +131,80 @@ public sealed class RetailSpellMetadataProjectorTests
         Assert.Contains(mismatches, value => value.Contains("csv=0x00000101 dat=0x00000010"));
     }
 
+    [Fact]
+    public void Project_ComponentSet_TakesHerbPowderPotionTalismanAndIgnoresScarabsAndTapers()
+    {
+        var components = new SpellComponentTable();
+        components.Components.Add(1u, Component(ComponentType.Scarab, string.Empty));
+        components.Components.Add(6u, Component(ComponentType.Scarab, string.Empty));
+        components.Components.Add(7u, Component(ComponentType.Herb, "Malar"));
+        components.Components.Add(33u, Component(ComponentType.Powder, "Caza"));
+        components.Components.Add(44u, Component(ComponentType.Potion, "El"));
+        components.Components.Add(49u, Component(ComponentType.Talisman, string.Empty));
+        components.Components.Add(60u, Component(ComponentType.Talisman, string.Empty));
+        components.Components.Add(63u, Component(ComponentType.Taper, string.Empty));
+        components.Components.Add(72u, Component(ComponentType.Taper, string.Empty));
+
+        // "Strength Self I" shape: lead scarab, no tapers, Rowan talisman.
+        SpellMetadata weakSelf = RetailSpellMetadataProjector.Project(
+            2u, Formula([1u, 7u, 33u, 44u, 60u]), components);
+        // "Strength Self VI" shape: pyreal scarab, two tapers, same talisman.
+        SpellMetadata strongSelf = RetailSpellMetadataProjector.Project(
+            0x0534u, Formula([6u, 63u, 7u, 72u, 33u, 44u, 63u, 60u]), components);
+        // "Strength Other VI" shape: the SAME herb/powder/potion, Poplar.
+        SpellMetadata strongOther = RetailSpellMetadataProjector.Project(
+            0x0539u, Formula([6u, 63u, 7u, 72u, 33u, 44u, 63u, 49u]), components);
+
+        Assert.Equal(new SpellComponentSet(7u, 33u, 44u, 60u), weakSelf.ComponentSet);
+        Assert.Equal(weakSelf.ComponentSet, strongSelf.ComponentSet);
+        Assert.NotEqual(weakSelf.ComponentSet, strongOther.ComponentSet);
+        Assert.Equal(new SpellComponentSet(7u, 33u, 44u, 49u), strongOther.ComponentSet);
+    }
+
+    [Fact]
+    [Trait("Lane", "InstalledDat")]
+    public void Load_EndOfRetailDat_ComponentSetSeparatesSelfFromOtherAcrossEveryTier()
+    {
+        string? datDir = ResolveDatDir();
+        if (datDir is null) Assert.Fail("Lane=InstalledDat requires an installed retail DAT directory; see docs/release-gate.md.");
+
+        using var rawDats = new DatCollection(datDir, DatAccessType.Read);
+        using var dats = new DatCollectionAdapter(rawDats);
+        MagicCatalog catalog = MagicCatalog.Load(dats);
+
+        SpellComponentSet Set(uint spellId)
+        {
+            Assert.True(catalog.SpellTable.TryGet(spellId, out SpellMetadata meta));
+            return meta.ComponentSet;
+        }
+
+        var strengthSelf = new SpellComponentSet(7u, 33u, 44u, 60u);
+        Assert.Equal(strengthSelf, Set(0x0002u));   // Strength Self I
+        Assert.Equal(strengthSelf, Set(0x0534u));   // Strength Self VI
+        Assert.Equal(strengthSelf, Set(0x10E5u));   // Incantation of Strength Self
+        // Strength Other VI and Incantation of Strength Other: Poplar 49.
+        Assert.Equal(new SpellComponentSet(7u, 33u, 44u, 49u), Set(0x0539u));
+        Assert.Equal(new SpellComponentSet(7u, 33u, 44u, 49u), Set(0x10E4u));
+
+        var masterySelf = new SpellComponentSet(7u, 25u, 42u, 60u);
+        Assert.Equal(masterySelf, Set(0x022Du));    // CE Mastery Self I
+        Assert.Equal(masterySelf, Set(0x0232u));    // CE Mastery Self VI
+        Assert.Equal(masterySelf, Set(0x11B2u));    // Incantation of CE Mastery Self
+        Assert.Equal(masterySelf, Set(0x08A7u));
+        Assert.NotEqual(masterySelf, Set(0x08A6u)); // Adja's Boon is NOT
+        Assert.Equal(new SpellComponentSet(7u, 25u, 42u, 49u), Set(0x08A6u));
+    }
+
+    private static SpellBase Formula(List<uint> components) => new()
+    {
+        Name = "Fixture",
+        Description = "Fixture",
+        Components = components,
+        School = DatMagicSchool.CreatureEnchantment,
+        Bitfield = SpellIndex.SelfTargeted,
+        Category = (DatSpellCategory)1u,
+    };
+
     private static SpellComponentBase Component(ComponentType type, string text) => new()
     {
         Type = type,

@@ -85,4 +85,7 @@ public interface INavigationAutomation
         in PluginMovementIntent intent);
 
     PluginNavigationCommandStatus ClearMovementIntent();
+
+    PluginNavigationCommandStatus FaceHeading(float headingDegrees) =>
+        PluginNavigationCommandStatus.Unavailable;
 }

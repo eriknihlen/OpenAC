@@ -363,6 +363,28 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         return Result(RuntimeCommandStatus.Accepted);
     }
 
+    public RuntimeCommandResult TurnToHeading(
+        RuntimeGenerationToken expectedGeneration,
+        float headingDegrees,
+        bool applyRunHoldKey = false)
+    {
+        RuntimeCommandStatus gate = Validate(
+            expectedGeneration,
+            requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _movement.TurnToHeading(
+            headingDegrees,
+            applyRunHoldKey)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Unsupported;
+        _events.EmitCommand(
+            RuntimeCommandDomain.Movement,
+            operation: 0x103,
+            status);
+        return Result(status);
+    }
+
     public RuntimeCommandResult Execute(
         RuntimeGenerationToken expectedGeneration,
         in RuntimeChatCommand command)

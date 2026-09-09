@@ -74,6 +74,47 @@ public sealed class PetAutomationTests
     }
 
     [Fact]
+    public void RefillWaitsForPeaceModeAndSummonDoesNot()
+    {
+        var settings = Settings(MonsterDamageType.Cold);
+        settings.PetRefillCountNormal = 5;
+        var items = new ItemAutomation
+        {
+            Items =
+            [
+                Device(1, 49387, mastery: 3, level: 100, structure: 5, maximum: 50),
+                Item(2, PetDeviceCatalog.EncapsulatedSpiritWeenieClassId),
+            ],
+        };
+        var character = new Character(3, 300);
+        PluginCombatTarget[] targets = [Target(10, "Target", 4)];
+        var automation = new PetAutomation();
+        bool inPeace = false;
+
+        Assert.True(automation.Tick(
+            items,
+            character,
+            targets,
+            settings,
+            1d,
+            out string blocked,
+            readyToRefillInPeace: () => inPeace));
+        Assert.Empty(items.Applies);
+        Assert.Contains("peace mode", blocked, StringComparison.Ordinal);
+
+        inPeace = true;
+        Assert.True(automation.Tick(
+            items,
+            character,
+            targets,
+            settings,
+            1.1d,
+            out _,
+            readyToRefillInPeace: () => inPeace));
+        Assert.Equal([(2u, 1u)], items.Applies);
+    }
+
+    [Fact]
     public void Select_RefillsChosenDeviceWithEncapsulatedSpiritBeforeSummon()
     {
         var settings = Settings(MonsterDamageType.Cold);

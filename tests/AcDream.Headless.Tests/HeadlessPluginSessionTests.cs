@@ -294,11 +294,213 @@ public sealed class HeadlessPluginSessionTests
         Assert.Equal([1_000_000u, 1_000_001u], observed);
     }
 
+    [Fact]
+    public void SessionTickFiresThePluginHostTickForEveryRegisteredHandler()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        var firstElapsed = new List<double>();
+        var secondElapsed = new List<double>();
+        Action<double> first = elapsed => firstElapsed.Add(elapsed);
+        Action<double> second = elapsed => secondElapsed.Add(elapsed);
+        session.Plugins.Host.Events.Tick += first;
+        session.Plugins.Host.Events.Tick += second;
+
+        session.Tick(0.25d);
+        session.Tick(0.10d);
+
+        Assert.Equal([0.25d, 0.10d], firstElapsed);
+        Assert.Equal([0.25d, 0.10d], secondElapsed);
+    }
+
+    [Fact]
+    public void AThrowingTickHandlerLogsAWarningAndDoesNotStopALaterHandler()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        var diagnosticsOutput = new StringWriter();
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(diagnosticsOutput),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        var laterElapsed = new List<double>();
+        Action<double> throwing = _ => throw new InvalidOperationException("boom");
+        Action<double> later = elapsed => laterElapsed.Add(elapsed);
+        session.Plugins.Host.Events.Tick += throwing;
+        session.Plugins.Host.Events.Tick += later;
+
+        session.Tick(0.25d);
+
+        Assert.Equal([0.25d], laterElapsed);
+        Assert.Contains(
+            "plugin-warn:",
+            diagnosticsOutput.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutomationIsAvailableTracksRuntimeInWorldLifecycle()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.IsAvailable);
+
+        _ = session.Start();
+
+        Assert.True(session.Plugins.Host.Automation.IsAvailable);
+    }
+
+    [Fact]
+    public void SessionSettingsForwardsTheDescriptorsPluginSettings()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        var declared = new Dictionary<string, Dictionary<string, string>>
+        {
+            [FixtureId] = new() { ["startMacro"] = "true" },
+        };
+        using var session = new HeadlessSessionHost(
+            Descriptor(
+                [],
+                Path.Combine(temporary.Path, "status.jsonl"),
+                pluginSettings: declared),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Equal(
+            "true",
+            session.Plugins.Host.SessionSettingsFor(FixtureId)["startMacro"]);
+    }
+
+    [Fact]
+    public void SessionSettingsForwardsDifferentPluginsToDifferentIds()
+    {
+        const string otherId = "acdream.test.other-fixture";
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        var declared = new Dictionary<string, Dictionary<string, string>>
+        {
+            [FixtureId] = new() { ["startMacro"] = "true" },
+            [otherId] = new() { ["startMacro"] = "false" },
+        };
+        using var session = new HeadlessSessionHost(
+            Descriptor(
+                [],
+                Path.Combine(temporary.Path, "status.jsonl"),
+                pluginSettings: declared),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Equal(
+            "true",
+            session.Plugins.Host.SessionSettingsFor(FixtureId)["startMacro"]);
+        Assert.Equal(
+            "false",
+            session.Plugins.Host.SessionSettingsFor(otherId)["startMacro"]);
+        Assert.Empty(session.Plugins.Host.SessionSettingsFor("acdream.test.unknown"));
+    }
+
+    [Fact]
+    public void MutatingTheDescriptorsPluginSettingsAfterConstructionIsNotVisibleToTheHost()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        var fixtureSettings = new Dictionary<string, string> { ["startMacro"] = "true" };
+        var declared = new Dictionary<string, Dictionary<string, string>>
+        {
+            [FixtureId] = fixtureSettings,
+        };
+        using var session = new HeadlessSessionHost(
+            Descriptor(
+                [],
+                Path.Combine(temporary.Path, "status.jsonl"),
+                pluginSettings: declared),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        // Mutate both levels after the host already read them.
+        fixtureSettings["startMacro"] = "false";
+        declared["acdream.test.injected-after-construction"] =
+            new() { ["startMacro"] = "true" };
+
+        Assert.Equal(
+            "true",
+            session.Plugins.Host.SessionSettingsFor(FixtureId)["startMacro"]);
+        Assert.Empty(session.Plugins.Host.SessionSettingsFor(
+            "acdream.test.injected-after-construction"));
+    }
+
+    [Fact]
+    public void ChatSubmitRoutesThroughTheRealChatCommandPipelineToARegisteredPluginVerb()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        string? received = null;
+        session.PluginCommands.Register(
+            "smoketest",
+            command => received = command.Arguments);
+
+        _ = session.Start();
+        bool accepted = session.Plugins.Host.Automation.Chat.Submit(
+            "/smoketest hello");
+
+        Assert.True(accepted);
+        Assert.Equal("hello", received);
+    }
+
+    [Fact]
+    public void ChatPostSystemMessageAppendsToTheRuntimeCommunicationTranscript()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        int before = session.Runtime.Chat.Count;
+
+        session.Plugins.Host.Automation.Chat.PostSystemMessage("hello from autostart");
+
+        Assert.Equal(before + 1, session.Runtime.Chat.Count);
+    }
+
     private static HeadlessSessionDescriptor Descriptor(
         List<string> plugins,
         string statusPath,
         IReadOnlyList<string>? loginCommands = null,
-        int loginCommandDelayMs = 500) => new()
+        int loginCommandDelayMs = 500,
+        Dictionary<string, Dictionary<string, string>>? pluginSettings = null) => new()
         {
             Id = "headless-session",
             Endpoint = new HeadlessEndpointDescriptor
@@ -324,6 +526,7 @@ public sealed class HeadlessPluginSessionTests
             StatusFile = statusPath,
             LoginCommands = loginCommands is null ? null : [.. loginCommands],
             LoginCommandDelayMs = loginCommandDelayMs,
+            PluginSettings = pluginSettings,
         };
 
     private static WorldSession.EntitySpawn Spawn(uint guid, float x) => new(

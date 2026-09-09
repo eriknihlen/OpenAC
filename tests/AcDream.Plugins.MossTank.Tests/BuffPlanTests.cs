@@ -63,7 +63,7 @@ public class BuffPlanTests
     }
 
     [Fact]
-    public void ProtectionsAndAurasAreCastWhenEnabledAndSkippedWhenNot()
+    public void ProtectionsAreSelfCandidatesAndAurasAreNot()
     {
         var lines = Lines(
             Spell(1, 109, 1, "Reduces damage the caster takes from Fire by 9%."),
@@ -71,11 +71,11 @@ public class BuffPlanTests
 
         var all = BuffPlan.Build(lines, Array.Empty<PluginSkillInfo>(),
             Array.Empty<PluginAttributeInfo>(), Array.Empty<PluginActiveEnchantment>(), Default);
-        Assert.Equal(2, all.Count);
+        Assert.Equal([1u], all.Select(static spell => spell.SpellId));
 
         var none = BuffPlan.Build(lines, Array.Empty<PluginSkillInfo>(),
             Array.Empty<PluginAttributeInfo>(), Array.Empty<PluginActiveEnchantment>(),
-            new BuffSettings { BuffProtections = false, BuffAuras = false });
+            new BuffSettings { BuffProtections = false });
         Assert.Empty(none);
     }
 
@@ -91,7 +91,7 @@ public class BuffPlanTests
     }
 
     [Fact]
-    public void BanesAreCastWhenEnabledAndSkippedWhenNot()
+    public void BanesAreNeverSelfListCandidates()
     {
         var bane = new PluginSpellInfo(
             1, "Blade Bane I", Family: 174, Tier: 1, Difficulty: 50, ManaCost: 10,
@@ -101,11 +101,42 @@ public class BuffPlanTests
             IsSelfTargeted: false, IsBeneficial: true);
         var lines = BuffProfile.Build(new[] { bane });
 
-        Assert.Single(BuffPlan.Build(lines, Array.Empty<PluginSkillInfo>(),
+        Assert.Equal(BuffTargetKind.Bane, lines[0].Kind);
+
+        Assert.Empty(BuffPlan.Build(lines, Array.Empty<PluginSkillInfo>(),
             Array.Empty<PluginAttributeInfo>(), Array.Empty<PluginActiveEnchantment>(), Default));
         Assert.Empty(BuffPlan.Build(lines, Array.Empty<PluginSkillInfo>(),
             Array.Empty<PluginAttributeInfo>(), Array.Empty<PluginActiveEnchantment>(),
             new BuffSettings { BuffBanes = false }));
+    }
+
+    [Fact]
+    public void ImpenetrabilityLeavesTheSelfListWithTheBanes()
+    {
+        var impenetrability = new PluginSpellInfo(
+            2, "Impenetrability I", Family: 173, Tier: 1, Difficulty: 50,
+            ManaCost: 10, DurationSeconds: 1800f, School: ItemEnchantmentSkill,
+            Description: "Increases a shield or piece of armor's armor value by "
+                + "20 points. Target yourself to cast this spell on all of your "
+                + "equipped armor.",
+            IsSelfTargeted: false, IsBeneficial: true);
+        var armorSelf = new PluginSpellInfo(
+            3, "Armor Self I", Family: 105, Tier: 1, Difficulty: 50, ManaCost: 10,
+            DurationSeconds: 1800f, School: LifeMagicSkill,
+            Description: "Increases the caster's natural armor by 20 points.",
+            IsSelfTargeted: true, IsBeneficial: true);
+        var lines = BuffProfile.Build(new[] { impenetrability, armorSelf });
+
+        var plan = BuffPlan.Build(
+            lines,
+            [Skill(ItemEnchantmentSkill, "Item Enchantment", PluginSkillTraining.Trained)],
+            Array.Empty<PluginAttributeInfo>(),
+            Array.Empty<PluginActiveEnchantment>(),
+            Default);
+
+        // Armor Self is eq.cs:159's own entry and stays; Impenetrability is
+        // eq.cs:246's and does not.
+        Assert.Equal([3u], plan.Select(static spell => spell.SpellId));
     }
 
     [Fact]
@@ -329,10 +360,7 @@ public class BuffPlanTests
             mana: 50, school: CreatureEnchantmentSkill),
         Spell(6, 106, 1, "Increases the caster's Life Magic skill by 10 points.",
             mana: 40, school: CreatureEnchantmentSkill),
-        // Item Enchantment (school 32)
-        Spell(7, 107, 1,
-            "Increases a shield or piece of armor's resistance to slashing damage by 10%. "
-            + "Target yourself to cast this spell on all of your equipped armor.",
+        Spell(7, 107, 1, "Increases the caster's maximum burden by 100 units.",
             mana: 30, school: ItemEnchantmentSkill),
         Spell(8, 108, 1, "Increases a weapon's damage value by 2 points.",
             mana: 20, school: ItemEnchantmentSkill),
@@ -356,7 +384,7 @@ public class BuffPlanTests
                 Attribute(4, "Focus"), Attribute(5, "Self"),
             },
             Array.Empty<PluginActiveEnchantment>(),
-            Default,
+            new BuffSettings { BuffOther = true },
             force: true);
 
     [Fact]
@@ -395,12 +423,14 @@ public class BuffPlanTests
     public void WithinOneGroupTheCheapestStillCastsFirst()
     {
         List<PluginSpellInfo> plan = OrderedPlan();
-        List<PluginSpellInfo> item =
-            plan.Where(s => s.School == ItemEnchantmentSkill).ToList();
+        List<PluginSpellInfo> tail = plan
+            .Skip(4)
+            .Where(s => s.School == CreatureEnchantmentSkill)
+            .ToList();
 
-        Assert.Equal(2, item.Count);
-        Assert.True(item[0].ManaCost <= item[1].ManaCost);
-        Assert.Equal(8u, item[0].SpellId);   // the 20-mana aura before the 30-mana bane
+        Assert.Equal(2, tail.Count);
+        Assert.True(tail[0].ManaCost <= tail[1].ManaCost);
+        Assert.Equal(6u, tail[0].SpellId);   // the 40-mana line before the 50-mana one
     }
 
     // ── The vital regeneration rates ─────────────────────────────────────
@@ -456,7 +486,7 @@ public class BuffPlanTests
             },
             new[] { Attribute(4, "Focus") },
             Array.Empty<PluginActiveEnchantment>(),
-            Default,
+            new BuffSettings { BuffOther = true },
             force: true);
 
         Assert.Equal(6, plan.Count);
@@ -481,5 +511,159 @@ public class BuffPlanTests
         Assert.Empty(BuffPlan.Build(book, Array.Empty<PluginSkillInfo>(),
             Array.Empty<PluginAttributeInfo>(),
             Array.Empty<PluginActiveEnchantment>(), off, force: true));
+    }
+
+
+    private static readonly PluginSpellComponentSet MasterySelf =
+        new(7u, 25u, 42u, 60u);   // Hyssop, Powdered Agate, Gypsum, Rowan
+    /// <summary>The same family's OTHER line: only the talisman differs.</summary>
+    private static readonly PluginSpellComponentSet MasteryOther =
+        new(7u, 25u, 42u, 49u);   // ... Poplar
+
+    private static PluginSpellInfo Tier(
+        uint id,
+        string name,
+        int tier,
+        int difficulty,
+        PluginSpellComponentSet componentSet,
+        bool self = true,
+        bool fellowship = false,
+        bool untargeted = false,
+        uint school = CreatureEnchantmentSkill) =>
+        new(id, name, 43u, tier, difficulty, 10, 1800f, school,
+            "Increases the caster's Creature Enchantment skill by 10 points.",
+            IsSelfTargeted: self, IsBeneficial: true)
+        {
+            IsFellowship = fellowship,
+            IsUntargeted = untargeted,
+            ComponentSet = componentSet,
+        };
+
+    private static List<PluginSpellInfo> PlanFor(
+        uint creatureSkill,
+        params PluginSpellInfo[] book) =>
+        BuffPlan.Build(
+            Lines(book),
+            new[]
+            {
+                Skill(CreatureEnchantmentSkill, "Creature Enchantment",
+                    PluginSkillTraining.Specialized, creatureSkill),
+                Skill(LifeMagicSkill, "Life Magic",
+                    PluginSkillTraining.Specialized, 450),
+            },
+            Array.Empty<PluginAttributeInfo>(),
+            Array.Empty<PluginActiveEnchantment>(),
+            new BuffSettings { BuffOther = true },
+            force: true);
+
+    [Fact]
+    public void AGemSpellCarryingTheOtherLinesCompSetIsNeverATierCandidate()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 350u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x0232u, "Creature Enchantment Mastery Self VI", 6, 250, MasterySelf),
+            Tier(0x08A6u, "Adja's Boon", 7, 300, MasteryOther, self: false),
+            Tier(0x11B2u, "Incantation of Creature Enchantment Mastery Self",
+                8, 400, MasterySelf));
+
+        Assert.Single(plan);
+        Assert.Equal(0x0232u, plan[0].SpellId);
+    }
+
+    [Fact]
+    public void TheSelfGemOfTheSameFamilyStaysACandidate()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 350u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x08A7u, "Adja's Blessing", 7, 300, MasterySelf));
+
+        Assert.Single(plan);
+        Assert.Equal(0x08A7u, plan[0].SpellId);
+    }
+
+    [Fact]
+    public void TheOtherLinesIncantationIsNotATierCandidateAtTheSameQuality()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 450u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x11B1u, "Incantation of Creature Enchantment Mastery Other",
+                8, 400, MasteryOther, self: false),
+            Tier(0x11B2u, "Incantation of Creature Enchantment Mastery Self",
+                8, 400, MasterySelf));
+
+        Assert.Single(plan);
+        Assert.Equal(0x11B2u, plan[0].SpellId);
+    }
+
+    [Fact]
+    public void AFellowshipMemberOfTheFamilyIsNotATierCandidate()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 450u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x0D3Bu, "Superior Conjurant Chant", 7, 325, MasterySelf,
+                fellowship: true));
+
+        Assert.Single(plan);
+        Assert.Equal(0x022Du, plan[0].SpellId);
+    }
+
+    /// <summary>
+    /// <c>A_0.isUntargeted == item.isUntargeted</c> -- the term that keeps a
+    /// targeted line from resolving to an untargeted ring of the same family.
+    /// </summary>
+    [Fact]
+    public void AnUntargetedMemberOfATargetedLineIsNotATierCandidate()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 450u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x0999u, "Mastery Ring", 7, 325, MasterySelf, untargeted: true));
+
+        Assert.Single(plan);
+        Assert.Equal(0x022Du, plan[0].SpellId);
+    }
+
+    [Fact]
+    public void ACrossSchoolMemberOfTheFamilyIsNotATierCandidate()
+    {
+        List<PluginSpellInfo> plan = PlanFor(
+            creatureSkill: 450u,
+            Tier(0x022Du, "Creature Enchantment Mastery Self I", 1, 1, MasterySelf),
+            Tier(0x0998u, "Life Impostor", 7, 325, MasterySelf,
+                school: LifeMagicSkill));
+
+        Assert.Single(plan);
+        Assert.Equal(0x022Du, plan[0].SpellId);
+    }
+
+    [Fact]
+    public void TheLineReferenceIsTheWeakestSelfMemberAndClassifiesTheLine()
+    {
+        var other = new PluginSpellInfo(
+            0x0001u, "Strength Other I", 1u, 1, 1, 10, 1800f,
+            CreatureEnchantmentSkill,
+            "Increases the target's Strength by 10 points.",
+            IsSelfTargeted: false, IsBeneficial: true);
+        var selfSix = new PluginSpellInfo(
+            0x0534u, "Strength Self VI", 1u, 6, 250, 10, 1800f,
+            CreatureEnchantmentSkill,
+            "Increases the caster's Strength by 10 points.",
+            IsSelfTargeted: true, IsBeneficial: true);
+        var selfOne = new PluginSpellInfo(
+            0x0002u, "Strength Self I", 1u, 1, 1, 10, 1800f,
+            CreatureEnchantmentSkill,
+            "Increases the caster's Strength by 10 points.",
+            IsSelfTargeted: true, IsBeneficial: true);
+
+        List<BuffLine> lines = Lines(other, selfSix, selfOne);
+
+        BuffLine line = Assert.Single(lines);
+        Assert.Equal(0x0002u, line.Reference.SpellId);
+        Assert.Equal(BuffTargetKind.Attribute, line.Kind);
+        Assert.Equal("Strength", line.TargetName);
     }
 }

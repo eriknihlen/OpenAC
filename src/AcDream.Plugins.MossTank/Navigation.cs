@@ -286,9 +286,12 @@ internal sealed class NavigationSettings
 
 internal sealed class NavigationController
 {
-    private const float HeadingToleranceDegrees = 4f;
-    private const float FarMovingTurnLimitDegrees = 45f;
-    private const float NearMovingTurnLimitDegrees = 15f;
+    internal const float HeadingToleranceDegrees = 4f;
+
+    internal const double FaceHeadingReissueSeconds = 0.7d;
+
+    internal const double NoFaceHeadingStamp = double.NegativeInfinity;
+
     private const double NearTargetMeters = 3d;
     private const double ChatInitialDelaySeconds = 0.2d;
     private const double UseRetrySeconds = 2d;
@@ -334,6 +337,11 @@ internal sealed class NavigationController
     private PluginNavigationPosition _portalOrigin;
     private bool _hasPortalOrigin;
     private bool _hadMovementIntent;
+
+    private double _now;
+
+    /// <summary>VTank <c>fd</c>'s <c>p</c> field (fd.cs:336-345).</summary>
+    private double _faceHeadingStamp = NoFaceHeadingStamp;
     private string _status = "Navigation disabled.";
 
     public NavigationController(IPluginHost host, NavigationSettings settings)
@@ -346,14 +354,61 @@ internal sealed class NavigationController
     public int CurrentWaypointIndex => _index;
     public bool Reversing => _reverse;
 
+    public bool HasActiveAction => _activeAction is not null;
+
+    private const double NavIdlePeaceOverrideMeters = 1.5d;
+
+    internal const string LowWaypointDistanceWarning =
+        "Warning: Idle peace selected with low waypoint minimum distance. "
+        + "Will switch to magic mode.";
+
+    private CombatModeGate? _combatModeGate;
+    private CombatSettings? _combatSettings;
+    private bool _lowWaypointWarningPosted;
+
+    internal void BindCombatModeGate(CombatModeGate gate, CombatSettings settings)
+    {
+        _combatModeGate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _combatSettings = settings ?? throw new ArgumentNullException(nameof(settings));
+    }
+
+    private bool TryRegisterArrival()
+    {
+        if (_combatModeGate is null || _combatSettings is null)
+            return true;
+        if (BoundedMinimumDistance() >= NavIdlePeaceOverrideMeters)
+            return true;
+        if (_host.Automation.Combat.Snapshot.Mode != PluginCombatMode.Peace)
+            return true;
+
+        if (_combatSettings.IdlePeaceMode && !_lowWaypointWarningPosted)
+        {
+            _lowWaypointWarningPosted = true;
+            _host.Automation.Chat.PostSystemMessage(
+                "[MossTank] " + LowWaypointDistanceWarning);
+        }
+
+        // fd.cs:135 — the forced Magic push fires regardless of the setting.
+        if (_combatModeGate.TryPrepare(PluginCombatMode.Magic))
+        {
+            return true;
+        }
+
+        _status = "Switching to magic mode at the waypoint.";
+        return false;
+    }
+
     public void ToggleReverse()
     {
         _reverse = !_reverse;
         _status = $"Nav backwards is {_reverse}.";
     }
 
+    internal void ResetOncePerRunWarnings() => _lowWaypointWarningPosted = false;
+
     public void Reset()
     {
+        ResetOncePerRunWarnings();
         StopMovement();
         _index = 0;
         _reverse = false;
@@ -383,6 +438,7 @@ internal sealed class NavigationController
         elapsedSeconds = double.IsFinite(elapsedSeconds)
             ? Math.Max(0d, elapsedSeconds)
             : 0d;
+        _now += elapsedSeconds;
         INavigationAutomation navigation = _host.Automation.Navigation;
         PluginNavigationSnapshot snapshot = navigation.Snapshot;
         if (!_settings.Enabled || !snapshot.IsAvailable)
@@ -438,6 +494,8 @@ internal sealed class NavigationController
             }
             if (distance <= BoundedMinimumDistance())
             {
+                if (!TryRegisterArrival())
+                    return true;
                 StopMovement();
                 AdvanceWaypoint();
                 return true;
@@ -722,6 +780,41 @@ internal sealed class NavigationController
         return true;
     }
 
+    internal static PluginNavigationCommandStatus SteerTowards(
+        INavigationAutomation navigation,
+        float signedHeadingDeltaDegrees,
+        float desiredHeadingDegrees,
+        double now,
+        ref double faceHeadingStamp,
+        bool run)
+    {
+        if (Math.Abs(signedHeadingDeltaDegrees) > HeadingToleranceDegrees)
+        {
+            PluginNavigationCommandStatus stopped =
+                navigation.ClearMovementIntent();
+            if (stopped != PluginNavigationCommandStatus.Accepted)
+                return stopped;
+
+            // fd.cs:336-339 — the `p` stamp.
+            if (now - faceHeadingStamp >= FaceHeadingReissueSeconds)
+            {
+                faceHeadingStamp = now;
+                PluginNavigationCommandStatus faced =
+                    navigation.FaceHeading(desiredHeadingDegrees);
+                if (faced != PluginNavigationCommandStatus.Accepted)
+                    return faced;
+            }
+
+            return PluginNavigationCommandStatus.Accepted;
+        }
+
+        // fd.cs:344-345 — inside the band: move, and reset the stamp so the
+        // next departure re-issues immediately.
+        faceHeadingStamp = NoFaceHeadingStamp;
+        return navigation.SetMovementIntent(
+            new PluginMovementIntent(Forward: true, Run: run));
+    }
+
     private bool Steer(
         INavigationAutomation navigation,
         in PluginNavigationPosition current,
@@ -730,21 +823,14 @@ internal sealed class NavigationController
     {
         float desired = DesiredHeading(current, target);
         float delta = SignedHeadingDelta(current.HeadingDegrees, desired);
-        float absolute = Math.Abs(delta);
-        bool turnRight = delta > HeadingToleranceDegrees;
-        bool turnLeft = delta < -HeadingToleranceDegrees;
-        bool forward = absolute <= HeadingToleranceDegrees
-            || (distanceMeters > NearTargetMeters
-                ? absolute <= FarMovingTurnLimitDegrees
-                : absolute <= NearMovingTurnLimitDegrees);
-        var intent = new PluginMovementIntent(
-            Forward: forward,
-            TurnLeft: turnLeft,
-            TurnRight: turnRight,
-            Run: true);
-        PluginNavigationCommandStatus result =
-            navigation.SetMovementIntent(intent);
-        _hadMovementIntent = result == PluginNavigationCommandStatus.Accepted;
+        _hadMovementIntent = SteerTowards(
+            navigation,
+            delta,
+            desired,
+            _now,
+            ref _faceHeadingStamp,
+            run: true)
+            == PluginNavigationCommandStatus.Accepted;
         return _hadMovementIntent;
     }
 
@@ -1038,16 +1124,20 @@ internal sealed class NavigationController
                     waypoint.JumpHeadingDegrees);
                 if (Math.Abs(delta) > HeadingToleranceDegrees)
                 {
-                    PluginMovementIntent turn = new(
-                        TurnLeft: delta < 0f,
-                        TurnRight: delta > 0f,
-                        Run: waypoint.JumpRun);
-                    _hadMovementIntent = _host.Automation.Navigation
-                        .SetMovementIntent(turn)
-                        == PluginNavigationCommandStatus.Accepted;
+                    INavigationAutomation nav = _host.Automation.Navigation;
+                    _hadMovementIntent = nav.ClearMovementIntent()
+                        == PluginNavigationCommandStatus.Accepted
+                        && _hadMovementIntent;
+                    if (_now - _faceHeadingStamp >= FaceHeadingReissueSeconds)
+                    {
+                        _faceHeadingStamp = _now;
+                        _ = nav.FaceHeading(waypoint.JumpHeadingDegrees);
+                    }
                     _status = $"Aligning jump: {Math.Abs(delta):0.0}d.";
                     return true;
                 }
+
+                _faceHeadingStamp = NoFaceHeadingStamp;
                 _jumpAligned = true;
             }
 
@@ -1161,8 +1251,21 @@ internal sealed class NavigationController
         _hasPortalOrigin = false;
     }
 
+    /// <summary>
+    /// VTank's navigate rule teardown on the <c>Running = false</c> edge:
+    /// <c>g8.cs:137</c> forwards to <c>fd.c(false)</c>
+    /// (<c>fd.cs:261-271</c>), whose <c>b()</c> (<c>fd.cs:298-308</c>)
+    /// releases the held movement keys. Ours is the same thing in acdream's
+    /// terms — drop the movement intent — and it is what the scheduler wires
+    /// as <c>onLostTurn</c> for both navigate tiers.
+    /// </summary>
+    internal void StopForLostTurn() => StopMovement();
+
     private void StopMovement()
     {
+        // VTank fd.cs:327 — the mover's disarm branch also resets `p`, so a
+        // re-armed route issues its first FaceHeading immediately.
+        _faceHeadingStamp = NoFaceHeadingStamp;
         if (!_hadMovementIntent)
             return;
         _ = _host.Automation.Navigation.ClearMovementIntent();

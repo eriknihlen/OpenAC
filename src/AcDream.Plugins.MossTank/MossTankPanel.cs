@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using AcDream.Plugin.Abstractions;
@@ -6,7 +6,7 @@ using AcDream.Plugins.MossTank.Expressions;
 
 namespace AcDream.Plugins.MossTank;
 
-internal sealed partial class MossTankPanel
+internal sealed partial class MossTankPanel : IBuffRuleHost
 {
     private enum TankTab
     {
@@ -21,8 +21,6 @@ internal sealed partial class MossTankPanel
         Meta,
     }
 
-    private const double StallTimeoutSeconds = 30.0;
-
     private const double CoverageRefreshIntervalSeconds = 1.0;
 
     private readonly IPluginHost _host;
@@ -32,15 +30,22 @@ internal sealed partial class MossTankPanel
     private readonly InventorySettings _inventorySettings = new();
     private readonly NavigationSettings _navigationSettings = new();
     private readonly VtankSettingsProfileSerializer.AllSettings _allSettings;
+    private readonly VtankGameInfoDatabase _gameInfo;
     private readonly MossTankProfileStore _profiles;
     private readonly MossTankLootProfileStore _lootProfiles;
     private readonly MossTankRouteProfileStore _routeProfiles;
     private readonly MossTankMetaProfileStore _metaProfiles;
     private readonly MetaViewManager _metaViews;
     private readonly CombatController _combat;
-    private readonly BuffCasterPreparer _buffCasterPreparer;
-    private readonly MacroIdleModeArbiter _idleModeArbiter;
+    /// <summary>VTank's one shared wield/mode subroutine, ga.a (ga.cs:1433-1573).</summary>
+    private readonly CombatModeGate _combatModeGate;
+    private readonly IdlePeaceRule _idlePeace;
+    private readonly SummonPetRule _summonPet;
+    private readonly MacroScheduler _scheduler;
+
     private readonly VitalRechargeController _vitalRecharge;
+
+    private readonly VitalRechargeController _vitalHelperRecharge;
     private readonly DispelController _dispel;
     private readonly InventoryMaintenanceController _inventoryMaintenance;
     private readonly CraftingController _crafting;
@@ -53,20 +58,26 @@ internal sealed partial class MossTankPanel
     private MetaProfile _metaProfile;
     private readonly MetaEngine _meta;
 
-    private List<PluginSpellInfo> _queue = new();
-    private int _queueIndex;
-    private bool _running;
-    private bool _forcePass;
-    private bool _announceBuffPass;
-    private double _automaticBuffScanRemaining;
-    private double _buffCastRecastRemaining;
+
     private bool _fastCastMovementActive;
     private long _fastCastStartCompletionRevision;
     private double _fastCastMovementElapsed;
     private double _randomHelperRemaining;
-    private int _randomHelperCursor;
-    private double _sinceProgress;
-    private int _castThisPass;
+    private const double TransactionSuspensionWatchdogSeconds =
+        SpellCastTracker.WorstCaseBusySeconds;
+
+    private readonly SpellCastTracker _castTracker = new();
+
+    private readonly BuffSelfRule _buffRule;
+
+    private ulong _castTrackerChatSequence;
+
+    private bool _transactionSuspensionHeld;
+    private double _transactionSuspensionElapsed;
+    private long _pokeMagicRevision;
+    private long _pokeItemRevision;
+    private PluginCombatMode _pokeCombatMode;
+    private bool _pokeEquipmentBusy;
     private string _status = "Idle.";
     private string _vitals = string.Empty;
     private string _coverage = string.Empty;
@@ -220,9 +231,13 @@ internal sealed partial class MossTankPanel
             Inventory = _inventorySettings,
             Navigation = _navigationSettings,
         };
+        // e0.cs:53-79 — VTank's official GameInfoDB, read from the profile
+        // directory beside the .usd files. Absent means EMPTY, not a guess:
+        // acdream does not ship Virindi's embedded defaultinfodb.ugd.
+        _gameInfo = VtankGameInfoDatabase.Load(host.VtankProfiles);
         _profiles = new MossTankProfileStore(host);
         _profiles.BindCharacter(host.Automation.Character.Name);
-        _profiles.LoadCurrent(_allSettings, _noBuffItemNames);
+        _profiles.LoadCurrent(_allSettings, _noBuffItemNames, _commandLogTypes);
         _lootProfiles = new MossTankLootProfileStore(host);
         _lootProfiles.BindCharacter(host.Automation.Character.Name);
         if (!_lootProfiles.LoadCurrent(
@@ -237,17 +252,35 @@ internal sealed partial class MossTankPanel
         _routeProfiles.BindCharacter(host.Automation.Character.Name);
         if (!_routeProfiles.LoadCurrent(_navigationSettings, host.Automation.Spells))
             _routeProfiles.SaveCurrent(_navigationSettings);
-        _combat = new CombatController(host, _combatSettings, _vitalSettings);
-        _buffCasterPreparer = new BuffCasterPreparer(
+        _castTracker.Completed += OnBuffCastOutcome;
+        _combat = new CombatController(
             host,
             _combatSettings,
-            _vitalSettings);
-        _idleModeArbiter = new MacroIdleModeArbiter(host, _combatSettings);
+            _vitalSettings,
+            _gameInfo,
+            _castTracker);
+        _combatModeGate = new CombatModeGate(
+            host,
+            _combatSettings,
+            _vitalSettings,
+            StopMacroFromGate);
+        _combat.BindCombatModeGate(_combatModeGate);
+        _buffRule = new BuffSelfRule(host, _buffSettings, this);
+        _idlePeace = new IdlePeaceRule(host, _combatSettings);
+        _summonPet = new SummonPetRule(
+            host,
+            _combatSettings,
+            () => _combat.HasTarget);
         _vitalRecharge = new VitalRechargeController(
             host,
             _vitalSettings,
             _combatSettings);
-        _dispel = new DispelController(host, _vitalSettings);
+        _vitalHelperRecharge = new VitalRechargeController(
+            host,
+            _vitalSettings,
+            _combatSettings);
+        _dispel = new DispelController(host, _vitalSettings, _combatSettings);
+        _dispel.BindCombatModeGate(_combatModeGate);
         _inventoryMaintenance = new InventoryMaintenanceController(
             host,
             _inventorySettings);
@@ -255,6 +288,7 @@ internal sealed partial class MossTankPanel
             host,
             _inventorySettings,
             _combatSettings);
+        _crafting.BindPeaceGate(ReadyToActInPeace);
         _combat.BindAmmunitionCraftRequest(
             _crafting.CanRequest,
             _crafting.Request);
@@ -267,6 +301,7 @@ internal sealed partial class MossTankPanel
             _inventorySettings.Loot);
         _profileGive = new ProfileGiveController(host, _lootProfiles);
         _navigation = new NavigationController(host, _navigationSettings);
+        _navigation.BindCombatModeGate(_combatModeGate, _combatSettings);
         _fellowshipManager = new FellowshipManager(host);
         _metaProfiles = new MossTankMetaProfileStore(host);
         _metaViews = new MetaViewManager(host);
@@ -280,7 +315,7 @@ internal sealed partial class MossTankPanel
             new MetaServices
             {
                 IsNavigationRouteEmpty = () => _navigationSettings.Waypoints.Count == 0,
-                NeedsBuff = () => BuildPlan(_host.Automation, force: false).Count != 0,
+                NeedsBuff = () => _buffRule.HasAnythingDue(),
                 DistanceFromAnyRoutePoint = DistanceFromAnyRoutePoint,
                 CountMonstersByPriority = CountMonstersByPriority,
                 LoadEmbeddedNavigationRoute = LoadEmbeddedNavigationRoute,
@@ -291,6 +326,17 @@ internal sealed partial class MossTankPanel
                 DestroyAllViews = _metaViews.DestroyAll,
             });
         RegisterVtankExpressionFunctions();
+        _scheduler = MacroRuleTable.Build(this);
+        _scheduler.MetaPass = elapsed =>
+        {
+            if (_combat.Enabled)
+                _meta.OnTick(elapsed);
+        };
+        _scheduler.Log = EmitMacroLog;
+        _scheduler.LockStateSuffix = () =>
+            $"   I={host.Automation.Items.IsBusy}, N={_navigation.HasActiveAction}, S={host.Automation.Loot.IsBusy}";
+        _combatModeGate.Log = EmitMacroLog;
+        _combat.Log = EmitMacroLog;
         _initialized = true;
         ApplyPersistedOptionOverrides();
         EnsureDefaultMonsterRule();
@@ -303,8 +349,9 @@ internal sealed partial class MossTankPanel
         _automationWasAvailable = host.Automation.IsAvailable;
     }
 
-    public Action ForceBuff => StartForceBuff;
-    public Action CancelForceBuff => CancelForceBuffCore;
+    public Action ForceBuff => _buffRule.StartForce;
+    public Action CancelForceBuff => _buffRule.CancelForce;
+
     public Action ToggleCombat => ToggleMacro;
     public Action ToggleCombatEnabled => () =>
     {
@@ -486,7 +533,16 @@ internal sealed partial class MossTankPanel
     public string CombatStatus => _combat.Status;
     public string CombatTarget => _combat.TargetText;
     public string CombatMode => _combat.ModeText;
-    public string VitalStatus => _vitalRecharge.Status;
+    /// <summary>
+    /// One status line over the two recharge owners (rows 4 and 11). The self
+    /// half speaks first because it outranks the helper half in the rule list;
+    /// the helper's line shows only while the self half is idle, which is what
+    /// the single shared instance used to display.
+    /// </summary>
+    public string VitalStatus =>
+        _vitalRecharge.Status == VitalRechargeController.IdleStatus
+            ? _vitalHelperRecharge.Status
+            : _vitalRecharge.Status;
     public string DispelStatus => _dispel.Status;
     public string InventoryMaintenanceStatus => _inventoryMaintenance.Status;
     public string CraftingStatus => _crafting.Status;
@@ -1337,6 +1393,7 @@ internal sealed partial class MossTankPanel
         _vitalSettings.Enabled = !_vitalSettings.Enabled;
         if (!_vitalSettings.Enabled)
             _vitalRecharge.Reset();
+            _vitalHelperRecharge.Reset();
         SaveProfile();
     };
     public Action ToggleBuffing => () => SetMetaOption(
@@ -1533,8 +1590,10 @@ internal sealed partial class MossTankPanel
             return;
         string removed = names[row];
         _combatSettings.CombatItemNames.Remove(removed);
+        _combatSettings.CombatItemOrder.Remove(removed);
         _noBuffItemNames.Remove(removed);
         _itemHandedness.Remove(removed);
+        ClearItemEnchantRows(removed);
         _profileNotice = $"Removed {removed}.";
         RefreshItemEditors();
         SaveProfile();
@@ -1655,7 +1714,9 @@ internal sealed partial class MossTankPanel
         }
         string removed = names[ClampRow(_selectedItemRow, names.Length)];
         _combatSettings.CombatItemNames.Remove(removed);
+        _combatSettings.CombatItemOrder.Remove(removed);
         _noBuffItemNames.Remove(removed);
+        ClearItemEnchantRows(removed);
         _profileNotice = $"Removed {removed}.";
         RefreshItemEditors();
         SaveProfile();
@@ -2346,7 +2407,7 @@ internal sealed partial class MossTankPanel
             destructive[i] = (flags & MonsterActionFlags.DestructiveCurse) != 0;
             corrosion[i] = (flags & MonsterActionFlags.Corrosion) != 0;
             names[i] = rule.Expression;
-            priorities[i] = actions.BoundedPriority.ToString(CultureInfo.InvariantCulture);
+            priorities[i] = actions.Priority.ToString(CultureInfo.InvariantCulture);
             damage[i] = DamageTypeDisplay(actions.DamageType);
             extraVuln[i] = DamageTypeDisplay(actions.ExtraVulnerability);
             weapon[i] = ItemDisplayName(actions.WeaponObjectId, actions.WeaponName);
@@ -2572,16 +2633,49 @@ internal sealed partial class MossTankPanel
             return;
         }
         _combatSettings.CombatItemObjectIds.Add(item.ObjectId);
-        _combatSettings.CombatItemNames.Add(item.Name);
+        if (_combatSettings.CombatItemNames.Add(item.Name))
+            _combatSettings.CombatItemOrder.Add(item.Name);
         if (noBuffs)
             _noBuffItemNames.Add(item.Name);
         else
             _noBuffItemNames.Remove(item.Name);
+        PopulateItemEnchantRows(item, noBuffs);
         _profileNotice = noBuffs
             ? $"Added {item.Name} (no buffs)."
             : $"Added {item.Name}.";
         RefreshItemEditors();
         SaveProfile();
+    }
+
+    private void PopulateItemEnchantRows(in PluginInventoryItem item, bool noBuffs)
+    {
+        ClearItemEnchantRows(item.Name);
+        if (!ItemEnchantDefaults.IsProfileEligible(in item))
+            return;
+        IReadOnlyList<string> defaults = ItemEnchantDefaults.Rows(in item, noBuffs);
+        if (defaults.Count == 0)
+        {
+            _buffSettings.ItemEnchantRows.Add(
+                new BuffItemEnchantRow(item.Name, string.Empty));
+            return;
+        }
+        foreach (string spellName in defaults)
+            _buffSettings.ItemEnchantRows.Add(new BuffItemEnchantRow(item.Name, spellName));
+    }
+
+    /// <summary><c>eq.b(int itemId)</c> (<c>eq.cs:59-68</c>).</summary>
+    private void ClearItemEnchantRows(string itemName)
+    {
+        for (int i = _buffSettings.ItemEnchantRows.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(
+                    _buffSettings.ItemEnchantRows[i].ItemName,
+                    itemName,
+                    StringComparison.Ordinal))
+            {
+                _buffSettings.ItemEnchantRows.RemoveAt(i);
+            }
+        }
     }
 
     private void AddSelectedConsumableCore()
@@ -2962,6 +3056,9 @@ internal sealed partial class MossTankPanel
         return count;
     }
 
+    internal bool GetMetaOptionForTest(string name) =>
+        GetMetaOption(name).IsTruthy;
+
     private ExpressionValue GetMetaOption(string name)
     {
         string key = name.Trim();
@@ -3308,7 +3405,13 @@ internal sealed partial class MossTankPanel
             "vtmacroenabled[]");
     }
 
-    private bool SetMetaOption(string name, ExpressionValue value)
+    /// <summary>
+    /// The panel's ONE option-write path — every toolbar toggle, the Options
+    /// tab and the meta engine's <c>setopt</c> all land here. Internal rather
+    /// than private so tests can set an option the way the product does
+    /// instead of reaching into settings objects.
+    /// </summary>
+    internal bool SetMetaOption(string name, ExpressionValue value)
     {
         string canonical = VtankOptionCatalog.IsKnown(name)
             ? VtankOptionCatalog.Canonical(name)
@@ -3733,6 +3836,7 @@ internal sealed partial class MossTankPanel
             case "usehealersheart":
                 _vitalSettings.UseHealersHeart = value.IsTruthy;
                 _vitalRecharge.Reset();
+                _vitalHelperRecharge.Reset();
                 break;
             case "rechargeboosttimeseconds":
                 _vitalSettings.RechargeBoostTimeSeconds = Math.Clamp(
@@ -3940,6 +4044,7 @@ internal sealed partial class MossTankPanel
             copyCurrent,
             _allSettings,
             _noBuffItemNames,
+            _commandLogTypes,
             out string notice))
         {
             _profileLifecycleNotice = notice;
@@ -3952,7 +4057,7 @@ internal sealed partial class MossTankPanel
 
     private void ClearProfileCore()
     {
-        _profiles.ClearCurrent(_allSettings, _noBuffItemNames);
+        _profiles.ClearCurrent(_allSettings, _noBuffItemNames, _commandLogTypes);
         _profileLifecycleNotice = $"Cleared {_profiles.Selected} to VTank defaults.";
         ResetProfileConsumers();
     }
@@ -3970,7 +4075,7 @@ internal sealed partial class MossTankPanel
 
     private void LoadSelectedProfile()
     {
-        _profiles.LoadCurrent(_allSettings, _noBuffItemNames);
+        _profiles.LoadCurrent(_allSettings, _noBuffItemNames, _commandLogTypes);
         LoadLootProfile();
         LoadRouteProfile();
         ApplyPersistedOptionOverrides();
@@ -3980,6 +4085,7 @@ internal sealed partial class MossTankPanel
     private void ResetProfileConsumers()
     {
         _vitalRecharge.Reset();
+        _vitalHelperRecharge.Reset();
         _dispel.Reset();
         _inventoryMaintenance.Reset();
         _crafting.Reset();
@@ -3999,10 +4105,12 @@ internal sealed partial class MossTankPanel
     private void ClearMossTankActionLocks()
     {
         ClearFastCastMovement();
-        _buffCastRecastRemaining = 0d;
+        _buffRule.ClearCastAttempt();
+        _buffRule.ClearRecastLock();
         _randomHelperRemaining = 0d;
         _combat.ClearActionLocks();
         _vitalRecharge.Reset();
+        _vitalHelperRecharge.Reset();
         _dispel.Reset();
         _inventoryMaintenance.Reset();
         _crafting.Reset();
@@ -4056,7 +4164,7 @@ internal sealed partial class MossTankPanel
 
     private void SaveProfile()
     {
-        _profiles.SaveCurrent(_allSettings, _noBuffItemNames);
+        _profiles.SaveCurrent(_allSettings, _noBuffItemNames, _commandLogTypes);
         _lootProfiles.SaveCurrent(
             _inventorySettings.Loot.Rules,
             _inventorySettings.Loot);
@@ -4088,110 +4196,15 @@ internal sealed partial class MossTankPanel
     private void Announce(string text) =>
         _host.Automation.Chat.PostSystemMessage($"[MossTank] {text}");
 
-    private void StartOrStop()
-    {
-        _host.Log.Info(
-            $"MossTank: Buff clicked (running={_running}, inWorld={_host.Automation.IsAvailable})");
-
-        if (_running)
-        {
-            Stop("Stopped.");
-            Announce("Stopped.");
-            return;
-        }
-
-        StartForceBuff();
-    }
-
-    private void StartForceBuff()
-    {
-        if (_running)
-            return;
-
-        IAutomationSurface automation = _host.Automation;
-        if (!automation.IsAvailable)
-        {
-            _status = "Not in world.";
-            return;
-        }
-
-        StartBuffPass(
-            automation,
-            force: true,
-            rebuffWhenUnderSeconds: null,
-            announce: true);
-    }
-
-    private void CancelForceBuffCore()
-    {
-        if (!_running || !_forcePass)
-            return;
-        Stop("Stopped.");
-        Announce("Stopped.");
-    }
-
-    private void StartBuffPass(
-        IAutomationSurface automation,
-        bool force,
-        double? rebuffWhenUnderSeconds,
-        bool announce)
-    {
-        double? effectiveThreshold = rebuffWhenUnderSeconds;
-        if (!force && _buffCastRecastRemaining > 0d)
-        {
-            effectiveThreshold = (effectiveThreshold
-                    ?? _buffSettings.RebuffWhenUnderSeconds)
-                + _buffSettings.BuffCastRecastSeconds;
-        }
-        _queue = BuildPlan(
-            automation,
-            force,
-            effectiveThreshold);
-        _queueIndex = 0;
-        _castThisPass = 0;
-        _sinceProgress = 0;
-        _forcePass = force;
-        _announceBuffPass = announce;
-        if (_queue.Count > 0)
-        {
-            _selectionBeforePass = _host.Selection.SelectedObjectId;
-            _buffCastRecastRemaining = Math.Max(
-                0d,
-                _buffSettings.BuffCastRecastResetSeconds);
-        }
-        _running = _queue.Count > 0;
-        if (_queue.Count == 0)
-        {
-            if (force)
-                _status = "Nothing to buff.";
-            if (announce)
-            {
-                Announce(
-                    "Nothing to buff — no known self-buffs match your skills.");
-            }
-            return;
-        }
-
-        string kind = force ? "Force buffing" : "Buffing";
-        _status = $"{kind} 0/{_queue.Count}…";
-        _host.Log.Info(
-            $"MossTank: {(force ? "force" : "automatic")} pass started, "
-            + $"{_queue.Count} buff(s) queued");
-        if (announce)
-            Announce($"{kind} — {_queue.Count} spell(s).");
-    }
-
     private void Stop(string status)
     {
         ClearFastCastMovement();
-        _running = false;
-        _forcePass = false;
-        _announceBuffPass = false;
-        _queue = new List<PluginSpellInfo>();
-        _queueIndex = 0;
+        // gj.cs:262-276 / d() - the tracker is forced back to idle whenever
+        // the thing it was waiting on stops mattering.
+        _buffRule.Stop();
         _status = status;
         RestoreSelection();
-        _buffCasterPreparer.Reset();
+        _combatModeGate.Reset();
     }
 
     private void RestoreSelection()
@@ -4203,27 +4216,38 @@ internal sealed partial class MossTankPanel
         _selectionBeforePass = null;
     }
 
-    private List<PluginSpellInfo> BuildPlan(
-        IAutomationSurface automation,
-        bool force,
-        double? rebuffWhenUnderSeconds = null)
-    {
-        List<PluginSpellInfo> plan = BuffPlan.Build(
-            BuffProfile.Build(automation.Spells.KnownSelfBuffs),
-            automation.Character.Skills,
-            automation.Character.Attributes,
-            automation.Character.ActiveEnchantments,
-            _buffSettings,
-            force,
-            rebuffWhenUnderSeconds,
-            automation.Character.Level);
-        plan.RemoveAll(spell => SpellComponentPolicy.UsesBlacklistedComponent(
-            automation.Spells,
-            spell,
-            _buffSettings.BlacklistedSpellComponents));
-        return plan;
-    }
+    private void OnBuffCastOutcome(SpellCastOutcomeInfo info) =>
+        _buffRule.ObserveCastOutcome(info);
 
+
+    bool IBuffRuleHost.MacroEnabled => _combat.Enabled;
+
+    bool IBuffRuleHost.HasTarget => _combat.HasTarget;
+
+    CombatModeGate IBuffRuleHost.Gate => _combatModeGate;
+
+    SpellCastTracker IBuffRuleHost.CastTracker => _castTracker;
+
+    void IBuffRuleHost.SetStatus(string status) => _status = status;
+
+    void IBuffRuleHost.Announce(string text) => Announce(text);
+
+    void IBuffRuleHost.Log(MacroLogChannel channel, string message) =>
+        EmitMacroLog(channel, message);
+
+    void IBuffRuleHost.MirrorToLog(MacroLogChannel channel, string message) =>
+        EmitMacroLog(channel, message, chat: false);
+
+    void IBuffRuleHost.CaptureSelection() =>
+        _selectionBeforePass ??= _host.Selection.SelectedObjectId;
+
+    void IBuffRuleHost.RestoreSelection() => RestoreSelection();
+
+    void IBuffRuleHost.StopFromBuffRule(string status) => Stop(status);
+
+    void IBuffRuleHost.BeginFastCast(
+        IAutomationSurface automation, in PluginSpellInfo spell) =>
+        BeginFastCastMovement(automation, spell);
     private void ToggleMacro() => SetMacroRunning(!_combat.Enabled);
 
     private void SetMacroRunning(bool running)
@@ -4234,14 +4258,48 @@ internal sealed partial class MossTankPanel
         if (running || _combat.Enabled)
             return;
 
-        _buffCasterPreparer.Reset();
+        if (_buffRule.IsBursting)
+        {
+            ClearFastCastMovement();
+            _buffRule.StopBurstOnly();
+            RestoreSelection();
+            _status = "Stopped.";
+        }
+        _combatModeGate.Reset();
+        _summonPet.Reset();
         _vitalRecharge.Reset();
+        _vitalHelperRecharge.Reset();
         _dispel.Reset();
         _inventoryMaintenance.Reset();
         _crafting.Reset();
         _loot.Reset();
         _profileGive.Reset();
         _navigation.Reset();
+    }
+
+    private void HandleDeath(bool macroRunning)
+    {
+        if (!macroRunning || !_combatSettings.StopMacroOnDeath)
+            return;
+        SetMacroRunning(false);
+        Announce("Macro stopped because the character died.");
+    }
+
+    private bool _wasDeadForMacro;
+
+    private bool ReadyToActInPeace()
+    {
+        IEquipmentAutomation equipment = _host.Automation.Equipment;
+        return _combatModeGate.TryDropToPeace(
+            equipment.IsAvailable ? equipment.CaptureOwnedEquipment() : [],
+            "an item");
+    }
+
+    private void ResetOncePerRunWarnings()
+    {
+        _combatModeGate.ResetOncePerRunWarnings();
+        _navigation.ResetOncePerRunWarnings();
+        _buffRule.ResetOncePerRunWarnings();
     }
 
     public void OnTick(double elapsedSeconds)
@@ -4262,289 +4320,135 @@ internal sealed partial class MossTankPanel
         }
 
         ObserveFastCastMovement(elapsedSeconds);
-        _buffCastRecastRemaining = Math.Max(
-            0d,
-            _buffCastRecastRemaining - Math.Max(0d, elapsedSeconds));
+        _buffRule.Advance(elapsedSeconds);
         EnsureCharacterProfile();
         ShowFirstRunGuidance();
         ObserveCommandPortalState();
         bool macroRunning = _combat.Enabled;
-        if (macroRunning
-            && _combatSettings.StopMacroOnDeath
-            && _host.Automation.IsAvailable
+        bool dead = _host.Automation.IsAvailable
             && _host.Automation.Character.MaxHealth > 0u
-            && _host.Automation.Character.CurrentHealth == 0u)
-        {
-            SetMacroRunning(false);
-            macroRunning = false;
-            Announce("Macro stopped because the character died.");
-        }
-        _fellowshipManager.Tick(
-            elapsedSeconds,
-            macroRunning && AutoFellowManagementEnabled);
-        if (macroRunning)
-            _meta.OnTick(elapsedSeconds);
+            && _host.Automation.Character.CurrentHealth == 0u;
+        if (dead && !_wasDeadForMacro)
+            HandleDeath(macroRunning);
+        _wasDeadForMacro = dead;
         _combatSettings.MetaState = _meta.CurrentState;
         RefreshDisplayBindings(elapsedSeconds);
 
         bool commandJumpOwnsAction = TickCommandJump(elapsedSeconds);
         bool giveOwnsAction = _profileGive.Tick(
             elapsedSeconds,
-            canAct: !_running && !commandJumpOwnsAction);
-        bool criticalCraftOwnsAction = _crafting.TickCritical(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction);
-        bool vitalOwnsAction = _vitalRecharge.Tick(
-            elapsedSeconds,
-            (macroRunning || _running)
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction,
-            noTarget: !_combat.HasTarget);
-        TickAutomaticBuffing(
-            elapsedSeconds,
-            macroRunning,
-            canAct: !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction);
-        bool dispelOwnsAction = _dispel.Tick(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction);
-        bool manaRechargeOwnsAction = _itemManaRecharge.Tick(
-            canAct: (macroRunning || _inventorySettings.ManaChargesWhenOff)
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction);
-        bool craftingOwnsAction = _crafting.Tick(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction);
-        bool idleCraftingOwnsAction = _crafting.TickIdle(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !craftingOwnsAction
-                && !_combat.HasTarget);
-        bool lootOwnsAction = _loot.Tick(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !craftingOwnsAction
-                && !idleCraftingOwnsAction
-                && (_inventorySettings.Loot.PriorityBoost
-                    || !_combat.HasTarget));
-        bool inventoryOwnsAction = _inventoryMaintenance.Tick(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !lootOwnsAction
-                && !craftingOwnsAction
-                && !idleCraftingOwnsAction
-                && !_combat.HasTarget);
-        bool navigationOwnsAction = _navigation.Tick(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !lootOwnsAction
-                && !craftingOwnsAction
-                && !idleCraftingOwnsAction
-                && !inventoryOwnsAction
-                && (_navigationSettings.Priority || !_combat.HasTarget));
-        bool randomHelperOwnsAction = TickRandomHelper(
-            elapsedSeconds,
-            canAct: macroRunning
-                && !_running
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !lootOwnsAction
-                && !craftingOwnsAction
-                && !idleCraftingOwnsAction
-                && !inventoryOwnsAction
-                && !navigationOwnsAction
-                && !_combat.HasTarget);
-        _combat.SetPaused(
-            _running || commandJumpOwnsAction || giveOwnsAction
-                || criticalCraftOwnsAction || vitalOwnsAction
-                || dispelOwnsAction
-                || manaRechargeOwnsAction
-                || lootOwnsAction
-                || craftingOwnsAction
-                || idleCraftingOwnsAction
-                || inventoryOwnsAction
-                || randomHelperOwnsAction
-                || (navigationOwnsAction && _navigationSettings.Priority));
-        _combat.OnTick(elapsedSeconds, _navigationSettings.Enabled);
+            canAct: !_buffRule.IsBursting && !commandJumpOwnsAction);
+        _prologueOwnsAction = commandJumpOwnsAction || giveOwnsAction;
 
-        IAutomationSurface automation = _host.Automation;
-        _idleModeArbiter.Tick(
-            elapsedSeconds,
-            macroRunning,
-            idle: !_running
-                && !automation.Magic.IsCasting
-                && !commandJumpOwnsAction
-                && !giveOwnsAction
-                && !criticalCraftOwnsAction
-                && !vitalOwnsAction
-                && !dispelOwnsAction
-                && !manaRechargeOwnsAction
-                && !lootOwnsAction
-                && !craftingOwnsAction
-                && !idleCraftingOwnsAction
-                && !inventoryOwnsAction
-                && !navigationOwnsAction
-                && !randomHelperOwnsAction
-                && !_combat.HasTarget
-                && !automation.Equipment.IsBusy);
+        ObserveSchedulerPokes();
+
+        bool schedulerActive = macroRunning
+            || _inventorySettings.ManaChargesWhenOff;
+        if (schedulerActive && !_scheduler.IsRunning)
+        {
+            _scheduler.Start();
+            _transactionSuspensionHeld = false;
+            _transactionSuspensionElapsed = 0d;
+            ResetOncePerRunWarnings();
+        }
+        else if (!schedulerActive && _scheduler.IsRunning)
+        {
+            _scheduler.Stop();
+            _transactionSuspensionHeld = false;
+            _transactionSuspensionElapsed = 0d;
+        }
+        ObserveCastResult(elapsedSeconds);
+        ObserveCastSuspension(elapsedSeconds);
+        _scheduler.ExternalSuspension = _prologueOwnsAction;
+        _scheduler.Advance(elapsedSeconds);
+        _combatModeGate.AdvancePass(elapsedSeconds);
+
+        // c406942ef review finding 4: the idle-peace owner's status was never
+        // displayed. It is displayed on the pass it actually wins.
+        if (_idlePeace.Running && _idlePeace.Status is { } idleStatus)
+            _status = idleStatus;
 
         if (_activeTab == TankTab.Route)
             RefreshRouteEditor();
-
-        if (!_running)
-            return;
-
-        if (!automation.IsAvailable)
-        {
-            Stop("Lost the session.");
-            return;
-        }
-
-        _sinceProgress += elapsedSeconds;
-        if (_sinceProgress > StallTimeoutSeconds)
-        {
-            Stop($"Stalled after {_castThisPass} cast(s).");
-            _host.Log.Warn("MossTank: pass stalled; stopping");
-            Announce($"Stopped — no progress after {_castThisPass} cast(s).");
-            return;
-        }
-
-        if (automation.Magic.IsCasting)
-            return;
-
-        if (vitalOwnsAction)
-            return;
-
-        if (inventoryOwnsAction)
-            return;
-
-        if (craftingOwnsAction)
-            return;
-
-        if (idleCraftingOwnsAction)
-            return;
-
-        if (manaRechargeOwnsAction)
-            return;
-
-        if (lootOwnsAction)
-            return;
-
-        if (giveOwnsAction)
-            return;
-
-        _buffCasterPreparer.Tick(elapsedSeconds);
-        if (_buffCasterPreparer.Stopped)
-        {
-            string reason = _buffCasterPreparer.Status;
-            Stop(reason);
-            _host.Log.Warn($"MossTank: buff pass stopped by preparer — {reason}");
-            return;
-        }
-        if (!_buffCasterPreparer.Ready)
-        {
-            _status = _buffCasterPreparer.Status;
-            return;
-        }
-
-        if (_queueIndex >= _queue.Count)
-        {
-            bool announce = _announceBuffPass;
-            bool force = _forcePass;
-            Stop($"Done — {_castThisPass} cast(s).");
-            _host.Log.Info(
-                $"MossTank: {(force ? "force" : "automatic")} pass complete "
-                + $"({_castThisPass} cast)");
-            if (announce)
-                Announce($"Finished — {_castThisPass} spell(s) cast.");
-            return;
-        }
-
-        PluginSpellInfo next = _queue[_queueIndex];
-        TryCast(
-            automation,
-            next,
-            $"{(_forcePass ? "Force buffing" : "Buffing")} "
-                + $"{_castThisPass + 1}/{_queue.Count}");
-        _queueIndex++;
     }
 
-    private void TickAutomaticBuffing(
-        double elapsedSeconds,
-        bool macroRunning,
-        bool canAct)
+    private void ObserveSchedulerPokes()
     {
-        _automaticBuffScanRemaining -= Math.Max(0d, elapsedSeconds);
-        if (!macroRunning || !_buffSettings.Enabled || _running || !canAct
-            || _automaticBuffScanRemaining > 0d)
+        IAutomationSurface automation = _host.Automation;
+        long magic = automation.Magic.LastCompletion.Revision;
+        long items = automation.Items.LastCompletion.Revision;
+        PluginCombatMode mode = automation.Combat.Snapshot.Mode;
+        bool equipping = automation.Equipment.IsBusy;
+        if (magic == _pokeMagicRevision
+            && items == _pokeItemRevision
+            && mode == _pokeCombatMode
+            && equipping == _pokeEquipmentBusy)
         {
             return;
         }
 
-        _automaticBuffScanRemaining = 1d;
-        double threshold = !_combat.HasTarget && _buffSettings.IdleBuffTopoff
-            ? _buffSettings.IdleBuffTopoffSeconds
-            : _buffSettings.RebuffWhenUnderSeconds;
-        StartBuffPass(
-            _host.Automation,
-            force: false,
-            rebuffWhenUnderSeconds: threshold,
-            announce: false);
+        _pokeMagicRevision = magic;
+        _pokeItemRevision = items;
+        _pokeCombatMode = mode;
+        _pokeEquipmentBusy = equipping;
+        _scheduler.Poke();
     }
+
+    private void ObserveCastResult(double elapsedSeconds)
+    {
+        double elapsed = Math.Max(0d, elapsedSeconds);
+
+        _castTracker.ObserveCompletion(_host.Automation.Magic.LastCompletion);
+        bool armed = _castTracker.IsBusy;
+        foreach (PluginChatMessage message in
+            _host.Automation.Chat.CaptureMessages(_castTrackerChatSequence))
+        {
+            _castTrackerChatSequence = Math.Max(
+                _castTrackerChatSequence,
+                message.Sequence);
+            if (armed)
+            {
+                _castTracker.ObserveChat(
+                    message.Sequence,
+                    message.Text,
+                    ownSpeech: message.Kind == SpellCastTracker.LocalSpeechChatKind
+                        && message.SenderObjectId != 0u
+                        && message.SenderObjectId
+                            == _host.Automation.Character.ObjectId);
+            }
+        }
+        _castTracker.Advance(elapsed);
+    }
+
+    private void ObserveCastSuspension(double elapsedSeconds)
+    {
+        IAutomationSurface automation = _host.Automation;
+        bool inFlight = _castTracker.IsBusy
+            || automation.Magic.IsCasting
+            || automation.Items.IsBusy;
+
+        if (_transactionSuspensionHeld)
+        {
+            _transactionSuspensionElapsed += Math.Max(0d, elapsedSeconds);
+            if (inFlight
+                && _transactionSuspensionElapsed < TransactionSuspensionWatchdogSeconds)
+            {
+                return;
+            }
+            _transactionSuspensionHeld = false;
+            _transactionSuspensionElapsed = 0d;
+            _scheduler.Resume();
+            return;
+        }
+
+        if (!inFlight)
+            return;
+        _transactionSuspensionHeld = true;
+        _transactionSuspensionElapsed = 0d;
+        _scheduler.Suspend();
+    }
+
+    internal void PokeScheduler() => _scheduler.Poke();
 
     private bool TickRandomHelper(double elapsedSeconds, bool canAct)
     {
@@ -4554,17 +4458,21 @@ internal sealed partial class MossTankPanel
         if (!canAct
             || !_buffSettings.RandomHelperBuffs
             || _randomHelperRemaining > 0d
-            || !_host.Automation.IsAvailable)
+            || !_host.Automation.IsAvailable
+            || _host.Automation.Items.IsBusy)
         {
             return false;
         }
-        if (_host.Automation.Magic.IsCasting)
+        if (_castTracker.IsBusy || _host.Automation.Magic.IsCasting)
             return true;
 
         PluginNavigationSnapshot navigation =
             _host.Automation.Navigation.Snapshot;
         if (!navigation.IsAvailable)
             return false;
+
+        // ba.cs:102-111 — every Player object other than self inside 0.075
+        // landblock units. The trace note's ≈240 m/unit puts that at 18 m.
         PluginWorldObject[] players = _host.Automation.Objects.CaptureObjects()
             .Where(value => value.ObjectClass == PluginObjectClass.Player
                 && value.ObjectId != _host.Automation.Character.ObjectId
@@ -4576,6 +4484,12 @@ internal sealed partial class MossTankPanel
         if (players.Length == 0)
             return false;
 
+        // ba.cs:116 — ONE random target, drawn before the spell loop and kept
+        // for whatever the loop settles on.
+        PluginWorldObject player = players[_randomHelper.Next(players.Length)];
+
+        // ba.cs:29-40 — the eleven hardcoded Tier-I "Other" stems, in VTank's
+        // own order.
         string[] stems =
         [
             "Endurance Other", "Regeneration Other", "Rejuvenation Other",
@@ -4584,44 +4498,57 @@ internal sealed partial class MossTankPanel
             "Fire Protection Other", "Lightning Protection Other",
             "Piercing Protection Other", "Acid Protection Other",
         ];
-        int attempts = players.Length * stems.Length;
-        for (int offset = 0; offset < attempts; offset++)
+
+        var castability = new BuffCastability(
+            _host.Automation.Spells,
+            _host.Automation.Magic,
+            _host.Automation.Items.IsAvailable
+                ? _host.Automation.Items.CaptureOwnedItems()
+                : [],
+            _buffSettings.BlacklistedSpellComponents,
+            text => Announce(text),
+            static (_, _, _) => { });
+        for (int attempt = 0; attempt < 100; attempt++)
         {
-            int slot = (_randomHelperCursor + offset) % attempts;
-            PluginWorldObject player = players[slot % players.Length];
-            string stem = stems[(slot / players.Length) % stems.Length];
-            PluginSpellInfo spell = _host.Automation.Spells.KnownSelfBuffs
-                .Where(value => value.Name.StartsWith(
+            string stem = stems[_randomHelper.Next(stems.Length)];
+            if (!BuffSelfRule.ResolveBestKnown(
+                    _host.Automation,
                     stem,
-                    StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(static value => value.Quality)
-                .ThenByDescending(static value => value.Tier)
-                .FirstOrDefault();
-            if (spell.SpellId == 0u
-                || SpellComponentPolicy.UsesBlacklistedComponent(
-                    _host.Automation.Spells,
-                    spell,
-                    _buffSettings.BlacklistedSpellComponents)
-                || _host.Automation.Magic.EvaluateGate(
-                    spell.SpellId,
-                    player.ObjectId) != PluginCastGate.Ready
-                || !_host.Automation.Magic.Cast(
-                    spell.SpellId,
-                    player.ObjectId))
+                    _buffSettings,
+                    castability,
+                    out PluginSpellInfo spell))
             {
                 continue;
             }
-            _randomHelperCursor = (slot + 1) % attempts;
+
+            if (!_combatModeGate.TryPrepare(PluginCombatMode.Magic))
+            {
+                _status = _combatModeGate.Status;
+                return true;
+            }
+            if (_host.Automation.Magic.EvaluateGate(spell.SpellId, player.ObjectId)
+                    != PluginCastGate.Ready
+                || !_host.Automation.Magic.Cast(spell.SpellId, player.ObjectId))
+            {
+                continue;
+            }
+
             _randomHelperRemaining = Math.Max(
                 0.25d,
                 _buffSettings.RandomHelperIntervalSeconds);
+            EmitMacroLog(
+                MacroLogChannel.SpellCast,
+                $"Casting: {spell.Name} on {player.ObjectId} ({player.Name})");
             _host.Log.Info(
                 $"MossTank: random helper {spell.Name} -> {player.Name}");
             return true;
         }
-        _randomHelperCursor = (_randomHelperCursor + 1) % attempts;
+        // ba.cs:125 — a hundred draws with nothing to show for them.
         return false;
     }
+
+    /// <summary><c>ba.m_f</c> (<c>ba.cs:20</c>).</summary>
+    private readonly Random _randomHelper = new();
 
     private void ShowFirstRunGuidance()
     {
@@ -4668,9 +4595,10 @@ internal sealed partial class MossTankPanel
     {
         if (_combat.Enabled)
             SetMacroRunning(false);
-        if (_running)
+        if (_buffRule.IsBursting)
             Stop("Stopped.");
         _vitalRecharge.Reset();
+        _vitalHelperRecharge.Reset();
         _inventoryMaintenance.Reset();
         _crafting.Reset();
         _itemManaRecharge.Reset();
@@ -4690,14 +4618,10 @@ internal sealed partial class MossTankPanel
             _combat.OnTick(0d, navigationEnabled: false);
 
         ClearFastCastMovement();
-        _running = false;
-        _forcePass = false;
-        _announceBuffPass = false;
-        _queue.Clear();
-        _queueIndex = 0;
+        _buffRule.Reset();
         _selectionBeforePass = null;
         _status = "Lost the session.";
-        _buffCasterPreparer.Reset();
+        _combatModeGate.Reset();
         ResetSessionScopedControllers();
     }
 
@@ -4708,10 +4632,8 @@ internal sealed partial class MossTankPanel
         _expressions.DestroyAuxiliaryViews();
         _metaViews.DestroyAll();
         ResetCommandSession();
-        _automaticBuffScanRemaining = 0d;
-        _buffCastRecastRemaining = 0d;
+        _buffRule.Reset();
         _randomHelperRemaining = 0d;
-        _randomHelperCursor = 0;
         _coverageSpellSnapshot = null;
         _coverageRefreshRemaining = 0d;
         _status = "Idle.";
@@ -4719,7 +4641,9 @@ internal sealed partial class MossTankPanel
 
     private void ResetSessionScopedControllers()
     {
+        _summonPet.Reset();
         _vitalRecharge.Reset();
+        _vitalHelperRecharge.Reset();
         _dispel.Reset();
         _inventoryMaintenance.Reset();
         _crafting.Reset();
@@ -4733,10 +4657,8 @@ internal sealed partial class MossTankPanel
         _expressions.DestroyAuxiliaryViews();
         _expressions.ClearSession();
         ResetCommandSession();
-        _automaticBuffScanRemaining = 0d;
-        _buffCastRecastRemaining = 0d;
+        _buffRule.Reset();
         _randomHelperRemaining = 0d;
-        _randomHelperCursor = 0;
         _coverageSpellSnapshot = null;
         _coverageRefreshRemaining = 0d;
         _combatSettings.MetaState = MetaEngine.DefaultState;
@@ -4808,42 +4730,6 @@ internal sealed partial class MossTankPanel
             + $"{trained} trained skills, "
             + $"{_coverageBuffLineCount} buff lines";
         _coverageRefreshRemaining = CoverageRefreshIntervalSeconds;
-    }
-
-    private bool TryCast(
-        IAutomationSurface automation, PluginSpellInfo spell, string label)
-    {
-        if (!spell.IsSelfTargeted)
-        {
-            uint self = automation.Character.ObjectId;
-            if (self == 0)
-            {
-                _status = $"{spell.Name}: no self target";
-                return false;
-            }
-            if (_host.Selection.SelectedObjectId != self)
-                _host.Selection.Select(self);
-        }
-
-        PluginCastGate gate = automation.Magic.EvaluateGate(spell.SpellId);
-        if (gate != PluginCastGate.Ready)
-        {
-            _status = $"{spell.Name}: {gate}";
-            return false;
-        }
-
-        if (!automation.Magic.Cast(spell.SpellId))
-        {
-            _status = $"Refused {spell.Name}.";
-            return false;
-        }
-
-        BeginFastCastMovement(automation, spell);
-        _castThisPass++;
-        _sinceProgress = 0;
-        _status = $"{label}: {spell.Name}";
-        _host.Log.Info($"MossTank: casting {spell.Name} (0x{spell.SpellId:X4})");
-        return true;
     }
 
     private void BeginFastCastMovement(

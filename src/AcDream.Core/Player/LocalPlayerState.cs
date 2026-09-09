@@ -142,13 +142,39 @@ public sealed class LocalPlayerState
             ? 1f
             : EnchantmentMath.GetVitaeMultiplier(
                 _spellbook.ActiveEnchantments);
+        int intrinsic = checked((int)Math.Min(int.MaxValue, skill.Value.CurrentLevel));
         return PlayerSkillMath.Calculate(
-            checked((int)Math.Min(int.MaxValue, skill.Value.CurrentLevel)),
+            intrinsic,
+            intrinsic + AttributeEnchantmentSkillDelta(skillId),
             skillId,
             skill.Value.Status,
             augmentations,
             mod,
             vitae);
+    }
+
+    public int AttributeEnchantmentSkillDelta(uint skillId)
+    {
+        if (SkillFormulaBonusResolver is not { } resolver
+            || _spellbook is null
+            || !_skills.TryGetValue(skillId, out SkillSnapshot snap))
+        {
+            return 0;
+        }
+        uint enchanted = resolver(skillId, EnchantedAttributeCurrentsById());
+        return checked((int)Math.Min(int.MaxValue, enchanted))
+            - checked((int)Math.Min(int.MaxValue, snap.FormulaBonus));
+    }
+
+    public IReadOnlyDictionary<uint, uint> EnchantedAttributeCurrentsById()
+    {
+        var currents = new Dictionary<uint, uint>(_attrs.Count);
+        foreach (AttributeKind kind in _attrs.Keys)
+        {
+            int value = GetEffectiveAttribute(kind) ?? 0;
+            currents[(uint)kind + 1u] = (uint)Math.Max(0, value);
+        }
+        return currents;
     }
 
     public int GetSkillVitaeModifier(uint skillId)

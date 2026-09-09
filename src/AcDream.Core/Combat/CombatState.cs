@@ -39,13 +39,17 @@ public sealed class CombatState
         uint Damage,
         uint HitQuadrant,
         bool Critical,
-        uint AttackType);
+        uint AttackType,
+        double DamagePercent = 0.0,
+        ulong AttackConditions = 0ul);
 
     public readonly record struct DamageDealt(
         string DefenderName,
         uint DamageType,
         uint Damage,
-        float DamagePercent);
+        double DamagePercent,
+        bool Critical = false,
+        ulong AttackConditions = 0ul);
 
     /// <summary>Retrieve last known health percent for a guid, or 1.0 if unknown.</summary>
     public float GetHealthPercent(uint guid) =>
@@ -74,27 +78,31 @@ public sealed class CombatState
 
     public void OnVictimNotification(
         string attackerName, uint attackerGuid, uint damageType, uint damage,
-        uint hitQuadrant, uint critical, uint attackType)
+        uint hitQuadrant, uint critical, uint attackType,
+        double damagePercent = 0.0, ulong attackConditions = 0ul)
     {
         DamageTaken?.Invoke(new DamageIncoming(
             attackerName, attackerGuid, damageType, damage, hitQuadrant,
-            critical != 0, attackType));
+            critical != 0, attackType, damagePercent, attackConditions));
     }
 
     public void OnDefenderNotification(
         string attackerName, uint attackerGuid, uint damageType, uint damage,
-        uint hitQuadrant, uint critical)
+        uint hitQuadrant, uint critical,
+        double damagePercent = 0.0, ulong attackConditions = 0ul)
     {
         DamageTaken?.Invoke(new DamageIncoming(
             attackerName, attackerGuid, damageType, damage, hitQuadrant,
-            critical != 0, 0));
+            critical != 0, 0, damagePercent, attackConditions));
     }
 
     public void OnAttackerNotification(
-        string defenderName, uint damageType, uint damage, float damagePercent)
+        string defenderName, uint damageType, uint damage, double damagePercent,
+        uint critical = 0u, ulong attackConditions = 0ul)
     {
         DamageDealtAccepted?.Invoke(new DamageDealt(
-            defenderName, damageType, damage, damagePercent));
+            defenderName, damageType, damage, damagePercent,
+            critical != 0, attackConditions));
     }
 
     public void OnEvasionAttackerNotification(string defenderName)

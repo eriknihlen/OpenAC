@@ -710,6 +710,34 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         runtime.Dispose();
     }
 
+    [Fact]
+    public void TurnToHeading_RejectsAStaleGeneration()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, _) =
+            CreateStartedHarness();
+        RuntimeGenerationToken stale = runtime.Generation;
+        adapter.Session.Reconnect(runtime.Generation);
+
+        RuntimeCommandResult result =
+            adapter.Movement.TurnToHeading(stale, 90f);
+
+        Assert.Equal(RuntimeCommandStatus.StaleGeneration, result.Status);
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void TurnToHeading_IsRefusedBeforeTheWorldIsEntered()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, _) =
+            CreateStartedHarness();
+
+        RuntimeCommandResult result =
+            adapter.Movement.TurnToHeading(runtime.Generation, 90f);
+
+        Assert.NotEqual(RuntimeCommandStatus.Accepted, result.Status);
+        runtime.Dispose();
+    }
+
     private static void SeedFellowship(
         GameRuntime runtime,
         uint leader,

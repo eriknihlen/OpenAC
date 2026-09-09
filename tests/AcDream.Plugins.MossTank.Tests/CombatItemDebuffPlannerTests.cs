@@ -45,6 +45,68 @@ public sealed class CombatItemDebuffPlannerTests
     }
 
     [Fact]
+    public void SourcesAnswersForOneKindOnlyAndEmitsRetailsDebuffChoiceLines()
+    {
+        PluginSpellInfo imperil = Spell(1, "Imperil Other VI", 300, 31);
+        PluginSpellInfo yield = Spell(2, "Magic Yield Other VII", 350, 31);
+        PluginSpellInfo lensSpell = Spell(3, "Imperil Other VII", 350, 31);
+        var catalog = new Catalog([imperil, yield], [imperil, yield, lensSpell]);
+        var character = new Character((31u, 500u));
+        PluginInventoryItem lens = Item(100, "Imperil Lens", 0x8000, 3) with
+        {
+            ItemSpellcraft = 900,
+        };
+        var settings = new CombatSettings
+        {
+            DebuffSelectionMethod = DebuffSelectionMethod.SpellLevel,
+        };
+        settings.CombatItemObjectIds.Add(lens.ObjectId);
+        var log = new List<string>();
+
+        IReadOnlyList<CombatDebuffSource> sources = CombatItemDebuffPlanner.Sources(
+            new DebuffIdentity(MonsterActionFlags.Imperil, MonsterDamageType.Auto),
+            settings,
+            character,
+            catalog,
+            [lens],
+            log.Add);
+
+        Assert.All(sources, source =>
+            Assert.Equal(MonsterActionFlags.Imperil, source.Identity.Flag));
+        Assert.Equal(2, sources.Count);
+        Assert.Equal(CombatDebuffSourceKind.CasterItem, sources[0].Kind);
+
+        Assert.Contains("Find debuff choice (Imperil Lens [100]): Begin", log);
+        Assert.Contains(
+            "Find debuff choice (Imperil Lens [100]): Item set to be used, quality 350.",
+            log);
+        Assert.Contains("Find debuff choice (Imperil Lens [100]): Item tests done.", log);
+    }
+
+    [Fact]
+    public void SourcesLogsRetailsWrongObjectTypeStopForAProfiledNonSource()
+    {
+        PluginSpellInfo imperil = Spell(1, "Imperil Other VI", 300, 31);
+        var catalog = new Catalog([imperil], [imperil]);
+        PluginInventoryItem armour = Item(101, "Studded Leather", 0x2, 0);
+        var settings = new CombatSettings();
+        settings.CombatItemObjectIds.Add(armour.ObjectId);
+        var log = new List<string>();
+
+        CombatItemDebuffPlanner.Sources(
+            new DebuffIdentity(MonsterActionFlags.Imperil, MonsterDamageType.Auto),
+            settings,
+            new Character((31u, 500u)),
+            catalog,
+            [armour],
+            log.Add);
+
+        Assert.Contains(
+            "Find debuff choice (Studded Leather [101]): Stop, wrong object type",
+            log);
+    }
+
+    [Fact]
     public void ItemAndGrenadeSourcesRequireTheirExactProfiles()
     {
         PluginSpellInfo imperil = Spell(1323, "Imperil Other I", 100, 31);

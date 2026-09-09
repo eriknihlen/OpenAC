@@ -41,6 +41,37 @@ public sealed class ItemManaRechargeTests
     }
 
     [Fact]
+    public void TheOldestQueuedWornItemIsChargedFirstNotTheMostDepleted()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal) { "Mana Charge" };
+        PluginInventoryItem[] inventory =
+        [
+            Item(10, "Mana Charge", 0x00080000u) with { ItemCurrentMana = 100 },
+            Item(20, "Low Wand") with
+            {
+                EquippedLocation = 0x01000000u,
+                ItemCurrentMana = 10,
+                ItemMaximumMana = 100,
+            },
+            Item(21, "Older Wand") with
+            {
+                EquippedLocation = 0x02000000u,
+                ItemCurrentMana = 20,
+                ItemMaximumMana = 100,
+            },
+        ];
+
+        ItemManaRechargePlan queued = Assert.IsType<ItemManaRechargePlan>(
+            ItemManaRechargePlanner.Plan(
+                inventory, names, thresholdPercent: 33, wieldOrder: [21u, 20u]));
+        Assert.Equal(21u, queued.TargetObjectId);
+
+        ItemManaRechargePlan depleted = Assert.IsType<ItemManaRechargePlan>(
+            ItemManaRechargePlanner.Plan(inventory, names, thresholdPercent: 33));
+        Assert.Equal(20u, depleted.TargetObjectId);
+    }
+
+    [Fact]
     public void PlannerRequiresProfileMembershipAndBelowThreshold()
     {
         PluginInventoryItem charge = Item(10, "Mana Charge", 0x00080000u) with

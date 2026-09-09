@@ -42,7 +42,9 @@ internal sealed class HeadlessPluginSession : IDisposable
         IEnumerable<string> roots,
         IReadOnlyList<string>? allowList,
         IPluginCommandRegistry? commands = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
+        Func<string, bool>? submitChatText = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -57,7 +59,9 @@ internal sealed class HeadlessPluginSession : IDisposable
                 sessionId,
                 () => runtime.Generation.Value),
             commands,
-            vtankProfiles);
+            vtankProfiles,
+            sessionSettings,
+            submitChatText);
         var plugins = new PluginSession(
             host,
             status => Report(statusWriter, sessionId, status),

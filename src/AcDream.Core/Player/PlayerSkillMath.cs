@@ -54,19 +54,22 @@ public static class PlayerSkillMath
 
     public static Value Calculate(
         int intrinsicLevel,
+        int enchantedIntrinsicLevel,
         uint skillId,
         uint advancementClass,
         AugmentationBonuses augmentations,
         EnchantmentMath.VitalMod enchantment,
         float vitaeMultiplier)
     {
-        int intrinsic = Math.Max(0, intrinsicLevel);
-        int unenchanted = SaturatingAdd(
-            intrinsic,
-            augmentations.BeforeEnchantments(skillId));
+        int before = augmentations.BeforeEnchantments(skillId);
+        int unenchanted = SaturatingAdd(Math.Max(0, intrinsicLevel), before);
+        // InqSkill(…, 0): the same augmentation prefix over the
+        // enchanted-attribute intrinsic, then EnchantSkill, then the
+        // post-enchantment augmentations.
+        int enchantedBase = SaturatingAdd(Math.Max(0, enchantedIntrinsicLevel), before);
         int enchanted = EnchantmentMath.EnchantSkill(
             enchantment,
-            (uint)unenchanted);
+            (uint)enchantedBase);
         int effective = SaturatingAdd(
             enchanted,
             augmentations.AfterEnchantments(advancementClass));

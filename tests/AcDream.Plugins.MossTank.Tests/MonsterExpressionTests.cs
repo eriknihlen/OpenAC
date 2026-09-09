@@ -1,4 +1,4 @@
-namespace AcDream.Plugins.MossTank.Tests;
+﻿namespace AcDream.Plugins.MossTank.Tests;
 
 public sealed class MonsterExpressionTests
 {
@@ -138,7 +138,7 @@ public sealed class MonsterExpressionTests
     }
 
     [Fact]
-    public void ResolverFallsBackToDefaultAndClampsPriority()
+    public void ResolverFallsBackToDefaultAndKeepsRetailsUnclampedPriority()
     {
         var fallback = new MonsterRule("DEFAULT", 99);
 
@@ -147,7 +147,7 @@ public sealed class MonsterExpressionTests
             Context());
 
         Assert.Same(fallback, resolved.Rule);
-        Assert.Equal(4, resolved.Priority);
+        Assert.Equal(99, resolved.Priority);
     }
 
     private static MonsterExpressionContext Context(
