@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AcDream.Tools.CommentResidue</RootNamespace>
+    <AssemblyName>AcDream.Tools.CommentResidue</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="patterns.txt;baseline.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

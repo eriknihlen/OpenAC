@@ -1,4 +1,5 @@
-﻿using AcDream.Plugin.Abstractions;
+using System.Globalization;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank;
 
@@ -2542,7 +2543,8 @@ internal sealed class CombatController
             ? $"0x{target.ObjectId:X8}"
             : target.Name;
         _targetDistance = target.Distance;
-        _targetText = $"Target  {_targetName}  {_targetDistance:0.0}m";
+        _targetText = string.Create(
+            CultureInfo.InvariantCulture, $"Target  {_targetName}  {_targetDistance:0.0}m");
         _failures.BeginEngagement(_targetId, _now);
     }
 

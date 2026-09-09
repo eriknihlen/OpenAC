@@ -13,6 +13,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.Core.Tests" />
     <InternalsVisibleTo Include="AcDream.App.Tests" />
+    <InternalsVisibleTo Include="AcDream.Private.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Chorizite.Core" />

@@ -80,6 +80,28 @@ That installs the advertised client from the real feed through the production
 updater, with real hash verification and atomic activation, into a temporary
 directory.
 
+## Comment residue
+
+A separate workflow, [`comment-residue.yml`](../.github/workflows/comment-residue.yml),
+runs `tools/CommentResidue` on every push and pull request against `main`. It
+is cheap enough that it is not exempt via `paths-ignore` — it runs on
+docs-only changes too. The tool scans `src/`, `tests/`, and `tools/` for lines
+matching `tools/CommentResidue/patterns.txt` (terms that should never appear
+in this repository's comments or strings) and fails the job if it finds a
+line that is not already recorded in `tools/CommentResidue/baseline.txt`. The
+baseline is a ratchet: it tolerates every hit that already existed when the
+job was introduced, but a new hit fails the build immediately.
+
+To update the baseline deliberately (a new, reviewed exception, or a file
+move that changed a path), run the tool locally with `--update-baseline`:
+
+```bash
+dotnet run --project tools/CommentResidue -c Release -- --root . --patterns tools/CommentResidue/patterns.txt --baseline tools/CommentResidue/baseline.txt --update-baseline
+```
+
+Review the diff before committing — every added line is a new exception, not
+a formality.
+
 ## Self-hosted runner notes
 
 - The Windows runner must run in an interactive session (a scheduled task at

@@ -1,0 +1,16 @@
+# Terms that must not appear in this repository's comments or strings; see
+# docs/ci-and-releases.md. One regular expression per line (blank lines and
+# lines starting with '#' are ignored); a match anywhere in a line fails the
+# comment-residue CI job unless the exact path and line are already recorded
+# in baseline.txt.
+\bacclient(?!(?-i:[a-z]))
+\bghidra\b
+\bdecompil\w*
+\bdecomp\b
+(?-i:Decomp)(?!os|lete|ress)|\b(?-i:decomp)(?!os|ress)
+named-retail
+docs/research
+claude-memory
+\bcdb\b
+\b(AP|TS|IA|AD)-\d{1,3}\b
+\b0x00[4-9A-Fa-f][0-9A-Fa-f]{5}\b(?<!000)

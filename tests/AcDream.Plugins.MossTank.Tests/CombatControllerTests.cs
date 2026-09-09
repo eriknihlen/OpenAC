@@ -1,4 +1,5 @@
-﻿using AcDream.Plugin.Abstractions;
+﻿using System.Globalization;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Plugins.MossTank.Tests;
 
@@ -207,6 +208,43 @@ public sealed class CombatControllerTests
 
         Assert.Equal(10u, surface.LastBeginTarget);
         Assert.Contains("9.0m", controller.TargetText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TargetTextDistanceIsInvariantUnderASwedishCulture()
+    {
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        CultureInfo previousUi = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("sv-SE");
+            CultureInfo.CurrentUICulture = new CultureInfo("sv-SE");
+            var surface = new FakeAutomation
+            {
+                CombatSnapshot = Physical(),
+                Targets = [Target(10, "Drudge", distance: 9, angle: 0)],
+                EquipmentItems = [WieldedPlannedWeapon()],
+            };
+            var settings = new CombatSettings
+            {
+                MaximumRange = 20f,
+                SelectionMethod = TargetSelectionMethod.Range,
+                ScanIntervalSeconds = 0.05d,
+            };
+            ProfileFixtureWeapon(settings);
+            var controller = new CombatController(new FakeHost(surface), settings);
+
+            controller.Toggle();
+            controller.OnTick(0.25);
+
+            Assert.Contains("9.0m", controller.TargetText, StringComparison.Ordinal);
+            Assert.DoesNotContain("9,0m", controller.TargetText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+            CultureInfo.CurrentUICulture = previousUi;
+        }
     }
 
     [Fact]

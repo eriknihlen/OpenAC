@@ -1,0 +1,26 @@
+name: Comment residue
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  comment-residue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Scan for comment residue
+        shell: pwsh
+        run: |
+          dotnet run --project tools/CommentResidue -c Release -- --root . --patterns tools/CommentResidue/patterns.txt --baseline tools/CommentResidue/baseline.txt

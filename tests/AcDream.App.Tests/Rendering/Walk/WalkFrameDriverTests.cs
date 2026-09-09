@@ -32,7 +32,7 @@ public sealed partial class WalkFrameDriverTests
     // interleave (stream flushes interleaved with sky/terrain/shell/punch/
     // alpha-barrier), not just each half in isolation. ─────────────────────
 
-    private sealed class RecordingLeafRenderer(
+    internal sealed class RecordingLeafRenderer(
         List<string> log,
         RetailAlphaQueue? alpha = null) : IWalkFrameLeafRenderer
     {
@@ -159,7 +159,7 @@ public sealed partial class WalkFrameDriverTests
         public float Aspect { get; set; } = 1f;
     }
 
-    private sealed class FakeWorldData : IWalkFrameWorldData
+    internal sealed class FakeWorldData : IWalkFrameWorldData
     {
         public readonly Dictionary<uint, WalkFrameStaticRecords> CellStaticsByCell = new();
         public readonly Dictionary<uint, WalkFrameStaticRecords> CellDynamicsByCell = new();
@@ -222,7 +222,7 @@ public sealed partial class WalkFrameDriverTests
         public Vector3 RayThrough(float screenX, float screenY) => new(screenX, screenY, 100f);
     }
 
-    private sealed class TestContext : IWalkFrameContext, IRetailFrameWalkContext
+    internal sealed class TestContext : IWalkFrameContext, IRetailFrameWalkContext
     {
         public readonly Dictionary<uint, WalkCell> Cells = new();
         public readonly Dictionary<WalkBuilding, float> ViewerDistances = new();
@@ -273,7 +273,7 @@ public sealed partial class WalkFrameDriverTests
         }
     }
 
-    private static WalkPolygon Quad(float z, bool facingViewer = true) => new()
+    internal static WalkPolygon Quad(float z, bool facingViewer = true) => new()
     {
         Vertices =
         [
@@ -1561,14 +1561,14 @@ public sealed partial class WalkFrameDriverTests
     }
 
 
-    private static IEnumerable<uint> CoarseLandscapeBuckets(uint landblockPrefix)
+    internal static IEnumerable<uint> CoarseLandscapeBuckets(uint landblockPrefix)
     {
         for (int x = 0; x < 8; x++)
         for (int y = 0; y < 8; y++)
             yield return landblockPrefix | (uint)(x * 8 + y + 1);
     }
 
-    private static WalkPortalView OneDegenerateView()
+    internal static WalkPortalView OneDegenerateView()
     {
         var view = new WalkPortalView { ViewCount = 1 };
         view.View.Polys.Add(new WalkViewPoly(0, 0, 0, 0, 0, 0));

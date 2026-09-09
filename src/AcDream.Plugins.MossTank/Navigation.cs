@@ -746,7 +746,7 @@ internal sealed class NavigationController
         if (liveDistance > BoundedMinimumDistance())
         {
             _checkpointElapsed = 0d;
-            _status = $"Checkpoint {_index + 1}/{_settings.Waypoints.Count}: {liveDistance:0.0}m";
+            _status = string.Create(CultureInfo.InvariantCulture, $"Checkpoint {_index + 1}/{_settings.Waypoints.Count}: {liveDistance:0.0}m");
             return Steer(
                 navigation,
                 snapshot.Position,

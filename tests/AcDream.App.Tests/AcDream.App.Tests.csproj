@@ -16,6 +16,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- tests-private/AcDream.Private.Tests reuses this assembly's internal
+         Walk test fixtures (WalkFrameDriverTests.RecordingLeafRenderer /
+         FakeWorldData / TestContext / DispatcherFixture) and
+         WalkOracleTraceRepoRoot for its moved trace-replay tests. -->
+    <InternalsVisibleTo Include="AcDream.Private.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="AcDream.Runtime.Gameplay" />
     <Using Include="AcDream.App.Tests.BoundedTestDatCollection" Alias="DatCollection" />

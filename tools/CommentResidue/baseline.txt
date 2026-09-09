@@ -1,0 +1,31 @@
+src/AcDream.App/Rendering/RetailCursorManager.cs|"using the registered OS cursor adaptation (AP-72).");
+src/AcDream.App/UI/UiRoot.cs|"canvas size (see AD-98).");
+src/AcDream.Core/Items/ClientObject.cs|VendorGrocer            = 0x00446220,   // TYPE_VENDOR_GROCER
+src/AcDream.Core/Items/ItemWireEnums.cs|SourceContainedTargetObjSelfOrContained    = 0x00880008,
+src/AcDream.Core/Items/ItemWireEnums.cs|SourceContainedTargetRemoteNeverWalk       = 0x00600008,
+src/AcDream.Core/Items/ItemWireEnums.cs|SourceRemoteTargetRemoteNeverWalk          = 0x00600020,
+src/AcDream.Core/Items/ItemWireEnums.cs|SourceWieldedTargetRemoteNeverWalk         = 0x00600004,
+tests/AcDream.App.Tests/Rendering/RetailDetailTextureContractTests.cs|? "AP-240 immediate A2C"
+tests/AcDream.App.Tests/Rendering/RetailDetailTextureContractTests.cs|Assert.Equal("AP-240 immediate A2C", state.Placement);
+tests/AcDream.App.Tests/UI/Layout/DormantDatWidgetConformanceTests.cs|+ "handler — import-time activation regressed (AD-73)");
+tests/AcDream.App.Tests/UI/Layout/DormantDatWidgetConformanceTests.cs|+ "would drop them; see AD-73's addendum.");
+tests/AcDream.Content.Tests/CharGen/ChargenAppearanceCatalogInstalledDatTests.cs|"TS-82 measurement drifted from its pinned expectation:\n" + string.Join('\n', baseEffectGapFailures));
+tests/AcDream.Content.Tests/StaticSpherePopulationMeasurementTests.cs|Console.WriteLine("===== AP-155 static-sphere population measurement =====");
+tests/AcDream.Core.Tests/Input/PlayerMoveToCutoverTests.cs|Assert.False(rig.MoveTo.IsMovingTo(), "jump must cancel the moveto (TS-36)");
+tests/AcDream.Core.Tests/Input/PlayerMoveToCutoverTests.cs|Assert.False(rig.MoveTo.IsMovingTo(), "user input must cancel the moveto (TS-36)");
+tests/AcDream.Core.Tests/Physics/Issue265SteepSlopeCaptureBisectTests.cs|"pre-existing, AD-25-closed mechanism, NOT introduced or worsened by this change)."
+tests/AcDream.Core.Tests/Physics/S4AdjustOffsetConformanceTests.cs|"slope. Written as the S4/AD-66 STOP condition; AD-66 relanded 2026-08-08 " +
+tests/AcDream.Core.Tests/Physics/S4AdjustOffsetConformanceTests.cs|$"tick {tick}: contact must not be lost running uphill (the AD-66 flap symptom)");
+tests/AcDream.Core.Tests/Physics/S6PerfectClipTailContainmentTests.cs|"The camera's PathClipped, never-grounded sweep must reach the Cyl PerfectClip TOI tail (AP-83) for a non-creature target.");
+tests/AcDream.Core.Tests/Physics/S6PerfectClipTailContainmentTests.cs|"The camera's PathClipped, never-grounded sweep must reach the Sphere PerfectClip TOI tail (AP-91) for a non-creature target.");
+tests/AcDream.Core.Tests/Physics/SortingSphereFloodMeasurementTests.cs|Console.WriteLine("===== AP-157 sorting-sphere flood measurement =====");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Assert.Contains("a.cs:2: // see register AD-12 for the note", output.ToString());
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Assert.Contains("gone.cs|// AD-1 stale entry", error.ToString());
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Assert.Equal("a.cs|// AD-12", lines[0]);
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Assert.Equal("z.cs|// AD-99", lines[1]);
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Write("a.cs", "// AD-12\n");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Write("a.cs", "int a = 1;\n// see register AD-12 for the note\n");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Write("bin/ignored.cs", "// AD-12\n");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|Write("z.cs", "// AD-99\n");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|string baseline = Write("baseline.txt", "a.cs|// see register AD-12 for the note\n");
+tests/AcDream.Tools.CommentResidue.Tests/CliTests.cs|string baseline = Write("baseline.txt", "gone.cs|// AD-1 stale entry\n");
