@@ -93,7 +93,7 @@ public sealed partial class LauncherWindowViewModel
                         if (_disposed) return;
                         string count = result.PlayerCount is { } value ? $"{value:N0} players" : "— players";
                         if (result.IsPlayerCountStale) count += " (stale)";
-                        string status = result.IsReachable == true ? "● Online" : "○ No response";
+                        string status = result.IsReachable == true ? "Online" : "Offline · no response";
                         string latency = result.LatencyMilliseconds is { } ms ? $" · {ms:0} ms" : "";
                         foreach (var row in AllAccountRows.Where(row => row.ServerName == server.Name && row.Endpoint == $"{server.Host}:{server.Port}"))
                         {

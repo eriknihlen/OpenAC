@@ -86,6 +86,7 @@ public sealed class LauncherProfileStore
         }
 
         ValidateAndNormalizeDocument(document);
+        LauncherProfileText.SynchronizeUsers(document);
         Document = document;
         return true;
     }
@@ -178,6 +179,7 @@ public sealed class LauncherProfileStore
 
         var server = new ServerProfile { Name = name, Host = host, Port = port };
         Document.Servers.Add(server);
+        LauncherProfileText.SynchronizeUsers(Document);
         return server;
     }
 
@@ -236,6 +238,11 @@ public sealed class LauncherProfileStore
 
         var profile = new AccountProfile { Account = account, Password = password };
         server.Accounts.Add(profile);
+        if (Document.Users is { } users)
+        {
+            users.Add(new LauncherUser(account, password));
+            LauncherProfileText.SynchronizeUsers(Document);
+        }
         return profile;
     }
 
@@ -265,6 +272,14 @@ public sealed class LauncherProfileStore
         {
             profile.Password = newPassword;
         }
+        if (Document.Users is { } users)
+        {
+            int index = users.FindIndex(user => user.Account == account);
+            users[index] = new LauncherUser(profile.Account, profile.Password);
+            foreach (var other in Document.Servers.SelectMany(item => item.Accounts).Where(item => item.Account == account))
+                other.Account = profile.Account;
+            LauncherProfileText.SynchronizeUsers(Document);
+        }
     }
 
     public void RemoveAccount(string serverName, string account)
@@ -272,6 +287,11 @@ public sealed class LauncherProfileStore
         ServerProfile server = FindServerOrThrow(serverName);
         AccountProfile profile = FindAccountOrThrow(server, account);
         server.Accounts.Remove(profile);
+        if (Document.Users is { } users)
+        {
+            users.RemoveAll(user => user.Account == account);
+            LauncherProfileText.SynchronizeUsers(Document);
+        }
     }
 
 
@@ -424,6 +444,7 @@ public sealed class LauncherProfileStore
         {
             mutation();
             ValidateAndNormalizeDocument(Document);
+            LauncherProfileText.SynchronizeUsers(Document);
             Save();
         }
         catch
@@ -580,6 +601,7 @@ public sealed class LauncherProfileStore
         new()
         {
             Version = source.Version,
+            Users = source.Users?.ToList(),
             Servers = source.Servers.Select(server => new ServerProfile
             {
                 Name = server.Name,

@@ -35,8 +35,8 @@ public sealed class ProfileTextEditorViewModel : ObservableObject
         Title = kind switch { LauncherTextEditorKind.Users => "Edit Users", LauncherTextEditorKind.Servers => "Edit Servers", _ => "Logon commands" };
         HelpText = kind switch
         {
-            LauncherTextEditorKind.Users => "One user per line: username | password | server1, server2. Omit servers to use all configured servers. Empty passwords are allowed. Put values containing | or commas in double quotes (JSON escapes). Removing an association removes its saved characters.",
-            LauncherTextEditorKind.Servers => "One server per line: name | host | port. Example: Local | 127.0.0.1 | 9000. Put names containing | or commas in double quotes. Keep the name to retain its accounts; renaming or removing it removes its account associations.",
+            LauncherTextEditorKind.Users => "One user per line: username | password. Every user lists all configured servers, including servers added later. Empty passwords are allowed. Quote values containing | with double quotes (JSON escapes).",
+            LauncherTextEditorKind.Servers => "One server per line: name | host | port. Example: Local | 127.0.0.1 | 9000. Put names containing | or commas in double quotes. Every server appears under every user. Keep the name to retain its saved characters.",
             _ => "Commands run for the named character after login. Keep server, account and character unchanged; edit commands in order. Use [] for no commands. Removing an entry clears its commands.",
         };
         Error = null;

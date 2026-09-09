@@ -36,6 +36,22 @@ public sealed class LauncherOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public async Task AssetVersionCrashProducesActionableErrorWithoutExposingStderr()
+    {
+        var supervisors = new FakeSupervisorFactory();
+        using var orchestrator = CreateOrchestrator(supervisorFactory: supervisors);
+        await orchestrator.LaunchAsync("Local ACE", "testaccount", "+Acdream", LaunchMode.Gui);
+        var supervisor = Assert.Single(supervisors.Created);
+        string path = supervisor.Spec!.StderrLogPath!;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "prepared asset package does not match: bake tool 10 != 6 " + Password);
+        supervisor.Exit(1);
+        string error = Assert.Single(orchestrator.GetSnapshot().Sessions).Error!;
+        Assert.Contains("Update the client", error);
+        Assert.DoesNotContain(Password, error);
+    }
+
+    [Fact]
     public async Task RunningHostHoldsSharedUpdateLeaseUntilProcessTerminalState()
     {
         var supervisors = new FakeSupervisorFactory();

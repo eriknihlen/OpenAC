@@ -28,17 +28,18 @@ Example | game.example.org | 9000
 **Edit Users** accepts one account per line:
 
 ```text
-myaccount | mypassword | Local, Example
+myaccount | mypassword
 anotheraccount | anotherpassword
 ```
 
-Omitting the server list associates the account with every configured server.
-Passwords are stored locally. A username with different passwords on different
-servers is exported as separate lines, preserving those credentials.
+Every user lists every configured server, including servers added later. Users
+can be added before any servers and survive removing all servers. Passwords are
+stored locally. Older conflicting passwords remain in Edit Users until you
+choose one password per username.
 Quote values containing separators or surrounding whitespace using JSON string
 escaping, for example `"password|with|separators"`.
 
-Removing a server association removes its saved characters. Keep names unchanged
+Removing a server removes its saved characters. Keep server names unchanged
 to retain their character settings. If profiles change while an editor is open,
 reopen the editor before saving.
 
@@ -58,8 +59,12 @@ continue to gate launching.
 ## Server status
 
 The launcher checks each configured endpoint every 30 seconds and on demand.
-**Online** means the game endpoint answered a status probe. **No response**
-means its availability is unknown; it does not prevent launching.
-Player counts come from TreeStats, matched by configured server name. Missing
+A green dot means the game endpoint answered; a red dot means no response
+within the timeout (offline or unreachable). Gray means not checked yet.
+Status does not prevent launching. Player counts come from TreeStats, matched
+by server name or an unambiguous hostname label such as coldeve in play.coldeve.ac. Missing
 counts are shown as unavailable and failed refreshes mark cached counts stale.
 These external population counts are separate from endpoint reachability.
+
+Failed launches stay visible on their account/server row. Play refreshes when
+the reconnect delay expires, even if no further session event arrives.

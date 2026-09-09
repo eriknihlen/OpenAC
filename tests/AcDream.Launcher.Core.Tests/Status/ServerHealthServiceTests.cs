@@ -8,6 +8,16 @@ namespace AcDream.Launcher.Core.Tests.Status;
 public sealed class ServerHealthServiceTests
 {
     [Fact]
+    public void PopulationMatchesHostnameWhenDisplayNameIsAnAddress()
+    {
+        var counts = ServerHealthService.ParsePlayerCounts("""[{"server":"Coldeve","count":807}]""");
+        Assert.Equal(807, ServerHealthService.FindPlayerCount(counts, "play.coldeve.ac", "play.coldeve.ac"));
+        Assert.Equal(807, ServerHealthService.FindPlayerCount(counts, "My favourite", "play.coldeve.ac"));
+        Assert.Null(ServerHealthService.FindPlayerCount(counts, "Local", "localhost"));
+        Assert.Null(ServerHealthService.FindPlayerCount(counts, "Another", "notcoldeve.example"));
+    }
+
+    [Fact]
     public async Task UdpProbeUsesPasswordlessStatusIdentityAndWaitsForValidReply()
     {
         using var server = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
@@ -43,7 +53,7 @@ public sealed class ServerHealthServiceTests
     }
 
     [Fact]
-    public async Task FailedRefreshMarksPreviousCountStaleAndNoReplyUnknown()
+    public async Task FailedRefreshMarksPreviousCountStaleAndNoReplyOffline()
     {
         var time = new TestClock();
         var handler = new ResponseHandler();
@@ -56,7 +66,7 @@ public sealed class ServerHealthServiceTests
         var stale = await service.CheckAsync("localhost", 9000, "Busy");
         Assert.Equal(27, stale.PlayerCount);
         Assert.True(stale.IsPlayerCountStale);
-        Assert.Null(stale.IsReachable);
+        Assert.False(stale.IsReachable);
     }
 
     [Fact]

@@ -67,6 +67,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         {
             ThrowIfDisposed();
             _profileStore.Load();
+            LauncherProfileText.EnableSharedUsers(_profileStore.Document);
         }
 
         RaiseStateChanged();
@@ -91,7 +92,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 sessions,
                 _platform,
                 _installRecord is not null,
-                _installationStatus);
+                _installationStatus,
+                _profileStore.Document.Users?.Select(user => user.Account).ToArray());
         }
     }
 
@@ -292,6 +294,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         MutateProfiles(() =>
         {
             EnsureAccountIdleLocked(serverName, accountName);
+            if (_profileStore.Document.Users is not null)
+                foreach (var server in _profileStore.Document.Servers) EnsureAccountIdleLocked(server.Name, accountName);
             _profileStore.EditAccount(
                 serverName,
                 accountName,
@@ -303,6 +307,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         MutateProfiles(() =>
         {
             EnsureAccountIdleLocked(serverName, accountName);
+            if (_profileStore.Document.Users is not null)
+                foreach (var server in _profileStore.Document.Servers) EnsureAccountIdleLocked(server.Name, accountName);
             _profileStore.RemoveAccount(serverName, accountName);
         });
 
@@ -731,6 +737,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 request.Activity.Supervisor = supervisor;
                 request.Activity.SupervisorStateHandler = stateHandler;
                 request.Activity.StatusSource = statusSource;
+                request.Activity.StderrLogPath = composed.StderrLogPath;
                 request.Activity.Status = "Starting host process…";
             }
 
@@ -839,6 +846,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                         break;
                     case LauncherSessionState.Exited:
                         activity.ExitCode ??= activity.Supervisor?.ExitCode;
+                        if (activity.ExitCode is not null and not 0) activity.Error ??= ReadStartupFailure(activity);
                         if (!activity.IsTerminal)
                         {
                             activity.State = LauncherActivityState.Exited;
@@ -957,6 +965,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                     activity.ExitCode = exited.Code;
                     activity.HostReportedExit = true;
                     activity.ExitReason = exited.Reason;
+                    if (exited.Code != 0) activity.Error ??= ReadStartupFailure(activity);
                     activity.HostTerminalStatus =
                         $"Exited: {exited.Reason} (code {exited.Code}).";
                     activity.Status = activity.HostTerminalStatus;
@@ -1075,6 +1084,24 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             characters,
             active is not null,
             active?.Status ?? "Idle");
+    }
+
+    private static string ReadStartupFailure(ManagedActivity activity)
+    {
+        try
+        {
+            if (activity.StderrLogPath is { } path && File.Exists(path))
+            {
+                using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+                char[] buffer = new char[4096];
+                string text = new(buffer, 0, reader.ReadBlock(buffer, 0, buffer.Length));
+                if (text.Contains("bake tool", StringComparison.Ordinal) && text.Contains("does not match", StringComparison.Ordinal))
+                    return "The installed client and prepared game files are different versions. Update the client to match your game files before trying again.";
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return $"Client exited with code {activity.ExitCode}. See the session log for details.";
     }
 
     private void MutateProfiles(Action mutation)
@@ -1345,6 +1372,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         public int? ExitCode { get; set; }
 
         public string? Error { get; set; }
+        public string? StderrLogPath { get; set; }
 
         public string? HostTerminalStatus { get; set; }
 

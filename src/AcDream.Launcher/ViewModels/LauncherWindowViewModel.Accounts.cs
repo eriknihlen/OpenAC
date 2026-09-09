@@ -21,6 +21,8 @@ public sealed partial class LauncherWindowViewModel
     private void RefreshAccountRows(LauncherStateSnapshot snapshot)
     {
         var retained = new HashSet<LauncherAccountServerRowViewModel>();
+        foreach (string name in snapshot.SharedAccountNames ?? [])
+            if (!Accounts.Any(account => account.AccountName == name)) Accounts.Add(new LauncherAccountGroupViewModel(name));
         foreach (LauncherServerSnapshot server in snapshot.Servers)
         foreach (LauncherAccountSnapshot account in server.Accounts)
         {
@@ -39,14 +41,14 @@ public sealed partial class LauncherWindowViewModel
                 group.Servers.Add(row);
             }
             retained.Add(row);
-            row.Update(server, account, snapshot.Sessions.FirstOrDefault(session => session.IsActive
-                && session.ServerName == server.Name && session.AccountName == account.AccountName));
+            row.Update(server, account, snapshot.Sessions.OrderByDescending(session => session.CreatedAt).FirstOrDefault(session =>
+                session.ServerName == server.Name && session.AccountName == account.AccountName));
         }
         foreach (LauncherAccountGroupViewModel group in Accounts.ToArray())
         {
             foreach (LauncherAccountServerRowViewModel row in group.Servers.Where(row => !retained.Contains(row)).ToArray())
                 group.Servers.Remove(row);
-            if (group.Servers.Count == 0) Accounts.Remove(group);
+            if (group.Servers.Count == 0 && !(snapshot.SharedAccountNames?.Contains(group.AccountName) ?? false)) Accounts.Remove(group);
         }
     }
 
@@ -95,9 +97,10 @@ public sealed partial class LauncherWindowViewModel
                 OperationStatus = $"Launching {started + 1} of {pending.Length}…";
                 try
                 {
-                    await _orchestrator.LaunchAsync(item.Row.ServerName, item.Row.AccountName,
+                    var result = await _orchestrator.LaunchAsync(item.Row.ServerName, item.Row.AccountName,
                         item.Character, item.Mode, token).ConfigureAwait(true);
-                    started++;
+                    if (result.State is not (LauncherActivityState.Failed or LauncherActivityState.Cancelled) && result.ExitCode is not (> 0 or < 0)) started++;
+                    else errors.Add($"{item.Row.AccountName} / {item.Row.ServerName}: {result.Error ?? result.Status}");
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
                 catch (Exception ex) { errors.Add($"{item.Row.AccountName} / {item.Row.ServerName}: {SafeDisplayError(ex, secret: null)}"); }

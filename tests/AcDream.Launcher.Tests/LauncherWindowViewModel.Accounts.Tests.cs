@@ -6,6 +6,47 @@ namespace AcDream.Launcher.Tests;
 
 public sealed partial class LauncherWindowViewModelTests
 {
+    [Fact]
+    public async Task PollRefreshesPlayWhenReconnectDelayExpiresWithoutAnEvent()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        await vm.StartBackgroundInitializationAsync();
+        vm.CloseActiveModal();
+        var row = vm.Accounts[0].Servers[0];
+        core.AccountLaunchCapability = LauncherCapability.Unavailable("Try again in 1 s.");
+        vm.PollStatus();
+        Assert.False(row.PlayCommand.CanExecute(null));
+        int notifications = 0;
+        row.PlayCommand.CanExecuteChanged += (_, _) => notifications++;
+        core.AccountLaunchCapability = LauncherCapability.Available;
+        vm.PollStatus();
+        Assert.True(notifications > 0);
+        Assert.True(row.PlayCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task FailedStartupIsShownInItsRowAndNotCountedAsStarted()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        await vm.StartBackgroundInitializationAsync();
+        vm.CloseActiveModal();
+        var row = vm.Accounts[0].Servers[0];
+        core.LaunchHandler = _ =>
+        {
+            core.Session = core.Session with { ServerName = row.ServerName, AccountName = row.AccountName,
+                State = LauncherActivityState.Failed, Error = "Client files do not match", ExitCode = 1 };
+            return Task.FromResult(core.Session);
+        };
+        await row.PlayCommand.ExecuteAsync();
+        Assert.Contains("Started 0 of 1", vm.OperationStatus);
+        Assert.Equal("Client files do not match", row.LaunchError);
+        Assert.True(row.HasLaunchError);
+        Assert.False(row.IsActive);
+        Assert.True(row.PlayCommand.CanExecute(null));
+    }
+
     private static LauncherServerSnapshot BatchServer(string name, params string[] accounts) => new(name, "localhost", 9000,
         accounts.Select(account => new LauncherAccountSnapshot(name, account,
             [new LauncherCharacterSnapshot(name, account, "A character", "123", LaunchMode.Gui, [], [], false, "Ready")], false, "Ready")).ToArray());

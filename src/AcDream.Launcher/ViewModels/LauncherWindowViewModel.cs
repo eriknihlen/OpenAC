@@ -343,6 +343,8 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         try
         {
             _orchestrator.PollStatus();
+            // Availability also changes when a reconnect delay expires, without a session event.
+            NotifyAccountCommands();
         }
         catch (Exception ex)
         {

@@ -24,11 +24,11 @@ public sealed class ServerHealthService(
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         Task<double?> reachability = CheckReachabilityAsync(host, port, cancellationToken);
-        var populationTask = GetPopulationAsync(serverName, cancellationToken);
+        var populationTask = GetPopulationAsync(serverName, host, cancellationToken);
         await Task.WhenAll(reachability, populationTask).ConfigureAwait(false);
         var population = await populationTask.ConfigureAwait(false);
         double? latency = await reachability.ConfigureAwait(false);
-        return new(latency.HasValue ? true : null, latency, population.Count,
+        return new(latency.HasValue, latency, population.Count,
             population.Stale, _time.GetUtcNow());
     }
 
@@ -45,7 +45,7 @@ public sealed class ServerHealthService(
         catch (IOException) { return null; }
     }
 
-    private async Task<(int? Count, bool Stale)> GetPopulationAsync(string serverName, CancellationToken token)
+    private async Task<(int? Count, bool Stale)> GetPopulationAsync(string serverName, string host, CancellationToken token)
     {
         await _populationGate.WaitAsync(token).ConfigureAwait(false);
         try
@@ -70,12 +70,23 @@ public sealed class ServerHealthService(
                 catch (JsonException) { }
                 catch (IOException) { }
             }
-            int? count = _counts.TryGetValue(serverName.Trim(), out var value) ? value : null;
+            int? count = FindPlayerCount(_counts, serverName, host);
             bool stale = count.HasValue && (_lastSuccess is null || _lastAttempt > _lastSuccess
                 || _time.GetUtcNow() - _lastSuccess > TimeSpan.FromMinutes(5));
             return (count, stale);
         }
         finally { _populationGate.Release(); }
+    }
+
+    internal static int? FindPlayerCount(IReadOnlyDictionary<string, int> counts, string serverName, string host)
+    {
+        if (counts.TryGetValue(serverName.Trim(), out int value)) return value;
+        static string Normalize(string name) => new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        string label = Normalize(serverName);
+        string[] hostParts = host.TrimEnd('.').Split('.').Select(Normalize).ToArray();
+        var matches = counts.Where(pair => Normalize(pair.Key) == label
+            || hostParts.Contains(Normalize(pair.Key), StringComparer.Ordinal)).ToArray();
+        return matches.Length == 1 ? matches[0].Value : null;
     }
 
     internal static Dictionary<string, int> ParsePlayerCounts(string json)

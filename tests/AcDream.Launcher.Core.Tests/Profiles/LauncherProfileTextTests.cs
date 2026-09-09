@@ -4,21 +4,36 @@ namespace AcDream.Launcher.Core.Tests.Profiles;
 
 public sealed class LauncherProfileTextTests
 {
+    [Fact]
+    public void UsersSurviveNoServersAndPopulateEveryServerAddedLater()
+    {
+        var document = new LauncherProfileDocument();
+        LauncherProfileText.Apply(document, LauncherTextEditorKind.Users, "Alice | one\nBob | two");
+        Assert.Equal(2, document.Users!.Count);
+        LauncherProfileText.Apply(document, LauncherTextEditorKind.Servers, "One | localhost | 9000\nTwo | localhost | 9001");
+        Assert.All(document.Servers, server => Assert.Equal(new[] { "Alice", "Bob" }, server.Accounts.Select(account => account.Account)));
+        LauncherProfileText.Apply(document, LauncherTextEditorKind.Servers, "");
+        Assert.Contains("Alice | one", LauncherProfileText.Read(document, LauncherTextEditorKind.Users));
+        LauncherProfileText.Apply(document, LauncherTextEditorKind.Servers, "Three | localhost | 9002");
+        Assert.Equal(2, document.Servers[0].Accounts.Count);
+        Assert.DoesNotContain("Three", LauncherProfileText.Read(document, LauncherTextEditorKind.Users));
+    }
+
     private static LauncherProfileDocument Sample() => new()
     {
         Servers = [new() { Name = "One", Host = "localhost", Port = 9000,
             Accounts = [new() { Account = "User", Password = "first", Characters = [new() { Name = "Hero", Id = "0x50000001", LaunchMode = LaunchMode.Headless, Plugins = ["plugin"], LoginCommands = ["/help"] }] }] },
-            new() { Name = "Two", Host = "localhost", Port = 9001, Accounts = [new() { Account = "User", Password = "second" }] }],
+            new() { Name = "Two", Host = "localhost", Port = 9001, Accounts = [new() { Account = "User", Password = "first" }] }],
     };
 
     [Fact]
-    public void UserRoundTripPreservesDistinctCredentialsAndCharacterSettings()
+    public void UserRoundTripPreservesSharedCredentialsAndCharacterSettings()
     {
         var document = Sample();
         string text = LauncherProfileText.Read(document, LauncherTextEditorKind.Users);
         LauncherProfileText.Apply(document, LauncherTextEditorKind.Users, text);
         Assert.Equal("first", document.Servers[0].Accounts[0].Password);
-        Assert.Equal("second", document.Servers[1].Accounts[0].Password);
+        Assert.Equal("first", document.Servers[1].Accounts[0].Password);
         var character = document.Servers[0].Accounts[0].Characters[0];
         Assert.Equal(LaunchMode.Headless, character.LaunchMode);
         Assert.Equal(["plugin"], character.Plugins);
@@ -60,7 +75,7 @@ public sealed class LauncherProfileTextTests
             store.AddServer("One", "localhost", 9000);
             store.AddAccount("One", "Original", "original-password");
             var error = Record.Exception(() => store.ExecuteTransaction(() => LauncherProfileText.Apply(store.Document,
-                LauncherTextEditorKind.Users, "New | new-password | One")));
+                LauncherTextEditorKind.Users, "New | new-password")));
             Assert.True(error is IOException or UnauthorizedAccessException);
             Assert.Equal("Original", store.Document.Servers[0].Accounts[0].Account);
             Assert.Equal("original-password", store.Document.Servers[0].Accounts[0].Password);

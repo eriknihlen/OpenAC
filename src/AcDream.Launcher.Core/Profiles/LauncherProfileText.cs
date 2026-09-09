@@ -17,10 +17,8 @@ public static class LauncherProfileText
 
     public static string Read(LauncherProfileDocument document, LauncherTextEditorKind kind) => kind switch
     {
-        LauncherTextEditorKind.Users => string.Join(Environment.NewLine, document.Servers
-            .SelectMany(s => s.Accounts.Select(a => (Server: s.Name, Account: a)))
-            .GroupBy(x => (x.Account.Account, x.Account.Password))
-            .Select(g => $"{Encode(g.Key.Account)} | {Encode(g.Key.Password)} | {string.Join(", ", g.Select(x => Encode(x.Server)))}")),
+        LauncherTextEditorKind.Users => string.Join(Environment.NewLine, GetUsers(document)
+            .Select(user => $"{Encode(user.Account)} | {Encode(user.Password)}")),
         LauncherTextEditorKind.Servers => string.Join(Environment.NewLine, document.Servers
             .Select(s => $"{Encode(s.Name)} | {Encode(s.Host)} | {s.Port}")),
         LauncherTextEditorKind.LogonCommands => JsonSerializer.Serialize(document.Servers
@@ -37,26 +35,14 @@ public static class LauncherProfileText
                 var users = Lines(text).Select(line =>
                 {
                     var fields = SplitFields(line, '|');
-                    Require(fields.Length is 2 or 3, "Each user line must be username | password | server1, server2. The server list may be omitted.");
-                    return new UserEntry(Decode(fields[0]), Decode(fields[1]),
-                        fields.Length == 2 || string.IsNullOrWhiteSpace(fields[2])
-                            ? document.Servers.Select(s => s.Name).ToArray()
-                            : SplitFields(fields[2], ',').Select(Decode).ToArray());
-                }).ToArray();
-                var replacements = document.Servers.ToDictionary(s => s.Name, _ => new List<AccountProfile>(), StringComparer.Ordinal);
-                foreach (var user in users)
-                {
-                    Require(!string.IsNullOrWhiteSpace(user.Username) && user.Password is not null && user.Servers is { Length: > 0 }, "Each user needs a username, password and at least one server.");
-                    foreach (string name in user.Servers)
-                    {
-                        Require(name is not null && replacements.ContainsKey(name), "A user refers to an unknown server. Add it in Edit Servers first.");
-                        var accounts = replacements[name];
-                        Require(!accounts.Any(a => a.Account == user.Username), "An account may appear only once on each server.");
-                        var existing = document.Servers.Single(s => s.Name == name).Accounts.Find(a => a.Account == user.Username);
-                        accounts.Add(new AccountProfile { Account = user.Username, Password = user.Password, Characters = existing?.Characters ?? [] });
-                    }
-                }
-                foreach (var server in document.Servers) server.Accounts = replacements[server.Name];
+                    Require(fields.Length == 2, "Each user line must be username | password.");
+                    return new LauncherUser(Decode(fields[0]), Decode(fields[1]));
+                }).ToList();
+                Require(users.All(user => !string.IsNullOrWhiteSpace(user.Account)), "Each user needs a username.");
+                Require(users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() == users.Count,
+                    "Each username must appear once. All servers use the same password for that user.");
+                document.Users = users;
+                SynchronizeUsers(document);
                 break;
             case LauncherTextEditorKind.Servers:
                 var servers = Lines(text).Select(line =>
@@ -68,8 +54,10 @@ public static class LauncherProfileText
                 }).ToArray();
                 Require(servers.All(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Host) && s.Port is >= 1 and <= 65535), "Each server needs a name, host and port from 1 to 65535.");
                 Require(servers.Select(s => s.Name).Distinct(StringComparer.Ordinal).Count() == servers.Length, "Server names must be unique.");
+                document.Users ??= GetUsers(document).ToList();
                 document.Servers = servers.Select(s => new ServerProfile { Name = s.Name, Host = s.Host, Port = s.Port,
                     Accounts = document.Servers.Find(old => old.Name == s.Name)?.Accounts ?? [] }).ToList();
+                SynchronizeUsers(document);
                 break;
             case LauncherTextEditorKind.LogonCommands:
                 var entries = Parse<CommandEntry>(text);
@@ -88,6 +76,34 @@ public static class LauncherProfileText
                 break;
             default: throw new ArgumentOutOfRangeException(nameof(kind));
         }
+    }
+
+    private static IEnumerable<LauncherUser> GetUsers(LauncherProfileDocument document) =>
+        document.Users ?? document.Servers.SelectMany(server => server.Accounts)
+            .Select(account => new LauncherUser(account.Account, account.Password)).Distinct().ToList();
+
+    internal static void SynchronizeUsers(LauncherProfileDocument document)
+    {
+        if (document.Users is not { } users) return;
+        Require(users.All(user => user is not null && !string.IsNullOrWhiteSpace(user.Account) && user.Password is not null),
+            "Each user needs a username and password field.");
+        Require(users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() == users.Count,
+            "Each username must appear once. Resolve its passwords in Edit Users first.");
+        foreach (var server in document.Servers)
+            server.Accounts = users.Select(user => new AccountProfile
+            {
+                Account = user.Account, Password = user.Password,
+                Characters = server.Accounts.Find(account => account.Account == user.Account)?.Characters ?? [],
+            }).ToList();
+    }
+
+    internal static void EnableSharedUsers(LauncherProfileDocument document)
+    {
+        var users = GetUsers(document).ToList();
+        // Keep conflicting older credentials available in the editor for explicit resolution.
+        if (users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() != users.Count) return;
+        document.Users = users;
+        SynchronizeUsers(document);
     }
 
     private static IEnumerable<string> Lines(string text) => text.Split('\n')
@@ -143,7 +159,7 @@ public static class LauncherProfileText
         if (!condition) throw new LauncherProfileException(message);
     }
 
-    private sealed record UserEntry(string Username, string Password, string[] Servers);
+
     private sealed record ServerEntry(string Name, string Host, int Port);
     private sealed record CommandEntry(string Server, string Account, string Character, string[] Commands);
 }

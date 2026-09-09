@@ -84,10 +84,10 @@
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:LauncherAccountServerRowViewModel">
                           <Border BorderBrush="#2B3941" BorderThickness="0,1,0,0" Padding="12,3,8,3">
-                            <Grid ColumnDefinitions="26,*,160,112,85,64,34" ColumnSpacing="6">
+                            <Grid ColumnDefinitions="26,*,160,112,85,64,34" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                               <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Select account and server for batch launch" />
                               <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                <TextBlock Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" />
+                                <Grid ColumnDefinitions="14,*"><Ellipse Width="7" Height="7" Fill="{Binding ServerDotColor}" ToolTip.Tip="{Binding ServerStatusText}" /><TextBlock Grid.Column="1" Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" /></Grid>
                                 <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
                               </StackPanel>
                               <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
@@ -96,6 +96,7 @@
                               <Button Grid.Column="5" Content="Play" Classes="primary" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
                               <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
+                              <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="6" Text="{Binding LaunchError}" IsVisible="{Binding HasLaunchError}" Foreground="#FFB0A0" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,3" />
                             </Grid>
                           </Border>
                         </DataTemplate>

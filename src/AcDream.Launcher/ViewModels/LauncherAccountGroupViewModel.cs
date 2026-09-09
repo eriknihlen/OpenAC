@@ -26,6 +26,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     private string? _activeSessionId;
     private bool? _isServerOnline;
     private string _serverStatusText = "Not checked";
+    private string? _launchError;
 
     public LauncherAccountServerRowViewModel(string accountName, string serverName,
         Func<LauncherAccountServerRowViewModel, string?> disabledReason, Action changed,
@@ -55,9 +56,12 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     public LaunchMode Mode => SelectedLaunchMode == "Headless" ? LaunchMode.Headless : SelectedCharacter == CharacterSelect ? LaunchMode.GuiSelect : LaunchMode.Gui;
     public string? CharacterName => SelectedCharacter == CharacterSelect ? null : SelectedCharacter;
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
+    public string? LaunchError { get => _launchError; private set { if (SetProperty(ref _launchError, value)) OnPropertyChanged(nameof(HasLaunchError)); } }
+    public bool HasLaunchError => !string.IsNullOrEmpty(LaunchError);
     public string ServerStatusText { get => _serverStatusText; set => SetProperty(ref _serverStatusText, value); }
     public string HealthText { get => ServerStatusText; set { ServerStatusText = value; OnPropertyChanged(); } }
-    public bool? IsServerOnline { get => _isServerOnline; set => SetProperty(ref _isServerOnline, value); }
+    public bool? IsServerOnline { get => _isServerOnline; set { if (SetProperty(ref _isServerOnline, value)) OnPropertyChanged(nameof(ServerDotColor)); } }
+    public string ServerDotColor => IsServerOnline switch { true => "#65D99B", false => "#F17474", _ => "#89949C" };
     public bool IsActive => _activeSessionId is not null;
     public bool CanEditSelection => !IsActive && _canInteract();
     public bool CanPlay => DisabledReason.Length == 0;
@@ -83,8 +87,9 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
             foreach (string choice in choices) CharacterChoices.Add(choice);
             SelectedCharacter = choices.Contains(selected, StringComparer.Ordinal) ? selected : CharacterSelect;
         }
-        _activeSessionId = session?.SessionId;
-        Status = session?.Status ?? account.ActivityStatus;
+        _activeSessionId = session?.IsActive == true ? session.SessionId : null;
+        Status = session?.Error ?? session?.Status ?? account.ActivityStatus;
+        LaunchError = session?.Error;
         NotifyState();
     }
 
