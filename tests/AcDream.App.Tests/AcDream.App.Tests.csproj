@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Share internal rendering fixtures with the additional test assembly. -->
+    <InternalsVisibleTo Include="$(AdditionalTestAssembly)" Condition="'$(AdditionalTestAssembly)' != ''" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AcDream.Runtime.Gameplay" />
+    <Using Include="AcDream.App.Tests.BoundedTestDatCollection" Alias="DatCollection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AcDream.App\AcDream.App.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Plugin.Tests.Fixtures.HostPlugin\AcDream.Plugin.Tests.Fixtures.HostPlugin.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\AcDream.Plugin.Tests.Fixtures.InvalidRenderPackMultiple\AcDream.Plugin.Tests.Fixtures.InvalidRenderPackMultiple.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal\AcDream.Plugin.Tests.Fixtures.InvalidRenderPackInternal.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Fixtures\launcher-session\LauncherCoreSessionConfigFixture.cs"
+             Link="Fixtures\LauncherCoreSessionConfigFixture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="UI\Layout\fixtures\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\src\AcDream.Plugins.MossTank\mosstank*.xml"
+          Link="MossTank\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

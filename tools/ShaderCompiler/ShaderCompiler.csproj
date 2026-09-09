@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>AcDream.Tools.ShaderCompiler</RootNamespace>
+    <AssemblyName>AcDream.Tools.ShaderCompiler</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Shaderc" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,422 @@
+name: Headless portability
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-headless:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build presentation-free closure
+        shell: pwsh
+        run: |
+          $projects = @(
+            "src/AcDream.Platform/AcDream.Platform.csproj",
+            "src/AcDream.Launcher.Core/AcDream.Launcher.Core.csproj",
+            "src/AcDream.Bake/AcDream.Bake.csproj",
+            "src/AcDream.Plugin.Abstractions/AcDream.Plugin.Abstractions.csproj",
+            "src/AcDream.Core/AcDream.Core.csproj",
+            "src/AcDream.Core.Net/AcDream.Core.Net.csproj",
+            "src/AcDream.Content/AcDream.Content.csproj",
+            "src/AcDream.Runtime/AcDream.Runtime.csproj",
+            "src/AcDream.Headless/AcDream.Headless.csproj"
+          )
+          foreach ($project in $projects) {
+            dotnet build $project -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Test presentation-free closure
+        shell: pwsh
+        run: |
+          $projects = @(
+            "tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj",
+            "tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj",
+            "tests/AcDream.Bake.Tests/AcDream.Bake.Tests.csproj",
+            "tests/AcDream.Core.Net.Tests/AcDream.Core.Net.Tests.csproj",
+            "tests/AcDream.Content.Tests/AcDream.Content.Tests.csproj",
+            "tests/AcDream.Runtime.Tests/AcDream.Runtime.Tests.csproj",
+            "tests/AcDream.Headless.Tests/AcDream.Headless.Tests.csproj"
+          )
+          foreach ($project in $projects) {
+            dotnet test $project -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Verify CLI without connecting
+        shell: pwsh
+        run: |
+          dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Content -LiteralPath headless-k0.json -Value '{"version":1,"sessions":[]}'
+          dotnet run --project src/AcDream.Headless/AcDream.Headless.csproj -c Release -- validate --config headless-k0.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Linux headless host executable permission
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x src/AcDream.Headless/bin/Release/net10.0/acdream-headless
+
+  portable-launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build and test the portable launcher
+        shell: pwsh
+        run: |
+          dotnet build src/AcDream.Launcher/AcDream.Launcher.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish the self-contained launcher distribution
+        shell: pwsh
+        run: |
+          $rid = if ($IsWindows) { "win-x64" } else { "linux-x64" }
+          dotnet publish src/AcDream.Launcher/AcDream.Launcher.csproj `
+            -c Release `
+            -r $rid `
+            -o "artifacts/acdream-launcher-$rid"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify self-contained Windows launcher and bake artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "artifacts/acdream-launcher-win-x64"
+          if (-not (Test-Path -LiteralPath "$root/acdream-launcher.exe" -PathType Leaf)) { throw "launcher executable missing" }
+          if (-not (Test-Path -LiteralPath "$root/acdream-bake.exe" -PathType Leaf)) { throw "bake executable missing" }
+          if (Test-Path -LiteralPath "$root/acdream-launcher.dll") { throw "launcher is not single-file" }
+          if (Test-Path -LiteralPath "$root/acdream-bake.dll") { throw "bake is not single-file" }
+          $env:DOTNET_ROOT = "Z:\definitely-not-installed"
+          $env:DOTNET_ROOT_X64 = "Z:\definitely-not-installed"
+          $env:DOTNET_MULTILEVEL_LOOKUP = "0"
+          & "$root/acdream-launcher.exe" --verify-publish
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$root/acdream-bake.exe" --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify self-contained Linux launcher and bake artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/acdream-launcher-linux-x64
+          self_contained=$(dotnet msbuild \
+            src/AcDream.Launcher/AcDream.Launcher.csproj \
+            -nologo \
+            -property:RuntimeIdentifier=linux-x64 \
+            -getProperty:SelfContained | tr -d '\r\n ')
+          test "$self_contained" = true
+          test -x "$root/acdream-launcher"
+          test -x "$root/acdream-bake"
+          test ! -f "$root/acdream-launcher.dll"
+          test ! -f "$root/acdream-bake.dll"
+          DOTNET_ROOT=/definitely-not-installed \
+          DOTNET_ROOT_X64=/definitely-not-installed \
+          DOTNET_MULTILEVEL_LOOKUP=0 \
+            "$root/acdream-launcher" --verify-publish
+          DOTNET_ROOT=/definitely-not-installed \
+          DOTNET_ROOT_X64=/definitely-not-installed \
+          DOTNET_MULTILEVEL_LOOKUP=0 \
+            "$root/acdream-bake" --help
+
+  linux-graphical:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build and publish Linux graphical client
+        shell: pwsh
+        run: |
+          dotnet build src/AcDream.App/AcDream.App.csproj -c Release -r linux-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet publish src/AcDream.App/AcDream.App.csproj `
+            -c Release `
+            -r linux-x64 `
+            --self-contained false `
+            -o artifacts/acdream-linux-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test portable graphical boundary
+        shell: pwsh
+        run: |
+          dotnet test `
+            tests/AcDream.UI.Abstractions.Tests/AcDream.UI.Abstractions.Tests.csproj `
+            -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test `
+            tests/AcDream.App.Tests/AcDream.App.Tests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~LinuxMonotonicFramePacingWaiterTests|FullyQualifiedName~LinuxPlatformBoundaryTests|FullyQualifiedName~GraphicalHostPlatformServicesTests|FullyQualifiedName~GraphicalLegacyConfigurationMigratorTests|FullyQualifiedName~GraphicalWindowBackendSelectionTests"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Linux package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/acdream-linux-x64
+          test -x "$root/AcDream.App"
+          test -f "$root/AcDream.App.dll"
+          test -f "$root/libglfw.so.3"
+          test -f "$root/libopenal.so"
+          test -f "$root/Rendering/Shaders/mesh_modern.vert"
+          test -f "$root/plugins/AcDream.Plugins.MossTank/AcDream.Plugins.MossTank.dll"
+          test -f "$root/plugins/AcDream.Plugins.MossTank/plugin.json"
+
+          test "$(grep -RIl --include='*.cs' 'LibraryImport(\"kernel32.dll\"' \
+            src/AcDream.App | wc -l)" -eq 1
+          grep -q 'WindowsHighResolutionFramePacingWaiter.cs' < <(
+            grep -RIl --include='*.cs' 'LibraryImport(\"kernel32.dll\"' \
+              src/AcDream.App)
+          ! grep -RIn --include='*.cs' 'LocalApplicationData' \
+            src/AcDream.App src/AcDream.UI.Abstractions
+          ! grep -RIn --include='*.cs' \
+            'WindowsHighResolutionFramePacingWaiter.Create()' \
+            src/AcDream.App \
+            --exclude='FramePacingWaiterFactory.cs' \
+            --exclude='WindowsHighResolutionFramePacingWaiter.cs'
+
+  linux-vulkan:
+    runs-on: ubuntu-latest
+
+    env:
+      XDG_CONFIG_HOME: ${{ github.workspace }}/artifacts/xdg/config
+      XDG_DATA_HOME: ${{ github.workspace }}/artifacts/xdg/data
+      XDG_CACHE_HOME: ${{ github.workspace }}/artifacts/xdg/cache
+      VULKAN_REPORT: ${{ github.workspace }}/artifacts/xdg/cache/acdream/diagnostics/graphical-capabilities-vulkan.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install lavapipe, the Vulkan loader and Xvfb
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            jq \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            vulkan-tools \
+            xauth \
+            xvfb
+
+      - name: Record the software Vulkan device
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          ls -l /usr/share/vulkan/icd.d/ || true
+          vulkaninfo --summary 2>&1 | tee artifacts/vulkaninfo-summary.txt
+
+      - name: Build and publish the Linux graphical client
+        shell: pwsh
+        run: |
+          dotnet publish src/AcDream.App/AcDream.App.csproj `
+            -c Release `
+            -r linux-x64 `
+            --self-contained false `
+            -o artifacts/acdream-linux-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test the Vulkan backend's platform-independent decisions
+        shell: pwsh
+        run: |
+          dotnet test `
+            tests/AcDream.App.Tests/AcDream.App.Tests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~AcDream.App.Tests.Rendering.Gpu.Vk&Lane!=Vulkan"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test the Vulkan hardware lane on lavapipe
+        shell: pwsh
+        run: |
+          dotnet test `
+            tests/AcDream.App.Tests/AcDream.App.Tests.csproj `
+            -c Release `
+            --filter "Lane=Vulkan"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Probe the Vulkan capability gate on lavapipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/acdream-linux-x64
+          out="$PWD/artifacts/vulkan-probe"
+          mkdir -p "$out"
+
+          # 24-bit depth explicitly: xvfb-run's default screen is 8-bit, which
+          # leaves the X11 WSI without a usable visual.
+          ACDREAM_RENDER_BACKEND=vulkan \
+          ACDREAM_VULKAN_PROBE=1 \
+          ACDREAM_VULKAN_PROBE_FRAMES=30 \
+          ACDREAM_AUTOMATION_ARTIFACT_DIR="$out" \
+          ACDREAM_DISPLAY_PROTOCOL=x11 \
+          ACDREAM_NO_AUDIO=1 \
+            xvfb-run -a -s "-screen 0 1920x1080x24" \
+              "$root/AcDream.App" /tmp/not-needed 2>&1 | tee artifacts/vulkan-probe.log
+
+          test -f "$VULKAN_REPORT"
+          cp "$VULKAN_REPORT" artifacts/vulkan-capabilities-pass.json
+
+          jq -r '"device: \(.DeviceName) (\(.DeviceType)), \(.DeviceApiVersion), \(.DriverInfo)"' \
+            "$VULKAN_REPORT"
+
+          # The gate accepted the device outright.
+          jq -e '.SupportFailures | length == 0' "$VULKAN_REPORT"
+          test "$(jq -r '.ActiveDisplayProtocol' "$VULKAN_REPORT")" = X11
+          # A software device, which is the whole point of this row.
+          test "$(jq -r '.DeviceType' "$VULKAN_REPORT")" = Cpu
+          # Vulkan 1.3 floor, unpacked from VK_MAKE_API_VERSION: major is bits
+          # 22+, minor is bits 12-21. Evaluate() already rejects anything lower,
+          # so this asserts the report agrees with the verdict rather than
+          # re-deriving it.
+          jq -e '
+            ((.DeviceApiVersionPacked / 4194304) | floor) as $major
+            | (((.DeviceApiVersionPacked % 4194304) / 4096) | floor) as $minor
+            | $major > 1 or ($major == 1 and $minor >= 3)' "$VULKAN_REPORT"
+          jq -e '.FunctionProbe.Failures | length == 0' "$VULKAN_REPORT"
+          jq -e '.FunctionProbe.DeviceCreation and .FunctionProbe.OffscreenReadback' \
+            "$VULKAN_REPORT"
+
+      - name: Assert the offline render produced a real frame
+        shell: bash
+        run: |
+          set -euo pipefail
+          png=artifacts/vulkan-probe/vulkan-bringup.png
+          test -f "$png"
+
+          width=$(od -An -tu4 -j16 -N4 --endian=big "$png" | tr -d ' ')
+          height=$(od -An -tu4 -j20 -N4 --endian=big "$png" | tr -d ' ')
+          bytes=$(stat -c%s "$png")
+          echo "captured ${width}x${height}, ${bytes} bytes"
+
+          test "$width" -ge 640
+          test "$height" -ge 360
+          test "$bytes" -gt 8192
+
+      - name: Verify the forced-unsupported gate exits 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/acdream-linux-x64
+          out="$PWD/artifacts/vulkan-forced"
+          mkdir -p "$out"
+
+          set +e
+          ACDREAM_RENDER_BACKEND=vulkan \
+          ACDREAM_VULKAN_PROBE=1 \
+          ACDREAM_VULKAN_PROBE_FRAMES=30 \
+          ACDREAM_VULKAN_FORCE_UNSUPPORTED=timelineSemaphore \
+          ACDREAM_AUTOMATION_ARTIFACT_DIR="$out" \
+          ACDREAM_DISPLAY_PROTOCOL=x11 \
+          ACDREAM_NO_AUDIO=1 \
+            xvfb-run -a -s "-screen 0 1920x1080x24" \
+              "$root/AcDream.App" /tmp/not-needed \
+              > artifacts/vulkan-forced.log 2>&1
+          code=$?
+          set -e
+
+          cat artifacts/vulkan-forced.log
+          test -f "$VULKAN_REPORT"
+          cp "$VULKAN_REPORT" artifacts/vulkan-capabilities-forced.json
+
+          test "$code" -eq 4
+          test "$(jq -r '.ForcedUnsupportedFeature' "$VULKAN_REPORT")" = timelineSemaphore
+          test "$(jq -r '.Features.TimelineSemaphore' "$VULKAN_REPORT")" = false
+          jq -e '.SupportFailures | length > 0' "$VULKAN_REPORT"
+          jq -e '.SupportFailures | any(test("timelineSemaphore"))' "$VULKAN_REPORT"
+          # The refusal must be actionable: the operator is told where the full
+          # report is, not merely that something was unsupported.
+          grep -q 'graphical-capabilities-vulkan.json' artifacts/vulkan-forced.log
+
+      - name: Verify the committed SPIR-V is fresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          committed=src/AcDream.App/Rendering/Shaders/spv
+          fresh="$PWD/artifacts/spv-fresh"
+          rm -rf "$fresh"
+          mkdir -p "$fresh"
+
+          pwsh tools/compile-shaders.ps1 -OutputDirectory "$fresh"
+
+          diff <(cd "$committed" && ls -1 | sort) <(cd "$fresh" && ls -1 | sort)
+
+          drift=0
+          for path in "$committed"/*.spv; do
+            name=$(basename "$path")
+            if ! cmp -s "$path" "$fresh/$name"; then
+              echo "DRIFT: $name differs from a fresh compile"
+              echo "  committed $(sha256sum "$path" | cut -d' ' -f1) $(stat -c%s "$path") bytes"
+              echo "  fresh     $(sha256sum "$fresh/$name" | cut -d' ' -f1) $(stat -c%s "$fresh/$name") bytes"
+              drift=$((drift + 1))
+            fi
+          done
+
+          diff <(jq -S . "$committed/shaders.manifest.json") \
+               <(jq -S . "$fresh/shaders.manifest.json")
+
+          if [ "$drift" -ne 0 ]; then
+            echo "$drift .spv artifact(s) are stale."
+            echo "Run tools/compile-shaders.ps1 and commit the result."
+            exit 1
+          fi
+          echo "all committed .spv match a fresh compile"
+
+      - name: Upload Vulkan evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-vulkan-evidence
+          if-no-files-found: warn
+          path: |
+            artifacts/vulkaninfo-summary.txt
+            artifacts/vulkan-probe.log
+            artifacts/vulkan-forced.log
+            artifacts/vulkan-capabilities-pass.json
+            artifacts/vulkan-capabilities-forced.json
+            artifacts/vulkan-probe/*.png

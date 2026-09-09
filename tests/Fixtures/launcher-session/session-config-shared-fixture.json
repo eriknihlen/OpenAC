@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "process": {
+    "content": {
+      "datDirectory": "shared-fixture-dats",
+      "preparedAssetPath": "shared-fixture-dats/acdream.pak"
+    }
+  },
+  "sessions": [
+    {
+      "id": "shared-fixture",
+      "endpoint": { "host": "127.0.0.1", "port": 9000 },
+      "account": "sharedaccount",
+      "character": { "name": "SharedToon" },
+      "policy": { "id": "idle" },
+      "credential": {
+        "provider": "standardInput",
+        "reference": "session"
+      },
+      "plugins": ["ExamplePlugin", "AnotherPlugin"],
+      "loginCommands": ["/tell someone, hi", "/vt start"],
+      "loginCommandDelayMs": 750,
+      "statusFile": "shared-fixture-status.jsonl"
+    }
+  ]
+}

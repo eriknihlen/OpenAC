@@ -1,0 +1,116 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>acdream-launcher</AssemblyName>
+    <Title>OpenAC Launcher</Title>
+    <Product>OpenAC</Product>
+    <Description>OpenAC launcher, installer and updater</Description>
+    <RootNamespace>AcDream.Launcher</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Windows shell/Explorer icon for acdream-launcher.exe. The window icon
+         is set separately via Window.Icon in MainWindow.axaml — the PE icon
+         never reaches Avalonia. -->
+    <ApplicationIcon>..\..\assets\icons\acdream-launcher.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+    <PublishBakeTool Condition="'$(PublishBakeTool)' == ''">true</PublishBakeTool>
+    <!-- App.OnFrameworkInitializationCompleted resolves the bake CLI at
+         AppContext.BaseDirectory/acdream-bake[.exe]. Publish co-deploys it
+         (PublishCoDeployedBakeTool below), but an ordinary `dotnet build`
+         did not, so a developer-built launcher reached the first-run wizard
+         with no bake tool beside it. This does for Build what that target
+         does for Publish. Set to false to skip; the two co-deploy targets
+         themselves pass PublishBakeTool=false into their inner Bake builds so
+         the recursion can never nest (gate-round-1 review F4: no CI lane sets
+         it — the guard is target-local). -->
+    <CoDeployBakeToolOnBuild Condition="'$(CoDeployBakeToolOnBuild)' == ''">true</CoDeployBakeToolOnBuild>
+    <_BakeExecutableName Condition="$([MSBuild]::IsOSPlatform('Windows'))">acdream-bake.exe</_BakeExecutableName>
+    <_BakeExecutableName Condition="'$(_BakeExecutableName)' == ''">acdream-bake</_BakeExecutableName>
+  </PropertyGroup>
+
+  <!-- Spelled out per project rather than batched: %(Item.Metadata) inside a
+       plain Include does NOT batch — the literal '%(...)' text survives into
+       the input list as a nonexistent file, which is permanently out-of-date
+       and silently defeats the incrementality this exists for (observed). -->
+  <ItemGroup>
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Bake\**\*.cs"
+                     Exclude="$(MSBuildProjectDirectory)\..\AcDream.Bake\bin\**\*.cs;$(MSBuildProjectDirectory)\..\AcDream.Bake\obj\**\*.cs" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Bake\AcDream.Bake.csproj" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Content\**\*.cs"
+                     Exclude="$(MSBuildProjectDirectory)\..\AcDream.Content\bin\**\*.cs;$(MSBuildProjectDirectory)\..\AcDream.Content\obj\**\*.cs" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Content\AcDream.Content.csproj" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Platform\**\*.cs"
+                     Exclude="$(MSBuildProjectDirectory)\..\AcDream.Platform\bin\**\*.cs;$(MSBuildProjectDirectory)\..\AcDream.Platform\obj\**\*.cs" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Platform\AcDream.Platform.csproj" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Core\**\*.cs"
+                     Exclude="$(MSBuildProjectDirectory)\..\AcDream.Core\bin\**\*.cs;$(MSBuildProjectDirectory)\..\AcDream.Core\obj\**\*.cs" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Core\AcDream.Core.csproj" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Plugin.Abstractions\**\*.cs"
+                     Exclude="$(MSBuildProjectDirectory)\..\AcDream.Plugin.Abstractions\bin\**\*.cs;$(MSBuildProjectDirectory)\..\AcDream.Plugin.Abstractions\obj\**\*.cs" />
+    <_BakeToolSource Include="$(MSBuildProjectDirectory)\..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Launcher.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Window icon for the Avalonia shell. Linked from assets/icons so the
+         art has one source of truth; the Link is what fixes the avares path
+         MainWindow.axaml resolves. -->
+    <AvaloniaResource Include="..\..\assets\icons\acdream-launcher-256.png"
+                      Link="Assets/acdream-launcher.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
+  </ItemGroup>
+
+  <Target Name="CoDeployBakeToolToBuildOutput"
+          AfterTargets="Build"
+          Condition="'$(CoDeployBakeToolOnBuild)' == 'true' and '$(PublishBakeTool)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(_IsPublishing)' != 'true'"
+          Inputs="@(_BakeToolSource)"
+          Outputs="$(OutputPath)$(_BakeExecutableName)">
+    <PropertyGroup>
+      <_BakeBuildRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_BakeBuildRid>
+      <_BakeBuildRid Condition="'$(_BakeBuildRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</_BakeBuildRid>
+      <_BakeBuildStagingDirectory>$(MSBuildProjectDirectory)\$(BaseIntermediateOutputPath)bake-codeploy\$(Configuration)\$(_BakeBuildRid)\</_BakeBuildStagingDirectory>
+      <_BakeBuildOutputDirectory Condition="$([System.IO.Path]::IsPathRooted('$(OutputPath)'))">$(OutputPath)</_BakeBuildOutputDirectory>
+      <_BakeBuildOutputDirectory Condition="'$(_BakeBuildOutputDirectory)' == ''">$(MSBuildProjectDirectory)\$(OutputPath)</_BakeBuildOutputDirectory>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\AcDream.Bake\AcDream.Bake.csproj"
+             Targets="Restore;Publish"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(_BakeBuildRid);SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;EnableSingleFileAnalyzer=false;PublishDir=$(_BakeBuildStagingDirectory);PublishBakeTool=false;CoDeployBakeToolOnBuild=false;RestoreLockedMode=true;RestoreForceEvaluate=true" />
+    <Copy SourceFiles="$(_BakeBuildStagingDirectory)$(_BakeExecutableName)"
+          DestinationFolder="$(_BakeBuildOutputDirectory)"
+          SkipUnchangedFiles="true" />
+    <Touch Files="$(_BakeBuildOutputDirectory)$(_BakeExecutableName)" />
+    <Message Importance="high"
+             Text="Co-deployed $(_BakeExecutableName) ($(_BakeBuildRid)) next to the launcher." />
+  </Target>
+
+  <Target Name="PublishCoDeployedBakeTool"
+          AfterTargets="Publish"
+          Condition="'$(RuntimeIdentifier)' != '' and '$(PublishBakeTool)' == 'true'">
+    <PropertyGroup>
+      <_BakePublishDirectory Condition="$([System.IO.Path]::IsPathRooted('$(PublishDir)'))">$(PublishDir)</_BakePublishDirectory>
+      <_BakePublishDirectory Condition="'$(_BakePublishDirectory)' == ''">$(MSBuildProjectDirectory)\$(PublishDir)</_BakePublishDirectory>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\AcDream.Bake\AcDream.Bake.csproj"
+             Targets="Restore;Publish"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;EnableSingleFileAnalyzer=false;PublishDir=$(_BakePublishDirectory);PublishBakeTool=false;RestoreLockedMode=true;RestoreForceEvaluate=true" />
+  </Target>
+</Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AcDream.Bake\AcDream.Bake.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.Platform\AcDream.Platform.csproj" />
+  </ItemGroup>
+</Project>

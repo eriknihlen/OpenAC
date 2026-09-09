@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel x="253" y="405" w="392" h="300" title="MossTank Advanced Options"
+       visible="{AdvancedOptionsVisible}" resizable="true" minw="392" minh="300">
+  <list x="4" y="4" w="256" h="160" rowheight="17" anchor="left top right"
+        selected="{SelectedAdvancedOptionIndex}" onchange="{SelectAdvancedOption}">
+    <column type="text" width="187" items="{AdvancedOptionNames}" onclick="{SelectAdvancedOption}" />
+    <column type="text" width="69" items="{AdvancedOptionValueColumn}" onclick="{ClickAdvancedOptionValue}" />
+  </list>
+  <list x="268" y="4" w="120" h="180" rowheight="18" anchor="right"
+        selected="{SelectedAdvancedOptionCategoryIndex}">
+    <column type="check" width="20" values="{AdvancedOptionCategoryEnabled}" onchange="{ToggleAdvancedOptionCategoryAt}" />
+    <column type="text" width="*" items="{AdvancedOptionCategoryNames}" onclick="{ToggleAdvancedOptionCategoryAt}" />
+  </list>
+  <field x="4" y="168" w="260" h="16" text="{AdvancedOptionValueDraft}"
+         onchange="{SetAdvancedOptionValueDraft}" onsubmit="{SubmitAdvancedOption}"
+         maxlength="160" clearonsubmit="false" background="#E6000000" />
+  <label x="4" y="188" w="384" h="80" text="{AdvancedOptionDescription}" color="#FFE8DEC3"
+         anchor="left top right" />
+</panel>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>acdream-bake</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Bake.Tests" />
+    <InternalsVisibleTo Include="AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Chorizite.DatReaderWriter" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Content\AcDream.Content.csproj" />
+    <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

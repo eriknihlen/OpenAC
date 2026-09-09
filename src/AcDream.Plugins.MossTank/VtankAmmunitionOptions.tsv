@@ -1,0 +1,121 @@
+# AmmoName	LauncherType	WieldReq	Element	Quality	Special	WieldReq2Skill	WieldReq2Value
+Barbed Quarrel	6	0	0	4	0	0	0
+Greater Barbed Quarrel	6	0	0	9	0	0	0
+Deadly Barbed Quarrel	6	230	0	22	0	0	0
+Blunt Quarrel	6	0	1	5	0	0	0
+Greater Blunt Quarrel	6	0	1	10	0	0	0
+Deadly Blunt Quarrel	6	230	1	20	0	0	0
+Armor Piercing Quarrel	6	0	0	5	0	0	0
+Greater Armor Piercing Quarrel	6	0	0	10	0	0	0
+Deadly Armor Piercing Quarrel	6	230	0	23	0	0	0
+Frog Crotch Quarrel	6	0	2	5	0	0	0
+Greater Frog Crotch Quarrel	6	0	2	10	0	0	0
+Deadly Frog Crotch Quarrel	6	230	2	23	0	0	0
+Fire Quarrel	6	0	6	5	0	0	0
+Greater Fire Quarrel	6	0	6	10	0	0	0
+Deadly Fire Quarrel	6	230	6	20	0	0	0
+Lightning Quarrel	6	0	4	5	0	0	0
+Greater Lightning Quarrel	6	0	4	10	0	0	0
+Deadly Lightning Quarrel	6	230	4	20	0	0	0
+Acid Quarrel	6	0	3	5	0	0	0
+Greater Acid Quarrel	6	0	3	10	0	0	0
+Deadly Acid Quarrel	6	230	3	20	0	0	0
+Frost Quarrel	6	0	5	5	0	0	0
+Greater Frost Quarrel	6	0	5	10	0	0	0
+Deadly Frost Quarrel	6	230	5	20	0	0	0
+Barbed Atlatl Dart	7	0	0	4	0	0	0
+Greater Barbed Atlatl Dart	7	0	0	9	0	0	0
+Deadly Barbed Atlatl Dart	7	230	0	22	0	0	0
+Blunt Atlatl Dart	7	0	1	5	0	0	0
+Greater Blunt Atlatl Dart	7	0	1	10	0	0	0
+Deadly Blunt Atlatl Dart	7	230	1	20	0	0	0
+Armor Piercing Atlatl Dart	7	0	0	5	0	0	0
+Greater Armor Piercing Atlatl Dart	7	0	0	10	0	0	0
+Deadly Armor Piercing Atlatl Dart	7	230	0	23	0	0	0
+Frog Crotch Atlatl Dart	7	0	2	5	0	0	0
+Greater Frog Crotch Atlatl Dart	7	0	2	10	0	0	0
+Deadly Frog Crotch Atlatl Dart	7	230	2	23	0	0	0
+Fire Atlatl Dart	7	0	6	5	0	0	0
+Greater Fire Atlatl Dart	7	0	6	10	0	0	0
+Deadly Fire Atlatl Dart	7	230	6	20	0	0	0
+Lightning Atlatl Dart	7	0	4	5	0	0	0
+Greater Lightning Atlatl Dart	7	0	4	10	0	0	0
+Deadly Lightning Atlatl Dart	7	230	4	20	0	0	0
+Acid Atlatl Dart	7	0	3	5	0	0	0
+Greater Acid Atlatl Dart	7	0	3	10	0	0	0
+Deadly Acid Atlatl Dart	7	230	3	20	0	0	0
+Frost Atlatl Dart	7	0	5	5	0	0	0
+Greater Frost Atlatl Dart	7	0	5	10	0	0	0
+Deadly Frost Atlatl Dart	7	230	5	20	0	0	0
+Barbed Arrow	5	0	0	4	0	0	0
+Greater Barbed Arrow	5	0	0	9	0	0	0
+Deadly Barbed Arrow	5	230	0	22	0	0	0
+Blunt Arrow	5	0	1	5	0	0	0
+Greater Blunt Arrow	5	0	1	10	0	0	0
+Deadly Blunt Arrow	5	230	1	20	0	0	0
+Armor Piercing Arrow	5	0	0	5	0	0	0
+Greater Armor Piercing Arrow	5	0	0	10	0	0	0
+Deadly Armor Piercing Arrow	5	230	0	23	0	0	0
+Frog Crotch Arrow	5	0	2	5	0	0	0
+Greater Frog Crotch Arrow	5	0	2	10	0	0	0
+Deadly Frog Crotch Arrow	5	230	2	23	0	0	0
+Fire Arrow	5	0	6	5	0	0	0
+Greater Fire Arrow	5	0	6	10	0	0	0
+Deadly Fire Arrow	5	230	6	20	0	0	0
+Lightning Arrow	5	0	4	5	0	0	0
+Greater Lightning Arrow	5	0	4	10	0	0	0
+Deadly Lightning Arrow	5	230	4	20	0	0	0
+Acid Arrow	5	0	3	5	0	0	0
+Greater Acid Arrow	5	0	3	10	0	0	0
+Deadly Acid Arrow	5	230	3	20	0	0	0
+Frost Arrow	5	0	5	5	0	0	0
+Greater Frost Arrow	5	0	5	10	0	0	0
+Deadly Frost Arrow	5	230	5	20	0	0	0
+Deadly Arrow	5	230	0	20	0	0	0
+Deadly Quarrel	6	230	0	20	0	0	0
+Deadly Atlatl Dart	7	230	0	20	0	0	0
+Deadly Broadhead Arrow	5	230	2	20	0	0	0
+Deadly Broadhead Quarrel	6	230	2	20	0	0	0
+Deadly Broadhead Atlatl Dart	7	230	2	20	0	0	0
+Greater Broadhead Atlatl Dart	7	0	2	8	0	0	0
+Greater Broadhead Arrow	5	0	2	8	0	0	0
+Greater Broadhead Quarrel	6	0	2	8	0	0	0
+Arrow	5	0	0	3	0	0	0
+Atlatl Dart	7	0	0	3	0	0	0
+Quarrel	6	0	0	3	0	0	0
+Broadhead Arrow	5	0	2	3	0	0	0
+Broadhead Quarrel	6	0	2	3	0	0	0
+Broadhead Atlatl Dart	7	0	2	3	0	0	0
+Raider Lightning Bolt	6	270	4	30	1	0	0
+Raider Lightning Atlatl Dart	7	270	4	30	1	0	0
+Raider Lightning Arrow	5	270	4	30	1	0	0
+Spectral Chill Arrow	5	270	5	30	2	0	0
+Spectral Chill Bolt	6	270	5	30	2	0	0
+Spectral Chill Atlatl Dart	7	270	5	30	2	0	0
+Olthoi Acid Arrow	5	270	3	30	2	0	0
+Olthoi Acid Bolt	6	270	3	30	2	0	0
+Olthoi Acid Atlatl Dart	7	270	3	30	2	0	0
+Greater Deadly Blunt Arrow	5	270	1	30	0	0	0
+Greater Deadly Blunt Quarrel	6	270	1	30	0	0	0
+Greater Deadly Blunt Atlatl Dart	7	270	1	30	0	0	0
+Gear Blade Slashing Arrow	5	270	2	30	2	0	0
+Gear Blade Slashing Bolt	6	270	2	30	2	0	0
+Gear Blade Slashing Atlatl Dart	7	270	2	30	2	0	0
+Burning Sands Atlatl Dart	7	270	6	30	2	0	0
+Burning Sands Bolt	6	270	6	30	2	0	0
+Burning Sands Arrow	5	270	6	30	2	0	0
+Greater Deadly Armor Piercing Atlatl Dart	7	270	0	33	0	0	0
+Greater Deadly Armor Piercing Arrow	5	270	0	33	0	0	0
+Greater Deadly Armor Piercing Quarrel	6	270	0	33	0	0	0
+Greater Deadly Frog Crotch Atlatl Dart	7	270	2	33	0	0	0
+Greater Deadly Frog Crotch Quarrel	6	270	2	33	0	0	0
+Greater Deadly Frog Crotch Arrow	5	270	2	33	0	0	0
+Deadly Prismatic Atlatl Dart	7	300	100	31	0	37	375
+Deadly Prismatic Quarrel	6	300	100	31	0	37	375
+Deadly Prismatic Arrow	5	300	100	31	0	37	375
+Greater Prismatic Atlatl Dart	7	290	100	26	0	37	350
+Greater Prismatic Quarrel	6	290	100	26	0	37	350
+Greater Prismatic Arrow	5	290	100	26	0	37	350
+Prismatic Atlatl Dart	7	250	100	21	0	37	250
+Prismatic Quarrel	6	250	100	21	0	37	250
+Prismatic Arrow	5	250	100	21	0	37	250

@@ -1,0 +1,758 @@
+# Official VTank GameInfoDB CraftInteractions: item1<TAB>item2<TAB>result<TAB>count<TAB>skill<TAB>difficulty<TAB>id
+Wrapped Bundle of Barbed Arrowheads	Wrapped Bundle of Arrowshafts	Barbed Arrow	250	37	55	1
+Wrapped Bundle of Greater Barbed Arrowheads	Wrapped Bundle of Arrowshafts	Greater Barbed Arrow	250	37	209	2
+Wrapped Bundle of Deadly Barbed Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Barbed Arrow	250	37	220	3
+Wrapped Bundle of Barbed Arrowheads	Wrapped Bundle of Quarrelshafts	Barbed Quarrel	250	37	55	4
+Wrapped Bundle of Greater Barbed Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Barbed Quarrel	250	37	209	5
+Wrapped Bundle of Deadly Barbed Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Barbed Quarrel	250	37	220	6
+Wrapped Bundle of Barbed Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Barbed Atlatl Dart	250	37	55	7
+Wrapped Bundle of Greater Barbed Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Barbed Atlatl Dart	250	37	209	8
+Wrapped Bundle of Deadly Barbed Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Barbed Atlatl Dart	250	37	220	9
+Wrapped Bundle of Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Blunt Arrow	250	37	0	10
+Wrapped Bundle of Greater Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Greater Blunt Arrow	250	37	0	11
+Wrapped Bundle of Deadly Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Blunt Arrow	250	37	198	12
+Wrapped Bundle of Blunt Arrowheads	Wrapped Bundle of Quarrelshafts	Blunt Quarrel	250	37	0	13
+Wrapped Bundle of Greater Blunt Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Blunt Quarrel	250	37	0	14
+Wrapped Bundle of Deadly Blunt Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Blunt Quarrel	250	37	198	15
+Wrapped Bundle of Blunt Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Blunt Atlatl Dart	250	37	0	16
+Wrapped Bundle of Greater Blunt Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Blunt Atlatl Dart	250	37	0	17
+Wrapped Bundle of Deadly Blunt Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Blunt Atlatl Dart	250	37	198	18
+Wrapped Bundle of Armor Piercing Arrowheads	Wrapped Bundle of Arrowshafts	Armor Piercing Arrow	250	37	0	19
+Wrapped Bundle of Greater Armor Piercing Arrowheads	Wrapped Bundle of Arrowshafts	Greater Armor Piercing Arrow	250	37	0	20
+Wrapped Bundle of Deadly Armor Piercing Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Armor Piercing Arrow	250	37	220	21
+Wrapped Bundle of Armor Piercing Arrowheads	Wrapped Bundle of Quarrelshafts	Armor Piercing Quarrel	250	37	0	22
+Wrapped Bundle of Greater Armor Piercing Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Armor Piercing Quarrel	250	37	0	23
+Wrapped Bundle of Deadly Armor Piercing Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Armor Piercing Quarrel	250	37	220	24
+Wrapped Bundle of Armor Piercing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Armor Piercing Atlatl Dart	250	37	0	25
+Wrapped Bundle of Greater Armor Piercing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Armor Piercing Atlatl Dart	250	37	0	26
+Wrapped Bundle of Deadly Armor Piercing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Armor Piercing Atlatl Dart	250	37	220	27
+Wrapped Bundle of Frog Crotch Arrowheads	Wrapped Bundle of Arrowshafts	Frog Crotch Arrow	250	37	0	28
+Wrapped Bundle of Greater Frog Crotch Arrowheads	Wrapped Bundle of Arrowshafts	Greater Frog Crotch Arrow	250	37	0	29
+Wrapped Bundle of Deadly Frog Crotch Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Frog Crotch Arrow	250	37	220	30
+Wrapped Bundle of Frog Crotch Arrowheads	Wrapped Bundle of Quarrelshafts	Frog Crotch Quarrel	250	37	0	31
+Wrapped Bundle of Greater Frog Crotch Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Frog Crotch Quarrel	250	37	0	32
+Wrapped Bundle of Deadly Frog Crotch Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Frog Crotch Quarrel	250	37	220	33
+Wrapped Bundle of Frog Crotch Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Frog Crotch Atlatl Dart	250	37	0	34
+Wrapped Bundle of Greater Frog Crotch Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Frog Crotch Atlatl Dart	250	37	0	35
+Wrapped Bundle of Deadly Frog Crotch Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Frog Crotch Atlatl Dart	250	37	220	36
+Wrapped Bundle of Fire Arrowheads	Wrapped Bundle of Arrowshafts	Fire Arrow	250	37	0	37
+Wrapped Bundle of Greater Fire Arrowheads	Wrapped Bundle of Arrowshafts	Greater Fire Arrow	250	37	0	38
+Wrapped Bundle of Deadly Fire Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Fire Arrow	250	37	275	39
+Wrapped Bundle of Fire Arrowheads	Wrapped Bundle of Quarrelshafts	Fire Quarrel	250	37	0	40
+Wrapped Bundle of Greater Fire Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Fire Quarrel	250	37	0	41
+Wrapped Bundle of Deadly Fire Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Fire Quarrel	250	37	275	42
+Wrapped Bundle of Fire Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Fire Atlatl Dart	250	37	0	43
+Wrapped Bundle of Greater Fire Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Fire Atlatl Dart	250	37	0	44
+Wrapped Bundle of Deadly Fire Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Fire Atlatl Dart	250	37	275	45
+Wrapped Bundle of Lightning Arrowheads	Wrapped Bundle of Arrowshafts	Lightning Arrow	250	37	0	46
+Wrapped Bundle of Greater Lightning Arrowheads	Wrapped Bundle of Arrowshafts	Greater Lightning Arrow	250	37	0	47
+Wrapped Bundle of Deadly Lightning Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Lightning Arrow	250	37	275	48
+Wrapped Bundle of Lightning Arrowheads	Wrapped Bundle of Quarrelshafts	Lightning Quarrel	250	37	0	49
+Wrapped Bundle of Greater Lightning Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Lightning Quarrel	250	37	0	50
+Wrapped Bundle of Deadly Lightning Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Lightning Quarrel	250	37	275	51
+Wrapped Bundle of Lightning Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Lightning Atlatl Dart	250	37	0	52
+Wrapped Bundle of Greater Lightning Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Lightning Atlatl Dart	250	37	0	53
+Wrapped Bundle of Deadly Lightning Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Lightning Atlatl Dart	250	37	275	54
+Wrapped Bundle of Acid Arrowheads	Wrapped Bundle of Arrowshafts	Acid Arrow	250	37	0	55
+Wrapped Bundle of Greater Acid Arrowheads	Wrapped Bundle of Arrowshafts	Greater Acid Arrow	250	37	0	56
+Wrapped Bundle of Deadly Acid Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Acid Arrow	250	37	275	57
+Wrapped Bundle of Acid Arrowheads	Wrapped Bundle of Quarrelshafts	Acid Quarrel	250	37	0	58
+Wrapped Bundle of Greater Acid Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Acid Quarrel	250	37	0	59
+Wrapped Bundle of Deadly Acid Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Acid Quarrel	250	37	275	60
+Wrapped Bundle of Acid Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Acid Atlatl Dart	250	37	0	61
+Wrapped Bundle of Greater Acid Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Acid Atlatl Dart	250	37	0	62
+Wrapped Bundle of Deadly Acid Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Acid Atlatl Dart	250	37	275	63
+Wrapped Bundle of Frost Arrowheads	Wrapped Bundle of Arrowshafts	Frost Arrow	250	37	0	64
+Wrapped Bundle of Greater Frost Arrowheads	Wrapped Bundle of Arrowshafts	Greater Frost Arrow	250	37	0	65
+Wrapped Bundle of Deadly Frost Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Frost Arrow	250	37	275	66
+Wrapped Bundle of Frost Arrowheads	Wrapped Bundle of Quarrelshafts	Frost Quarrel	250	37	0	67
+Wrapped Bundle of Greater Frost Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Frost Quarrel	250	37	0	68
+Wrapped Bundle of Deadly Frost Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Frost Quarrel	250	37	275	69
+Wrapped Bundle of Frost Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Frost Atlatl Dart	250	37	0	70
+Wrapped Bundle of Greater Frost Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Frost Atlatl Dart	250	37	0	71
+Wrapped Bundle of Deadly Frost Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Frost Atlatl Dart	250	37	275	72
+Bundle of Barbed Arrowheads	Bundle of Arrowshafts	Barbed Arrow	10	37	0	73
+Bundle of Greater Barbed Arrowheads	Bundle of Arrowshafts	Greater Barbed Arrow	10	37	0	74
+Bundle of Deadly Barbed Arrowheads	Bundle of Arrowshafts	Deadly Barbed Arrow	10	37	0	75
+Bundle of Barbed Arrowheads	Bundle of Quarrelshafts	Barbed Quarrel	10	37	0	76
+Bundle of Greater Barbed Arrowheads	Bundle of Quarrelshafts	Greater Barbed Quarrel	10	37	0	77
+Bundle of Deadly Barbed Arrowheads	Bundle of Quarrelshafts	Deadly Barbed Quarrel	10	37	0	78
+Bundle of Barbed Arrowheads	Bundle of Atlatl Dart shafts	Barbed Atlatl Dart	10	37	0	79
+Bundle of Greater Barbed Arrowheads	Bundle of Atlatl Dart shafts	Greater Barbed Atlatl Dart	10	37	0	80
+Bundle of Deadly Barbed Arrowheads	Bundle of Atlatl Dart shafts	Deadly Barbed Atlatl Dart	10	37	0	81
+Bundle of Blunt Arrowheads	Bundle of Arrowshafts	Blunt Arrow	10	37	0	82
+Bundle of Greater Blunt Arrowheads	Bundle of Arrowshafts	Greater Blunt Arrow	10	37	0	83
+Bundle of Deadly Blunt Arrowheads	Bundle of Arrowshafts	Deadly Blunt Arrow	10	37	0	84
+Bundle of Blunt Arrowheads	Bundle of Quarrelshafts	Blunt Quarrel	10	37	0	85
+Bundle of Greater Blunt Arrowheads	Bundle of Quarrelshafts	Greater Blunt Quarrel	10	37	0	86
+Bundle of Deadly Blunt Arrowheads	Bundle of Quarrelshafts	Deadly Blunt Quarrel	10	37	0	87
+Bundle of Blunt Arrowheads	Bundle of Atlatl Dart shafts	Blunt Atlatl Dart	10	37	0	88
+Bundle of Greater Blunt Arrowheads	Bundle of Atlatl Dart shafts	Greater Blunt Atlatl Dart	10	37	0	89
+Bundle of Deadly Blunt Arrowheads	Bundle of Atlatl Dart shafts	Deadly Blunt Atlatl Dart	10	37	0	90
+Bundle of Armor Piercing Arrowheads	Bundle of Arrowshafts	Armor Piercing Arrow	10	37	0	91
+Bundle of Greater Armor Piercing Arrowheads	Bundle of Arrowshafts	Greater Armor Piercing Arrow	10	37	0	92
+Bundle of Deadly Armor Piercing Arrowheads	Bundle of Arrowshafts	Deadly Armor Piercing Arrow	10	37	0	93
+Bundle of Armor Piercing Arrowheads	Bundle of Quarrelshafts	Armor Piercing Quarrel	10	37	0	94
+Bundle of Greater Armor Piercing Arrowheads	Bundle of Quarrelshafts	Greater Armor Piercing Quarrel	10	37	0	95
+Bundle of Deadly Armor Piercing Arrowheads	Bundle of Quarrelshafts	Deadly Armor Piercing Quarrel	10	37	0	96
+Bundle of Armor Piercing Arrowheads	Bundle of Atlatl Dart shafts	Armor Piercing Atlatl Dart	10	37	0	97
+Bundle of Greater Armor Piercing Arrowheads	Bundle of Atlatl Dart shafts	Greater Armor Piercing Atlatl Dart	10	37	0	98
+Bundle of Deadly Armor Piercing Arrowheads	Bundle of Atlatl Dart shafts	Deadly Armor Piercing Atlatl Dart	10	37	0	99
+Bundle of Frog Crotch Arrowheads	Bundle of Arrowshafts	Frog Crotch Arrow	10	37	0	100
+Bundle of Greater Frog Crotch Arrowheads	Bundle of Arrowshafts	Greater Frog Crotch Arrow	10	37	0	101
+Bundle of Deadly Frog Crotch Arrowheads	Bundle of Arrowshafts	Deadly Frog Crotch Arrow	10	37	0	102
+Bundle of Frog Crotch Arrowheads	Bundle of Quarrelshafts	Frog Crotch Quarrel	10	37	0	103
+Bundle of Greater Frog Crotch Arrowheads	Bundle of Quarrelshafts	Greater Frog Crotch Quarrel	10	37	0	104
+Bundle of Deadly Frog Crotch Arrowheads	Bundle of Quarrelshafts	Deadly Frog Crotch Quarrel	10	37	0	105
+Bundle of Frog Crotch Arrowheads	Bundle of Atlatl Dart shafts	Frog Crotch Atlatl Dart	10	37	0	106
+Bundle of Greater Frog Crotch Arrowheads	Bundle of Atlatl Dart shafts	Greater Frog Crotch Atlatl Dart	10	37	0	107
+Bundle of Deadly Frog Crotch Arrowheads	Bundle of Atlatl Dart shafts	Deadly Frog Crotch Atlatl Dart	10	37	0	108
+Bundle of Fire Arrowheads	Bundle of Arrowshafts	Fire Arrow	10	37	0	109
+Bundle of Greater Fire Arrowheads	Bundle of Arrowshafts	Greater Fire Arrow	10	37	0	110
+Bundle of Deadly Fire Arrowheads	Bundle of Arrowshafts	Deadly Fire Arrow	10	37	0	111
+Bundle of Fire Arrowheads	Bundle of Quarrelshafts	Fire Quarrel	10	37	0	112
+Bundle of Greater Fire Arrowheads	Bundle of Quarrelshafts	Greater Fire Quarrel	10	37	0	113
+Bundle of Deadly Fire Arrowheads	Bundle of Quarrelshafts	Deadly Fire Quarrel	10	37	0	114
+Bundle of Fire Arrowheads	Bundle of Atlatl Dart shafts	Fire Atlatl Dart	10	37	0	115
+Bundle of Greater Fire Arrowheads	Bundle of Atlatl Dart shafts	Greater Fire Atlatl Dart	10	37	0	116
+Bundle of Deadly Fire Arrowheads	Bundle of Atlatl Dart shafts	Deadly Fire Atlatl Dart	10	37	0	117
+Bundle of Lightning Arrowheads	Bundle of Arrowshafts	Lightning Arrow	10	37	0	118
+Bundle of Greater Lightning Arrowheads	Bundle of Arrowshafts	Greater Lightning Arrow	10	37	0	119
+Bundle of Deadly Lightning Arrowheads	Bundle of Arrowshafts	Deadly Lightning Arrow	10	37	0	120
+Bundle of Lightning Arrowheads	Bundle of Quarrelshafts	Lightning Quarrel	10	37	0	121
+Bundle of Greater Lightning Arrowheads	Bundle of Quarrelshafts	Greater Lightning Quarrel	10	37	0	122
+Bundle of Deadly Lightning Arrowheads	Bundle of Quarrelshafts	Deadly Lightning Quarrel	10	37	0	123
+Bundle of Lightning Arrowheads	Bundle of Atlatl Dart shafts	Lightning Atlatl Dart	10	37	0	124
+Bundle of Greater Lightning Arrowheads	Bundle of Atlatl Dart shafts	Greater Lightning Atlatl Dart	10	37	0	125
+Bundle of Deadly Lightning Arrowheads	Bundle of Atlatl Dart shafts	Deadly Lightning Atlatl Dart	10	37	0	126
+Bundle of Acid Arrowheads	Bundle of Arrowshafts	Acid Arrow	10	37	0	127
+Bundle of Greater Acid Arrowheads	Bundle of Arrowshafts	Greater Acid Arrow	10	37	0	128
+Bundle of Deadly Acid Arrowheads	Bundle of Arrowshafts	Deadly Acid Arrow	10	37	0	129
+Bundle of Acid Arrowheads	Bundle of Quarrelshafts	Acid Quarrel	10	37	0	130
+Bundle of Greater Acid Arrowheads	Bundle of Quarrelshafts	Greater Acid Quarrel	10	37	0	131
+Bundle of Deadly Acid Arrowheads	Bundle of Quarrelshafts	Deadly Acid Quarrel	10	37	0	132
+Bundle of Acid Arrowheads	Bundle of Atlatl Dart shafts	Acid Atlatl Dart	10	37	0	133
+Bundle of Greater Acid Arrowheads	Bundle of Atlatl Dart shafts	Greater Acid Atlatl Dart	10	37	0	134
+Bundle of Deadly Acid Arrowheads	Bundle of Atlatl Dart shafts	Deadly Acid Atlatl Dart	10	37	0	135
+Bundle of Frost Arrowheads	Bundle of Arrowshafts	Frost Arrow	10	37	0	136
+Bundle of Greater Frost Arrowheads	Bundle of Arrowshafts	Greater Frost Arrow	10	37	0	137
+Bundle of Deadly Frost Arrowheads	Bundle of Arrowshafts	Deadly Frost Arrow	10	37	0	138
+Bundle of Frost Arrowheads	Bundle of Quarrelshafts	Frost Quarrel	10	37	0	139
+Bundle of Greater Frost Arrowheads	Bundle of Quarrelshafts	Greater Frost Quarrel	10	37	0	140
+Bundle of Deadly Frost Arrowheads	Bundle of Quarrelshafts	Deadly Frost Quarrel	10	37	0	141
+Bundle of Frost Arrowheads	Bundle of Atlatl Dart shafts	Frost Atlatl Dart	10	37	0	142
+Bundle of Greater Frost Arrowheads	Bundle of Atlatl Dart shafts	Greater Frost Atlatl Dart	10	37	0	143
+Bundle of Deadly Frost Arrowheads	Bundle of Atlatl Dart shafts	Deadly Frost Atlatl Dart	10	37	0	144
+Cooking Pot	Simple Dried Rations	Simple Field Rations	25	39	0	145
+Cooking Pot	Elaborate Dried Rations	Elaborate Field Rations	25	39	0	146
+Cooking Pot	Simple Dried Health Rations	Simple Field Health Rations	25	39	0	147
+Cooking Pot	Elaborate Dried Health Rations	Elaborate Field Health Rations	25	39	0	148
+Cooking Pot	Simple Dried Mana Rations	Simple Field Mana Rations	25	39	0	149
+Cooking Pot	Elaborate Dried Mana Rations	Elaborate Field Mana Rations	25	39	0	150
+Mortar and Pestle	Hot Pepper	Hot Sauce	1	39	0	151
+Hot Sauce	Simple Dried Rations	Simple Dried Health Rations	1	39	0	152
+Hot Sauce	Elaborate Dried Rations	Elaborate Dried Health Rations	1	39	0	153
+Cinnamon	Simple Dried Rations	Simple Dried Mana Rations	1	39	0	154
+Cinnamon	Elaborate Dried Rations	Elaborate Dried Mana Rations	1	39	0	155
+Treated Mandrake	Treated Hyssop	Combined Hyssop and Mandrake	1	21	0	156
+Soft Bandages	Combined Hyssop and Mandrake	Plentiful Healing Kit	1	21	0	157
+Health Infusion	Potion of Healing	Trade Health Elixir	0	38	0	158
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Frog Crotch Arrowheads	Wrapped Bundle of Deadly Frog Crotch Arrowheads	0	37	0	159
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Armor Piercing Arrowheads	Wrapped Bundle of Deadly Armor Piercing Arrowheads	0	37	0	160
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Blunt Arrowheads	Wrapped Bundle of Deadly Blunt Arrowheads	0	37	0	161
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Fire Arrowheads	Wrapped Bundle of Deadly Fire Arrowheads	0	37	0	162
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Frost Arrowheads	Wrapped Bundle of Deadly Frost Arrowheads	0	37	0	163
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Acid Arrowheads	Wrapped Bundle of Deadly Acid Arrowheads	0	37	0	164
+Concentrated Bloodhunter Oil	Wrapped Bundle of Greater Lightning Arrowheads	Wrapped Bundle of Deadly Lightning Arrowheads	0	37	0	165
+Concentrated Bloodseeker Oil	Wrapped Bundle of Frog Crotch Arrowheads	Wrapped Bundle of Greater Frog Crotch Arrowheads	0	37	0	166
+Concentrated Bloodseeker Oil	Wrapped Bundle of Armor Piercing Arrowheads	Wrapped Bundle of Greater Armor Piercing Arrowheads	0	37	0	167
+Concentrated Bloodseeker Oil	Wrapped Bundle of Blunt Arrowheads	Wrapped Bundle of Greater Blunt Arrowheads	0	37	0	168
+Concentrated Bloodseeker Oil	Wrapped Bundle of Fire Arrowheads	Wrapped Bundle of Greater Fire Arrowheads	0	37	0	169
+Concentrated Bloodseeker Oil	Wrapped Bundle of Frost Arrowheads	Wrapped Bundle of Greater Frost Arrowheads	0	37	0	170
+Concentrated Bloodseeker Oil	Wrapped Bundle of Acid Arrowheads	Wrapped Bundle of Greater Acid Arrowheads	0	37	0	171
+Concentrated Bloodseeker Oil	Wrapped Bundle of Lightning Arrowheads	Wrapped Bundle of Greater Lightning Arrowheads	0	37	0	172
+Empty Stopped Keg	Duke Raoul's Distillation Brew	Keg of Duke Raoul's Distillation	0	0	0	173
+Empty Stopped Keg	Apothecary Zongo's Stout Brew	Keg of Apothecary Zongo's Stout	0	0	0	174
+Empty Stopped Keg	Hunter's Stock Amber Brew	Keg of Hunter's Stock Amber	0	0	0	175
+Empty Bottles	Keg of Apothecary Zongo's Stout	Apothecary Zongo's Stout	0	0	0	176
+Empty Bottles	Keg of Duke Raoul's Distillation	Duke Raoul's Distillation	0	0	0	177
+Empty Bottles	Keg of Bobo's Stout	Bobo's Stout	0	0	0	178
+Empty Bottles	Keg of Tusker Spit Ale	Tusker Spit Ale	0	0	0	179
+Empty Bottles	Keg of Amber Ape	Amber Ape	0	0	0	180
+Empty Bottles	Keg of Hunter's Stock Amber	Hunter's Stock Amber	0	0	0	181
+Neutral Balm	Strong Chorizite Oil	Strong Dispel Potion	0	0	0	182
+Neutral Balm	Concentrated Chorizite Oil	Concentrated Dispel Potion	0	0	0	183
+Neutral Balm	Condensed Chorizite Oil	Condensed Dispel Potion	0	0	0	184
+Empty Stopped Keg	Tusker Spit Brew	Keg of Tusker Spit Ale	0	0	0	185
+Empty Stopped Keg	Amber Ape Brew	Keg of Amber Ape	0	0	0	186
+Empty Stopped Keg	Bobo's Stout Brew	Keg of Bobo's Stout	0	0	0	187
+Victual Oil	Healing Famous Pizza	Hearty Healing Famous Pizza	0	39	0	188
+Victual Oil	Healing Cake	Hearty Healing Cake	0	39	0	189
+Victual Oil	Healing Carrot Cake	Hearty Healing Carrot Cake	0	39	0	190
+Victual Oil	Healing Pizza	Hearty Healing Pizza	0	39	0	191
+Victual Oil	Healing Applesauce	Hearty Healing Applesauce	0	39	0	192
+Victual Oil	Healing Spiced Applesauce	Hearty Healing Spiced Applesauce	0	39	0	193
+Victual Oil	Healing Meat Pie	Hearty Healing Meat Pie	0	39	0	194
+Victual Oil	Healing Fish Pie	Hearty Healing Fish Pie	0	39	0	195
+Victual Oil	Healing Chicken Pie	Hearty Healing Chicken Pie	0	39	0	196
+Victual Oil	Healing Rabbit Pie	Hearty Healing Rabbit Pie	0	39	0	197
+Victual Oil	Healing Mushroom Pie	Hearty Healing Mushroom Pie	0	39	0	198
+Victual Oil	Healing Apple Pie	Hearty Healing Apple Pie	0	39	0	199
+Victual Oil	Healing Spiced Apple Pie	Hearty Healing Spiced Apple Pie	0	39	0	200
+Victual Oil	Healing Beef Stew	Hearty Healing Beef Stew	0	39	0	201
+Victual Oil	Healing Fish Stew	Hearty Healing Fish Stew	0	39	0	202
+Victual Oil	Healing Chicken Stew	Hearty Healing Chicken Stew	0	39	0	203
+Victual Oil	Healing Rabbit Stew	Hearty Healing Rabbit Stew	0	39	0	204
+Victual Oil	Healing Mushroom Stew	Hearty Healing Mushroom Stew	0	39	0	205
+Victual Oil	Healing Carrot Soup	Hearty Healing Carrot Soup	0	39	0	206
+Victual Oil	Healing Beef Noodle	Hearty Healing Beef Noodle	0	39	0	207
+Victual Oil	Healing Fish Noodle	Hearty Healing Fish Noodle	0	39	0	208
+Victual Oil	Healing Chicken Noodle	Hearty Healing Chicken Noodle	0	39	0	209
+Victual Oil	Healing Rabbit Noodle	Hearty Healing Rabbit Noodle	0	39	0	210
+Victual Oil	Healing Mushroom Noodle	Hearty Healing Mushroom Noodle	0	39	0	211
+Victual Oil	Healing Ice Cream	Hearty Healing Icecream	0	39	0	212
+Victual Oil	Healing Green Tea Ice Cream	Hearty Healing Green Tea Ice Cream	0	39	0	213
+Victual Oil	Healing Holtburger	Hearty Healing Holtburger	0	39	0	214
+Victual Oil	Healing Hot Kimchi	Hearty Healing Hot Kimchi	0	39	0	215
+Victual Oil	Mana Hot Kimchi	Hearty Mana Hot Kimchi	0	39	0	216
+Victual Oil	Mana Famous Pizza	Hearty Mana Famous Pizza	0	39	0	217
+Victual Oil	Mana Green Tea Ice Cream	Hearty Mana Green Tea Ice Cream	0	39	0	218
+Victual Oil	Mana Cake	Hearty Mana Cake	0	39	0	219
+Victual Oil	Mana Carrot Cake	Hearty Mana Carrot Cake	0	39	0	220
+Victual Oil	Mana Pizza	Hearty Mana Pizza	0	39	0	221
+Victual Oil	Mana Applesauce	Hearty Mana Applesauce	0	39	0	222
+Victual Oil	Mana Spiced Applesauce	Hearty Mana Spiced Applesauce	0	39	0	223
+Victual Oil	Mana Meat Pie	Hearty Mana Meat Pie	0	39	0	224
+Victual Oil	Mana Fish Pie	Hearty Mana Fish Pie	0	39	0	225
+Victual Oil	Mana Chicken Pie	Hearty Mana Chicken Pie	0	39	0	226
+Victual Oil	Mana Rabbit Pie	Hearty Mana Rabbit Pie	0	39	0	227
+Victual Oil	Mana Mushroom Pie	Hearty Mana Mushroom Pie	0	39	0	228
+Victual Oil	Mana Apple Pie	Hearty Mana Apple Pie	0	39	0	229
+Victual Oil	Mana Spiced Apple Pie	Hearty Mana Spiced Apple Pie	0	39	0	230
+Victual Oil	Mana Beef Stew	Hearty Mana Beef Stew	0	39	0	231
+Victual Oil	Mana Fish Stew	Hearty Mana Fish Stew	0	39	0	232
+Victual Oil	Mana Chicken Stew	Hearty Mana Chicken Stew	0	39	0	233
+Victual Oil	Mana Rabbit Stew	Hearty Mana Rabbit Stew	0	39	0	234
+Victual Oil	Mana Mushroom Stew	Hearty Mana Mushroom Stew	0	39	0	235
+Victual Oil	Mana Carrot Soup	Hearty Mana Carrot Soup	0	39	0	236
+Victual Oil	Mana Beef Noodle	Hearty Mana Beef Noodle	0	39	0	237
+Victual Oil	Mana Fish Noodle	Hearty Mana Fish Noodle	0	39	0	238
+Victual Oil	Mana Chicken Noodle	Hearty Mana Chicken Noodle	0	39	0	239
+Victual Oil	Mana Rabbit Noodle	Hearty Mana Rabbit Noodle	0	39	0	240
+Victual Oil	Mana Mushroom Noodle	Hearty Mana Mushroom Noodle	0	39	0	241
+Victual Oil	Mana Ice Cream	Hearty Mana Icecream	0	39	0	242
+Victual Oil	Mana Holtburger	Hearty Mana Holtburger	0	39	0	243
+Baking Pan	Olthoi Chocolate Cake Batter	Chocolate Olthoi Cake	0	39	0	244
+Frying Pan	Olthoi Egg	Fried Olthoi Egg	0	39	0	245
+Cooking Pot	Olthoi Egg	Hard Boiled Olthoi Egg	0	39	0	246
+Baking Pan	Olthoi Cake Batter	Olthoi Cake	0	39	0	247
+Baking Pan	Olthoi Carrot Cake Batter	Olthoi Carrot Cake	0	39	0	248
+Olthoi Pumpkin Pie Filling	Dough	Olthoi Pumpkin Pie	0	39	0	249
+Olthoi Batter	Bread	Olthoi Toast	0	39	0	250
+Brine	Olthoi Egg	Pickled Olthoi Egg	0	39	0	251
+Frying Pan	Marinated Olthoi Egg	Vesayen Style Fried Olthoi Egg	0	39	0	252
+Hot Sauce	Olthoi Egg	Marinated Olthoi Egg	0	39	0	253
+Treated Stibnite and Frankincense Crucible	Powdered Onyx	Gem of Greater Protection	0	38	0	254
+Treated Quicksilver and Frankincense Crucible	Powdered Hematite	Gem of Greater Piercing Protection	0	38	0	255
+Treated Verdigris and Frankincense Crucible	Powdered Turquoise	Gem of Greater Bludgeon Protection	0	38	0	256
+Treated Cadmia and Frankincense Crucible	Powdered Moonstone	Gem of Greater Blade Protection	0	38	0	257
+Treated Brimstone and Frankincense Crucible	Powdered Malachite	Gem of Greater Acid Protection	0	38	0	258
+Treated Colcothar and Frankincense Crucible	Powdered Quartz	Gem of Greater Cold Protection	0	38	0	259
+Treated Turpeth and Frankincense Crucible	Powdered Carnelian	Gem of Greater Fire Protection	0	38	0	260
+Treated Cobalt and Frankincense Crucible	Powdered Agate	Gem of Greater Lightning Protection	0	38	0	261
+Treated Vitriol and Frankincense Crucible	Powdered Bloodstone	Gem of Greater Regeneration	0	38	0	262
+Treated Cinnabar and Frankincense Crucible	Powdered Amber	Gem of Greater Rejuvenation	0	38	0	263
+Treated Gypsum and Frankincense Crucible	Powdered Lapis Lazuli	Gem of Greater Mana Renewal	0	38	0	264
+Concentrated Health Infusion	Concentrated Aqua Incanta	Concentrated Health Oil	0	38	0	265
+Concentrated Mana Infusion	Concentrated Aqua Incanta	Concentrated Mana Oil	0	38	0	266
+Concentrated Victual Infusion	Concentrated Aqua Incanta	Concentrated Victual Oil	0	38	0	267
+Eye Dropper	Concentrated Health Oil	Health Oil	0	38	0	268
+Eye Dropper	Concentrated Mana Oil	Mana Oil	0	38	0	269
+Eye Dropper	Concentrated Victual Oil	Victual Oil	0	38	0	270
+Concentrated Bloodseeker Infusion	Concentrated Aqua Incanta	Concentrated Bloodseeker Oil	0	38	0	271
+Concentrated Bloodhunter Infusion	Concentrated Aqua Incanta	Concentrated Bloodhunter Oil	0	38	0	272
+Concentrated Fire Infusion	Concentrated Aqua Incanta	Concentrated Fire Oil	0	38	0	273
+Concentrated Frost Infusion	Concentrated Aqua Incanta	Concentrated Frost Oil	0	38	0	274
+Concentrated Acid Infusion	Concentrated Aqua Incanta	Concentrated Acid Oil	0	38	0	275
+Concentrated Lightning Infusion	Concentrated Aqua Incanta	Concentrated Lightning Oil	0	38	0	276
+Bloodhunter Infusion	Aqua Incanta	Bloodhunter Oil	0	38	0	277
+Bloodseeker Infusion	Aqua Incanta	Bloodseeker Oil	0	38	0	278
+Lightning Infusion	Aqua Incanta	Lightning Oil	0	38	0	279
+Fire Infusion	Aqua Incanta	Fire Oil	0	38	0	280
+Acid Infusion	Aqua Incanta	Acid Oil	0	38	0	281
+Frost Infusion	Aqua Incanta	Frost Oil	0	38	0	282
+Wrapped Bundle of Deadly Acid Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Acid Arrow	0	37	0	283
+Wrapped Bundle of Deadly Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Blunt Arrow	0	37	0	284
+Bundle of Deadly Arrowheads	Bundle of Arrowshafts	Deadly Arrow	0	37	0	285
+Wrapped Bundle of Greater Blunt Arrowheads	Bundle of Arrowshafts	Greater Blunt Arrow	0	37	0	286
+Wrapped Bundle of Greater Frog Crotch Arrowheads	Bundle of Arrowshafts	Greater Frog Crotch Arrow	0	37	0	287
+Baking Pan	Dough	Bread	0	39	0	288
+Carving Knife	Cabbage	Coleslaw	0	39	0	289
+Frying Pan	Dough	Flat Bread	0	39	0	290
+Frying Pan	Brimstone-cap Mushroom	Fried Mushroom	0	39	0	291
+Brine	Egg	Pickled Egg	0	39	0	292
+Brine	Fish Filet	Pickled Fish	0	39	0	293
+Rich Carrot Stock	Cheese	Carol's Carrot Soup	0	39	0	294
+Cubed Carrot Cake	Milk	Carrot Cake Soup	0	39	0	295
+Cooking Pot	Spiced Pumpkin	Pumpkin Soup	0	39	0	296
+Uncooked Rice	Grapes	Stuffed Grape Leaf	0	39	0	297
+Baking Pan	Cheese Filled Mushroom	Stuffed Mushroom	0	0	0	298
+Uncooked Rice	Fish Filet	Sushi	0	39	0	299
+Rat Tail	Ground Rabbit	Rabbit Sausage	0	39	0	300
+Rat Tail	Ground Meat	Sausage	0	39	0	301
+Hot Sauce	Sausage	Spicy Sausage	0	39	0	302
+Metal Press	Apple	Apple Juice	0	39	0	303
+Bitter Milk	Honey	Chocolate Milk	0	39	0	304
+Crushed Ice	Milk	Cold Milk	0	39	0	305
+Egg	Spiced Milk	Eggnog	0	39	0	306
+Sweetened Hot Milk	Cocoa Powder	Hot Chocolate	0	39	0	307
+Crushed Ice	Mocha	Iced Mocha	0	39	0	308
+Mocha Base	Milk	Mocha	0	39	0	309
+Peppermint Stick	Hot Chocolate	Peppermint Hot Chocolate	0	0	0	310
+Crushed Ice	Rich Mocha	Rich Iced Mocha	0	39	0	311
+Cinnamon	Mocha	Rich Mocha	0	39	0	312
+Slice of Bread	Cheese	Cheese Sandwich	0	39	0	313
+Slice of Bread	Chicken	Chicken Sandwich	0	39	0	314
+Ravener Gut	Ground Meat	Drudge Gut Sausage	0	39	0	315
+Slice of Bread	Egg	Egg Sandwich	0	39	0	316
+Slice of Bread	Fish	Fish Sandwich	0	39	0	317
+Frying Pan	Cheese Sandwich	Grilled Cheese Sandwich	0	39	0	318
+Ground Meat	Bread	Holtburger	0	39	0	319
+Dough	Apple	Apple Pie	0	39	0	320
+Heavy Grinder	Apple	Applesauce	0	39	0	321
+Baking Pan	Cake Batter	Cake	0	39	0	322
+Monougat	Apple	Candied Apple	0	39	0	323
+Baking Pan	Carrot Cake Batter	Carrot Cake	0	39	0	324
+Baking Pan	Chocolate Cake Batter	Chocolate Cake	0	39	0	325
+Baking Pan	Chocolate Cookie Dough	Chocolate Cookie	0	39	0	326
+Chocolate Liquor	Ice Cream	Chocolate Ice Cream	0	39	0	327
+Baking Pan	Cookie Dough	Cookie	0	39	0	328
+Cocoa Mixture	Honey	Bar Dark Chocolate	0	39	0	329
+Monougat	Bar Dark Chocolate	Dark Chocolate Candy Bar	0	39	0	330
+Baking Pan	Fruitcake Batter	Fruitcake	0	39	0	331
+Baking Pan	Ginger Dough	Ginger Bread	0	39	0	332
+Frozen Green Tea	Honey	Green Tea Ice Cream	0	39	0	333
+Frozen Cream	Honey	Ice Cream	0	39	0	334
+Milky Cocoa Mixture	Honey	Bar Milk Chocolate	0	39	0	335
+Monougat	Bar Milk Chocolate	Milk Chocolate Candy Bar	0	39	0	336
+Baking Pan	Peppermint Chocolate Cookie Dough	Peppermint Chocolate Cookie	0	39	0	337
+Baking Pan	Peppermint Cookie Dough	Peppermint Cookie	0	39	0	338
+Peppermint Stick	Ice Cream	Peppermint Ice Cream	0	39	0	339
+Monougat	Peppermint Stick	Peppermint Monougat Chew	0	39	0	340
+Pumpkin Pie Filling	Dough	Pumpkin Pie	0	39	0	341
+Dough	Spiced Apple Filling	Spiced Apple Pie	0	39	0	342
+Cinnamon	Applesauce	Spiced Applesauce	0	39	0	343
+Raw Noodles	Cheese	Cragstone Farms Mac and Cheese	0	39	0	344
+Raw Egg Noodles	Ground Beef	Cragstonanoff	0	39	0	345
+Rice Dough	Chicken	Chicken Dumpling	0	39	0	346
+Rice Dough	Fish	Fish Dumpling	0	39	0	347
+Frying Pan	Chicken Piece	Fried Chicken	0	39	0	348
+Frying Pan	Egg	Fried Egg	0	39	0	349
+Frying Pan	Fish Filet	Fried Fish	0	39	0	350
+Frying Pan	Rabbit Piece	Fried Rabbit	0	39	0	351
+Frying Pan	Steak	Fried Steak	0	39	0	352
+Skewer	Steak	Beef Kebob	0	39	0	353
+Skewer	Chicken Piece	Chicken Kebob	0	39	0	354
+Skewer	Fish Filet	Fish Kebob	0	39	0	355
+Skewer	Brimstone-cap Mushroom	Mushroom Kebob	0	39	0	356
+Skewer	Rabbit Piece	Rabbit Kebob	0	39	0	357
+Brine	Cabbage	Kimchi	0	39	0	358
+Hot Sauce	Kimchi	Hot Kimchi	0	39	0	359
+Fire Oil	Hot Kimchi	Flaming Kimchi	0	39	0	360
+Raw Noodles	Steak	Beef Noodle	0	39	0	361
+Raw Noodles	Chicken Piece	Chicken Noodle	0	39	0	362
+Raw Noodles	Fish Filet	Fish Noodle	0	39	0	363
+Raw Noodles	Brimstone-cap Mushroom	Mushroom Noodle	0	39	0	364
+Raw Noodles	Rabbit Piece	Rabbit Noodle	0	39	0	365
+Dough	Chicken Piece	Chicken Pie	0	39	0	366
+Dough	Fish Filet	Fish Pie	0	39	0	367
+Dough	Steak	Meat Pie	0	39	0	368
+Dough	Brimstone-cap Mushroom	Mushroom Pie	0	39	0	369
+Dough	Rabbit Piece	Rabbit Pie	0	39	0	370
+Cooking Pot	Uncooked Rice	Bowl of Rice	0	39	0	371
+Uncooked Rice	Steak	Beef Rice	0	39	0	372
+Uncooked Rice	Chicken Piece	Chicken Rice	0	39	0	373
+Uncooked Rice	Brimstone-cap Mushroom	Mushroom Rice	0	39	0	374
+Uncooked Rice	Rabbit Piece	Rabbit Rice	0	39	0	375
+Cooking Pot	Steak	Beef Stew	0	39	0	376
+Cooking Pot	Chicken Piece	Chicken Stew	0	39	0	377
+Cooking Pot	Fish Filet	Fish Stew	0	39	0	378
+Cooking Pot	Brimstone-cap Mushroom	Mushroom Stew	0	39	0	379
+Cooking Pot	Rabbit Piece	Rabbit Stew	0	39	0	380
+Batter	Bread	Viamont Toast	0	39	0	381
+Oregano	Pizza	Famous Pizza	0	39	0	382
+Dough	Cheese	Pizza	0	39	0	383
+Health Oil	Cake	Healing Cake	0	39	0	384
+Health Oil	Carrot Cake	Healing Carrot Cake	0	39	0	385
+Health Oil	Pizza	Healing Pizza	0	39	0	386
+Health Oil	Famous Pizza	Healing Famous Pizza	0	39	0	387
+Health Oil	Applesauce	Healing Applesauce	0	39	0	388
+Health Oil	Spiced Applesauce	Healing Spiced Applesauce	0	39	0	389
+Health Oil	Meat Pie	Healing Meat Pie	0	39	0	390
+Health Oil	Fish Pie	Healing Fish Pie	0	39	0	391
+Health Oil	Chicken Pie	Healing Chicken Pie	0	39	0	392
+Health Oil	Rabbit Pie	Healing Rabbit Pie	0	39	0	393
+Health Oil	Mushroom Pie	Healing Mushroom Pie	0	39	0	394
+Health Oil	Apple Pie	Healing Apple Pie	0	39	0	395
+Health Oil	Spiced Apple Pie	Healing Spiced Apple Pie	0	39	0	396
+Health Oil	Beef Stew	Healing Beef Stew	0	39	0	397
+Health Oil	Fish Stew	Healing Fish Stew	0	39	0	398
+Health Oil	Chicken Stew	Healing Chicken Stew	0	39	0	399
+Health Oil	Rabbit Stew	Healing Rabbit Stew	0	39	0	400
+Health Oil	Mushroom Stew	Healing Mushroom Stew	0	39	0	401
+Health Oil	Carrot Soup	Healing Carrot Soup	0	39	0	402
+Health Oil	Beef Noodle	Healing Beef Noodle	0	39	0	403
+Health Oil	Fish Noodle	Healing Fish Noodle	0	39	0	404
+Health Oil	Chicken Noodle	Healing Chicken Noodle	0	39	0	405
+Health Oil	Rabbit Noodle	Healing Rabbit Noodle	0	39	0	406
+Health Oil	Mushroom Noodle	Healing Mushroom Noodle	0	39	0	407
+Health Oil	Ice Cream	Healing Icecream	0	39	0	408
+Health Oil	Green Tea Ice Cream	Healing Green Tea Ice Cream	0	39	0	409
+Health Oil	Holtburger	Healing Holtburger	0	39	0	410
+Health Oil	Hot Kimchi	Healing Hot Kimchi	0	39	0	411
+Victual Oil	Cake	Hearty Cake	0	39	0	412
+Victual Oil	Carrot Cake	Hearty Carrot Cake	0	39	0	413
+Victual Oil	Pizza	Hearty Pizza	0	39	0	414
+Victual Oil	Famous Pizza	Hearty Famous Pizza	0	39	0	415
+Victual Oil	Applesauce	Hearty Applesauce	0	39	0	416
+Victual Oil	Spiced Applesauce	Hearty Spiced Applesauce	0	39	0	417
+Victual Oil	Meat Pie	Hearty Meat Pie	0	39	0	418
+Victual Oil	Fish Pie	Hearty Fish Pie	0	39	0	419
+Victual Oil	Chicken Pie	Hearty Chicken Pie	0	39	0	420
+Victual Oil	Rabbit Pie	Hearty Rabbit Pie	0	39	0	421
+Victual Oil	Mushroom Pie	Hearty Mushroom Pie	0	39	0	422
+Victual Oil	Apple Pie	Hearty Apple Pie	0	39	0	423
+Victual Oil	Spiced Apple Pie	Hearty Spiced Apple Pie	0	39	0	424
+Victual Oil	Beef Stew	Hearty Beef Stew	0	39	0	425
+Victual Oil	Fish Stew	Hearty Fish Stew	0	39	0	426
+Victual Oil	Chicken Stew	Hearty Chicken Stew	0	39	0	427
+Victual Oil	Rabbit Stew	Hearty Rabbit Stew	0	39	0	428
+Victual Oil	Mushroom Stew	Hearty Mushroom Stew	0	39	0	429
+Victual Oil	Carrot Soup	Hearty Carrot Soup	0	39	0	430
+Victual Oil	Beef Noodle	Hearty Beef Noodle	0	39	0	431
+Victual Oil	Fish Noodle	Hearty Fish Noodle	0	39	0	432
+Victual Oil	Chicken Noodle	Hearty Chicken Noodle	0	39	0	433
+Victual Oil	Rabbit Noodle	Hearty Rabbit Noodle	0	39	0	434
+Victual Oil	Mushroom Noodle	Hearty Mushroom Noodle	0	39	0	435
+Victual Oil	Ice Cream	Hearty Icecream	0	39	0	436
+Victual Oil	Green Tea Ice Cream	Hearty Green Tea Ice Cream	0	39	0	437
+Victual Oil	Holtburger	Hearty Holtburger	0	39	0	438
+Victual Oil	Hot Kimchi	Hearty Hot Kimchi	0	39	0	439
+Mana Oil	Cake	Mana Cake	0	39	0	440
+Mana Oil	Carrot Cake	Mana Carrot Cake	0	39	0	441
+Mana Oil	Pizza	Mana Pizza	0	39	0	442
+Mana Oil	Famous Pizza	Mana Famous Pizza	0	39	0	443
+Mana Oil	Applesauce	Mana Applesauce	0	39	0	444
+Mana Oil	Spiced Applesauce	Mana Spiced Applesauce	0	39	0	445
+Mana Oil	Meat Pie	Mana Meat Pie	0	39	0	446
+Mana Oil	Fish Pie	Mana Fish Pie	0	39	0	447
+Mana Oil	Chicken Pie	Mana Chicken Pie	0	39	0	448
+Mana Oil	Rabbit Pie	Mana Rabbit Pie	0	39	0	449
+Mana Oil	Mushroom Pie	Mana Mushroom Pie	0	39	0	450
+Mana Oil	Apple Pie	Mana Apple Pie	0	39	0	451
+Mana Oil	Spiced Apple Pie	Mana Spiced Apple Pie	0	39	0	452
+Mana Oil	Beef Stew	Mana Beef Stew	0	39	0	453
+Mana Oil	Fish Stew	Mana Fish Stew	0	39	0	454
+Mana Oil	Chicken Stew	Mana Chicken Stew	0	39	0	455
+Mana Oil	Rabbit Stew	Mana Rabbit Stew	0	39	0	456
+Mana Oil	Mushroom Stew	Mana Mushroom Stew	0	39	0	457
+Mana Oil	Carrot Soup	Mana Carrot Soup	0	39	0	458
+Mana Oil	Beef Noodle	Mana Beef Noodle	0	39	0	459
+Mana Oil	Fish Noodle	Mana Fish Noodle	0	39	0	460
+Mana Oil	Chicken Noodle	Mana Chicken Noodle	0	39	0	461
+Mana Oil	Rabbit Noodle	Mana Rabbit Noodle	0	39	0	462
+Mana Oil	Mushroom Noodle	Mana Mushroom Noodle	0	39	0	463
+Mana Oil	Ice Cream	Mana Icecream	0	39	0	464
+Mana Oil	Green Tea Ice Cream	Mana Green Tea Ice Cream	0	39	0	465
+Mana Oil	Holtburger	Mana Holtburger	0	39	0	466
+Mana Oil	Hot Kimchi	Mana Hot Kimchi	0	39	0	467
+Bloodhunter Oil	Bundle of Greater Acid Arrowheads	Bundle of Deadly Acid Arrowheads	0	37	0	468
+Bloodhunter Oil	Bundle of Greater Arrowheads	Bundle of Deadly Arrowheads	0	37	0	469
+Bloodhunter Oil	Bundle of Greater Blunt Arrowheads	Bundle of Deadly Blunt Arrowheads	0	37	0	470
+Bloodhunter Oil	Bundle of Greater Frog Crotch Arrowheads	Bundle of Deadly Frog Crotch Arrowheads	0	37	0	471
+Concentrated Fire Oil	Wrapped Bundle of Arrowheads	Wrapped Bundle of Fire Arrowheads	0	37	0	472
+Concentrated Frost Oil	Wrapped Bundle of Arrowheads	Wrapped Bundle of Frost Arrowheads	0	37	0	473
+Concentrated Acid Oil	Wrapped Bundle of Arrowheads	Wrapped Bundle of Acid Arrowheads	0	37	0	474
+Concentrated Lightning Oil	Wrapped Bundle of Arrowheads	Wrapped Bundle of Lightning Arrowheads	0	37	0	475
+Lightning Oil	Bundle of Arrowheads	Bundle of Lightning Arrowheads	0	37	0	476
+Fire Oil	Bundle of Arrowheads	Bundle of Fire Arrowheads	0	37	0	477
+Frost Oil	Bundle of Arrowheads	Bundle of Frost Arrowheads	0	37	0	478
+Acid Oil	Bundle of Arrowheads	Bundle of Acid Arrowheads	0	37	0	479
+Bloodseeker Oil	Bundle of Blunt Arrowheads	Bundle of Greater Blunt Arrowheads	0	37	0	480
+Bloodseeker Oil	Bundle of Frog Crotch Arrowheads	Bundle of Greater Frog Crotch Arrowheads	0	37	0	481
+Bloodseeker Oil	Bundle of Arrowheads	Bundle of Greater Arrowheads	0	37	0	482
+Bloodseeker Oil	Bundle of Fire Arrowheads	Bundle of Greater Fire Arrowheads	0	37	0	483
+Bloodseeker Oil	Bundle of Acid Arrowheads	Bundle of Greater Acid Arrowheads	0	37	0	484
+Bloodseeker Oil	Bundle of Frost Arrowheads	Bundle of Greater Frost Arrowheads	0	37	0	485
+Bloodseeker Oil	Bundle of Lightning Arrowheads	Bundle of Greater Lightning Arrowheads	0	37	0	486
+Eye Dropper	Concentrated Health Infusion	Health Infusion	0	38	0	487
+Eye Dropper	Concentrated Mana Infusion	Mana Infusion	0	38	0	488
+Eye Dropper	Concentrated Victual Infusion	Victual Infusion	0	38	0	489
+Alembic	Quicksilver	Bloodseeker Infusion	0	38	0	490
+Alembic	Stibnite	Bloodhunter Infusion	0	38	0	491
+Alembic	Cobalt	Lightning Infusion	0	38	0	492
+Alembic	Turpeth	Fire Infusion	0	38	0	493
+Alembic	Colcothar	Frost Infusion	0	38	0	494
+Alembic	Brimstone	Acid Infusion	0	38	0	495
+Alembic	Vitriol Pea	Concentrated Health Infusion	0	38	0	496
+Alembic	Gypsum Pea	Concentrated Mana Infusion	0	38	0	497
+Alembic	Realgar Pea	Concentrated Victual Infusion	0	38	0	498
+Alembic	Quicksilver Pea	Concentrated Bloodseeker Infusion	0	38	0	499
+Alembic	Stibnite Pea	Concentrated Bloodhunter Infusion	0	38	0	500
+Alembic	Turpeth Pea	Concentrated Fire Infusion	0	38	0	501
+Alembic	Colcothar Pea	Concentrated Frost Infusion	0	38	0	502
+Alembic	Brimstone Pea	Concentrated Acid Infusion	0	38	0	503
+Alembic	Cobalt Pea	Concentrated Lightning Infusion	0	38	0	504
+Crucible	Stibnite	Crucible with Stibnite Potion	0	38	0	505
+Crucible with Stibnite Potion	Frankincense	Stibnite and Frankincense Crucible	0	38	0	506
+Aqua Vitae	Stibnite and Frankincense Crucible	Treated Stibnite and Frankincense Crucible	0	38	0	507
+Crucible	Quicksilver	Crucible with Quicksilver Potion	0	38	0	508
+Crucible with Quicksilver Potion	Frankincense	Quicksilver and Frankincense Crucible	0	38	0	509
+Aqua Vitae	Quicksilver and Frankincense Crucible	Treated Quicksilver and Frankincense Crucible	0	38	0	510
+Crucible	Verdigris	Crucible with Verdigris Potion	0	38	0	511
+Crucible with Verdigris Potion	Frankincense	Verdigris and Frankincense Crucible	0	38	0	512
+Aqua Vitae	Verdigris and Frankincense Crucible	Treated Verdigris and Frankincense Crucible	0	38	0	513
+Crucible	Cadmia	Crucible with Cadmia Potion	0	38	0	514
+Crucible with Cadmia Potion	Frankincense	Cadmia and Frankincense Crucible	0	38	0	515
+Aqua Vitae	Cadmia and Frankincense Crucible	Treated Cadmia and Frankincense Crucible	0	38	0	516
+Crucible	Brimstone	Crucible with Brimstone Potion	0	38	0	517
+Crucible with Brimstone Potion	Frankincense	Brimstone and Frankincense Crucible	0	38	0	518
+Aqua Vitae	Brimstone and Frankincense Crucible	Treated Brimstone and Frankincense Crucible	0	38	0	519
+Crucible	Colcothar	Crucible with Colcothar Potion	0	38	0	520
+Crucible with Colcothar Potion	Frankincense	Colcothar and Frankincense Crucible	0	38	0	521
+Aqua Vitae	Colcothar and Frankincense Crucible	Treated Colcothar and Frankincense Crucible	0	38	0	522
+Crucible	Turpeth	Crucible with Turpeth Potion	0	38	0	523
+Crucible with Turpeth Potion	Frankincense	Turpeth and Frankincense Crucible	0	38	0	524
+Aqua Vitae	Turpeth and Frankincense Crucible	Treated Turpeth and Frankincense Crucible	0	38	0	525
+Crucible	Cobalt	Crucible with Cobalt Potion	0	38	0	526
+Crucible with Cobalt Potion	Frankincense	Cobalt and Frankincense Crucible	0	38	0	527
+Aqua Vitae	Cobalt and Frankincense Crucible	Treated Cobalt and Frankincense Crucible	0	38	0	528
+Crucible	Vitriol	Crucible with Vitriol Potion	0	38	0	529
+Crucible with Vitriol Potion	Frankincense	Vitriol and Frankincense Crucible	0	38	0	530
+Aqua Vitae	Vitriol and Frankincense Crucible	Treated Vitriol and Frankincense Crucible	0	38	0	531
+Crucible	Cinnabar	Crucible with Cinnabar Potion	0	38	0	532
+Crucible with Cinnabar Potion	Frankincense	Cinnabar and Frankincense Crucible	0	38	0	533
+Aqua Vitae	Cinnabar and Frankincense Crucible	Treated Cinnabar and Frankincense Crucible	0	38	0	534
+Crucible	Gypsum	Crucible with Gypsum Potion	0	38	0	535
+Crucible with Gypsum Potion	Frankincense	Gypsum and Frankincense Crucible	0	38	0	536
+Aqua Vitae	Gypsum and Frankincense Crucible	Treated Gypsum and Frankincense Crucible	0	38	0	537
+Ground Chorizite	Vitriol	Chorizite	0	0	0	538
+Alembic	Chorizite	Chorizite Oil	0	0	0	539
+Chorizite Oil	Chorizite Oil	Strong Chorizite Oil	0	0	0	540
+Chorizite Oil	Strong Chorizite Oil	Concentrated Chorizite Oil	0	0	0	541
+Chorizite Oil	Concentrated Chorizite Oil	Condensed Chorizite Oil	0	0	0	542
+Cocoa Mixture	Milk	Milky Cocoa Mixture	0	39	0	543
+Mortar and Pestle	Cinnamon Bark	Cinnamon	0	0	0	544
+Heavy Grinder	Ginger	Ground Ginger	0	0	0	545
+Mortar and Pestle	Hot Pepper	Hot Sauce	0	0	0	546
+Heavy Grinder	Nutmeg	Ground Nutmeg	0	0	0	547
+Flour	Water	Dough	0	0	0	548
+Carving Knife	Fish	Fish Filet	0	39	0	549
+Carving Knife	Brimstone-cap Mushroom	Stemless Mushroom	0	39	0	550
+Rennet	Milk	Cheese	0	39	0	551
+Stemless Mushroom	Cheese	Cheese Filled Mushroom	0	39	0	552
+Dough	Egg	Batter	0	39	0	553
+Baking Pan	Brown Beans	Roasted Beans	0	39	0	554
+Heavy Grinder	Roasted Beans	Chocolate Liquor	0	39	0	555
+Metal Press	Chocolate Liquor	Cocoa Powder	0	39	0	556
+Cocoa Powder	Milk	Bitter Milk	0	39	0	557
+Heavy Grinder	Magic Iceball	Crushed Ice	0	39	0	558
+Ground Nutmeg	Milk	Spiced Milk	0	39	0	559
+Cooking Pot	Milk	Hot Milk	0	39	0	560
+Hot Milk	Honey	Sweetened Hot Milk	0	39	0	561
+Cocoa Powder	Coffee	Mocha Base	0	39	0	562
+Whittling Knife	Strange Stick	Cinnamon Bark	0	39	0	563
+Carving Knife	Bread	Slice of Bread	0	39	0	564
+Carving Knife	Side of Beef	Steak	0	39	0	565
+Heavy Grinder	Steak	Ground Meat	0	39	0	566
+Heavy Grinder	Rabbit Piece	Ground Rabbit	0	39	0	567
+Batter	Flour	Cake Batter	0	39	0	568
+Cake Batter	Carrot	Carrot Cake Batter	0	39	0	569
+Cake Batter	Cocoa Powder	Chocolate Cake Batter	0	39	0	570
+Dough	Honey	Cookie Dough	0	39	0	571
+Cocoa Powder	Cookie Dough	Chocolate Cookie Dough	0	39	0	572
+Chocolate Liquor	Cocoa Powder	Cocoa Mixture	0	39	0	573
+Cinnamon	Mocha	Rich Mocha	0	39	0	574
+Cinnamon	Brown Lump	Spiced Lump	0	39	0	575
+Flour	Spiced Lump	Spiced Lumpy Flour	0	39	0	576
+Spiced Lumpy Flour	Egg	Rich Lumpy Flour	0	39	0	577
+Rich Lumpy Flour	Red Wine	Fruitcake Batter	0	39	0	578
+Ground Ginger	Dough	Ginger Dough	0	39	0	579
+Frozen Cream	Green Tea	Frozen Green Tea	0	39	0	580
+Magic Iceball	Milk	Frozen Cream	0	39	0	581
+Peppermint Stick	Chocolate Cookie Dough	Peppermint Chocolate Cookie Dough	0	39	0	582
+Peppermint Stick	Cookie Dough	Peppermint Cookie Dough	0	39	0	583
+Baking Pan	Pumpkin	Cooked Pumpkin	0	39	0	584
+Cooked Pumpkin	Milk	Liquid Pumpkin	0	39	0	585
+Liquid Pumpkin	Honey	Sweetened Pumpkin	0	39	0	586
+Sweetened Pumpkin	Cinnamon	Spiced Pumpkin	0	39	0	587
+Spiced Pumpkin	Egg	Pumpkin Pie Filling	0	39	0	588
+Cinnamon	Apple	Spiced Apple Filling	0	39	0	589
+Carving Knife	Chicken	Chicken Pieces	0	39	0	590
+Carving Knife	Rabbit Carcass	Rabbit Pieces	0	39	0	591
+Noodle Cutter	Dough	Raw Noodles	0	39	0	592
+Dough	Olthoi Egg	Olthoi Batter	0	39	0	593
+Flour	Olthoi Batter	Olthoi Cake Batter	0	39	0	594
+Olthoi Cake Batter	Carrot	Olthoi Carrot Cake Batter	0	39	0	595
+Olthoi Cake Batter	Chocolate Powder	Olthoi Chocolate Cake Batter	0	39	0	596
+Spiced Pumpkin Filling	Olthoi Egg	Olthoi Pumpkin Pie Filling	0	39	0	597
+Cooking Pot	Carrot	Carrot Stock	0	39	0	598
+Carrot Stock	Milk	Rich Carrot Stock	0	39	0	599
+Mortar and Pestle	Uncooked Rice	Rice Flour	0	39	0	600
+Rice Flour	Water	Rice Dough	0	39	0	601
+Carving Knife	Carrot Cake	Cubed Carrot Cake	0	39	0	602
+Noodle Cutter	Batter	Raw Egg Noodles	0	39	0	603
+Baking Pan	Plain Barley	Roasted Barley	0	39	0	604
+Brew Kettle	Water	Full Brew Kettle	0	39	0	605
+Roasted Barley	Full Brew Kettle	Dark Wort	0	39	0	606
+Ultra Green Hops	Dark Wort	Aromatic Dark Wort	0	39	0	607
+Dried Yeast	Aromatic Dark Wort	Glorious Dark Brew	0	39	0	608
+Amber Barley	Full Brew Kettle	Amber Wort	0	39	0	609
+Ultra Green Hops	Amber Wort	Aromatic Amber Wort	0	39	0	610
+Dried Yeast	Aromatic Amber Wort	Glorious Amber Brew	0	39	0	611
+Plain Barley	Full Brew Kettle	Sweet Wort	0	39	0	612
+Ultra Green Hops	Sweet Wort	Aromatic Finished Wort	0	39	0	613
+Dried Yeast	Aromatic Finished Wort	Glorious Fermented Brew	0	39	0	614
+Moarsmuck	Glorious Dark Brew	Apothecary Zongo's Stout Brew	0	39	0	615
+Moarsmuck	Glorious Amber Brew	Hunter's Stock Amber Brew	0	39	0	616
+Moarsmuck	Glorious Fermented Brew	Duke Raoul's Distillation Brew	0	39	0	617
+Tusker Spit	Glorious Dark Brew	Bobo's Stout Brew	0	39	0	618
+Tusker Spit	Glorious Amber Brew	Amber Ape Brew	0	39	0	619
+Tusker Spit	Glorious Fermented Brew	Tusker Spit Brew	0	39	0	620
+Wrapped Bundle of Raider Lightning Arrowheads	Wrapped Bundle of Arrowshafts	Raider Lightning Arrow	250	37	0	621
+Wrapped Bundle of Raider Lightning Arrowheads	Wrapped Bundle of Quarrelshafts	Raider Lightning Bolt	250	37	0	622
+Wrapped Bundle of Raider Lightning Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Raider Lightning Atlatl Dart	250	37	0	623
+Wrapped Bundle of Arrowheads	Wrapped Bundle of Arrowshafts	Arrow	250	37	0	624
+Wrapped Bundle of Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Atlatl Dart	250	37	0	625
+Wrapped Bundle of Arrowheads	Wrapped Bundle of Quarrelshafts	Quarrel	250	37	0	626
+Carving Knife	Cured Mushroom Stalk	Tiriun Stalk Jerky	10	39	100	627
+Hot Sauce	Tiriun Mushroom Stalk	Cured Mushroom Stalk	1	39	100	628
+Cooking Pot	Tiriun Mushroom Spores	Roasted Tiriun Spores	1	39	100	629
+Mortar and Pestle	Roasted Tiriun Spores	Tiriun Spore Powder	10	39	100	630
+Skewer	Tiriun Mushroom Cap	Roasted Tiriun Cap	1	39	100	631
+Carving Knife	Roasted Tiriun Cap	Tiriun Cap Wafer	10	39	100	632
+Splitting Tool	Lead Pea	Lead Scarab	20	33	0	633
+Splitting Tool	Iron Pea	Iron Scarab	20	33	0	634
+Splitting Tool	Copper Pea	Copper Scarab	20	33	0	635
+Splitting Tool	Silver Pea	Silver Scarab	20	33	0	636
+Splitting Tool	Gold Pea	Gold Scarab	20	33	0	637
+Splitting Tool	Pyreal Pea	Pyreal Scarab	20	33	0	638
+Splitting Tool	Amaranth Pea	Amaranth	50	33	0	639
+Splitting Tool	Bistort Pea	Bistort	50	33	0	640
+Splitting Tool	Comfrey Pea	Comfrey	50	33	0	641
+Splitting Tool	Damiana Pea	Damiana	50	33	0	642
+Splitting Tool	Dragonsblood Pea	Dragonsblood	50	33	0	643
+Splitting Tool	Eyebright Pea	Eyebright	50	33	0	644
+Splitting Tool	Frankincense Pea	Frankincense	50	33	0	645
+Splitting Tool	Ginseng Pea	Ginseng	50	33	0	646
+Splitting Tool	Hawthorn Pea	Hawthorn	50	33	0	647
+Splitting Tool	Henbane Pea	Henbane	50	33	0	648
+Splitting Tool	Hyssop Pea	Hyssop	50	33	0	649
+Splitting Tool	Mandrake Pea	Mandrake	50	33	0	650
+Splitting Tool	Mugwort Pea	Mugwort	50	33	0	651
+Splitting Tool	Myrrh Pea	Myrrh	50	33	0	652
+Splitting Tool	Saffron Pea	Saffron	50	33	0	653
+Splitting Tool	Vervain Pea	Vervain	50	33	0	654
+Splitting Tool	Wormwood Pea	Wormwood	50	33	0	655
+Splitting Tool	Yarrow Pea	Yarrow	50	33	0	656
+Splitting Tool	Powdered Agate Pea	Powdered Agate	50	33	0	657
+Splitting Tool	Powdered Amber Pea	Powdered Amber	50	33	0	658
+Splitting Tool	Powdered Azurite Pea	Powdered Azurite	50	33	0	659
+Splitting Tool	Powdered Bloodstone Pea	Powdered Bloodstone	50	33	0	660
+Splitting Tool	Powdered Carnelian Pea	Powdered Carnelian	50	33	0	661
+Splitting Tool	Powdered Hematite Pea	Powdered Hematite	50	33	0	662
+Splitting Tool	Powdered Lapis Lazuli Pea	Powdered Lapis Lazuli	50	33	0	663
+Splitting Tool	Powdered Malachite Pea	Powdered Malachite	50	33	0	664
+Splitting Tool	Powdered Moonstone Pea	Powdered Moonstone	50	33	0	665
+Splitting Tool	Powdered Onyx Pea	Powdered Onyx	50	33	0	666
+Splitting Tool	Powdered Quartz Pea	Powdered Quartz	50	33	0	667
+Splitting Tool	Powdered Turquoise Pea	Powdered Turquoise	50	33	0	668
+Splitting Tool	Brimstone Pea	Brimstone	50	33	0	669
+Splitting Tool	Cadmia Pea	Cadmia	50	33	0	670
+Splitting Tool	Cinnabar Pea	Cinnabar	50	33	0	671
+Splitting Tool	Cobalt Pea	Cobalt	50	33	0	672
+Splitting Tool	Colcothar Pea	Colcothar	50	33	0	673
+Splitting Tool	Gypsum Pea	Gypsum	50	33	0	674
+Splitting Tool	Quicksilver Pea	Quicksilver	50	33	0	675
+Splitting Tool	Realgar Pea	Realgar	50	33	0	676
+Splitting Tool	Stibnite Pea	Stibnite	50	33	0	677
+Splitting Tool	Turpeth Pea	Turpeth	50	33	0	678
+Splitting Tool	Verdigris Pea	Verdigris	50	33	0	679
+Splitting Tool	Vitriol Pea	Vitriol	50	33	0	680
+Splitting Tool	Poplar Pea	Poplar Talisman	20	33	0	681
+Splitting Tool	Blackthorn Pea	Blackthorn Talisman	20	33	0	682
+Splitting Tool	Yew Pea	Yew Talisman	20	33	0	683
+Splitting Tool	Hemlock Pea	Hemlock Talisman	20	33	0	684
+Splitting Tool	Alder Pea	Alder Talisman	20	33	0	685
+Splitting Tool	Ebony Pea	Ebony Talisman	20	33	0	686
+Splitting Tool	Birch Pea	Birch Talisman	20	33	0	687
+Splitting Tool	Ashwood Pea	Ashwood Talisman	20	33	0	688
+Splitting Tool	Elder Pea	Elder Talisman	20	33	0	689
+Splitting Tool	Rowan Pea	Rowan Talisman	20	33	0	690
+Splitting Tool	Willow Pea	Willow Talisman	20	33	0	691
+Splitting Tool	Cedar Pea	Cedar Talisman	20	33	0	692
+Splitting Tool	Oak Pea	Oak Talisman	20	33	0	693
+Splitting Tool	Hazel Pea	Hazel Talisman	20	33	0	694
+Splitting Tool	Red Pea	Red Taper	50	33	0	695
+Splitting Tool	Pink Pea	Pink Taper	50	33	0	696
+Splitting Tool	Orange Pea	Orange Taper	50	33	0	697
+Splitting Tool	Yellow Pea	Yellow Taper	50	33	0	698
+Splitting Tool	Green Pea	Green Taper	50	33	0	699
+Splitting Tool	Turquoise Pea	Turquoise Taper	50	33	0	700
+Splitting Tool	Blue Pea	Blue Taper	50	33	0	701
+Splitting Tool	Indigo Pea	Indigo Taper	50	33	0	702
+Splitting Tool	Violet Pea	Violet Taper	50	33	0	703
+Splitting Tool	Brown Pea	Brown Taper	50	33	0	704
+Splitting Tool	White Pea	White Taper	50	33	0	705
+Splitting Tool	Grey Pea	Grey Taper	50	33	0	706
+Wrapped Bundle of Greater Deadly Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Greater Deadly Blunt Arrow	250	37	0	707
+Wrapped Bundle of Greater Deadly Blunt Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Deadly Blunt Quarrel	250	37	0	708
+Wrapped Bundle of Greater Deadly Blunt Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Deadly Blunt Atlatl Dart	250	37	0	709
+Wrapped Bundle of Olthoi Acid Arrowheads	Wrapped Bundle of Arrowshafts	Olthoi Acid Arrow	2500	37	0	710
+Wrapped Bundle of Olthoi Acid Arrowheads	Wrapped Bundle of Quarrelshafts	Olthoi Acid Bolt	2500	37	0	711
+Wrapped Bundle of Olthoi Acid Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Olthoi Acid Atlatl Dart	2500	37	0	712
+Wrapped Bundle of Gear Blade Slashing Arrowheads	Wrapped Bundle of Arrowshafts	Gear Blade Slashing Arrow	250	37	0	713
+Wrapped Bundle of Gear Blade Slashing Arrowheads	Wrapped Bundle of Quarrelshafts	Gear Blade Slashing Bolt	250	37	0	714
+Wrapped Bundle of Gear Blade Slashing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Gear Blade Slashing Atlatl Dart	250	37	0	715
+Wrapped Bundle of Greater Deadly Armor Piercing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Deadly Armor Piercing Atlatl Dart	500	37	0	716
+Wrapped Bundle of Greater Deadly Armor Piercing Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Deadly Armor Piercing Quarrel	500	37	0	717
+Wrapped Bundle of Greater Deadly Armor Piercing Arrowheads	Wrapped Bundle of Arrowshafts	Greater Deadly Armor Piercing Arrow	500	37	0	718
+Wrapped Bundle of Burning Sands Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Burning Sands Atlatl Dart	500	37	0	719
+Wrapped Bundle of Burning Sands Arrowheads	Wrapped Bundle of Quarrelshafts	Burning Sands Bolt	500	37	0	720
+Wrapped Bundle of Burning Sands Arrowheads	Wrapped Bundle of Arrowshafts	Burning Sands Arrow	500	37	0	721
+Wrapped Bundle of Greater Deadly Frog Crotch Arrowheads	Wrapped Bundle of Arrowshafts	Greater Deadly Frog Crotch Arrow	500	37	0	722
+Wrapped Bundle of Greater Deadly Frog Crotch Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Deadly Frog Crotch Quarrel	500	37	0	723
+Wrapped Bundle of Greater Deadly Frog Crotch Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Deadly Frog Crotch Atlatl Dart	500	37	0	724
+Wrapped Bundle of Deadly Prismatic Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Prismatic Atlatl Dart	500	37	0	725
+Wrapped Bundle of Deadly Prismatic Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Prismatic Quarrel	500	37	0	726
+Wrapped Bundle of Deadly Prismatic Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Prismatic Arrow	500	37	0	727
+Wrapped Bundle of Greater Prismatic Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Greater Prismatic Atlatl Dart	500	37	0	728
+Wrapped Bundle of Greater Prismatic Arrowheads	Wrapped Bundle of Quarrelshafts	Greater Prismatic Quarrel	500	37	0	729
+Wrapped Bundle of Greater Prismatic Arrowheads	Wrapped Bundle of Arrowshafts	Greater Prismatic Arrow	500	37	0	730
+Wrapped Bundle of Prismatic Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Prismatic Atlatl Dart	500	37	0	731
+Wrapped Bundle of Prismatic Arrowheads	Wrapped Bundle of Quarrelshafts	Prismatic Quarrel	500	37	0	732
+Wrapped Bundle of Prismatic Arrowheads	Wrapped Bundle of Arrowshafts	Prismatic Arrow	500	37	0	733
+Infinite Deadly Frog Crotch Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Frog Crotch Arrow	500	37	0	734
+Infinite Deadly Broad Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Broadhead Arrow	500	37	0	735
+Infinite Deadly Armor Piercing Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Armor Piercing Arrow	500	37	0	736
+Infinite Deadly Blunt Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Blunt Arrow	500	37	0	737
+Infinite Deadly Acid Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Acid Arrow	500	37	0	738
+Infinite Deadly Fire Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Fire Arrow	500	37	0	739
+Infinite Deadly Frost Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Frost Arrow	500	37	0	740
+Infinite Deadly Electric Arrowheads	Wrapped Bundle of Arrowshafts	Deadly Lightning Arrow	500	37	0	741
+Infinite Deadly Frog Crotch Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Frog Crotch Quarrel	500	37	0	742
+Infinite Deadly Frog Crotch Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Frog Crotch Atlatl Dart	500	37	0	743
+Infinite Deadly Broad Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Broadhead Quarrel	500	37	0	744
+Infinite Deadly Broad Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Broadhead Atlatl Dart	500	37	0	745
+Infinite Deadly Armor Piercing Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Armor Piercing Quarrel	500	37	0	746
+Infinite Deadly Armor Piercing Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Armor Piercing Atlatl Dart	500	37	0	747
+Infinite Deadly Blunt Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Blunt Quarrel	500	37	0	748
+Infinite Deadly Blunt Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Blunt Atlatl Dart	500	37	0	749
+Infinite Deadly Acid Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Acid Quarrel	500	37	0	750
+Infinite Deadly Acid Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Acid Atlatl Dart	500	37	0	751
+Infinite Deadly Fire Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Fire Quarrel	500	37	0	752
+Infinite Deadly Fire Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Fire Atlatl Dart	500	37	0	753
+Infinite Deadly Frost Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Frost Quarrel	500	37	0	754
+Infinite Deadly Frost Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Frost Atlatl Dart	500	37	0	755
+Infinite Deadly Electric Arrowheads	Wrapped Bundle of Quarrelshafts	Deadly Lightning Quarrel	500	37	0	756
+Infinite Deadly Electric Arrowheads	Wrapped Bundle of Atlatl Dartshafts	Deadly Lightning Atlatl Dart	500	37	0	757

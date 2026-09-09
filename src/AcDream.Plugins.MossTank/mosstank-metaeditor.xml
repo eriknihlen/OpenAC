@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel x="300" y="380" w="630" h="160" title="MossTank Meta Rule Editor"
+       visible="{MetaEditorVisible}" resize="none">
+  <field x="4" y="8" w="118" h="21" text="{MetaStateDraft}"
+         onchange="{SetMetaStateDraft}" onsubmit="{SetMetaStateDraft}"
+         maxlength="64" clearonsubmit="false" background="#E6000000"
+         color="#FFE8DEC3" tooltip="State in which this meta rule is evaluated." />
+  <menu x="128" y="8" w="244" h="21" items="{MetaConditionNames}"
+        selected="{SelectedMetaCondition}" onchange="{SelectMetaCondition}"
+        rows="12" openupward="false" tooltip="Choose the rule condition." />
+  <menu x="378" y="8" w="204" h="21" items="{MetaActionNames}"
+        selected="{SelectedMetaAction}" onchange="{SelectMetaAction}"
+        rows="10" openupward="false" tooltip="Choose the action performed when the condition matches." />
+
+  <field x="4" y="34" w="244" h="21" text="{MetaConditionTextDraft}"
+         onchange="{SetMetaConditionTextDraft}"
+         onsubmit="{SetMetaConditionTextDraft}" maxlength="256"
+         clearonsubmit="false" background="#E6000000" color="#FFE8DEC3"
+         tooltip="Condition text or UtilityBelt-compatible expression." />
+  <field x="254" y="34" w="244" h="21" text="{MetaActionTextDraft}"
+         onchange="{SetMetaActionTextDraft}"
+         onsubmit="{SetMetaActionTextDraft}" maxlength="256"
+         clearonsubmit="false" background="#E6000000" color="#FFE8DEC3"
+         tooltip="Primary action argument or expression." />
+  <field x="504" y="34" w="110" h="21" text="{MetaSecondaryTextDraft}"
+         onchange="{SetMetaSecondaryTextDraft}"
+         onsubmit="{SetMetaSecondaryTextDraft}" maxlength="128"
+         clearonsubmit="false" background="#E6000000" color="#FFE8DEC3"
+         tooltip="Secondary action argument." />
+
+  <label x="4" y="64" w="60" h="16" text="{MetaNumberLabel}" color="#FFC7B98F" />
+  <button x="70" y="59" w="28" h="21" text="-" onclick="{MetaNumberDown}"
+          tooltip="Decrease the primary numeric argument." />
+  <button x="104" y="59" w="28" h="21" text="+" onclick="{MetaNumberUp}"
+          tooltip="Increase the primary numeric argument." />
+  <label x="144" y="64" w="76" h="16" text="{MetaSecondaryNumberLabel}"
+         color="#FFC7B98F" />
+  <button x="224" y="59" w="28" h="21" text="-"
+          onclick="{MetaSecondaryNumberDown}" tooltip="Decrease the secondary numeric argument." />
+  <button x="258" y="59" w="28" h="21" text="+"
+          onclick="{MetaSecondaryNumberUp}" tooltip="Increase the secondary numeric argument." />
+  <label x="306" y="64" w="200" h="16" text="{MetaStatus}" color="#FFC7B98F" />
+
+  <button x="4" y="90" w="80" h="22" text="Apply" onclick="{ApplyMetaRule}" />
+  <button x="90" y="90" w="80" h="22" text="Remove" onclick="{RemoveMetaRule}" />
+  <button x="176" y="90" w="28" h="22" icon="0x060028FC" iconkind="did"
+          onclick="{MoveMetaRuleUp}" tooltip="Move the selected meta rule up." />
+  <button x="210" y="90" w="28" h="22" icon="0x060028FD" iconkind="did"
+          onclick="{MoveMetaRuleDown}" tooltip="Move the selected meta rule down." />
+  <button x="250" y="90" w="80" h="22" text="Cancel" onclick="{HideMetaEditor}" />
+
+  <label x="4" y="120" w="600" h="16" text="{MetaNotice}" color="#FF9B9072" />
+</panel>

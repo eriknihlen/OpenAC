@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel x="28" y="42" w="984" h="271" title="MossTank  v0.1.0"
+       visible="{WindowAvailable}" resizable="true" minw="856" minh="236">
+  <tab x="8"   y="22" w="58" h="18" text="Options"
+       selected="{OptionsSelected}" enabled="{OptionsTabEnabled}" onclick="{ShowOptions}" />
+  <tab x="66"  y="22" w="56" h="18" text="Profiles"
+       selected="{ProfilesSelected}" enabled="{ProfilesTabEnabled}" onclick="{ShowProfiles}" />
+  <tab x="122" y="22" w="42" h="18" text="Vitals"
+       selected="{VitalsSelected}" enabled="{VitalsTabEnabled}" onclick="{ShowVitals}" />
+  <tab x="164" y="22" w="62" h="18" text="Monsters"
+       selected="{MonstersSelected}" enabled="{MonstersTabEnabled}" onclick="{ShowMonsters}" />
+  <tab x="226" y="22" w="42" h="18" text="Items"
+       selected="{ItemsSelected}" enabled="{ItemsTabEnabled}" onclick="{ShowItems}" />
+  <tab x="268" y="22" w="86" h="18" text="Consumables"
+       selected="{ConsumablesSelected}" enabled="{ConsumablesTabEnabled}" onclick="{ShowConsumables}" />
+  <tab x="354" y="22" w="42" h="18" text="Buffs"
+       selected="{BuffsSelected}" enabled="{BuffsTabEnabled}" onclick="{ShowBuffs}" />
+  <tab x="396" y="22" w="44" h="18" text="Route"
+       selected="{RouteSelected}" enabled="{RouteTabEnabled}" onclick="{ShowRoute}" />
+  <tab x="440" y="22" w="38" h="18" text="Meta"
+       selected="{MetaSelected}" enabled="{MetaTabEnabled}" onclick="{ShowMeta}" />
+
+  <group x="8" y="42" w="976" h="229" visible="{OptionsVisible}" anchor="left top right bottom">
+    <label x="8" y="8" w="80" h="16" text="Monster Range:" color="#FFE8DEC3" />
+    <field x="8" y="24" w="40" h="16" text="{MonsterRangeValueText}"
+           onchange="{SetMonsterRangeText}" maxlength="6" background="#E6000000"
+           tooltip="Maximum monster acquisition range in meters." />
+    <label x="8" y="40" w="80" h="16" text="Ring Range:" color="#FFE8DEC3" />
+    <field x="8" y="56" w="40" h="16" text="{RingRangeValueText}"
+           onchange="{SetRingRangeText}" maxlength="6" background="#E6000000"
+           tooltip="Maximum range for ring-spell target density." />
+    <label x="8" y="72" w="80" h="16" text="Approach Range:" color="#FFE8DEC3" />
+    <field x="8" y="88" w="40" h="16" text="{ApproachRangeValueText}"
+           onchange="{SetApproachRangeText}" maxlength="6" background="#E6000000"
+           tooltip="Distance at which MossTank approaches its combat target." />
+    <label x="8" y="104" w="80" h="16" text="Follow/Nav Min Distance:" color="#FFE8DEC3" />
+    <field x="8" y="120" w="40" h="16" text="{FollowNavMinimumValueText}"
+           onchange="{SetFollowNavMinimumText}" maxlength="6" background="#E6000000"
+           tooltip="Minimum distance maintained while following or navigating." />
+
+    <button x="152" y="8" w="112" h="25" text="Force Buff" onclick="{ForceBuff}" />
+    <button x="152" y="38" w="112" h="25" text="Cancel Force Buff"
+            onclick="{CancelForceBuff}" />
+    <toggle x="152" y="68" w="120" h="20" text="Enable Buffing"
+            checked="{BuffingEnabled}" onclick="{ToggleBuffing}" />
+    <toggle x="152" y="88" w="120" h="20" text="Enable Combat"
+            checked="{CombatEnabled}" onclick="{ToggleCombatEnabled}" />
+    <toggle x="152" y="108" w="120" h="20" text="Enable Navigation"
+            checked="{NavigationEnabled}" onclick="{ToggleNavigation}" />
+    <toggle x="152" y="128" w="120" h="20" text="Enable Looting"
+            checked="{LootEnabled}" onclick="{ToggleLooting}" />
+    <toggle x="152" y="148" w="120" h="20" text="Enable Meta"
+            checked="{MetaEnabled}" onclick="{ToggleMeta}" />
+
+    <toggle x="282" y="8" w="160" h="20" text="Enable Autostack"
+            checked="{AutoStackEnabled}" onclick="{ToggleAutoStack}" />
+    <toggle x="282" y="28" w="160" h="20" text="Enable Autocram"
+            checked="{AutoCramEnabled}" onclick="{ToggleAutoCram}" />
+    <toggle x="282" y="48" w="120" h="20" text="Use Dispel Items"
+            checked="{UseDispelItemsEnabled}" onclick="{ToggleUseDispelItems}" />
+    <toggle x="282" y="68" w="120" h="20" text="Cast Dispel Self"
+            checked="{CastDispelSelfEnabled}" onclick="{ToggleCastDispelSelf}" />
+    <toggle x="282" y="128" w="120" h="20" text="Auto Fellow Mgmt."
+            checked="{AutoFellowManagementEnabled}" onclick="{ToggleAutoFellowManagement}" />
+    <toggle x="282" y="148" w="160" h="20" text="M. Charges When Off"
+            checked="{ManaChargesWhenOffEnabled}" onclick="{ToggleManaChargesWhenOff}" />
+
+    <toggle x="448" y="8" w="160" h="20" text="Boost Nav. Priority"
+            checked="{NavigationPriorityEnabled}" onclick="{ToggleNavigationPriority}" />
+    <toggle x="448" y="28" w="160" h="20" text="Boost Loot Priority"
+            checked="{LootPriorityBoostEnabled}" onclick="{ToggleLootPriorityBoost}" />
+    <toggle x="448" y="48" w="160" h="20" text="Loot Only Rare Corpses"
+            checked="{LootOnlyRareCorpsesEnabled}" onclick="{ToggleLootOnlyRareCorpses}" />
+    <toggle x="448" y="68" w="160" h="20" text="Peace Mode When Idle"
+            checked="{IdlePeaceModeEnabled}" onclick="{ToggleIdlePeaceMode}" />
+    <toggle x="448" y="88" w="160" h="20" text="Rebuff When Idle"
+            checked="{IdleBuffTopoffEnabled}" onclick="{ToggleIdleBuffTopoff}" />
+    <toggle x="448" y="108" w="160" h="20" text="Fastcast Buffs"
+            checked="{FastCastBuffsEnabled}" onclick="{ToggleFastCastBuffs}" />
+    <toggle x="448" y="128" w="160" h="20" text="Don't Shoot at Walls"
+            checked="{DontShootAtWallsEnabled}" onclick="{ToggleDontShootAtWalls}" />
+    <toggle x="448" y="148" w="160" h="20" text="Fallback Debuffs if Blocked"
+            checked="{DebuffFallbackEnabled}" onclick="{ToggleDebuffFallback}" />
+
+    <toggle x="614" y="8" w="160" h="20" text="Summon Pets"
+            checked="{SummonPetsEnabled}" onclick="{ToggleSummonPets}" />
+    <toggle x="614" y="28" w="120" h="20" text="Custom Pet Range:"
+            checked="{CustomPetRangeEnabled}" onclick="{TogglePetRangeMode}" />
+    <field x="734" y="28" w="40" h="16" text="{PetCustomRangeValueText}"
+           onchange="{SetPetCustomRangeText}" maxlength="6" background="#E6000000"
+           tooltip="Custom pet summon range in meters." />
+    <label x="614" y="48" w="120" h="16" text="Pet Min. Monsters:" color="#FFE8DEC3" />
+    <field x="734" y="48" w="40" h="16" text="{PetDensityValueText}"
+           onchange="{SetPetDensityText}" maxlength="3" background="#E6000000"
+           tooltip="Minimum nearby monsters required before summoning a pet." />
+    <toggle x="673" y="128" w="175" h="20" text="Advanced Options"
+            checked="{AdvancedOptionsVisible}" onclick="{ToggleAdvancedOptionsVisible}" />
+    <toggle x="673" y="148" w="175" h="20" text="Run Macro"
+            checked="{CombatMacroRunning}" onclick="{ToggleCombat}" />
+    <label x="673" y="170" w="175" h="16" text="{CombatStatus}" color="#FFC7B98F" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{ProfilesVisible}" anchor="left top right bottom">
+    <label x="8" y="8" w="142" h="16" text="Macro Settings" color="#FFE8DEC3" />
+    <menu x="156" y="8" w="140" h="20" items="{MacroProfileNames}"
+          selected="{SelectedMacroProfile}" onchange="{SelectMacroProfile}"
+          rows="7" scroll="true" tooltip="Select the active macro profile." />
+    <button x="306" y="8" w="50" h="20" text="CopyTo" onclick="{CopyProfile}" />
+    <button x="366" y="8" w="100" h="20" text="Clear profile!"
+            onclick="{ClearProfile}" />
+    <toggle x="476" y="8" w="80" h="20" text="Mine only"
+            checked="{MineOnlyEnabled}" onclick="{ToggleMineOnly}" />
+    <button x="566" y="8" w="76" h="20" text="Delete"
+            onclick="{DeleteProfile}"
+            tooltip="Delete the selected named profile's real .usd file. Not available for By char." />
+
+    <toggle x="8" y="32" w="142" h="20" text="Enable Auto-Navigation"
+            checked="{NavigationEnabled}" onclick="{ToggleNavigation}" />
+    <menu x="156" y="32" w="140" h="20" items="{RouteProfileNames}"
+          selected="{SelectedRouteProfile}" onchange="{SelectRouteProfile}"
+          rows="7" scroll="true" tooltip="Select the active navigation profile." />
+    <button x="306" y="32" w="50" h="20" text="CopyTo" onclick="{CopyRouteProfile}" />
+    <button x="366" y="32" w="100" h="20" text="Clear nav profile!"
+            onclick="{ClearRouteProfile}" />
+    <button x="566" y="32" w="76" h="20" text="Delete"
+            onclick="{DeleteRouteProfile}"
+            tooltip="Delete the selected named route's real .af file. Not available for By char." />
+
+    <toggle x="8" y="56" w="142" h="20" text="Enable Looting"
+            checked="{LootEnabled}" onclick="{ToggleLooting}" />
+    <menu x="156" y="56" w="140" h="20" items="{LootProfileNames}"
+          selected="{LootProfileName}" onchange="{SelectLootProfile}"
+          rows="7" scroll="true" tooltip="Select the active loot profile." />
+    <button x="306" y="56" w="50" h="20" text="New" onclick="{CreateLootProfile}" />
+    <button x="566" y="56" w="76" h="20" text="Delete"
+            onclick="{DeleteLootProfile}"
+            tooltip="Delete the selected named loot profile's real .utl file. Not available for By char." />
+    <toggle x="652" y="56" w="80" h="20" text="Show Editor"
+            checked="{LootEditorVisible}" onclick="{ToggleLootEditorVisible}" />
+
+    <toggle x="8" y="80" w="142" h="20" text="Enable Meta Actions"
+            checked="{MetaEnabled}" onclick="{ToggleMeta}" />
+    <menu x="156" y="80" w="140" h="20" items="{MetaProfileNames}"
+          selected="{SelectedMetaProfile}" onchange="{SelectMetaProfile}"
+          rows="7" scroll="true" tooltip="Select the active meta profile." />
+    <button x="306" y="80" w="50" h="20" text="CopyTo" onclick="{CopyMetaProfile}" />
+    <button x="566" y="80" w="76" h="20" text="Delete"
+            onclick="{DeleteMetaProfile}"
+            tooltip="Delete the selected named Meta profile's real .af file. Not available for By char." />
+
+    <label x="8" y="108" w="400" h="16" text="{LootStatus}" color="#FF9B9072" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{VitalsVisible}" anchor="left top right bottom">
+    <label x="8" y="0" w="80" h="16" text="Heal at:" color="#FFE8DEC3" />
+    <slider x="100" y="0" w="144" h="16" min="0" max="100"
+            value="{NormalHealthPercent}" onchange="{SetNormalHealthPercent}"
+            tooltip="Combat health recharge threshold." />
+    <label x="252" y="0" w="80" h="16" text="{NormalHealthText}" color="#FFC7B98F" />
+    <label x="8" y="16" w="80" h="16" text="Restam at:" color="#FFE8DEC3" />
+    <slider x="100" y="16" w="144" h="16" min="0" max="100"
+            value="{NormalStaminaPercent}" onchange="{SetNormalStaminaPercent}"
+            tooltip="Combat stamina recharge threshold." />
+    <label x="252" y="16" w="80" h="16" text="{NormalStaminaText}" color="#FFC7B98F" />
+    <label x="8" y="32" w="80" h="16" text="Get Mana at:" color="#FFE8DEC3" />
+    <slider x="100" y="32" w="144" h="16" min="0" max="100"
+            value="{NormalManaPercent}" onchange="{SetNormalManaPercent}"
+            tooltip="Combat mana recharge threshold." />
+    <label x="252" y="32" w="80" h="16" text="{NormalManaText}" color="#FFC7B98F" />
+
+    <label x="8" y="56" w="80" h="16" text="Top-off HP:" color="#FFE8DEC3" />
+    <slider x="100" y="56" w="144" h="16" min="0" max="100"
+            value="{NoTargetHealthPercent}" onchange="{SetNoTargetHealthPercent}"
+            tooltip="Idle health top-off threshold." />
+    <label x="252" y="56" w="80" h="16" text="{NoTargetHealthText}" color="#FFC7B98F" />
+    <label x="8" y="72" w="80" h="16" text="Top-off Stam:" color="#FFE8DEC3" />
+    <slider x="100" y="72" w="144" h="16" min="0" max="100"
+            value="{NoTargetStaminaPercent}" onchange="{SetNoTargetStaminaPercent}"
+            tooltip="Idle stamina top-off threshold." />
+    <label x="252" y="72" w="80" h="16" text="{NoTargetStaminaText}" color="#FFC7B98F" />
+    <label x="8" y="88" w="80" h="16" text="Top-off Mana:" color="#FFE8DEC3" />
+    <slider x="100" y="88" w="144" h="16" min="0" max="100"
+            value="{NoTargetManaPercent}" onchange="{SetNoTargetManaPercent}"
+            tooltip="Idle mana top-off threshold." />
+    <label x="252" y="88" w="80" h="16" text="{NoTargetManaText}" color="#FFC7B98F" />
+
+    <label x="8" y="112" w="80" h="16" text="Heal others at:" color="#FFE8DEC3" />
+    <slider x="100" y="112" w="144" h="16" min="0" max="100"
+            value="{HelperHealthPercent}" onchange="{SetHelperHealthPercent}"
+            tooltip="Fellowship healing threshold." />
+    <label x="252" y="112" w="80" h="16" text="{HelperHealthText}" color="#FFC7B98F" />
+    <label x="8" y="128" w="80" h="16" text="Restam others at:" color="#FFE8DEC3" />
+    <slider x="100" y="128" w="144" h="16" min="0" max="100"
+            value="{HelperStaminaPercent}" onchange="{SetHelperStaminaPercent}"
+            tooltip="Fellowship stamina-restoration threshold." />
+    <label x="252" y="128" w="80" h="16" text="{HelperStaminaText}" color="#FFC7B98F" />
+    <label x="8" y="144" w="80" h="16" text="Infuse others at:" color="#FFE8DEC3" />
+    <slider x="100" y="144" w="144" h="16" min="0" max="100"
+            value="{HelperManaPercent}" onchange="{SetHelperManaPercent}"
+            tooltip="Fellowship mana-infusion threshold." />
+    <label x="252" y="144" w="80" h="16" text="{HelperManaText}" color="#FFC7B98F" />
+
+    <toggle x="360" y="4" w="190" h="20" text="Enable vital recharge"
+            checked="{VitalUpkeepEnabled}" onclick="{ToggleVitalUpkeep}" />
+    <toggle x="360" y="28" w="190" h="20" text="Help fellows"
+            checked="{HelpOthersEnabled}" onclick="{ToggleHelpOthers}" />
+    <label x="360" y="60" w="290" h="16" text="{VitalStatus}" color="#FFC7B98F" />
+    <label x="360" y="88" w="290" h="16" text="{Vitals}" color="#FFE8DEC3" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{MonstersVisible}" anchor="left top right bottom">
+    <label x="0"   y="0" w="20" text="F"  color="#FFE8DEC3" tooltip="Fester" />
+    <label x="20"  y="0" w="20" text="B"  color="#FFE8DEC3" tooltip="Broadside of a Barn" />
+    <label x="40"  y="0" w="20" text="G"  color="#FFE8DEC3" tooltip="Gravity Well" />
+    <label x="60"  y="0" w="20" text="I"  color="#FFE8DEC3" tooltip="Imperil" />
+    <label x="80"  y="0" w="20" text="Y"  color="#FFE8DEC3" tooltip="Yield" />
+    <label x="100" y="0" w="20" text="V"  color="#FFE8DEC3" tooltip="Vuln (Element)" />
+    <label x="120" y="0" w="20" text="A"  color="#FFE8DEC3" tooltip="Attack" />
+    <label x="140" y="0" w="20" text="R"  color="#FFE8DEC3" tooltip="Ring Spell" />
+    <label x="160" y="0" w="20" text="S"  color="#FFE8DEC3" tooltip="Streak" />
+    <label x="181" y="0" w="19" text="WC" color="#FFE8DEC3" tooltip="Weakening Curse" />
+    <label x="203" y="0" w="14" text="FC" color="#FFE8DEC3" tooltip="Festering Curse" />
+    <label x="223" y="0" w="14" text="Cp" color="#FFE8DEC3" tooltip="Corruption" />
+    <label x="242" y="0" w="17" text="DC" color="#FFE8DEC3" tooltip="Destructive Curse" />
+    <label x="264" y="0" w="13" text="Cs" color="#FFE8DEC3" tooltip="Corrosion" />
+    <label x="280" y="0" w="127" text="Name" color="#FFE8DEC3" />
+    <label x="407" y="0" w="27" text="P" color="#FFE8DEC3" tooltip="Priority" />
+    <label x="434" y="0" w="63" text="Dmg type" color="#FFE8DEC3" />
+    <label x="497" y="0" w="63" text="Ex. Vuln" color="#FFE8DEC3" />
+    <label x="560" y="0" w="87" text="Weapon" color="#FFE8DEC3" />
+    <label x="647" y="0" w="87" text="Offhand" color="#FFE8DEC3" />
+    <label x="734" y="0" w="63" text="PetDmg" color="#FFE8DEC3" />
+
+    <list x="0" y="16" w="976" h="151" anchor="left right top bottom"
+          selected="{SelectedMonsterListRow}" onchange="{SelectMonsterListRow}"
+          tooltip="Click a check to toggle it, a name to delete the rule, or another cell to cycle its value.">
+      <column type="check" width="20" values="{MonsterFesterColumn}" onchange="{ToggleMonsterFesterAt}" />
+      <column type="check" width="20" values="{MonsterBroadsideColumn}" onchange="{ToggleMonsterBroadsideAt}" />
+      <column type="check" width="20" values="{MonsterGravityWellColumn}" onchange="{ToggleMonsterGravityWellAt}" />
+      <column type="check" width="20" values="{MonsterImperilColumn}" onchange="{ToggleMonsterImperilAt}" />
+      <column type="check" width="20" values="{MonsterYieldColumn}" onchange="{ToggleMonsterYieldAt}" />
+      <column type="check" width="20" values="{MonsterVulnerabilityColumn}" onchange="{ToggleMonsterVulnerabilityAt}" />
+      <column type="check" width="20" values="{MonsterAttackColumn}" onchange="{ToggleMonsterAttackAt}" />
+      <column type="check" width="20" values="{MonsterRingColumn}" onchange="{ToggleMonsterRingAt}" />
+      <column type="check" width="20" values="{MonsterStreakColumn}" onchange="{ToggleMonsterStreakAt}" />
+      <column type="check" width="20" values="{MonsterWeakeningColumn}" onchange="{ToggleMonsterWeakeningAt}" />
+      <column type="check" width="20" values="{MonsterFesteringColumn}" onchange="{ToggleMonsterFesteringAt}" />
+      <column type="check" width="20" values="{MonsterCorruptionColumn}" onchange="{ToggleMonsterCorruptionAt}" />
+      <column type="check" width="20" values="{MonsterDestructiveColumn}" onchange="{ToggleMonsterDestructiveAt}" />
+      <column type="check" width="20" values="{MonsterCorrosionColumn}" onchange="{ToggleMonsterCorrosionAt}" />
+      <column type="text" width="127" items="{MonsterNameColumn}" onclick="{DeleteMonsterRuleAt}" />
+      <column type="text" width="27" items="{MonsterPriorityColumn}" onclick="{CycleMonsterPriorityAt}" />
+      <column type="text" width="63" items="{MonsterDamageColumn}" onclick="{CycleMonsterDamageAt}" />
+      <column type="text" width="63" items="{MonsterExtraVulnColumn}" onclick="{CycleMonsterExtraVulnerabilityAt}" />
+      <column type="text" width="87" items="{MonsterWeaponColumn}" onclick="{CycleMonsterWeaponAt}" />
+      <column type="text" width="87" items="{MonsterOffhandColumn}" onclick="{CycleMonsterOffhandAt}" />
+      <column type="text" width="63" items="{MonsterPetDamageColumn}" onclick="{CycleMonsterPetDamageAt}" />
+      <column type="icon" width="23" iconkind="did" values="{MonsterMoveUpIcons}" onclick="{MoveMonsterRuleUpAt}" />
+      <column type="icon" width="23" iconkind="did" values="{MonsterMoveDownIcons}" onclick="{MoveMonsterRuleDownAt}" />
+      <column type="text" width="*" items="{MonsterFillerColumn}" onclick="{MonsterFillerClick}" />
+    </list>
+
+    <field x="8" y="171" w="388" h="16" text="{MonsterExpressionDraft}"
+           onchange="{SetMonsterExpressionDraft}" maxlength="256"
+           background="#E6000000" color="#FFE8DEC3" anchor="bottom"
+           tooltip="Monster name or expression to match." />
+    <button x="404" y="171" w="50" h="16" text="Add" onclick="{AddMonsterRule}"
+            anchor="bottom"
+            tooltip="Add a new monster rule using the name/expression above." />
+    <button x="462" y="171" w="50" h="16" text="Add Sel" onclick="{AddSelectedMonster}"
+            anchor="bottom"
+            tooltip="Add the monster currently selected in the world." />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{ItemsVisible}" anchor="left top right bottom">
+    <label x="4" y="8" w="327" text="Weapons / Wands / Shields / Pets" color="#FFE8DEC3" />
+    <label x="331" y="8" w="103" text="Hands" color="#FFE8DEC3" />
+    <list x="4" y="28" w="430" h="147" rowheight="18" anchor="left top bottom"
+          selected="{SelectedItemRowIndex}" onchange="{SelectItemRow}"
+          tooltip="Click a name to remove it, or Hands to cycle 1-Handed/2-Handed.">
+      <column type="text" width="327" items="{ItemNameColumn}" onclick="{DeleteItemRowAt}" />
+      <column type="text" width="103" items="{ItemHandsColumn}" onclick="{CycleItemHandsAt}" />
+    </list>
+    <button x="4" y="189" w="126" h="25" text="Add" onclick="{AddSelectedItem}" anchor="bottom" />
+    <button x="138" y="189" w="138" h="25" text="Add (no buffs)"
+            onclick="{AddSelectedItemNoBuffs}" anchor="bottom" />
+    <button x="284" y="189" w="126" h="25" text="Remove"
+            onclick="{RemoveSelectedItem}" anchor="bottom" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{ConsumablesVisible}" anchor="left top right bottom">
+    <label x="4" y="8"
+           text="Gems / Food / Kits / Potions / Charges / Grenades / Lockpicks"
+           color="#FFE8DEC3" />
+    <label x="566" y="8" text="Excluded Scarab Types:" color="#FFE8DEC3" anchor="right" />
+    <list x="4" y="28" w="414" h="147" rowheight="18" anchor="left top bottom"
+          items="{ConsumableRows}" selected="{SelectedConsumableRowIndex}"
+          onchange="{SelectConsumableRow}" tooltip="Click a row to remove it." />
+    <list x="566" y="28" w="406" h="147" rowheight="18" anchor="right top bottom"
+          selected="{SelectedExcludedComponentIndex}" onchange="{SelectExcludedComponentRow}"
+          tooltip="Click a row to remove it from the blacklist.">
+      <column type="icon" width="23" iconkind="did" values="{ExcludedComponentIcons}"
+              onclick="{DeleteExcludedComponentAt}" />
+      <column type="text" width="*" items="{ExcludedComponentRows}"
+              onclick="{DeleteExcludedComponentAt}" />
+    </list>
+    <button x="4" y="189" w="176" h="25" text="Add"
+            onclick="{AddSelectedConsumable}" anchor="bottom" />
+    <button x="188" y="189" w="110" h="25" text="Add All Peas"
+            onclick="{AddAllPeas}" anchor="bottom" />
+    <button x="306" y="189" w="104" h="25" text="Remove"
+            onclick="{RemoveSelectedConsumable}" anchor="bottom" />
+    <button x="566" y="189" w="176" h="24" text="Add Selected"
+            onclick="{AddSelectedComponent}" anchor="right bottom" />
+    <label x="566" y="213" w="176" h="16" text="{ProfileNotice}" color="#FF9B9072" anchor="right bottom" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{BuffsVisible}" anchor="left top right bottom">
+    <label x="4" y="0" w="320" h="16" text="Extra Buff Spells" color="#FFE8DEC3"
+           tooltip="Named spell exemplars — stored and shown here, not yet used when choosing what to cast (#491)." />
+    <list x="4" y="18" w="320" h="151" rowheight="17" anchor="left top bottom"
+          items="{ExtraBuffRows}" selected="{SelectedExtraBuffIndex}"
+          onchange="{DeleteExtraBuffAt}" tooltip="Click a row to remove it." />
+    <button x="4" y="173" w="120" h="18" text="Add..." onclick="{ShowExtraBuffPicker}" anchor="bottom" />
+
+    <label x="652" y="0" w="320" h="16" text="Blacklisted Buff Families" color="#FFE8DEC3"
+           anchor="right"
+           tooltip="Named buff families — stored and shown here, not yet used when choosing what to cast (#491)." />
+    <list x="652" y="18" w="320" h="151" rowheight="17" anchor="right top bottom"
+          items="{BlacklistedBuffFamilyRows}" selected="{SelectedBlacklistedBuffIndex}"
+          onchange="{DeleteBlacklistedBuffFamilyAt}" tooltip="Click a row to remove it." />
+    <button x="652" y="173" w="120" h="18" text="Add..." onclick="{ShowBlacklistedBuffPicker}" anchor="right bottom" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{RouteVisible}" anchor="left top right bottom">
+    <label x="4" y="0" w="370" h="16" text="Navigation Waypoints" color="#FFE8DEC3" />
+    <list x="4" y="16" w="370" h="151" rowheight="17" anchor="left top bottom"
+          selected="{SelectedRouteWaypointIndex}" onchange="{SelectRouteWaypoint}"
+          tooltip="Click a waypoint to remove it.">
+      <column type="text" width="324" items="{RouteWaypointTextColumn}" onclick="{DeleteRouteWaypointAt}" />
+      <column type="text" width="30" items="{RouteWaypointCountColumn}" onclick="{DeleteRouteWaypointAt}" />
+      <column type="text" width="*" items="{RouteWaypointFillerColumn}" onclick="{RouteWaypointFillerClick}" />
+    </list>
+
+    <menu x="4" y="171" w="80" h="16" items="{RouteModeNames}" anchor="bottom"
+          selected="{SelectedRouteMode}" onchange="{SelectRouteMode}"
+          rows="4" openupward="true" tooltip="Choose Circular, Linear, Follow, or Once route behavior." />
+    <menu x="90" y="171" w="120" h="16" items="{RouteInsertModeNames}" anchor="bottom"
+          selected="{SelectedRouteInsertMode}" onchange="{SelectRouteInsertMode}"
+          rows="3" openupward="true" tooltip="Where Add buttons insert the new waypoint." />
+    <button x="214" y="171" w="16" h="16" icon="0x060028FD" iconkind="did" anchor="bottom"
+            onclick="{MoveRouteWaypointDown}" tooltip="Advance the current point." />
+    <button x="230" y="171" w="16" h="16" icon="0x060028FC" iconkind="did" anchor="bottom"
+            onclick="{MoveRouteWaypointUp}" tooltip="Regress the current point." />
+    <button x="246" y="171" w="16" h="16" icon="0x060011F7" iconkind="did" anchor="bottom"
+            onclick="{SelectNearestRouteWaypoint}" tooltip="Select the nearest waypoint." />
+
+    <button x="380" y="16" w="88" h="16" text="Add" onclick="{AddRoutePoint}" />
+    <button x="474" y="16" w="88" h="16" text="Open Vendor" onclick="{AddRouteOpenVendor}" />
+    <button x="380" y="38" w="88" h="16" text="Add Portal/NPC" onclick="{AddRoutePortal}" />
+    <button x="474" y="38" w="88" h="16" text="Add NPC Talk" onclick="{AddRouteUseSelected}" />
+    <button x="380" y="60" w="88" h="16" text="Add Recall" onclick="{AddRouteRecall}" />
+    <menu x="474" y="60" w="120" h="16" items="{RouteRecallNames}"
+          selected="{SelectedRouteRecall}" onchange="{SelectRouteRecall}"
+          rows="7" openupward="false"
+          tooltip="Choose the recall type added by Add Recall." />
+    <button x="380" y="82" w="88" h="16" text="Add Pause" onclick="{AddRoutePause}" />
+    <field x="474" y="82" w="68" h="16" text="{RoutePauseSecondsFieldText}"
+           onchange="{SetRoutePauseSecondsText}" onsubmit="{SetRoutePauseSecondsText}"
+           maxlength="4" clearonsubmit="false" background="#E6000000"
+           color="#FFE8DEC3" tooltip="Pause duration in seconds, added by Add Pause." />
+    <label x="547" y="82" w="50" h="16" text="seconds" color="#FFE8DEC3" />
+    <button x="380" y="104" w="88" h="16" text="Add Chat" onclick="{AddRouteChat}" />
+    <field x="474" y="104" w="120" h="16" text="{RouteChatDraft}"
+           onchange="{SetRouteChatDraft}" onsubmit="{SetRouteChatDraft}"
+           maxlength="128" clearonsubmit="false" background="#E6000000"
+           color="#FFE8DEC3" tooltip="Chat command added by Add Chat." />
+
+    <label x="4" y="195" w="300" h="16" text="{NavigationStatus}" color="#FF9B9072" anchor="bottom" />
+    <label x="310" y="195" w="300" h="16" text="{RouteNotice}" color="#FF9B9072" anchor="bottom" />
+  </group>
+
+  <group x="8" y="42" w="976" h="229" visible="{MetaVisible}" anchor="left top right bottom">
+    <list x="4" y="16" w="968" h="151" rowheight="17" anchor="left right top bottom"
+          selected="{SelectedMetaRuleIndex}" onchange="{SelectMetaRule}"
+          tooltip="Click State/Condition/Action to edit; delete/move-up/move-down cells act immediately.">
+      <column type="text" width="23" items="{MetaDeleteColumn}" onclick="{DeleteMetaRuleAt}" />
+      <column type="icon" width="23" iconkind="did" values="{MetaMoveUpIcons}" onclick="{MoveMetaRuleUpAt}" />
+      <column type="icon" width="23" iconkind="did" values="{MetaMoveDownIcons}" onclick="{MoveMetaRuleDownAt}" />
+      <column type="text" width="157" items="{MetaStateColumn}" onclick="{SelectMetaRule}" />
+      <column type="text" width="*" items="{MetaConditionColumn}" onclick="{SelectMetaRule}" />
+      <column type="text" width="*" items="{MetaActionColumn}" onclick="{SelectMetaRule}" />
+    </list>
+
+    <label x="4" y="171" w="136" h="16" text="Current State:" color="#FFE8DEC3" anchor="bottom" />
+    <menu x="140" y="171" w="120" h="16" items="{MetaCurrentStateNames}" anchor="bottom"
+          selected="{SelectedMetaCurrentState}" onchange="{SetMetaCurrentState}"
+          rows="8" openupward="true"
+          tooltip="Force the live Meta engine into a state directly." />
+    <button x="462" y="171" w="50" h="16" text="Create" onclick="{CreateMetaRule}" anchor="bottom" />
+
+    <label x="4" y="213" w="500" h="16" text="{MetaStatus}" color="#FFC7B98F" anchor="bottom" />
+  </group>
+
+</panel>

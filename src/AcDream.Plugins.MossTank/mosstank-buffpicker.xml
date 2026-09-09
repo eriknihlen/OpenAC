@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel x="253" y="405" w="268" h="236" title="MossTank Add Buff"
+       visible="{BuffPickerVisible}" resize="none">
+  <list x="4" y="22" w="260" h="160" rowheight="17"
+        items="{BuffPickerRows}" selected="{SelectedBuffPickerIndex}"
+        onchange="{PickBuffAt}"
+        tooltip="Select a spell to add and close this picker." />
+  <label x="4" y="188" w="60" h="16" text="Search:" color="#FFE8DEC3" />
+  <field x="64" y="186" w="200" h="18" text="{BuffPickerSearchText}"
+         onchange="{SetBuffPickerSearchText}" maxlength="64"
+         clearonsubmit="false" background="#E6000000" color="#FFE8DEC3"
+         tooltip="Live-filters the list above by name." />
+  <button x="4" y="210" w="260" h="20" text="Cancel"
+          onclick="{HideBuffPicker}" />
+</panel>

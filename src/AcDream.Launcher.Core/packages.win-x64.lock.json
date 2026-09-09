@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "acdream.platform": {
+        "type": "Project"
+      }
+    },
+    "net10.0/win-x64": {}
+  }
+}

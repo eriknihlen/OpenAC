@@ -1,0 +1,910 @@
+1
+CondAct
+5
+CType
+AType
+CData
+AData
+State
+n
+n
+n
+n
+n
+33
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+2
+i
+7
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+setvar[mssortstring,`CV,AS,EQ,TR-,OC,IC,AL-,EP,MX-`]
+i
+1
+s
+SortManaStones
+s
+Default
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 7
+i
+2
+s
+/ms set ocfilter manastone
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortManaStones
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortHealingKits
+s
+SortManaStones
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 7
+i
+2
+s
+/ms set ocfilter healingkit
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortHealingKits
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortMisc
+s
+SortHealingKits
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 2
+i
+2
+s
+/ms set ocfilter misc
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortMisc
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortGems
+s
+SortMisc
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 3
+i
+2
+s
+/ms set ocfilter gem
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortGems
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortWeapons
+s
+SortGems
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 1
+i
+2
+s
+/ms set ocfilter meleeweapon
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortWeapons
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortWands
+s
+SortWeapons
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 1
+i
+2
+s
+/ms set ocfilter wand
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortWands
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortSpellComps
+s
+SortWands
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest pack 8
+i
+2
+s
+/ms set ocfilter spellcomp
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortSpellComps
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortInventory
+s
+SortSpellComps
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source player
+i
+2
+s
+/ms set dest player
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortInventory
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack1
+s
+SortInventory
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 1
+i
+2
+s
+/ms set dest pack 1
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack1
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack2
+s
+SortPack1
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 2
+i
+2
+s
+/ms set dest pack 2
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack2
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack3
+s
+SortPack2
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 3
+i
+2
+s
+/ms set dest pack 3
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack3
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack4
+s
+SortPack3
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 4
+i
+2
+s
+/ms set dest pack 4
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack4
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack5
+s
+SortPack4
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 5
+i
+2
+s
+/ms set dest pack 5
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack5
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack6
+s
+SortPack5
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 6
+i
+2
+s
+/ms set dest pack 6
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack6
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack7
+s
+SortPack6
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 7
+i
+2
+s
+/ms set dest pack 7
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack7
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+SortPack8
+s
+SortPack7
+i
+1
+i
+3
+i
+0
+TABLE
+2
+K
+V
+n
+n
+5
+i
+2
+s
+/ms set source pack 8
+i
+2
+s
+/ms set dest pack 8
+i
+2
+s
+/ms clear ocfilter
+i
+8
+TABLE
+2
+k
+v
+n
+n
+1
+s
+e
+s
+`/ms set flags `+getvar[mssortstring]
+i
+2
+s
+/ms start
+s
+SortPack8
+i
+4
+i
+1
+s
+^You think\, \"done sorting\!\"$
+s
+AllDone
+s
+SortPack8

@@ -1,0 +1,416 @@
+~~
+~~	lockandkey.af - Portal Bot with Stipend & Partial Bella Services
+~~
+~~	A portal summoning bot that:
+~~	  - Listens for tells containing "primary" or "secondary" to summon portals
+~~	  - Collects stipend on timer (with backoff)
+~~	  - Runs partial bella (jaw turn-in only, no kill bella)
+~~	  - Returns home via ah_recall after services
+~~
+~~	Portal Spells:
+~~	  Summon Primary Portal I   = spell 157
+~~	  Summon Secondary Portal I = spell 2648
+~~
+
+~~ {
+~~ FOR AUTO-COMPLETION ASSISTANCE: testvar getvar setvar touchvar clearallvars clearvar getcharintprop getchardoubleprop getcharquadprop getcharboolprop getcharstringprop getisspellknown getcancastspell_hunt getcancastspell_buff getcharvital_base getcharvital_current getcharvital_buffedmax getcharskill_traininglevel getcharskill_base getcharskill_buffed getplayerlandcell getplayercoordinates coordinategetns coordinategetwe coordinategetz coordinatetostring coordinateparse coordinatedistancewithz coordinatedistanceflat wobjectgetphysicscoordinates wobjectgetname wobjectgetobjectclass wobjectgettemplatetype wobjectgetisdooropen wobjectfindnearestmonster wobjectfindnearestdoor wobjectfindnearestbyobjectclass wobjectfindininventorybytemplatetype wobjectfindininventorybyname wobjectfindininventorybynamerx wobjectgetselection wobjectgetplayer wobjectfindnearestbynameandobjectclass actiontryselect actiontryuseitem actiontryapplyitem actiontrygiveitem actiontryequipanywand actiontrycastbyid actiontrycastbyidontarget chatbox chatboxpaste statushud statushudcolored uigetcontrol uisetlabel isfalse istrue iif randint cstr strlen getobjectinternaltype cstrf stopwatchcreate stopwatchstart stopwatchstop stopwatchelapsedseconds cnumber floor ceiling round abs getworldname getitemcountininventorybyname getheading getitemcountininventorybynamerx getheadingto actiontrygiveprofile vitae getfellowshipstatus getfellowshipname getfellowshipisopen getfellowshipisleader getfellowshipleaderid getfellowshipcanrecruit getfellowid getfellowshipcount getfellowshiplocked getfellowname getfellowshipisfull sin cos tan sqrt asin acos atan atan2 sinh cosh tanh vtsetmetastate getregexmatch echo chr ord wobjectgetid wobjectgethealth wobjectfindbyid wobjectgetintprop wobjectfindnearestbytemplatetype wobjectgetopencontainer testquestflag getquestktprogress isrefreshingquests getquestktrequired getqueststatus getisday getgamehour getgamehourname getisnight getgameday getgameticks getminutesuntilday getgamemonth getplayerlandblock wobjectisvalid getitemcountbytemplatetype ifthen
+~~ }
+
+STATE: {Default}
+~~ Init variables then transition to service check
+	IF:	Not Expr {testvar[bellaTurnInAttempts]}
+		DO:	DoExpr {setvar[bellaTurnInAttempts, 0]}
+	IF:	Not Expr {testvar[bellaJawRunRecoverAttempts]}
+		DO:	DoExpr {setvar[bellaJawRunRecoverAttempts, 0]}
+	IF:	Not Expr {testvar[bellaBackoffSeconds]}
+		DO:	DoExpr {setvar[bellaBackoffSeconds, 86400]}
+	IF:	Not Expr {testvar[stipendBackoffSeconds]}
+		DO:	DoExpr {setvar[stipendBackoffSeconds, 86400]}
+	IF:	Not Expr {testvar[disableBellaServices]}
+		DO:	DoExpr {setvar[disableBellaServices, 0]}
+	IF:	Not Expr {testvar[serviceCheckInterval]}
+		DO:	DoExpr {setvar[serviceCheckInterval, 900]}
+	IF:	Not Expr {testvar[serviceClock]}
+		DO:	DoAll
+				DoExpr {setvar[serviceClock,stopwatchcreate[]]}
+				DoExpr {stopwatchstart[getvar[serviceClock]]}
+	IF:	Always
+		DO:	DoAll
+				Chat {/ub opt set VTank.PatchExpressionEngine true}
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt opt set enablelooting false}
+				Chat {/vt opt set enablenav false}
+				Chat {/vt opt set enablebuffing false}
+				SetState {service_quest_refresh}
+~~ }
+
+STATE: {idle}
+~~ Main loop: listen for portal tells, check service timer
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	DoAll
+				Chat {/vt opt set enablebuffing false}
+				DoExpr {setcombatstate[`peace`]}
+				DoExpr {clearvar[queuePrimary]}
+				DoExpr {clearvar[queueSecondary]}
+	~~ Listen for tells containing "primary"
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*primary.*"$} {}
+		DO:	SetState {summon_primary}
+	~~ Listen for tells containing "secondary"
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*secondary.*"$} {}
+		DO:	SetState {summon_secondary}
+	~~ Periodic service check
+	IF:	All
+			Expr {testvar[serviceClock]}
+			Expr {stopwatchelapsedseconds[getvar[serviceClock]]>=getvar[serviceCheckInterval]}
+		DO:	SetState {service_quest_refresh}
+	IF:	Always
+		DO:	None
+
+STATE: {summon_primary}
+~~ Face 180, equip wand, cast Summon Primary Portal I (157), retry on fizzle
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	DoAll
+				Chat {/a Summoning 125 Eaters portal...}
+				Chat {/vt opt set enablecombat false}
+				Chat {/ub face 180}
+				DoExpr {setcombatstate[`magic`]}
+				DoExpr {actiontryequipanywand[]}
+				DoExpr {clearvar[queuePrimary]}
+	IF:	SecsInStateGE 4
+		DO:	DoExpr {actiontrycastbyid[157]}
+	~~ Fizzle: retry cast
+	IF:	ChatMatch {Your spell fizzled.}
+		DO:	DoAll
+				Chat {/a Fizzled! Retrying 125 Eaters portal...}
+				DoExpr {actiontrycastbyid[157]}
+				SetState {summon_primary}
+	~~ Queue incoming tells while casting
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*primary.*"$} {}
+		DO:	DoAll
+				Chat {/a Queued 125 Eaters portal, will summon shortly.}
+				DoExpr {setvar[queuePrimary, 1]}
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*secondary.*"$} {}
+		DO:	DoAll
+				Chat {/a Queued Bellas portal, will summon shortly.}
+				DoExpr {setvar[queueSecondary, 1]}
+	IF:	SecsInStateGE 17
+		DO:	SetState {summon_done}
+
+STATE: {summon_secondary}
+~~ Face 90, equip wand, cast Summon Secondary Portal I (2648), retry on fizzle
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	DoAll
+				Chat {/a Summoning Bellas portal...}
+				Chat {/vt opt set enablecombat false}
+				Chat {/ub face 90}
+				DoExpr {setcombatstate[`magic`]}
+				DoExpr {actiontryequipanywand[]}
+				DoExpr {clearvar[queueSecondary]}
+	IF:	SecsInStateGE 4
+		DO:	DoExpr {actiontrycastbyid[2648]}
+	~~ Fizzle: retry cast
+	IF:	ChatMatch {Your spell fizzled.}
+		DO:	DoAll
+				Chat {/a Fizzled! Retrying Bellas portal...}
+				DoExpr {actiontrycastbyid[2648]}
+				SetState {summon_secondary}
+	~~ Queue incoming tells while casting
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*primary.*"$} {}
+		DO:	DoAll
+				Chat {/a Queued 125 Eaters portal, will summon shortly.}
+				DoExpr {setvar[queuePrimary, 1]}
+	IF:	ChatCapture {(^(\[[A-z]+?\] |)You|.*\<Tell:IIDString:.+:(?<who>[^\<]*)\>.+\<\\Tell\>) tells you, ".*secondary.*"$} {}
+		DO:	DoAll
+				Chat {/a Queued Bellas portal, will summon shortly.}
+				DoExpr {setvar[queueSecondary, 1]}
+	IF:	SecsInStateGE 17
+		DO:	SetState {summon_done}
+
+STATE: {summon_done}
+~~ Check queue: process next summon request or return to idle
+	IF:	Expr {testvar[queuePrimary]}
+		DO:	DoAll
+				Chat {/a Processing queued 125 Eaters portal...}
+				SetState {summon_primary}
+	IF:	Expr {testvar[queueSecondary]}
+		DO:	DoAll
+				Chat {/a Processing queued Bellas portal...}
+				SetState {summon_secondary}
+	IF:	Always
+		DO:	SetState {idle}
+
+STATE: {service_quest_refresh}
+~~ Request quest status refresh, wait for completion
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	DoAll
+				Chat {/myquests}
+				DoExpr {touchvar[questsRequested]}
+	IF:	All
+			Expr {testvar[questsRequested]}
+			Expr {isrefreshingquests[]==0}
+			SecsInStateGE 2
+		DO:	SetState {service_pending_eval}
+	IF:	SecsInStateGE 8
+		DO:	SetState {service_pending_eval}
+
+STATE: {service_pending_eval}
+~~ Check if bella jaw quest is ready (no augment application for portal bot)
+	IF:	Always
+		DO:	SetState {service_decide}
+
+STATE: {service_decide}
+~~ Decide which services to run: stipend, partial bella, or return to idle
+	~~ Reset bella backoff if timer expired
+	IF:	All
+			Expr {getvar[disableBellaServices]==1}
+			Expr {testvar[bellaBackoffClock]}
+			Expr {stopwatchelapsedseconds[getvar[bellaBackoffClock]]>=getvar[bellaBackoffSeconds]}
+		DO:	DoAll
+				DoExpr {setvar[disableBellaServices, 0]}
+				DoExpr {setvar[bellaTurnInAttempts, 0]}
+				DoExpr {setvar[bellaJawRunRecoverAttempts, 0]}
+				DoExpr {clearvar[bellaBackoffClock]}
+	~~ Stipend: first run (no backoff clock)
+	IF:	All
+			Expr {getqueststatus[`stipendtimer_0812`]==1}
+			Not Expr {testvar[stipendBackoffClock]}
+		DO:	SetState {service_stipend}
+	~~ Stipend: backoff expired
+	IF:	All
+			Expr {getqueststatus[`stipendtimer_0812`]==1}
+			Expr {testvar[stipendBackoffClock]}
+			Expr {stopwatchelapsedseconds[getvar[stipendBackoffClock]]>=getvar[stipendBackoffSeconds]}
+		DO:	DoAll
+				DoExpr {clearvar[stipendBackoffClock]}
+				SetState {service_stipend}
+	~~ Partial bella: jaw quest ready + services not disabled
+	IF:	All
+			Expr {getvar[disableBellaServices]!=1}
+			Expr {getqueststatus[`insatiableeaterjaw`]==1}
+		DO:	SetState {service_bella_jaw_entry}
+	~~ Nothing to do, return to idle
+	IF:	Always
+		DO:	DoAll
+				DoExpr {setvar[serviceClock,stopwatchcreate[]]}
+				DoExpr {stopwatchstart[getvar[serviceClock]]}
+				SetState {idle}
+
+STATE: {service_stipend}
+~~ Run stipend collection nav, start backoff clock
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	SetWatchdog 3 600 {service_reset_main}
+	IF:	Always
+		DO:	DoAll
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt opt set enablelooting false}
+				Chat {/vt opt set enablenav true}
+				DoExpr {setvar[stipendBackoffClock, stopwatchcreate[]]}
+				DoExpr {stopwatchstart[getvar[stipendBackoffClock]]}
+				DoExpr {touchvar[stipendNavLoaded]}
+				EmbedNav nav0__stipend_nav {stipend.nav}
+	IF:	All
+			Expr {testvar[stipendNavLoaded]}
+			NavEmpty
+			SecsInStateGE 2
+		DO:	SetState {service_reset_main}
+
+STATE: {service_bella_jaw_entry}
+~~ Equip quest gear, buff up, then run nav_lockandkeyjaw (nav handles idle/quest swap + recall)
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	DoAll
+				Chat {/a [bella] equipping quest gear and buffing for jaw dungeon}
+				Chat {/ub equip load quest.utl}
+				Chat {/vt opt set enablecombat true}
+				Chat {/vt opt set enablelooting false}
+				Chat {/vt opt set enablenav true}
+				Chat {/vt opt set enablebuffing true}
+				DoExpr {setvar[jawEntryNavLoaded,1]}
+				Chat {/vt nav load nav_lockandkeyjaw}
+				SetWatchdog 3 600 {service_bella_backoff}
+	IF:	All
+			Expr {getvar[jawEntryNavLoaded]==1}
+			NavEmpty
+			SecsInStateGE 2
+		DO:	DoAll
+				DoExpr {setvar[jawEntryNavLoaded,0]}
+				DoExpr {setvar[bellaJawRunRecoverAttempts, 0]}
+				Chat {/vt nav load jaw_1_hunt}
+				Chat {/vt opt set enablecombat true}
+				Chat {/vt opt set enablelooting true}
+				Chat {/vt opt set lootonlyrarecorpses false}
+				SetState {service_bella_jaw_hunt}
+
+STATE: {service_bella_jaw_run_recover}
+~~ Recovery wait for jaw run stuck
+	IF:	Death
+		DO:	SetState {death}
+	IF:	SecsInStateGE 20
+		DO:	SetState {service_bella_jaw_entry}
+
+STATE: {service_bella_jaw_hunt}
+~~ Hunt for jaw drop
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	Chat {/vt opt set enablebuffing true}
+	IF:	ExitPortal
+		DO:	DoAll
+				Chat {/vt opt set enablenav true}
+				SetState {service_bella_turn_in_jaw}
+	IF:	ItemCountGE 1 {Insatiable Eater Jaw}
+		DO:	DoAll
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt nav load to_fiun}
+	IF:	SecsInStateGE 1200
+		DO:	SetState {service_bella_backoff}
+
+STATE: {service_bella_turn_in_jaw}
+~~ Turn in jaw to Fiun NPC, then return home (partial bella - no mp_trans/secondary/kill)
+	IF:	Death
+		DO:	SetState {death}
+	~~ Jaw accepted: return home instead of continuing to mp_secondary
+	IF:	ChatMatch {^.*One who obtains such as this is truly worthy of that which we would teach\. The highest peak of the deadliest isle contains that which you seek.*$}
+		DO:	DoAll
+				Chat {/a [bella] jaw turned in, returning home (partial bella)}
+				DoExpr {setvar[bellaTurnInAttempts, 0]}
+				SetState {equip_idle}
+	IF:	All
+			SecsInStateGE 300
+			ItemCountGE 1 {Insatiable Eater Jaw}
+			Expr {getvar[bellaTurnInAttempts]<3}
+		DO:	DoAll
+				DoExpr {chatbox[`/a [bella] jaw turn-in timed out, retry `+cstr[getvar[bellaTurnInAttempts]+1]+`/3`]}
+				DoExpr {setvar[bellaTurnInAttempts,getvar[bellaTurnInAttempts]+1]}
+				Chat {/vt nav load to_fiun}
+				SetState {service_bella_turn_in_jaw}
+	IF:	All
+			SecsInStateGE 300
+			ItemCountGE 1 {Insatiable Eater Jaw}
+			Expr {getvar[bellaTurnInAttempts]>=3}
+		DO:	SetState {service_bella_backoff}
+	~~ Jaw already gone (consumed by NPC), just go home
+	IF:	SecsInStateGE 300
+		DO:	DoAll
+				DoExpr {setvar[bellaTurnInAttempts, 0]}
+				SetState {equip_idle}
+
+STATE: {service_bella_backoff}
+~~ Disable bella services for 24h, return home
+	IF:	Always
+		DO:	DoAll
+				Chat {/a [bella] backoff tripped, disabling bella services for 24h}
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt opt set enablenav true}
+				DoExpr {setvar[disableBellaServices, 1]}
+				DoExpr {setvar[bellaTurnInAttempts, 0]}
+				DoExpr {setvar[bellaJawRunRecoverAttempts, 0]}
+				DoExpr {setvar[bellaBackoffClock,stopwatchcreate[]]}
+				DoExpr {stopwatchstart[getvar[bellaBackoffClock]]}
+				SetState {equip_idle}
+
+STATE: {equip_idle}
+~~ Swap back to idle gear before heading home
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	Chat {/ub equip load idle.utl}
+	IF:	SecsInStateGE 12
+		DO:	SetState {service_reset_main}
+
+STATE: {service_reset_main}
+~~ Clear service vars, load ah_recall to return home, then go to idle
+	IF:	Death
+		DO:	SetState {death}
+	IF:	Always
+		DO:	SetWatchdog 3 600 {service_reset_main_stuck}
+	IF:	Always
+		DO:	DoAll
+				DoExpr {clearvar[questsRequested]}
+				DoExpr {clearvar[stipendNavLoaded]}
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt opt set enablelooting false}
+				Chat {/vt opt set enablenav true}
+				Chat {/vt opt set enablebuffing false}
+				DoExpr {setvar[serviceClock,stopwatchcreate[]]}
+				DoExpr {stopwatchstart[getvar[serviceClock]]}
+				DoExpr {touchvar[resetNavLoaded]}
+				Chat {/vt nav load ah_recall}
+	IF:	All
+			Expr {testvar[resetNavLoaded]}
+			NavEmpty
+			SecsInStateGE 2
+		DO:	DoAll
+				DoExpr {clearvar[resetNavLoaded]}
+				ClearWatchdog
+				Chat {/vt opt set enablenav false}
+				SetState {idle}
+
+STATE: {service_reset_main_stuck}
+~~ Fallback if ah_recall nav gets stuck
+	IF:	Always
+		DO:	DoAll
+				Chat {/ah}
+				SetState {service_reset_main_wait}
+
+STATE: {service_reset_main_wait}
+~~ Wait for /ah recall, then retry reset
+	IF:	Death
+		DO:	SetState {death}
+	IF:	ExitPortal
+		DO:	SetState {service_reset_main}
+	IF:	SecsInStateGE 30
+		DO:	SetState {service_reset_main}
+
+STATE: {death}
+~~ Death recovery: wait for portal exit, recall home
+	IF:	Always
+		DO:	DoAll
+				Chat {/vt opt set enablecombat false}
+				Chat {/vt opt set enablelooting false}
+	IF:	ExitPortal
+		DO:	DoAll
+				Chat {/ah}
+				SetState {death_wait_recall}
+	IF:	SecsInStateGE 30
+		DO:	DoAll
+				Chat {/ah}
+				SetState {death_wait_recall}
+
+STATE: {death_wait_recall}
+~~ Wait for /ah recall portal exit, then return to idle
+	IF:	Death
+		DO:	SetState {death}
+	IF:	ExitPortal
+		DO:	SetState {idle}
+	IF:	SecsInStateGE 60
+		DO:	SetState {idle}
+
+~~========================= ONLY NAVS APPEAR BELOW THIS LINE =========================~~
+
+NAV: nav0__stipend_nav once
+	pau 47.1262349446615 26.1864453474681 0.225020837783813 2000
+	cht -101.597905190786 -96.6216093699137 2.08333134651184E-05 {/ah}
+	pau 47.1262349446615 26.1864453474681 0.225020837783813 15000
+	pnt 59.3590666453044 -28.7057823816935 0.0500208298365275
+	ptl -101.597905190786 -96.6216093699137 2.08333134651184E-05 59.3936458587647 -28.7256083488464 0.0508250035345554 14 {Portal to Town Network}
+	pnt -101.615851815542 -96.6388638178507 2.08333134651184E-05
+	pnt -101.657751337687 -96.5832635879517 2.08333134651184E-05
+	pnt -101.658352184296 -96.5325949986776 2.08333134651184E-05
+	ptl -101.597905190786 -96.6216093699137 2.08333134651184E-05 -101.588099161784 -96.5166525046031 -0.000262499845121056 14 {Portal to Arwic}
+	pnt 56.6498762130737 33.416518386205 0.175020837783813
+	pnt 56.655900033315 33.5368880271912 0.175020837783813
+	pnt 56.7470087051392 33.5495386441549 0.175020837783813
+	pnt 56.7795230229696 33.6337207794189 0.175020837783813
+	tlk -101.597905190786 -96.6216093699137 2.08333134651184E-05 56.7816291809082 33.6455291748047 0.175020843744278 37 {Monroe}
