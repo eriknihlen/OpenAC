@@ -5,8 +5,10 @@ using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.ViewModels;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Headless;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -16,7 +18,11 @@ public sealed class MainWindowViewTests
 {
     private static readonly (string Name, Type Type)[] ExpectedNamedControls =
     [
-        ("ProfilesTree", typeof(TreeView)),
+        ("AccountsScroll", typeof(ScrollViewer)),
+        ("PlayCheckedButton", typeof(Button)),
+        ("ProfileTextBox", typeof(TextBox)),
+        ("CharacterPluginsTextBox", typeof(TextBox)),
+        ("SessionLogCloseButton", typeof(Button)),
         ("ServerNameTextBox", typeof(TextBox)),
         ("AccountNameTextBox", typeof(TextBox)),
         ("CharacterNameTextBox", typeof(TextBox)),
@@ -36,6 +42,7 @@ public sealed class MainWindowViewTests
         OpeningAndClosingTheFirstRunWizardFocusesAndRunsTheCloseFallbackWithoutThrowing();
         await OpeningAndClosingTheUpdatePromptFocusesAndRunsTheCloseFallbackWithoutThrowing();
         ClosingAModalRestoresThePreviouslyFocusedControlWithoutThrowing();
+        ResizingKeepsBatchActionsVisibleWhileManyAccountsScroll();
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
@@ -200,7 +207,7 @@ public sealed class MainWindowViewTests
             Control addServerButton = window
                 .GetVisualDescendants()
                 .OfType<Button>()
-                .First(button => Equals(button.Content, "+ Server"));
+                .First(button => Equals(button.Content, "Edit Servers"));
             addServerButton.Focus();
             Assert.Same(addServerButton, CurrentFocus(window));
 
@@ -214,13 +221,58 @@ public sealed class MainWindowViewTests
 
             // addServerButton was focused before the dialog opened, so the
             // restore branch (focusToRestore.Focus()) is what ran here, not
-            // the ProfilesTree.Focus() fallback exercised by the tests above.
+            // the account list focus fallback exercised by the tests above.
             Assert.Same(addServerButton, CurrentFocus(window));
         }
         finally
         {
             CloseTestWindow(window);
         }
+    }
+
+    private static void ResizingKeepsBatchActionsVisibleWhileManyAccountsScroll()
+    {
+        var source = new StubOrchestrator
+        {
+            ServerRows = [new LauncherServerSnapshot("Local", "127.0.0.1", 9000,
+                Enumerable.Range(1, 30).Select(i => new LauncherAccountSnapshot("Local", $"account{i}",
+                    [new LauncherCharacterSnapshot("Local", $"account{i}", $"Character{i}", "0x50000001",
+                        LaunchMode.Gui, [], [], false, "Ready")], false, "Ready")).ToArray())],
+        };
+        using var model = new LauncherWindowViewModel(source, new ImmediateUiDispatcher());
+        model.Initialize();
+        var window = new MainWindow { DataContext = model };
+        try
+        {
+            window.Show();
+            Assert.True(window.CanResize);
+            foreach (var size in new[] { new Avalonia.Size(760, 460), new Avalonia.Size(1120, 740), new Avalonia.Size(1600, 1000) })
+            {
+                window.Width = size.Width;
+                window.Height = size.Height;
+                window.UpdateLayout();
+                Dispatcher.UIThread.RunJobs();
+                var scroll = window.FindControl<ScrollViewer>("AccountsScroll")!;
+                var play = window.FindControl<Button>("PlayCheckedButton")!;
+                Assert.True(scroll.Bounds.Height > 50);
+                Assert.True(scroll.Extent.Height > scroll.Viewport.Height);
+                Avalonia.Point origin = play.TranslatePoint(default, window)!.Value;
+                Assert.InRange(origin.X, 0, window.Bounds.Width - play.Bounds.Width + 1);
+                Assert.InRange(origin.Y, 0, window.Bounds.Height - play.Bounds.Height + 1);
+                Assert.Equal(30, model.Accounts.Count);
+                string artifacts = Path.Combine(FindRepositoryRoot(), "artifacts", "launcher-redesign");
+                Directory.CreateDirectory(artifacts);
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+                using var frame = window.CaptureRenderedFrame();
+                Assert.NotNull(frame);
+                frame.Save(Path.Combine(artifacts, $"launcher-{size.Width:0}x{size.Height:0}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+            }
+            model.OpenSessionLogCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Same(window.FindControl<Button>("SessionLogCloseButton"), CurrentFocus(window));
+            model.CloseActiveModal();
+        }
+        finally { CloseTestWindow(window); }
     }
 
     private static void CloseTestWindow(MainWindow window)
@@ -402,6 +454,7 @@ public sealed class MainWindowViewTests
 
     private sealed class StubOrchestrator : ILauncherOrchestrator
     {
+        public IReadOnlyList<LauncherServerSnapshot> ServerRows { get; set; } = [];
         // Never raised: these tests exercise MainWindow's dispatcher/focus
         // wiring directly and never trigger an orchestrator-side refresh.
 #pragma warning disable CS0067
@@ -413,7 +466,7 @@ public sealed class MainWindowViewTests
         }
 
         public LauncherStateSnapshot GetSnapshot() => new(
-            Servers: [],
+            Servers: ServerRows,
             Sessions: [],
             Platform: LauncherPlatformCapabilities.Detect(),
             IsInstallationReady: false,

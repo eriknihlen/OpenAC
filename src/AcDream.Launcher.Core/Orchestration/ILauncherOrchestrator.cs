@@ -9,6 +9,12 @@ public interface ILauncherOrchestrator : IDisposable
 
     void LoadProfiles();
 
+    string ReadProfileText(LauncherTextEditorKind kind) =>
+        throw new NotSupportedException("Text editing is not available.");
+
+    void SaveProfileText(LauncherTextEditorKind kind, string text, string originalText) =>
+        throw new NotSupportedException("Text editing is not available.");
+
     LauncherStateSnapshot GetSnapshot();
 
     LauncherCapability GetLaunchCapability(LaunchMode mode);

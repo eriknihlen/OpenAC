@@ -158,6 +158,13 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
 
     public RelayCommand CancelCommand { get; }
 
+    public bool AutoOpenDiscoveredUpdates { get; set; } = true;
+
+    public void OpenAvailableUpdate()
+    {
+        if (!_disposed && HasSomethingToUpdate && _canOpen()) IsOpen = true;
+    }
+
     public async Task StartupCheckAsync()
     {
         if (IsBusy || _disposed)
@@ -169,6 +176,8 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
         _cancellation = cancellation;
         IsStartupCheckComplete = false;
         StartupCheckSucceeded = false;
+        Error = null;
+        Status = "Checking for updates…";
         IsBusy = true;
         try
         {
@@ -176,6 +185,7 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
                 .ConfigureAwait(true);
             _check = await _updater.CheckAsync(cancellation.Token).ConfigureAwait(true);
             StartupCheckSucceeded = true;
+            Status = HasSomethingToUpdate ? "An update is available." : "OpenAC is up to date.";
             OnPropertyChanged(nameof(Body));
             OnPropertyChanged(nameof(IsClientUpdateAvailable));
             OnPropertyChanged(nameof(IsLauncherUpdateAvailable));
@@ -187,6 +197,9 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
         catch
         {
             _check = null;
+            Status = "Updates could not be checked. Try again from Installation & updates.";
+            OnPropertyChanged(nameof(IsClientUpdateAvailable));
+            OnPropertyChanged(nameof(IsLauncherUpdateAvailable));
         }
         finally
         {
@@ -215,7 +228,7 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
     /// question (notably required world-data work) has finished.</summary>
     public void TryOpenPendingUpdate()
     {
-        if (!_disposed && HasSomethingToUpdate && _canOpen())
+        if (AutoOpenDiscoveredUpdates && !_disposed && HasSomethingToUpdate && _canOpen())
         {
             IsOpen = true;
         }
@@ -292,6 +305,9 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
                 .ConfigureAwait(true);
             _onClientChanged();
             Status = "Update installed.";
+            _check = null;
+            OnPropertyChanged(nameof(IsClientUpdateAvailable));
+            OnPropertyChanged(nameof(IsLauncherUpdateAvailable));
             IsProgressIndeterminate = false;
             IsOpen = false;
         }

@@ -63,10 +63,9 @@ public sealed class FirstRunInstallerViewModel : ObservableObject, IDisposable
 
     public string Body => IsContentUpdate
         ? BuildContentUpdateBody()
-        : "Select the retail Asheron's Call DAT folder. acdream will validate "
-            + "the four required files, build DataDirectory/pak/acdream.pak, and "
-            + "verify its SHA-256 before enabling launch. No work begins until "
-            + "you choose Build and install.";
+        : "Choose your Asheron's Call data folder. OpenAC will check the required "
+            + "files and prepare the game content. First setup can take a while. "
+            + "Choose Build and install when you are ready.";
 
     public string StartActionText => IsContentUpdate
         ? _contentMigration?.Kind == ContentWorkKind.Overlay

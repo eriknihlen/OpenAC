@@ -3,273 +3,140 @@
         xmlns:vm="using:AcDream.Launcher.ViewModels"
         x:Class="AcDream.Launcher.MainWindow"
         x:DataType="vm:LauncherWindowViewModel"
-        Title="acdream launcher"
+        Title="OpenAC"
         Icon="avares://acdream-launcher/Assets/acdream-launcher.png"
-        Width="1180"
-        Height="760"
-        MinWidth="900"
-        MinHeight="620"
-        Background="#10151D">
+        Width="1120" Height="740" MinWidth="760" MinHeight="460"
+        CanResize="True" Background="#10171C">
   <Window.Styles>
     <Style Selector="Border.card">
-      <Setter Property="Background" Value="#18212D" />
-      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Background" Value="#1D2931" />
+      <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="16" />
     </Style>
+    <Style Selector="Button">
+      <Setter Property="Background" Value="#202C33" />
+      <Setter Property="BorderBrush" Value="#405059" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="CornerRadius" Value="3" />
+    </Style>
     <Style Selector="Button.primary">
-      <Setter Property="Background" Value="#3C78D8" />
-      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#DBB573" />
+      <Setter Property="Foreground" Value="#181A1B" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
-    <Style Selector="Button.danger">
-      <Setter Property="Background" Value="#8E3540" />
-      <Setter Property="Foreground" Value="White" />
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#E6C68F" />
+      <Setter Property="Foreground" Value="#181A1B" />
     </Style>
-    <Style Selector="TextBlock.muted">
-      <Setter Property="Foreground" Value="#A8B5C6" />
-    </Style>
-    <Style Selector="TextBlock.section">
-      <Setter Property="FontSize" Value="18" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
+    <Style Selector="Button.danger"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
+    <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
+    <Style Selector="TextBlock.section"><Setter Property="FontSize" Value="16" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
+    <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,3" /><Setter Property="Background" Value="#131D23" /></Style>
+    <Style Selector="CheckBox"><Setter Property="MinHeight" Value="24" /></Style>
+    <Style Selector="Expander"><Setter Property="Padding" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
   </Window.Styles>
-
   <Grid RowDefinitions="Auto,Auto,*,Auto">
-    <Border Grid.Row="0" Background="#141C26" Padding="20,14">
-      <Grid ColumnDefinitions="*,Auto">
-        <StackPanel Spacing="2">
-          <TextBlock Text="acdream" FontSize="24" FontWeight="Bold" />
-          <TextBlock Text="Servers, accounts, characters, and supervised sessions"
-                     Classes="muted" />
-        </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <Button Content="First-run setup"
-                  Command="{Binding FirstRunWizardShell.OpenCommand}" />
-          <Button Content="Verify files"
-                  AutomationProperties.Name="Verify installed client content"
-                  Command="{Binding VerifyContentCommand}" />
-        </StackPanel>
-      </Grid>
+    <Border Padding="18,10" Background="#152029">
+      <StackPanel Spacing="1">
+        <TextBlock Text="OpenAC" FontFamily="Georgia,serif" FontSize="27" Foreground="#DBB573" />
+        <TextBlock Text="Asheron's Call forever." FontFamily="Georgia,serif" FontSize="18" Foreground="#F0E4CD" />
+      </StackPanel>
     </Border>
-
-    <StackPanel Grid.Row="1" Margin="16,12,16,0" Spacing="8">
-      <Border Classes="card"
-              Padding="12"
-              Background="#4B3820"
-              IsVisible="{Binding ShowInstallationBanner}">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="3">
-            <TextBlock Text="{Binding InstallationBannerTitle}" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding InstallationStatus}" TextWrapping="Wrap" />
-          </StackPanel>
-          <Button Grid.Column="1"
-                  Content="Open setup"
-                  IsVisible="{Binding !IsInstallationChecking}"
-                  Command="{Binding FirstRunWizardShell.OpenCommand}" />
+    <StackPanel Grid.Row="1" Spacing="4">
+      <Border Background="#292820" Padding="14,8" IsVisible="{Binding ShowInstallationBanner}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+          <StackPanel><TextBlock Text="{Binding InstallationBannerTitle}" FontWeight="SemiBold" /><TextBlock Text="{Binding InstallationStatus}" TextWrapping="Wrap" Classes="muted" /></StackPanel>
+          <Button Grid.Column="1" Content="Open setup" Classes="primary" IsVisible="{Binding !IsInstallationChecking}" Command="{Binding FirstRunWizardShell.OpenCommand}" />
         </Grid>
       </Border>
-      <Border Classes="card"
-              Padding="12"
-              Background="#24344B"
-              IsVisible="{Binding ShowGraphicalLaunchNotice}">
-        <StackPanel Spacing="3">
-          <TextBlock Text="Graphical launch unavailable" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding GraphicalLaunchNotice}" TextWrapping="Wrap" />
-        </StackPanel>
+      <Border Background="#292820" Padding="14,8" IsVisible="{Binding ShowUpdateBanner}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+          <StackPanel><TextBlock Text="An OpenAC update is available" FontWeight="SemiBold" /><TextBlock Text="{Binding UpdatePrompt.Body}" Classes="muted" TextWrapping="Wrap" /></StackPanel>
+          <Button Grid.Column="1" Content="Review update" Classes="primary" Command="{Binding ReviewUpdateCommand}" />
+        </Grid>
       </Border>
     </StackPanel>
-
-    <Grid Grid.Row="2" Margin="16" ColumnDefinitions="330,12,*" RowDefinitions="*,12,220">
-      <Border Grid.Column="0" Grid.RowSpan="3" Classes="card">
-        <Grid RowDefinitions="Auto,Auto,*,Auto">
-          <TextBlock Text="Profiles" Classes="section" />
-          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,12,0,10">
-            <Button Content="+ Server" Command="{Binding AddServerCommand}" />
-            <Button Content="+ Account" Command="{Binding AddAccountCommand}" />
-            <Button Content="+ Character" Command="{Binding AddCharacterCommand}" />
-          </StackPanel>
-          <TreeView x:Name="ProfilesTree"
-                    Grid.Row="2"
-                    ItemsSource="{Binding Servers}"
-                    SelectedItem="{Binding SelectedNode, Mode=TwoWay}">
-            <TreeView.DataTemplates>
-              <TreeDataTemplate DataType="{x:Type vm:LauncherTreeNodeViewModel}"
-                                ItemsSource="{Binding Children}">
-                <StackPanel Margin="2,4" Spacing="1">
-                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
-                  <TextBlock Text="{Binding SecondaryText}"
-                             Classes="muted"
-                             FontSize="11"
-                             TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-              </TreeDataTemplate>
-            </TreeView.DataTemplates>
-          </TreeView>
-          <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
-            <Button Content="Edit" Command="{Binding EditSelectedCommand}" />
-            <Button Content="Remove"
-                    Classes="danger"
-                    Command="{Binding RemoveSelectedCommand}" />
-          </StackPanel>
-        </Grid>
-      </Border>
-
-      <Border Grid.Column="2" Grid.Row="0" Classes="card">
-        <ScrollViewer>
-          <StackPanel Spacing="14">
-            <StackPanel Spacing="3">
-              <TextBlock Text="{Binding SelectionTitle}" FontSize="24" FontWeight="Bold" />
-              <TextBlock Text="{Binding SelectionSubtitle}" Classes="muted" />
-            </StackPanel>
-
-            <Border Background="#213044" CornerRadius="6" Padding="12"
-                    IsVisible="{Binding IsServerSelected}">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Server profile" Classes="section" />
-                <TextBlock Text="Add accounts beneath this server, or edit its host and port." TextWrapping="Wrap" />
-                <Button Content="Add account"
-                        HorizontalAlignment="Left"
-                        Command="{Binding AddAccountCommand}" />
-              </StackPanel>
-            </Border>
-
-            <Border Background="#213044" CornerRadius="6" Padding="12"
-                    IsVisible="{Binding IsAccountSelected}">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Account profile" Classes="section" />
-                <TextBlock Text="Your characters appear here automatically after you log in."
-                           TextWrapping="Wrap" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="Open character select"
-                          Classes="primary"
-                          AutomationProperties.Name="Open character select for account"
-                          Command="{Binding LaunchAccountGuiSelectCommand}" />
-                </StackPanel>
-                <TextBlock Text="{Binding AccountGuiSelectDisabledReason}"
-                           Classes="muted"
-                           TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-
-            <StackPanel IsVisible="{Binding IsCharacterSelected}" Spacing="14">
-              <Border Background="#213044" CornerRadius="6" Padding="12">
-                <StackPanel Spacing="10">
-                  <TextBlock Text="Launch" Classes="section" />
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Play"
-                            Classes="primary"
-                            MinWidth="110"
-                            AutomationProperties.Name="Play as the selected character"
-                            Command="{Binding LaunchGuiCommand}" />
-                    <Button Content="Headless"
-                            AutomationProperties.Name="Launch a headless session"
-                            Command="{Binding LaunchHeadlessCommand}" />
-                  </StackPanel>
-                  <TextBlock Text="{Binding GuiLaunchDisabledReason}"
-                             Classes="muted"
-                             TextWrapping="Wrap"
-                             IsVisible="{Binding ShowGuiLaunchDisabledReason}" />
-                  <TextBlock Text="{Binding HeadlessLaunchDisabledReason}"
-                             Classes="muted"
-                             TextWrapping="Wrap"
-                             IsVisible="{Binding ShowHeadlessLaunchDisabledReason}" />
-                </StackPanel>
-              </Border>
-
-              <Border Background="#213044" CornerRadius="6" Padding="12">
-                <StackPanel Spacing="10">
-                  <TextBlock Text="Per-character launch settings" Classes="section" />
-                  <Grid ColumnDefinitions="*,12,*">
-                    <StackPanel Spacing="5">
-                      <TextBlock Text="Plugins (one id per line — blank loads all, &quot;none&quot; disables)" Classes="muted" />
-                      <TextBox Text="{Binding CharacterPluginsText, Mode=TwoWay}"
-                               AcceptsReturn="True"
-                               TextWrapping="Wrap"
-                               MinHeight="96" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Spacing="5">
-                      <TextBlock Text="Login commands (ordered, one per line)" Classes="muted" />
-                      <TextBox Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}"
-                               AcceptsReturn="True"
-                               TextWrapping="Wrap"
-                               MinHeight="96" />
-                    </StackPanel>
-                  </Grid>
-                  <Button Content="Save settings"
-                          HorizontalAlignment="Left"
-                          Command="{Binding SaveCharacterSettingsCommand}" />
-                </StackPanel>
-              </Border>
-            </StackPanel>
-          </StackPanel>
-        </ScrollViewer>
-      </Border>
-
-      <Border Grid.Column="2" Grid.Row="2" Classes="card">
-        <Grid RowDefinitions="Auto,Auto,*">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Text="Sessions" Classes="section" />
-            <Button Grid.Column="1"
-                    Content="Clear finished"
-                    Command="{Binding ClearFinishedSessionsCommand}" />
-          </Grid>
-          <Grid Grid.Row="1"
-                ColumnDefinitions="2*,2*,130,3*,Auto"
-                Margin="4,10,4,4">
-            <TextBlock Text="ACCOUNT" Classes="muted" FontSize="11" FontWeight="SemiBold" />
-            <TextBlock Grid.Column="1" Text="CHARACTER"
-                       Classes="muted" FontSize="11" FontWeight="SemiBold" />
-            <TextBlock Grid.Column="2" Text="STATUS"
-                       Classes="muted" FontSize="11" FontWeight="SemiBold" />
-            <TextBlock Grid.Column="3" Text="DETAIL"
-                       Classes="muted" FontSize="11" FontWeight="SemiBold" />
-          </Grid>
-          <ScrollViewer Grid.Row="2" Margin="0,0,0,0">
-            <ItemsControl ItemsSource="{Binding Sessions}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:LauncherSessionRowViewModel">
-                  <Border BorderBrush="#344559"
-                          BorderThickness="0,0,0,1"
-                          Padding="4,8">
-                    <Grid ColumnDefinitions="2*,2*,130,3*,Auto">
-                      <TextBlock Text="{Binding Account}"
-                                 FontWeight="SemiBold"
-                                 TextTrimming="CharacterEllipsis" />
-                      <TextBlock Grid.Column="1"
-                                 Text="{Binding Character}"
-                                 TextTrimming="CharacterEllipsis" />
-                      <TextBlock Grid.Column="2" Text="{Binding State}" />
-                      <StackPanel Grid.Column="3" Spacing="2">
-                        <TextBlock Text="{Binding Status}"
-                                   TextTrimming="CharacterEllipsis" Classes="muted" />
-                        <TextBlock Text="{Binding Error}"
-                                   Foreground="#FF9A9A"
-                                   IsVisible="{Binding HasError}"
-                                   TextTrimming="CharacterEllipsis" />
-                      </StackPanel>
-                      <Button Grid.Column="4" Content="Stop" Command="{Binding StopCommand}" />
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
-        </Grid>
-      </Border>
-    </Grid>
-
-    <Border Grid.Row="3" Background="#141C26" Padding="16,10">
-      <Grid ColumnDefinitions="*,Auto">
-        <StackPanel Spacing="2">
-          <TextBlock Text="{Binding OperationStatus}" />
-          <TextBlock Text="{Binding LastError}"
-                     Foreground="#FF9A9A"
-                     IsVisible="{Binding HasError}"
-                     TextWrapping="Wrap" />
+    <Grid Grid.Row="2" Margin="14,10" RowDefinitions="Auto,Auto,*">
+      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="Accounts" Classes="section" />
+          <TextBlock Text="{Binding CheckedSelectionSummary}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
         </StackPanel>
-        <Button Grid.Column="1"
-                Content="Cancel operation"
-                Command="{Binding CancelOperationCommand}" />
+        <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" />
+      </Grid>
+      <Grid Grid.Row="1" ColumnDefinitions="26,*,160,112,85,64,34" Margin="22,0,14,5" ColumnSpacing="6">
+        <TextBlock Grid.Column="1" Text="Server · status · players" Classes="muted" FontSize="12" />
+        <TextBlock Grid.Column="2" Text="Character" Classes="muted" FontSize="12" />
+        <TextBlock Grid.Column="3" Text="Launch mode" Classes="muted" FontSize="12" />
+        <TextBlock Grid.Column="4" Text="Session" Classes="muted" FontSize="12" />
+      </Grid>
+      <ScrollViewer Grid.Row="2" x:Name="AccountsScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Focusable="True">
+        <StackPanel Spacing="5">
+          <TextBlock Text="Add your users and servers with the editors below." IsVisible="{Binding !HasAccounts}" Classes="muted" Margin="8,16" />
+          <ItemsControl ItemsSource="{Binding Accounts}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:LauncherAccountGroupViewModel">
+                <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Margin="0,0,0,5">
+                  <StackPanel>
+                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="#1D2931" Padding="10,4" MinHeight="30"><ToggleButton.Template><ControlTemplate><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" /></Border></ControlTemplate></ToggleButton.Template><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="▾" IsVisible="{Binding IsExpanded}" /><TextBlock Text="▸" IsVisible="{Binding !IsExpanded}" /><TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" /></StackPanel></ToggleButton>
+                    <ItemsControl ItemsSource="{Binding Servers}" IsVisible="{Binding IsExpanded}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LauncherAccountServerRowViewModel">
+                          <Border BorderBrush="#2B3941" BorderThickness="0,1,0,0" Padding="12,3,8,3">
+                            <Grid ColumnDefinitions="26,*,160,112,85,64,34" ColumnSpacing="6">
+                              <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Select account and server for batch launch" />
+                              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" />
+                                <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
+                              </StackPanel>
+                              <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
+                              <ComboBox Grid.Column="3" ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Launch mode" />
+                              <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
+                              <Button Grid.Column="5" Content="Play" Classes="primary" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
+                              <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
+                              <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+    <Border Grid.Row="3" Background="#172128" Padding="14,8">
+      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <WrapPanel Orientation="Horizontal">
+            <Button Content="Edit Users" Command="{Binding EditUsersTextCommand}" Margin="0,0,6,3" />
+            <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" Margin="0,0,6,3" />
+            <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" Margin="0,0,6,3" />
+          </WrapPanel>
+          <Button Grid.Column="1" x:Name="PlayCheckedButton" Content="Play selected" Classes="primary" Command="{Binding LaunchCheckedCommand}" VerticalAlignment="Top" />
+        </Grid>
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBlock Text="{Binding OperationStatus}" Classes="muted" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OperationStatus}" VerticalAlignment="Center" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+            <Button Content="Installation &amp; updates">
+              <Button.Flyout><Flyout><StackPanel Spacing="8" Width="280">
+                <TextBlock Text="Installation &amp; updates" Classes="section" />
+                <TextBlock Text="{Binding InstallationStatus}" TextWrapping="Wrap" Classes="muted" />
+                <Button Content="First-run setup" Command="{Binding FirstRunWizardShell.OpenCommand}" />
+                <Button Content="Verify files" Command="{Binding VerifyContentCommand}" />
+                <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" />
+                <TextBlock Text="{Binding UpdatePrompt.Status}" TextWrapping="Wrap" Classes="muted" />
+              </StackPanel></Flyout></Button.Flyout>
+            </Button>
+            <Button Content="Log" Command="{Binding OpenSessionLogCommand}" />
+            <Button Content="Cancel" IsVisible="{Binding IsBusy}" Command="{Binding CancelOperationCommand}" />
+          </StackPanel>
+        </Grid>
+        <TextBlock Grid.Row="2" Text="{Binding LastError}" Foreground="#FFB0A0" IsVisible="{Binding HasError}" TextWrapping="Wrap" MaxHeight="56" />
       </Grid>
     </Border>
 
@@ -465,6 +332,7 @@
         <StackPanel Spacing="14">
           <TextBlock Text="{Binding UpdatePrompt.Title}" FontSize="24" FontWeight="Bold" />
           <TextBlock Text="{Binding UpdatePrompt.Body}" TextWrapping="Wrap" />
+          <TextBlock Text="Close your active sessions before installing the update." TextWrapping="Wrap" Foreground="#DBB573" IsVisible="{Binding HasActiveSessions}" />
           <Border Background="#24344B"
                   Padding="10"
                   CornerRadius="5"
@@ -504,6 +372,55 @@
                     Command="{Binding UpdatePrompt.UpdateCommand}" />
           </StackPanel>
         </StackPanel>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding TextEditor.IsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Text editor dialog">
+      <Border Classes="card" Margin="24" MaxWidth="880" VerticalAlignment="Stretch">
+        <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10">
+          <TextBlock Text="{Binding TextEditor.Title}" FontSize="22" />
+          <TextBlock Grid.Row="1" Text="{Binding TextEditor.HelpText}" TextWrapping="Wrap" Classes="muted" />
+          <TextBox Grid.Row="2" x:Name="ProfileTextBox" Text="{Binding TextEditor.Text, Mode=TwoWay}" AcceptsReturn="True" AcceptsTab="True"
+                   FontFamily="Cascadia Mono,Consolas,monospace" TextWrapping="NoWrap" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Profile text" />
+          <TextBlock Grid.Row="3" Text="{Binding TextEditor.Error}" Foreground="#FFB0A0" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Cancel" Command="{Binding TextEditor.CancelCommand}" />
+            <Button Content="Save" Classes="primary" Command="{Binding TextEditor.SaveCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsCharacterOptionsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Character options dialog">
+      <Border Classes="card" Margin="24" MaxWidth="720" VerticalAlignment="Stretch">
+        <Grid RowDefinitions="Auto,Auto,*,Auto,*,Auto,Auto" RowSpacing="8">
+          <TextBlock Text="{Binding SelectionTitle}" FontSize="22" />
+          <TextBlock Grid.Row="1" Text="Plugins · one id per line; blank loads all, none disables" Classes="muted" />
+          <TextBox Grid.Row="2" x:Name="CharacterPluginsTextBox" Text="{Binding CharacterPluginsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" />
+          <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          <TextBlock Grid.Row="5" Text="{Binding LastError}" Foreground="#FFB0A0" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Cancel" Command="{Binding CloseDesktopDialogCommand}" />
+            <Button Content="Save" Classes="primary" Command="{Binding SaveRowOptionsCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSessionLogOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Session log dialog">
+      <Border Classes="card" Margin="24" MaxWidth="960">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+          <TextBlock Text="Sessions" FontSize="22" />
+          <ScrollViewer Grid.Row="1"><ItemsControl ItemsSource="{Binding Sessions}"><ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:LauncherSessionRowViewModel"><Border Padding="6,8" BorderBrush="#35434B" BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="160,160,*" ColumnSpacing="10"><TextBlock Text="{Binding Account}" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Character}" TextWrapping="Wrap" />
+                <StackPanel Grid.Column="2"><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFB0A0" /></StackPanel>
+              </Grid></Border></DataTemplate>
+          </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+          <Button Grid.Row="2" x:Name="SessionLogCloseButton" Content="Close" Command="{Binding CloseDesktopDialogCommand}" HorizontalAlignment="Right" />
+        </Grid>
       </Border>
     </Border>
   </Grid>

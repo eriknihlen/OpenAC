@@ -7,7 +7,7 @@ using AcDream.Launcher.ViewModels;
 
 namespace AcDream.Launcher.Tests;
 
-public sealed class LauncherWindowViewModelTests
+public sealed partial class LauncherWindowViewModelTests
 {
     [Fact]
     public async Task InitializeProjectsHierarchySessionsAndFutureWorkflowShells()
@@ -40,7 +40,7 @@ public sealed class LauncherWindowViewModelTests
         await viewModel.StartBackgroundInitializationAsync();
         Assert.False(viewModel.IsInstallationChecking);
         Assert.True(viewModel.IsFirstRunRequired);
-        Assert.Contains("SHA-256", viewModel.FirstRunWizardShell.Body, StringComparison.Ordinal);
+        Assert.Contains("Build and install", viewModel.FirstRunWizardShell.Body, StringComparison.Ordinal);
         Assert.False(viewModel.UpdatePrompt.IsOpen);
         Assert.Empty(viewModel.UpdatePrompt.Body);
         viewModel.FirstRunWizardShell.OpenCommand.Execute(null);
@@ -927,6 +927,8 @@ public sealed class LauncherWindowViewModelTests
     {
         public event EventHandler? StateChanged;
 
+        public IReadOnlyList<LauncherServerSnapshot>? ServersOverride { get; set; }
+        public List<(string Server, string Account, string? Character, LaunchMode Mode)> LaunchRequests { get; } = [];
         public bool LoadCalled { get; private set; }
 
         public bool ClearCalled { get; private set; }
@@ -983,7 +985,7 @@ public sealed class LauncherWindowViewModelTests
         public void LoadProfiles() => LoadCalled = true;
 
         public LauncherStateSnapshot GetSnapshot() => new(
-            [CreateServerSnapshot()],
+            ServersOverride ?? [CreateServerSnapshot()],
             [Session],
             Platform,
             IsInstallationReady: InstalledRecord is not null,
@@ -1083,6 +1085,7 @@ public sealed class LauncherWindowViewModelTests
             CancellationToken cancellationToken = default)
         {
             LaunchRequest = (serverName, accountName, characterName, mode);
+            LaunchRequests.Add(LaunchRequest.Value);
             return LaunchHandler?.Invoke(cancellationToken) ?? Task.FromResult(Session);
         }
 

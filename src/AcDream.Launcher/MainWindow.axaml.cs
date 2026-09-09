@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
         if (DataContext is LauncherWindowViewModel viewModel)
         {
             viewModel.PollStatus();
+            viewModel.PollServerHealth();
         }
     }
 
@@ -94,7 +95,7 @@ public sealed partial class MainWindow : Window
             {
                 if (focusToRestore?.Focus() != true)
                 {
-                    ProfilesTree.Focus();
+                    AccountsScroll.Focus();
                 }
             });
         }
@@ -104,7 +105,19 @@ public sealed partial class MainWindow : Window
 
     private void FocusActiveModal(LauncherWindowViewModel viewModel)
     {
-        if (viewModel.EditorDialog.IsOpen)
+        if (viewModel.TextEditor.IsOpen)
+        {
+            ProfileTextBox.Focus();
+        }
+        else if (viewModel.IsCharacterOptionsOpen)
+        {
+            CharacterPluginsTextBox.Focus();
+        }
+        else if (viewModel.IsSessionLogOpen)
+        {
+            SessionLogCloseButton.Focus();
+        }
+        else if (viewModel.EditorDialog.IsOpen)
         {
             Control target = viewModel.EditorDialog.Kind switch
             {

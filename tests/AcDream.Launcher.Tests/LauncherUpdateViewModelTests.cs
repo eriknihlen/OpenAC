@@ -6,6 +6,38 @@ namespace AcDream.Launcher.Tests;
 public sealed class LauncherUpdateViewModelTests
 {
     [Fact]
+    public async Task BannerModeDefersModalUntilReviewAndClearsAvailabilityAfterInstall()
+    {
+        var updater = new FakeUpdater { ClientUpdateAvailable = true };
+        using var vm = Create(updater);
+        vm.AutoOpenDiscoveredUpdates = false;
+        await vm.StartupCheckAsync();
+        Assert.True(vm.IsClientUpdateAvailable);
+        Assert.False(vm.IsOpen);
+        vm.OpenAvailableUpdate();
+        Assert.True(vm.IsOpen);
+        await vm.UpdateCommand.ExecuteAsync();
+        Assert.False(vm.IsClientUpdateAvailable);
+        Assert.False(vm.IsOpen);
+    }
+
+    [Fact]
+    public async Task SuccessfulManualRetryReplacesPreviousFailureStatus()
+    {
+        var updater = new FakeUpdater
+        {
+            CheckHandler = _ => Task.FromException<LauncherUpdateCheckResult>(new IOException("Offline")),
+        };
+        using var vm = Create(updater);
+        await vm.StartupCheckAsync();
+        Assert.Contains("could not", vm.Status);
+        updater.CheckHandler = null;
+        await vm.StartupCheckAsync();
+        Assert.True(vm.StartupCheckSucceeded);
+        Assert.Contains("up to date", vm.Status);
+    }
+
+    [Fact]
     public async Task NothingOutOfDateNeverShowsTheDialog()
     {
         var updater = new FakeUpdater
@@ -222,7 +254,7 @@ public sealed class LauncherUpdateViewModelTests
         public Func<CancellationToken, Task<LauncherUpdateCheckResult>>? CheckHandler
         {
             get;
-            init;
+            set;
         }
 
         public Func<

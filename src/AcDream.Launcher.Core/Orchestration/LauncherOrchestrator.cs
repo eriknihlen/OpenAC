@@ -243,6 +243,25 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
     public void AddServer(string name, string host, int port) =>
         MutateProfiles(() => _profileStore.AddServer(name, host, port));
 
+    public string ReadProfileText(LauncherTextEditorKind kind)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            return LauncherProfileText.Read(_profileStore.Document, kind);
+        }
+    }
+
+    public void SaveProfileText(LauncherTextEditorKind kind, string text, string originalText) =>
+        MutateProfiles(() =>
+        {
+            if (!string.Equals(LauncherProfileText.Read(_profileStore.Document, kind), originalText, StringComparison.Ordinal))
+                throw new LauncherProfileException("Profiles changed while this editor was open. Close and reopen it before saving.");
+            foreach (var server in _profileStore.Document.Servers)
+                EnsureServerIdleLocked(server.Name);
+            LauncherProfileText.Apply(_profileStore.Document, kind, text);
+        });
+
     public void EditServer(string name, string newName, string newHost, int newPort) =>
         MutateProfiles(() =>
         {

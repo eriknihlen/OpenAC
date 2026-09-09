@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Net.Http;
+using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.Core.Installation;
 using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Orchestration;
@@ -18,6 +20,7 @@ public sealed partial class App : Application
     private LauncherOrchestrator? _orchestrator;
     private LauncherWindowViewModel? _viewModel;
     private LauncherUpdateComposition? _updateComposition;
+    private readonly HttpClient _serverStatusClient = new();
 
     public App()
     {
@@ -92,6 +95,8 @@ public sealed partial class App : Application
                 DataContext = _viewModel,
             };
             desktop.MainWindow = mainWindow;
+            _viewModel.UpdatePrompt.AutoOpenDiscoveredUpdates = false;
+            _viewModel.ConfigureServerHealth(new ServerHealthService(_serverStatusClient, new UdpServerReachabilityProbe()));
             _viewModel.Initialize();
             mainWindow.Opened += OnMainWindowOpened;
             desktop.Exit += OnDesktopExit;
@@ -100,16 +105,20 @@ public sealed partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void OnMainWindowOpened(object? sender, EventArgs e)
+    private async void OnMainWindowOpened(object? sender, EventArgs e)
     {
         if (sender is MainWindow window)
         {
             window.Opened -= OnMainWindowOpened;
         }
 
-        if (_viewModel is not null)
+        if (_viewModel is { } viewModel)
         {
-            _ = _viewModel.StartBackgroundInitializationAsync();
+            await viewModel.StartBackgroundInitializationAsync();
+            if (ReferenceEquals(_viewModel, viewModel) && viewModel.IsFirstRunRequired)
+            {
+                viewModel.FirstRunWizardShell.OpenCommand.Execute(null);
+            }
         }
     }
 
@@ -118,6 +127,7 @@ public sealed partial class App : Application
         _viewModel?.Dispose();
         _orchestrator?.Dispose();
         _updateComposition?.Dispose();
+        _serverStatusClient.Dispose();
         _viewModel = null;
         _orchestrator = null;
         _updateComposition = null;

@@ -8,7 +8,7 @@ using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.ViewModels;
 
-public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
+public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposable
 {
     private readonly ILauncherOrchestrator _orchestrator;
     private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(30);
@@ -68,6 +68,7 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
         UpdatePrompt.PropertyChanged += OnModalPropertyChanged;
         UpdatePrompt.StartupCheckCompleted += OnStartupUpdateCheckCompleted;
 
+        InitializeAccountCommands();
         AddServerCommand = new RelayCommand(OpenAddServerDialog, () => CanInteract);
         AddAccountCommand = new RelayCommand(OpenAddAccountDialog, CanAddAccount);
         AddCharacterCommand = new RelayCommand(OpenAddCharacterDialog, CanAddCharacter);
@@ -94,6 +95,7 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
         VerifyContentCommand = new AsyncRelayCommand(
             VerifyContentAsync,
             () => CanInteract && Sessions.All(session => !session.IsActive));
+        InitializeDesktop();
     }
 
     public ObservableCollection<LauncherTreeNodeViewModel> Servers { get; } = [];
@@ -149,7 +151,10 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
     public bool IsModalOpen =>
         EditorDialog.IsOpen
         || FirstRunWizardShell.IsOpen
-        || UpdatePrompt.IsOpen;
+        || UpdatePrompt.IsOpen
+        || (TextEditor?.IsOpen ?? false)
+        || IsCharacterOptionsOpen
+        || IsSessionLogOpen;
 
     private bool CanInteract => !IsBusy && !IsModalOpen;
 
@@ -352,6 +357,7 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        DisposeDesktop();
         _disposed = true;
         _startupCancellation.Cancel();
         _operationCancellation?.Cancel();
@@ -502,7 +508,12 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
 
     public void CloseActiveModal()
     {
-        if (EditorDialog.IsOpen)
+        CloseDesktopDialogs();
+        if (TextEditor.IsOpen)
+        {
+            TextEditor.Close();
+        }
+        else if (EditorDialog.IsOpen)
         {
             EditorDialog.Close();
         }
@@ -521,6 +532,7 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
         SelectionKey? previousSelection = preferredSelection ?? SelectionKey.From(SelectedNode);
         LauncherStateSnapshot snapshot = _orchestrator.GetSnapshot();
         _snapshot = snapshot;
+        RefreshAccountRows(snapshot);
 
         Servers.Clear();
         foreach (LauncherServerSnapshot server in snapshot.Servers)
@@ -1227,6 +1239,8 @@ public sealed class LauncherWindowViewModel : ObservableObject, IDisposable
 
     private void NotifyCommandStates()
     {
+        NotifyAccountCommands();
+        NotifyDesktopCommands();
         AddServerCommand.NotifyCanExecuteChanged();
         AddAccountCommand.NotifyCanExecuteChanged();
         AddCharacterCommand.NotifyCanExecuteChanged();
