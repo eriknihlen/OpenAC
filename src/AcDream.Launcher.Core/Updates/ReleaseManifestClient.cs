@@ -54,7 +54,7 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
         {
             Timeout = timeout ?? TimeSpan.FromSeconds(15),
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("acdream-launcher/1");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAC-launcher/1");
     }
 
     internal static ReleaseManifestClient CreateLoopbackFixture(

@@ -145,7 +145,7 @@ public sealed class BoundedProcessOutputCapture : IDisposable
         try
         {
             byte[] marker = Encoding.UTF8.GetBytes(
-                $"\n[acdream-launcher] client.err.log truncated at {_maxBytes} bytes\n");
+                $"\n[OpenAC launcher] client.err.log truncated at {_maxBytes} bytes\n");
             WriteChunkLocked(marker);
         }
         catch (Exception error) when (IsRecoverableIoFailure(error))

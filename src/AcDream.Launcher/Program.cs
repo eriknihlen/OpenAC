@@ -74,7 +74,7 @@ internal static class Program
             File.WriteAllText(
                 path,
                 $"""
-                 acdream launcher crash report
+                 OpenAC launcher crash report
                  utc: {DateTime.UtcNow:O}
                  os: {Environment.OSVersion}
                  rid: {System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}

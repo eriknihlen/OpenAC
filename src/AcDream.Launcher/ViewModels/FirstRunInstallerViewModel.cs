@@ -239,8 +239,8 @@ public sealed class FirstRunInstallerViewModel : ObservableObject, IDisposable
 
     public string CompletedBody => IsContentUpdate
         ? _completionRequirement
-            ?? "acdream built and verified the required world data. You can play now."
-        : "acdream built and verified your game content. You can play now.";
+            ?? "OpenAC built and verified the required world data. You can play now."
+        : "OpenAC built and verified your game content. You can play now.";
 
     public void SetCompletionRequirement(string? requirement)
     {
@@ -440,7 +440,7 @@ public sealed class FirstRunInstallerViewModel : ObservableObject, IDisposable
                 + $"{LauncherInstaller.FullRebuildRequiredFreeBytes / (1024d * 1024d * 1024d):N0} GiB "
                 + "while the optimized package is built beside the active one.";
         return $"This client needs recipe {migration.TargetRecipeVersion}: "
-            + $"{migration.Reason}. acdream will build {work} from your installed "
+            + $"{migration.Reason}. OpenAC will build {work} from your installed "
             + "Asheron's Call DAT files. The existing package stays in place "
             + $"until the new one has finished and verified. {estimate} "
             + "No work begins until you confirm below.";

@@ -1163,7 +1163,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         {
             _pendingInstalledContent = record;
             _isClientCompatibilityPending = true;
-            const string requirement = "acdream built and verified the world data. "
+            const string requirement = "OpenAC built and verified the world data. "
                 + "Install the matching game update next; Play stays disabled until it finishes.";
             FirstRunWizardShell.SetCompletionRequirement(requirement);
             _orchestrator.SetInstallationState(

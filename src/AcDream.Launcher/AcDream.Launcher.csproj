@@ -2,6 +2,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>acdream-launcher</AssemblyName>
+    <Title>OpenAC Launcher</Title>
+    <Product>OpenAC</Product>
+    <Description>OpenAC launcher, installer and updater</Description>
     <RootNamespace>AcDream.Launcher</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

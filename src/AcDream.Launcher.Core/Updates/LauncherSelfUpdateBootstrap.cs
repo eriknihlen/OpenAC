@@ -467,7 +467,7 @@ public static class LauncherSelfUpdateBootstrap
         if (!PathsEqual(executable, expectedExecutable))
         {
             throw new LauncherUpdateException(
-                "Self-update can run only from the published acdream-launcher executable.");
+                "Self-update can run only from the published OpenAC launcher executable.");
         }
     }
 

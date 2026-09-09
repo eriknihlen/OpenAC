@@ -459,7 +459,7 @@ public sealed class LauncherInstaller : ILauncherInstaller
             if (!File.Exists(bakeOutputPath))
             {
                 throw new LauncherInstallException(
-                    "The bake tool reported success but did not publish acdream.pak.");
+                    "The bake tool reported success but did not publish the prepared game data.");
             }
 
             long size = new FileInfo(bakeOutputPath).Length;

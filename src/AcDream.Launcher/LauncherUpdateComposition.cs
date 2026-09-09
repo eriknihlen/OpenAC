@@ -75,7 +75,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
             {
                 Timeout = TimeSpan.FromSeconds(15),
             };
-            artifactClient.DefaultRequestHeaders.UserAgent.ParseAdd("acdream-launcher/1");
+            artifactClient.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAC-launcher/1");
             manifestClient = CreateManifestClient(manifestUri);
             var selfUpdates = new LauncherSelfUpdateManager(paths, artifactClient);
             var updater = new LauncherUpdater(
