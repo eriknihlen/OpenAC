@@ -32,6 +32,8 @@ internal sealed class PlatformFramePacingWaiterFactory
                 WindowsHighResolutionFramePacingWaiter.Create(),
             GraphicalHostOperatingSystem.Linux =>
                 LinuxMonotonicFramePacingWaiter.Create(),
+            GraphicalHostOperatingSystem.MacOS =>
+                MacMonotonicFramePacingWaiter.Create(),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(_operatingSystem)),
         };

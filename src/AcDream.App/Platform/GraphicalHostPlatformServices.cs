@@ -9,12 +9,16 @@ internal enum GraphicalHostOperatingSystem
 {
     Windows,
     Linux,
+    MacOS,
 }
 
 internal static class RuntimePlatformGuard
 {
     [SupportedOSPlatformGuard("linux")]
     internal static bool IsLinuxRuntime => System.OperatingSystem.IsLinux();
+
+    [SupportedOSPlatformGuard("macos")]
+    internal static bool IsMacOsRuntime => System.OperatingSystem.IsMacOS();
 }
 
 internal sealed record GraphicalNativeDependency(
@@ -60,9 +64,11 @@ internal sealed record GraphicalHostPlatformServices(
             return GraphicalHostOperatingSystem.Windows;
         if (System.OperatingSystem.IsLinux())
             return GraphicalHostOperatingSystem.Linux;
+        if (System.OperatingSystem.IsMacOS())
+            return GraphicalHostOperatingSystem.MacOS;
 
         throw new PlatformNotSupportedException(
-            "acdream graphical hosting supports Windows and Linux.");
+            "acdream graphical hosting supports Windows, Linux, and macOS.");
     }
 
     private static string ResolveRuntimeIdentifier(
@@ -86,10 +92,14 @@ internal sealed record GraphicalHostPlatformServices(
                 "The first acdream Linux graphical package supports linux-x64 only.");
         }
 
-        string operatingSystemName =
-            operatingSystem == GraphicalHostOperatingSystem.Windows
-                ? "win"
-                : "linux";
+        string operatingSystemName = operatingSystem switch
+        {
+            GraphicalHostOperatingSystem.Windows => "win",
+            GraphicalHostOperatingSystem.Linux => "linux",
+            GraphicalHostOperatingSystem.MacOS => "osx",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(operatingSystem)),
+        };
         return $"{operatingSystemName}-{architectureName}";
     }
 
@@ -107,6 +117,11 @@ internal sealed record GraphicalHostPlatformServices(
             [
                 new("window/input", "libglfw.so.3"),
                 new("audio", "libopenal.so"),
+            ],
+            GraphicalHostOperatingSystem.MacOS =>
+            [
+                new("window/input", "libglfw.3.dylib"),
+                new("audio", "libopenal.dylib"),
             ],
             _ => throw new ArgumentOutOfRangeException(
                 nameof(operatingSystem)),

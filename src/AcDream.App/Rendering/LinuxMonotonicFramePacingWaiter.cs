@@ -42,9 +42,10 @@ internal sealed partial class LinuxMonotonicFramePacingWaiter
                 "Could not read the Linux monotonic clock.");
         }
 
-        long durationNanoseconds = ConvertTicksToNanoseconds(
-            durationTicks,
-            clockFrequency);
+        long durationNanoseconds =
+            FramePacingDuration.ConvertTicksToNanoseconds(
+                durationTicks,
+                clockFrequency);
         Timespec deadline = AddNanoseconds(now, durationNanoseconds);
         do
         {
@@ -62,31 +63,6 @@ internal sealed partial class LinuxMonotonicFramePacingWaiter
                 result,
                 "Waiting on the Linux monotonic frame deadline failed.");
         }
-    }
-
-    internal static long ConvertTicksToNanoseconds(
-        long durationTicks,
-        long clockFrequency)
-    {
-        if (durationTicks <= 0)
-            throw new ArgumentOutOfRangeException(nameof(durationTicks));
-        if (clockFrequency <= 0)
-            throw new ArgumentOutOfRangeException(nameof(clockFrequency));
-
-        long wholeSeconds = Math.DivRem(
-            durationTicks,
-            clockFrequency,
-            out long remainder);
-        if (wholeSeconds >= long.MaxValue / NanosecondsPerSecond)
-            return long.MaxValue;
-
-        long wholeNanoseconds = wholeSeconds * NanosecondsPerSecond;
-        long fractionalNanoseconds = checked((long)Math.Ceiling(
-            remainder * (double)NanosecondsPerSecond / clockFrequency));
-        if (wholeNanoseconds > long.MaxValue - fractionalNanoseconds)
-            return long.MaxValue;
-
-        return Math.Max(1L, wholeNanoseconds + fractionalNanoseconds);
     }
 
     private static Timespec AddNanoseconds(

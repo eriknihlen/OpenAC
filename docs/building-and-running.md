@@ -10,10 +10,16 @@
   at `127.0.0.1:9000`.
 - For the graphical client, a **Vulkan 1.3** capable GPU and driver. On
   Linux that means your distribution's Vulkan ICD for your GPU (for example
-  `mesa-vulkan-drivers` on Ubuntu) and an X11 or Wayland desktop.
+  `mesa-vulkan-drivers` on Ubuntu) and an X11 or Wayland desktop. On macOS it
+  means MoltenVK and the Vulkan loader (`brew install molten-vk
+  vulkan-loader`); MoltenVK is reached through
+  `VK_KHR_portability_enumeration`, and the loader needs
+  `VK_ICD_FILENAMES=$(brew --prefix)/etc/vulkan/icd.d/MoltenVK_icd.json`.
 
-Windows and Linux (x64) are both supported. The examples below use
-PowerShell; the bash equivalents differ only in how variables are set.
+Windows and Linux (x64) are both supported, and macOS (arm64) runs the
+graphical client and the bake step from source; the launcher is Windows and
+Linux only. The examples below use PowerShell; the bash equivalents differ
+only in how variables are set.
 
 ## Build and test
 

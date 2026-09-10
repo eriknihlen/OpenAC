@@ -61,15 +61,18 @@ players help us decide what to fix next.
 **Platforms.** Windows and Linux, 64-bit, for the launcher, the graphical
 client, and the headless host. Windows is where most of the play-testing
 happens; the Linux client is newer and has had less time in front of players,
-so reports from Linux desktops are especially welcome. macOS support for
-Apple silicon is on the roadmap.
+so reports from Linux desktops are especially welcome. macOS on Apple
+silicon runs the graphical client, built from source; the launcher does not
+support it yet.
 
 ## Roadmap
 
 - **Linux in CI.** The Linux graphical client builds, installs through the
   launcher, and plays, but CI runs its rendering tests on Windows hardware
   only. A Linux rendering lane is next.
-- **macOS on Apple silicon.**
+- **macOS in the launcher and CI.** The graphical client builds, renders
+  through MoltenVK, and plays on Apple silicon. The launcher does not run
+  there yet, and no CI lane covers it.
 - **Performance tuning.** Improve frame times, world streaming, memory use,
   and responsiveness.
 - **Housing.**

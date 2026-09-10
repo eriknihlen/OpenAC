@@ -152,6 +152,11 @@ public sealed unsafe class BitmapFont : IDisposable
             @"C:\Windows\Fonts\arial.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
             "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+            // macOS ships Menlo only as a .ttc collection, whose first font
+            // does not start at offset 0; stbtt_InitFont rejects it. Prefer
+            // the plain .ttf faces and keep the collections as a last resort.
+            "/System/Library/Fonts/SFNSMono.ttf",
+            "/System/Library/Fonts/Monaco.ttf",
             "/Library/Fonts/Menlo.ttc",
             "/System/Library/Fonts/Menlo.ttc",
         };

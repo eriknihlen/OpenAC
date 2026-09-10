@@ -10,6 +10,7 @@ internal enum GraphicalDisplayProtocol
     Windows,
     X11,
     Wayland,
+    Cocoa,
     Automatic,
 }
 
@@ -36,6 +37,15 @@ internal sealed record GraphicalWindowBackendSelection(
             return new(
                 GraphicalDisplayProtocol.Windows,
                 "Windows graphical host");
+        }
+
+        if (operatingSystem == GraphicalHostOperatingSystem.MacOS)
+        {
+            // GLFW exposes exactly one native backend on macOS, so the
+            // X11/Wayland selection below has nothing to choose between.
+            return new(
+                GraphicalDisplayProtocol.Cocoa,
+                "macOS graphical host");
         }
 
         string? configured = environment(EnvironmentVariable);
@@ -97,6 +107,7 @@ internal static class GraphicalWindowBackendConfigurator
     private const int GlfwPlatformInitHint = 0x00050003;
     private const int GlfwAnyPlatform = 0x00060000;
     private const int GlfwWin32Platform = 0x00060001;
+    private const int GlfwCocoaPlatform = 0x00060002;
     private const int GlfwWaylandPlatform = 0x00060003;
     private const int GlfwX11Platform = 0x00060004;
 
@@ -141,6 +152,8 @@ internal static class GraphicalWindowBackendConfigurator
                         GlfwX11Platform,
                     GraphicalDisplayProtocol.Wayland =>
                         GlfwWaylandPlatform,
+                    GraphicalDisplayProtocol.Cocoa =>
+                        GlfwCocoaPlatform,
                     GraphicalDisplayProtocol.Automatic =>
                         GlfwAnyPlatform,
                     _ => throw new ArgumentOutOfRangeException(
@@ -182,6 +195,7 @@ internal static class GraphicalWindowBackendConfigurator
 internal static unsafe class GlfwNativePlatformProbe
 {
     private const int GlfwWin32Platform = 0x00060001;
+    private const int GlfwCocoaPlatform = 0x00060002;
     private const int GlfwWaylandPlatform = 0x00060003;
     private const int GlfwX11Platform = 0x00060004;
 
@@ -190,6 +204,8 @@ internal static unsafe class GlfwNativePlatformProbe
     {
         if (operatingSystem == GraphicalHostOperatingSystem.Windows)
             return GraphicalDisplayProtocol.Windows;
+        if (operatingSystem == GraphicalHostOperatingSystem.MacOS)
+            return GraphicalDisplayProtocol.Cocoa;
 
         if (!GraphicalWindowBackendConfigurator.TryGetConfiguredApi(
                 out Glfw? glfw)
@@ -208,6 +224,7 @@ internal static unsafe class GlfwNativePlatformProbe
             GlfwX11Platform => GraphicalDisplayProtocol.X11,
             GlfwWaylandPlatform => GraphicalDisplayProtocol.Wayland,
             GlfwWin32Platform => GraphicalDisplayProtocol.Windows,
+            GlfwCocoaPlatform => GraphicalDisplayProtocol.Cocoa,
             _ => GraphicalDisplayProtocol.Unknown,
         };
     }
