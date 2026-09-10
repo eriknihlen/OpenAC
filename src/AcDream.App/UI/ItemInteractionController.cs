@@ -528,6 +528,9 @@ public sealed class ItemInteractionController : IDisposable
     public bool TrySalvageItemsForAutomation(
         uint toolId,
         IReadOnlyList<uint> itemIds)
+        => TrySalvageItems(toolId, itemIds);
+
+    public bool TrySalvageItems(uint toolId, IReadOnlyList<uint> itemIds)
     {
         if (_sendSalvage is null
             || toolId == 0u
@@ -549,9 +552,7 @@ public sealed class ItemInteractionController : IDisposable
                 || !distinct.Add(itemId)
                 || !IsOwnedByPlayer(itemId)
                 || _objects.Get(itemId) is not { } item
-                || item.MaterialType is null or 0u
-                || item.Structure >= 100
-                || ((item.PublicWeenieBitfield ?? 0u) & 0xFF000000u) != 0u)
+                || !SalvageItemPolicy.IsSuitable(item))
             {
                 return false;
             }

@@ -1,4 +1,5 @@
 using AcDream.App.Settings;
+using AcDream.App.Rendering;
 using AcDream.App.Rendering.Vfx;
 using AcDream.App.Update;
 using AcDream.UI.Abstractions.Panels.Settings;
@@ -7,6 +8,27 @@ namespace AcDream.App.Tests.World;
 
 public sealed class LiveObjectFrameControllerTests
 {
+    [Fact]
+    public void SkyPesActivationBindingReleasesOnlyItsOwnGate()
+    {
+        var slot = new SkyPesActivationGateSlot();
+        var first = new RecordingSkyPesActivationGate();
+        var second = new RecordingSkyPesActivationGate();
+
+        IDisposable firstLease = slot.BindOwned(first);
+        slot.Tick();
+        Assert.Equal(1, first.Calls);
+
+        firstLease.Dispose();
+        IDisposable secondLease = slot.BindOwned(second);
+        firstLease.Dispose();
+        slot.Tick();
+        secondLease.Dispose();
+
+        Assert.Equal(1, first.Calls);
+        Assert.Equal(1, second.Calls);
+    }
+
     [Theory]
     [InlineData(ParticleRange.Retail, 1f)]
     [InlineData(
@@ -52,5 +74,12 @@ public sealed class LiveObjectFrameControllerTests
         public DisplaySettings DisplayPreview { get; set; } = display;
 
         public AudioSettings AudioPreview => AudioSettings.Default;
+    }
+
+    private sealed class RecordingSkyPesActivationGate : ISkyPesActivationGate
+    {
+        public int Calls { get; private set; }
+
+        public void Tick() => Calls++;
     }
 }

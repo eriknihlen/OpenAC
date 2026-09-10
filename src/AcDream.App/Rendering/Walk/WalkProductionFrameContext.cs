@@ -61,7 +61,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         float viewportWidth,
         float viewportHeight,
         uint viewerCellId = 0u,
-        bool weatherGateOpen = false)
+        bool weatherGateOpen = false,
+        bool buildingDegradesDisabled = false)
     {
         _cells = cells ?? throw new ArgumentNullException(nameof(cells));
         _buildings = buildings ?? throw new ArgumentNullException(nameof(buildings));
@@ -69,7 +70,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
             viewProjection, viewportWidth, viewportHeight);
         Reset(
             worldViewpoint, forward, viewProjection, viewportWidth, viewportHeight,
-            viewerCellId, weatherGateOpen);
+            viewerCellId, weatherGateOpen, buildingDegradesDisabled);
     }
 
     internal void Reset(
@@ -79,7 +80,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         float viewportWidth,
         float viewportHeight,
         uint viewerCellId = 0u,
-        bool weatherGateOpen = false)
+        bool weatherGateOpen = false,
+        bool buildingDegradesDisabled = false)
     {
         _rays.Reset(viewProjection, viewportWidth, viewportHeight);
         WorldViewpoint = worldViewpoint;
@@ -88,6 +90,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         ViewportHeight = viewportHeight;
         ViewerCellId = viewerCellId;
         WeatherGateOpen = weatherGateOpen;
+        BuildingDegradesDisabled = buildingDegradesDisabled;
         _activeViewVertCount = 0;
         CyPlane = new WalkPlane(forward, -Vector3.Dot(worldViewpoint, forward) - ZNear);
     }
@@ -97,6 +100,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
     public float ViewportHeight { get; private set; }
     public uint ViewerCellId { get; private set; }
     public bool WeatherGateOpen { get; private set; }
+    public bool BuildingDegradesDisabled { get; private set; }
     public WalkPlane CyPlane { get; private set; }
     public IWalkRayCaster Rays => _rays;
     public IWalkFrameContext CellContext => this;

@@ -6,6 +6,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.UI.Layout;
 
@@ -997,6 +998,15 @@ public sealed class AppraisalUiController : IRetainedPanelController
     }
 
     public void OnHidden() => _windowVisible = false;
+
+    public bool HandleInputAction(InputAction action)
+    {
+        if (_disposed || !_windowVisible || action != InputAction.SelectionExamine)
+            return false;
+
+        _closeWindow();
+        return true;
+    }
 
     private void HandleSelectionChanged(SelectionTransition transition)
     {

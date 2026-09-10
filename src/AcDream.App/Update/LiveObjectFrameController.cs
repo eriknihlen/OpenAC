@@ -120,6 +120,39 @@ internal sealed class LiveEffectFrameController
     }
 }
 
+internal sealed class SkyPesActivationGateSlot : ISkyPesActivationGate
+{
+    private ISkyPesActivationGate? _gate;
+
+    public IDisposable BindOwned(ISkyPesActivationGate gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        if (_gate is not null)
+            throw new InvalidOperationException("Sky presentation effects are already bound.");
+
+        _gate = gate;
+        return new Binding(this, gate);
+    }
+
+    public void Tick() => _gate?.Tick();
+
+    private void Unbind(ISkyPesActivationGate expected)
+    {
+        if (ReferenceEquals(_gate, expected))
+            _gate = null;
+    }
+
+    private sealed class Binding(
+        SkyPesActivationGateSlot slot,
+        ISkyPesActivationGate expected) : IDisposable
+    {
+        private SkyPesActivationGateSlot? _slot = slot;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref _slot, null)?.Unbind(expected);
+    }
+}
+
 internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
 {
     private readonly RetailInboundEventDispatcher _inboundEvents;
@@ -135,6 +168,7 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
         _animatedEntities;
     private readonly EquippedChildRenderController _equippedChildren;
     private readonly LiveEffectFrameController _effects;
+    private readonly SkyPesActivationGateSlot _skyPesActivation = new();
     private readonly ILiveRenderProjectionSink? _renderProjections;
     private readonly StaticRenderProjectionJournal? _staticRenderProjections;
     private readonly List<WorldEntity> _activeStaticProjectionScratch = [];
@@ -182,6 +216,9 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
             deltaSeconds,
             static (controller, elapsed) => controller.TickCore(elapsed));
 
+    public IDisposable BindSkyPesActivationGateOwned(ISkyPesActivationGate gate) =>
+        _skyPesActivation.BindOwned(gate);
+
     private void TickCore(float deltaSeconds)
     {
         _localPlayerFrame.AdvanceBeforeNetwork(deltaSeconds);
@@ -215,6 +252,7 @@ internal sealed class LiveObjectFrameController : ILiveObjectFramePhase
                 _activeStaticProjectionScratch);
         }
         _staticAnimations.ProcessHooks();
+        _skyPesActivation.Tick();
         _effects.Tick(deltaSeconds);
     }
 }

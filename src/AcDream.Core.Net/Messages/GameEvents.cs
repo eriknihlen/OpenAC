@@ -390,6 +390,59 @@ public static class GameEvents
             BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(4)));
     }
 
+    public readonly record struct SalvageResult(
+        uint MaterialType,
+        double Workmanship,
+        uint Units);
+
+    public readonly record struct SalvageOperationsResult(
+        uint SkillId,
+        IReadOnlyList<uint> UnsuitableItemGuids,
+        IReadOnlyList<SalvageResult> Results,
+        int AugmentationBonusPercent);
+
+    public static SalvageOperationsResult? ParseSalvageOperationsResult(
+        ReadOnlySpan<byte> payload)
+    {
+        const int ResultSize = 16;
+        int position = 0;
+        if (payload.Length < 16)
+            return null;
+
+        uint skillId = BinaryPrimitives.ReadUInt32LittleEndian(payload); position += 4;
+        uint unsuitableCount = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(position)); position += 4;
+        if (unsuitableCount > (uint)((payload.Length - position) / sizeof(uint)))
+            return null;
+
+        var unsuitable = new uint[(int)unsuitableCount];
+        for (int index = 0; index < unsuitable.Length; index++)
+        {
+            unsuitable[index] = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(position));
+            position += sizeof(uint);
+        }
+
+        if (payload.Length - position < sizeof(uint) + sizeof(int))
+            return null;
+        uint resultCount = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(position));
+        position += sizeof(uint);
+        if (resultCount > (uint)((payload.Length - position - sizeof(int)) / ResultSize))
+            return null;
+
+        var results = new SalvageResult[(int)resultCount];
+        for (int index = 0; index < results.Length; index++)
+        {
+            uint materialType = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(position)); position += 4;
+            double workmanship = BinaryPrimitives.ReadDoubleLittleEndian(payload.Slice(position)); position += 8;
+            uint units = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(position)); position += 4;
+            results[index] = new SalvageResult(materialType, workmanship, units);
+        }
+
+        if (payload.Length - position < sizeof(int))
+            return null;
+        int augmentationBonus = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(position));
+        return new SalvageOperationsResult(skillId, unsuitable, results, augmentationBonus);
+    }
+
     public static uint? ParseCloseGroundContainer(ReadOnlySpan<byte> payload)
     {
         if (payload.Length < 4) return null;

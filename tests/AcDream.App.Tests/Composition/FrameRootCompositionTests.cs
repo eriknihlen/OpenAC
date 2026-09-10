@@ -13,6 +13,27 @@ namespace AcDream.App.Tests.Composition;
 public sealed class FrameRootCompositionTests
 {
     [Fact]
+    public void RuntimeBindingsClearSkyActivationGateOnRollback()
+    {
+        var calls = new List<string>();
+        var gate = new RecordingSkyPesActivationGate(calls);
+        var slot = new SkyPesActivationGateSlot();
+        var bindings = new FrameRootRuntimeBindings();
+        bindings.Adopt("sky presentation effects activation", slot.BindOwned(gate));
+        var scope = new CompositionAcquisitionScope();
+        scope.Own(
+            "frame-root runtime bindings",
+            bindings,
+            static value => value.Dispose());
+
+        Assert.Throws<InvalidOperationException>(() =>
+            scope.RollbackAndThrow(new InvalidOperationException("composition failed")));
+        slot.Tick();
+
+        Assert.Empty(calls);
+    }
+
+    [Fact]
     public void RuntimeBindingsReleaseInReverseAndRetryOnlyFailedEdges()
     {
         var calls = new List<string>();
@@ -190,6 +211,12 @@ public sealed class FrameRootCompositionTests
             if (_failures-- > 0)
                 throw new InvalidOperationException("retry");
         }
+    }
+
+    private sealed class RecordingSkyPesActivationGate(List<string> calls)
+        : ISkyPesActivationGate
+    {
+        public void Tick() => calls.Add("tick");
     }
 
     private static int CallIndex(

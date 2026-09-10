@@ -489,6 +489,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
         };
         cell.SetItem(guid, tex, dragIconTexture: dragTex);
+        SetStructureBar(cell, item);
         cell.SetWaitingState(waiting);
         cell.SlotIndex = list.GetNumUIItems();                 // index it will occupy (== its slot in a packed list)
         ConfigureDropFeedback(list, cell);
@@ -546,6 +547,11 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         if (cap <= 0) { cell.CapacityFill = -1f; return; }
         int n = CountLooseContents(containerGuid);
         cell.CapacityFill = Math.Clamp(n / (float)cap, 0f, 1f);
+    }
+
+    private static void SetStructureBar(UiItemSlot cell, ClientObject? item)
+    {
+        cell.SetStructure(item?.Structure ?? 0, item?.MaxStructure ?? 0);
     }
 
     public void OnDragLift(UiItemList sourceList, UiItemSlot sourceCell, ItemDragPayload payload)

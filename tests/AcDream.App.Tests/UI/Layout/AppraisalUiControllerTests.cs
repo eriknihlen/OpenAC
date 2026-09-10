@@ -8,6 +8,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.Tests.UI.Layout;
 
@@ -15,6 +16,47 @@ public sealed class AppraisalUiControllerTests
 {
     private const uint ObjectId = 0x50000001u;
     private static (uint, int, int) NoTexture(uint _) => (0u, 0, 0);
+
+    [Fact]
+    public void InspectKeyClosesVisibleWindowAndAllowsNextInspectToOpenIt()
+    {
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Chainmail Basinet",
+            Type = ItemType.Clothing,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        int closed = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => closed++)!;
+
+        Assert.False(controller.HandleInputAction(InputAction.SelectionExamine));
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+        controller.OnShown();
+
+        Assert.False(controller.HandleInputAction(InputAction.SelectRight));
+        Assert.True(controller.HandleInputAction(InputAction.SelectionExamine));
+        Assert.Equal(1, closed);
+        Assert.Single(sent);
+        Assert.Equal(0, interaction.BusyCount);
+        controller.OnHidden();
+
+        Assert.False(controller.HandleInputAction(InputAction.SelectionExamine));
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+        controller.OnShown();
+        Assert.Equal(2, shown);
+        Assert.Equal(2, sent.Count);
+        Assert.True(controller.HandleInputAction(InputAction.SelectionExamine));
+        Assert.Equal(2, closed);
+    }
 
     [Fact]
     public void ItemResponse_UsesAuthoredItemSubviewTitleAndScrollbars()

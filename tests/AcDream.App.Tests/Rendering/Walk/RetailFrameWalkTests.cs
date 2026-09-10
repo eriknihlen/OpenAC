@@ -84,6 +84,7 @@ public sealed class RetailFrameWalkTests
 
         public Vector3 ViewpointInBuilding(WalkBuilding building) => Vector3.Zero;
         public virtual float ViewerDistanceTo(WalkBuilding building) => 0f;
+        public bool BuildingDegradesDisabled { get; set; }
         public IWalkFrameContext CellContext => this;
         public WalkPlane CyPlane { get; set; } = new(new Vector3(0, 0, 1), 0f);
         public void SetActiveView(WalkPortalView views, int index) { }
@@ -299,6 +300,74 @@ public sealed class RetailFrameWalkTests
     private sealed class DistanceContext(float distance) : TestContext
     {
         public override float ViewerDistanceTo(WalkBuilding building) => distance;
+    }
+
+    [Fact]
+    public void OverheadBuildingSelectionSurvivesTheFinalEmptyLevelAndRestoresDistanceSelection()
+    {
+        var building = new WalkBuilding
+        {
+            GfxObjId = 0x01000001u,
+            DegradeLevels =
+            [
+                new(0x01000001u, 1u, 24f, 48f, 96f, null),
+                new(0x01000002u, 1u, 192f, 392f, 392f, null),
+                new(0u, 1u, float.MaxValue, float.MaxValue, float.MaxValue, null),
+            ],
+        };
+        var walk = new RetailFrameWalk();
+        var context = new DistanceContext(450f);
+        var normal = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, normal);
+        Assert.Empty(normal.ShellSelections);
+
+        context.BuildingDegradesDisabled = true;
+        var overhead = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, overhead);
+        Assert.Equal(0x01000001u, Assert.Single(overhead.ShellSelections).GfxObjId);
+
+        context.BuildingDegradesDisabled = false;
+        var restored = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, restored);
+        Assert.Empty(restored.ShellSelections);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void CoarseTerrainDrawsAllBuildingShellsWithinObjectRangeAndUpdatesOnRecenter(int ring)
+    {
+        const uint viewerCell = 0xA9B40001u;
+        uint landblock = 0xA9000000u | ((uint)(0xB4 + ring) << 16);
+        var entries = new[] { 1u, 2u, 64u }.Select((cell, index) =>
+            new WalkBuildingFactory.Entry(
+                new WalkBuilding { PositionCellId = landblock | cell, GfxObjId = 0x01000001u + (uint)index },
+                Matrix4x4.Identity, Matrix4x4.Identity)).ToArray();
+        var assembler = new WalkLandscapeAssembler();
+        assembler.PublishLandblock(landblock, 10f, 0f, entries);
+        assembler.SetViewer(viewerCell, Vector3.Zero);
+        var walk = new RetailFrameWalk { ObjectRingLimit = ring };
+
+        AssertShells(3);
+        walk.ObjectRingLimit = ring - 1;
+        AssertShells(0);
+        walk.ObjectRingLimit = ring;
+
+        assembler.SetViewer(landblock | 1u, Vector3.Zero);
+        AssertShells(3);
+        assembler.SetViewer(viewerCell, Vector3.Zero);
+        AssertShells(3);
+        assembler.ClearBuildings(landblock);
+        AssertShells(0);
+
+        void AssertShells(int count)
+        {
+            var recorder = new Recorder();
+            walk.DrawLandscape(assembler.Landscape, new WalkPortalView(), new TestContext(), recorder);
+            Assert.Equal(count, recorder.ShellSelections.Count);
+            Assert.Equal(count, recorder.ShellSelections.Select(s => s.GfxObjId).Distinct().Count());
+        }
     }
 
 

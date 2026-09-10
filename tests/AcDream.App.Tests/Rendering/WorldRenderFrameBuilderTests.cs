@@ -1,18 +1,26 @@
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using AcDream.App.Composition;
 using AcDream.App.Input;
 using AcDream.App.Rendering;
+using AcDream.App.Rendering.Gpu;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Rendering.Vfx;
 using AcDream.App.Streaming;
+using AcDream.App.Tests.Rendering.Gpu;
 using AcDream.App.Tests.Architecture;
 using AcDream.App.World;
 using AcDream.Core.Lighting;
 using AcDream.Core.Physics;
 using AcDream.Core.Rendering;
+using AcDream.Core.Vfx;
 using AcDream.Core.World;
 using AcDream.Core.World.Cells;
+using DatPhysicsScript = DatReaderWriter.DBObjs.PhysicsScript;
+using DatAnimationHook = DatReaderWriter.Types.AnimationHook;
+using DatPhysicsScriptData = DatReaderWriter.Types.PhysicsScriptData;
+using DatSoundTweakedHook = DatReaderWriter.Types.SoundTweakedHook;
 
 namespace AcDream.App.Tests.Rendering;
 
@@ -214,6 +222,7 @@ public sealed class WorldRenderFrameBuilderTests
             Assert.False(result.PlayerSeenOutside);
             Assert.True(result.RootSeenOutside);
             Assert.True(result.RenderSky);
+            Assert.False(result.SkyEffectsActive);
             Assert.False(result.CameraInsideEnclosedCell);
             Assert.True(result.PlayerOrCameraInsideEnclosedCell);
             Assert.True(result.IsAtmosphericallyOutdoor);
@@ -249,9 +258,127 @@ public sealed class WorldRenderFrameBuilderTests
         Assert.False(result.PlayerInsideCell);
         Assert.False(result.CameraInsideCell);
         Assert.True(result.RenderSky);
+        Assert.True(result.SkyEffectsActive);
         Assert.False(result.CameraInsideEnclosedCell);
         Assert.False(result.PlayerOrCameraInsideEnclosedCell);
         Assert.True(result.IsAtmosphericallyOutdoor);
+    }
+
+    [Fact]
+    public void Map_mode_disables_distance_fog_only_for_the_active_retail_chase_camera()
+    {
+        var atmosphere = new AtmosphereSnapshot(
+            WeatherKind.Storm,
+            Intensity: 0.8f,
+            FogColor: new Vector3(0.1f, 0.2f, 0.3f),
+            FogStart: 30f,
+            FogEnd: 180f,
+            FogMode: FogMode.Linear,
+            LightningFlash: 0.6f,
+            Override: EnvironOverride.BlackFog);
+        var controller = new CameraController(new OrbitCamera(), new FlyCamera());
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        controller.EnterChaseMode(legacy, retail);
+        retail.ToggleRetailMapModeView();
+        bool savedRetailCamera = CameraDiagnostics.UseRetailChaseCamera;
+
+        try
+        {
+            CameraDiagnostics.UseRetailChaseCamera = true;
+            var viewPlane = new TeleportViewPlaneController();
+            viewPlane.Begin(controller.Active.Projection);
+            var source = new RuntimeWorldFrameCameraSource(controller, viewPlane.ApplyTo);
+            WorldCameraFrame overheadFrame = source.Resolve();
+            Assert.True(WorldCameraViewPolicy.IsOverheadView(controller.Active));
+            Assert.False(WorldCameraViewPolicy.IsOverheadView(overheadFrame.Camera));
+            Assert.True(overheadFrame.IsOverheadView);
+
+            using var device = new RecordingGpuDevice();
+            using IGpuFrame gpuFrame = device.BeginFrame();
+            var sections = new WorldFrameSections();
+            using var lightingUbo = new SceneLightingUboBinding(
+                new FixedGpuFrameSource(gpuFrame),
+                sections);
+            lightingUbo.BeginFrame(gpuFrame.SlotIndex);
+            var environment = new RuntimeWorldFrameEnvironmentPreparation(
+                RuntimeOptions.Parse("test-dat", _ => null),
+                new WorldTimeService(SkyStateProvider.Default()),
+                new LightManager(),
+                dispatcher: null,
+                environmentCells: null,
+                lightingUbo,
+                new WorldRenderRangeState(4, 12),
+                skyPes: null);
+            WorldRootFrame roots = default;
+            var foundation = new RenderFrameFoundation(
+                PortalViewportVisible: false,
+                Sky: default,
+                Atmosphere: atmosphere);
+
+            environment.Prepare(in overheadFrame, in roots, in foundation, activeDayGroup: null);
+            SceneLightingUbo overheadUbo = ReadSceneLighting(sections);
+            Assert.Equal((float)FogMode.Off, overheadUbo.FogParams.W);
+            Assert.Equal(atmosphere.FogStart, overheadUbo.FogParams.X);
+            Assert.Equal(atmosphere.FogEnd, overheadUbo.FogParams.Y);
+            Assert.Equal(atmosphere.LightningFlash, overheadUbo.FogParams.Z);
+
+            CameraDiagnostics.UseRetailChaseCamera = false;
+            Assert.False(WorldCameraViewPolicy.IsOverheadView(controller.Active));
+            Assert.False(source.Resolve().IsOverheadView);
+
+            controller.ToggleFly();
+            Assert.False(source.Resolve().IsOverheadView);
+            controller.ToggleFly();
+            Assert.False(source.Resolve().IsOverheadView);
+
+            controller.EnterChaseMode(legacy, retail);
+
+            retail.ToggleRetailMapModeView();
+            CameraDiagnostics.UseRetailChaseCamera = true;
+            WorldCameraFrame restoredFrame = source.Resolve();
+            Assert.False(restoredFrame.IsOverheadView);
+            AtmosphereSnapshot newWeather = atmosphere with
+            {
+                FogMode = FogMode.Exp2,
+                FogStart = 240f,
+                FogEnd = 720f,
+            };
+            RenderFrameFoundation afterMapExit = foundation with { Atmosphere = newWeather };
+            environment.Prepare(in restoredFrame, in roots, in afterMapExit, activeDayGroup: null);
+            SceneLightingUbo restoredUbo = ReadSceneLighting(sections);
+            Assert.Equal((float)newWeather.FogMode, restoredUbo.FogParams.W);
+            Assert.Equal(newWeather.FogStart, restoredUbo.FogParams.X);
+            Assert.Equal(newWeather.FogEnd, restoredUbo.FogParams.Y);
+
+            AtmosphereSnapshot userDisabled = newWeather with { FogMode = FogMode.Off };
+            RenderFrameFoundation disabledByUser = foundation with { Atmosphere = userDisabled };
+            environment.Prepare(in restoredFrame, in roots, in disabledByUser, activeDayGroup: null);
+            Assert.Equal((float)FogMode.Off, ReadSceneLighting(sections).FogParams.W);
+
+            CameraDiagnostics.UseRetailChaseCamera = false;
+            legacy.ToggleRetailMapModeView();
+            WorldCameraFrame legacyMapFrame = source.Resolve();
+            Assert.True(legacyMapFrame.IsOverheadView);
+            environment.Prepare(in legacyMapFrame, in roots, in afterMapExit, activeDayGroup: null);
+            Assert.Equal((float)FogMode.Off, ReadSceneLighting(sections).FogParams.W);
+
+            legacy.ToggleRetailMapModeView();
+            WorldCameraFrame legacyRestoredFrame = source.Resolve();
+            Assert.False(legacyRestoredFrame.IsOverheadView);
+            environment.Prepare(in legacyRestoredFrame, in roots, in afterMapExit, activeDayGroup: null);
+            Assert.Equal((float)newWeather.FogMode, ReadSceneLighting(sections).FogParams.W);
+
+            CameraDiagnostics.UseRetailChaseCamera = true;
+            retail.ToggleRetailLookDownView();
+            Assert.False(source.Resolve().IsOverheadView);
+            retail.SetRetailFirstPersonView();
+            Assert.False(source.Resolve().IsOverheadView);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = savedRetailCamera;
+        }
     }
 
     [Fact]
@@ -296,6 +423,103 @@ public sealed class WorldRenderFrameBuilderTests
 
         Assert.Contains(visibleLight, lighting.PointSnapshot);
         Assert.Contains(hiddenLight, lighting.PointSnapshot);
+    }
+
+    [Fact]
+    public void Runtime_environment_stops_sky_hooks_before_an_enclosed_frame_can_dispatch_them()
+    {
+        const uint otherOwner = 0x50000001u;
+        var calls = new List<(uint EntityId, DatAnimationHook Hook)>();
+        var router = new AnimationHookRouter();
+        router.Register(new RecordingHookSink(calls));
+        var sound = new DatSoundTweakedHook
+        {
+            SoundId = 0x0A00038Bu,
+            Volume = 0.1f,
+            Priority = 1f,
+        };
+        var script = new DatPhysicsScript();
+        script.ScriptData.Add(new DatPhysicsScriptData
+        {
+            StartTime = 1.0,
+            Hook = sound,
+        });
+        var runner = new PhysicsScriptRunner(_ => script, router);
+        var poses = new EntityEffectPoseRegistry();
+        var particles = new ParticleHookSink(
+            new ParticleSystem(new EmitterDescRegistry()),
+            poses);
+        var stoppedAudioOwners = new List<uint>();
+        var skyPes = new SkyPesFrameController(
+            runner,
+            particles,
+            poses,
+            effects: null,
+            diagnostic: null,
+            stopAudio: stoppedAudioOwners.Add);
+        var environment = new RuntimeWorldFrameEnvironmentPreparation(
+            RuntimeOptions.Parse("test-dat", _ => null),
+            new WorldTimeService(SkyStateProvider.Default()),
+            new LightManager(),
+            dispatcher: null,
+            environmentCells: null,
+            lightingUbo: null,
+            new WorldRenderRangeState(4, 12),
+            skyPes);
+        WorldCameraFrame camera = CameraFrame(new FlyCamera());
+        RenderFrameFoundation foundation = default;
+        var sky = new DayGroupData
+        {
+            Name = "Test",
+            SkyObjects =
+            [
+                new SkyObjectData
+                {
+                    GfxObjId = 0x02000714u,
+                    DefaultScriptId = 0x330007DBu,
+                    PesObjectId = 0x330007DBu,
+                },
+            ],
+        };
+        WorldRootFrame outdoor = default;
+        var enclosed = new WorldRootFrame(
+            PlayerRoot: null,
+            PlayerSeenOutside: false,
+            ViewerCellId: 0x01010100u,
+            ViewerEyePosition: Vector3.Zero,
+            PlayerViewPosition: Vector3.Zero,
+            ViewerRoot: new LoadedCell { CellId = 0x01010100u, SeenOutside = true },
+            CameraInsideCell: true,
+            RootSeenOutside: true,
+            PlayerInsideCell: true,
+            PlayerLandblockId: null,
+            RenderCenterLandblockX: 0,
+            RenderCenterLandblockY: 0,
+            PlayerCellId: 0x01010100u,
+            PlayerIndoorGate: true);
+
+        Assert.True(enclosed.RenderSky);
+        Assert.False(enclosed.SkyEffectsActive);
+
+        environment.Prepare(in camera, in outdoor, in foundation, sky);
+        Assert.True(runner.PlayDirect(otherOwner, 0x330007DBu));
+
+        var updateGate = new RuntimeSkyPesActivationGate(
+            skyPes,
+            new RecordingCamera([], camera),
+            new RecordingRoots([], enclosed));
+        updateGate.Tick();
+        runner.Tick(1.0);
+
+        var otherCall = Assert.Single(calls);
+        Assert.Equal(otherOwner, otherCall.EntityId);
+        Assert.Equal([0xF0000000u], stoppedAudioOwners);
+
+        environment.Prepare(in camera, in outdoor, in foundation, sky);
+        runner.Tick(2.0);
+
+        Assert.Equal(2, calls.Count);
+        Assert.Equal(0xF0000000u, calls[1].EntityId);
     }
 
     [Fact]
@@ -494,6 +718,33 @@ public sealed class WorldRenderFrameBuilderTests
             calls.Add("camera");
             return result;
         }
+    }
+
+    private sealed class RecordingHookSink(
+        List<(uint EntityId, DatAnimationHook Hook)> calls) : IAnimationHookSink
+    {
+        public void OnHook(
+            uint entityId,
+            Vector3 entityWorldPosition,
+            DatAnimationHook hook)
+        {
+            _ = entityWorldPosition;
+            calls.Add((entityId, hook));
+        }
+    }
+
+    private static SceneLightingUbo ReadSceneLighting(WorldFrameSections sections)
+    {
+        GpuBufferSection section = sections.SceneLighting;
+        Assert.True(section.IsValid);
+        Span<byte> bytes = stackalloc byte[SceneLightingUbo.SizeInBytes];
+        section.Buffer!.Read(section.OffsetBytes, bytes);
+        return MemoryMarshal.Read<SceneLightingUbo>(bytes);
+    }
+
+    private sealed class FixedGpuFrameSource(IGpuFrame frame) : ICurrentGpuFrameSource
+    {
+        public IGpuFrame? CurrentFrame => frame;
     }
 
     private sealed class RecordingVisibility(List<string> calls)

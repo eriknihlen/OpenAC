@@ -71,4 +71,36 @@ public sealed class GameEventsInventoryTests
         Assert.Equal(0x50000A01u, p!.Value.ItemGuid);
         Assert.Equal(0x0Au, p.Value.WeenieError);
     }
+
+    [Fact]
+    public void ParseSalvageOperationsResult_readsRejectedItemsAndResults()
+    {
+        var wire = new AceWireWriter()
+            .Write(28u)
+            .Write(1u).Write(0x50000020u)
+            .Write(1u)
+            .Write(63u).Write(unchecked((ulong)BitConverter.DoubleToInt64Bits(8d))).Write(1u)
+            .Write(25)
+            .ToArray();
+
+        GameEvents.SalvageOperationsResult? result =
+            GameEvents.ParseSalvageOperationsResult(wire);
+
+        Assert.NotNull(result);
+        Assert.Equal(28u, result!.Value.SkillId);
+        Assert.Equal([0x50000020u], result.Value.UnsuitableItemGuids);
+        GameEvents.SalvageResult material = Assert.Single(result.Value.Results);
+        Assert.Equal((63u, 8d, 1u), (material.MaterialType, material.Workmanship, material.Units));
+        Assert.Equal(25, result.Value.AugmentationBonusPercent);
+    }
+
+    [Fact]
+    public void ParseSalvageOperationsResult_truncatedResult_returnsNull()
+    {
+        var wire = new AceWireWriter()
+            .Write(28u).Write(0u).Write(1u).Write(63u)
+            .ToArray();
+
+        Assert.Null(GameEvents.ParseSalvageOperationsResult(wire));
+    }
 }

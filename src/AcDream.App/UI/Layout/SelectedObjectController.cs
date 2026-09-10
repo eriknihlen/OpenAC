@@ -263,12 +263,7 @@ public sealed class SelectedObjectController : IRetainedPanelController
         uint g = guid.Value;
 
         uint stackSize = _stackSize(g);
-        string? objectName = _resolveName(g);
-        _currentName = _isCoinstack(g) && _isOwnedByPlayer(g)
-            ? $"{stackSize} {objectName} (of {_coinTotal()})"
-            : stackSize > 1u && !string.IsNullOrEmpty(objectName)
-                ? $"{stackSize} {objectName}"
-                : objectName;
+        RefreshName(g, stackSize);
 
         SetOverlayState(stackSize > 1u
             ? RetailUiStateIds.StackedItemSelected
@@ -397,8 +392,23 @@ public sealed class SelectedObjectController : IRetainedPanelController
 
     private void OnObjectUpdated(ClientObject updated)
     {
-        if (_current == updated.ObjectId && _stackSize(updated.ObjectId) != _splitQuantity.Maximum)
+        if (_current != updated.ObjectId)
+            return;
+        uint stackSize = _stackSize(updated.ObjectId);
+        if (stackSize != _splitQuantity.Maximum)
             ApplySelection(updated.ObjectId);
+        else
+            RefreshName(updated.ObjectId, stackSize);
+    }
+
+    private void RefreshName(uint guid, uint stackSize)
+    {
+        string? objectName = _resolveName(guid);
+        _currentName = _isCoinstack(guid) && _isOwnedByPlayer(guid)
+            ? $"{stackSize} {objectName} (of {_coinTotal()})"
+            : stackSize > 1u && !string.IsNullOrEmpty(objectName)
+                ? $"{stackSize} {objectName}"
+                : objectName;
     }
 
     private void OnSelectionTransition(SelectionTransition transition)
