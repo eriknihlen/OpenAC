@@ -191,6 +191,10 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
 
     public Func<GpuPipelineDescription, Exception?>? PipelineFailure { get; set; }
 
+    public Func<GpuTextureDescription, Exception?>? TextureFailure { get; set; }
+
+    public Func<IGpuTexture, IGpuSampler, Exception?>? TextureRegistrationFailure { get; set; }
+
     public IGpuBuffer CreateBuffer(in GpuBufferDescription description)
     {
         var buffer = new RecordingGpuBuffer(description);
@@ -204,6 +208,8 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
 
     public IGpuTexture CreateTexture(in GpuTextureDescription description)
     {
+        if (TextureFailure?.Invoke(description) is { } failure)
+            throw failure;
         RecordingGpuTexture texture = new(
             description.Name,
             description.Kind,
@@ -308,6 +314,9 @@ internal sealed class RecordingGpuDevice : IGpuDevice, IGpuPipelineFormatVariant
     {
         ArgumentNullException.ThrowIfNull(texture);
         ArgumentNullException.ThrowIfNull(sampler);
+
+        if (TextureRegistrationFailure?.Invoke(texture, sampler) is { } failure)
+            throw failure;
 
         uint slot = _freeTextureSlots.Count > 0 ? _freeTextureSlots.Pop() : _nextTextureSlot++;
         _calls.Add(new GpuRecordedTextureRegistration(texture.Name, sampler.Description, slot));

@@ -7,22 +7,29 @@ namespace AcDream.App.Rendering;
 internal readonly struct BindlessTextureLocation : IEquatable<BindlessTextureLocation>
 {
     private readonly uint _slotPlusOne;
+    private readonly uint _repeatSlotPlusOne;
 
-    public BindlessTextureLocation(GpuTextureSlot slot, uint layer, GpuTextureSlot repeatSlot = default)
+    public BindlessTextureLocation(GpuTextureSlot slot, uint layer)
+        : this(slot, layer, GpuTextureSlot.Unassigned)
+    {
+    }
+
+    public BindlessTextureLocation(GpuTextureSlot slot, uint layer, GpuTextureSlot repeatSlot)
     {
         _slotPlusOne = slot.IsAssigned ? slot.Index + 1 : 0;
         Layer = layer;
-        RepeatSlot = repeatSlot;
+        _repeatSlotPlusOne = repeatSlot.IsAssigned ? repeatSlot.Index + 1 : 0;
     }
 
     public static BindlessTextureLocation Unresolved => default;
 
     public uint Layer { get; }
 
-    public GpuTextureSlot RepeatSlot { get; }
+    public GpuTextureSlot RepeatSlot =>
+        _repeatSlotPlusOne == 0 ? GpuTextureSlot.Unassigned : new GpuTextureSlot(_repeatSlotPlusOne - 1);
 
     public GpuTextureSlot ResolveSlot(bool wrapping) =>
-        wrapping && RepeatSlot.IsAssigned ? RepeatSlot : Slot;
+        IsResolved && wrapping && RepeatSlot.IsAssigned ? RepeatSlot : Slot;
 
     public bool IsResolved => _slotPlusOne != 0;
 
@@ -113,7 +120,7 @@ internal sealed class CompositeTextureArrayResource
     public Gpu.IGpuTexture? Image { get; init; }
 
     public required GpuTextureSlot Slot { get; init; }
-    public GpuTextureSlot RepeatSlot { get; init; }
+    public GpuTextureSlot RepeatSlot { get; init; } = GpuTextureSlot.Unassigned;
     public required int Width { get; init; }
     public required int Height { get; init; }
     public required int Capacity { get; init; }
@@ -155,8 +162,8 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
     public CompositeTextureArrayResource Create(int width, int height, int capacity)
     {
         Gpu.IGpuTexture? image = null;
-        GpuTextureSlot slot = default;
-        GpuTextureSlot repeatSlot = default;
+        GpuTextureSlot slot = GpuTextureSlot.Unassigned;
+        GpuTextureSlot repeatSlot = GpuTextureSlot.Unassigned;
         try
         {
             image = _device.CreateTexture(new Gpu.GpuTextureDescription(

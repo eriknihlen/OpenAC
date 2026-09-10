@@ -13,6 +13,88 @@ public sealed class RhiCompositeTextureArrayBackendTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void UnresolvedLocationsNeverSelectATexture(bool wrapping)
+    {
+        Assert.Equal(GpuTextureSlot.Unassigned, default(BindlessTextureLocation).RepeatSlot);
+        Assert.Equal(GpuTextureSlot.Unassigned, BindlessTextureLocation.Unresolved.ResolveSlot(wrapping));
+        var unresolved = new BindlessTextureLocation(GpuTextureSlot.Unassigned, 0, new GpuTextureSlot(7));
+        Assert.Equal(GpuTextureSlot.Unassigned, unresolved.ResolveSlot(wrapping));
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(7u)]
+    public void ClampOnlyLocationsUseTheirOwnSlotForBothAddressModes(uint index)
+    {
+        var slot = new GpuTextureSlot(index);
+        var location = new BindlessTextureLocation(slot, 3);
+        Assert.Equal(GpuTextureSlot.Unassigned, location.RepeatSlot);
+        Assert.Equal(slot, location.ResolveSlot(false));
+        Assert.Equal(slot, location.ResolveSlot(true));
+        Assert.Equal(new BindlessTextureLocation(slot, 3, GpuTextureSlot.Unassigned), location);
+    }
+
+    [Fact]
+    public void AnExplicitRepeatSlotZeroRemainsUsable()
+    {
+        var location = new BindlessTextureLocation(new GpuTextureSlot(7), 3, new GpuTextureSlot(0));
+        Assert.Equal(new GpuTextureSlot(0), location.ResolveSlot(true));
+        Assert.Equal(new GpuTextureSlot(7), location.ResolveSlot(false));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void FailedCreationReleasesOnlySuccessfullyRegisteredSlots(int failureStage)
+    {
+        using var device = new RecordingGpuDevice();
+        var backend = new RhiCompositeTextureArrayBackend(device);
+        int baselineSlots = device.LiveTextureSlotCount;
+        var failure = new InvalidOperationException("Injected texture creation failure");
+        int registration = 0;
+        device.TextureFailure = _ => failureStage == 0 ? failure : null;
+        device.TextureRegistrationFailure = (_, _) => ++registration == failureStage ? failure : null;
+        device.Clear();
+
+        Assert.Same(failure, Assert.Throws<InvalidOperationException>(() => backend.Create(4, 4, 2)));
+
+        var registered = device.Calls.OfType<GpuRecordedTextureRegistration>().Select(call => call.Slot).ToArray();
+        var released = device.Calls.OfType<GpuRecordedTextureRelease>().Select(call => call.Slot).ToArray();
+        Assert.Equal(failureStage == 2 ? 1 : 0, registered.Length);
+        Assert.Equal(registered, released);
+        Assert.DoesNotContain(device.DefaultTextureSlot.Index, released);
+        Assert.Equal(baselineSlots, device.LiveTextureSlotCount);
+        if (failureStage == 0)
+            Assert.Empty(device.CreatedTextures);
+        else
+            Assert.True(Assert.Single(device.CreatedTextures).IsDisposed);
+    }
+
+    [Fact]
+    public void ResourceWithoutRepeatRegistrationOnlyReleasesItsOwnSlot()
+    {
+        using var device = new RecordingGpuDevice();
+        var backend = new RhiCompositeTextureArrayBackend(device);
+        var image = device.CreateTexture(new GpuTextureDescription(
+            "clamp-only", GpuTextureKind.Texture2DArray, GpuTextureFormat.Rgba8Unorm, 4, 4, 1, 1));
+        var slot = device.RegisterTexture(image, device.CreateSampler(GpuSamplerDescription.WorldClamp));
+        var resource = new CompositeTextureArrayResource
+        {
+            Name = 0, Handle = 0, Image = image, Slot = slot,
+            Width = 4, Height = 4, Capacity = 1, Bytes = 64,
+        };
+        Assert.Equal(GpuTextureSlot.Unassigned, resource.RepeatSlot);
+        device.Clear();
+        backend.MakeNonResident(resource);
+        Assert.Equal(slot.Index, Assert.Single(device.Calls.OfType<GpuRecordedTextureRelease>()).Slot);
+        Assert.Equal(1, device.LiveTextureSlotCount);
+        backend.Delete(resource);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void NewAndCachedAppearanceTexturesPreserveBothAddressModes(bool palette)
     {
         using var device = new RecordingGpuDevice();
