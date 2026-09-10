@@ -1,5 +1,7 @@
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
+using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.Core.Tests.Orchestration;
 
@@ -23,12 +25,14 @@ public sealed class LauncherExecutableSetTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         string suffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
-        string graphical = Path.Combine(_root, "AcDream.App" + suffix);
+        string graphical = Path.Combine(
+            _root,
+            PayloadExecutableNames.GraphicalHostForCurrentOs() + suffix);
         string headless = Path.Combine(_root, "acdream-headless" + suffix);
         File.WriteAllText(graphical, string.Empty);
         File.WriteAllText(headless, string.Empty);
-        MakeExecutableOnLinux(graphical);
-        MakeExecutableOnLinux(headless);
+        MakeExecutableOnUnix(graphical);
+        MakeExecutableOnUnix(headless);
 
         LauncherExecutableSet set = LauncherExecutableSet.FromDirectory(_root);
 
@@ -78,16 +82,18 @@ public sealed class LauncherExecutableSetTests : IDisposable
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public void LinuxRequiresExecutePermissionForBothCoDeployedHosts()
+    [Trait("Lane", "Unix")]
+    public void UnixRequiresExecutePermissionForBothCoDeployedHosts()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!LauncherOperatingSystem.IsUnix)
         {
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
         }
 
         Directory.CreateDirectory(_root);
-        string graphical = Path.Combine(_root, "AcDream.App");
+        string graphical = Path.Combine(
+            _root,
+            PayloadExecutableNames.GraphicalHostForCurrentOs());
         string headless = Path.Combine(_root, "acdream-headless");
         File.WriteAllText(graphical, string.Empty);
         File.WriteAllText(headless, string.Empty);
@@ -111,35 +117,33 @@ public sealed class LauncherExecutableSetTests : IDisposable
         Assert.Throws<LauncherOperationException>(() =>
             set.CreateProbeSpec("session.json"));
 
-        MakeExecutableOnLinux(graphical);
-        MakeExecutableOnLinux(headless);
+        MakeExecutableOnUnix(graphical);
+        MakeExecutableOnUnix(headless);
 
         Assert.True(set.GetAvailability(LaunchMode.GuiSelect).IsAvailable);
         Assert.True(set.GetAvailability(LaunchMode.Headless).IsAvailable);
     }
 
     [Fact]
-    [Trait("Lane", "Windows")]
-    public void WindowsPreservesExistenceOnlyAvailability()
+    public void AvailabilityRequiresExecutePermissionOnlyOnUnix()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            throw new PlatformNotSupportedException("Lane=Windows requires a Windows host.");
-        }
-
         var set = new LauncherExecutableSet(
             "graphical.exe",
             "headless.exe",
             fileExists: _ => true,
             hasUnixExecutePermission: _ => false);
 
-        Assert.True(set.GetAvailability(LaunchMode.Gui).IsAvailable);
-        Assert.True(set.GetAvailability(LaunchMode.Headless).IsAvailable);
+        Assert.Equal(
+            !LauncherOperatingSystem.IsUnix,
+            set.GetAvailability(LaunchMode.Gui).IsAvailable);
+        Assert.Equal(
+            !LauncherOperatingSystem.IsUnix,
+            set.GetAvailability(LaunchMode.Headless).IsAvailable);
     }
 
-    private static void MakeExecutableOnLinux(string path)
+    private static void MakeExecutableOnUnix(string path)
     {
-        if (OperatingSystem.IsLinux())
+        if (LauncherOperatingSystem.IsUnix)
         {
             File.SetUnixFileMode(
                 path,

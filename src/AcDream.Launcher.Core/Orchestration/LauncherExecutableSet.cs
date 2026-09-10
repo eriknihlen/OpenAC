@@ -1,6 +1,7 @@
 using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Updates;
+using AcDream.Launcher.Core;
 
 namespace AcDream.Launcher.Core.Orchestration;
 
@@ -73,7 +74,7 @@ public sealed class LauncherExecutableSet
                 + "the client before launching.");
         }
 
-        if (OperatingSystem.IsLinux() && !_hasUnixExecutePermission(path))
+        if (LauncherOperatingSystem.IsUnix && !_hasUnixExecutePermission(path))
         {
             return LauncherCapability.Unavailable(
                 $"The co-deployed {host} at '{path}' exists but is not executable. "
@@ -127,7 +128,7 @@ public sealed class LauncherExecutableSet
         return new LauncherExecutableSet(
             Path.Combine(
                 fullDirectory,
-                PayloadExecutableNames.GraphicalHost + executableSuffix),
+                PayloadExecutableNames.GraphicalHostForCurrentOs() + executableSuffix),
             Path.Combine(
                 fullDirectory,
                 PayloadExecutableNames.HeadlessHost + executableSuffix),
@@ -176,7 +177,7 @@ public sealed class LauncherExecutableSet
         return new ExecutablePaths(
             Path.Combine(
                 fullDirectory,
-                PayloadExecutableNames.GraphicalHost + executableSuffix),
+                PayloadExecutableNames.GraphicalHostForCurrentOs() + executableSuffix),
             Path.Combine(
                 fullDirectory,
                 PayloadExecutableNames.HeadlessHost + executableSuffix),
@@ -185,7 +186,7 @@ public sealed class LauncherExecutableSet
 
     private static bool HasUnixExecutePermission(string path)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!LauncherOperatingSystem.IsUnix)
         {
             return true;
         }

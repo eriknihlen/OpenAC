@@ -457,7 +457,7 @@ public sealed class LauncherOrchestratorTests : IDisposable
                     "testaccount",
                     "+Acdream",
                     mode));
-            Assert.Contains("supported on Windows and Linux", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Windows, Linux, and macOS", exception.Message, StringComparison.Ordinal);
         }
 
         Assert.False(orchestrator.GetLaunchCapability(LaunchMode.Headless).IsAvailable);

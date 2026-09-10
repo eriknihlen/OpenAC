@@ -5,7 +5,7 @@ param(
     [int]$BuildTimeoutSeconds = 900,
     [int]$TestTimeoutSeconds = 600,
     [int]$HangTimeoutSeconds = 180,
-    [string]$TestFilter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure',
+    [string]$TestFilter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=MacOS&Lane!=Unix&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure',
     [switch]$SkipRestore,
     [switch]$SkipBuild
 )

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using AcDream.Launcher.Core;
 
 namespace AcDream.Launcher.Core.Launching;
 
@@ -42,8 +43,11 @@ internal sealed partial class SystemChildProcess : ILauncherChildProcess
 {
     private const int Sigint = 2;
 
-    [LibraryImport("libc", SetLastError = true)]
-    private static partial int kill(int pid, int sig);
+    [LibraryImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static partial int LinuxKill(int pid, int sig);
+
+    [LibraryImport("/usr/lib/libSystem.B.dylib", EntryPoint = "kill", SetLastError = true)]
+    private static partial int MacKill(int pid, int sig);
 
     private readonly Process _process;
     private readonly bool _supportsConsoleGracefulStop;
@@ -111,14 +115,16 @@ internal sealed partial class SystemChildProcess : ILauncherChildProcess
 
     public bool TryRequestGracefulStop()
     {
-        if (!OperatingSystem.IsLinux() || !_supportsConsoleGracefulStop)
+        if (!LauncherOperatingSystem.IsUnix || !_supportsConsoleGracefulStop)
         {
             return false;
         }
 
         try
         {
-            return kill(_process.Id, Sigint) == 0;
+            return (OperatingSystem.IsMacOS()
+                ? MacKill(_process.Id, Sigint)
+                : LinuxKill(_process.Id, Sigint)) == 0;
         }
         catch
         {

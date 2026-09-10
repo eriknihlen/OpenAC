@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Launcher.Core.Tests.Updates;
@@ -74,12 +75,40 @@ public sealed class SafeZipExtractorTests : IDisposable
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public async Task LinuxWritesTheMarkedModesToTheRealFileSystem()
+    public void MacPayloadRequiresOwnerExecutePermissionForEveryRequiredHost()
     {
-        if (!OperatingSystem.IsLinux())
+        IReadOnlyList<ExtractedFileRecord> executableFiles =
+        [
+            new("acdream-client", new string('a', 64), 1, 0x1ED),
+            new("acdream-headless", new string('b', 64), 1, 0x1ED),
+        ];
+
+        ClientVersionStore.ValidateRequiredExecutables(
+            executableFiles,
+            "osx-arm64",
+            launcherPayload: false);
+
+        IReadOnlyList<ExtractedFileRecord> nonExecutableFiles =
+        [
+            new("acdream-client", new string('a', 64), 1, 0x1A4),
+            new("acdream-headless", new string('b', 64), 1, 0x1ED),
+        ];
+        LauncherUpdateException exception = Assert.Throws<LauncherUpdateException>(() =>
+            ClientVersionStore.ValidateRequiredExecutables(
+                nonExecutableFiles,
+                "osx-arm64",
+                launcherPayload: false));
+
+        Assert.Contains("Unix release executable 'acdream-client'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Lane", "Unix")]
+    public async Task UnixWritesTheMarkedModesToTheRealFileSystem()
+    {
+        if (!LauncherOperatingSystem.IsUnix)
         {
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
         }
 
         byte[] archive = UpdateTestData.CreateZip(

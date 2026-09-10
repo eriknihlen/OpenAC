@@ -532,7 +532,7 @@ public sealed partial class LauncherWindowViewModelTests
             LauncherPlatformCapabilities.UnsupportedPlatformGraphicalLaunchDisabledReason,
             viewModel.GraphicalLaunchNotice);
         Assert.Contains(
-            "supported on Windows and Linux",
+            "supported on Windows, Linux, and macOS",
             viewModel.GuiLaunchDisabledReason,
             StringComparison.Ordinal);
     }
@@ -549,6 +549,27 @@ public sealed partial class LauncherWindowViewModelTests
 
         Assert.False(viewModel.ShowGraphicalLaunchNotice);
         Assert.True(viewModel.CanLaunchGui);
+    }
+
+    [Fact]
+    public void MacPlatformEnablesGraphicalAndHeadlessLaunches()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Platform = new LauncherPlatformCapabilities(
+                IsWindows: false, IsLinux: false,
+                CanRunHeadless: true, CanLaunchGraphicalClient: true,
+                PlatformName: "macOS", GraphicalLaunchDisabledReason: null)
+            {
+                IsMacOS = true,
+            },
+        };
+        using var viewModel = CreateInitialized(orchestrator);
+        SelectCharacter(viewModel);
+
+        Assert.False(viewModel.ShowGraphicalLaunchNotice);
+        Assert.True(viewModel.CanLaunchGui);
+        Assert.True(viewModel.CanLaunchHeadless);
     }
 
     [Fact]

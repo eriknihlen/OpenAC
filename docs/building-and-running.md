@@ -12,21 +12,22 @@
   Linux that means your distribution's Vulkan ICD for your GPU (for example
   `mesa-vulkan-drivers` on Ubuntu) and an X11 or Wayland desktop. On macOS it
   means MoltenVK and the Vulkan loader (`brew install molten-vk
-  vulkan-loader`); MoltenVK is reached through
+  vulkan-loader`) when running from source; MoltenVK is reached through
   `VK_KHR_portability_enumeration`, and the loader needs
   `VK_ICD_FILENAMES=$(brew --prefix)/etc/vulkan/icd.d/MoltenVK_icd.json`.
+  The Apple-silicon launcher distribution supplies its own validated loader,
+  MoltenVK, and ICD manifest for launched clients.
 
-Windows and Linux (x64) are both supported, and macOS (arm64) runs the
-graphical client and the bake step from source; the launcher is Windows and
-Linux only. The examples below use PowerShell; the bash equivalents differ
-only in how variables are set.
+Windows and Linux (x64), plus macOS (arm64), are supported by the launcher,
+graphical client, and bake step. The examples below use PowerShell; the bash
+equivalents differ only in how variables are set.
 
 ## Build and test
 
 ```bash
 dotnet restore AcDream.slnx
 dotnet build AcDream.slnx -c Release
-dotnet test AcDream.slnx -c Release --no-build --filter "Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure"
+dotnet test AcDream.slnx -c Release --no-build --filter "Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=MacOS&Lane!=Unix&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure"
 ```
 
 The filter is the portable gate described in `release-gate.md`. Tests behind a
@@ -72,6 +73,18 @@ dotnet run --project src/AcDream.App/AcDream.App.csproj -c Release
 ```
 
 The DAT directory can instead be the first positional argument.
+
+For a macOS source build, set the same game variables and run the managed
+assembly with the Homebrew loader available:
+
+```bash
+export DYLD_LIBRARY_PATH="$(brew --prefix)/lib"
+export VK_DRIVER_FILES="$(brew --prefix)/etc/vulkan/icd.d/MoltenVK_icd.json"
+dotnet src/AcDream.App/bin/Release/net10.0/AcDream.App.dll "$HOME/ac"
+```
+
+The packaged Mac client is named `acdream-client` and loads its bundled graphics
+libraries directly. It does not require those environment variables.
 
 ## Useful startup options
 

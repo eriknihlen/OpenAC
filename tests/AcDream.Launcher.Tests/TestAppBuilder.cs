@@ -3,7 +3,7 @@ using Avalonia.Headless;
 using Xunit;
 
 [assembly: AvaloniaTestApplication(typeof(AcDream.Launcher.Tests.TestAppBuilder))]
-[assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerAssembly)]
+[assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerTest)]
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 

@@ -48,7 +48,8 @@ internal sealed class LauncherUpdateComposition : IDisposable
         string launcherTargetDirectory,
         Func<bool> hasRunningSessions,
         Func<ClientVersionStore, string, ClientVersionResolution>? initialize = null,
-        Uri? updateManifestUri = null)
+        Uri? updateManifestUri = null,
+        LauncherInstallationLayout? installationLayout = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(launcherVersion);
@@ -85,7 +86,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
                 selfUpdates,
                 launcherVersion,
                 rid,
-                launcherTargetDirectory,
+                installationLayout ?? LauncherInstallationLayout.Flat(launcherTargetDirectory, rid),
                 hasRunningSessions);
             return new LauncherUpdateComposition(
                 versions,

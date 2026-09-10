@@ -70,7 +70,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
     private readonly SafeZipExtractor _extractor;
     private readonly LauncherVersion _launcherVersion;
     private readonly string _rid;
-    private readonly string _launcherTargetDirectory;
+    private readonly LauncherInstallationLayout _launcherLayout;
     private readonly Func<bool> _hasRunningSessions;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
 
@@ -82,6 +82,29 @@ public sealed class LauncherUpdater : ILauncherUpdater
         LauncherVersion launcherVersion,
         string rid,
         string launcherTargetDirectory,
+        Func<bool>? hasRunningSessions = null,
+        SafeZipExtractor? extractor = null)
+        : this(
+            manifestClient,
+            httpClient,
+            versions,
+            selfUpdates,
+            launcherVersion,
+            rid,
+            LauncherInstallationLayout.Flat(launcherTargetDirectory, rid),
+            hasRunningSessions,
+            extractor)
+    {
+    }
+
+    public LauncherUpdater(
+        IReleaseManifestClient manifestClient,
+        HttpClient httpClient,
+        ClientVersionStore versions,
+        LauncherSelfUpdateManager selfUpdates,
+        LauncherVersion launcherVersion,
+        string rid,
+        LauncherInstallationLayout launcherLayout,
         Func<bool>? hasRunningSessions = null,
         SafeZipExtractor? extractor = null)
     {
@@ -97,8 +120,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
         }
 
         _rid = rid;
-        ArgumentException.ThrowIfNullOrWhiteSpace(launcherTargetDirectory);
-        _launcherTargetDirectory = Path.GetFullPath(launcherTargetDirectory);
+        _launcherLayout = launcherLayout ?? throw new ArgumentNullException(nameof(launcherLayout));
         _hasRunningSessions = hasRunningSessions ?? (() => false);
         _downloader = new VerifiedArtifactDownloader(
             httpClient ?? throw new ArgumentNullException(nameof(httpClient)));
@@ -311,7 +333,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
                 SelfUpdateStageResult result = await _selfUpdates.StageAsync(
                         check.Manifest,
                         _rid,
-                        _launcherTargetDirectory,
+                        _launcherLayout,
                         downloadProgress,
                         cancellationToken)
                     .ConfigureAwait(false);

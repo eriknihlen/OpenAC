@@ -3,6 +3,9 @@ param(
     [string]$Version,
     [string]$BaseUrl,
     [switch]$IncludeLinux,
+    [switch]$IncludeMacOS,
+    [switch]$MacOnly,
+    [string]$MacArtifactsDirectory,
     [string]$MinimumLauncherVersion = '0.0.1'
 )
 
@@ -41,8 +44,18 @@ $RawBase = if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
 
 $BinRoot = Join-Path $RepoRoot 'bin'
 $Staging = Join-Path $BinRoot 'payload'
-$Rids = @('win-x64')
+if ($MacOnly -and ($IncludeLinux -or $IncludeMacOS -or -not [string]::IsNullOrWhiteSpace($MacArtifactsDirectory))) {
+    throw '-MacOnly cannot be combined with another platform-selection parameter.'
+}
+if ($IncludeMacOS -and -not $IsMacOS) {
+    throw '-IncludeMacOS packages an OpenAC.app bundle and must run on macOS.'
+}
+if (-not [string]::IsNullOrWhiteSpace($MacArtifactsDirectory) -and $IncludeMacOS) {
+    throw 'Use either -IncludeMacOS or -MacArtifactsDirectory, not both.'
+}
+$Rids = if ($MacOnly) { @('osx-arm64') } else { @('win-x64') }
 if ($IncludeLinux) { $Rids += 'linux-x64' }
+if ($IncludeMacOS) { $Rids += 'osx-arm64' }
 
 Write-Host "acdream alpha feed" -ForegroundColor Cyan
 Write-Host "  version : $Version"
@@ -197,6 +210,24 @@ function Get-Artifact {
     }
 }
 
+function Copy-MacArtifacts {
+    param([Parameter(Mandatory)][string]$SourceDirectory)
+
+    $source = [IO.Path]::GetFullPath($SourceDirectory)
+    if (-not (Test-Path -LiteralPath $source -PathType Container)) {
+        throw "macOS release artifact directory '$source' does not exist."
+    }
+
+    foreach ($name in @('client-osx-arm64.zip', 'launcher-osx-arm64.zip')) {
+        $from = Join-Path $source $name
+        $to = Join-Path $BinRoot $name
+        if (-not (Test-Path -LiteralPath $from -PathType Leaf)) {
+            throw "macOS release artifact '$from' is missing."
+        }
+        Copy-Item -LiteralPath $from -Destination $to -Force
+    }
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
 
 $clients = [ordered]@{}
@@ -218,11 +249,48 @@ foreach ($rid in $Rids) {
     $launcherZip = Join-Path $BinRoot "launcher-$rid.zip"
 
     Write-Host "[$rid] packing..." -ForegroundColor Yellow
-    New-PayloadZip $clientDirectory $clientZip @("AcDream.App$suffix", "acdream-headless$suffix")
-    New-PayloadZip $launcherDirectory $launcherZip @("acdream-launcher$suffix", "acdream-bake$suffix")
+    if ($rid -eq 'osx-arm64') {
+        $publishedAppHost = Join-Path $clientDirectory 'AcDream.App'
+        $macClient = Join-Path $clientDirectory 'acdream-client'
+        if (-not (Test-Path -LiteralPath $publishedAppHost -PathType Leaf)) {
+            throw "macOS graphical client publish output '$publishedAppHost' is missing."
+        }
+        if (Test-Path -LiteralPath $macClient) {
+            throw "macOS graphical client destination '$macClient' already exists."
+        }
+        Move-Item -LiteralPath $publishedAppHost -Destination $macClient
+        & (Join-Path $RepoRoot 'tools/package-macos-vulkan.ps1') -ClientDirectory $clientDirectory
+        if ($LASTEXITCODE) { throw 'macOS Vulkan dependency packaging failed.' }
+    }
+    $clientExecutables = if ($rid -eq 'osx-arm64') {
+        @('acdream-client', 'acdream-headless')
+    } else {
+        @("AcDream.App$suffix", "acdream-headless$suffix")
+    }
+    New-PayloadZip $clientDirectory $clientZip $clientExecutables
+    if ($rid -eq 'osx-arm64') {
+        & (Join-Path $RepoRoot 'tools/package-macos-launcher.ps1') `
+            -PublishDirectory $launcherDirectory `
+            -OutputDirectory $Staging `
+            -Version $Version `
+            -ZipPath $launcherZip
+        if ($LASTEXITCODE) { throw 'macOS launcher bundle packaging failed.' }
+    } else {
+        New-PayloadZip $launcherDirectory $launcherZip @("acdream-launcher$suffix", "acdream-bake$suffix")
+    }
 
     $clients[$rid] = Get-Artifact $clientZip "$RawBase/client-$rid.zip"
     $launchers[$rid] = Get-Artifact $launcherZip "$RawBase/launcher-$rid.zip"
+}
+
+if (-not [string]::IsNullOrWhiteSpace($MacArtifactsDirectory)) {
+    Copy-MacArtifacts $MacArtifactsDirectory
+    $clients['osx-arm64'] = Get-Artifact `
+        (Join-Path $BinRoot 'client-osx-arm64.zip') `
+        "$RawBase/client-osx-arm64.zip"
+    $launchers['osx-arm64'] = Get-Artifact `
+        (Join-Path $BinRoot 'launcher-osx-arm64.zip') `
+        "$RawBase/launcher-osx-arm64.zip"
 }
 
 $manifest = [ordered]@{

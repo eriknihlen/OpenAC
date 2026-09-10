@@ -15,18 +15,18 @@ internal sealed class AppCredentialResolver
 
     private readonly TextReader _standardInput;
     private readonly string _credentialBaseDirectory;
-    private readonly bool _isLinux;
+    private readonly bool _isUnix;
 
     internal AppCredentialResolver(
         TextReader standardInput,
         string credentialBaseDirectory,
-        bool isLinux)
+        bool isUnix)
     {
         _standardInput = standardInput
             ?? throw new ArgumentNullException(nameof(standardInput));
         ArgumentException.ThrowIfNullOrWhiteSpace(credentialBaseDirectory);
         _credentialBaseDirectory = Path.GetFullPath(credentialBaseDirectory);
-        _isLinux = isLinux;
+        _isUnix = isUnix;
     }
 
     internal AppCredentialSecret Resolve(
@@ -108,7 +108,7 @@ internal sealed class AppCredentialResolver
                 $"Credential file reference '{reference}' cannot be a symbolic link.");
         }
 
-        if (RuntimePlatformGuard.IsLinuxRuntime && _isLinux)
+        if (RuntimePlatformGuard.IsUnixRuntime && _isUnix)
         {
             UnixFileMode mode = File.GetUnixFileMode(path);
             if ((mode & NonUserPermissionMask) != 0

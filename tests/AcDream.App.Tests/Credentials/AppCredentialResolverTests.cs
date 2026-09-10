@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using AcDream.App.Configuration;
 using AcDream.App.Credentials;
 
@@ -16,7 +17,7 @@ public sealed class AppCredentialResolverTests
             var resolver = new AppCredentialResolver(
                 TextReader.Null,
                 Environment.CurrentDirectory,
-                isLinux: false);
+                isUnix: false);
 
             AppCredentialSecret secret = resolver.Resolve(
                 "session",
@@ -45,7 +46,7 @@ public sealed class AppCredentialResolverTests
         var resolver = new AppCredentialResolver(
             new StringReader(secretValue + Environment.NewLine),
             Environment.CurrentDirectory,
-            isLinux: false);
+            isUnix: false);
 
         using AppCredentialSecret secret = resolver.Resolve(
             "session",
@@ -73,7 +74,7 @@ public sealed class AppCredentialResolverTests
             var resolver = new AppCredentialResolver(
                 TextReader.Null,
                 directory,
-                isLinux: false);
+                isUnix: false);
 
             using AppCredentialSecret secret = resolver.Resolve(
                 "session",
@@ -103,7 +104,7 @@ public sealed class AppCredentialResolverTests
             var resolver = new AppCredentialResolver(
                 new StringReader(string.Empty),
                 Environment.CurrentDirectory,
-                isLinux: false);
+                isUnix: false);
 
             AppCredentialException error =
                 Assert.Throws<AppCredentialException>(() =>
@@ -130,10 +131,27 @@ public sealed class AppCredentialResolverTests
         if (!OperatingSystem.IsLinux())
             throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
 
+        AssertRejectsGroupReadableCredential("linux-secret");
+    }
+
+    [Fact]
+    [Trait("Lane", "MacOS")]
+    public void MacOsRejectsGroupOrOtherCredentialPermissions()
+    {
+        if (!OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("Lane=MacOS requires a native macOS host.");
+
+        AssertRejectsGroupReadableCredential("macos-secret");
+    }
+
+    [SupportedOSPlatform("linux")]
+    [SupportedOSPlatform("macos")]
+    private static void AssertRejectsGroupReadableCredential(string value)
+    {
         string path = Path.Combine(
             Path.GetTempPath(),
             $"acdream-app-credential-{Guid.NewGuid():N}");
-        File.WriteAllText(path, "linux-secret");
+        File.WriteAllText(path, value);
         File.SetUnixFileMode(
             path,
             UnixFileMode.UserRead | UnixFileMode.GroupRead);
@@ -142,7 +160,7 @@ public sealed class AppCredentialResolverTests
             var resolver = new AppCredentialResolver(
                 TextReader.Null,
                 Path.GetDirectoryName(path)!,
-                isLinux: true);
+                isUnix: true);
 
             Assert.Throws<AppCredentialException>(() =>
                 resolver.Resolve(

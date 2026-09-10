@@ -62,6 +62,13 @@ own licenses. Each license text ships inside the package.
 | Microsoft.Extensions.Logging.Abstractions | MIT |
 | OpenAL Soft (via Silk.NET.OpenAL.Soft.Native) | LGPL-2.1 (dynamically linked native library; source at https://github.com/kcat/openal-soft) |
 | .NET runtime (self-contained payloads) | MIT |
+| MoltenVK (Apple-silicon client payload) | Apache-2.0 |
+| Vulkan-Loader (Apple-silicon client payload) | Apache-2.0 |
+
+The macOS packaging step pins the MoltenVK and Vulkan-Loader Homebrew formula
+versions, records the formula source and bottle SHA-256 values in the client
+payload, and includes the installed license texts in
+`Resources/vulkan/licenses/`.
 
 SixLabors.ImageSharp's Split License grants Apache-2.0 terms to open-source
 projects; a commercial product built on OpenAC may need its own ImageSharp

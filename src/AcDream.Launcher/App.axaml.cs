@@ -46,6 +46,8 @@ public sealed partial class App : Application
             ApplicationPathSet paths = startupOptions.Paths;
             LauncherProfileStore profiles = LauncherProfileStore.ForApplicationPaths(paths);
             string rid = LauncherRuntimeIdentity.DetectRid();
+            LauncherInstallationLayout layout = LauncherInstallationLayout.Detect(
+                AppContext.BaseDirectory, rid);
             string executableSuffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
             var installer = new LauncherInstaller(
                 paths,
@@ -57,10 +59,11 @@ public sealed partial class App : Application
                 paths,
                 rid,
                 GetLauncherVersion(),
-                AppContext.BaseDirectory,
+                layout.InstalledRoot,
                 () => _orchestrator?.GetSnapshot().Sessions.Any(session => session.IsActive)
                     == true,
-                updateManifestUri: startupOptions.UpdateManifestUri);
+                updateManifestUri: startupOptions.UpdateManifestUri,
+                installationLayout: layout);
             _updateComposition = updates;
 
             _orchestrator = new LauncherOrchestrator(
@@ -76,7 +79,7 @@ public sealed partial class App : Application
                     ? null
                     : token => LauncherSelfUpdateBootstrap.TryApplyStagedUpdateNowAsync(
                         selfUpdates,
-                        AppContext.BaseDirectory,
+                        layout,
                         Environment.ProcessPath
                             ?? throw new InvalidOperationException(
                                 "The launcher executable path is unavailable."),

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Launching;
 
 namespace AcDream.Launcher.Core.Tests.Launching;
@@ -147,12 +148,12 @@ public sealed class LauncherProcessSupervisorTests
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
+    [Trait("Lane", "Unix")]
     [Trait("Lane", "Timing")]
-    public void GracefulStopSignalSendsSigintToARealChildOnLinux()
+    public void GracefulStopSignalSendsSigintToARealChildOnUnix()
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+        if (!LauncherOperatingSystem.IsUnix)
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
 
         string readyMarker = Path.Combine(
             Path.GetTempPath(), "acdream-la3-sigint-" + Guid.NewGuid().ToString("N"));

@@ -24,10 +24,13 @@ internal static class Program
             string executable = Environment.ProcessPath
                 ?? throw new InvalidOperationException(
                     "The launcher executable path is unavailable.");
+            LauncherInstallationLayout layout = LauncherInstallationLayout.Detect(
+                AppContext.BaseDirectory,
+                LauncherRuntimeIdentity.DetectRid());
             SelfUpdateStartupResult startup = LauncherSelfUpdateBootstrap.HandleAsync(
                     args,
                     selfUpdates,
-                    AppContext.BaseDirectory,
+                    layout,
                     executable)
                 .GetAwaiter()
                 .GetResult();

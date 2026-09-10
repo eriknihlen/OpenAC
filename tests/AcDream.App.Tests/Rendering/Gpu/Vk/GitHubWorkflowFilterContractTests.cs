@@ -10,7 +10,7 @@ namespace AcDream.App.Tests.Rendering.Gpu.Vk;
 public sealed class GitHubWorkflowFilterContractTests
 {
     [Fact]
-    public void PortableFilters_MatchCanonicalReleaseGateWithOnlyLinuxLaneEnabledOnLinux()
+    public void PortableFilters_MatchCanonicalReleaseGateWithOnlyTheirNativeLaneEnabled()
     {
         string root = RepositoryRoot();
         string releaseGate = File.ReadAllText(Path.Combine(root, "tools", "run-release-gate.ps1"));
@@ -27,12 +27,24 @@ public sealed class GitHubWorkflowFilterContractTests
         Assert.True(windows.Success, "Could not locate the Windows test filter in ci.yml.");
         Assert.Equal(expected, windows.Groups["filter"].Value);
 
+        string linuxBody = JobBody(workflow, "linux-portable", "macos-portable");
         MatchCollection linux = Regex.Matches(
-            workflow, "--filter\\s+'(?<filter>[^']+)'", RegexOptions.CultureInvariant);
+            linuxBody, "--filter\\s+'(?<filter>[^']+)'", RegexOptions.CultureInvariant);
         Assert.Equal(2, linux.Count);
-        string expectedLinux = string.Join('&', expected.Split('&').Where(term => term != "Lane!=Linux"));
+        string expectedLinux = string.Join('&', expected.Split('&').Where(term =>
+            term is not "Lane!=Linux" and not "Lane!=Unix"));
         foreach (Match filter in linux)
             Assert.Equal(expectedLinux, filter.Groups["filter"].Value);
+
+        string macBody = JobBody(workflow, "macos-portable", "vulkan-hardware");
+        Match mac = Regex.Match(
+            macBody,
+            "\\$filter\\s*=\\s*'(?<filter>[^']+)'",
+            RegexOptions.CultureInvariant);
+        Assert.True(mac.Success, "Could not locate the macOS test filter in ci.yml.");
+        string expectedMac = string.Join('&', expected.Split('&').Where(term =>
+            term is not "Lane!=MacOS" and not "Lane!=Unix"));
+        Assert.Equal(expectedMac, mac.Groups["filter"].Value);
     }
 
     [Fact]
@@ -58,5 +70,13 @@ public sealed class GitHubWorkflowFilterContractTests
             directory = directory.Parent;
         return directory?.FullName
             ?? throw new InvalidOperationException("Could not locate the repository root.");
+    }
+
+    private static string JobBody(string workflow, string job, string nextJob)
+    {
+        int start = workflow.IndexOf($"  {job}:", StringComparison.Ordinal);
+        int end = workflow.IndexOf($"\n  {nextJob}:", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, $"Could not locate the {job} job body.");
+        return workflow[start..end];
     }
 }

@@ -18,6 +18,23 @@ public static class LauncherSelfUpdateBootstrap
     public static async Task<SelfUpdateStartupResult> HandleAsync(
         string[] args,
         LauncherSelfUpdateManager manager,
+        LauncherInstallationLayout layout,
+        string currentExecutablePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        return await HandleAsync(
+                args,
+                manager,
+                layout.InstalledRoot,
+                currentExecutablePath,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<SelfUpdateStartupResult> HandleAsync(
+        string[] args,
+        LauncherSelfUpdateManager manager,
         string launcherBaseDirectory,
         string currentExecutablePath,
         CancellationToken cancellationToken = default)
@@ -31,6 +48,8 @@ public static class LauncherSelfUpdateBootstrap
         if (args.Length > 0
             && string.Equals(args[0], HelperArgument, StringComparison.Ordinal))
         {
+            baseDirectory = Path.GetDirectoryName(executable)
+                ?? throw new LauncherUpdateException("The staged launcher has no directory.");
             if (args.Length < 4
                 || !int.TryParse(
                     args[1],
@@ -206,6 +225,23 @@ public static class LauncherSelfUpdateBootstrap
 
     public static async Task<bool> TryApplyStagedUpdateNowAsync(
         LauncherSelfUpdateManager manager,
+        LauncherInstallationLayout layout,
+        string currentExecutablePath,
+        IReadOnlyList<string> publicArguments,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        return await TryApplyStagedUpdateNowAsync(
+                manager,
+                layout.InstalledRoot,
+                currentExecutablePath,
+                publicArguments,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<bool> TryApplyStagedUpdateNowAsync(
+        LauncherSelfUpdateManager manager,
         string launcherBaseDirectory,
         string currentExecutablePath,
         IReadOnlyList<string> publicArguments,
@@ -249,7 +285,8 @@ public static class LauncherSelfUpdateBootstrap
         var startInfo = new ProcessStartInfo(helperPath)
         {
             UseShellExecute = false,
-            WorkingDirectory = manager.GetPayloadDirectory(plan.TransactionId),
+            WorkingDirectory = Path.GetDirectoryName(helperPath)
+                ?? throw new LauncherUpdateException("The staged launcher has no directory."),
         };
         startInfo.ArgumentList.Add(HelperArgument);
         startInfo.ArgumentList.Add(
@@ -293,7 +330,8 @@ public static class LauncherSelfUpdateBootstrap
                 "The helper target does not match the pending self-update.");
         }
 
-        string expectedHelperDirectory = manager.GetPayloadDirectory(plan.TransactionId);
+        string expectedHelperDirectory = Path.GetDirectoryName(manager.GetStagedLauncherPath(plan))
+            ?? throw new LauncherUpdateException("The staged launcher has no directory.");
         string expectedHelperPath = manager.GetStagedLauncherPath(plan);
         if (!PathsEqual(helperBaseDirectory, expectedHelperDirectory)
             || !PathsEqual(currentExecutablePath, expectedHelperPath))
@@ -302,13 +340,12 @@ public static class LauncherSelfUpdateBootstrap
                 "Self-update helper mode is trusted only from the staged launcher payload.");
         }
 
-        string launcherPath = ClientVersionStore.ResolveContained(
-            targetDirectory,
-            GetLauncherFileName(plan.Rid));
+        string launcherPath = LauncherInstallationLayoutFor(plan).LauncherPath;
         var startInfo = new ProcessStartInfo(launcherPath)
         {
             UseShellExecute = false,
-            WorkingDirectory = Path.GetFullPath(targetDirectory),
+            WorkingDirectory = Path.GetDirectoryName(launcherPath)
+                ?? throw new LauncherUpdateException("The installed launcher has no directory."),
         };
         startInfo.ArgumentList.Add(ConfirmArgument);
         startInfo.ArgumentList.Add(transactionId);
@@ -426,7 +463,8 @@ public static class LauncherSelfUpdateBootstrap
                 restoredStart = new ProcessStartInfo(launcherPath)
                 {
                     UseShellExecute = false,
-                    WorkingDirectory = Path.GetFullPath(targetDirectory),
+                    WorkingDirectory = Path.GetDirectoryName(launcherPath)
+                        ?? throw new LauncherUpdateException("The installed launcher has no directory."),
                 };
                 foreach (string argument in publicArguments)
                 {
@@ -447,8 +485,10 @@ public static class LauncherSelfUpdateBootstrap
         return 74;
     }
 
-    private static string GetLauncherFileName(string rid) =>
-        PayloadExecutableNames.Launcher + PayloadExecutableNames.SuffixForRid(rid);
+    private static LauncherInstallationLayout LauncherInstallationLayoutFor(SelfUpdatePlan plan) =>
+        plan.InstallationKind == LauncherInstallationKind.MacBundle
+            ? LauncherInstallationLayout.MacBundle(plan.TargetDirectory, plan.Rid)
+            : LauncherInstallationLayout.Flat(plan.TargetDirectory, plan.Rid);
 
     private static void ValidateCanonicalStartup(
         SelfUpdatePlan plan,
@@ -461,9 +501,7 @@ public static class LauncherSelfUpdateBootstrap
                 "The pending self-update targets a different launcher directory.");
         }
 
-        string expectedExecutable = ClientVersionStore.ResolveContained(
-            baseDirectory,
-            GetLauncherFileName(plan.Rid));
+        string expectedExecutable = LauncherInstallationLayoutFor(plan).LauncherPath;
         if (!PathsEqual(executable, expectedExecutable))
         {
             throw new LauncherUpdateException(
@@ -493,10 +531,5 @@ public static class LauncherSelfUpdateBootstrap
     }
 
     private static bool PathsEqual(string left, string right) =>
-        string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+        LauncherPathIdentity.Equals(left, right);
 }

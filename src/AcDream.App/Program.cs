@@ -86,8 +86,9 @@ if (sessionConfigFlagPath is not null)
         var resolver = new AppCredentialResolver(
             Console.In,
             applicationPaths.ConfigDirectory,
-            graphicalPlatform.OperatingSystem
-                == GraphicalHostOperatingSystem.Linux);
+            graphicalPlatform.OperatingSystem is
+                GraphicalHostOperatingSystem.Linux or
+                GraphicalHostOperatingSystem.MacOS);
         secret = resolver.Resolve(session.Id, session.Credential);
         runtimeOptions = RuntimeOptions.FromSessionConfig(
             resolvedDatDir,

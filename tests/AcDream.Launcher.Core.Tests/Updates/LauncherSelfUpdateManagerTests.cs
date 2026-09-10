@@ -19,6 +19,249 @@ public sealed class LauncherSelfUpdateManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task MacBundleApplyAndRollbackRenameTheWholeAppWithoutWritingInsideIt()
+    {
+        string container = Path.Combine(_root, "Applications");
+        string bundle = Path.Combine(container, "OpenAC.app");
+        string launcher = Path.Combine(bundle, "Contents", "MacOS", "acdream-launcher");
+        string support = Path.Combine(bundle, "Contents", "Resources", "support.dat");
+        Directory.CreateDirectory(Path.GetDirectoryName(launcher)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(support)!);
+        await File.WriteAllTextAsync(launcher, "old-launcher");
+        await File.WriteAllTextAsync(support, "old-support");
+
+        LauncherInstallationLayout layout = LauncherInstallationLayout.MacBundle(bundle, "osx-arm64");
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("OpenAC.app/Contents/MacOS/acdream-launcher", "new-launcher"u8.ToArray(), 0x81ED),
+            ("OpenAC.app/Contents/Info.plist", "<plist/>"u8.ToArray(), 0x81A4),
+            ("OpenAC.app/Contents/Resources/support.dat", "new-support"u8.ToArray(), 0x81A4),
+        ]);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", archive);
+        using var http = new HttpClient();
+        var manager = new LauncherSelfUpdateManager(UpdateTestData.Paths(_root), http);
+        var artifact = new ReleaseArtifact(
+            server.UriFor("launcher.zip"),
+            UpdateTestData.Sha256(archive),
+            archive.LongLength);
+
+        _ = await manager.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            "osx-arm64",
+            artifact,
+            layout,
+            progress: null,
+            CancellationToken.None);
+        SelfUpdatePlan applied = await manager.ApplyPendingAsync(bundle);
+
+        Assert.Equal(SelfUpdatePlanState.AwaitingConfirmation, applied.State);
+        Assert.Equal("new-launcher", await File.ReadAllTextAsync(launcher));
+        Assert.Equal("new-support", await File.ReadAllTextAsync(support));
+        Assert.False(File.Exists(Path.Combine(bundle, LauncherSelfUpdateManager.InstallRecordFileName)));
+        Assert.True(Directory.Exists(Path.Combine(
+            manager.GetTargetTransactionDirectory(applied), "backup", "OpenAC.app")));
+
+        SelfUpdatePlan rolledBack = await manager.RollbackAwaitingConfirmationAsync(bundle);
+        Assert.Equal(SelfUpdatePlanState.RolledBack, rolledBack.State);
+        Assert.Equal("old-launcher", await File.ReadAllTextAsync(launcher));
+        Assert.Equal("old-support", await File.ReadAllTextAsync(support));
+        Assert.False(Directory.Exists(manager.GetTargetTransactionDirectory(rolledBack)));
+    }
+
+    [Fact]
+    public async Task MacBundleStageRejectsFilesOutsideOpenAcApp()
+    {
+        string bundle = Path.Combine(_root, "Applications", "OpenAC.app");
+        string launcher = Path.Combine(bundle, "Contents", "MacOS", "acdream-launcher");
+        Directory.CreateDirectory(Path.GetDirectoryName(launcher)!);
+        await File.WriteAllTextAsync(launcher, "old-launcher");
+        LauncherInstallationLayout layout = LauncherInstallationLayout.MacBundle(bundle, "osx-arm64");
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("OpenAC.app/Contents/MacOS/acdream-launcher", "new-launcher"u8.ToArray(), 0x81ED),
+            ("outside-bundle", "unexpected"u8.ToArray(), 0x81A4),
+        ]);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", archive);
+        using var http = new HttpClient();
+        var manager = new LauncherSelfUpdateManager(UpdateTestData.Paths(_root), http);
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() => manager.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            "osx-arm64",
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(archive),
+                archive.LongLength),
+            layout,
+            progress: null,
+            CancellationToken.None));
+
+        Assert.Equal("old-launcher", await File.ReadAllTextAsync(launcher));
+        Assert.False(File.Exists(manager.PendingPlanPath));
+    }
+
+    [Fact]
+    public async Task MacBundleStageRequiresInfoPlist()
+    {
+        string bundle = Path.Combine(_root, "Applications", "OpenAC.app");
+        string launcher = Path.Combine(bundle, "Contents", "MacOS", "acdream-launcher");
+        Directory.CreateDirectory(Path.GetDirectoryName(launcher)!);
+        await File.WriteAllTextAsync(launcher, "old-launcher");
+        byte[] archive = UpdateTestData.CreateZip(
+            [("OpenAC.app/Contents/MacOS/acdream-launcher", "new-launcher"u8.ToArray(), 0x81ED)]);
+        using var server = new LocalHttpFixture();
+        server.Add("launcher.zip", archive);
+        using var http = new HttpClient();
+        var manager = new LauncherSelfUpdateManager(UpdateTestData.Paths(_root), http);
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() => manager.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            "osx-arm64",
+            new ReleaseArtifact(server.UriFor("launcher.zip"), UpdateTestData.Sha256(archive), archive.LongLength),
+            LauncherInstallationLayout.MacBundle(bundle, "osx-arm64"),
+            progress: null,
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task MacBundleHelperUsesTheStagedMacOsDirectoryForItsTrustCheck()
+    {
+        MacBundleScenario scenario = await CreateMacBundleScenarioAsync();
+        try
+        {
+            SelfUpdatePlan plan = Assert.IsType<SelfUpdatePlan>(
+                await scenario.Manager.LoadPendingAsync());
+            LauncherInstallationLayout layout = LauncherInstallationLayout.MacBundle(
+                scenario.Bundle,
+                "osx-arm64");
+
+            LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+                LauncherSelfUpdateBootstrap.HandleAsync(
+                    [
+                        LauncherSelfUpdateBootstrap.HelperArgument,
+                        Environment.ProcessId.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture),
+                        scenario.Bundle,
+                        plan.TransactionId,
+                    ],
+                    scenario.Manager,
+                    layout,
+                    scenario.Manager.GetStagedLauncherPath(plan)));
+
+            Assert.Contains("cannot wait on itself", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            scenario.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task MacBundleRecoveryRestoresThePriorBundleAtEveryRenameBoundary(int boundary)
+    {
+        MacBundleScenario scenario = await CreateMacBundleScenarioAsync();
+        try
+        {
+            SelfUpdatePlan staged = Assert.IsType<SelfUpdatePlan>(
+                await scenario.Manager.LoadPendingAsync());
+            string swap = scenario.Manager.GetTargetTransactionDirectory(staged);
+            string incoming = Path.Combine(swap, "incoming", "OpenAC.app");
+            CopyDirectory(
+                Path.Combine(scenario.Manager.GetPayloadDirectory(staged.TransactionId), "OpenAC.app"),
+                incoming);
+            await SetBundleApplyingAsync(scenario.Manager.PendingPlanPath);
+
+            string backup = Path.Combine(swap, "backup", "OpenAC.app");
+            if (boundary >= 1)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+                Directory.Move(scenario.Bundle, backup);
+            }
+
+            if (boundary >= 2)
+            {
+                Directory.Move(incoming, scenario.Bundle);
+            }
+
+            SelfUpdatePlan recovered = await scenario.Manager.RecoverApplyingAsync(scenario.Bundle);
+
+            Assert.Equal(SelfUpdatePlanState.RolledBack, recovered.State);
+            Assert.Equal("old-launcher", await File.ReadAllTextAsync(scenario.Launcher));
+            Assert.Equal("old-support", await File.ReadAllTextAsync(scenario.Support));
+            Assert.False(Directory.Exists(swap));
+        }
+        finally
+        {
+            scenario.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task MacBundleConfirmationCleansBothTransactionRoots()
+    {
+        MacBundleScenario scenario = await CreateMacBundleScenarioAsync();
+        try
+        {
+            SelfUpdatePlan applied = await scenario.Manager.ApplyPendingAsync(scenario.Bundle);
+            await scenario.Manager.ConfirmAsync(
+                applied.TransactionId,
+                scenario.Bundle,
+                scenario.Launcher);
+            await scenario.Manager.CompleteConfirmedAsync(applied.TransactionId, scenario.Bundle);
+
+            Assert.False(File.Exists(scenario.Manager.PendingPlanPath));
+            Assert.False(Directory.Exists(scenario.Manager.GetTargetTransactionDirectory(applied)));
+            Assert.False(Directory.Exists(scenario.Manager.GetTransactionDirectory(applied.TransactionId)));
+            Assert.Equal("new-launcher", await File.ReadAllTextAsync(scenario.Launcher));
+        }
+        finally
+        {
+            scenario.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SchemaThreeFlatPlanMigratesToSchemaFourFlatPlan()
+    {
+        using var harness = new Harness(_root);
+        _ = await harness.StageAsync();
+        JsonObject document = Assert.IsType<JsonObject>(JsonNode.Parse(
+            await File.ReadAllTextAsync(harness.Manager.PendingPlanPath)));
+        document["schemaVersion"] = 3;
+        document.Remove("installationKind");
+        await File.WriteAllTextAsync(harness.Manager.PendingPlanPath, document.ToJsonString());
+
+        SelfUpdatePlan migrated = Assert.IsType<SelfUpdatePlan>(await harness.Manager.LoadPendingAsync());
+
+        Assert.Equal(SelfUpdatePlan.CurrentSchemaVersion, migrated.SchemaVersion);
+        Assert.Equal(LauncherInstallationKind.Flat, migrated.InstallationKind);
+    }
+
+    [Fact]
+    public async Task TamperedBundlePlanCannotBeReinterpretedAsFlat()
+    {
+        MacBundleScenario scenario = await CreateMacBundleScenarioAsync();
+        try
+        {
+            JsonObject document = Assert.IsType<JsonObject>(JsonNode.Parse(
+                await File.ReadAllTextAsync(scenario.Manager.PendingPlanPath)));
+            document["installationKind"] = "flat";
+            await File.WriteAllTextAsync(scenario.Manager.PendingPlanPath, document.ToJsonString());
+
+            await Assert.ThrowsAsync<LauncherUpdateException>(() => scenario.Manager.LoadPendingAsync());
+        }
+        finally
+        {
+            scenario.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task StartupWithoutPlanReclaimsOnlyExactOwnedResidue()
     {
         using var harness = new Harness(_root);
@@ -517,6 +760,94 @@ public sealed class LauncherSelfUpdateManagerTests : IDisposable
             await File.ReadAllTextAsync(path)));
         plan["state"] = state;
         await File.WriteAllTextAsync(path, plan.ToJsonString());
+    }
+
+    private static async Task SetBundleApplyingAsync(string path)
+    {
+        JsonObject plan = Assert.IsType<JsonObject>(JsonNode.Parse(
+            await File.ReadAllTextAsync(path)));
+        plan["state"] = "applying";
+        plan["apply"] = new JsonArray();
+        await File.WriteAllTextAsync(path, plan.ToJsonString());
+    }
+
+    private async Task<MacBundleScenario> CreateMacBundleScenarioAsync()
+    {
+        string root = Path.Combine(_root, Guid.NewGuid().ToString("N"));
+        string bundle = Path.Combine(root, "Applications", "OpenAC.app");
+        string launcher = Path.Combine(bundle, "Contents", "MacOS", "acdream-launcher");
+        string support = Path.Combine(bundle, "Contents", "Resources", "support.dat");
+        Directory.CreateDirectory(Path.GetDirectoryName(launcher)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(support)!);
+        await File.WriteAllTextAsync(launcher, "old-launcher");
+        await File.WriteAllTextAsync(support, "old-support");
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("OpenAC.app/Contents/MacOS/acdream-launcher", "new-launcher"u8.ToArray(), 0x81ED),
+            ("OpenAC.app/Contents/Info.plist", "<plist/>"u8.ToArray(), 0x81A4),
+            ("OpenAC.app/Contents/Resources/support.dat", "new-support"u8.ToArray(), 0x81A4),
+        ]);
+        var server = new LocalHttpFixture();
+        server.Add("launcher.zip", archive);
+        var http = new HttpClient();
+        var manager = new LauncherSelfUpdateManager(UpdateTestData.Paths(root), http);
+        await manager.StageAsync(
+            LauncherVersion.Parse("2.0.0"),
+            "osx-arm64",
+            new ReleaseArtifact(
+                server.UriFor("launcher.zip"),
+                UpdateTestData.Sha256(archive),
+                archive.LongLength),
+            LauncherInstallationLayout.MacBundle(bundle, "osx-arm64"),
+            progress: null,
+            CancellationToken.None);
+        return new MacBundleScenario(bundle, launcher, support, manager, http, server);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        foreach (string directory in Directory.EnumerateDirectories(
+                     source,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(
+                destination,
+                Path.GetRelativePath(source, directory)));
+        }
+
+        foreach (string file in Directory.EnumerateFiles(
+                     source,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
+    }
+
+    private sealed class MacBundleScenario(
+        string bundle,
+        string launcher,
+        string support,
+        LauncherSelfUpdateManager manager,
+        HttpClient http,
+        LocalHttpFixture server) : IDisposable
+    {
+        public string Bundle => bundle;
+
+        public string Launcher => launcher;
+
+        public string Support => support;
+
+        public LauncherSelfUpdateManager Manager => manager;
+
+        public void Dispose()
+        {
+            http.Dispose();
+            server.Dispose();
+        }
     }
 
     private sealed class Harness : IDisposable

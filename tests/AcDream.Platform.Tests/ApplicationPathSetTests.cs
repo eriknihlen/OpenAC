@@ -5,6 +5,49 @@ namespace AcDream.Platform.Tests;
 public sealed class ApplicationPathSetTests
 {
     [Fact]
+    public void MacUsesApplicationSupportAndCachesOutsideTheApplicationBundle()
+    {
+        string home = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mac-home"));
+        var platform = new FixtureEnvironment(isWindows: false)
+        {
+            IsMacOS = true,
+            UserProfile = home,
+            Variables = { ["XDG_DATA_HOME"] = Path.Combine(home, "linux-data") },
+        };
+
+        ApplicationPathSet paths = ApplicationPathSet.Resolve(platform: platform);
+
+        Assert.Equal(Path.Combine(home, "Library", "Application Support", "acdream"), paths.DataDirectory);
+        Assert.Equal(Path.Combine(paths.DataDirectory, "config"), paths.ConfigDirectory);
+        Assert.Equal(Path.Combine(home, "Library", "Caches", "acdream"), paths.CacheDirectory);
+        Assert.Null(paths.LegacyConfigDirectory);
+    }
+
+    [Fact]
+    public void MacPreservesExplicitAndEnvironmentOverrides()
+    {
+        string home = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mac-overrides"));
+        var platform = new FixtureEnvironment(isWindows: false)
+        {
+            IsMacOS = true,
+            UserProfile = home,
+            CurrentDirectoryValue = home,
+            Variables =
+            {
+                ["ACDREAM_CONFIG_DIR"] = "custom-config",
+                ["ACDREAM_DATA_DIR"] = "environment-data",
+                ["ACDREAM_CACHE_DIR"] = "custom-cache",
+            },
+        };
+
+        ApplicationPathSet paths = ApplicationPathSet.Resolve(dataDirectory: "explicit-data", platform: platform);
+
+        Assert.Equal(Path.Combine(home, "custom-config"), paths.ConfigDirectory);
+        Assert.Equal(Path.Combine(home, "explicit-data"), paths.DataDirectory);
+        Assert.Equal(Path.Combine(home, "custom-cache"), paths.CacheDirectory);
+    }
+
+    [Fact]
     public void LinuxUsesXdgRootsAndPublishesFeaturePaths()
     {
         string root = Path.GetFullPath(
@@ -175,6 +218,8 @@ public sealed class ApplicationPathSetTests
         : IApplicationPathEnvironment
     {
         public bool IsWindows { get; } = isWindows;
+
+        public bool IsMacOS { get; init; }
 
         public string CurrentDirectoryValue { get; init; } =
             Environment.CurrentDirectory;

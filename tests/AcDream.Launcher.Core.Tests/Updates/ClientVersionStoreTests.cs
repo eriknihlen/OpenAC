@@ -56,7 +56,7 @@ public sealed class ClientVersionStoreTests : IDisposable
         Assert.Equal("1.0.0", rolledBack.Version!.Value);
         Assert.Equal("2.0.0", rolledBack.PreviousVersion);
         Assert.Equal("first-gui", await File.ReadAllTextAsync(
-            Path.Combine(rolledBack.Directory!, "AcDream.App" + ExecutableSuffix)));
+            Path.Combine(rolledBack.Directory!, GraphicalHostName)));
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public sealed class ClientVersionStoreTests : IDisposable
         var store = new ClientVersionStore(_paths);
         _ = await PromoteAsync(store, "1.0.0", "first");
         ClientVersionResolution second = await PromoteAsync(store, "2.0.0", "second");
-        string graphical = Path.Combine(second.Directory!, "AcDream.App" + ExecutableSuffix);
+        string graphical = Path.Combine(second.Directory!, GraphicalHostName);
         await File.WriteAllTextAsync(graphical, "tampered!!");
 
         var restarted = new ClientVersionStore(_paths);
@@ -152,7 +152,7 @@ public sealed class ClientVersionStoreTests : IDisposable
         ClientVersionResolution first = await PromoteAsync(store, "1.0.0", "one");
         Assert.Equal(first.Directory, executables.WorkingDirectory);
         Assert.Equal(
-            Path.Combine(first.Directory!, "AcDream.App" + ExecutableSuffix),
+            Path.Combine(first.Directory!, GraphicalHostName),
             executables.CreatePlaySpec(LaunchMode.Gui, "session.json").ExecutablePath);
 
         ClientVersionResolution second = await PromoteAsync(store, "2.0.0", "two");
@@ -174,16 +174,16 @@ public sealed class ClientVersionStoreTests : IDisposable
         Assert.Contains("active client version", error.Message, StringComparison.OrdinalIgnoreCase);
         ClientVersionResolution resolution = await store.LoadAndRecoverAsync(_rid);
         Assert.Equal("original-gui", await File.ReadAllTextAsync(
-            Path.Combine(resolution.Directory!, "AcDream.App" + ExecutableSuffix)));
+            Path.Combine(resolution.Directory!, GraphicalHostName)));
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public async Task LinuxTreatsNonCanonicalInstallJsonCasingAsUnrecordedContent()
+    [Trait("Lane", "Unix")]
+    public async Task UnixRejectsNonCanonicalInstallJsonCasing()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!LauncherOperatingSystem.IsUnix)
         {
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
         }
 
         var store = new ClientVersionStore(_paths);
@@ -196,7 +196,10 @@ public sealed class ClientVersionStoreTests : IDisposable
             .LoadAndRecoverAsync(_rid);
 
         Assert.Equal(ClientVersionState.Invalid, resolution.State);
-        Assert.Contains("unrecorded", resolution.Status, StringComparison.OrdinalIgnoreCase);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.Contains("unrecorded", resolution.Status, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]
@@ -236,6 +239,9 @@ public sealed class ClientVersionStoreTests : IDisposable
     private string ExecutableSuffix => _rid.StartsWith("win-", StringComparison.Ordinal)
         ? ".exe"
         : string.Empty;
+
+    private string GraphicalHostName =>
+        PayloadExecutableNames.GraphicalHostForRid(_rid) + ExecutableSuffix;
 
     private async Task<ClientVersionResolution> PromoteAsync(
         ClientVersionStore store,

@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Tests.Updates;
@@ -211,7 +212,7 @@ internal static class UpdateTestData
         const int executable = 0x81ED;
         return CreateZip(
         [
-            ($"AcDream.App{suffix}", Encoding.UTF8.GetBytes(marker + "-gui"), executable),
+            ($"{PayloadExecutableNames.GraphicalHostForRid(rid)}{suffix}", Encoding.UTF8.GetBytes(marker + "-gui"), executable),
             ($"acdream-headless{suffix}", Encoding.UTF8.GetBytes(marker + "-headless"), executable),
             ("assets/readme.txt", Encoding.UTF8.GetBytes(marker), 0x81A4),
         ]);

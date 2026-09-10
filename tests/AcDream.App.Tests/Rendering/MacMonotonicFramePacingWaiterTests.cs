@@ -11,6 +11,7 @@ public sealed class MacMonotonicFramePacingWaiterTests
     [InlineData(125_000L, 125u, 3u, 3_000UL)]
     [InlineData(1_000L, 1u, 1u, 1_000UL)]
     [InlineData(41L, 125u, 3u, 1UL)]
+    [InlineData(42L, 125u, 3u, 2UL)]
     public void NanosecondsConvertThroughTheReportedTimebase(
         long nanoseconds,
         uint numerator,

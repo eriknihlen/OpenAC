@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcDream.Launcher.Core;
 using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Profiles;
@@ -105,7 +106,7 @@ public sealed class LauncherProfileStore
         {
             using (FileStream stream = CreateCredentialTempFile(tempPath))
             {
-                if (OperatingSystem.IsLinux())
+                if (LauncherOperatingSystem.IsUnix)
                 {
                     File.SetUnixFileMode(tempPath, OwnerOnlyFileMode);
                 }
@@ -113,7 +114,7 @@ public sealed class LauncherProfileStore
                 JsonSerializer.Serialize(stream, Document, SerializerOptions);
             }
 
-            if (OperatingSystem.IsLinux()
+            if (LauncherOperatingSystem.IsUnix
                 && File.GetUnixFileMode(tempPath) != OwnerOnlyFileMode)
             {
                 throw new IOException(
@@ -139,7 +140,7 @@ public sealed class LauncherProfileStore
             Share = FileShare.None,
         };
 
-        if (OperatingSystem.IsLinux())
+        if (LauncherOperatingSystem.IsUnix)
         {
             options.UnixCreateMode = OwnerOnlyFileMode;
         }
@@ -409,7 +410,7 @@ public sealed class LauncherProfileStore
 
     private void EnsureExistingCredentialFilePermissions()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!LauncherOperatingSystem.IsUnix)
         {
             return;
         }

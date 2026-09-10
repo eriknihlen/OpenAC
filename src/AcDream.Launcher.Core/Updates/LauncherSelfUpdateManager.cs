@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcDream.Launcher.Core;
 using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Updates;
@@ -36,12 +37,13 @@ public sealed record SelfUpdatePlan(
     string Version,
     string Rid,
     string TargetDirectory,
+    LauncherInstallationKind InstallationKind,
     string ArchiveSha256,
     long ArchiveSize,
     IReadOnlyList<InstalledFileRecord> Files,
     IReadOnlyList<SelfUpdateApplyEntry>? Apply)
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 }
 
 public sealed record LauncherBinaryInstallRecord(
@@ -150,16 +152,49 @@ public sealed class LauncherSelfUpdateManager
             manifest.Version,
             rid,
             manifest.RequireLauncher(rid),
-            targetDirectory,
+            LauncherInstallationLayout.Flat(targetDirectory, rid),
             progress,
             cancellationToken);
     }
+
+    public Task<SelfUpdateStageResult> StageAsync(
+        ReleaseManifest manifest,
+        string rid,
+        LauncherInstallationLayout layout,
+        IProgress<ArtifactDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(layout);
+        return StageAsync(
+            manifest.Version,
+            rid,
+            manifest.RequireLauncher(rid),
+            layout,
+            progress,
+            cancellationToken);
+    }
+
+    internal Task<SelfUpdateStageResult> StageAsync(
+        LauncherVersion version,
+        string rid,
+        ReleaseArtifact artifact,
+        string targetDirectory,
+        IProgress<ArtifactDownloadProgress>? progress,
+        CancellationToken cancellationToken) =>
+        StageAsync(
+            version,
+            rid,
+            artifact,
+            LauncherInstallationLayout.Flat(targetDirectory, rid),
+            progress,
+            cancellationToken);
 
     internal async Task<SelfUpdateStageResult> StageAsync(
         LauncherVersion version,
         string rid,
         ReleaseArtifact artifact,
-        string targetDirectory,
+        LauncherInstallationLayout layout,
         IProgress<ArtifactDownloadProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -170,8 +205,9 @@ public sealed class LauncherSelfUpdateManager
             throw new ArgumentException("RID is invalid.", nameof(rid));
         }
 
+        ValidateLayout(layout, rid);
         using UpdateSessionBarrier.ExclusiveLease lease = Barrier.AcquireExclusive();
-        string target = NormalizeTargetDirectory(targetDirectory);
+        string target = NormalizeTargetDirectory(layout.InstalledRoot);
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(TransactionsDirectory);
         SelfUpdatePlan? existing = await LoadPendingAsync(cancellationToken)
@@ -203,10 +239,18 @@ public sealed class LauncherSelfUpdateManager
                     PayloadExecutableNames.ForPayload(rid, launcherPayload: true),
                     cancellationToken)
                 .ConfigureAwait(false);
-            ClientVersionStore.ValidateRequiredExecutables(
-                extracted,
-                rid,
-                launcherPayload: true);
+            if (layout.Kind == LauncherInstallationKind.MacBundle)
+            {
+                ValidateMacBundleExecutable(extracted, layout);
+            }
+            else
+            {
+                ClientVersionStore.ValidateRequiredExecutables(
+                    extracted,
+                    rid,
+                    launcherPayload: true);
+            }
+            ValidatePayloadLayout(extracted, layout);
             if (extracted.Any(file => string.Equals(
                     file.Path,
                     InstallRecordFileName,
@@ -223,6 +267,7 @@ public sealed class LauncherSelfUpdateManager
                 version.Value,
                 rid,
                 target,
+                layout.Kind,
                 artifact.Sha256.ToLowerInvariant(),
                 artifact.Size,
                 extracted.Select(file => new InstalledFileRecord(
@@ -272,6 +317,7 @@ public sealed class LauncherSelfUpdateManager
                 throw new LauncherUpdateException("The self-update plan is empty.");
             }
 
+            plan = MigratePlan(plan);
             ValidatePlan(plan, plan.TargetDirectory);
             return plan;
         }
@@ -304,6 +350,11 @@ public sealed class LauncherSelfUpdateManager
             .ConfigureAwait(false)
             ?? throw new LauncherUpdateException("There is no staged launcher self-update.");
         ValidatePlan(plan, expectedTarget);
+
+        if (plan.InstallationKind == LauncherInstallationKind.MacBundle)
+        {
+            return await ApplyBundlePendingAsync(plan, cancellationToken).ConfigureAwait(false);
+        }
 
         if (plan.State == SelfUpdatePlanState.AwaitingConfirmation)
         {
@@ -378,13 +429,15 @@ public sealed class LauncherSelfUpdateManager
         string expectedTargetDirectory,
         CancellationToken cancellationToken = default)
     {
-        string expectedTarget = NormalizeTargetDirectory(expectedTargetDirectory);
+        string expectedTarget = NormalizeTargetPath(expectedTargetDirectory);
         SelfUpdatePlan plan = await LoadPendingAsync(cancellationToken)
             .ConfigureAwait(false)
             ?? throw new LauncherUpdateException("There is no pending self-update.");
         ValidatePlan(plan, expectedTarget);
         return plan.State == SelfUpdatePlanState.Applying
-            ? await RollbackApplyingAsync(plan, cancellationToken).ConfigureAwait(false)
+            ? plan.InstallationKind == LauncherInstallationKind.MacBundle
+                ? await RollbackBundleApplyingAsync(plan, cancellationToken).ConfigureAwait(false)
+                : await RollbackApplyingAsync(plan, cancellationToken).ConfigureAwait(false)
             : plan;
     }
 
@@ -425,9 +478,7 @@ public sealed class LauncherSelfUpdateManager
                 "The running launcher does not match the pending confirmation plan.");
         }
 
-        string expectedExecutable = ClientVersionStore.ResolveContained(
-            expectedTarget,
-            GetLauncherFileName(plan.Rid));
+        string expectedExecutable = LayoutFor(plan).LauncherPath;
         if (!PathsEqual(expectedExecutable, currentExecutablePath))
         {
             throw new LauncherUpdateException(
@@ -436,11 +487,14 @@ public sealed class LauncherSelfUpdateManager
 
         await VerifyAppliedTargetsAsync(plan, expectedTarget, cancellationToken)
             .ConfigureAwait(false);
-        await VerifyInstalledOwnershipMatchesPlanAsync(
-                plan,
-                expectedTarget,
-                cancellationToken)
-            .ConfigureAwait(false);
+        if (plan.InstallationKind == LauncherInstallationKind.Flat)
+        {
+            await VerifyInstalledOwnershipMatchesPlanAsync(
+                    plan,
+                    expectedTarget,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
         string confirmationPath = GetConfirmationPath(transactionId);
         await AtomicJsonFile.WriteBytesAsync(
                 confirmationPath,
@@ -517,8 +571,9 @@ public sealed class LauncherSelfUpdateManager
 
         plan = plan with { State = SelfUpdatePlanState.Applying };
         await WritePlanAsync(plan, cancellationToken).ConfigureAwait(false);
-        return await RollbackApplyingAsync(plan, cancellationToken)
-            .ConfigureAwait(false);
+        return plan.InstallationKind == LauncherInstallationKind.MacBundle
+            ? await RollbackBundleApplyingAsync(plan, cancellationToken).ConfigureAwait(false)
+            : await RollbackApplyingAsync(plan, cancellationToken).ConfigureAwait(false);
     }
 
     public string GetTransactionDirectory(string transactionId)
@@ -534,12 +589,12 @@ public sealed class LauncherSelfUpdateManager
         Path.Combine(GetTransactionDirectory(transactionId), "confirmed");
 
     internal string GetTargetTransactionDirectory(SelfUpdatePlan plan) =>
-        Path.Combine(plan.TargetDirectory, TargetTransactionPrefix + plan.TransactionId);
+        LayoutFor(plan).GetSiblingTransactionDirectory(plan.TransactionId);
 
     internal string GetStagedLauncherPath(SelfUpdatePlan plan) =>
         ClientVersionStore.ResolveContained(
             GetPayloadDirectory(plan.TransactionId),
-            GetLauncherFileName(plan.Rid));
+            LayoutFor(plan).PayloadLauncherPath);
 
     internal bool CleanupOwnedResidueUnderLease(
         SelfUpdatePlan? pending,
@@ -555,12 +610,81 @@ public sealed class LauncherSelfUpdateManager
         }
             ? pending.TransactionId
             : null;
-        CleanupTargetResidue(target, keepTarget);
-        return !HasReclaimableResidue(pending?.TransactionId, target, keepTarget);
+        string transactionContainer = pending?.InstallationKind == LauncherInstallationKind.MacBundle
+            || string.Equals(Path.GetFileName(target), "OpenAC.app", StringComparison.Ordinal)
+            ? Path.GetDirectoryName(target)
+                ?? throw new LauncherUpdateException("The app bundle has no containing directory.")
+            : target;
+        CleanupTargetResidue(transactionContainer, keepTarget);
+        return !HasReclaimableResidue(
+            pending?.TransactionId,
+            transactionContainer,
+            keepTarget);
     }
 
     private static string GetLauncherFileName(string rid) =>
         PayloadExecutableNames.Launcher + PayloadExecutableNames.SuffixForRid(rid);
+
+    private static LauncherInstallationLayout LayoutFor(SelfUpdatePlan plan) =>
+        plan.InstallationKind == LauncherInstallationKind.MacBundle
+            ? LauncherInstallationLayout.MacBundle(plan.TargetDirectory, plan.Rid)
+            : LauncherInstallationLayout.Flat(plan.TargetDirectory, plan.Rid);
+
+    private static void ValidateLayout(LauncherInstallationLayout layout, string rid)
+    {
+        if (layout.Kind == LauncherInstallationKind.MacBundle)
+        {
+            if (!rid.StartsWith("osx-", StringComparison.Ordinal)
+                || layout != LauncherInstallationLayout.MacBundle(layout.InstalledRoot, rid))
+            {
+                throw new LauncherUpdateException("The macOS launcher installation layout is invalid.");
+            }
+        }
+        else if (layout.Kind != LauncherInstallationKind.Flat)
+        {
+            throw new LauncherUpdateException("The launcher installation layout is invalid.");
+        }
+    }
+
+    private static void ValidatePayloadLayout(
+        IReadOnlyList<ExtractedFileRecord> files,
+        LauncherInstallationLayout layout)
+    {
+        if (layout.Kind != LauncherInstallationKind.MacBundle)
+        {
+            return;
+        }
+
+        string prefix = layout.PayloadRoot + "/";
+        string infoPlist = layout.PayloadRoot + "/Contents/Info.plist";
+        if (files.Any(file => !file.Path.StartsWith(prefix, StringComparison.Ordinal))
+            || !files.Any(file => string.Equals(
+                file.Path,
+                layout.PayloadLauncherPath,
+                StringComparison.Ordinal))
+            || !files.Any(file => string.Equals(
+                file.Path,
+                infoPlist,
+                StringComparison.Ordinal)))
+        {
+            throw new LauncherUpdateException(
+                "The macOS launcher ZIP must contain exactly the OpenAC.app bundle root and launcher executable.");
+        }
+    }
+
+    private static void ValidateMacBundleExecutable(
+        IReadOnlyList<ExtractedFileRecord> files,
+        LauncherInstallationLayout layout)
+    {
+        ExtractedFileRecord? launcher = files.SingleOrDefault(file =>
+            string.Equals(file.Path, layout.PayloadLauncherPath, StringComparison.Ordinal));
+        if (launcher is null
+            || (launcher.UnixMode & (int)UnixFileMode.UserExecute) == 0)
+        {
+            throw new LauncherUpdateException(
+                "The macOS launcher ZIP lacks an executable app-bundle launcher.");
+        }
+    }
 
     private async Task<IReadOnlyList<SelfUpdateApplyEntry>> BuildApplyJournalAsync(
         SelfUpdatePlan plan,
@@ -659,7 +783,7 @@ public sealed class LauncherSelfUpdateManager
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             await CopyFileDurablyAsync(source, destination, cancellationToken)
                 .ConfigureAwait(false);
-            if (OperatingSystem.IsLinux() && file.UnixMode != 0)
+            if (LauncherOperatingSystem.IsUnix && file.UnixMode != 0)
             {
                 File.SetUnixFileMode(destination, (UnixFileMode)file.UnixMode);
             }
@@ -776,6 +900,158 @@ public sealed class LauncherSelfUpdateManager
         {
             File.Move(incomingPath, targetPath);
         }
+    }
+
+    private async Task<SelfUpdatePlan> ApplyBundlePendingAsync(
+        SelfUpdatePlan plan,
+        CancellationToken cancellationToken)
+    {
+        if (plan.State == SelfUpdatePlanState.AwaitingConfirmation)
+        {
+            return plan;
+        }
+
+        if (plan.State == SelfUpdatePlanState.Applying)
+        {
+            plan = await RollbackBundleApplyingAsync(plan, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (plan.State == SelfUpdatePlanState.RolledBack)
+        {
+            await VerifyBundleRestoredAsync(plan, cancellationToken).ConfigureAwait(false);
+            plan = plan with { State = SelfUpdatePlanState.Staged, Apply = null };
+            await WritePlanAsync(plan, cancellationToken).ConfigureAwait(false);
+        }
+
+        await VerifyPayloadAsync(plan, cancellationToken).ConfigureAwait(false);
+        LauncherInstallationLayout layout = LayoutFor(plan);
+        string swap = GetTargetTransactionDirectory(plan);
+        if (Directory.Exists(swap))
+        {
+            ClientVersionStore.RejectReparseTree(swap);
+            SafeZipExtractor.TryDeleteDirectory(swap);
+        }
+
+        if (Directory.Exists(swap) || File.Exists(swap))
+        {
+            throw new LauncherUpdateException("The macOS bundle transaction could not be reclaimed.");
+        }
+
+        string incomingRoot = Path.Combine(swap, "incoming");
+        Directory.CreateDirectory(incomingRoot);
+        await CopyBundleIncomingAsync(plan, incomingRoot, cancellationToken).ConfigureAwait(false);
+        string incomingBundle = ClientVersionStore.ResolveContained(incomingRoot, layout.PayloadRoot);
+        string backupRoot = Path.Combine(swap, "backup");
+        string backupBundle = Path.Combine(backupRoot, layout.PayloadRoot);
+        ClientVersionStore.RejectReparseTree(swap);
+        if (!Directory.Exists(layout.InstalledRoot)
+            || (File.GetAttributes(layout.InstalledRoot) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new LauncherUpdateException("The installed macOS app bundle is missing or linked.");
+        }
+
+        plan = plan with { State = SelfUpdatePlanState.Applying, Apply = [] };
+        await WritePlanAsync(plan, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Directory.CreateDirectory(backupRoot);
+            Directory.Move(layout.InstalledRoot, backupBundle);
+            _applyObserver?.Invoke(new SelfUpdateApplyObservation(
+                SelfUpdateApplyBoundary.AfterTargetMutation,
+                layout.PayloadRoot,
+                SelfUpdateApplyOperation.Install));
+            Directory.Move(incomingBundle, layout.InstalledRoot);
+            await VerifyAppliedTargetsAsync(plan, layout.InstalledRoot, cancellationToken)
+                .ConfigureAwait(false);
+            plan = plan with { State = SelfUpdatePlanState.AwaitingConfirmation };
+            await WritePlanAsync(plan, cancellationToken).ConfigureAwait(false);
+            return plan;
+        }
+        catch
+        {
+            await RollbackBundleApplyingAsync(plan, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task CopyBundleIncomingAsync(
+        SelfUpdatePlan plan,
+        string incomingRoot,
+        CancellationToken cancellationToken)
+    {
+        string payload = GetPayloadDirectory(plan.TransactionId);
+        foreach (InstalledFileRecord file in plan.Files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string source = ClientVersionStore.ResolveContained(payload, file.Path);
+            string destination = ClientVersionStore.ResolveContained(incomingRoot, file.Path);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            await CopyFileDurablyAsync(source, destination, cancellationToken).ConfigureAwait(false);
+            if (LauncherOperatingSystem.IsUnix && file.UnixMode != 0)
+            {
+                File.SetUnixFileMode(destination, (UnixFileMode)file.UnixMode);
+            }
+
+            await VerifyFileAsync(incomingRoot, file, "Incoming macOS app bundle", cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task<SelfUpdatePlan> RollbackBundleApplyingAsync(
+        SelfUpdatePlan plan,
+        CancellationToken cancellationToken)
+    {
+        if (plan.State != SelfUpdatePlanState.Applying || plan.Apply is null)
+        {
+            throw new LauncherUpdateException("The macOS bundle rollback journal is missing.");
+        }
+
+        LauncherInstallationLayout layout = LayoutFor(plan);
+        string swap = GetTargetTransactionDirectory(plan);
+        string backup = Path.Combine(swap, "backup", layout.PayloadRoot);
+        string discard = Path.Combine(swap, "rollback-discard", layout.PayloadRoot);
+        if (!Directory.Exists(swap))
+        {
+            throw new LauncherUpdateException("The macOS bundle rollback transaction is missing.");
+        }
+
+        ClientVersionStore.RejectReparseTree(swap);
+        if (Directory.Exists(backup))
+        {
+            if (Directory.Exists(layout.InstalledRoot))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(discard)!);
+                Directory.Move(layout.InstalledRoot, discard);
+            }
+
+            Directory.Move(backup, layout.InstalledRoot);
+        }
+        else if (!Directory.Exists(layout.InstalledRoot))
+        {
+            throw new LauncherUpdateException("The macOS bundle rollback state is ambiguous.");
+        }
+
+        await VerifyBundleRestoredAsync(plan, cancellationToken).ConfigureAwait(false);
+        plan = plan with { State = SelfUpdatePlanState.RolledBack };
+        await WritePlanAsync(plan, cancellationToken).ConfigureAwait(false);
+        SafeZipExtractor.TryDeleteDirectory(swap);
+        return plan;
+    }
+
+    private static Task VerifyBundleRestoredAsync(
+        SelfUpdatePlan plan,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        LauncherInstallationLayout layout = LayoutFor(plan);
+        if (!Directory.Exists(layout.InstalledRoot)
+            || !File.Exists(layout.LauncherPath)
+            || (File.GetAttributes(layout.InstalledRoot) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new LauncherUpdateException("The prior macOS app bundle was not restored.");
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task<SelfUpdatePlan> RollbackApplyingAsync(
@@ -1091,6 +1367,12 @@ public sealed class LauncherSelfUpdateManager
         string targetDirectory,
         CancellationToken cancellationToken)
     {
+        if (plan.InstallationKind == LauncherInstallationKind.MacBundle)
+        {
+            await VerifyBundleRestoredAsync(plan, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (plan.Apply is null)
         {
             throw new LauncherUpdateException("The rollback receipt is missing its apply journal.");
@@ -1215,7 +1497,7 @@ public sealed class LauncherSelfUpdateManager
 
         var before = new FileInfo(path);
         long size = before.Length;
-        int unixMode = OperatingSystem.IsLinux()
+        int unixMode = LauncherOperatingSystem.IsUnix
             ? (int)File.GetUnixFileMode(path) & 0x1FF
             : 0;
         string sha256 = await Integrity.FileIntegrity.ComputeSha256HexAsync(
@@ -1227,7 +1509,7 @@ public sealed class LauncherSelfUpdateManager
         if (!after.Exists
             || (after.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
             || after.Length != size
-            || (OperatingSystem.IsLinux()
+            || (LauncherOperatingSystem.IsUnix
                 && ((int)File.GetUnixFileMode(path) & 0x1FF) != unixMode))
         {
             throw new LauncherUpdateException($"{description} changed while it was measured.");
@@ -1294,14 +1576,29 @@ public sealed class LauncherSelfUpdateManager
         string targetDirectory,
         CancellationToken cancellationToken)
     {
+        LauncherInstallationLayout layout = LayoutFor(plan);
         foreach (InstalledFileRecord file in plan.Files)
         {
-            await VerifyFileAsync(
-                    targetDirectory,
-                    file,
-                    "Applied launcher",
-                    cancellationToken)
-                .ConfigureAwait(false);
+            if (plan.InstallationKind == LauncherInstallationKind.MacBundle)
+            {
+                string prefix = layout.PayloadRoot + "/";
+                InstalledFileRecord installed = file with { Path = file.Path[prefix.Length..] };
+                await VerifyFileAsync(
+                        targetDirectory,
+                        installed,
+                        "Applied launcher",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await VerifyFileAsync(
+                        targetDirectory,
+                        file,
+                        "Applied launcher",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         if (plan.Apply is not null)
@@ -1349,7 +1646,7 @@ public sealed class LauncherSelfUpdateManager
                 $"{description} file '{file.Path}' SHA-256 is corrupt.");
         }
 
-        if (OperatingSystem.IsLinux()
+        if (LauncherOperatingSystem.IsUnix
             && ((int)File.GetUnixFileMode(path) & 0x1FF) != file.UnixMode)
         {
             throw new LauncherUpdateException(
@@ -1424,6 +1721,15 @@ public sealed class LauncherSelfUpdateManager
             .ConfigureAwait(false);
     }
 
+    private static SelfUpdatePlan MigratePlan(SelfUpdatePlan plan) =>
+        plan.SchemaVersion == 3
+            ? plan with
+            {
+                SchemaVersion = SelfUpdatePlan.CurrentSchemaVersion,
+                InstallationKind = LauncherInstallationKind.Flat,
+            }
+            : plan;
+
     private void ValidatePlan(SelfUpdatePlan plan, string expectedTargetDirectory)
     {
         if (plan.SchemaVersion != SelfUpdatePlan.CurrentSchemaVersion)
@@ -1442,7 +1748,11 @@ public sealed class LauncherSelfUpdateManager
             throw new LauncherUpdateException("The self-update plan metadata is invalid.");
         }
 
-        string target = NormalizeTargetDirectory(plan.TargetDirectory);
+        bool bundleRecovery = plan.InstallationKind == LauncherInstallationKind.MacBundle
+            && plan.State == SelfUpdatePlanState.Applying;
+        string target = bundleRecovery
+            ? NormalizeTargetPath(plan.TargetDirectory)
+            : NormalizeTargetDirectory(plan.TargetDirectory);
         if (!PathsEqual(target, expectedTargetDirectory))
         {
             throw new LauncherUpdateException(
@@ -1450,6 +1760,41 @@ public sealed class LauncherSelfUpdateManager
         }
 
         ValidateFileRecords(plan.Files, "self-update file list");
+        if (!Enum.IsDefined(plan.InstallationKind))
+        {
+            throw new LauncherUpdateException("The self-update installation layout is invalid.");
+        }
+
+        LauncherInstallationLayout layout = LayoutFor(plan);
+        if (plan.InstallationKind == LauncherInstallationKind.MacBundle)
+        {
+            string prefix = layout.PayloadRoot + "/";
+            string infoPlist = layout.PayloadRoot + "/Contents/Info.plist";
+            if (!plan.Rid.StartsWith("osx-", StringComparison.Ordinal)
+                || plan.Files.Any(file => !file.Path.StartsWith(prefix, StringComparison.Ordinal))
+                || !plan.Files.Any(file => string.Equals(
+                    file.Path,
+                    layout.PayloadLauncherPath,
+                    StringComparison.Ordinal))
+                || !plan.Files.Any(file => string.Equals(
+                    file.Path,
+                    infoPlist,
+                    StringComparison.Ordinal))
+                || (plan.State == SelfUpdatePlanState.Staged) != (plan.Apply is null)
+                || (plan.Apply is not null && plan.Apply.Count != 0))
+            {
+                throw new LauncherUpdateException("The macOS bundle self-update plan is invalid.");
+            }
+
+            string bundleTransaction = GetTargetTransactionDirectory(plan);
+            if (!IsContained(layout.ContainerDirectory, bundleTransaction))
+            {
+                throw new LauncherUpdateException("A macOS bundle transaction path escaped.");
+            }
+
+            return;
+        }
+
         var newPaths = new HashSet<string>(
             plan.Files.Select(file => file.Path),
             StringComparer.OrdinalIgnoreCase);
@@ -1530,7 +1875,7 @@ public sealed class LauncherSelfUpdateManager
 
         string transactionDirectory = GetTransactionDirectory(plan.TransactionId);
         if (!IsContained(TransactionsDirectory, transactionDirectory)
-            || !IsContained(target, GetTargetTransactionDirectory(plan)))
+            || !IsContained(layout.ContainerDirectory, GetTargetTransactionDirectory(plan)))
         {
             throw new LauncherUpdateException("A self-update transaction path escaped.");
         }
@@ -1618,14 +1963,7 @@ public sealed class LauncherSelfUpdateManager
 
     private static string NormalizeTargetDirectory(string targetDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
-        if (!Path.IsPathFullyQualified(targetDirectory))
-        {
-            throw new LauncherUpdateException(
-                "The self-update target directory must be absolute.");
-        }
-
-        string target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetDirectory));
+        string target = NormalizeTargetPath(targetDirectory);
         if (!Directory.Exists(target)
             || (File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
         {
@@ -1634,6 +1972,18 @@ public sealed class LauncherSelfUpdateManager
         }
 
         return target;
+    }
+
+    private static string NormalizeTargetPath(string targetDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
+        if (!Path.IsPathFullyQualified(targetDirectory))
+        {
+            throw new LauncherUpdateException(
+                "The self-update target directory must be absolute.");
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetDirectory));
     }
 
     private static void EnsureSafeParent(string root, string filePath)
@@ -1702,12 +2052,7 @@ public sealed class LauncherSelfUpdateManager
     }
 
     private static bool PathsEqual(string left, string right) =>
-        string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+        LauncherPathIdentity.Equals(left, right);
 
     private static void RequireTransactionId(string transactionId)
     {

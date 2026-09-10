@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Integrity;
 using AcDream.Platform;
 
@@ -432,11 +433,11 @@ public sealed class ClientVersionStore
                     $"The release ZIP is missing required root executable '{path}'.");
             }
 
-            if (rid.StartsWith("linux-", StringComparison.Ordinal)
+            if (IsUnixRid(rid)
                 && (file.UnixMode & (int)UnixFileMode.UserExecute) == 0)
             {
                 throw new LauncherUpdateException(
-                    $"The Linux release executable '{path}' lacks owner execute permission.");
+                    $"The Unix release executable '{path}' lacks owner execute permission.");
             }
         }
     }
@@ -538,7 +539,7 @@ public sealed class ClientVersionStore
                         $"Client version {version} file '{file.Path}' SHA-256 is corrupt.");
                 }
 
-                if (OperatingSystem.IsLinux()
+                if (LauncherOperatingSystem.IsUnix
                     && ((int)File.GetUnixFileMode(path) & 0x1FF) != file.UnixMode)
                 {
                     return Invalid(
@@ -994,6 +995,10 @@ public sealed class ClientVersionStore
             throw new ArgumentException("RID is invalid.", nameof(rid));
         }
     }
+
+    private static bool IsUnixRid(string rid) =>
+        rid.StartsWith("linux-", StringComparison.Ordinal)
+        || rid.StartsWith("osx-", StringComparison.Ordinal);
 
     private void SetCached(ClientVersionResolution resolution)
     {

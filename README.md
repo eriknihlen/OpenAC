@@ -58,21 +58,19 @@ breaks. Today it does the following:
 version, what you did, what happened, and a screenshot if you can. Reports from
 players help us decide what to fix next.
 
-**Platforms.** Windows and Linux, 64-bit, for the launcher, the graphical
-client, and the headless host. Windows is where most of the play-testing
-happens; the Linux client is newer and has had less time in front of players,
-so reports from Linux desktops are especially welcome. macOS on Apple
-silicon runs the graphical client, built from source; the launcher does not
-support it yet.
+**Platforms.** Windows and Linux, 64-bit, and macOS on Apple silicon, for the
+launcher, graphical client, and headless host. Windows is where most of the
+play-testing happens; the Linux and macOS clients are newer and have had less
+time in front of players, so reports from those desktops are especially
+welcome.
 
 ## Roadmap
 
 - **Linux in CI.** The Linux graphical client builds, installs through the
   launcher, and plays, but CI runs its rendering tests on Windows hardware
   only. A Linux rendering lane is next.
-- **macOS in the launcher and CI.** The graphical client builds, renders
-  through MoltenVK, and plays on Apple silicon. The launcher does not run
-  there yet, and no CI lane covers it.
+- **macOS distribution.** Add Developer ID signing and notarization to the
+  Apple-silicon launcher packages.
 - **Performance tuning.** Improve frame times, world streaming, memory use,
   and responsiveness.
 - **Housing.**
@@ -88,6 +86,7 @@ it anywhere, and run it:
 |---|---|---|
 | Windows | `launcher-win-x64.zip` | `acdream-launcher.exe` |
 | Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
+| macOS (Apple silicon) | `launcher-osx-arm64.zip` | Drag `OpenAC.app` to `~/Applications`, then open it in Finder. |
 
 The launcher installs the client, prepares your data files, keeps itself and
 the client up to date, and stores your server and character profiles.

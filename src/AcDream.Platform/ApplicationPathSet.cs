@@ -4,6 +4,8 @@ public interface IApplicationPathEnvironment
 {
     bool IsWindows { get; }
 
+    bool IsMacOS => false;
+
     string CurrentDirectory { get; }
 
     string? GetEnvironmentVariable(string name);
@@ -21,6 +23,8 @@ internal sealed class ApplicationPathEnvironment
     }
 
     public bool IsWindows => OperatingSystem.IsWindows();
+
+    public bool IsMacOS => OperatingSystem.IsMacOS();
 
     public string CurrentDirectory => Environment.CurrentDirectory;
 
@@ -87,6 +91,15 @@ public sealed record ApplicationPathSet(
             config = Path.Combine(roaming, "acdream");
             data = Path.Combine(local, "acdream");
             cache = Path.Combine(local, "acdream", "cache");
+        }
+        else if (platform.IsMacOS)
+        {
+            string home = RequireFolder(
+                platform,
+                Environment.SpecialFolder.UserProfile);
+            data = Path.Combine(home, "Library", "Application Support", "acdream");
+            config = Path.Combine(data, "config");
+            cache = Path.Combine(home, "Library", "Caches", "acdream");
         }
         else
         {

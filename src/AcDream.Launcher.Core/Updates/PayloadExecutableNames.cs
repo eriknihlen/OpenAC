@@ -4,6 +4,8 @@ public static class PayloadExecutableNames
 {
     public const string GraphicalHost = "AcDream.App";
 
+    public const string MacGraphicalHost = "acdream-client";
+
     public const string HeadlessHost = "acdream-headless";
 
     /// <summary>The launcher itself (<c>launcher-*.zip</c>).</summary>
@@ -25,12 +27,23 @@ public static class PayloadExecutableNames
     public static string SuffixForCurrentOs() =>
         OperatingSystem.IsWindows() ? ".exe" : string.Empty;
 
+    public static string GraphicalHostForRid(string rid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rid);
+        return rid.StartsWith("osx-", StringComparison.Ordinal)
+            ? MacGraphicalHost
+            : GraphicalHost;
+    }
+
+    public static string GraphicalHostForCurrentOs() =>
+        OperatingSystem.IsMacOS() ? MacGraphicalHost : GraphicalHost;
+
     public static IReadOnlyList<string> ForPayload(string rid, bool launcherPayload)
     {
         string suffix = SuffixForRid(rid);
         return launcherPayload
             ? [Launcher + suffix, BakeTool + suffix]
-            : [GraphicalHost + suffix, HeadlessHost + suffix];
+            : [GraphicalHostForRid(rid) + suffix, HeadlessHost + suffix];
     }
 
     /// <summary>
@@ -41,6 +54,6 @@ public static class PayloadExecutableNames
         string suffix = SuffixForRid(rid);
         return launcherPayload
             ? [Launcher + suffix]
-            : [GraphicalHost + suffix, HeadlessHost + suffix];
+            : [GraphicalHostForRid(rid) + suffix, HeadlessHost + suffix];
     }
 }

@@ -39,8 +39,9 @@ if (!string.IsNullOrWhiteSpace(selfUpdateData)
                 Environment.ProcessPath
                 ?? throw new InvalidOperationException("Process path is unavailable.")));
     }
-    catch (LauncherUpdateException)
+    catch (LauncherUpdateException exception)
     {
+        Console.Error.WriteLine(exception.Message);
         return 74;
     }
     if (startup.ShouldExit)
@@ -166,8 +167,9 @@ static async Task<int> BootstrapProbeAsync(string[] arguments)
             Path.GetFullPath(arguments[1]),
             Path.GetFullPath(arguments[2]));
     }
-    catch (LauncherUpdateException)
+    catch (LauncherUpdateException exception)
     {
+        Console.Error.WriteLine(exception.Message);
         return 74;
     }
     File.WriteAllText(

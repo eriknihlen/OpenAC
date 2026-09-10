@@ -126,7 +126,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
 
     private void CreateInstanceAndSurface()
     {
-        _vk = Silk.NET.Vulkan.Vk.GetApi();
+        _vk = GraphicalVulkanLoader.CreateApi();
         if (_window.VkSurface is null)
         {
             throw new NotSupportedException(

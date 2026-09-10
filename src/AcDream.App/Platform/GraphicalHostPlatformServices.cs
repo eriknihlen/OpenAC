@@ -15,10 +15,10 @@ internal enum GraphicalHostOperatingSystem
 internal static class RuntimePlatformGuard
 {
     [SupportedOSPlatformGuard("linux")]
-    internal static bool IsLinuxRuntime => System.OperatingSystem.IsLinux();
-
     [SupportedOSPlatformGuard("macos")]
-    internal static bool IsMacOsRuntime => System.OperatingSystem.IsMacOS();
+    internal static bool IsUnixRuntime =>
+        System.OperatingSystem.IsLinux()
+        || System.OperatingSystem.IsMacOS();
 }
 
 internal sealed record GraphicalNativeDependency(

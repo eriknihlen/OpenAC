@@ -9,7 +9,7 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' == ''">$(MSBuildProjectDirectory)/packages.neutral.lock.json</NuGetLockFilePath>

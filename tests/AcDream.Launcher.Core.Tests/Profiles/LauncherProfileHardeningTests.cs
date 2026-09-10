@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.Core.Tests.Profiles;
@@ -128,12 +129,12 @@ public sealed class LauncherProfileHardeningTests : IDisposable
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public void LinuxLoadNormalizesAnExistingCredentialFileTo0600BeforeReading()
+    [Trait("Lane", "Unix")]
+    public void UnixLoadNormalizesAnExistingCredentialFileTo0600BeforeReading()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!LauncherOperatingSystem.IsUnix)
         {
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
         }
 
         File.WriteAllText(_filePath, """{"version":1,"servers":[]}""");

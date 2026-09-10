@@ -1,3 +1,4 @@
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.Core.Tests.Profiles;
@@ -314,11 +315,11 @@ public sealed class LauncherProfileStoreTests : IDisposable
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public void SaveSetsOwnerOnlyPermissionsOnLinux()
+    [Trait("Lane", "Unix")]
+    public void SaveSetsOwnerOnlyPermissionsOnUnix()
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+        if (!LauncherOperatingSystem.IsUnix)
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
 
         var store = new LauncherProfileStore(_filePath);
         store.Load();
@@ -341,7 +342,7 @@ public sealed class LauncherProfileStoreTests : IDisposable
         Assert.Equal(FileAccess.Write, options.Access);
         Assert.Equal(FileShare.None, options.Share);
 
-        if (OperatingSystem.IsLinux())
+        if (LauncherOperatingSystem.IsUnix)
         {
             Assert.Equal(
                 LauncherProfileStore.OwnerOnlyFileMode,
@@ -354,11 +355,11 @@ public sealed class LauncherProfileStoreTests : IDisposable
     }
 
     [Fact]
-    [Trait("Lane", "Linux")]
-    public void TempCredentialFileIsOwnerOnlyFromItsFirstObservableLinuxState()
+    [Trait("Lane", "Unix")]
+    public void TempCredentialFileIsOwnerOnlyFromItsFirstObservableUnixState()
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("Lane=Linux requires a native Linux host.");
+        if (!LauncherOperatingSystem.IsUnix)
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
 
         string tempPath = _filePath + ".tmp";
         using FileStream stream = LauncherProfileStore.CreateCredentialTempFile(tempPath);

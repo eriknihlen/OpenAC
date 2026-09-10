@@ -90,9 +90,11 @@ internal sealed partial class MacMonotonicFramePacingWaiter
         if (nanoseconds <= 0)
             return 0UL;
 
-        UInt128 machUnits =
+        UInt128 scaledNanoseconds =
             (UInt128)(ulong)nanoseconds
-            * timebaseDenominator
+            * timebaseDenominator;
+        UInt128 machUnits =
+            (scaledNanoseconds + timebaseNumerator - 1u)
             / timebaseNumerator;
         if (machUnits > ulong.MaxValue)
             return ulong.MaxValue;

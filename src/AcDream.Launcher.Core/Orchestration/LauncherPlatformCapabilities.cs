@@ -18,12 +18,23 @@ public sealed record LauncherPlatformCapabilities(
     string PlatformName,
     string? GraphicalLaunchDisabledReason)
 {
+    public bool IsMacOS { get; init; }
+
     public const string UnsupportedPlatformGraphicalLaunchDisabledReason =
-        "Graphical client launches are supported on Windows and Linux.";
+        "Graphical client launches are supported on Windows, Linux, and macOS.";
 
     public static LauncherPlatformCapabilities Detect()
+        => ForOperatingSystem(
+            OperatingSystem.IsWindows(),
+            OperatingSystem.IsLinux(),
+            OperatingSystem.IsMacOS());
+
+    internal static LauncherPlatformCapabilities ForOperatingSystem(
+        bool isWindows,
+        bool isLinux,
+        bool isMacOS)
     {
-        if (OperatingSystem.IsWindows())
+        if (isWindows)
         {
             return new LauncherPlatformCapabilities(
                 IsWindows: true,
@@ -34,7 +45,7 @@ public sealed record LauncherPlatformCapabilities(
                 GraphicalLaunchDisabledReason: null);
         }
 
-        if (OperatingSystem.IsLinux())
+        if (isLinux)
         {
             return new LauncherPlatformCapabilities(
                 IsWindows: false,
@@ -43,6 +54,20 @@ public sealed record LauncherPlatformCapabilities(
                 CanLaunchGraphicalClient: true,
                 PlatformName: "Linux",
                 GraphicalLaunchDisabledReason: null);
+        }
+
+        if (isMacOS)
+        {
+            return new LauncherPlatformCapabilities(
+                IsWindows: false,
+                IsLinux: false,
+                CanRunHeadless: true,
+                CanLaunchGraphicalClient: true,
+                PlatformName: "macOS",
+                GraphicalLaunchDisabledReason: null)
+            {
+                IsMacOS = true,
+            };
         }
 
         return new LauncherPlatformCapabilities(
@@ -61,7 +86,7 @@ public sealed record LauncherPlatformCapabilities(
             return CanRunHeadless
                 ? LauncherCapability.Available
                 : LauncherCapability.Unavailable(
-                    "Headless launches are supported only on Windows and Linux.");
+                    "Headless launches are supported only on Windows, Linux, and macOS.");
         }
 
         return CanLaunchGraphicalClient

@@ -142,6 +142,9 @@ internal static class GraphicalWindowBackendConfigurator
             // A separate Glfw.GetApi() instance would receive the hint but
             // would not own the window backend's process-global GLFW state.
             Glfw glfw = GlfwProvider.UninitializedGLFW.Value;
+            GraphicalVulkanLoader.ConfigureForGlfw(
+                platform.OperatingSystem,
+                glfw);
             glfw.InitHint(
                 (InitHint)GlfwPlatformInitHint,
                 requested switch

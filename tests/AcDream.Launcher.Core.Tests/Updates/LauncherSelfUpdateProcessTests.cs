@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AcDream.Launcher.Core;
 using AcDream.Launcher.Core.Integrity;
 using AcDream.Launcher.Core.Updates;
 
@@ -126,7 +127,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             int replacementPid = ParsePid(launchMarker);
             await WaitForProcessExitAsync(replacementPid, TimeSpan.FromSeconds(10));
             Assert.False(File.Exists(helperPidPath));
-            if (OperatingSystem.IsLinux())
+            if (LauncherOperatingSystem.IsUnix)
             {
                 Assert.True(
                     (File.GetUnixFileMode(prepared.CanonicalPath)
@@ -539,7 +540,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             string targetPath = Path.Combine(target, targetName);
             File.WriteAllBytes(targetPath, oldContent);
             int unixAttributes = 0x81A4;
-            if (OperatingSystem.IsLinux())
+            if (LauncherOperatingSystem.IsUnix)
             {
                 UnixFileMode mode = File.GetUnixFileMode(source);
                 if (isAppHost)
@@ -632,7 +633,7 @@ public sealed class LauncherSelfUpdateProcessTests : IDisposable
             string target = Path.Combine(destination, Path.GetRelativePath(source, file));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target);
-            if (OperatingSystem.IsLinux())
+            if (LauncherOperatingSystem.IsUnix)
             {
                 File.SetUnixFileMode(target, File.GetUnixFileMode(file));
             }
