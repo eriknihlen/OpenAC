@@ -119,9 +119,8 @@ internal sealed unsafe class VulkanInstanceFactory
         VulkanExtensionPlan plan = VulkanExtensionSelection.Resolve(
             available,
             requiredExtensions,
-            enableOptionalExtensions
-                ? VulkanExtensionSelection.OptionalInstanceExtensions
-                : []);
+            VulkanExtensionSelection.ResolveOptionalInstanceExtensions(
+                enableOptionalExtensions));
         if (!plan.IsSatisfied)
         {
             throw new NotSupportedException(
@@ -148,9 +147,15 @@ internal sealed unsafe class VulkanInstanceFactory
                 EngineVersion = VulkanApiVersion.Make(0, 1, 0),
                 ApiVersion = apiVersion,
             };
+            bool portability = plan.Enabled.Contains(
+                VulkanExtensionSelection.PortabilityEnumerationExtension,
+                StringComparer.Ordinal);
             var create = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
+                Flags = portability
+                    ? InstanceCreateFlags.EnumeratePortabilityBitKhr
+                    : InstanceCreateFlags.None,
                 PApplicationInfo = &application,
                 EnabledExtensionCount = (uint)plan.Enabled.Count,
                 PpEnabledExtensionNames = (byte**)extensionNames,

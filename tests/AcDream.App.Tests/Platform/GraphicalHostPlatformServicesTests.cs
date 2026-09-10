@@ -51,6 +51,22 @@ public sealed class GraphicalHostPlatformServicesTests
             return;
         }
 
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal(
+                GraphicalHostOperatingSystem.MacOS,
+                platform.OperatingSystem);
+            Assert.StartsWith(
+                "osx-",
+                platform.RuntimeIdentifier,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                platform.NativeDependencies,
+                dependency =>
+                    dependency.PublishedFileName == "libglfw.3.dylib");
+            return;
+        }
+
         throw new PlatformNotSupportedException();
     }
 }

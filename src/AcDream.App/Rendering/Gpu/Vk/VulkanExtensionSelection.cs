@@ -22,6 +22,21 @@ internal static class VulkanExtensionSelection
     /// <summary>Presenting to a surface. Required on the real device; absent in the headless probe.</summary>
     internal const string SwapchainExtension = "VK_KHR_swapchain";
 
+    /// <summary>
+    /// Lets the loader report non-conformant implementations. MoltenVK on
+    /// macOS is one, so without this the loader enumerates no devices at all.
+    /// Enabled whenever advertised; absent on conformant drivers.
+    /// </summary>
+    internal const string PortabilityEnumerationExtension =
+        "VK_KHR_portability_enumeration";
+
+    /// <summary>
+    /// The spec requires this be enabled whenever the physical device
+    /// advertises it, which MoltenVK always does.
+    /// </summary>
+    internal const string PortabilitySubsetExtension =
+        "VK_KHR_portability_subset";
+
     internal static VulkanExtensionPlan Resolve(
         IReadOnlyList<string> available,
         IReadOnlyList<string> required,
@@ -69,5 +84,15 @@ internal static class VulkanExtensionSelection
         [DebugUtilsExtension];
 
     internal static IReadOnlyList<string> OptionalDeviceExtensions { get; } =
-        [MemoryBudgetExtension, PresentWaitExtension];
+        [MemoryBudgetExtension, PresentWaitExtension, PortabilitySubsetExtension];
+
+    /// <summary>
+    /// Portability is not a debug nicety, so it stays on the optional list
+    /// even when the caller declined the rest of the optional extensions.
+    /// </summary>
+    internal static IReadOnlyList<string> ResolveOptionalInstanceExtensions(
+        bool enableOptionalExtensions) =>
+        enableOptionalExtensions
+            ? [.. OptionalInstanceExtensions, PortabilityEnumerationExtension]
+            : [PortabilityEnumerationExtension];
 }

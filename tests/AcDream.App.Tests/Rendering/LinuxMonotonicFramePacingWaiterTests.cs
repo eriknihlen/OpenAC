@@ -17,7 +17,7 @@ public sealed class LinuxMonotonicFramePacingWaiterTests
     {
         Assert.Equal(
             expected,
-            LinuxMonotonicFramePacingWaiter
+            FramePacingDuration
                 .ConvertTicksToNanoseconds(ticks, frequency));
     }
 
@@ -40,6 +40,13 @@ public sealed class LinuxMonotonicFramePacingWaiterTests
         if (OperatingSystem.IsLinux())
         {
             Assert.IsType<LinuxMonotonicFramePacingWaiter>(waiter);
+            ((IDisposable)waiter).Dispose();
+            return;
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.IsType<MacMonotonicFramePacingWaiter>(waiter);
             ((IDisposable)waiter).Dispose();
             return;
         }

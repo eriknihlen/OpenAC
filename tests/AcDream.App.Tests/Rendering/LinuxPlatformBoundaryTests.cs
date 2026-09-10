@@ -79,6 +79,8 @@ public sealed class LinuxPlatformBoundaryTests
                     && relative is not
                         "Rendering/LinuxMonotonicFramePacingWaiter.cs"
                     && relative is not
+                        "Rendering/MacMonotonicFramePacingWaiter.cs"
+                    && relative is not
                         "Rendering/WindowsHighResolutionFramePacingWaiter.cs";
             })
             .Select(path => Path.GetRelativePath(app, path))
