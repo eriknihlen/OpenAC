@@ -166,7 +166,7 @@ jobs:
             "$expanded/OpenAC.app/Contents/Resources/PrivacyInfo.xcprivacy")) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged path '$path'." }
           }
-          & /usr/bin/test -x "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher"
+          & /bin/test -x "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher"
           if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not executable.' }
           foreach ($path in @(
             "$clientExpanded/acdream-client",
@@ -176,7 +176,7 @@ jobs:
             "$clientExpanded/Resources/PrivacyInfo.xcprivacy")) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
           }
-          & /usr/bin/test -x "$clientExpanded/acdream-client"
+          & /bin/test -x "$clientExpanded/acdream-client"
           if ($LASTEXITCODE -ne 0) { throw 'The packaged client is not executable.' }
           foreach ($signed in @(
             "$expanded/OpenAC.app",
