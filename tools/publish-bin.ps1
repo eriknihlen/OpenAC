@@ -53,7 +53,7 @@ if ($IncludeMacOS -and -not $IsMacOS) {
 if (-not [string]::IsNullOrWhiteSpace($MacArtifactsDirectory) -and $IncludeMacOS) {
     throw 'Use either -IncludeMacOS or -MacArtifactsDirectory, not both.'
 }
-$Rids = if ($MacOnly) { @('osx-arm64') } else { @('win-x64') }
+[string[]]$Rids = if ($MacOnly) { 'osx-arm64' } else { 'win-x64' }
 if ($IncludeLinux) { $Rids += 'linux-x64' }
 if ($IncludeMacOS) { $Rids += 'osx-arm64' }
 
