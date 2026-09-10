@@ -101,7 +101,8 @@ internal sealed class RetailPViewRenderer
                     viewportWidth,
                     viewportHeight,
                     ctx.ViewerCellId,
-                    weatherGateOpen);
+                    weatherGateOpen,
+                    ctx.BuildingDegradesDisabled);
             }
             else
             {
@@ -112,7 +113,8 @@ internal sealed class RetailPViewRenderer
                     viewportWidth,
                     viewportHeight,
                     ctx.ViewerCellId,
-                    weatherGateOpen);
+                    weatherGateOpen,
+                    ctx.BuildingDegradesDisabled);
             }
             Walk.WalkProductionFrameContext walkContext = _walkFrameContextScratch;
             _walkLandscape!.SetViewer(ctx.ViewerCellId, ctx.ViewerEyePos);
@@ -427,6 +429,7 @@ public sealed class RetailPViewFrameInput
 
     public bool RenderSky { get; private set; }
     public bool RenderWeather { get; private set; }
+    public bool BuildingDegradesDisabled { get; private set; }
     public float DayFraction { get; private set; }
     public DayGroupData? ActiveDayGroup { get; private set; }
     public SkyKeyframe SkyKeyframe { get; private set; }
@@ -464,7 +467,8 @@ public sealed class RetailPViewFrameInput
         uint playerCellId,
         Vector3 playerViewPosition,
         Matrix4x4 cameraView,
-        CameraCellResolution cameraCellResolution)
+        CameraCellResolution cameraCellResolution,
+        bool buildingDegradesDisabled = false)
     {
         RootCell = rootCell;
         NearbyBuildingCells = nearbyBuildingCells;
@@ -491,6 +495,7 @@ public sealed class RetailPViewFrameInput
         PlayerViewPosition = playerViewPosition;
         CameraView = cameraView;
         CameraCellResolution = cameraCellResolution;
+        BuildingDegradesDisabled = buildingDegradesDisabled;
         return this;
     }
 }

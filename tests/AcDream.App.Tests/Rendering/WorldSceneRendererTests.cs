@@ -289,6 +289,21 @@ public sealed class WorldSceneRendererTests
     }
 
     [Fact]
+    public void PViewWorld_OverheadDetailOverrideIsReplacedOnEveryFrame()
+    {
+        var root = new LoadedCell { CellId = 0x01010001u };
+        var rig = new Rig(false, false, root);
+        WorldRenderFrame normal = rig.Frames.Frame;
+        rig.Frames.Frame = normal with { Camera = normal.Camera with { IsOverheadView = true } };
+        rig.Renderer.Render(default);
+        Assert.True(rig.PView.LastInput!.BuildingDegradesDisabled);
+
+        rig.Frames.Frame = normal;
+        rig.Renderer.Render(default);
+        Assert.False(rig.PView.LastInput!.BuildingDegradesDisabled);
+    }
+
+    [Fact]
     public void OutdoorPView_SkipsPostWorldParticleReplayAndFlatWeather()
     {
         var root = new LoadedCell
@@ -856,6 +871,7 @@ public sealed class WorldSceneRendererTests
     private sealed class FrameBuilder(List<string> calls, WorldRenderFrame frame) :
         IWorldRenderFrameBuilder
     {
+        public WorldRenderFrame Frame { get; set; } = frame;
         public RenderFrameFoundation Foundation { get; private set; }
 
         public bool WaitingForLogin { get; private set; }
@@ -871,7 +887,7 @@ public sealed class WorldSceneRendererTests
             Foundation = foundation;
             WaitingForLogin = waitingForLogin;
             ActiveDayGroup = activeDayGroup;
-            return frame;
+            return Frame;
         }
 
     }

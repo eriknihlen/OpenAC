@@ -14,6 +14,7 @@ public interface IRetailFrameWalkContext : IWalkBuildingFrameContext
     uint ViewerCellId => 0u;
 
     bool WeatherGateOpen => false;
+    bool BuildingDegradesDisabled => false;
 }
 
 public sealed class RetailFrameWalk
@@ -125,6 +126,11 @@ public sealed class RetailFrameWalk
                     DrawBuilding(building, activeViews, ctx, sink);
                 if (block.SideCellCount == 8 || block.Ring <= ObjectRingLimit)
                 {
+                    if ((uint)cellIndex < (uint)block.CoarseCellBuildings.Length)
+                    {
+                        foreach (WalkBuilding coarseBuilding in block.CoarseCellBuildings[cellIndex])
+                            DrawBuilding(coarseBuilding, activeViews, ctx, sink);
+                    }
                     sink.OnLandscapeCellTurn(
                         block.LandblockId,
                         block.SideCellCount,
@@ -150,7 +156,8 @@ public sealed class RetailFrameWalk
         WalkBuildingSelection selection = building.Select(
             ctx.ViewerDistanceTo(building),
             _degradation?.DegradeDistance ?? _fixedDegradeDistance ?? 50f,
-            _degradation?.ActiveMultiplier ?? _fixedDegradeMultiplier ?? 0f);
+            _degradation?.ActiveMultiplier ?? _fixedDegradeMultiplier ?? 0f,
+            degradesDisabled: ctx.BuildingDegradesDisabled);
         if (selection.GfxObjId == 0)
             return;
 

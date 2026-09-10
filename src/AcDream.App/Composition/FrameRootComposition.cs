@@ -324,7 +324,10 @@ internal sealed class FrameRootCompositionPhase
             content.ParticleSink,
             d.EffectPoses,
             live.EntityEffects,
-            d.Log);
+            d.Log,
+            content.Audio is { } audio
+                ? audio.Engine.StopAllForOwner
+                : null);
         IWorldSceneFramePhase? worldSceneRenderer = null;
         CurrentRenderSceneOracle? currentRenderSceneOracle = null;
         RenderSceneShadowComparisonController? renderSceneShadowComparison = null;
@@ -352,10 +355,26 @@ internal sealed class FrameRootCompositionPhase
                     persistentDaylight: () =>
                         d.Runtime.CharacterOwner.Options.GetOptionBit(
                             CharacterOptionId.PersistentAtDay));
+            var worldFrameCamera = new RuntimeWorldFrameCameraSource(
+                host.CameraController,
+                session.LocalTeleport.ApplyViewPlane);
+            var worldFrameRoots = new RuntimeWorldFrameRootSource(
+                d.PhysicsEngine,
+                d.CellVisibility,
+                d.PlayerMode,
+                d.ChaseCameraInput,
+                d.PlayerController,
+                d.WorldOrigin);
+            var skyPesActivationGate = new RuntimeSkyPesActivationGate(
+                skyPesFrame,
+                worldFrameCamera,
+                worldFrameRoots);
+            bindings.Adopt(
+                "sky presentation effects activation",
+                session.LiveObjectFrame.BindSkyPesActivationGateOwned(
+                    skyPesActivationGate));
             var worldRenderFrameBuilder = new WorldRenderFrameBuilder(
-                new RuntimeWorldFrameCameraSource(
-                    host.CameraController,
-                    session.LocalTeleport),
+                worldFrameCamera,
                 new RuntimeWorldFrameVisibilityPreparation(
                     live.SelectionScene,
                     d.ParticleVisibility,
@@ -367,13 +386,7 @@ internal sealed class FrameRootCompositionPhase
                     content.Audio?.Engine,
                     host.CameraController,
                     d.DisplayFramePacing),
-                new RuntimeWorldFrameRootSource(
-                    d.PhysicsEngine,
-                    d.CellVisibility,
-                    d.PlayerMode,
-                    d.ChaseCameraInput,
-                    d.PlayerController,
-                    d.WorldOrigin),
+                worldFrameRoots,
                 worldFrameEnvironment,
                 new RuntimeWorldFrameAnimatedEntitySource(
                     d.Animations,

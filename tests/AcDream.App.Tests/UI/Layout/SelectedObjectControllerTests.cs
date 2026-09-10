@@ -77,6 +77,7 @@ public class SelectedObjectControllerTests
         public readonly Dictionary<uint, bool>   HealthTargetMap = new();
         public readonly Dictionary<uint, bool>   OwnedMap        = new();
         public readonly Dictionary<uint, string> NameMap         = new();
+        public Func<uint, string?>? ResolveName;
         public readonly Dictionary<uint, float>  HealthMap       = new();
         public readonly Dictionary<uint, bool>   HasHealthMap    = new();
         public readonly Dictionary<uint, float>  ManaMap         = new();
@@ -112,7 +113,8 @@ public class SelectedObjectControllerTests
                 },
                 isHealthTarget:  g => HealthTargetMap.TryGetValue(g, out var v) && v,
                 isOwnedByPlayer: g => OwnedMap.TryGetValue(g, out var v) && v,
-                name:            g => NameMap.TryGetValue(g, out var v) ? v : null,
+                name:            g => ResolveName is not null ? ResolveName(g)
+                    : NameMap.TryGetValue(g, out var v) ? v : null,
                 healthPercent:   g => HealthMap.TryGetValue(g, out var v) ? v : 1f,
                 hasHealth:       g => HasHealthMap.TryGetValue(g, out var v) && v,
                 stackSize:       g => StackMap.TryGetValue(g, out var v) ? v : 0u,
@@ -129,6 +131,39 @@ public class SelectedObjectControllerTests
                 isVendorSplitExempt: g => VendorSplitExemptMap.TryGetValue(g, out var v) && v,
                 isCoinstack: g => CoinstackMap.TryGetValue(g, out var v) && v,
                 coinTotal: () => CoinTotal);
+    }
+
+    [Theory]
+    [InlineData("Chainmail Basinet", 1, "Silver Chainmail Basinet")]
+    [InlineData("Silver Chainmail Basinet", 1, "Silver Chainmail Basinet")]
+    [InlineData("Chainmail Basinet", 2, "2 Silver Chainmail Basinets")]
+    public void MaterialNameMatchesAssessmentAndRefreshesOnObjectUpdate(
+        string baseName, int stackSize, string expected)
+    {
+        var (layout, nameEl, _, _) = FakeLayout();
+        var item = new ClientObject
+        {
+            ObjectId = 123u,
+            Name = baseName,
+            PluralName = "Chainmail Basinets",
+            StackSize = stackSize,
+        };
+        var names = new RetailAppraisalNameResolver(
+            new Dictionary<uint, string> { [1u] = "Silver" },
+            new CreatureDisplayNameResolver(new Dictionary<uint, string>()));
+        var h = new Harness { ResolveName = _ => names.ResolveAppropriateName(item) };
+        h.StackMap[item.ObjectId] = (uint)stackSize;
+        using var controller = h.Bind(layout);
+        h.FireSelection(item.ObjectId);
+        h.SplitQuantity.SetValue(1u);
+
+        item.MaterialType = 1u;
+        h.ObjectUpdatedHandler!(item);
+
+        Assert.Equal(expected,
+            nameEl.Children.OfType<UiText>().First().LinesProvider().Single().Text);
+        Assert.Equal(baseName, item.Name);
+        Assert.Equal(1u, h.SplitQuantity.Value);
     }
 
     // ── B1: Bind initialisation ──────────────────────────────────────────────

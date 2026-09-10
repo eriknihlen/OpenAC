@@ -635,6 +635,22 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
+    public void PrimaryUseOfOwnedSalvageTool_requestsSalvagePanel()
+    {
+        var h = new Harness();
+        const uint tool = 0x50000A31u;
+        var actions = new List<ItemPolicyAction>();
+        h.Controller.PolicyActionRequested += actions.Add;
+        h.AddContained(tool, item => item.Type = ItemType.TinkeringTool);
+
+        Assert.True(h.Controller.ActivateItem(tool));
+
+        Assert.Equal(
+            [new ItemPolicyAction(ItemPolicyActionKind.OpenSalvage, tool)],
+            actions);
+    }
+
+    [Fact]
     public void ZeroValuedUseabilityGem_sendsUseLikeBlackmoorsFavor()
     {
         var h = new Harness();
@@ -2230,6 +2246,47 @@ public sealed class ItemInteractionControllerTests
         h.Objects.Get(source)!.Structure = 100;
         Assert.False(h.Controller.TrySalvageItemsForAutomation(tool, [source]));
         Assert.Single(h.Salvages);
+    }
+
+    [Theory]
+    [InlineData(3u)]
+    [InlineData(9u)]
+    [InlineData(56u)]
+    [InlineData(65u)]
+    [InlineData(72u)]
+    public void TrySalvageItems_rejectsInvalidMaterialGroup(uint materialType)
+    {
+        var h = new Harness();
+        const uint tool = 0x50000A42u;
+        const uint source = 0x50000A43u;
+        h.AddContained(tool, item => item.Type = ItemType.TinkeringTool);
+        h.AddContained(source, item =>
+        {
+            item.MaterialType = materialType;
+            item.Structure = 50;
+        });
+
+        Assert.False(h.Controller.TrySalvageItems(tool, [source]));
+        Assert.Empty(h.Salvages);
+    }
+
+    [Fact]
+    public void TrySalvageItems_sendsOwnedSuitableItem()
+    {
+        var h = new Harness();
+        const uint tool = 0x50000A44u;
+        const uint source = 0x50000A45u;
+        h.AddContained(tool, item => item.Type = ItemType.TinkeringTool);
+        h.AddContained(source, item =>
+        {
+            item.MaterialType = 12u;
+            item.Structure = 50;
+        });
+
+        Assert.True(h.Controller.TrySalvageItems(tool, [source]));
+        Assert.Single(h.Salvages);
+        Assert.Equal(tool, h.Salvages[0].ToolGuid);
+        Assert.Equal(new[] { source }, h.Salvages[0].ItemGuids);
     }
 
     [Fact]

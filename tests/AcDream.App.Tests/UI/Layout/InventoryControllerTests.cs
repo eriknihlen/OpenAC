@@ -654,6 +654,30 @@ public class InventoryControllerTests
         Assert.Equal(-1f, grid.GetItem(0)!.CapacityFill);
     }
 
+    [Fact]
+    public void SalvageBag_structureIndicator_tracksPartialFullAndDepletedUpdates()
+    {
+        const uint salvageBag = 0xAu;
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, salvageBag, Player, slot: 0);
+        ClientObject bag = objects.Get(salvageBag)!;
+        bag.Structure = 30;
+        bag.MaxStructure = 100;
+        objects.AddOrUpdate(bag);
+        using var controller = Bind(layout, objects);
+
+        Assert.Equal(0.3f, grid.GetItem(0)!.StructureFill);
+
+        bag.Structure = 100;
+        objects.AddOrUpdate(bag);
+        Assert.Equal(-1f, grid.GetItem(0)!.StructureFill);
+
+        bag.Structure = 0;
+        objects.AddOrUpdate(bag);
+        Assert.Equal(0f, grid.GetItem(0)!.StructureFill);
+    }
+
     private static ItemDragPayload Payload(uint obj) => new(obj, ItemDragSource.Inventory, 0, new UiItemSlot());
 
     private static WeenieData WorldReplacement(uint guid) => new(

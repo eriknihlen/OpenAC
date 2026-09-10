@@ -11,6 +11,7 @@ public sealed class WalkLandBlock
     public int Ring;
 
     public WalkBuilding?[] CellBuildings = [];
+    public WalkBuilding[][] CoarseCellBuildings = [];
 
     // ---- per-frame visibility (draw_check_blocks / landcell_check) ----
     public WalkBoundingType InView;

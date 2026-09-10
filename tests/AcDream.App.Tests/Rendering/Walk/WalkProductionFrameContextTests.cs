@@ -11,6 +11,17 @@ public sealed class WalkProductionFrameContextTests
         * Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 4f / 3f, 0.1f, 1000f);
 
     [Fact]
+    public void FrameResetRestoresBuildingDetailPolicy()
+    {
+        var ctx = new WalkProductionFrameContext(
+            new CellVisibility(), new WalkBuildingRegistry(), Vector3.Zero, Vector3.UnitY,
+            SimpleViewProjection(), 1024f, 768f, buildingDegradesDisabled: true);
+        Assert.True(((IRetailFrameWalkContext)ctx).BuildingDegradesDisabled);
+        ctx.Reset(Vector3.Zero, Vector3.UnitY, SimpleViewProjection(), 1024f, 768f);
+        Assert.False(((IRetailFrameWalkContext)ctx).BuildingDegradesDisabled);
+    }
+
+    [Fact]
     public void GetVisible_ResolvesThroughTheCommittedCellVisibilityRegistry()
     {
         var cellVisibility = new CellVisibility();

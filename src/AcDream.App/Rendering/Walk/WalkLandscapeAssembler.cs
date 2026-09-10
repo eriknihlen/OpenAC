@@ -152,6 +152,23 @@ public sealed class WalkLandscapeAssembler
                     block.CellBuildings[cellIndex] = entry.Building;
             }
         }
+        else if (sideCellCount > 1 && data.Buildings.Count > 0)
+        {
+            // A coarse terrain cell can cover several building anchors.
+            int span = 8 / sideCellCount;
+            var buckets = new List<WalkBuilding>?[sideCellCount * sideCellCount];
+            foreach (WalkBuildingFactory.Entry entry in data.Buildings)
+            {
+                int anchor = (int)(entry.Building.PositionCellId & 0xFFFFu) - 1;
+                if ((uint)anchor >= 64u)
+                    continue;
+                int cell = (anchor / 8 / span) * sideCellCount + anchor % 8 / span;
+                (buckets[cell] ??= []).Add(entry.Building);
+            }
+            block.CoarseCellBuildings = new WalkBuilding[buckets.Length][];
+            for (int i = 0; i < buckets.Length; i++)
+                block.CoarseCellBuildings[i] = buckets[i]?.ToArray() ?? [];
+        }
         return block;
     }
 

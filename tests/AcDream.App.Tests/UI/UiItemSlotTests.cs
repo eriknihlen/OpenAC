@@ -201,6 +201,18 @@ public class UiItemSlotTests
     public void CapacityFrontSprite_default() => Assert.Equal(0x06004D23u, new UiItemSlot().CapacityFrontSprite);
 
     [Fact]
+    public void StructureFill_defaultsHidden() => Assert.Equal(-1f, new UiItemSlot().StructureFill);
+
+    [Fact]
+    public void StructureSprites_defaultToTheAuthoredStructureMeter()
+    {
+        var slot = new UiItemSlot();
+
+        Assert.Equal(0x06004D24u, slot.StructureBackSprite);
+        Assert.Equal(0x06004D25u, slot.StructureFrontSprite);
+    }
+
+    [Fact]
     public void ActiveCooldownSprite_selects_the_exact_one_based_step()
     {
         uint[] sprites =

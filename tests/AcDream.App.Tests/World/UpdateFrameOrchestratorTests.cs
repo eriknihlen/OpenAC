@@ -351,6 +351,7 @@ public sealed class UpdateFrameOrchestratorTests
             ("LiveEntityAnimationPresenter", "Present"),
             ("EquippedChildRenderController", "Tick"),
             ("RetailStaticAnimatingObjectScheduler", "ProcessHooks"),
+            ("SkyPesActivationGateSlot", "Tick"),
             ("LiveEffectFrameController", "Tick"));
         AssertNamedCallOrder(
             RequiredMethod(typeof(LiveEffectFrameController), "Tick"),

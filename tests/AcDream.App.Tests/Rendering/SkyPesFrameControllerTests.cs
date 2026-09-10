@@ -33,6 +33,7 @@ public sealed class SkyPesFrameControllerTests
 
         public readonly List<uint> ResolvedScriptIds = [];
         public readonly List<string> Diagnostics = [];
+        public readonly List<uint> StoppedAudioOwners = [];
         public readonly List<(uint EntityId, Vector3 Position, AnimationHook Hook)> HookCalls;
         public readonly PhysicsScriptRunner Runner;
         public readonly SkyPesFrameController Controller;
@@ -87,7 +88,8 @@ public sealed class SkyPesFrameControllerTests
                 sink,
                 poses,
                 effects: null,
-                Diagnostics.Add);
+                Diagnostics.Add,
+                StoppedAudioOwners.Add);
         }
     }
 
@@ -242,5 +244,35 @@ public sealed class SkyPesFrameControllerTests
         Assert.Same(sound, call.Hook);
         Assert.Equal(currentCamera, call.Position);
         Assert.Single(h.ResolvedScriptIds);
+    }
+
+    [Fact]
+    public void EnclosedFrameStopsSkyHooksAndAudioWhilePreservingOtherOwners()
+    {
+        var sound = new SoundTweakedHook
+        {
+            SoundId = 0x0A00038Bu,
+            Volume = 0.1f,
+            Priority = 1f,
+        };
+        var h = new Harness(sound, hookTime: 1.0);
+        const uint otherOwner = 0x50000001u;
+
+        h.Controller.Update(0.3f, Group(Carrier()), Vector3.Zero);
+        Assert.True(h.Runner.PlayDirect(otherOwner, AuroraScript));
+
+        h.Controller.Update(0.4f, Group(Carrier()), Vector3.Zero, skyActive: false);
+        h.Runner.Tick(1.0);
+
+        var otherCall = Assert.Single(h.HookCalls);
+        Assert.Equal(otherOwner, otherCall.EntityId);
+        Assert.Equal([0xF0000000u], h.StoppedAudioOwners);
+        Assert.Equal(0, h.Runner.ActiveScriptCount);
+
+        h.Controller.Update(0.5f, Group(Carrier()), Vector3.One, skyActive: true);
+        h.Runner.Tick(2.0);
+
+        Assert.Equal(2, h.HookCalls.Count);
+        Assert.Equal(0xF0000000u, h.HookCalls[1].EntityId);
     }
 }

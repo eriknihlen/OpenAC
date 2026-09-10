@@ -1401,6 +1401,93 @@ public sealed class GameEventWiringTests
     }
 
     [Fact]
+    public void WireAll_SalvageOperationsResult_EmitsTheSalvagingSuccessLine()
+    {
+        var lines = new List<(string Text, RetailLogTextType Type)>();
+        var dispatcher = new GameEventDispatcher();
+        GameEventWiring.WireAll(
+            dispatcher,
+            new ClientObjectTable(),
+            new CombatState(),
+            new Spellbook(),
+            new ChatLog(),
+            onInterfaceText: (text, type) => lines.Add((text, type)));
+
+        byte[] payload = new AceWireWriter()
+            .Write(28u)
+            .Write(0u)
+            .Write(1u)
+            .Write(63u).Write(unchecked((ulong)BitConverter.DoubleToInt64Bits(8d))).Write(1u)
+            .Write(0)
+            .ToArray();
+        dispatcher.Dispatch(GameEventEnvelope.TryParse(
+            WrapEnvelope(GameEventType.SalvageOperationsResult, payload))!.Value);
+
+        Assert.Equal(
+            ("You obtain 1 Silver (ws 8.00) using your knowledge of Weapon Tinkering.",
+                RetailLogTextType.Salvaging),
+            Assert.Single(lines));
+    }
+
+    [Fact]
+    public void WireAll_SalvageOperationsResult_EmitsUnsuitableItemsInSalvagingLog()
+    {
+        var lines = new List<(string Text, RetailLogTextType Type)>();
+        var items = new ClientObjectTable();
+        const uint unsuitableItem = 0x50000020u;
+        items.AddOrUpdate(new ClientObject { ObjectId = unsuitableItem, Name = "Broken Item" });
+        var dispatcher = new GameEventDispatcher();
+        GameEventWiring.WireAll(
+            dispatcher,
+            items,
+            new CombatState(),
+            new Spellbook(),
+            new ChatLog(),
+            onInterfaceText: (text, type) => lines.Add((text, type)));
+
+        byte[] payload = new AceWireWriter()
+            .Write(28u)
+            .Write(1u).Write(unsuitableItem)
+            .Write(0u)
+            .Write(0)
+            .ToArray();
+        dispatcher.Dispatch(GameEventEnvelope.TryParse(
+            WrapEnvelope(GameEventType.SalvageOperationsResult, payload))!.Value);
+
+        Assert.Equal(
+            (" The following were not suitable for salvaging: Broken Item",
+                RetailLogTextType.Salvaging),
+            Assert.Single(lines));
+    }
+
+    [Fact]
+    public void WireAll_SalvageOperationsResult_EmitsFailureInSalvagingLog()
+    {
+        var lines = new List<(string Text, RetailLogTextType Type)>();
+        var dispatcher = new GameEventDispatcher();
+        GameEventWiring.WireAll(
+            dispatcher,
+            new ClientObjectTable(),
+            new CombatState(),
+            new Spellbook(),
+            new ChatLog(),
+            onInterfaceText: (text, type) => lines.Add((text, type)));
+
+        byte[] payload = new AceWireWriter()
+            .Write(28u)
+            .Write(0u)
+            .Write(0u)
+            .Write(0)
+            .ToArray();
+        dispatcher.Dispatch(GameEventEnvelope.TryParse(
+            WrapEnvelope(GameEventType.SalvageOperationsResult, payload))!.Value);
+
+        Assert.Equal(
+            ("Salvaging Failed!", RetailLogTextType.Salvaging),
+            Assert.Single(lines));
+    }
+
+    [Fact]
     public void WireAll_PlayerDescription_PublishesCharacterOptions()
     {
         var dispatcher = new GameEventDispatcher();

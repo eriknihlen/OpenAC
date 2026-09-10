@@ -210,7 +210,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
                         roots.PlayerCellId,
                         roots.PlayerViewPosition,
                         camera.Camera.View,
-                        _diagnostics.CameraCellResolution));
+                        _diagnostics.CameraCellResolution,
+                        buildingDegradesDisabled: camera.IsOverheadView));
 
                 _particleVisibility.MarkVisibleLandscapeCells(
                     pviewResult.VisibleLandscapeCells);

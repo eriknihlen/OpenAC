@@ -28,6 +28,7 @@ public static class WindowNames
     public const string Examination = "examination";
     public const string Vendor = "vendor";
     public const string SecureTrade = "secure-trade";
+    public const string Salvage = "salvage";
     public const string Options = "options";
     public const string KeyboardConfig = "keyboard-config";
 

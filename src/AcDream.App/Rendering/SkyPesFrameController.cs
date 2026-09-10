@@ -19,6 +19,7 @@ internal sealed class SkyPesFrameController
     private readonly ParticleHookSink _particles;
     private readonly EntityEffectPoseRegistry _poses;
     private readonly EntityEffectController? _effects;
+    private readonly Action<uint>? _stopAudio;
     private readonly HashSet<SkyPesKey> _active = [];
     private readonly HashSet<SkyPesKey> _missing = [];
     private readonly HashSet<uint> _reportedScriptMismatches = [];
@@ -31,20 +32,29 @@ internal sealed class SkyPesFrameController
         ParticleHookSink particles,
         EntityEffectPoseRegistry poses,
         EntityEffectController? effects,
-        Action<string>? diagnostic = null)
+        Action<string>? diagnostic = null,
+        Action<uint>? stopAudio = null)
     {
         _scripts = scripts ?? throw new ArgumentNullException(nameof(scripts));
         _particles = particles ?? throw new ArgumentNullException(nameof(particles));
         _poses = poses ?? throw new ArgumentNullException(nameof(poses));
         _effects = effects;
         _diagnostic = diagnostic;
+        _stopAudio = stopAudio;
     }
 
     public void Update(
         float dayFraction,
         DayGroupData? dayGroup,
-        Vector3 cameraWorldPosition)
+        Vector3 cameraWorldPosition,
+        bool skyActive = true)
     {
+        if (!skyActive)
+        {
+            SetActive(false);
+            return;
+        }
+
         _seenScratch.Clear();
         if (dayGroup is not null)
         {
@@ -113,6 +123,16 @@ internal sealed class SkyPesFrameController
         }
     }
 
+    public void SetActive(bool skyActive)
+    {
+        if (skyActive)
+            return;
+
+        _seenScratch.Clear();
+        StopUnseen(_active, stopScripts: true);
+        StopUnseen(_missing, stopScripts: false);
+    }
+
     private void StopUnseen(HashSet<SkyPesKey> set, bool stopScripts)
     {
         _stopScratch.Clear();
@@ -131,6 +151,7 @@ internal sealed class SkyPesFrameController
                 _effects?.UnregisterSyntheticOwner(ownerId);
                 _particles.StopAllForEntity(ownerId, fadeOut: true);
                 _poses.Remove(ownerId);
+                _stopAudio?.Invoke(ownerId);
             }
 
             set.Remove(key);

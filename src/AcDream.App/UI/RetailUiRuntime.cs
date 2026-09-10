@@ -323,6 +323,29 @@ public sealed record RetailUiRuntimeBindings(
 public sealed class RetailUiRuntime : IDisposable
 {
     private readonly RetailUiRuntimeBindings _bindings;
+    private CreatureDisplayNameResolver? _creatureNames;
+    private RetailAppraisalNameResolver? _itemNames;
+
+    private RetailAppraisalNameResolver ItemNames
+    {
+        get
+        {
+            if (_itemNames is not null)
+                return _itemNames;
+            lock (_bindings.Assets.DatLock)
+            {
+                _creatureNames ??= CreatureDisplayNameResolver.Load(_bindings.Assets.Dats);
+                return _itemNames ??= RetailAppraisalNameResolver.Load(
+                    _bindings.Assets.Dats, _creatureNames);
+            }
+        }
+    }
+
+    private string? ResolveSelectedObjectName(uint guid) =>
+        _bindings.Toolbar.Objects.Get(guid) is { } obj
+            ? ItemNames.ResolveAppropriateName(obj)
+            : _bindings.Toolbar.ResolveName(guid);
+
     private StackSplitQuantityState StackSplitQuantity => _bindings.StackSplitQuantity;
     private RetailWindowLayoutPersistence? _persistence;
     private RetailUiAutomationScriptRunner? _automation;
@@ -378,6 +401,13 @@ public sealed class RetailUiRuntime : IDisposable
     private void Initialize()
     {
         RetailUiRuntimeBindings bindings = _bindings;
+        lock (_bindings.Assets.DatLock)
+        {
+            ElementInfo? mainPanelFrame = LayoutImporter.ImportInfos(
+                _bindings.Assets.Dats, 0x2100006Eu, 0x100005FEu);
+            if (mainPanelFrame is not null)
+                _panelUi.ConfigureMainPanelFrame(mainPanelFrame);
+        }
         MountFpsDisplay();
         MountVividTargetIndicator();
         MountProjectileDebugOverlay();
@@ -406,6 +436,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountExternalContainer();
         MountVendor();
         MountSecureTrade();
+        MountSalvage();
         MountItemCooldowns();
         if (bindings.Connection is { } connection)
         {
@@ -436,6 +467,7 @@ public sealed class RetailUiRuntime : IDisposable
                     WindowNames.Vitals,
                     WindowNames.SideVitals,
                     WindowNames.SecureTrade,
+                    WindowNames.Salvage,
                     WindowNames.PluginShelf,
                 ]);
             _persistence.ResetToDefaults();
@@ -678,6 +710,9 @@ public sealed class RetailUiRuntime : IDisposable
 
     public bool HandleInputAction(AcDream.UI.Abstractions.Input.InputAction action)
     {
+        if (AppraisalController?.HandleInputAction(action) == true)
+            return true;
+
         if (SpellcastingUiController?.Handle(action) == true)
             return true;
 
@@ -1542,7 +1577,7 @@ public sealed class RetailUiRuntime : IDisposable
             handler => b.ItemMana.ItemManaChanged -= handler,
             b.IsHealthTarget,
             b.ItemInteraction.IsOwnedByPlayer,
-            b.ResolveName,
+            ResolveSelectedObjectName,
             b.HealthPercent,
             b.HasHealth,
             b.StackSize,
@@ -1802,11 +1837,8 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Assets.ResolveSprite,
                     _bindings.Assets.DefaultFont,
                     _bindings.Assets.ResolveFont);
-            creatureNames = CreatureDisplayNameResolver.Load(
-                _bindings.Assets.Dats);
-            itemNames = RetailAppraisalNameResolver.Load(
-                _bindings.Assets.Dats,
-                creatureNames);
+            itemNames = ItemNames;
+            creatureNames = _creatureNames;
         }
         if (layout is null)
         {
@@ -4008,6 +4040,71 @@ public sealed class RetailUiRuntime : IDisposable
 
     public Layout.SecureTradeUiController? SecureTradeController { get; private set; }
 
+    public SalvageUiController? SalvageController { get; private set; }
+
+    private void MountSalvage()
+    {
+        ImportedLayout? layout;
+        uint emptySlot;
+        lock (_bindings.Assets.DatLock)
+        {
+            layout = LayoutImporter.Import(
+                _bindings.Assets.Dats, SalvageUiController.LayoutId, SalvageUiController.RootId,
+                _bindings.Assets.ResolveSprite, _bindings.Assets.DefaultFont, _bindings.Assets.ResolveFont);
+            emptySlot = ItemListCellTemplate.ResolveEmptySprite(
+                _bindings.Assets.Dats, SalvageUiController.LayoutId, SalvageUiController.ItemListId);
+        }
+        if (layout is null)
+        {
+            Console.WriteLine("[UI] salvage window layout is unavailable.");
+            return;
+        }
+        InventoryRuntimeBindings inventory = _bindings.Inventory;
+        SalvageUiController? controller = SalvageUiController.Bind(layout,
+            new SalvageUiController.Bindings(
+                inventory.Objects,
+                inventory.ItemInteraction.IsOwnedByPlayer,
+                inventory.ItemInteraction.TrySalvageItems,
+                () => _bindings.Options.CurrentCharacterOption((uint)CharacterOptionId.SalvageMultiple),
+                inventory.ResolveIcon,
+                visible =>
+                {
+                    if (visible) Host.ShowWindow(WindowNames.Salvage);
+                    else Host.HideWindow(WindowNames.Salvage);
+                },
+                _bindings.Options.DisplaySystemMessage,
+                emptySlot));
+        if (controller is null)
+        {
+            Console.WriteLine("[UI] salvage window controls are unavailable.");
+            return;
+        }
+        UiElement root = layout.Root;
+        const float frameInset = 2f * RetailChromeSprites.Border;
+        float width = MathF.Min(root.Width, MathF.Max(240f, Host.Root.Width - frameInset));
+        RetailWindowFrame.Mount(Host.Root, root, _bindings.Assets.ResolveSprite,
+            new RetailWindowFrame.Options
+            {
+                WindowName = WindowNames.Salvage,
+                Chrome = RetailWindowChrome.NineSlice,
+                Left = MathF.Max(0f, (Host.Root.Width - width - frameInset) * 0.5f),
+                Top = MathF.Max(0f, (Host.Root.Height - root.Height - frameInset) * 0.5f),
+                ContentWidth = width,
+                ContentHeight = root.Height,
+                MinWidth = 240f,
+                MinHeight = root.Height,
+                Visible = false,
+                ResizeX = true,
+                ResizeY = false,
+                ResizableEdges = ResizeEdges.Left | ResizeEdges.Right,
+                ConstrainDragToParent = true,
+                ConstrainResizeToParent = true,
+                Controller = controller,
+            });
+        SalvageController = controller;
+        inventory.ItemInteraction.PolicyActionRequested += controller.HandlePolicyAction;
+    }
+
     private void MountSecureTrade()
     {
         if (_bindings.Social.Trade is not { } tradeView)
@@ -4595,6 +4692,8 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Inventory.ItemInteraction.SecureTradeRequested -=
                         trade.RequestSecureTrade;
                 }
+                if (SalvageController is { } salvage)
+                    _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
             },
             () => _itemConfirmationController?.Dispose(),
             () =>

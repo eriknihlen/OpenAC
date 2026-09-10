@@ -22,7 +22,24 @@ internal readonly record struct WorldCameraFrame(
     Matrix4x4 ViewProjection,
     FrustumPlanes Frustum,
     Matrix4x4 InverseView,
-    Vector3 Position);
+    Vector3 Position)
+{
+    public bool IsOverheadView { get; init; }
+}
+
+internal static class WorldCameraViewPolicy
+{
+    internal static bool IsOverheadView(ICamera activeCamera) =>
+        activeCamera is RetailChaseCamera { IsMapMode: true }
+            or ChaseCamera { IsMapMode: true };
+
+    internal static AtmosphereSnapshot Apply(
+        in AtmosphereSnapshot atmosphere,
+        bool distanceFogDisabled) =>
+        distanceFogDisabled
+            ? atmosphere with { FogMode = FogMode.Off }
+            : atmosphere;
+}
 
 internal readonly record struct WorldRootFrame(
     LoadedCell? PlayerRoot,
@@ -41,6 +58,8 @@ internal readonly record struct WorldRootFrame(
     bool PlayerIndoorGate)
 {
     public bool RenderSky => ViewerRoot is null || RootSeenOutside;
+
+    public bool SkyEffectsActive => RenderSky && !PlayerInsideCell;
 
     public bool CameraInsideEnclosedCell => CameraInsideCell && !RootSeenOutside;
 
@@ -151,6 +170,36 @@ internal interface IWorldFrameEnvironmentPreparation
 
 }
 
+internal interface ISkyPesActivationGate
+{
+    void Tick();
+}
+
+internal sealed class RuntimeSkyPesActivationGate
+    : ISkyPesActivationGate
+{
+    private readonly SkyPesFrameController _skyPes;
+    private readonly IWorldFrameCameraSource _camera;
+    private readonly IWorldFrameRootSource _roots;
+
+    public RuntimeSkyPesActivationGate(
+        SkyPesFrameController skyPes,
+        IWorldFrameCameraSource camera,
+        IWorldFrameRootSource roots)
+    {
+        _skyPes = skyPes ?? throw new ArgumentNullException(nameof(skyPes));
+        _camera = camera ?? throw new ArgumentNullException(nameof(camera));
+        _roots = roots ?? throw new ArgumentNullException(nameof(roots));
+    }
+
+    public void Tick()
+    {
+        WorldCameraFrame camera = _camera.Resolve();
+        WorldRootFrame roots = _roots.Resolve(in camera);
+        _skyPes.SetActive(roots.SkyEffectsActive);
+    }
+}
+
 internal interface IWorldFrameAnimatedEntitySource
 {
     HashSet<uint> Capture();
@@ -229,19 +278,22 @@ internal sealed class WorldRenderFrameBuilder : IWorldRenderFrameBuilder
 internal sealed class RuntimeWorldFrameCameraSource : IWorldFrameCameraSource
 {
     private readonly CameraController _cameras;
-    private readonly LocalPlayerTeleportController _teleport;
+    private readonly Func<ICamera, ICamera> _applyViewPlane;
 
     public RuntimeWorldFrameCameraSource(
         CameraController cameras,
-        LocalPlayerTeleportController teleport)
+        Func<ICamera, ICamera> applyViewPlane)
     {
         _cameras = cameras ?? throw new ArgumentNullException(nameof(cameras));
-        _teleport = teleport ?? throw new ArgumentNullException(nameof(teleport));
+        _applyViewPlane = applyViewPlane
+            ?? throw new ArgumentNullException(nameof(applyViewPlane));
     }
 
     public WorldCameraFrame Resolve()
     {
-        ICamera camera = _teleport.ApplyViewPlane(_cameras.Active);
+        ICamera activeCamera = _cameras.Active;
+        bool overheadView = WorldCameraViewPolicy.IsOverheadView(activeCamera);
+        ICamera camera = _applyViewPlane(activeCamera);
         Matrix4x4 projection = camera.Projection;
         Matrix4x4 viewProjection = camera.View * projection;
         FrustumPlanes frustum = FrustumPlanes.FromViewProjection(viewProjection);
@@ -253,7 +305,10 @@ internal sealed class RuntimeWorldFrameCameraSource : IWorldFrameCameraSource
             viewProjection,
             frustum,
             inverseView,
-            position);
+            position)
+        {
+            IsOverheadView = overheadView,
+        };
     }
 }
 
@@ -500,7 +555,8 @@ internal sealed class RuntimeWorldFrameEnvironmentPreparation
         _skyPes?.Update(
             (float)_worldTime.DayFraction,
             activeDayGroup,
-            camera.Position);
+            camera.Position,
+            roots.SkyEffectsActive);
 
         SkyKeyframe landscapeLighting = _persistentDaylight()
             ? _worldTime.SkyAtDayFraction(0.5f)
@@ -512,7 +568,9 @@ internal sealed class RuntimeWorldFrameEnvironmentPreparation
         _dispatcher?.SetSceneLights(_lighting.PointSnapshot);
         _environmentCells?.SetPointSnapshot(_lighting.PointSnapshot);
 
-        AtmosphereSnapshot atmosphere = foundation.Atmosphere;
+        AtmosphereSnapshot atmosphere = WorldCameraViewPolicy.Apply(
+            foundation.Atmosphere,
+            camera.IsOverheadView);
         SceneLightingUbo ubo = SceneLightingUbo.Build(
             _lighting,
             in atmosphere,

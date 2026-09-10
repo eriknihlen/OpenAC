@@ -50,7 +50,7 @@ public sealed class WalkLandscapeAssemblerTests
     }
 
     [Fact]
-    public void RingPyramid_FarBlockDegradesSideCellCountAndNeverAttachesBuildings()
+    public void RingPyramid_FarBlockKeepsBuildingsInCoarseCellBuckets()
     {
         var assembler = new WalkLandscapeAssembler();
         var building = new WalkBuildingFactory.Entry(
@@ -69,6 +69,7 @@ public sealed class WalkLandscapeAssemblerTests
         Assert.Contains(center.CellBuildings, b => b is not null);
         Assert.Equal(2, far.SideCellCount);
         Assert.All(far.CellBuildings, Assert.Null);
+        Assert.Same(building.Building, Assert.Single(far.CoarseCellBuildings.SelectMany(b => b)));
     }
 
     [Fact]

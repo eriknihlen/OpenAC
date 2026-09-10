@@ -45,6 +45,15 @@ public class UiItemSlot : UiElement
     public uint CapacityBackSprite { get; set; } = 0x06004D22u;
     public uint CapacityFrontSprite { get; set; } = 0x06004D23u;
 
+    public float StructureFill { get; set; } = -1f;
+    public uint StructureBackSprite { get; set; } = 0x06004D24u;
+    public uint StructureFrontSprite { get; set; } = 0x06004D25u;
+
+    public void SetStructure(int structure, int maxStructure)
+        => StructureFill = maxStructure > 0 && structure < maxStructure
+            ? Math.Clamp(structure / (float)maxStructure, 0f, 1f)
+            : -1f;
+
     public enum DragAcceptState { None, Accept, Reject }
     private DragAcceptState _dragAccept = DragAcceptState.None;
     internal DragAcceptState DragAcceptVisual => _dragAccept;
@@ -244,26 +253,11 @@ public class UiItemSlot : UiElement
 
         DrawShortcutOverlay(ctx);
 
-        if (CapacityFill >= 0f && SpriteResolve is not null)
-        {
-            const float by = 1f, bw = 5f, bh = 30f;
-            float bx = Width - bw;
-            if (CapacityBackSprite != 0)
-            {
-                var (bt, _, _) = SpriteResolve(CapacityBackSprite);
-                if (bt != 0) ctx.DrawSprite(bt, bx, by, bw, bh, 0f, 0f, 1f, 1f, Vector4.One);
-            }
-            float f = Math.Clamp(CapacityFill, 0f, 1f);
-            if (f > 0f && CapacityFrontSprite != 0)
-            {
-                var (ft, _, _) = SpriteResolve(CapacityFrontSprite);
-                if (ft != 0)
-                {
-                    float fh = bh * f;
-                    ctx.DrawSprite(ft, bx, by + (bh - fh), bw, fh, 0f, 1f - f, 1f, 1f, Vector4.One);
-                }
-            }
-        }
+        DrawMeter(ctx, CapacityFill, CapacityBackSprite, CapacityFrontSprite);
+
+        // Full structure hides its meter; depleted structure retains the empty rail.
+        if (StructureFill is >= 0f and < 1f)
+            DrawMeter(ctx, StructureFill, StructureBackSprite, StructureFrontSprite);
 
         if (_waiting && SpriteResolve is not null && WaitingSprite != 0)
         {
@@ -303,6 +297,30 @@ public class UiItemSlot : UiElement
                     1f,
                     1f,
                     Vector4.One);
+        }
+    }
+
+    private void DrawMeter(UiRenderContext ctx, float fill, uint backSprite, uint frontSprite)
+    {
+        if (fill < 0f || SpriteResolve is null)
+            return;
+
+        const float by = 1f, bw = 5f, bh = 30f;
+        float bx = Width - bw;
+        if (backSprite != 0)
+        {
+            var (bt, _, _) = SpriteResolve(backSprite);
+            if (bt != 0) ctx.DrawSprite(bt, bx, by, bw, bh, 0f, 0f, 1f, 1f, Vector4.One);
+        }
+        float f = Math.Clamp(fill, 0f, 1f);
+        if (f > 0f && frontSprite != 0)
+        {
+            var (ft, _, _) = SpriteResolve(frontSprite);
+            if (ft != 0)
+            {
+                float fh = bh * f;
+                ctx.DrawSprite(ft, bx, by + (bh - fh), bw, fh, 0f, 1f - f, 1f, 1f, Vector4.One);
+            }
         }
     }
 
