@@ -8,15 +8,21 @@ internal readonly struct BindlessTextureLocation : IEquatable<BindlessTextureLoc
 {
     private readonly uint _slotPlusOne;
 
-    public BindlessTextureLocation(GpuTextureSlot slot, uint layer)
+    public BindlessTextureLocation(GpuTextureSlot slot, uint layer, GpuTextureSlot repeatSlot = default)
     {
         _slotPlusOne = slot.IsAssigned ? slot.Index + 1 : 0;
         Layer = layer;
+        RepeatSlot = repeatSlot;
     }
 
     public static BindlessTextureLocation Unresolved => default;
 
     public uint Layer { get; }
+
+    public GpuTextureSlot RepeatSlot { get; }
+
+    public GpuTextureSlot ResolveSlot(bool wrapping) =>
+        wrapping && RepeatSlot.IsAssigned ? RepeatSlot : Slot;
 
     public bool IsResolved => _slotPlusOne != 0;
 
@@ -24,12 +30,12 @@ internal readonly struct BindlessTextureLocation : IEquatable<BindlessTextureLoc
         _slotPlusOne == 0 ? GpuTextureSlot.Unassigned : new GpuTextureSlot(_slotPlusOne - 1);
 
     public bool Equals(BindlessTextureLocation other) =>
-        _slotPlusOne == other._slotPlusOne && Layer == other.Layer;
+        _slotPlusOne == other._slotPlusOne && Layer == other.Layer && RepeatSlot == other.RepeatSlot;
 
     public override bool Equals(object? obj) =>
         obj is BindlessTextureLocation other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine(_slotPlusOne, Layer);
+    public override int GetHashCode() => HashCode.Combine(_slotPlusOne, Layer, RepeatSlot);
 
     public static bool operator ==(BindlessTextureLocation left, BindlessTextureLocation right) =>
         left.Equals(right);
@@ -107,6 +113,7 @@ internal sealed class CompositeTextureArrayResource
     public Gpu.IGpuTexture? Image { get; init; }
 
     public required GpuTextureSlot Slot { get; init; }
+    public GpuTextureSlot RepeatSlot { get; init; }
     public required int Width { get; init; }
     public required int Height { get; init; }
     public required int Capacity { get; init; }
@@ -126,10 +133,15 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
 {
     private readonly Gpu.IGpuDevice _device;
     private readonly Gpu.IGpuSampler _sampler;
+    private readonly Gpu.IGpuSampler _repeatSampler;
 
     internal RhiCompositeTextureArrayBackend(Gpu.IGpuDevice device)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
+        _repeatSampler = device.CreateSampler(Gpu.GpuSamplerDescription.WorldRepeat with
+        {
+            MipFilter = Gpu.GpuMipFilter.None,
+        });
         _sampler = device.CreateSampler(Gpu.GpuSamplerDescription.WorldClamp with
         {
             MipFilter = Gpu.GpuMipFilter.None,
@@ -143,6 +155,8 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
     public CompositeTextureArrayResource Create(int width, int height, int capacity)
     {
         Gpu.IGpuTexture? image = null;
+        GpuTextureSlot slot = default;
+        GpuTextureSlot repeatSlot = default;
         try
         {
             image = _device.CreateTexture(new Gpu.GpuTextureDescription(
@@ -153,13 +167,15 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
                 height,
                 capacity,
                 MipLevelCount: 1));
-            Gpu.GpuTextureSlot slot = _device.RegisterTexture(image, _sampler);
+            slot = _device.RegisterTexture(image, _sampler);
+            repeatSlot = _device.RegisterTexture(image, _repeatSampler);
             return new CompositeTextureArrayResource
             {
                 Name = 0,
                 Handle = 0,
                 Image = image,
                 Slot = slot,
+                RepeatSlot = repeatSlot,
                 Width = width,
                 Height = height,
                 Capacity = capacity,
@@ -168,6 +184,10 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
         }
         catch
         {
+            if (repeatSlot.IsAssigned)
+                _device.ReleaseTextureSlot(repeatSlot);
+            if (slot.IsAssigned)
+                _device.ReleaseTextureSlot(slot);
             image?.Dispose();
             throw;
         }
@@ -187,6 +207,8 @@ internal sealed class RhiCompositeTextureArrayBackend : ICompositeTextureArrayBa
         ArgumentNullException.ThrowIfNull(resource);
         if (resource.Slot.IsAssigned)
             _device.ReleaseTextureSlot(resource.Slot);
+        if (resource.RepeatSlot.IsAssigned)
+            _device.ReleaseTextureSlot(resource.RepeatSlot);
     }
 
     public void Delete(CompositeTextureArrayResource resource) => RequireImage(resource).Dispose();
@@ -426,7 +448,8 @@ internal sealed class CompositeTextureArrayCache : IDisposable
         entry.Atlas.LastUseSequence = ++_useSequence;
         location = new BindlessTextureLocation(
             entry.Atlas.Resource.Slot,
-            checked((uint)entry.Layer));
+            checked((uint)entry.Layer),
+            entry.Atlas.Resource.RepeatSlot);
         return true;
     }
 
@@ -488,7 +511,7 @@ internal sealed class CompositeTextureArrayCache : IDisposable
         _owners.Acquire(ownerLocalId, key);
         _frameUploadCount++;
         _frameUploadBytes = checked(_frameUploadBytes + bytes);
-        location = new BindlessTextureLocation(atlas.Resource.Slot, checked((uint)layer));
+        location = new BindlessTextureLocation(atlas.Resource.Slot, checked((uint)layer), atlas.Resource.RepeatSlot);
         return true;
     }
 

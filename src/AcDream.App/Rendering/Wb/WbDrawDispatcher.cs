@@ -2279,7 +2279,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
                         paletteOverride!,
                         paletteIdentity);
                 compositePending = !texture.IsResolved;
-                return new ResolvedTexture(texture.Slot, texture.Layer);
+                return new ResolvedTexture(texture.ResolveSlot(batch.HasWrappingUVs), texture.Layer);
             }
 
             case WbTextureResolutionKind.OriginalTextureOverride:
@@ -2290,7 +2290,7 @@ public sealed partial class WbDrawDispatcher : IDisposable
                         surfaceId,
                         overrideOrigTex);
                 compositePending = !texture.IsResolved;
-                return new ResolvedTexture(texture.Slot, texture.Layer);
+                return new ResolvedTexture(texture.ResolveSlot(batch.HasWrappingUVs), texture.Layer);
             }
 
             case WbTextureResolutionKind.SharedAtlas:

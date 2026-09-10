@@ -10,6 +10,31 @@ public sealed class RhiCompositeTextureArrayBackendTests
 {
     private static byte[] Rgba(int width, int height) => new byte[width * height * 4];
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NewAndCachedAppearanceTexturesPreserveBothAddressModes(bool palette)
+    {
+        using var device = new RecordingGpuDevice();
+        var backend = new RhiCompositeTextureArrayBackend(device);
+        using var cache = new CompositeTextureArrayCache(backend, ImmediateGpuResourceRetirementQueue.Instance);
+        var key = new CompositeTextureKey(
+            palette ? CompositeTextureKind.PaletteComposite : CompositeTextureKind.OriginalTextureOverride,
+            1, 2, default);
+        cache.BeginFrame();
+        Assert.True(cache.TryAddAndAcquire(1, key,
+            new AcDream.Core.Textures.DecodedTexture(Rgba(4, 4), 4, 4), out var added));
+        Assert.True(cache.TryAcquire(2, key, out var cached));
+        Assert.Equal(added, cached);
+        Assert.True(cached.ResolveSlot(true).IsAssigned);
+        Assert.NotEqual(cached.ResolveSlot(false), cached.ResolveSlot(true));
+        var registration = Assert.Single(device.Calls.OfType<GpuRecordedTextureRegistration>(),
+            r => r.Slot == cached.ResolveSlot(true).Index);
+        Assert.Equal(GpuSamplerDescription.WorldRepeat with { MipFilter = GpuMipFilter.None }, registration.Sampler);
+        Assert.Single(device.Calls.OfType<GpuRecordedTextureRegistration>(),
+            r => r.Slot == cached.ResolveSlot(false).Index);
+    }
+
     [Fact]
     public void CreateProducesASingleLevelArrayRegisteredIntoTheTable()
     {
@@ -19,6 +44,14 @@ public sealed class RhiCompositeTextureArrayBackendTests
         CompositeTextureArrayResource resource = backend.Create(32, 32, 8);
 
         Assert.True(resource.Slot.IsAssigned);
+        Assert.True(resource.RepeatSlot.IsAssigned);
+        Assert.NotEqual(resource.Slot, resource.RepeatSlot);
+        var registrations = device.Calls.OfType<GpuRecordedTextureRegistration>()
+            .Where(r => r.Slot == resource.Slot.Index || r.Slot == resource.RepeatSlot.Index).ToArray();
+        Assert.Equal(2, registrations.Length);
+        Assert.Equal(registrations[0].TextureName, registrations[1].TextureName);
+        Assert.Equal(GpuSamplerDescription.WorldClamp with { MipFilter = GpuMipFilter.None }, registrations[0].Sampler);
+        Assert.Equal(GpuSamplerDescription.WorldRepeat with { MipFilter = GpuMipFilter.None }, registrations[1].Sampler);
         Assert.Equal(32 * 32 * 4 * 8, resource.Bytes);
         // The GL identity fields are meaningless on this arm and say so.
         Assert.Equal(0u, resource.Name);
@@ -51,7 +84,7 @@ public sealed class RhiCompositeTextureArrayBackendTests
         var backend = new RhiCompositeTextureArrayBackend(device);
         int before = device.LiveTextureSlotCount;
         CompositeTextureArrayResource resource = backend.Create(32, 32, 4);
-        Assert.Equal(before + 1, device.LiveTextureSlotCount);
+        Assert.Equal(before + 2, device.LiveTextureSlotCount);
 
         backend.MakeNonResident(resource);
         Assert.Equal(before, device.LiveTextureSlotCount);
