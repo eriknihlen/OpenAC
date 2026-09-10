@@ -17,6 +17,7 @@ public sealed class RetailPanelUiController : IDisposable
     private bool _applying;
     private bool _synchronizingGeometry;
     private PanelGeometry? _mainPanelGeometry;
+    private ElementInfo? _mainPanelFrame;
     private bool _disposed;
 
     public RetailPanelUiController(
@@ -31,6 +32,14 @@ public sealed class RetailPanelUiController : IDisposable
 
     public uint? ActivePanelId => _activePanel;
 
+    public void ConfigureMainPanelFrame(ElementInfo frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (_byPanel.Count != 0)
+            throw new InvalidOperationException("Configure the shared frame before registering panels.");
+        _mainPanelFrame = frame;
+    }
+
     public void RegisterMainPanel(
         uint panelId,
         string windowName,
@@ -42,6 +51,27 @@ public sealed class RetailPanelUiController : IDisposable
             throw new ArgumentException(
                 $"Panel window name '{windowName}' does not match handle '{window.Name}'.",
                 nameof(windowName));
+
+        if (_mainPanelFrame is { } shared)
+        {
+            var frame = window.OuterFrame;
+            frame.MinWidth = shared.MinWidth ?? shared.Width;
+            frame.MaxWidth = shared.MaxWidth ?? shared.Width;
+            frame.MinHeight = shared.MinHeight ?? shared.Height;
+            frame.MaxHeight = shared.MaxHeight ?? float.MaxValue;
+            frame.Resizable = true;
+            frame.ResizeX = true;
+            frame.ResizeY = true;
+            frame.ResizableEdges = ResizeEdges.Bottom;
+            bool constrained = frame.ConstrainResizeToParent;
+            frame.ConstrainResizeToParent = false;
+            try { window.ResizeTo(shared.Width, shared.Height); }
+            finally
+            {
+                frame.ResizeX = false;
+                frame.ConstrainResizeToParent = constrained;
+            }
+        }
 
         RegisterCore(
             panelId,
@@ -277,14 +307,19 @@ public sealed class RetailPanelUiController : IDisposable
         }
     }
 
-    private static void ApplyWindowGeometry(PanelEntry entry, PanelGeometry geometry)
+    private void ApplyWindowGeometry(PanelEntry entry, PanelGeometry geometry)
     {
         if (entry.Window is not { } window) return;
-
-        if (window.Left != geometry.Left || window.Top != geometry.Top)
-            window.MoveTo(geometry.Left, geometry.Top);
-        if (window.Width != geometry.Width || window.Height != geometry.Height)
-            window.ResizeTo(geometry.Width, geometry.Height);
+        bool synchronizing = _synchronizingGeometry;
+        _synchronizingGeometry = true;
+        try
+        {
+            if (window.Left != geometry.Left || window.Top != geometry.Top)
+                window.MoveTo(geometry.Left, geometry.Top);
+            if (window.Width != geometry.Width || window.Height != geometry.Height)
+                window.ResizeTo(geometry.Width, geometry.Height);
+        }
+        finally { _synchronizingGeometry = synchronizing; }
     }
 
     public void Dispose()

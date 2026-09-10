@@ -378,6 +378,13 @@ public sealed class RetailUiRuntime : IDisposable
     private void Initialize()
     {
         RetailUiRuntimeBindings bindings = _bindings;
+        lock (_bindings.Assets.DatLock)
+        {
+            ElementInfo? mainPanelFrame = LayoutImporter.ImportInfos(
+                _bindings.Assets.Dats, 0x2100006Eu, 0x100005FEu);
+            if (mainPanelFrame is not null)
+                _panelUi.ConfigureMainPanelFrame(mainPanelFrame);
+        }
         MountFpsDisplay();
         MountVividTargetIndicator();
         MountProjectileDebugOverlay();
