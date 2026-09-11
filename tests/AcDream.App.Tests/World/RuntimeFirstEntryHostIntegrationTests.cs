@@ -486,14 +486,12 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
             {
                 ServerGuid = playerGuid,
             };
-            var dormant = new DormantLiveEntityStore();
             var teardown = new NoopTeardown();
             var deletion = new LiveEntityDeletionController(
                 Runtime,
                 EntityObjects,
                 teardown,
-                identity,
-                dormant);
+                identity);
             Controller = new LiveEntityHydrationController(
                 Runtime,
                 EntityObjects,
@@ -506,7 +504,6 @@ public sealed class RuntimeFirstEntryHostIntegrationTests
                 new NoopTimestamps(),
                 identity,
                 deletion,
-                dormant,
                 firstEntry: FirstEntry);
         }
 

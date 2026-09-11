@@ -530,13 +530,11 @@ internal sealed class SessionPlayerCompositionPhase
             live.Lights,
             d.ClassificationCache,
             d.PlayerIdentity);
-        var dormantLiveEntities = new DormantLiveEntityStore();
         var deletion = new LiveEntityDeletionController(
             live.LiveEntities,
             d.EntityObjects,
             teardown,
-            d.PlayerIdentity,
-            dormantLiveEntities);
+            d.PlayerIdentity);
         live.LiveEntities.Physics.BindObjectTableHostResolver(
             guid => d.MotionBindings.ResolvePhysicsHost(guid));
         IPreparedCollisionSource firstEntryCollision =
@@ -634,7 +632,6 @@ internal sealed class SessionPlayerCompositionPhase
             localPhysicsTimestamps,
             d.PlayerIdentity,
             deletion,
-            dormantLiveEntities,
             firstEntryDrive,
             acceptedPositionDrive);
         bindings.Adopt(
@@ -688,8 +685,7 @@ internal sealed class SessionPlayerCompositionPhase
         var liveness = new LiveEntityLivenessController(
             live.LiveEntities,
             d.PlayerIdentity,
-            deletion,
-            dormantLiveEntities);
+            deletion);
         var sessionEvents = new LiveEntitySessionController(
             d.InboundEntityEvents,
             hydration,

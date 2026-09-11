@@ -161,7 +161,6 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
     private readonly IAcceptedLocalPhysicsTimestampPublisher _timestamps;
     private readonly ILocalPlayerIdentitySource _identity;
     private readonly LiveEntityDeletionController _deletion;
-    private readonly DormantLiveEntityStore _dormant;
     private readonly RuntimeFirstEntryDriveController? _firstEntry;
     private readonly RuntimeAcceptedPositionDriveController? _acceptedPositionDrive;
     private readonly Dictionary<RuntimeEntityRecord, CanonicalProjectionOperation>
@@ -186,7 +185,6 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
         IAcceptedLocalPhysicsTimestampPublisher timestamps,
         ILocalPlayerIdentitySource identity,
         LiveEntityDeletionController deletion,
-        DormantLiveEntityStore? dormant = null,
         RuntimeFirstEntryDriveController? firstEntry = null,
         RuntimeAcceptedPositionDriveController? acceptedPositionDrive = null)
     {
@@ -202,7 +200,6 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
         _timestamps = timestamps ?? throw new ArgumentNullException(nameof(timestamps));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _deletion = deletion ?? throw new ArgumentNullException(nameof(deletion));
-        _dormant = dormant ?? new DormantLiveEntityStore();
         _firstEntry = firstEntry;
         _acceptedPositionDrive = acceptedPositionDrive;
     }
@@ -210,30 +207,6 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
     internal event Action<uint>? AppearanceApplied;
 
     public void OnCreate(WorldSession.EntitySpawn spawn)
-    {
-        DormantCreateDisposition dormantDisposition =
-            _dormant.ClassifyCreate(spawn);
-        if (dormantDisposition is DormantCreateDisposition.StaleGeneration)
-            return;
-
-        if (dormantDisposition is DormantCreateDisposition.ExistingGeneration
-            && _dormant.TryGetExact(
-                spawn.Guid,
-                spawn.InstanceSequence,
-                out WorldSession.EntitySpawn retained))
-        {
-            OnCreateCore(retained, dormantDisposition);
-            if (!spawn.Equals(retained))
-                OnCreateCore(spawn, DormantCreateDisposition.NoDormantRecord);
-            return;
-        }
-
-        OnCreateCore(spawn, dormantDisposition);
-    }
-
-    private void OnCreateCore(
-        WorldSession.EntitySpawn spawn,
-        DormantCreateDisposition dormantDisposition)
     {
         lock (_datLock)
         {
@@ -251,7 +224,6 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
             if (registration.Canonical is not { } canonical)
                 return;
 
-            _dormant.RemoveThroughAcceptedCreate(spawn);
             ulong createIntegrationVersion = canonical.CreateIntegrationVersion;
 
             try
@@ -265,8 +237,7 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
                         createIntegrationVersion,
                         spawn,
                         replaceGeneration: result.Disposition is
-                                AcDream.Core.Physics.CreateObjectTimestampDisposition.NewGeneration
-                            || dormantDisposition is DormantCreateDisposition.NewGeneration)
+                                AcDream.Core.Physics.CreateObjectTimestampDisposition.NewGeneration)
                     && _runtime.IsCurrentCreateIntegration(
                         canonical,
                         createIntegrationVersion))
@@ -422,18 +393,15 @@ AppearanceSynchronization:
     }
 
     /// <summary>
-    /// Reprojects retained live objects after their landblock is loaded. An
+    /// Reprojects retained live objects after their landblock is loaded. A
     /// fully hydrated record only rebuckets. A retained partial projection
     /// resumes its exact initial transaction without registering logical
-    /// mesh/script resources a second time.
+    /// mesh/script resources a second time. An object destroyed by its
+    /// out-of-visibility deadline is not rebuilt here; the server re-sends
+    /// it when the player returns.
     /// </summary>
     public void OnLandblockLoaded(uint loadedLandblockId)
     {
-        WorldSession.EntitySpawn[] dormant =
-            _dormant.SnapshotLandblock(loadedLandblockId);
-        for (int i = 0; i < dormant.Length; i++)
-            OnCreate(dormant[i]);
-
         if (_runtime.Count == 0)
             return;
 

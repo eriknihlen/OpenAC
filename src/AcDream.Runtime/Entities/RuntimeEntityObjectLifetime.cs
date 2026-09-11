@@ -1744,12 +1744,6 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             ObjectTableWiring.ApplyEntityDelete(Objects, acceptance.Delete);
     }
 
-    public void ApplyAcceptedDormantDelete(DeleteObject.Parsed delete)
-    {
-        EnsureNotDisposed();
-        ObjectTableWiring.ApplyEntityDelete(Objects, delete);
-    }
-
     public void ClearObjects()
     {
         EnsureNotDisposed();

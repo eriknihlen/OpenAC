@@ -17,24 +17,19 @@ internal interface ILiveEntityPruneSink
 internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
 {
     private readonly LiveEntityRuntime _runtime;
-    private readonly RuntimeEntityObjectLifetime _entityObjects;
     private readonly ILiveEntityTeardownCoordinator _teardown;
     private readonly ILocalPlayerIdentitySource _identity;
-    private readonly DormantLiveEntityStore _dormant;
 
     public LiveEntityDeletionController(
         LiveEntityRuntime runtime,
         RuntimeEntityObjectLifetime entityObjects,
         ILiveEntityTeardownCoordinator teardown,
-        ILocalPlayerIdentitySource identity,
-        DormantLiveEntityStore? dormant = null)
+        ILocalPlayerIdentitySource identity)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        _entityObjects = entityObjects
-            ?? throw new ArgumentNullException(nameof(entityObjects));
+        ArgumentNullException.ThrowIfNull(entityObjects);
         _teardown = teardown ?? throw new ArgumentNullException(nameof(teardown));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
-        _dormant = dormant ?? new DormantLiveEntityStore();
     }
 
     public bool Delete(DeleteObject.Parsed delete)
@@ -46,18 +41,10 @@ internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
         if (!hasActiveRecord)
             _teardown.ForgetUnknownOwner(delete.Guid);
 
-        bool removed = _runtime.UnregisterLiveEntity(
+        return _runtime.UnregisterLiveEntity(
             delete,
             isLocalPlayer: false,
             removeRetainedObject: true);
-        bool removedDormant = _dormant.RemoveExact(delete);
-        if (!removed && removedDormant)
-            _entityObjects.ApplyAcceptedDormantDelete(delete);
-        if (removed)
-        {
-            _dormant.RemoveExact(delete);
-        }
-        return removed || removedDormant;
     }
 
     public bool DeleteClientGhost(uint serverGuid)
@@ -71,6 +58,12 @@ internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
         return Delete(new DeleteObject.Parsed(serverGuid, record.Generation));
     }
 
+    /// <summary>
+    /// Destroys an object whose 25-second out-of-visibility deadline expired.
+    /// This is a full delete, the same as a server delete: the server forgets
+    /// the object on the same schedule and re-sends a create when the player
+    /// returns, so nothing is kept to rebuild it from.
+    /// </summary>
     public bool Prune(LiveEntityPruneCandidate candidate)
     {
         if (!_runtime.TryGetRecord(
@@ -81,16 +74,11 @@ internal sealed class LiveEntityDeletionController : ILiveEntityPruneSink
             return false;
         }
 
-        WorldSession.EntitySpawn snapshot = record.Snapshot;
-        bool removed = _runtime.UnregisterLiveEntity(
+        return _runtime.UnregisterLiveEntity(
             new DeleteObject.Parsed(
                 candidate.ServerGuid,
                 candidate.Generation),
-            isLocalPlayer: false);
-        if (!removed)
-            return false;
-
-        _dormant.Retain(snapshot);
-        return true;
+            isLocalPlayer: false,
+            removeRetainedObject: true);
     }
 }

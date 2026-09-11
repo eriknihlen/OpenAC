@@ -1,5 +1,4 @@
 using AcDream.App.World;
-using AcDream.Core.Net.Messages;
 using AcDream.Runtime.Entities;
 
 namespace AcDream.App.Tests.World;
@@ -66,16 +65,35 @@ public sealed class LiveEntityLivenessControllerTests
     }
 
     [Fact]
-    public void ConservativeVisibilityUsesGlobalLandblockCoordinates()
+    public void VisibilityIsThePlayersLandblockAndItsEightNeighbours()
     {
-        CreateObject.ServerPosition player = Position(0x3032_0001u, 190f, 20f, 5f);
-        CreateObject.ServerPosition adjacent = Position(0x3132_0001u, 1f, 20f, 5f);
-        CreateObject.ServerPosition exactlyTwoBlocks = Position(0x3232_0001u, 190f, 20f, 5f);
-        CreateObject.ServerPosition beyond = Position(0x3332_0001u, 1f, 20f, 5f);
+        const uint player = 0x3032_0001u;
 
-        Assert.True(LiveEntityLivenessController.IsWithinConservativeVisibility(player, adjacent));
-        Assert.True(LiveEntityLivenessController.IsWithinConservativeVisibility(player, exactlyTwoBlocks));
-        Assert.False(LiveEntityLivenessController.IsWithinConservativeVisibility(player, beyond));
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x3032_00A7u));
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x3132_0001u));
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x2F31_0001u));
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x3133_00FFu));
+        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x3232_0001u));
+        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x3034_0001u));
+        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(player, 0x2E30_0001u));
+    }
+
+    [Fact]
+    public void VisibilityInsideADungeonIsTheDungeonsOwnLandblock()
+    {
+        const uint playerCell = 0x01D9_0102u;
+
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_0140u));
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_FFFFu));
+        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0xA9B4_0001u));
+    }
+
+    [Fact]
+    public void VisibilityDoesNotDependOnDistanceInsideTheNeighbourhood()
+    {
+        // The far corner of a diagonal neighbour is ~543 m away and used to
+        // fall outside the old 384 m sphere while the server still knew it.
+        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(0x3032_0001u, 0x3133_0001u));
     }
 
     private static LiveEntityLivenessSample Sample(
@@ -88,11 +106,4 @@ public sealed class LiveEntityLivenessControllerTests
             guid,
             visible,
             retained);
-
-    private static CreateObject.ServerPosition Position(
-        uint cell,
-        float x,
-        float y,
-        float z) =>
-        new(cell, x, y, z, 1f, 0f, 0f, 0f);
 }

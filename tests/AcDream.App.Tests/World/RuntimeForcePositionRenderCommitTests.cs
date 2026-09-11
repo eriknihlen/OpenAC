@@ -243,13 +243,11 @@ public sealed class RuntimeForcePositionRenderCommitTests
 
             var materializer = new HostMaterializer(Runtime);
             var identity = new LocalPlayerIdentityState { ServerGuid = PlayerGuid };
-            var dormant = new DormantLiveEntityStore();
             var deletion = new LiveEntityDeletionController(
                 Runtime,
                 EntityObjects,
                 new NoopTeardown(),
-                identity,
-                dormant);
+                identity);
             Controller = new LiveEntityHydrationController(
                 Runtime,
                 EntityObjects,
@@ -262,7 +260,6 @@ public sealed class RuntimeForcePositionRenderCommitTests
                 new NoopTimestamps(),
                 identity,
                 deletion,
-                dormant,
                 firstEntry: FirstEntry);
 
             _session = new WorldSession(

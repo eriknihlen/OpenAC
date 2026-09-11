@@ -760,11 +760,11 @@ public sealed class LiveEntityHydrationControllerTests
     }
 
     [Fact]
-    public void Prune_ReleasesActiveOwnersButRetainsColdAuthoritativeSnapshot()
+    public void Prune_DeletesTheObjectOutright()
     {
         using var fixture = new Fixture(originKnown: true);
         fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
-        ClientObject retainedObject = fixture.Objects.Get(Guid)!;
+        Assert.NotNull(fixture.Objects.Get(Guid));
 
         Assert.True(fixture.Controller.OnPrune(
             new LiveEntityPruneCandidate(
@@ -772,13 +772,13 @@ public sealed class LiveEntityHydrationControllerTests
                 Guid)));
 
         Assert.False(fixture.Runtime.TryGetRecord(Guid, out _));
-        Assert.Same(retainedObject, fixture.Objects.Get(Guid));
-        Assert.True(fixture.Dormant.Contains(Guid, generation: 1));
+        Assert.Null(fixture.Objects.Get(Guid));
         Assert.Equal(1, fixture.Teardown.TearDownCount);
+        Assert.Equal(0, fixture.Runtime.PendingTeardownCount);
     }
 
     [Fact]
-    public void LoadedLandblock_RestoresDormantSnapshotThroughCanonicalHydration()
+    public void LoadedLandblock_DoesNotResurrectAPrunedObject()
     {
         using var fixture = new Fixture(originKnown: true);
         fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
@@ -788,122 +788,31 @@ public sealed class LiveEntityHydrationControllerTests
                 Guid)));
 
         fixture.Controller.OnLandblockLoaded(Cell);
+
+        Assert.False(fixture.Runtime.TryGetRecord(Guid, out _));
+        Assert.Null(fixture.Objects.Get(Guid));
+        Assert.Equal(1, fixture.Resources.RegisterCount);
+        Assert.Equal(1, fixture.Resources.UnregisterCount);
+    }
+
+    [Fact]
+    public void RecreateAfterPrune_HydratesFreshFromTheWire()
+    {
+        using var fixture = new Fixture(originKnown: true);
+        fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
+        Assert.True(fixture.Controller.OnPrune(
+            new LiveEntityPruneCandidate(
+                fixture.Record.ProjectionKey!.Value,
+                Guid)));
+
+        fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
 
         Assert.True(fixture.Runtime.TryGetRecord(Guid, out LiveEntityRecord restored));
         Assert.Equal((ushort)1, restored.Generation);
         Assert.NotNull(restored.WorldEntity);
-        Assert.False(fixture.Dormant.Contains(Guid, generation: 1));
+        Assert.NotNull(fixture.Objects.Get(Guid));
         Assert.Equal(2, fixture.Resources.RegisterCount);
         Assert.Equal(1, fixture.Resources.UnregisterCount);
-        Assert.Equal(2, fixture.Ready.PublishCount);
-    }
-
-    [Fact]
-    public void ExactDelete_RemovesDormantSnapshotAndRetainedObject()
-    {
-        using var fixture = new Fixture(originKnown: true);
-        fixture.Controller.OnCreate(Spawn(Generation: 1, PositionSequence: 1));
-        Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
-                fixture.Record.ProjectionKey!.Value,
-                Guid)));
-
-        Assert.True(fixture.Controller.OnDelete(
-            new DeleteObject.Parsed(Guid, InstanceSequence: 1)));
-
-        Assert.False(fixture.Dormant.Contains(Guid, generation: 1));
-        Assert.Null(fixture.Objects.Get(Guid));
-        fixture.Controller.OnLandblockLoaded(Cell);
-        Assert.False(fixture.Runtime.TryGetRecord(Guid, out _));
-    }
-
-    [Fact]
-    public void DormantNewerGeneration_RejectsStaleCreateAndAcceptsReplacement()
-    {
-        using var fixture = new Fixture(originKnown: true);
-        fixture.Controller.OnCreate(Spawn(Generation: 2, PositionSequence: 1));
-        Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
-                fixture.Record.ProjectionKey!.Value,
-                Guid)));
-
-        fixture.Controller.OnCreate(Spawn(
-            Generation: 1,
-            PositionSequence: 2,
-            Name: "stale"));
-
-        Assert.False(fixture.Runtime.TryGetRecord(Guid, out _));
-        Assert.True(fixture.Dormant.Contains(Guid, generation: 2));
-
-        fixture.Controller.OnCreate(Spawn(
-            Generation: 3,
-            PositionSequence: 1,
-            Name: "replacement"));
-
-        Assert.Equal((ushort)3, fixture.Record.Generation);
-        Assert.Equal("replacement", fixture.Objects.Get(Guid)!.Name);
-        Assert.False(fixture.Dormant.Contains(Guid, generation: 2));
-    }
-
-    [Fact]
-    public void DormantSameGenerationCreate_UsesRetainedTimestampGate()
-    {
-        using var fixture = new Fixture(originKnown: true);
-        WorldSession.EntitySpawn accepted = Spawn(
-            Generation: 1,
-            PositionSequence: 5);
-        fixture.Controller.OnCreate(accepted);
-        Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
-                fixture.Record.ProjectionKey!.Value,
-                Guid)));
-
-        CreateObject.ServerPosition stalePosition =
-            accepted.Position!.Value with
-            {
-                LandblockId = 0x02020001u,
-                PositionX = 99f,
-            };
-        PhysicsSpawnData stalePhysics = accepted.Physics!.Value with
-        {
-            Position = stalePosition,
-            Timestamps = accepted.Physics.Value.Timestamps with
-            {
-                Position = 4,
-            },
-        };
-        fixture.Controller.OnCreate(accepted with
-        {
-            Position = stalePosition,
-            PositionSequence = 4,
-            Physics = stalePhysics,
-        });
-
-        Assert.Equal(accepted.Position, fixture.Record.Snapshot.Position);
-        Assert.Equal((ushort)5, fixture.Record.Snapshot.PositionSequence);
-    }
-
-    [Fact]
-    public void DormantReplacementCreate_ReplacesAbsentOldQualities()
-    {
-        using var fixture = new Fixture(originKnown: true);
-        fixture.Controller.OnCreate(
-            Spawn(Generation: 1, PositionSequence: 1) with
-            {
-                Value = 123,
-            });
-        Assert.True(fixture.Controller.OnPrune(
-            new LiveEntityPruneCandidate(
-                fixture.Record.ProjectionKey!.Value,
-                Guid)));
-
-        fixture.Controller.OnCreate(
-            Spawn(Generation: 2, PositionSequence: 1) with
-            {
-                Value = null,
-            });
-
-        Assert.Equal(0, fixture.Objects.Get(Guid)!.Value);
     }
 
     [Fact]
@@ -2267,7 +2176,6 @@ public sealed class LiveEntityHydrationControllerTests
         public readonly RecordingOrigin Origin;
         public readonly RecordingNetworkSink Network = new();
         public readonly RecordingTeardownCoordinator Teardown = new();
-        public readonly DormantLiveEntityStore Dormant = new();
         public readonly RecordingTimestampPublisher Timestamps;
         public readonly LiveEntityHydrationController Controller;
 
@@ -2366,8 +2274,7 @@ public sealed class LiveEntityHydrationControllerTests
                 Runtime,
                 EntityObjects,
                 Teardown,
-                identity,
-                Dormant);
+                identity);
             Controller = new LiveEntityHydrationController(
                 Runtime,
                 EntityObjects,
@@ -2380,7 +2287,6 @@ public sealed class LiveEntityHydrationControllerTests
                 Timestamps,
                 identity,
                 deletion,
-                Dormant,
                 firstEntry: FirstEntry);
         }
 
