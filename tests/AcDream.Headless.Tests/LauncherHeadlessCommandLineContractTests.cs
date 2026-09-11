@@ -2,6 +2,7 @@ using AcDream.Headless.Configuration;
 using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
+using AcDream.Launcher.Core.Updates;
 
 namespace AcDream.Headless.Tests;
 
@@ -15,9 +16,14 @@ public sealed class LauncherHeadlessCommandLineContractTests : IDisposable
     public LauncherHeadlessCommandLineContractTests()
     {
         Directory.CreateDirectory(AppDirectory);
-        string suffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
-        CreateStubExecutable(Path.Combine(AppDirectory, "AcDream.App" + suffix));
-        CreateStubExecutable(Path.Combine(AppDirectory, "acdream-headless" + suffix));
+        // The resolver picks the graphical host per OS; the stub has to match.
+        string suffix = PayloadExecutableNames.SuffixForCurrentOs();
+        CreateStubExecutable(
+            Path.Combine(
+                AppDirectory,
+                PayloadExecutableNames.GraphicalHostForCurrentOs() + suffix));
+        CreateStubExecutable(
+            Path.Combine(AppDirectory, PayloadExecutableNames.HeadlessHost + suffix));
     }
 
     private static void CreateStubExecutable(string path)
