@@ -93,6 +93,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
     private float _attackWhenResponseReceivedPower;
     private bool _currentBuildIsAutomatic;
     private bool _repeatAttacking;
+    private bool _fireWhenCharged;
     private float _requestedAttackPower;
     private float _latestPowerBarLevel;
     private bool _disposed;
@@ -219,14 +220,29 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
         _attackRequestInProgress = false;
         float currentPower = GetPowerBarLevel();
-        _requestedAttackPower = Math.Min(DesiredPower, currentPower);
+
+        // Marker is the floor / auto-repeat default, not a hold ceiling.
+        // - Release at/above the marker: fire at the charged power (may be full).
+        // - Release below the marker, or before charge starts (missile ready wait):
+        //   keep loading up to the marker, then fire.
+        if (!_buildInProgress || currentPower < DesiredPower)
+        {
+            _requestedAttackPower = DesiredPower;
+            _fireWhenCharged = true;
+        }
+        else
+        {
+            _requestedAttackPower = currentPower;
+            _fireWhenCharged = false;
+        }
 
         if (_attackServerResponsePending)
         {
             _attackWhenResponseReceived = true;
             _attackWhenResponseReceivedPower = _requestedAttackPower;
+            _fireWhenCharged = false;
         }
-        else if (DesiredPower <= currentPower || _repeatAttacking)
+        else if (!_fireWhenCharged || DesiredPower <= currentPower || _repeatAttacking)
         {
             ExecuteAttack(RequestedHeight, setServerPending: true);
         }
@@ -238,11 +254,13 @@ public sealed class RuntimeCombatAttackState : IDisposable
     {
         if (!_attackServerResponsePending
             && !_attackRequestInProgress
+            && !_fireWhenCharged
             && !_repeatAttacking)
             return;
 
         _operations.SendCancelAttack();
         _repeatAttacking = false;
+        _fireWhenCharged = false;
 
         if (_buildInProgress)
             ResetPowerBar();
@@ -252,9 +270,9 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
     public void Tick()
     {
-        if (_attackRequestInProgress
-            && !_buildInProgress
-            && !_attackServerResponsePending)
+        if (!_buildInProgress
+            && !_attackServerResponsePending
+            && (_attackRequestInProgress || _fireWhenCharged))
             AttemptStartBuildingAttack();
 
         if (!_buildInProgress)
@@ -262,7 +280,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
         if (!_operations.PlayerReadyForAttack)
         {
-            if (_attackRequestInProgress)
+            if (_attackRequestInProgress || _fireWhenCharged)
             {
                 StopBuild();
                 _latestPowerBarLevel = 0f;
@@ -337,17 +355,29 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
     private void ExecuteAttack(AttackHeight height, bool setServerPending)
     {
+        _fireWhenCharged = false;
         StopBuild();
-        if (!_operations.SendAttack(
-                height,
-                Math.Clamp(_requestedAttackPower, 0f, 1f)))
+        float power = Math.Clamp(_requestedAttackPower, 0f, 1f);
+        if (!_operations.SendAttack(height, power))
         {
             ResetPowerBar();
             return;
         }
 
         if (_operations.AutoRepeatAttack)
+        {
             _repeatAttacking = true;
+            // Pre-queue the marker immediately after an overcharged opener so the
+            // next swing does not reuse the initiating power while we wait for
+            // AttackDone (common when running into melee range).
+            if (Math.Abs(power - DesiredPower) >= 0.01f)
+            {
+                _requestedAttackPower = DesiredPower;
+                _operations.SendAttack(
+                    height,
+                    Math.Clamp(DesiredPower, 0f, 1f));
+            }
+        }
         _attackServerResponsePending = setServerPending;
     }
 
@@ -441,6 +471,7 @@ public sealed class RuntimeCombatAttackState : IDisposable
         _attackWhenResponseReceived = false;
         _attackWhenResponseReceivedPower = 0f;
         _repeatAttacking = false;
+        _fireWhenCharged = false;
         _requestedAttackPower = 0f;
         _completionRevision = 0;
         CompletionSequence = 0u;

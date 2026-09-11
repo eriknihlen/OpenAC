@@ -44,7 +44,7 @@ public sealed class RuntimeCombatAttackStateTests
     }
 
     [Fact]
-    public void EarlyRelease_CommitsOnUseTimeTickAtReleasedPower()
+    public void EarlyReleaseBelowMarker_KeepsChargingToDesiredPower()
     {
         double now = 0d;
         var sent = new List<(AttackHeight Height, float Power)>();
@@ -57,13 +57,66 @@ public sealed class RuntimeCombatAttackStateTests
         now = 0.25d;
         controller.ReleaseAttack();
         Assert.Empty(sent);
+        Assert.Equal(1f, controller.RequestedAttackPower, 3);
 
-        now = 0.26d;
+        now = 1d;
         controller.Tick();
 
         var attack = Assert.Single(sent);
         Assert.Equal(AttackHeight.Low, attack.Height);
-        Assert.Equal(0.25f, attack.Power, 3);
+        Assert.Equal(1f, attack.Power, 3);
+    }
+
+    [Fact]
+    public void HoldPastLowMarker_ReleasesAtChargedPower()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 1d;
+        controller.ReleaseAttack();
+
+        var attack = Assert.Single(sent);
+        Assert.Equal(AttackHeight.Medium, attack.Height);
+        Assert.Equal(1f, attack.Power, 3);
+    }
+
+    [Fact]
+    public void OverchargedOpener_WithAutoRepeat_PrequeuesMarkerPower()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = new RuntimeCombatAttackState(
+            combat,
+            canStartAttack: () => true,
+            sendAttack: (height, power) =>
+            {
+                sent.Add((height, power));
+                return true;
+            },
+            autoRepeatAttack: () => true,
+            now: () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0f);
+
+        controller.PressAttack(AttackHeight.High);
+        now = 1d;
+        controller.ReleaseAttack();
+
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(1f, sent[0].Power, 3);
+        Assert.Equal(0f, sent[1].Power, 3);
+        Assert.Equal(0f, controller.RequestedAttackPower, 3);
+
+        combat.OnAttackDone(1u, 0u);
+        Assert.Equal(3, sent.Count);
+        Assert.Equal(0f, sent[2].Power, 3);
     }
 
     [Fact]
@@ -127,6 +180,70 @@ public sealed class RuntimeCombatAttackStateTests
 
         Assert.True(controller.BuildInProgress);
         Assert.Equal(0f, controller.PowerBarLevel);
+    }
+
+    [Fact]
+    public void HoldPastMarker_DoesNotAutoReleaseAtSetpoint()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0.5f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 0.5d;
+        controller.Tick();
+        Assert.Empty(sent);
+        Assert.True(controller.AttackRequestInProgress);
+        Assert.Equal(0.5f, controller.PowerBarLevel, 3);
+
+        now = 1d;
+        controller.Tick();
+        Assert.Empty(sent);
+        Assert.True(controller.AttackRequestInProgress);
+        Assert.Equal(1f, controller.PowerBarLevel, 3);
+    }
+
+    [Fact]
+    public void ReleaseBeforeReadyStance_ChargesToDesiredPowerOnceReady()
+    {
+        double now = 0d;
+        bool ready = false;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = new RuntimeCombatAttackState(
+            combat,
+            canStartAttack: () => true,
+            sendAttack: (height, power) =>
+            {
+                sent.Add((height, power));
+                return true;
+            },
+            playerReadyForAttack: () => ready,
+            now: () => now);
+        combat.SetCombatMode(CombatMode.Missile);
+        controller.SetDesiredPower(0.75f);
+
+        controller.PressAttack(AttackHeight.High);
+        controller.ReleaseAttack();
+        Assert.Empty(sent);
+        Assert.False(controller.AttackRequestInProgress);
+        Assert.False(controller.BuildInProgress);
+        Assert.Equal(0.75f, controller.RequestedAttackPower, 3);
+
+        ready = true;
+        controller.Tick();
+        Assert.True(controller.BuildInProgress);
+        Assert.Empty(sent);
+
+        now = 0.75d;
+        controller.Tick();
+
+        var attack = Assert.Single(sent);
+        Assert.Equal(AttackHeight.High, attack.Height);
+        Assert.Equal(0.75f, attack.Power, 3);
     }
 
     [Fact]
