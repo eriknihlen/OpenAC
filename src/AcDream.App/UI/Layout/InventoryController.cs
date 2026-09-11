@@ -281,7 +281,35 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         if (containerId == EffectiveOpen() || containerId == _playerGuid())
             Populate();
     }
-    private void OnInteractionStateChanged() => Populate();
+    // A transaction only changes which cells are waiting on it.
+    private void OnInteractionStateChanged() => ApplyTransactionStates();
+
+    private void ApplyTransactionStates()
+    {
+        PendingListPlacement? pending = _pendingListPlacement;
+        ApplyWaitingStates(_containerList, _playerGuid(), pending);
+        ApplyWaitingStates(_contentsGrid, EffectiveOpen(), pending);
+        if (_topContainer?.GetItem(0) is { ItemId: not 0u } main)
+            main.SetWaitingState(IsWaitingSource(main.ItemId));
+        ApplyIndicators();
+    }
+
+    private void ApplyWaitingStates(
+        UiItemList? list,
+        uint containerId,
+        PendingListPlacement? pending)
+    {
+        if (list is null) return;
+        for (int i = 0; i < list.GetNumUIItems(); i++)
+        {
+            if (list.GetItem(i) is not { ItemId: not 0u } cell) continue;
+            cell.SetWaitingState(
+                IsWaitingSource(cell.ItemId)
+                || (pending is { } projection
+                    && projection.ContainerId == containerId
+                    && projection.ItemId == cell.ItemId));
+        }
+    }
     private void OnPendingBackpackPlacementRequested(PendingBackpackPlacement pending)
     {
         if (_pendingListPlacement is not null
@@ -348,9 +376,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint p = _playerGuid();
         uint open = EffectiveOpen();
 
-        _contentsGrid?.Flush();
-        _containerList?.Flush();
-
         var visibleBags = new List<uint>();
         foreach (var guid in _objects.GetContents(p))
         {
@@ -369,15 +394,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             visibleBags.Remove(bagProjection.ItemId);
             int index = Math.Clamp(bagProjection.Placement, 0, visibleBags.Count);
             visibleBags.Insert(index, bagProjection.ItemId);
-        }
-
-        foreach (uint guid in visibleBags)
-        {
-            bool waiting = IsWaitingSource(guid)
-                || pending is { } waitingBagProjection
-                    && waitingBagProjection.ContainerId == p
-                    && waitingBagProjection.ItemId == guid;
-            AddCell(_containerList, guid, isContainer: true, waiting);
         }
 
         var visibleContents = new List<uint>();
@@ -399,13 +415,34 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             visibleContents.Insert(index, projection.ItemId);
         }
 
+        // Flushing cells cancels a press in progress: UiRoot releases capture when the
+        // captured element leaves the tree.
+        if (TryRefreshCellsInPlace(visibleBags, visibleContents, pending, p, open))
+        {
+            ApplyIndicators();
+            RefreshBurden();
+            return;
+        }
+
+        _containerList?.Flush();
+        _contentsGrid?.Flush();
+
+        foreach (uint guid in visibleBags)
+        {
+            AddCell(
+                _containerList,
+                guid,
+                isContainer: true,
+                IsWaiting(guid, p, pending));
+        }
+
         foreach (uint guid in visibleContents)
         {
-            bool waiting = IsWaitingSource(guid)
-                || pending is { } waitingProjection
-                && waitingProjection.ContainerId == open
-                && waitingProjection.ItemId == guid;
-            AddCell(_contentsGrid, guid, isContainer: false, waiting);
+            AddCell(
+                _contentsGrid,
+                guid,
+                isContainer: false,
+                IsWaiting(guid, open, pending));
         }
 
         if (_contentsGrid is not null)
@@ -473,6 +510,96 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private uint EffectiveOpen() => _openContainer != 0 ? _openContainer : _playerGuid();
 
     public uint CurrentOpenContainerId => EffectiveOpen();
+
+    private bool IsWaiting(uint guid, uint containerId, PendingListPlacement? pending)
+        => IsWaitingSource(guid)
+            || (pending is { } projection
+                && projection.ContainerId == containerId
+                && projection.ItemId == guid);
+
+    /// <summary>False when anything structural moved, which needs the rebuild.</summary>
+    private bool TryRefreshCellsInPlace(
+        IReadOnlyList<uint> visibleBags,
+        IReadOnlyList<uint> visibleContents,
+        PendingListPlacement? pending,
+        uint player,
+        uint open)
+    {
+        if (!MatchesCells(_containerList, visibleBags, ContainerSlotTarget(player, visibleBags.Count))
+            || !MatchesCells(_contentsGrid, visibleContents, ContentsSlotTarget(open, player)))
+        {
+            return false;
+        }
+
+        RefreshCells(_containerList, visibleBags, isContainer: true, player, pending);
+        RefreshCells(_contentsGrid, visibleContents, isContainer: false, open, pending);
+        RefreshTopContainer(player);
+        return true;
+    }
+
+    private static bool MatchesCells(UiItemList? list, IReadOnlyList<uint> guids, int slotTarget)
+    {
+        if (list is null) return guids.Count == 0;
+        if (list.GetNumUIItems() != slotTarget) return false;
+        for (int i = 0; i < slotTarget; i++)
+        {
+            uint expected = i < guids.Count ? guids[i] : 0u;
+            if (list.GetItem(i) is not { } cell || cell.ItemId != expected) return false;
+        }
+        return true;
+    }
+
+    private void RefreshCells(
+        UiItemList? list,
+        IReadOnlyList<uint> guids,
+        bool isContainer,
+        uint containerId,
+        PendingListPlacement? pending)
+    {
+        if (list is null) return;
+        for (int i = 0; i < guids.Count; i++)
+        {
+            if (list.GetItem(i) is not { } cell) continue;
+            uint guid = guids[i];
+            ClientObject? item = _objects.Get(guid);
+            uint tex = item is null
+                ? 0u
+                : _iconIds(item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+            uint dragTex = item is null
+                ? 0u
+                : _dragIconIds?.Invoke(
+                    item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
+            cell.SetItem(guid, tex, dragIconTexture: dragTex);
+            SetStructureBar(cell, item);
+            cell.SetWaitingState(IsWaiting(guid, containerId, pending));
+            if (isContainer)
+                SetCapacityBar(cell, guid);
+        }
+    }
+
+    private void RefreshTopContainer(uint player)
+    {
+        if (_topContainer?.GetItem(0) is not { } main) return;
+        main.SetWaitingState(IsWaitingSource(player));
+        SetCapacityBar(main, player);
+    }
+
+    // Never from the cells on screen: a capacity change has to reach the rebuild.
+    private int ContainerSlotTarget(uint player, int bagCount)
+    {
+        if (_containerList is null) return 0;
+        int capacity = _objects.Get(player)?.ContainersCapacity ?? 0;
+        int slots = capacity > 0 ? capacity : SideBagSlots;
+        slots = Math.Max(slots, bagCount);
+        return Math.Min(slots, SideBagSlots);
+    }
+
+    private int ContentsSlotTarget(uint open, uint player)
+    {
+        if (_contentsGrid is null) return 0;
+        int cap = _objects.Get(open)?.ItemsCapacity ?? 0;
+        return cap > 0 ? cap : (open == player ? MainPackSlots : SidePackSlots);
+    }
 
     private void AddCell(UiItemList? list, uint guid, bool isContainer, bool waiting = false)
     {

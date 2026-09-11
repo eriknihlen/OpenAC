@@ -163,6 +163,38 @@ public sealed class ExternalContainerControllerTests
     }
 
     [Fact]
+    public void InteractionStateChange_refreshesCellsInPlace_withoutRebuilding()
+    {
+        using var h = new Harness();
+        h.Open(Chest, new ContainerContentEntry(Item, 0u));
+
+        UiItemSlot cell = h.Contents.GetItem(0)!;
+        UiItemSlot chest = h.Top.GetItem(0)!;
+
+        h.Interaction.IncrementBusyCount();
+
+        Assert.Same(cell, h.Contents.GetItem(0));
+        Assert.Same(chest, h.Top.GetItem(0));
+    }
+
+    [Fact]
+    public void AppraisalResponse_keepsContentsCellsAlive()
+    {
+        using var h = new Harness();
+        h.Open(Chest, new ContainerContentEntry(Item, 0u));
+
+        UiItemSlot cell = h.Contents.GetItem(0)!;
+        UiItemSlot chest = h.Top.GetItem(0)!;
+
+        var properties = new PropertyBundle();
+        properties.Ints[1u] = 42;
+        Assert.True(h.Objects.UpdateAppraisal(Item, properties, Array.Empty<uint>()));
+
+        Assert.Same(cell, h.Contents.GetItem(0));
+        Assert.Same(chest, h.Top.GetItem(0));
+    }
+
+    [Fact]
     public void AuthoritativeView_ShowsAuthoredStripAndPopulatesLists()
     {
         using var h = new Harness();

@@ -306,15 +306,12 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         using IDisposable topLayout = _topContainer.DeferLayout();
         using IDisposable containerLayout = _containerList.DeferLayout();
         using IDisposable contentsLayout = _contentsList.DeferLayout();
-        _topContainer.Flush();
-        _containerList.Flush();
-        _contentsList.Flush();
 
-        AddRootCell(root);
+        var visibleContainers = new List<uint>();
         foreach (uint guid in _objects.GetContents(root))
         {
             if (IsContainer(_objects.Get(guid)))
-                AddContainerCell(guid);
+                visibleContainers.Add(guid);
         }
 
         var visibleContents = new List<uint>();
@@ -333,15 +330,83 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
                 Math.Clamp(pending.Placement, 0, visibleContents.Count),
                 pending.ItemId);
         }
-        foreach (uint guid in visibleContents)
+        // Flushing cells cancels a press in progress: UiRoot releases capture when the
+        // captured element leaves the tree.
+        if (TryRefreshCellsInPlace(root, visibleContainers, visibleContents))
         {
-            bool waiting = _itemInteraction.IsPendingInventorySource(guid)
-                || _pendingPlacement is { } projection
-                    && projection.ContainerId == _openContainer
-                    && projection.ItemId == guid;
-            AddContentsCell(guid, waiting);
+            ApplyIndicators();
+            return;
         }
+
+        _topContainer.Flush();
+        _containerList.Flush();
+        _contentsList.Flush();
+
+        AddRootCell(root);
+        foreach (uint guid in visibleContainers)
+            AddContainerCell(guid);
+
+        foreach (uint guid in visibleContents)
+            AddContentsCell(guid, IsWaiting(guid));
         ApplyIndicators();
+    }
+
+    private bool IsWaiting(uint guid)
+        => _itemInteraction.IsPendingInventorySource(guid)
+            || (_pendingPlacement is { } projection
+                && projection.ContainerId == _openContainer
+                && projection.ItemId == guid);
+
+    /// <summary>False when anything structural moved, which needs the rebuild.</summary>
+    private bool TryRefreshCellsInPlace(
+        uint root,
+        IReadOnlyList<uint> visibleContainers,
+        IReadOnlyList<uint> visibleContents)
+    {
+        if (_topContainer.GetNumUIItems() != 1
+            || _topContainer.GetItem(0)?.ItemId != root
+            || !Matches(_containerList, visibleContainers)
+            || !Matches(_contentsList, visibleContents))
+        {
+            return false;
+        }
+
+        RefreshIcons(_topContainer, [root]);
+        SetCapacity(_topContainer.GetItem(0)!, root);
+        RefreshIcons(_containerList, visibleContainers);
+        for (int i = 0; i < visibleContainers.Count; i++)
+            SetCapacity(_containerList.GetItem(i)!, visibleContainers[i]);
+        RefreshIcons(_contentsList, visibleContents);
+        for (int i = 0; i < visibleContents.Count; i++)
+            _contentsList.GetItem(i)!.SetWaitingState(IsWaiting(visibleContents[i]));
+        return true;
+    }
+
+    // The lists pad themselves with empty cells (FillVisibleEmptySlots).
+    private static bool Matches(UiItemList list, IReadOnlyList<uint> guids)
+    {
+        if (list.GetNumUIItems() < guids.Count) return false;
+        for (int i = 0; i < list.GetNumUIItems(); i++)
+        {
+            uint expected = i < guids.Count ? guids[i] : 0u;
+            if (list.GetItem(i) is not { } cell || cell.ItemId != expected) return false;
+        }
+        return true;
+    }
+
+    private void RefreshIcons(UiItemList list, IReadOnlyList<uint> guids)
+    {
+        for (int i = 0; i < guids.Count; i++)
+        {
+            if (list.GetItem(i) is not { } cell) continue;
+            uint guid = guids[i];
+            ClientObject? item = _objects.Get(guid);
+            uint icon = item is null ? 0u : _resolveIcon(
+                item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+            uint dragIcon = item is null ? 0u : _resolveDragIcon(
+                item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+            cell.SetItem(guid, icon, dragIconTexture: dragIcon);
+        }
     }
 
     private void AddRootCell(uint guid)
@@ -512,12 +577,22 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     }
 
     private void OnSelectionChanged(SelectionTransition _) => ApplyIndicators();
-    private void OnInteractionStateChanged()
+    // A transaction only changes which cells are waiting on it.
+    private void OnInteractionStateChanged() => ApplyTransactionStates();
+
+    private void ApplyTransactionStates()
     {
-        if (_window.IsVisible)
-            Populate();
-        else
-            ApplyIndicators();
+        for (int i = 0; i < _contentsList.GetNumUIItems(); i++)
+        {
+            if (_contentsList.GetItem(i) is not { ItemId: not 0u } cell) continue;
+            cell.SetWaitingState(
+                _itemInteraction.IsPendingInventorySource(cell.ItemId)
+                || (_pendingPlacement is { } projection
+                    && projection.ContainerId == _openContainer
+                    && projection.ItemId == cell.ItemId));
+        }
+
+        ApplyIndicators();
     }
 
     private void OnPendingPlacementRequested(PendingBackpackPlacement pending)
