@@ -1181,6 +1181,46 @@ public class CharacterStatControllerTests
         Assert.Equal(trainedBefore + 1, RowsUnderHeader(list, "Trained Skills"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DataChangedRefresh_PreservesSkillsScrollWithinTheNewContentBounds(
+        bool shrinkSkills)
+    {
+        var list = new UiPanel { Width = 300, Height = 60 };
+        var layout = Fake((CharacterStatController.ListBoxId, list));
+        CharacterSheet sheet = SampleData.SampleCharacter();
+        Action refresh = CharacterStatController.Bind(layout, () => sheet,
+            spriteResolve: id => (id, 16, 16)).Refresh;
+
+        ClickTab(layout, left: 92f);
+        UiScrollablePanel previous = list.Children.OfType<UiScrollablePanel>().Single();
+        previous.LayoutScrollableChildren();
+        Assert.True(previous.Scroll.MaxScroll > 10);
+        int offset = previous.Scroll.MaxScroll - 10;
+        previous.Scroll.SetScrollY(offset);
+
+        sheet = new CharacterSheet
+        {
+            Name = sheet.Name,
+            UnassignedXp = sheet.UnassignedXp + 1,
+            SkillCredits = sheet.SkillCredits,
+            Skills = shrinkSkills ? sheet.Skills.Take(6).ToList() : sheet.Skills,
+        };
+        refresh();
+
+        UiScrollablePanel replacement = list.Children.OfType<UiScrollablePanel>().Single();
+        Assert.NotSame(previous, replacement);
+        if (shrinkSkills)
+        {
+            Assert.True(replacement.Scroll.MaxScroll > 0);
+            Assert.True(replacement.Scroll.MaxScroll < offset);
+        }
+        Assert.Equal(Math.Min(offset, replacement.Scroll.MaxScroll), replacement.Scroll.ScrollY);
+        if (!shrinkSkills)
+            Assert.Equal(offset, replacement.Scroll.ScrollY);
+    }
+
     [Fact]
     public void Rows_CarryTheSharedTooltipPopupLocatorAndDescriptionText()
     {
