@@ -487,7 +487,7 @@ internal sealed class LocalPlayerTeleportController
 
     private bool _loginPlacementCompleted;
     private float _loginHoldSeconds;
-    private float _loginReadyHoldSeconds;
+    private bool _loginModeEntered;
 
     private readonly ILocalPlayerLoginLifecycleSource _loginLifecycle;
 
@@ -1061,32 +1061,20 @@ internal sealed class LocalPlayerTeleportController
             || snapshot.Generation == 0
             || snapshot.Completed
             || snapshot.Cancelled
-            || _loginRevealGeneration == snapshot.Generation)
+            || (_loginRevealGeneration == snapshot.Generation && _loginModeEntered))
         {
             return;
         }
 
         long generation = _lifetimeGeneration;
-        bool adoptedArmedTunnel = _loginTunnelArmed;
-        if (adoptedArmedTunnel)
+        if (_loginTunnelArmed)
         {
-            // The armed tunnel already owns the portal viewport. Do not wait
-            // for RuntimePublished / CanExecuteLiveMovement — indoor first-entry
-            // can stay dormant for a long time, and TickArmedLoginTunnel hard-
-            // pins worldReady=false forever until adoption.
+            // Keep the existing tunnel while the player controller becomes ready.
+            // Viewport adoption does not acquire movement-mode ownership.
             _loginTunnelArmed = false;
             _loginRevealGeneration = snapshot.Generation;
             _loginPresentationActive = true;
-            // Best-effort: attach live portal-space once first-entry publishes.
-            _ = _mode.TryEnterPortalSpaceForLogin();
-            if (_lifetimeGeneration != generation)
-                return;
-            Console.WriteLine(
-                $"live: login portal-space presentation started "
-                + $"(gen={snapshot.Generation} "
-                + $"cell=0x{snapshot.Readiness.DestinationCell:X8} "
-                + "adoptedArmedTunnel=1)");
-            return;
+            _loginModeEntered = false;
         }
 
         if (!_mode.TryEnterPortalSpaceForLogin()
@@ -1096,65 +1084,37 @@ internal sealed class LocalPlayerTeleportController
             return;
         }
 
-        // Re-read after the mode entry: TryEnterPortalSpaceForLogin can run
-        // arbitrary presentation attach work.
-        snapshot = _transit.Snapshot;
-        if (snapshot.Kind != RuntimePortalKind.Login
-            || snapshot.Generation == 0
-            || snapshot.Completed
-            || snapshot.Cancelled)
+        RuntimePortalSnapshot current = _transit.Snapshot;
+        if (current.Kind != RuntimePortalKind.Login
+            || current.Generation != snapshot.Generation
+            || current.Completed
+            || current.Cancelled
+            || _transit.HasPendingTeleportStart
+            || _transit.IsTeleportActive)
         {
             return;
         }
 
+        bool adoptedArmedTunnel = _loginPresentationActive
+            && _loginRevealGeneration == snapshot.Generation;
         _loginRevealGeneration = snapshot.Generation;
         _loginPresentationActive = true;
-        _loginHoldSeconds = 0f;
-        _presentation.Begin(_mode.Projection);
+        _loginModeEntered = true;
+        if (!adoptedArmedTunnel)
+        {
+            _loginHoldSeconds = 0f;
+            _presentation.Begin(_mode.Projection);
+        }
         Console.WriteLine(
             $"live: login portal-space presentation started "
             + $"(gen={snapshot.Generation} "
             + $"cell=0x{snapshot.Readiness.DestinationCell:X8} "
-            + "adoptedArmedTunnel=0)");
-    }
-
-    private void TickLoginRevealUnblock(float deltaSeconds)
-    {
-        RuntimePortalSnapshot snapshot = _transit.Snapshot;
-        bool loginRevealActive = snapshot.Kind == RuntimePortalKind.Login
-            && snapshot.Generation != 0
-            && !snapshot.Completed
-            && !snapshot.Cancelled;
-        if (!loginRevealActive)
-        {
-            _loginReadyHoldSeconds = 0f;
-            return;
-        }
-
-        if (!snapshot.Readiness.IsReady)
-        {
-            _loginReadyHoldSeconds = 0f;
-            return;
-        }
-
-        _loginReadyHoldSeconds += deltaSeconds;
-        // Release simulation as soon as the destination is ready so dormant
-        // first-entry can publish. Runs even after armed-tunnel adoption —
-        // Place still waits on _loginPlacementCompleted.
-        if (!_transit.IsWorldSimulationAvailable
-            && _loginReadyHoldSeconds >= 0.05f
-            && _worldReveal.ObserveLoginMaterialized(snapshot.Generation))
-        {
-            Console.WriteLine(
-                "live: login simulation released on destination readiness "
-                + $"(cell=0x{snapshot.Readiness.DestinationCell:X8})");
-        }
+            + $"adoptedArmedTunnel={(adoptedArmedTunnel ? 1 : 0)})");
     }
 
     private void TickLoginPresentation(float deltaSeconds)
     {
         TryActivateLoginPresentation();
-        TickLoginRevealUnblock(deltaSeconds);
 
         RuntimePortalSnapshot snapshot = _transit.Snapshot;
         bool revealActive = snapshot.Kind == RuntimePortalKind.Login
@@ -1167,6 +1127,7 @@ internal sealed class LocalPlayerTeleportController
             {
                 _loginRevealGeneration = 0;
                 _loginPresentationActive = false;
+                _loginModeEntered = false;
                 _loginTunnelArmed = false;
                 _loginHoldSeconds = 0f;
                 _presentation.Reset();
@@ -1186,7 +1147,8 @@ internal sealed class LocalPlayerTeleportController
         uint destinationCell = snapshot.Readiness.DestinationCell;
 
         bool originReady = !_streaming.IsRecenterPending;
-        bool worldReady = _loginPlacementCompleted
+        bool worldReady = _loginModeEntered
+            && _loginPlacementCompleted
             && originReady
             && _worldReveal.Evaluate(destinationCell).IsReady;
         if (!IsCurrentLoginLifetime(generation, revealGeneration))
@@ -1246,6 +1208,7 @@ internal sealed class LocalPlayerTeleportController
                     _worldReveal.Complete();
                     _loginRevealGeneration = 0;
                     _loginPresentationActive = false;
+                    _loginModeEntered = false;
                     _loginHoldSeconds = 0f;
                     Console.WriteLine(
                         "live: login portal-space presentation complete");
@@ -1412,9 +1375,9 @@ internal sealed class LocalPlayerTeleportController
         _holdSeconds = 0f;
         _loginRevealGeneration = 0;
         _loginPresentationActive = false;
+        _loginModeEntered = false;
         _loginTunnelArmed = false;
         _loginHoldSeconds = 0f;
-        _loginReadyHoldSeconds = 0f;
         if (clearSession)
             _loginPlacementCompleted = false;
 

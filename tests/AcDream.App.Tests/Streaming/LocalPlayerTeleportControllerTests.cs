@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using AcDream.App.Input;
 using AcDream.App.Rendering;
 using AcDream.App.Streaming;
@@ -1142,6 +1142,7 @@ public sealed class LocalPlayerTeleportControllerTests
         public int EnterPortalCount;
         public int EnterPortalForLoginCount;
         public bool BlockLoginEnter;
+        public Action? OnLoginEnter;
         public Func<PlayerMovementController?>? RebuildOnEnter;
 
         public bool TryEnterPortalSpace()
@@ -1157,6 +1158,7 @@ public sealed class LocalPlayerTeleportControllerTests
         public bool TryEnterPortalSpaceForLogin()
         {
             EnterPortalForLoginCount++;
+            OnLoginEnter?.Invoke();
             if (BlockLoginEnter)
                 return false;
             return TryEnterPortalSpace();
@@ -1538,11 +1540,8 @@ public sealed class LocalPlayerTeleportControllerTests
     }
 
     [Fact]
-    public void ArmedLoginTunnel_IsAdoptedEvenWhenLoginModeEntryIsBlocked()
+    public void ArmedLoginTunnel_RetriesModeOwnershipWithoutRestartOrEarlyCompletion()
     {
-        // Indoor DreamWeave strand: first-entry stays unpublished so
-        // TryEnterPortalSpaceForLogin fails. The armed tunnel must still be
-        // adopted so presentation can Place once placement completes.
         var order = new List<string>();
         var harness = new Harness(worldReady: false, order: order);
         harness.Mode.BlockLoginEnter = true;
@@ -1562,11 +1561,28 @@ public sealed class LocalPlayerTeleportControllerTests
         Assert.Equal(0x526A0293u, harness.Controller.ActiveDestinationCell);
         Assert.True(harness.Presentation.IsPortalViewportVisible);
 
+        // Destination readiness alone must not release simulation or complete login.
+        harness.WorldReady = true;
+        Assert.True(harness.Reveal.Evaluate(0x526A0293u).IsReady);
+        harness.Controller.OnLocalPlayerFirstEntryCompleted();
+        harness.Controller.Tick(1f);
+        Assert.Equal(2, harness.Mode.EnterPortalForLoginCount);
+        Assert.False(harness.Presentation.WorldReadyValues[^1]);
+        Assert.False(harness.Transit.IsWorldSimulationAvailable);
+        Assert.False(harness.Transit.Snapshot.Materialized);
+        Assert.False(harness.Transit.Snapshot.Completed);
+        Assert.Equal(0, harness.Session.LoginCompleteCount);
+        Assert.Equal(["enter"], harness.Presentation.Cues);
+
         harness.Mode.BlockLoginEnter = false;
         harness.WorldReady = true;
         harness.Controller.OnLocalPlayerFirstEntryCompleted();
         harness.Controller.Tick(0.016f);
         Assert.True(harness.Presentation.WorldReadyValues[^1]);
+        Assert.Equal(3, harness.Mode.EnterPortalForLoginCount);
+        Assert.Equal(1, harness.Mode.EnterPortalCount);
+        Assert.Equal(beginsAtArm, order.Count(entry => entry == "presentation-begin"));
+        Assert.Equal(["enter"], harness.Presentation.Cues);
         harness.Presentation.Enqueue(TeleportAnimEvent.Place);
         harness.Controller.Tick(0.016f);
         harness.Presentation.Enqueue(TeleportAnimEvent.PlayExitSound);
@@ -1577,6 +1593,64 @@ public sealed class LocalPlayerTeleportControllerTests
         Assert.True(harness.Reveal.Snapshot.Completed);
     }
 
+    [Fact]
+    public void ActiveLogin_PreventsAutoEntryFromCompletingTheReveal()
+    {
+        var harness = new Harness(worldReady: true);
+        harness.Reveal.BeginLogin(0x20210001u);
+        Assert.True(harness.Reveal.Evaluate(0x20210001u).IsReady);
+        var context = (LivePlayerModeAutoEntryContext)
+            System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+                typeof(LivePlayerModeAutoEntryContext));
+        typeof(LivePlayerModeAutoEntryContext).GetField(
+            "_worldReveal", System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic)!.SetValue(context, harness.Reveal);
+
+        Assert.False(context.IsWorldReady);
+        harness.Controller.OnLocalPlayerFirstEntryCompleted();
+        harness.Presentation.Enqueue(TeleportAnimEvent.Place);
+        harness.Controller.Tick(0.016f);
+        Assert.True(harness.Transit.IsWorldSimulationAvailable);
+        Assert.False(context.IsWorldReady);
+        Assert.False(harness.Reveal.Snapshot.Completed);
+        Assert.Equal(0, harness.Session.LoginCompleteCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ArmedLoginModeEntry_RejectsReentrantCancellationOrReplacement(bool replace)
+    {
+        var harness = new Harness(worldReady: true);
+        harness.Presentation.Enqueue(TeleportAnimEvent.EnterTunnel);
+        harness.Controller.ArmLoginTunnel();
+        long original = harness.Reveal.BeginLogin(0x20210001u);
+        harness.Mode.OnLoginEnter = () =>
+        {
+            harness.Mode.OnLoginEnter = null;
+            if (replace)
+                harness.Reveal.BeginLogin(0x20220001u);
+            else
+                Assert.True(harness.Transit.Cancel(original));
+        };
+
+        harness.Controller.Tick(0.016f);
+        Assert.False(harness.Transit.Snapshot.Materialized);
+        Assert.False(harness.Transit.Snapshot.Completed);
+        Assert.Equal(0, harness.Session.LoginCompleteCount);
+        Assert.DoesNotContain(true, harness.Presentation.WorldReadyValues);
+
+        if (!replace)
+            harness.Reveal.BeginLogin(0x20220001u);
+        harness.Controller.OnLocalPlayerFirstEntryCompleted();
+        harness.Controller.Tick(0.016f);
+        Assert.Equal(2, harness.Mode.EnterPortalForLoginCount);
+        Assert.True(harness.Presentation.WorldReadyValues[^1]);
+        harness.Presentation.Enqueue(TeleportAnimEvent.FireLoginComplete);
+        harness.Controller.Tick(0.016f);
+        Assert.Equal(1, harness.Session.LoginCompleteCount);
+        Assert.True(harness.Transit.Snapshot.Completed);
+    }
     [Fact]
     public void ArmedLoginTunnel_DisarmsWhenTheEnterFallsBackToSelection()
     {
