@@ -49,6 +49,24 @@ public sealed class VendorStagingList
         return VendorStagingAddOutcome.Added;
     }
 
+    /// <summary>
+    /// Stages a sell row. Re-staging a guid that is already listed replaces
+    /// the row (it is removed and appended again at the end) rather than
+    /// summing quantities: the staged amount is the caller's current view of
+    /// the stack, so a second drop of the same item can never send more than
+    /// the player owns.
+    /// </summary>
+    public VendorStagingAddOutcome Stage(uint itemGuid, int quantity)
+    {
+        if (itemGuid == 0u || quantity <= 0)
+            return VendorStagingAddOutcome.Ignored;
+
+        _entries.RemoveAll(entry => entry.ItemGuid == itemGuid);
+        _entries.Add(new VendorStagingEntry(itemGuid, quantity));
+        Changed?.Invoke();
+        return VendorStagingAddOutcome.Added;
+    }
+
     public bool Remove(uint itemGuid, int amount)
     {
         int index = _entries.FindIndex(entry => entry.ItemGuid == itemGuid);

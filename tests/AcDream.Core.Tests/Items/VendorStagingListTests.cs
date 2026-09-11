@@ -20,6 +20,8 @@ public sealed class VendorStagingListTests
         Assert.False(list.IsEmpty);
     }
 
+    // Add() is the Buying-tab path: repeated adds of a shop item accumulate
+    // under the 5000 cap. Stage() is the Selling-tab path: see below.
     [Fact]
     public void AddingTheSameGuidTwiceAccumulatesRatherThanDuplicatingOrOverwriting()
     {
@@ -228,5 +230,42 @@ public sealed class VendorStagingListTests
         list.Clear();
 
         Assert.Equal(0, fired);
+    }
+
+    [Fact]
+    public void StagingAnAlreadyStagedGuidReplacesTheRowAndMovesItLast()
+    {
+        var list = new VendorStagingList();
+        list.Stage(ItemA, 1);
+        list.Stage(ItemB, 3);
+
+        VendorStagingAddOutcome outcome = list.Stage(ItemA, 1);
+
+        Assert.Equal(VendorStagingAddOutcome.Added, outcome);
+        Assert.Equal(
+            new[] { new VendorStagingEntry(ItemB, 3), new VendorStagingEntry(ItemA, 1) },
+            list.Entries);
+    }
+
+    [Fact]
+    public void StagingReplacesTheQuantityInsteadOfSummingIt()
+    {
+        var list = new VendorStagingList();
+        list.Stage(ItemA, 20);
+
+        list.Stage(ItemA, 5);
+
+        VendorStagingEntry entry = Assert.Single(list.Entries);
+        Assert.Equal(5, entry.Quantity);
+    }
+
+    [Fact]
+    public void StageIgnoresAnEmptyGuidOrNonPositiveQuantity()
+    {
+        var list = new VendorStagingList();
+
+        Assert.Equal(VendorStagingAddOutcome.Ignored, list.Stage(0u, 1));
+        Assert.Equal(VendorStagingAddOutcome.Ignored, list.Stage(ItemA, 0));
+        Assert.True(list.IsEmpty);
     }
 }

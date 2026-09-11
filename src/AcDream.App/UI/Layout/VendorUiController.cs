@@ -1441,6 +1441,13 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         _selection.Select(payload.ObjId, SelectionChangeSource.Vendor);
 
         ClientObject item = _objects.Get(payload.ObjId)!;
+        IReadOnlyList<uint> contents = _objects.GetContents(payload.ObjId);
+        if (contents.Count > 0)
+        {
+            StageContainerContents(item, contents);
+            return;
+        }
+
         int fullStack = Math.Max(1, item.StackSize);
         if (quantity < fullStack)
         {
@@ -1462,7 +1469,31 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             string name = string.IsNullOrWhiteSpace(item.Name) ? "item" : item.Name;
             _systemMessage?.Invoke($"Splitting the {name} before selling them");
         }
-        _sellStaging.Add(payload.ObjId, quantity);
+        _sellStaging.Stage(payload.ObjId, quantity);
+    }
+
+    /// <summary>
+    /// Dropping a pack that holds items sells the pack's contents, not the
+    /// pack: one notice names the pack, then each direct child is checked
+    /// against the vendor on its own and staged if it is a sellable leaf.
+    /// Unsellable children are skipped silently. A nested pack that still
+    /// holds items is neither staged nor opened (one level only); an empty
+    /// nested pack is an ordinary leaf.
+    /// </summary>
+    private void StageContainerContents(ClientObject pack, IReadOnlyList<uint> contents)
+    {
+        string name = string.IsNullOrWhiteSpace(pack.Name) ? "item" : pack.Name;
+        _systemMessage?.Invoke($"Selling contents of {name}");
+
+        uint[] children = contents.ToArray();
+        foreach (uint child in children)
+        {
+            if (_objects.GetContents(child).Count > 0)
+                continue;
+            if (EvaluateSellAcceptability(child, out int childQuantity) != VendorSellRejection.None)
+                continue;
+            _sellStaging.Stage(child, childQuantity);
+        }
     }
 
     private VendorSellRejection EvaluateSellAcceptability(uint itemGuid, out int quantity)
@@ -1488,9 +1519,12 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         if (rejection == VendorSellRejection.None)
         {
             uint fullStack = (uint)Math.Max(1, item.StackSize);
-            quantity = (int)_splitQuantity.GetObjectSplitSize(
-                itemGuid,
-                _selection.SelectedObjectId ?? 0u,
+            // Never sell more than the stack the player actually holds.
+            quantity = (int)Math.Min(
+                _splitQuantity.GetObjectSplitSize(
+                    itemGuid,
+                    _selection.SelectedObjectId ?? 0u,
+                    fullStack),
                 fullStack);
         }
         return rejection;

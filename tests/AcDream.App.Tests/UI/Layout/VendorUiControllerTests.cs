@@ -1589,6 +1589,115 @@ public sealed class VendorUiControllerTests
     private static ItemDragPayload DragFromInventory(uint guid) =>
         new(guid, ItemDragSource.Inventory, 0, new UiItemSlot());
 
+    private static void MakeContained(
+        Harness h,
+        uint guid,
+        uint containerGuid,
+        ItemType type,
+        int value,
+        int itemsCapacity = 0)
+    {
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = guid,
+            Name = $"Item {guid:X8}",
+            Type = type,
+            Value = value,
+            StackSize = 1,
+            ItemsCapacity = itemsCapacity,
+        });
+        h.Objects.MoveItem(guid, containerGuid, h.Objects.GetContents(containerGuid).Count);
+    }
+
+    private const uint PlayerOwnedPackGuid = 0x60000301u;
+    private const uint PackChildAGuid = 0x60000302u;
+    private const uint PackChildBGuid = 0x60000303u;
+    private const uint PackChildCGuid = 0x60000304u;
+    private const uint NestedPackGuid = 0x60000305u;
+    private const uint NestedChildGuid = 0x60000306u;
+
+    [Fact]
+    public void HandleDropRelease_PackWithContents_StagesTheSellableLeafChildrenNotThePack()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakeContained(h, PlayerOwnedPackGuid, Harness.PlayerGuid, ItemType.Container, 10, itemsCapacity: 24);
+        MakeContained(h, PackChildAGuid, PlayerOwnedPackGuid, ItemType.Armor, 100);
+        MakeContained(h, PackChildBGuid, PlayerOwnedPackGuid, ItemType.Misc, 100);
+        MakeContained(h, PackChildCGuid, PlayerOwnedPackGuid, ItemType.Armor, 100);
+
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedPackGuid));
+
+        Assert.Equal(2, h.SellingList.GetNumUIItems());
+        Assert.Equal(PackChildAGuid, h.SellingList.GetItem(0)!.ItemId);
+        Assert.Equal(PackChildCGuid, h.SellingList.GetItem(1)!.ItemId);
+        Assert.Equal(new[] { "Selling contents of Item 60000301" }, h.SystemMessages);
+        Assert.True(h.SellingPage.Visible);
+        Assert.Equal(PlayerOwnedPackGuid, h.Selection.SelectedObjectId);
+
+        h.SellAllButton.OnClick!.Invoke();
+
+        (_, IReadOnlyList<(int Amount, uint ItemGuid)> items) = Assert.Single(h.Sells);
+        Assert.Equal(
+            new (int Amount, uint ItemGuid)[] { (1, PackChildAGuid), (1, PackChildCGuid) },
+            items);
+    }
+
+    [Fact]
+    public void HandleDropRelease_EmptyPack_StagesThePackItselfAsOneRow()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Container), Array.Empty<VendorShopItem>());
+        MakeContained(h, PlayerOwnedPackGuid, Harness.PlayerGuid, ItemType.Container, 10, itemsCapacity: 24);
+
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedPackGuid));
+
+        Assert.Equal(1, h.SellingList.GetNumUIItems());
+        Assert.Equal(PlayerOwnedPackGuid, h.SellingList.GetItem(0)!.ItemId);
+        Assert.Empty(h.SystemMessages);
+    }
+
+    [Fact]
+    public void HandleDropRelease_NestedPackInsideThePack_IsNeitherStagedNorDescended()
+    {
+        var h = new Harness();
+        h.State.Apply(
+            VendorGuid,
+            SellProfile((uint)ItemType.Armor | (uint)ItemType.Container),
+            Array.Empty<VendorShopItem>());
+        MakeContained(h, PlayerOwnedPackGuid, Harness.PlayerGuid, ItemType.Container, 10, itemsCapacity: 24);
+        MakeContained(h, PackChildAGuid, PlayerOwnedPackGuid, ItemType.Armor, 100);
+        MakeContained(h, NestedPackGuid, PlayerOwnedPackGuid, ItemType.Container, 10, itemsCapacity: 24);
+        MakeContained(h, NestedChildGuid, NestedPackGuid, ItemType.Armor, 100);
+
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedPackGuid));
+
+        Assert.Equal(1, h.SellingList.GetNumUIItems());
+        Assert.Equal(PackChildAGuid, h.SellingList.GetItem(0)!.ItemId);
+    }
+
+    [Fact]
+    public void HandleDropRelease_DroppingAStagedItemAgain_KeepsOneRowAtQuantityOne()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakePlayerOwned(h, PlayerOwnedArmorGuid, ItemType.Armor, 100);
+
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+
+        Assert.Equal(1, h.SellingList.GetNumUIItems());
+        h.SellAllButton.OnClick!.Invoke();
+
+        (_, IReadOnlyList<(int Amount, uint ItemGuid)> items) = Assert.Single(h.Sells);
+        Assert.Equal(new (int Amount, uint ItemGuid)[] { (1, PlayerOwnedArmorGuid) }, items);
+    }
+
     [Fact]
     public void OnDragOver_TargetIsNotTheSellingList_RejectsRegardlessOfAcceptability()
     {
