@@ -142,11 +142,17 @@ internal sealed class PlayerModeController :
 
     public bool TryEnterPortalSpaceForLogin()
     {
-        _autoEntry?.Cancel();
         if (!_mode.IsPlayerMode && !TryEnter("login"))
             return false;
 
-        return TryEnterPortalSpace();
+        if (!TryEnterPortalSpace())
+            return false;
+
+        // Only retire auto-entry once portal-space login ownership is real.
+        // Cancelling earlier left indoor logins stranded when first-entry was
+        // still publishing the movement controller.
+        _autoEntry?.Cancel();
+        return true;
     }
 
     public void EnterWorld()
