@@ -357,16 +357,27 @@ public sealed class RuntimeCombatAttackState : IDisposable
     {
         _fireWhenCharged = false;
         StopBuild();
-        if (!_operations.SendAttack(
-                height,
-                Math.Clamp(_requestedAttackPower, 0f, 1f)))
+        float power = Math.Clamp(_requestedAttackPower, 0f, 1f);
+        if (!_operations.SendAttack(height, power))
         {
             ResetPowerBar();
             return;
         }
 
         if (_operations.AutoRepeatAttack)
+        {
             _repeatAttacking = true;
+            // Pre-queue the marker immediately after an overcharged opener so the
+            // next swing does not reuse the initiating power while we wait for
+            // AttackDone (common when running into melee range).
+            if (Math.Abs(power - DesiredPower) >= 0.01f)
+            {
+                _requestedAttackPower = DesiredPower;
+                _operations.SendAttack(
+                    height,
+                    Math.Clamp(DesiredPower, 0f, 1f));
+            }
+        }
         _attackServerResponsePending = setServerPending;
     }
 

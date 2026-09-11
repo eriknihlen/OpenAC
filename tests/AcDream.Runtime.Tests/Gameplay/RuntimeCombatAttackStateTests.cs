@@ -87,6 +87,39 @@ public sealed class RuntimeCombatAttackStateTests
     }
 
     [Fact]
+    public void OverchargedOpener_WithAutoRepeat_PrequeuesMarkerPower()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = new RuntimeCombatAttackState(
+            combat,
+            canStartAttack: () => true,
+            sendAttack: (height, power) =>
+            {
+                sent.Add((height, power));
+                return true;
+            },
+            autoRepeatAttack: () => true,
+            now: () => now);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0f);
+
+        controller.PressAttack(AttackHeight.High);
+        now = 1d;
+        controller.ReleaseAttack();
+
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(1f, sent[0].Power, 3);
+        Assert.Equal(0f, sent[1].Power, 3);
+        Assert.Equal(0f, controller.RequestedAttackPower, 3);
+
+        combat.OnAttackDone(1u, 0u);
+        Assert.Equal(3, sent.Count);
+        Assert.Equal(0f, sent[2].Power, 3);
+    }
+
+    [Fact]
     public void HoldBinding_UsesPressAndReleaseTransitions()
     {
         double now = 1d;
