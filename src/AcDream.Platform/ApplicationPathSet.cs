@@ -123,14 +123,30 @@ public sealed record ApplicationPathSet(
                 "acdream");
         }
 
-        string? legacyConfigDirectory =
-            platform.IsWindows && configDirectory is null
-                ? Path.Combine(
+        string? legacyConfigDirectory = null;
+        if (configDirectory is null)
+        {
+            if (platform.IsWindows)
+            {
+                legacyConfigDirectory = Path.Combine(
                     RequireFolder(
                         platform,
                         Environment.SpecialFolder.LocalApplicationData),
-                    "acdream")
-                : null;
+                    "acdream");
+            }
+            else if (platform.IsMacOS)
+            {
+                legacyConfigDirectory = ResolveXdg(
+                    platform,
+                    "XDG_CONFIG_HOME",
+                    Path.Combine(
+                        RequireFolder(
+                            platform,
+                            Environment.SpecialFolder.UserProfile),
+                        ".config"),
+                    "acdream");
+            }
+        }
 
         return new ApplicationPathSet(
             Normalize(configDirectory ?? config, platform),
