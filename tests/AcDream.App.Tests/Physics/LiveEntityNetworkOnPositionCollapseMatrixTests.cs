@@ -340,30 +340,61 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
         fixture.DrainPlacementFifo();
     }
 
-    // ── Scenario 7: sticky-suppressed steady-state (row 8's asymmetry) ──
+    // ── Scenario 7: a sticky lease does not gate the position arm ──
+    // A melee creature keeps its stick on the player for the whole
+    // engagement; the server corrections it receives meanwhile must still
+    // route (the per-tick stick adjustment then overwrites the frame).
 
     [Fact]
-    public void StickySuppressed_CreatureGuid_RoutingSkippedButStillArmed()
+    public void StickyArmed_CreatureGuid_NearWirePositionStillRoutesAndEnqueues()
     {
         using var fixture = new Fixture(CreatureGuid);
         EntityPhysicsHost host = fixture.ArmSticky(stickTargetGuid: 0x70009999u);
         fixture.Remote.Body.TransientState = TransientStateFlags.Active
             | TransientStateFlags.Contact;
-        Vector3 bodyBefore = fixture.Remote.Body.Position;
-        var target = new Vector3(12f, 14f, SpawnHeight);
+        fixture.Remote.Body.Position = new Vector3(2f, 2f, SpawnHeight);
+        fixture.Remote.LastServerPos = fixture.Remote.Body.Position;
+        fixture.Remote.LastServerPosTime =
+            (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds - 0.15;
+        var target = new Vector3(4f, 3f, SpawnHeight);
 
         fixture.Controller.OnPosition(fixture.Update(
             target, SourceCell, teleportSequence: 1,
             guid: CreatureGuid, isGrounded: true));
 
-        // Routing never ran: body and queue are untouched.
-        Assert.Equal(bodyBefore, fixture.Remote.Body.Position);
-        Assert.False(fixture.Remote.Interp.IsActive);
-        // D4: sticky-suppressed still arms, with UnroutedCatchUp.
+        Assert.True(fixture.Remote.Interp.IsActive);
         Assert.NotNull(host.PositionManager.Constraint);
-        // Still stuck — nothing in this path unsticks it (only the teleport
-        // hook does).
+        // Sticky itself is untouched by this non-teleport path (only the
+        // teleport hook unsticks).
         Assert.NotEqual(0u, host.PositionManager.GetStickyObjectId());
+    }
+
+    [Fact]
+    public void StickyArmed_CreatureGuid_FarWirePositionSnapsTheBody()
+    {
+        using var fixture = new Fixture(CreatureGuid);
+        fixture.PublishDestinationCollision();
+        fixture.ServiceWindow.Allow(DestinationLandblock);
+        EntityPhysicsHost host = fixture.ArmSticky(stickTargetGuid: 0x70009999u);
+        fixture.Remote.Body.TransientState = TransientStateFlags.Active
+            | TransientStateFlags.Contact;
+        Vector3 spawnPose = fixture.Entity.Position;
+        var destination = new Vector3(12f, 14f, SpawnHeight);
+
+        fixture.Controller.OnPosition(fixture.Update(
+            destination, DestinationCell, teleportSequence: 1,
+            guid: CreatureGuid, isGrounded: true));
+
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        Assert.NotEqual(spawnPose, body.Position);
+        Assert.Equal(body.Position, fixture.Entity.Position);
+        Assert.Equal(DestinationCell, fixture.Entity.ParentCellId);
+        Assert.NotNull(host.PositionManager.Constraint);
+        Assert.NotEqual(0u, host.PositionManager.GetStickyObjectId());
+
+        fixture.DrainPlacementFifo();
     }
 
     [Fact]

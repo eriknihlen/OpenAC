@@ -181,9 +181,8 @@ internal sealed class RuntimeRemotePhysicsUpdater
                         | moverPvpState,
                     movingEntityId: localEntityId);
 
-                rm.Body.Position = resolveResult.Position;
-                if (resolveResult.CellId != 0)
-                    committedCellId = resolveResult.CellId;
+                committedCellId = CommitSweepOutcome(
+                    rm.Body, resolveResult, preIntegratePos, dt, committedCellId);
 
                 bool candidateMoved = postIntegratePos != preIntegratePos;
                 if (resolveResult.Ok && candidateMoved)
@@ -258,7 +257,7 @@ internal sealed class RuntimeRemotePhysicsUpdater
                               < AcDream.Core.Physics.PhysicsGlobals.FloorZ
                                                           ? 1 << 10 : 0)
                         | (System.Numerics.Vector3.Distance(
-                               preIntegratePos, resolveResult.Position) > 0.01f
+                               preIntegratePos, rm.Body.Position) > 0.01f
                                                           ? 1 << 11 : 0);
                     if (AcDream.Core.Physics.PhysicsDiagnostics
                             .ShouldEmitRemoteSlideTick(serverGuid, slideSignature))
@@ -285,7 +284,7 @@ internal sealed class RuntimeRemotePhysicsUpdater
                             acceleration: rm.Body.Acceleration,
                             preIntegratePosition: preIntegratePos,
                             postIntegratePosition: postIntegratePos,
-                            resolvedPosition: resolveResult.Position);
+                            resolvedPosition: rm.Body.Position);
                     }
                 }
 
@@ -544,6 +543,38 @@ internal sealed class RuntimeRemotePhysicsUpdater
             rm,
             objectClockEpoch,
             externalOwnerValid);
+    }
+
+    /// <summary>
+    /// Applies a sweep outcome to the body. A successful sweep commits the
+    /// resolved origin and cell and publishes the step velocity. A failed
+    /// sweep (no valid position found) keeps the pre-step origin, with the
+    /// heading already applied, and zeroes the step velocity; committing the
+    /// checked position instead is what ratcheted a creature into a wall one
+    /// tick at a time. Returns the committed cell id.
+    /// </summary>
+    internal static uint CommitSweepOutcome(
+        AcDream.Core.Physics.PhysicsBody body,
+        in AcDream.Core.Physics.ResolveResult result,
+        System.Numerics.Vector3 preIntegratePos,
+        float dt,
+        uint committedCellId)
+    {
+        if (result.Ok)
+        {
+            body.Position = result.Position;
+            if (result.CellId != 0)
+                committedCellId = result.CellId;
+            body.CachedVelocity = dt > 0f
+                ? (result.Position - preIntegratePos) / dt
+                : System.Numerics.Vector3.Zero;
+        }
+        else
+        {
+            body.Position = preIntegratePos;
+            body.CachedVelocity = System.Numerics.Vector3.Zero;
+        }
+        return committedCellId;
     }
 
     private bool IsCurrentOwner(

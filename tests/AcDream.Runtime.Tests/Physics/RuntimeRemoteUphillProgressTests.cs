@@ -84,8 +84,10 @@ public sealed class RuntimeRemoteUphillProgressTests
 
         Assert.Equal(latched.X, body.Position.X);
         Assert.Equal(latched.Y, body.Position.Y);
-        float expectedLiftedZ = latched.Z + 0.48f * (1f / 0.857493f - 1f);
-        Assert.Equal(expectedLiftedZ, body.Position.Z, 4);
+        // An absorbed step is a failed sweep, and a failed sweep holds the
+        // pre-step origin: the bare-radius push that lands in the checked
+        // position during offset adjustment is never committed.
+        Assert.Equal(latched.Z, body.Position.Z, 4);
         Assert.True((body.TransientState & TransientStateFlags.Sliding) != 0);
 
         harness.Tick(1, UphillRootMotionPerTick);

@@ -1408,39 +1408,36 @@ internal sealed class LiveEntityNetworkUpdateController
                 }
             }
 
-            bool snapSuppressedByStick = !IsPlayerGuid(update.Guid)
-                && (rmState.Host?.PositionManager.GetStickyObjectId() ?? 0u) != 0u;
-
+            // A sticky lease (a creature closing on its melee target) does not
+            // gate the position arm: the server correction routes like any
+            // other, and the per-tick stick adjustment then overwrites the frame.
             RemoteContactArm arm = RemoteContactArm.UnroutedCatchUp;
-            if (!snapSuppressedByStick || isTeleportRoute)
+            RemoteContactRouting? routing = RunRemoteArmTail(
+                acceptedPositionCanonical,
+                positionRecord,
+                rmState,
+                earlyRemoteRoute,
+                update.Guid,
+                worldPos,
+                rot,
+                acceptedPositionAuthorityVersion,
+                entity);
+            if (routing is null)
+                return;
+            arm = routing.Value.Arm;
+
+            if (arm is RemoteContactArm.AirborneSnap)
             {
-                RemoteContactRouting? routing = RunRemoteArmTail(
-                    acceptedPositionCanonical,
-                    positionRecord,
-                    rmState,
-                    earlyRemoteRoute,
-                    update.Guid,
-                    worldPos,
-                    rot,
-                    acceptedPositionAuthorityVersion,
-                    entity);
-                if (routing is null)
-                    return;
-                arm = routing.Value.Arm;
-
-                if (arm is RemoteContactArm.AirborneSnap)
+                if (IsPlayerGuid(update.Guid))
                 {
-                    if (IsPlayerGuid(update.Guid))
-                    {
-                        rmState.Interp.Clear();
-                    }
+                    rmState.Interp.Clear();
+                }
 
-                    if (_animatedEntities.TryGetValue(entity.Id, out var aeForLand)
-                        && aeForLand.Sequencer is not null)
-                    {
-                        _motionRuntime.EnsureRemoteMotionBindings(
-                            rmState, aeForLand, update.Guid);
-                    }
+                if (_animatedEntities.TryGetValue(entity.Id, out var aeForLand)
+                    && aeForLand.Sequencer is not null)
+                {
+                    _motionRuntime.EnsureRemoteMotionBindings(
+                        rmState, aeForLand, update.Guid);
                 }
             }
 
@@ -1454,7 +1451,6 @@ internal sealed class LiveEntityNetworkUpdateController
 
             if (!isTeleportRoute
                 && rmState.HasServerVelocity
-                && !snapSuppressedByStick
                 && _animatedEntities.TryGetValue(entity.Id, out var aeForVelocity))
             {
                 if (System.Environment.GetEnvironmentVariable("ACDREAM_REMOTE_VEL_DIAG") == "1")
