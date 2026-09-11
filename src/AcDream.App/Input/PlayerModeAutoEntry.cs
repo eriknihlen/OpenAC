@@ -54,8 +54,11 @@ internal sealed class LivePlayerModeAutoEntryContext
             out LiveEntityRecord record)
         && record.PhysicsHost is EntityPhysicsHost;
 
+    // The login presentation owns world entry and its completion notification.
     public bool IsWorldReady =>
-        _liveEntities.TryGetSnapshot(
+        (_worldReveal.Snapshot.Kind != AcDream.Runtime.RuntimePortalKind.Login
+            || _worldReveal.Snapshot.Completed)
+        && _liveEntities.TryGetSnapshot(
             _identity.ServerGuid,
             out AcDream.Core.Net.WorldSession.EntitySpawn player)
         && player.Position is { LandblockId: not 0u } position

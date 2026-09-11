@@ -487,6 +487,7 @@ internal sealed class LocalPlayerTeleportController
 
     private bool _loginPlacementCompleted;
     private float _loginHoldSeconds;
+    private bool _loginModeEntered;
 
     private readonly ILocalPlayerLoginLifecycleSource _loginLifecycle;
 
@@ -1060,37 +1061,45 @@ internal sealed class LocalPlayerTeleportController
             || snapshot.Generation == 0
             || snapshot.Completed
             || snapshot.Cancelled
-            || _loginRevealGeneration == snapshot.Generation)
+            || (_loginRevealGeneration == snapshot.Generation && _loginModeEntered))
         {
             return;
         }
-
-        if (_mode.Controller is not { CanExecuteLiveMovement: true })
-            return;
 
         long generation = _lifetimeGeneration;
+        if (_loginTunnelArmed)
+        {
+            // Keep the existing tunnel while the player controller becomes ready.
+            // Viewport adoption does not acquire movement-mode ownership.
+            _loginTunnelArmed = false;
+            _loginRevealGeneration = snapshot.Generation;
+            _loginPresentationActive = true;
+            _loginModeEntered = false;
+        }
+
         if (!_mode.TryEnterPortalSpaceForLogin()
             || _lifetimeGeneration != generation
-            || _mode.Controller is null)
+            || _mode.Controller is not { CanExecuteLiveMovement: true })
         {
             return;
         }
 
-        // Re-read after the mode entry: TryEnterPortalSpaceForLogin can run
-        // arbitrary presentation attach work.
-        snapshot = _transit.Snapshot;
-        if (snapshot.Kind != RuntimePortalKind.Login
-            || snapshot.Generation == 0
-            || snapshot.Completed
-            || snapshot.Cancelled)
+        RuntimePortalSnapshot current = _transit.Snapshot;
+        if (current.Kind != RuntimePortalKind.Login
+            || current.Generation != snapshot.Generation
+            || current.Completed
+            || current.Cancelled
+            || _transit.HasPendingTeleportStart
+            || _transit.IsTeleportActive)
         {
             return;
         }
 
-        bool adoptedArmedTunnel = _loginTunnelArmed;
-        _loginTunnelArmed = false;
+        bool adoptedArmedTunnel = _loginPresentationActive
+            && _loginRevealGeneration == snapshot.Generation;
         _loginRevealGeneration = snapshot.Generation;
         _loginPresentationActive = true;
+        _loginModeEntered = true;
         if (!adoptedArmedTunnel)
         {
             _loginHoldSeconds = 0f;
@@ -1118,6 +1127,7 @@ internal sealed class LocalPlayerTeleportController
             {
                 _loginRevealGeneration = 0;
                 _loginPresentationActive = false;
+                _loginModeEntered = false;
                 _loginTunnelArmed = false;
                 _loginHoldSeconds = 0f;
                 _presentation.Reset();
@@ -1137,7 +1147,8 @@ internal sealed class LocalPlayerTeleportController
         uint destinationCell = snapshot.Readiness.DestinationCell;
 
         bool originReady = !_streaming.IsRecenterPending;
-        bool worldReady = _loginPlacementCompleted
+        bool worldReady = _loginModeEntered
+            && _loginPlacementCompleted
             && originReady
             && _worldReveal.Evaluate(destinationCell).IsReady;
         if (!IsCurrentLoginLifetime(generation, revealGeneration))
@@ -1197,6 +1208,7 @@ internal sealed class LocalPlayerTeleportController
                     _worldReveal.Complete();
                     _loginRevealGeneration = 0;
                     _loginPresentationActive = false;
+                    _loginModeEntered = false;
                     _loginHoldSeconds = 0f;
                     Console.WriteLine(
                         "live: login portal-space presentation complete");
@@ -1363,6 +1375,7 @@ internal sealed class LocalPlayerTeleportController
         _holdSeconds = 0f;
         _loginRevealGeneration = 0;
         _loginPresentationActive = false;
+        _loginModeEntered = false;
         _loginTunnelArmed = false;
         _loginHoldSeconds = 0f;
         if (clearSession)

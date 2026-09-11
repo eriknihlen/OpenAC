@@ -129,7 +129,6 @@ internal sealed class PlayerModeController :
 
     public bool TryEnterPortalSpace()
     {
-        _autoEntry?.Cancel();
         if (Controller is null && !TryEnter("teleport"))
             return false;
 
@@ -137,12 +136,12 @@ internal sealed class PlayerModeController :
             return false;
 
         controller.State = PlayerState.PortalSpace;
+        _autoEntry?.Cancel();
         return true;
     }
 
     public bool TryEnterPortalSpaceForLogin()
     {
-        _autoEntry?.Cancel();
         if (!_mode.IsPlayerMode && !TryEnter("login"))
             return false;
 
