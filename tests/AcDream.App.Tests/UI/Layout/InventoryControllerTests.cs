@@ -65,7 +65,10 @@ public class InventoryControllerTests
         StackSplitQuantityState? stackSplitQuantity = null,
         ItemInteractionController? itemInteraction = null,
         Func<int?>? strengthProvider = null,
-        Spellbook? burdenSpellbook = null)
+        Spellbook? burdenSpellbook = null,
+        ShortcutStore? shortcuts = null,
+        UiShortcutDigitGraphics? shortcutDigits = null,
+        CombatState? combat = null)
         => InventoryController.Bind(layout, objects, () => Player,
             iconIds: (_, _, _, _, _) => 0u,
             strength: strengthProvider ?? (() => strength), datFont: null,
@@ -81,7 +84,10 @@ public class InventoryControllerTests
             selection: selection ?? new SelectionState(),
             stackSplitQuantity: stackSplitQuantity,
             itemInteraction: itemInteraction,
-            burdenSpellbook: burdenSpellbook);
+            burdenSpellbook: burdenSpellbook,
+            shortcuts: shortcuts,
+            shortcutDigits: shortcutDigits,
+            combat: combat);
 
     private static UiButton MakeButton(uint id)
     {
@@ -2196,5 +2202,81 @@ public class InventoryControllerTests
 
         Assert.Empty(pickups);
         Assert.Equal(new[] { "Backpack is completely full!" }, messages);
+    }
+
+    // ── #32: the sale and trade markers and the shortcut slot number live on
+    //        the object, so the inventory cells show them.
+
+    [Fact]
+    public void Populate_marksCellsStagedForSaleOrTrade()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xA, Player, slot: 0);
+        SeedContained(objects, 0xB, Player, slot: 1);
+        objects.Get(0xA)!.SellState = 1;
+        objects.Get(0xB)!.TradeState = 1;
+
+        Bind(layout, objects);
+
+        UiItemSlot forSale = grid.GetItem(0)!;
+        Assert.True(forSale.ShowSellOverlay);
+        Assert.Equal(ItemCellOverlaySprites.Sell, forSale.SellOverlaySprite);
+        Assert.False(forSale.ShowTradeOverlay);
+        UiItemSlot forTrade = grid.GetItem(1)!;
+        Assert.True(forTrade.ShowTradeOverlay);
+        Assert.Equal(ItemCellOverlaySprites.Trade, forTrade.TradeOverlaySprite);
+        Assert.False(forTrade.ShowSellOverlay);
+
+        objects.Get(0xA)!.SellState = 0;
+        objects.NotifyObjectUpdated(0xA);
+        Assert.False(grid.GetItem(0)!.ShowSellOverlay);
+    }
+
+    [Fact]
+    public void Populate_stampsTheShortcutSlotNumberOnTheItemsCell()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xA, Player, slot: 0);
+        SeedContained(objects, 0xB, Player, slot: 1);
+        using var shortcuts = new ShortcutStore();
+        shortcuts.Load([new ShortcutEntry(2, 0xA, 0u)]);
+        uint[] regular = [0x101u, 0x102u, 0x103u, 0x104u, 0x105u, 0x106u, 0x107u, 0x108u, 0x109u];
+        uint[] ghosted = [0x201u, 0x202u, 0x203u, 0x204u, 0x205u, 0x206u, 0x207u, 0x208u, 0x209u];
+        var digits = new UiShortcutDigitGraphics(regular, ghosted, EmptyDigits: null);
+        var combat = new CombatState();
+
+        Bind(layout, objects, shortcuts: shortcuts, shortcutDigits: digits, combat: combat);
+
+        Assert.Equal(2, grid.GetItem(0)!.ShortcutNum);
+        Assert.False(grid.GetItem(0)!.ShortcutGhosted);
+        Assert.Same(regular, grid.GetItem(0)!.RegularDigits);
+        Assert.Equal(-1, grid.GetItem(1)!.ShortcutNum);
+
+        // Rebinding the shortcut moves the number without a rebuild.
+        shortcuts.Load([new ShortcutEntry(4, 0xB, 0u)]);
+        Assert.Equal(-1, grid.GetItem(0)!.ShortcutNum);
+        Assert.Equal(4, grid.GetItem(1)!.ShortcutNum);
+
+        // Magic mode ghosts the digits, the way the shortcut bar does.
+        combat.SetCombatMode(CombatMode.Magic);
+        Assert.True(grid.GetItem(1)!.ShortcutGhosted);
+        Assert.Same(ghosted, grid.GetItem(1)!.GhostedDigits);
+    }
+
+    [Fact]
+    public void Populate_bottomRowShortcutsCarryNoNumber()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xA, Player, slot: 0);
+        using var shortcuts = new ShortcutStore();
+        shortcuts.Load([new ShortcutEntry(9, 0xA, 0u)]);
+
+        Bind(layout, objects, shortcuts: shortcuts,
+            shortcutDigits: new UiShortcutDigitGraphics([0x1u], [0x2u], null));
+
+        Assert.Equal(-1, grid.GetItem(0)!.ShortcutNum);
     }
 }

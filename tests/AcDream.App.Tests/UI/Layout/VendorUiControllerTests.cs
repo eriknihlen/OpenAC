@@ -2460,4 +2460,42 @@ public sealed class VendorUiControllerTests
         Assert.Equal(1, h.BuyingList.GetNumUIItems());
         Assert.Equal("Buying 2 items worth 30p", GetText(h.BuyListText));
     }
+
+    // ── #32: an item staged for sale carries the sale marker on the object
+    //        (so the inventory shows it too) and on its selling row.
+
+    [Fact]
+    public void HandleDropRelease_StagingMarksTheObjectForSaleAndTheSellingRow()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakeContained(h, PlayerOwnedArmorGuid, Harness.PlayerGuid, ItemType.Armor, 100);
+        Assert.Equal(0, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
+
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+
+        Assert.Equal(1, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
+        UiItemSlot row = h.SellingList.GetItem(0)!;
+        Assert.True(row.ShowSellOverlay);
+        Assert.Equal(ItemCellOverlaySprites.Sell, row.SellOverlaySprite);
+
+        h.SellClearListButton.OnClick!.Invoke();
+        Assert.Equal(0, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
+    }
+
+    [Fact]
+    public void Dispose_ClearsTheSaleMarkerOfEveryStagedItem()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakeContained(h, PlayerOwnedArmorGuid, Harness.PlayerGuid, ItemType.Armor, 100);
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+        Assert.Equal(1, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
+
+        h.Controller.Dispose();
+
+        Assert.Equal(0, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
+    }
 }

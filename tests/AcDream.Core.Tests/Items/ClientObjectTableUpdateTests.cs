@@ -79,4 +79,20 @@ public sealed class ClientObjectTableUpdateTests
         Assert.Equal(12345, item.LastAppraisalTimeMs);
         Assert.Equal(1, updates);
     }
+
+    [Fact]
+    public void NotifyObjectUpdated_publishesAClientSideChangeToObservers()
+    {
+        var t = new ClientObjectTable();
+        t.AddOrUpdate(new ClientObject { ObjectId = 0x50000001u });
+        ClientObject? seen = null;
+        t.ObjectUpdated += o => seen = o;
+
+        t.Get(0x50000001u)!.SellState = 1;
+        Assert.True(t.NotifyObjectUpdated(0x50000001u));
+
+        Assert.Same(t.Get(0x50000001u), seen);
+        Assert.Equal(1, seen!.SellState);
+        Assert.False(t.NotifyObjectUpdated(0x50000002u));
+    }
 }

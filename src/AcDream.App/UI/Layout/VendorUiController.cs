@@ -129,6 +129,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
     private readonly UiButton? _sellClearItemButton;
     private readonly UiButton? _sellClearListButton;
     private readonly VendorStagingList _buyStaging = new();
+    private readonly HashSet<uint> _sellMarked = [];
     private readonly VendorStagingList _sellStaging = new();
     private readonly RetailDialogFactory? _dialogs;
     private readonly Action<string>? _systemMessage;
@@ -345,6 +346,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
 
         _buyStaging.Changed += RebuildBuyingList;
         _buyStaging.Changed += RefreshItemsTabAvailability;
+        _sellStaging.Changed += SyncSellStates;
         _sellStaging.Changed += RebuildSellingList;
         _buyStaging.Changed += UpdateBuyTransactionText;
         _sellStaging.Changed += UpdateSellTransactionText;
@@ -1304,6 +1306,42 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         }
     }
 
+    // The sale marker lives on the object, so every window drawing the item
+    // shows it; it follows the sell list exactly and clears with it.
+    private void SyncSellStates()
+    {
+        var staged = new HashSet<uint>();
+        foreach (VendorStagingEntry entry in _sellStaging.Entries)
+            staged.Add(entry.ItemGuid);
+        foreach (uint guid in _sellMarked.ToArray())
+        {
+            if (staged.Contains(guid))
+                continue;
+            _sellMarked.Remove(guid);
+            SetSellState(guid, 0);
+        }
+        foreach (uint guid in staged)
+        {
+            if (_sellMarked.Add(guid))
+                SetSellState(guid, 1);
+        }
+    }
+
+    private void ClearSellStates()
+    {
+        foreach (uint guid in _sellMarked.ToArray())
+            SetSellState(guid, 0);
+        _sellMarked.Clear();
+    }
+
+    private void SetSellState(uint guid, int state)
+    {
+        if (_objects.Get(guid) is not { } item || item.SellState == state)
+            return;
+        item.SellState = state;
+        _objects.NotifyObjectUpdated(guid);
+    }
+
     private void RebuildSellingList()
     {
         if (_sellingList is not { } list)
@@ -1329,6 +1367,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     TooltipTextResolve = g => _objects.Get(g)?.GetTooltipDisplayName(),
                 };
                 cell.SetItem(item.ObjectId, icon);
+                cell.ShowSellOverlay = true;
+                cell.SellOverlaySprite = ItemCellOverlaySprites.Sell;
                 cell.Selected = item.ObjectId == selectedGuid;
                 uint captured = item.ObjectId;
                 cell.Clicked = () =>
@@ -1647,8 +1687,10 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         _buyStaging.Changed -= RebuildBuyingList;
         _buyStaging.Changed -= RefreshItemsTabAvailability;
         _buyStaging.Changed -= UpdateBuyTransactionText;
+        _sellStaging.Changed -= SyncSellStates;
         _sellStaging.Changed -= RebuildSellingList;
         _sellStaging.Changed -= UpdateSellTransactionText;
+        ClearSellStates();
         DismissCloseConfirmationIfOpen();
         _dragOverSink.Parent?.RemoveChild(_dragOverSink);
         RetailTabBinding.SetClick(_itemsTab, null);

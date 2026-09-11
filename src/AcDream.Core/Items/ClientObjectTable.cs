@@ -540,6 +540,17 @@ public sealed class ClientObjectTable
         return Ingest(data);
     }
 
+    /// <summary>
+    /// Publishes a client-side change on an object (a sale or trade marker)
+    /// to every observer, the same way a server property update does.
+    /// </summary>
+    public bool NotifyObjectUpdated(uint itemId)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
     public bool UpdateProperties(uint itemId, PropertyBundle incoming)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;

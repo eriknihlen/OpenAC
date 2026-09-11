@@ -234,8 +234,10 @@ public sealed class RuntimeTradeState : IDisposable
 
     private void SetTradeState(uint itemGuid, int state)
     {
-        if (_objects?.Get(itemGuid) is { } item)
-            item.TradeState = state;
+        if (_objects?.Get(itemGuid) is not { } item || item.TradeState == state)
+            return;
+        item.TradeState = state;
+        _objects.NotifyObjectUpdated(itemGuid);
     }
 
     private void ClearLocked()

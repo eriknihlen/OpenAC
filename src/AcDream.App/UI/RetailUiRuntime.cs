@@ -3873,7 +3873,10 @@ public sealed class RetailUiRuntime : IDisposable
             () => CloseWindow(WindowNames.Inventory),
             StackSplitQuantity,
             b.ResolveDragIcon,
-            b.Spellbook);
+            b.Spellbook,
+            _bindings.Toolbar.Shortcuts,
+            LoadShortcutDigitGraphics(),
+            _bindings.Toolbar.Combat);
         InventoryPanelController = inventory;
         PaperdollController paperdoll = PaperdollController.Bind(
             layout, b.Objects, b.PlayerGuid, b.ResolveIcon, b.Selection, b.ItemInteraction,

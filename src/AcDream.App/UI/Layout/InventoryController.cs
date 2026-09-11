@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using AcDream.App.UI;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
@@ -57,6 +58,9 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private readonly ItemInteractionController? _itemInteraction;
     private readonly StackSplitQuantityState? _stackSplitQuantity;
     private PendingListPlacement? _pendingListPlacement;
+    private readonly ShortcutStore? _shortcuts;
+    private readonly UiShortcutDigitGraphics? _shortcutDigits;
+    private readonly CombatState? _combat;
     private bool _disposed;
 
     private readonly record struct PendingListPlacement(
@@ -89,9 +93,15 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         ItemInteractionController? itemInteraction,
         Action? onClose,
         StackSplitQuantityState? stackSplitQuantity,
-        Spellbook? burdenSpellbook)
+        Spellbook? burdenSpellbook,
+        ShortcutStore? shortcuts,
+        UiShortcutDigitGraphics? shortcutDigits,
+        CombatState? combat)
     {
         _objects    = objects;
+        _shortcuts  = shortcuts;
+        _shortcutDigits = shortcutDigits;
+        _combat     = combat;
         _playerGuid = playerGuid;
         _iconIds    = iconIds;
         _dragIconIds = dragIconIds;
@@ -183,6 +193,10 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         _selection.Changed += OnSelectionChanged;
         if (_burdenSpellbook is not null)
             _burdenSpellbook.EnchantmentsChanged += RefreshBurden;
+        if (_shortcuts is not null)
+            _shortcuts.Changed += RestampShortcutNumbers;
+        if (_combat is not null)
+            _combat.CombatModeChanged += OnCombatModeChanged;
         if (_itemInteraction is not null)
         {
             _itemInteraction.StateChanged += OnInteractionStateChanged;
@@ -233,14 +247,18 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Action? onClose = null,
         StackSplitQuantityState? stackSplitQuantity = null,
         Func<ItemType, uint, uint, uint, uint, uint>? dragIconIds = null,
-        Spellbook? burdenSpellbook = null)
+        Spellbook? burdenSpellbook = null,
+        ShortcutStore? shortcuts = null,
+        UiShortcutDigitGraphics? shortcutDigits = null,
+        CombatState? combat = null)
         => new InventoryController(layout, objects, playerGuid, iconIds, dragIconIds, strength, selection,
                                    ownerName, datFont,
                                    contentsEmptySprite, sideBagEmptySprite, mainPackEmptySprite,
                                    sendUse, sendPutItemInContainer,
                                    sendStackableSplitToContainer, sendStackableMerge,
                                    notifyMergeAttempt, itemInteraction,
-                                   onClose, stackSplitQuantity, burdenSpellbook);
+                                   onClose, stackSplitQuantity, burdenSpellbook,
+                                   shortcuts, shortcutDigits, combat);
 
     private void OnObjectChanged(ClientObject o)
     {
@@ -582,9 +600,67 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                     item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
             cell.SetItem(guid, tex, dragIconTexture: dragTex);
             SetStructureBar(cell, item);
+            ApplyMarkers(cell, item);
             cell.SetWaitingState(IsWaiting(guid, containerId, pending));
             if (isContainer)
                 SetCapacityBar(cell, guid);
+        }
+    }
+
+    // The sale and trade markers and the shortcut number belong to the
+    // object, so every cell showing it carries them.
+    private void ApplyMarkers(UiItemSlot cell, ClientObject? item)
+    {
+        cell.ShowSellOverlay = item is { SellState: not 0 };
+        cell.SellOverlaySprite = ItemCellOverlaySprites.Sell;
+        cell.ShowTradeOverlay = item is { TradeState: not 0 };
+        cell.TradeOverlaySprite = ItemCellOverlaySprites.Trade;
+        ApplyShortcutNumber(cell, item?.ObjectId ?? 0u);
+    }
+
+    private void ApplyShortcutNumber(UiItemSlot cell, uint guid)
+    {
+        int slot = ShortcutSlotOf(guid);
+        if (slot < 0)
+        {
+            cell.ClearShortcutNum();
+            return;
+        }
+        cell.RegularDigits = _shortcutDigits?.RegularDigits;
+        cell.GhostedDigits = _shortcutDigits?.GhostedDigits;
+        cell.EmptyDigits = _shortcutDigits?.EmptyDigits;
+        cell.SetShortcutNum(slot, _combat?.CurrentMode == CombatMode.Magic);
+    }
+
+    /// <summary>The numbered (top-row) shortcut slot holding this object, or -1.</summary>
+    private int ShortcutSlotOf(uint guid)
+    {
+        if (_shortcuts is null || guid == 0u)
+            return -1;
+        for (int slot = 0; slot < NumberedShortcutSlots; slot++)
+            if (_shortcuts.Get(slot) == guid)
+                return slot;
+        return -1;
+    }
+
+    private const int NumberedShortcutSlots = 9;
+
+    private void OnCombatModeChanged(CombatMode mode) => RestampShortcutNumbers();
+
+    private void RestampShortcutNumbers()
+    {
+        RestampShortcutNumbers(_contentsGrid);
+        RestampShortcutNumbers(_containerList);
+        RestampShortcutNumbers(_topContainer);
+    }
+
+    private void RestampShortcutNumbers(UiItemList? list)
+    {
+        if (list is null) return;
+        for (int i = 0; i < list.GetNumUIItems(); i++)
+        {
+            if (list.GetItem(i) is { ItemId: not 0u } cell)
+                ApplyShortcutNumber(cell, cell.ItemId);
         }
     }
 
@@ -628,6 +704,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         };
         cell.SetItem(guid, tex, dragIconTexture: dragTex);
         SetStructureBar(cell, item);
+        ApplyMarkers(cell, item);
         cell.SetWaitingState(waiting);
         cell.SlotIndex = list.GetNumUIItems();                 // index it will occupy (== its slot in a packed list)
         ConfigureDropFeedback(list, cell);
@@ -1150,6 +1227,10 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         _selection.Changed -= OnSelectionChanged;
         if (_burdenSpellbook is not null)
             _burdenSpellbook.EnchantmentsChanged -= RefreshBurden;
+        if (_shortcuts is not null)
+            _shortcuts.Changed -= RestampShortcutNumbers;
+        if (_combat is not null)
+            _combat.CombatModeChanged -= OnCombatModeChanged;
         if (_contentsGrid is not null)
         {
             _contentsGrid.PrimaryItemPressed = null;

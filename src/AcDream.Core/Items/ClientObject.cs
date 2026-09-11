@@ -179,6 +179,8 @@ public sealed class ClientObject
     public uint? CooldownId { get; set; }
     public double? CooldownDuration { get; set; }
     public int TradeState { get; set; }
+    /// <summary>Non-zero while the item sits in a vendor sell list.</summary>
+    public int SellState { get; set; }
     public bool IsComponentPack { get; set; }
     public byte? RadarBlipColor { get; set; }
     public byte? RadarBehavior { get; set; }

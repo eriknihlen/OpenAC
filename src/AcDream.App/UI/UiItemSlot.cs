@@ -74,6 +74,10 @@ public class UiItemSlot : UiElement
 
     public uint TradeOverlaySprite { get; set; }
 
+    public bool ShowSellOverlay { get; set; }
+
+    public uint SellOverlaySprite { get; set; }
+
     public IReadOnlyList<uint>? CooldownSprites { get; set; }
 
     public Func<uint, int>? CooldownStepProvider { get; set; }
@@ -239,6 +243,16 @@ public class UiItemSlot : UiElement
             var (tex, _, _) = SpriteResolve(EmptySprite);
             if (tex != 0)
                 ctx.DrawSprite(tex, 0f, 0f, Width, Height, 0f, 0f, 1f, 1f, Vector4.One);
+        }
+
+        if (ShowSellOverlay
+            && ItemId != 0
+            && SpriteResolve is not null
+            && SellOverlaySprite != 0)
+        {
+            var (sellTex, _, _) = SpriteResolve(SellOverlaySprite);
+            if (sellTex != 0)
+                ctx.DrawSprite(sellTex, 0f, 0f, Width, Height, 0f, 0f, 1f, 1f, Vector4.One);
         }
 
         if (ShowTradeOverlay

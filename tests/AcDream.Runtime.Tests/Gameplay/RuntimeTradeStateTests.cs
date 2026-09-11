@@ -1,3 +1,4 @@
+using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Runtime.Gameplay;
 
@@ -129,5 +130,23 @@ public sealed class RuntimeTradeStateTests
         Assert.False(snapshot.IsOpen);
         Assert.Equal(0, snapshot.SelfItemCount);
         Assert.False(snapshot.PartnerAccepted);
+    }
+
+    [Fact]
+    public void ApplyAdd_marksTheObjectAndPublishesTheChangeOnce()
+    {
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject { ObjectId = ItemA });
+        using var trade = new RuntimeTradeState(objects);
+        trade.ApplyRegister(new GameEvents.RegisterTrade(Partner, Partner, 0uL), Self);
+        int updates = 0;
+        objects.ObjectUpdated += _ => updates++;
+
+        trade.ApplyAdd(new GameEvents.AddToTrade(ItemA, (uint)RuntimeTradeSide.Self, 0u));
+        Assert.Equal(1, objects.Get(ItemA)!.TradeState);
+        Assert.Equal(1, updates);
+
+        trade.ApplyAdd(new GameEvents.AddToTrade(ItemA, (uint)RuntimeTradeSide.Self, 0u));
+        Assert.Equal(1, updates);
     }
 }
