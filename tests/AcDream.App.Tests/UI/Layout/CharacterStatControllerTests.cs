@@ -1181,11 +1181,37 @@ public class CharacterStatControllerTests
         Assert.Equal(trainedBefore + 1, RowsUnderHeader(list, "Trained Skills"));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void DataChangedRefresh_PreservesSkillsScrollWithinTheNewContentBounds(
-        bool shrinkSkills)
+    [Fact]
+    public void DataChangedRefresh_WhenSkillLayoutUnchanged_KeepsViewportAndScroll()
+    {
+        var list = new UiPanel { Width = 300, Height = 60 };
+        var layout = Fake((CharacterStatController.ListBoxId, list));
+        CharacterSheet sheet = SampleData.SampleCharacter();
+        Action refresh = CharacterStatController.Bind(layout, () => sheet,
+            spriteResolve: id => (id, 16, 16)).Refresh;
+
+        ClickTab(layout, left: 92f);
+        UiScrollablePanel viewport = list.Children.OfType<UiScrollablePanel>().Single();
+        viewport.LayoutScrollableChildren();
+        Assert.True(viewport.Scroll.MaxScroll > 10);
+        int offset = viewport.Scroll.MaxScroll - 10;
+        viewport.Scroll.SetScrollY(offset);
+
+        sheet = new CharacterSheet
+        {
+            Name = sheet.Name,
+            UnassignedXp = sheet.UnassignedXp + 1,
+            SkillCredits = sheet.SkillCredits,
+            Skills = sheet.Skills,
+        };
+        refresh();
+
+        Assert.Same(viewport, list.Children.OfType<UiScrollablePanel>().Single());
+        Assert.Equal(offset, viewport.Scroll.ScrollY);
+    }
+
+    [Fact]
+    public void DataChangedRefresh_WhenSkillLayoutShrinks_RebuildsAndClampsScroll()
     {
         var list = new UiPanel { Width = 300, Height = 60 };
         var layout = Fake((CharacterStatController.ListBoxId, list));
@@ -1205,20 +1231,15 @@ public class CharacterStatControllerTests
             Name = sheet.Name,
             UnassignedXp = sheet.UnassignedXp + 1,
             SkillCredits = sheet.SkillCredits,
-            Skills = shrinkSkills ? sheet.Skills.Take(6).ToList() : sheet.Skills,
+            Skills = sheet.Skills.Take(6).ToList(),
         };
         refresh();
 
         UiScrollablePanel replacement = list.Children.OfType<UiScrollablePanel>().Single();
         Assert.NotSame(previous, replacement);
-        if (shrinkSkills)
-        {
-            Assert.True(replacement.Scroll.MaxScroll > 0);
-            Assert.True(replacement.Scroll.MaxScroll < offset);
-        }
-        Assert.Equal(Math.Min(offset, replacement.Scroll.MaxScroll), replacement.Scroll.ScrollY);
-        if (!shrinkSkills)
-            Assert.Equal(offset, replacement.Scroll.ScrollY);
+        Assert.True(replacement.Scroll.MaxScroll > 0);
+        Assert.True(replacement.Scroll.MaxScroll < offset);
+        Assert.Equal(replacement.Scroll.MaxScroll, replacement.Scroll.ScrollY);
     }
 
     [Fact]
@@ -1870,6 +1891,73 @@ public class CharacterStatControllerTests
 
         Assert.Equal("350", value.LinesProvider()[0].Text);
         Assert.Equal(new Vector4(0f, 1f, 0f, 1f), value.LinesProvider()[0].Color);
+    }
+
+    [Fact]
+    public void SkillsRefresh_WhenLayoutUnchanged_KeepsSameRowPanels()
+    {
+        var list = new UiPanel { Width = 300 };
+        var layout = Fake((CharacterStatController.ListBoxId, list));
+        CharacterSheet sheet = VitaeSkillSheet(
+            currentLevel: 300,
+            baseLevel: 300,
+            vitaeModifier: 0);
+
+        var binding = CharacterStatController.Bind(
+            layout,
+            () => sheet,
+            spriteResolve: id => (id, 16, 16));
+        ClickTab(layout, left: 92f);
+
+        UiClickablePanel before = Assert.Single(SkillRows(list));
+        sheet = VitaeSkillSheet(
+            currentLevel: 301,
+            baseLevel: 300,
+            vitaeModifier: 0);
+        binding.Refresh();
+
+        Assert.Same(before, Assert.Single(SkillRows(list)));
+    }
+
+    [Fact]
+    public void SkillsRefresh_WhenUnassignedXpChanges_UpdatesRaiseAffordability()
+    {
+        var list = new UiPanel { Width = 300 };
+        var btn1 = MakeButton();
+        var btn10 = MakeButton();
+        CharacterSheet sheet = VitaeSkillSheet(
+            currentLevel: 300,
+            baseLevel: 300,
+            vitaeModifier: 0);
+        var layout = Fake(
+            (CharacterStatController.ListBoxId, list),
+            (CharacterStatController.RaiseOneId, btn1),
+            (CharacterStatController.RaiseTenId, btn10));
+
+        var binding = CharacterStatController.Bind(
+            layout,
+            () => sheet,
+            spriteResolve: id => (id, 16, 16));
+        ClickTab(layout, left: 92f);
+        UiClickablePanel row = SkillRows(list)[0];
+        row.OnClick!();
+
+        Assert.Equal("Normal", btn1.ActiveState);
+        Assert.Equal("Normal", btn10.ActiveState);
+
+        sheet = new CharacterSheet
+        {
+            SkillCredits = sheet.SkillCredits,
+            UnassignedXp = 50,
+            Skills = sheet.Skills,
+        };
+        binding.Refresh();
+
+        Assert.Same(row, Assert.Single(SkillRows(list)));
+        Assert.Equal("Ghosted", btn1.ActiveState);
+        Assert.Equal("Ghosted", btn10.ActiveState);
+        Assert.True(btn1.Visible);
+        Assert.True(btn10.Visible);
     }
 
     [Fact]
