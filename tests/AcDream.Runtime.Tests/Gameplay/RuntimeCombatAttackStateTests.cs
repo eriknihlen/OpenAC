@@ -44,7 +44,7 @@ public sealed class RuntimeCombatAttackStateTests
     }
 
     [Fact]
-    public void EarlyRelease_CommitsOnUseTimeTickAtReleasedPower()
+    public void EarlyRelease_KeepsLoadingToTheSetPowerBeforeCommitting()
     {
         double now = 0d;
         var sent = new List<(AttackHeight Height, float Power)>();
@@ -60,10 +60,64 @@ public sealed class RuntimeCombatAttackStateTests
 
         now = 0.26d;
         controller.Tick();
+        Assert.Empty(sent);
+
+        now = 0.99d;
+        controller.Tick();
+        Assert.Empty(sent);
+
+        now = 1d;
+        controller.Tick();
 
         var attack = Assert.Single(sent);
         Assert.Equal(AttackHeight.Low, attack.Height);
-        Assert.Equal(0.25f, attack.Power, 3);
+        Assert.Equal(1f, attack.Power, 3);
+    }
+
+    [Fact]
+    public void ReleasePastTheSetPower_FiresImmediatelyAtTheHeldLevel()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0.5f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 0.8d;
+        controller.ReleaseAttack();
+
+        var attack = Assert.Single(sent);
+        Assert.Equal(AttackHeight.Medium, attack.Height);
+        Assert.Equal(0.8f, attack.Power, 3);
+    }
+
+    [Fact]
+    public void MissileTapWithoutAutoRepeat_LoadsToTheSetAccuracyBeforeFiring()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(combat, () => now, sent);
+        combat.SetCombatMode(CombatMode.Missile);
+        controller.SetDesiredPower(2f / 3f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 0.05d;
+        controller.ReleaseAttack();
+        Assert.Empty(sent);
+
+        now = 0.5d;
+        controller.Tick();
+        Assert.Empty(sent);
+
+        now = 0.7d;
+        controller.Tick();
+
+        var attack = Assert.Single(sent);
+        Assert.Equal(2f / 3f, attack.Power, 3);
+        Assert.False(controller.RepeatAttackInProgress);
     }
 
     [Fact]

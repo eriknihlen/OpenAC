@@ -219,7 +219,10 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
         _attackRequestInProgress = false;
         float currentPower = GetPowerBarLevel();
-        _requestedAttackPower = Math.Min(DesiredPower, currentPower);
+        // Key-up commits the larger of the bar setting and the level reached so
+        // far: an early release keeps loading to the setting, a late release
+        // fires at the held level.
+        _requestedAttackPower = Math.Max(DesiredPower, currentPower);
 
         if (_attackServerResponsePending)
         {
