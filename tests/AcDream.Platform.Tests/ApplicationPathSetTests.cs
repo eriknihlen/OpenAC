@@ -20,6 +20,43 @@ public sealed class ApplicationPathSetTests
         Assert.Equal(Path.Combine(home, "Library", "Application Support", "acdream"), paths.DataDirectory);
         Assert.Equal(Path.Combine(paths.DataDirectory, "config"), paths.ConfigDirectory);
         Assert.Equal(Path.Combine(home, "Library", "Caches", "acdream"), paths.CacheDirectory);
+        Assert.Equal(
+            Path.Combine(home, ".config", "acdream"),
+            paths.LegacyConfigDirectory);
+    }
+
+    [Fact]
+    public void MacLegacyConfigFollowsXdgConfigHomeWhenItIsSet()
+    {
+        string home = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mac-xdg-home"));
+        string xdg = Path.Combine(home, "xdg-config");
+        var platform = new FixtureEnvironment(isWindows: false)
+        {
+            IsMacOS = true,
+            UserProfile = home,
+            Variables = { ["XDG_CONFIG_HOME"] = xdg },
+        };
+
+        ApplicationPathSet paths = ApplicationPathSet.Resolve(platform: platform);
+
+        Assert.Equal(Path.Combine(xdg, "acdream"), paths.LegacyConfigDirectory);
+    }
+
+    [Fact]
+    public void MacHasNoLegacyConfigWhenTheConfigDirectoryIsOverridden()
+    {
+        string home = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mac-explicit-config"));
+        var platform = new FixtureEnvironment(isWindows: false)
+        {
+            IsMacOS = true,
+            UserProfile = home,
+            CurrentDirectoryValue = home,
+        };
+
+        ApplicationPathSet paths = ApplicationPathSet.Resolve(
+            configDirectory: Path.Combine(home, "explicit"),
+            platform: platform);
+
         Assert.Null(paths.LegacyConfigDirectory);
     }
 
