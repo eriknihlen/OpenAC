@@ -5,9 +5,13 @@ using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
+using AcDream.Core.World.Cells;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Physics;
+using BSPNodeType = DatReaderWriter.Enums.BSPNodeType;
+using CellBSPNode = DatReaderWriter.Types.CellBSPNode;
+using CellBSPTree = DatReaderWriter.Types.CellBSPTree;
 
 namespace AcDream.Runtime.Tests.Gameplay;
 
@@ -553,6 +557,116 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
         Assert.True(fixture.Movement.Controller!.IsRuntimePublished);
         Assert.Equal(0, fixture.Owner.CaptureOwnership()
             .PendingActivationCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IndoorDormantActivationRecoversOnCommittedAuthorityWithoutAnotherAdmission(bool unbound)
+    {
+        const uint indoorCell = (Cell & 0xFFFF0000u) | 0x0101u;
+        using var fixture = new Fixture(preparePlacement: false, cell: indoorCell);
+        if (!unbound)
+            CommitProductionCollisionGeneration(fixture, indoorCell & 0xFFFF0000u);
+        fixture.RepreparePlacement();
+        Assert.Equal(RuntimeLocalPlayerPhysicsPublicationStatus.Committed,
+            fixture.Owner.Commit(fixture.Prepare(), out var token));
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.DeferredCell,
+            fixture.Owner.EvaluateActivation(token, out var deferred));
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.DeferredCell,
+            fixture.Owner.CommitActivation(deferred, out _));
+        if (unbound)
+            CommitProductionCollisionGeneration(fixture, indoorCell & 0xFFFF0000u);
+        ulong authority = fixture.Lifetime.Physics.CollisionGenerationAuthority(indoorCell);
+        Assert.NotEqual(0UL, authority);
+        Assert.Equal(unbound ? 1 : 0, fixture.Lifetime.Physics.CaptureOwnership()
+            .UnboundDeferredSetPositionCellCount);
+        Assert.False(fixture.Movement.Controller!.IsRuntimePublished);
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.DeferredCell,
+            fixture.Owner.EvaluateActivation(token, out var waiting));
+        Assert.False(waiting.IsValid);
+
+        AddSyntheticIndoorCell(fixture.Lifetime.Physics.DataCache, indoorCell);
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.Evaluated,
+            fixture.Owner.EvaluateActivation(token, out var ready));
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.Committed,
+            fixture.Owner.CommitActivation(ready, out var projection));
+        Assert.True(projection.IsValid);
+        Assert.True(fixture.Movement.Controller.IsRuntimePublished);
+        Assert.True(fixture.Record.PhysicsBody!.InWorld);
+        Assert.Equal(indoorCell, fixture.Record.PhysicsBody.CellPosition.ObjCellId);
+        Assert.Equal(authority, fixture.Lifetime.Physics.CollisionGenerationAuthority(indoorCell));
+        Assert.Equal(0, fixture.Owner.CaptureOwnership().PendingActivationCount);
+        Assert.Equal(0, fixture.Lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+        Assert.Equal(0, fixture.Lifetime.Physics.CaptureOwnership().UnboundDeferredSetPositionCellCount);
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.RejectedAuthority,
+            fixture.Owner.CommitActivation(ready, out _));
+    }
+
+    [Fact]
+    public void DeferredIndoorEvaluationCommittedAfterCellArrivesCanRearmImmediately()
+    {
+        const uint indoorCell = (Cell & 0xFFFF0000u) | 0x0101u;
+        using var fixture = new Fixture(preparePlacement: false, cell: indoorCell);
+        CommitProductionCollisionGeneration(fixture, indoorCell & 0xFFFF0000u);
+        fixture.RepreparePlacement();
+        Assert.Equal(RuntimeLocalPlayerPhysicsPublicationStatus.Committed,
+            fixture.Owner.Commit(fixture.Prepare(), out var token));
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.DeferredCell,
+            fixture.Owner.EvaluateActivation(token, out var deferred));
+
+        AddSyntheticIndoorCell(fixture.Lifetime.Physics.DataCache, indoorCell);
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.DeferredCell,
+            fixture.Owner.CommitActivation(deferred, out _));
+        // Already parked ready on the committed generation; no recovery is needed.
+        Assert.Equal(1, fixture.Lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+        Assert.False(fixture.Movement.Controller!.IsRuntimePublished);
+        Assert.Equal(0, fixture.Lifetime.Physics.SetPosition
+            .TryRecoverUnboundDeferredWhenSpawnReady(indoorCell));
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.Evaluated,
+            fixture.Owner.EvaluateActivation(token, out var ready));
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.Committed,
+            fixture.Owner.CommitActivation(ready, out _));
+        Assert.True(fixture.Movement.Controller!.IsRuntimePublished);
+        Assert.Equal(indoorCell, fixture.Record.PhysicsBody!.CellPosition.ObjCellId);
+        Assert.Equal(0, fixture.Owner.CaptureOwnership().PendingActivationCount);
+    }
+
+    [Fact]
+    public void SpawnReadyIndoorActivationStillWaitsForThePendingAdmission()
+    {
+        const uint indoorCell = (Cell & 0xFFFF0000u) | 0x0101u;
+        using var fixture = new Fixture(preparePlacement: false, cell: indoorCell);
+        CommitProductionCollisionGeneration(fixture, indoorCell & 0xFFFF0000u);
+        fixture.RepreparePlacement();
+        Assert.Equal(RuntimeLocalPlayerPhysicsPublicationStatus.Committed,
+            fixture.Owner.Commit(fixture.Prepare(), out var token));
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.DeferredCell,
+            fixture.Owner.EvaluateActivation(token, out var deferred));
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.DeferredCell,
+            fixture.Owner.CommitActivation(deferred, out _));
+
+        RuntimeCollisionAdmission admission = fixture.Lifetime.Physics
+            .BeginCollisionAdmission(indoorCell & 0xFFFF0000u);
+        AddSyntheticIndoorCell(fixture.Lifetime.Physics.DataCache, indoorCell);
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.DeferredCell,
+            fixture.Owner.EvaluateActivation(token, out var waiting));
+        Assert.False(waiting.IsValid);
+        Assert.False(fixture.Movement.Controller!.IsRuntimePublished);
+        Assert.False(fixture.Record.PhysicsBody!.InWorld);
+
+        using PreparedLandblockCollisionGeneration prepared = fixture.Lifetime.Physics
+            .PrepareCollisionGeneration(admission);
+        fixture.Lifetime.Physics.StageCollisionAssets(
+            admission, prepared, CollisionAssets(indoorCell & 0xFFFF0000u));
+        AddSyntheticIndoorCell(prepared.DataCache, indoorCell);
+        Assert.True(CommitPrepared(fixture.Lifetime.Physics, admission, prepared).Committed);
+        Assert.Equal(RuntimeLocalPlayerPhysicsActivationStatus.Evaluated,
+            fixture.Owner.EvaluateActivation(token, out var ready));
+        Assert.Equal(RuntimeDormantSetPositionCommitStatus.Committed,
+            fixture.Owner.CommitActivation(ready, out _));
+        Assert.True(fixture.Movement.Controller.IsRuntimePublished);
+        Assert.Equal(0, fixture.Owner.CaptureOwnership().PendingActivationCount);
     }
 
     [Fact]
@@ -2501,7 +2615,8 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
             Vector3? initialVelocity = null,
             Vector3? initialOmega = null,
             float? initialFriction = null,
-            float? initialElasticity = null)
+            float? initialElasticity = null,
+            uint cell = Cell)
         {
             _moverSphereOriginZ = moverSphereOriginZ;
             if (residentWorld)
@@ -2540,7 +2655,8 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
                     initialVelocity,
                     initialOmega,
                     initialFriction,
-                    initialElasticity)).Canonical!;
+                    initialElasticity,
+                    cell)).Canonical!;
             Identity.ServerGuid = Record.ServerGuid;
             ActivationPreparation = new(
                 Radius: 0.48f,
@@ -2666,10 +2782,11 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
         Vector3? initialVelocity = null,
         Vector3? initialOmega = null,
         float? initialFriction = null,
-        float? initialElasticity = null)
+        float? initialElasticity = null,
+        uint cell = Cell)
     {
         var position = new CreateObject.ServerPosition(
-            Cell,
+            cell,
             1f,
             2f,
             3f,
@@ -2788,6 +2905,29 @@ public sealed class RuntimeLocalPlayerPhysicsPublicationStateTests
             default:
                 throw new ArgumentOutOfRangeException(nameof(mutation));
         }
+    }
+
+    private static void AddSyntheticIndoorCell(PhysicsDataCache cache, uint cellId)
+    {
+        var root = new CellBSPNode { Type = BSPNodeType.Leaf };
+        cache.RegisterCellStructForTest(cellId, new CellPhysics
+        {
+            WorldTransform = Matrix4x4.Identity,
+            InverseWorldTransform = Matrix4x4.Identity,
+            Resolved = new Dictionary<ushort, ResolvedPolygon>(),
+            Portals = [new PortalInfo(0, 0, 0)],
+            CellBSP = new CellBSPTree
+            {
+                Root = root,
+            },
+            FlatContainmentBsp = FlatCollisionAssetBuilder.FlattenCellContainmentBsp(root),
+            FlatPhysicsBsp = FlatCollisionAssetBuilder.FlattenPhysicsBsp(
+                null, new Dictionary<ushort, ResolvedPolygon>()),
+        });
+        cache.CellGraph.Add(new EnvCell(
+            cellId, Matrix4x4.Identity, Matrix4x4.Identity,
+            Vector3.Zero, Vector3.One, Array.Empty<CellPortal>(),
+            Array.Empty<uint>(), seenOutside: false, containmentBsp: null));
     }
 
     private static RuntimeCollisionGenerationCommit CommitPrepared(

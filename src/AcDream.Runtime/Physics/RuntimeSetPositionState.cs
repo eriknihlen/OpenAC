@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using AcDream.Content;
@@ -1786,14 +1786,39 @@ internal sealed class RuntimeSetPositionState : IDisposable
             return 0;
         }
 
+        var retries = new List<RuntimeEntityPlacementToken>();
         int recovered = RecoverUnboundDeferredOntoAuthority(
             cellId,
             prefix,
-            authority);
+            authority,
+            retries);
         recovered += RecoverStaleExpectedDeferredOntoAuthority(
             cellId,
             prefix,
-            authority);
+            authority,
+            retries);
+
+        // Every survivor must be indexed before placement observers can start
+        // another admission. Callbacks may replace operations or authority.
+        foreach (RuntimeEntityPlacementToken token in retries)
+        {
+            if (_physics.CollisionGenerationAuthority(cellId) != authority
+                || !_physics.IsCollisionEvaluationPrefixAdmissible(cellId)
+                || !_physics.Engine.IsSpawnCellReady(cellId))
+            {
+                break;
+            }
+            if (IsCurrentByToken(token.Entity, token, out Operation? operation)
+                && operation.WakeableLostCell
+                && operation.ExactCellId == cellId
+                && operation.CollisionPrefix == prefix
+                && operation.CollisionGeneration == authority
+                && operation.CollisionGenerationReady
+                && operation.WithdrawalAcknowledged)
+            {
+                RetryDeferred(operation, preserveDeferredOrder: true);
+            }
+        }
         return recovered;
     }
 
@@ -1832,7 +1857,8 @@ internal sealed class RuntimeSetPositionState : IDisposable
     private int RecoverUnboundDeferredOntoAuthority(
         uint cellId,
         uint prefix,
-        ulong authority)
+        ulong authority,
+        List<RuntimeEntityPlacementToken> retries)
     {
         var unboundKey = new UnboundCellKey(cellId, prefix);
         if (!_unboundDeferredByCell.Remove(
@@ -1859,7 +1885,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
                 continue;
             }
 
-            MarkDeferredRecoveredOntoAuthority(operation, authority);
+            MarkDeferredRecoveredOntoAuthority(operation, authority, retries);
             recovered++;
         }
 
@@ -1875,7 +1901,8 @@ internal sealed class RuntimeSetPositionState : IDisposable
     private int RecoverStaleExpectedDeferredOntoAuthority(
         uint cellId,
         uint prefix,
-        ulong authority)
+        ulong authority,
+        List<RuntimeEntityPlacementToken> retries)
     {
         // Ops parked on Expected (typically authority+1) after the landblock
         // already committed never receive a matching CommitCollisionGeneration.
@@ -1912,7 +1939,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
                     continue;
                 }
 
-                MarkDeferredRecoveredOntoAuthority(operation, authority);
+                MarkDeferredRecoveredOntoAuthority(operation, authority, retries);
                 recovered++;
             }
         }
@@ -1922,19 +1949,19 @@ internal sealed class RuntimeSetPositionState : IDisposable
 
     private void MarkDeferredRecoveredOntoAuthority(
         Operation operation,
-        ulong authority)
+        ulong authority,
+        List<RuntimeEntityPlacementToken> retries)
     {
         ulong prior = operation.CollisionGeneration;
         operation.CollisionGeneration = authority;
         operation.CollisionGenerationReady = true;
+        IndexDeferred(operation);
+        retries.Add(operation.Token);
         if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
         {
             Console.WriteLine(FormattableString.Invariant(
                 $"[wake] recover-spawn cell=0x{operation.ExactCellId:X8} gen={authority} (was {prior}) guid=0x{operation.Record.ServerGuid:X8} dormant={operation.DormantLocalActivation}"));
         }
-
-        if (operation.WithdrawalAcknowledged)
-            RetryDeferred(operation);
     }
 
     internal bool TryPrepareDormantLocalActivationCommit(
@@ -4074,7 +4101,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
             projection);
     }
 
-    private void RetryDeferred(Operation operation)
+    private void RetryDeferred(Operation operation, bool preserveDeferredOrder = false)
     {
         if (operation.DormantLocalActivation)
             return;
@@ -4108,7 +4135,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
             }
             else
             {
-                UnindexDeferred(operation);
+                UnindexDeferred(operation, preserveDeferredOrder);
                 operation.CollisionPrefix = blocking.Token.LandblockPrefix;
                 operation.CollisionGeneration = blocking.Token.CollisionGeneration;
                 operation.CollisionGenerationReady = false;
@@ -4119,7 +4146,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
             }
         }
 
-        UnindexDeferred(operation);
+        UnindexDeferred(operation, preserveDeferredOrder);
         operation.CollisionQuiescenceHeld = false;
         operation.Command = operation.Command with
         {
@@ -4997,7 +5024,7 @@ internal sealed class RuntimeSetPositionState : IDisposable
             entities.Add(operation.Key);
     }
 
-    private void UnindexDeferred(Operation operation)
+    private void UnindexDeferred(Operation operation, bool preserveOrder = false)
     {
         if (operation.ExactCellId == 0u)
         {
@@ -5016,8 +5043,9 @@ internal sealed class RuntimeSetPositionState : IDisposable
                 if (unboundIndex >= 0)
                 {
                     int last = unbound.Count - 1;
-                    unbound[unboundIndex] = unbound[last];
-                    unbound.RemoveAt(last);
+                    if (!preserveOrder)
+                        unbound[unboundIndex] = unbound[last];
+                    unbound.RemoveAt(preserveOrder ? unboundIndex : last);
                 }
                 if (unbound.Count == 0)
                 {
@@ -5039,8 +5067,9 @@ internal sealed class RuntimeSetPositionState : IDisposable
             if (index >= 0)
             {
                 int last = entities.Count - 1;
-                entities[index] = entities[last];
-                entities.RemoveAt(last);
+                if (!preserveOrder)
+                    entities[index] = entities[last];
+                entities.RemoveAt(preserveOrder ? index : last);
             }
             if (entities.Count == 0)
                 RemoveDeferredBucket(bucket);
