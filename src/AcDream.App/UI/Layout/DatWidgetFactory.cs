@@ -141,6 +141,10 @@ public static class DatWidgetFactory
         bar.DownPressedSprite = ButtonStateImage(trailingButton, "Normal_pressed");
         if (info.TryGetEffectiveBool(0x79u, out bool hideDisabled))
             bar.HideWhenDisabled = hideDisabled;
+        if (info.TryGetEffectiveBool(0x82u, out bool proportional))
+            bar.Proportional = proportional;
+        if (info.TryGetEffectiveInteger(0x89u, out int minThumbExtent) && minThumbExtent > 0)
+            bar.MinThumbExtent = minThumbExtent;
 
         if (bar.Horizontal)
         {
@@ -152,6 +156,34 @@ public static class DatWidgetFactory
             ElementInfo? scalarThumb = info.Children.FirstOrDefault(child => child.Id == 1u);
             bar.TrackSprite = DefaultImage(info);
             bar.ThumbSprite = scalarThumb is null ? 0u : DefaultImage(scalarThumb);
+            if (scalarThumb is { Width: > 0f })
+                bar.ThumbExtent = scalarThumb.Width;
+
+            // A composited thumb authors its art on left cap / middle / right cap
+            // children, the same way the vertical bars do top to bottom.
+            ElementInfo[] horizontalSlices = scalarThumb?.Children
+                .Where(child => DefaultImage(child) != 0u)
+                .OrderBy(child => child.X)
+                .ThenBy(child => child.ReadOrder)
+                .ToArray() ?? [];
+            if (horizontalSlices.Length > 0)
+            {
+                bar.ThumbTopSprite = ButtonStateImage(horizontalSlices[0], "Normal");
+                bar.ThumbTopRolloverSprite = ButtonStateImage(horizontalSlices[0], "Normal_rollover");
+                bar.ThumbTopPressedSprite = ButtonStateImage(horizontalSlices[0], "Normal_pressed");
+            }
+            if (horizontalSlices.Length > 1)
+            {
+                bar.ThumbSprite = ButtonStateImage(horizontalSlices[1], "Normal");
+                bar.ThumbRolloverSprite = ButtonStateImage(horizontalSlices[1], "Normal_rollover");
+                bar.ThumbPressedSprite = ButtonStateImage(horizontalSlices[1], "Normal_pressed");
+            }
+            if (horizontalSlices.Length > 2)
+            {
+                bar.ThumbBotSprite = ButtonStateImage(horizontalSlices[^1], "Normal");
+                bar.ThumbBotRolloverSprite = ButtonStateImage(horizontalSlices[^1], "Normal_rollover");
+                bar.ThumbBotPressedSprite = ButtonStateImage(horizontalSlices[^1], "Normal_pressed");
+            }
 
             if (bar.TrackSprite == 0u)
             {
@@ -191,6 +223,8 @@ public static class DatWidgetFactory
             child.Type == 1u && child.Id != incrementId && child.Id != decrementId);
         if (thumb is not null)
         {
+            if (thumb.Height > 0f)
+                bar.ThumbExtent = thumb.Height;
             ElementInfo[] slices = thumb.Children
                 .Where(child => DefaultImage(child) != 0u)
                 .OrderBy(child => child.Y)

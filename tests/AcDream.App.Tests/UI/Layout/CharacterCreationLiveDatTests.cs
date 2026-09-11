@@ -1282,6 +1282,15 @@ public sealed class CharacterCreationLiveDatTests
         Assert.NotEqual(0u, scrollbar.ThumbSprite);
         Assert.Equal(0u, scrollbar.ThumbTopSprite);
         Assert.Equal(0u, scrollbar.ThumbBotSprite);
+
+        // Authored as a fixed 39 px thumb (not proportional) with a 37 px minimum.
+        Assert.False(scrollbar.Proportional);
+        Assert.Equal(39f, scrollbar.ThumbExtent);
+        Assert.Equal(37f, scrollbar.MinThumbExtent);
+
+        UiScrollbar heritage = Assert.IsType<UiScrollbar>(screen.FindElement(0x100002E7u));
+        Assert.False(heritage.Proportional);
+        Assert.Equal(39f, heritage.ThumbExtent);
     }
 
     [InstalledDatFact]

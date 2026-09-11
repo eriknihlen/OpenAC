@@ -83,6 +83,22 @@ public sealed class UiScrollbar : UiElement
 
     public float DecrementButtonExtent { get; set; } = 16f;
 
+    /// <summary>
+    /// Sized-to-content thumb: its extent is the visible fraction of the track.
+    /// When false the thumb keeps its authored extent and slides over the
+    /// rest of the track (the character-creation lists are authored this way).
+    /// </summary>
+    public bool Proportional { get; set; } = true;
+
+    /// <summary>Smallest proportional thumb extent along the axis (authored per bar).</summary>
+    public float MinThumbExtent { get; set; } = MinThumb;
+
+    /// <summary>
+    /// Authored thumb extent along the axis, used when not proportional.
+    /// 0 falls back to the native size of the thumb sprite.
+    /// </summary>
+    public float ThumbExtent { get; set; }
+
     /// <summary>Authored extent of the increment button along the scrollbar axis.</summary>
     public float IncrementButtonExtent { get; set; } = 16f;
 
@@ -124,6 +140,35 @@ public sealed class UiScrollbar : UiElement
         float travel = trackLen - h;
         float y = trackTop + travel * m.PositionRatio;
         return (y, h);
+    }
+
+    /// <summary>
+    /// The thumb of this bar along its axis: a proportional bar sizes it to the
+    /// visible fraction (never below the authored minimum); a fixed bar keeps
+    /// the authored extent. Either way the thumb travels the rest of the track.
+    /// </summary>
+    internal (float start, float extent) ModelThumbRect(UiScrollable m, float trackStart, float trackLen)
+    {
+        float extent = Proportional
+            ? MathF.Max(MinThumbExtent, trackLen * m.ThumbRatio)
+            : MathF.Min(MathF.Max(0f, trackLen), FixedThumbExtent());
+        float travel = trackLen - extent;
+        float start = trackStart + travel * m.PositionRatio;
+        return (start, extent);
+    }
+
+    private float FixedThumbExtent()
+    {
+        if (ThumbExtent > 0f)
+            return ThumbExtent;
+        if (SpriteResolve is not null && ThumbSprite != 0)
+        {
+            var (_, width, height) = SpriteResolve(ThumbSprite);
+            int native = Horizontal ? width : height;
+            if (native > 0)
+                return native;
+        }
+        return MinThumbExtent;
     }
 
     public static (float x, float width) ScalarFillRect(
@@ -194,7 +239,7 @@ public sealed class UiScrollbar : UiElement
         {
             float trackTop = decrementExtent;
             float trackLen = MathF.Max(0f, Height - decrementExtent - incrementExtent);
-            var (ty, th) = ThumbRect(m, trackTop, trackLen);
+            var (ty, th) = ModelThumbRect(m, trackTop, trackLen);
             if (ThumbTopSprite != 0 && ThumbBotSprite != 0 && th >= 2f * CapH)
             {
                 DrawSprite(ctx, resolve, ActiveThumbTopSprite, 0f, ty, Width, CapH);
@@ -255,7 +300,7 @@ public sealed class UiScrollbar : UiElement
 
         float trackLeft = decrementExtent;
         float trackLength = MathF.Max(0f, Width - decrementExtent - incrementExtent);
-        var (tx, tw) = ThumbRect(model, trackLeft, trackLength);
+        var (tx, tw) = ModelThumbRect(model, trackLeft, trackLength);
         if (ThumbTopSprite != 0 && ThumbBotSprite != 0 && tw >= 2f * CapH)
         {
             DrawSprite(ctx, resolve, ActiveThumbTopSprite, tx, 0f, CapH, Height);
@@ -421,7 +466,7 @@ public sealed class UiScrollbar : UiElement
                 // Track interior: start a thumb drag or page-scroll.
                 float trackTop = decrementExtent;
                 float trackLen = MathF.Max(0f, Height - decrementExtent - incrementExtent);
-                var (ty, th) = ThumbRect(m, trackTop, trackLen);
+                var (ty, th) = ModelThumbRect(m, trackTop, trackLen);
 
                 if (ly >= ty && ly <= ty + th)
                 {
@@ -443,7 +488,7 @@ public sealed class UiScrollbar : UiElement
                     Height
                     - AxisExtent(DecrementButtonExtent, Height)
                     - AxisExtent(IncrementButtonExtent, Height));
-                float thumbH = MathF.Max(MinThumb, trackLen * m.ThumbRatio);
+                var (_, thumbH) = ModelThumbRect(m, trackTop, trackLen);
                 float travel = MathF.Max(1f, trackLen - thumbH);
                 float newRatio = ((float)e.Data2 - _dragOffsetY - trackTop) / travel;
                 m.SetPositionRatio(newRatio);
@@ -479,7 +524,7 @@ public sealed class UiScrollbar : UiElement
 
                 float trackLeft = decrementExtent;
                 float trackLength = MathF.Max(0f, Width - decrementExtent - incrementExtent);
-                var (tx, tw) = ThumbRect(m, trackLeft, trackLength);
+                var (tx, tw) = ModelThumbRect(m, trackLeft, trackLength);
                 if (x >= tx && x <= tx + tw)
                 {
                     _draggingThumb = true;
@@ -500,7 +545,7 @@ public sealed class UiScrollbar : UiElement
                     Width
                     - AxisExtent(DecrementButtonExtent, Width)
                     - AxisExtent(IncrementButtonExtent, Width));
-                float thumbWidth = MathF.Max(MinThumb, trackLength * m.ThumbRatio);
+                var (_, thumbWidth) = ModelThumbRect(m, trackLeft, trackLength);
                 float travel = MathF.Max(1f, trackLength - thumbWidth);
                 float ratio = ((float)e.Data1 - _dragOffsetX - trackLeft) / travel;
                 m.SetPositionRatio(ratio);
@@ -656,7 +701,7 @@ public sealed class UiScrollbar : UiElement
                 Width
                 - AxisExtent(DecrementButtonExtent, Width)
                 - AxisExtent(IncrementButtonExtent, Width));
-            var (tx, tw) = ThumbRect(m, trackLeft, trackLength);
+            var (tx, tw) = ModelThumbRect(m, trackLeft, trackLength);
             return x >= tx && x <= tx + tw;
         }
 
@@ -666,7 +711,7 @@ public sealed class UiScrollbar : UiElement
             Height
             - AxisExtent(DecrementButtonExtent, Height)
             - AxisExtent(IncrementButtonExtent, Height));
-        var (ty, th) = ThumbRect(m, trackTop, trackLen);
+        var (ty, th) = ModelThumbRect(m, trackTop, trackLen);
         return y >= ty && y <= ty + th;
     }
 

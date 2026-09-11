@@ -611,4 +611,61 @@ public class UiScrollbarTests
         for (int i = 0; i < verts.Count; i += 8)
             Assert.True(verts[i + 3] <= 1.0001f, $"thumb sprite V={verts[i + 3]} exceeds native (tiled)");
     }
+
+    // ── #33: a fixed-size thumb (not proportional) slides over the whole track.
+
+    private static UiScrollbar FixedThumbBar(UiScrollable model) => new()
+    {
+        Width = 37f,
+        Height = 307f,
+        DecrementButtonExtent = 17f,
+        IncrementButtonExtent = 17f,
+        Proportional = false,
+        ThumbExtent = 39f,
+        Model = model,
+    };
+
+    [Fact]
+    public void VerticalModel_FixedThumb_KeepsItsExtentAndReachesTheTrackEnd()
+    {
+        var model = new UiScrollable { ContentHeight = 400, ViewHeight = 300 };
+        UiScrollbar bar = FixedThumbBar(model);
+
+        var (startAtTop, extent) = bar.ModelThumbRect(model, trackStart: 17f, trackLen: 273f);
+        Assert.Equal(39f, extent);
+        Assert.Equal(17f, startAtTop);
+
+        model.ScrollToEnd();
+        var (startAtEnd, _) = bar.ModelThumbRect(model, trackStart: 17f, trackLen: 273f);
+        Assert.Equal(17f + 273f - 39f, startAtEnd);
+    }
+
+    [Fact]
+    public void VerticalModel_FixedThumb_DragMapsTheWholeTrackNotAQuarterOfIt()
+    {
+        var model = new UiScrollable { ContentHeight = 400, ViewHeight = 300 };
+        UiScrollbar bar = FixedThumbBar(model);
+
+        // Grab the thumb 3 px below its top edge, then drag to the middle of
+        // its travel (17 + 3 + 234 / 2): the content should be half way, not
+        // already pinned to the end.
+        Assert.True(bar.OnEvent(new UiEvent(0u, bar, UiEventType.MouseDown, Data1: 10, Data2: 20)));
+        Assert.True(bar.IsDragging);
+        Assert.True(bar.OnEvent(new UiEvent(0u, bar, UiEventType.MouseMove, Data1: 10, Data2: 137)));
+        Assert.Equal(50, model.ScrollY);
+
+        Assert.True(bar.OnEvent(new UiEvent(0u, bar, UiEventType.MouseMove, Data1: 10, Data2: 254)));
+        Assert.Equal(model.MaxScroll, model.ScrollY);
+        Assert.True(bar.OnEvent(new UiEvent(0u, bar, UiEventType.MouseUp, Data1: 10, Data2: 254)));
+    }
+
+    [Fact]
+    public void VerticalModel_ProportionalThumb_HonoursTheAuthoredMinimum()
+    {
+        var model = new UiScrollable { ContentHeight = 10_000, ViewHeight = 100 };
+        var bar = new UiScrollbar { Width = 37f, Height = 307f, MinThumbExtent = 37f, Model = model };
+
+        var (_, extent) = bar.ModelThumbRect(model, trackStart: 17f, trackLen: 273f);
+        Assert.Equal(37f, extent);
+    }
 }
