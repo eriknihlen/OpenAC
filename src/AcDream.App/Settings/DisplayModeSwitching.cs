@@ -25,6 +25,10 @@ internal sealed unsafe class GlfwDisplayModeSwitcher : IDisplayModeSwitcher
 
     private static (int X, int Y) _windowedPosition = (60, 60);
 
+    private static bool MacOsHost { get; } =
+        AcDream.App.Platform.GraphicalHostPlatformServices.DetectOperatingSystem()
+            == AcDream.App.Platform.GraphicalHostOperatingSystem.MacOS;
+
     public GlfwDisplayModeSwitcher(IWindow window)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
@@ -100,6 +104,15 @@ internal sealed unsafe class GlfwDisplayModeSwitcher : IDisplayModeSwitcher
                 // restore it (GLFW does not remember it for us).
                 glfw.GetWindowPos(handle, out int x, out int y);
                 _windowedPosition = (x, y);
+            }
+
+            // GLFW_AUTO_ICONIFY restores the desktop video mode on focus loss.
+            if (MacOsHost)
+            {
+                glfw.SetWindowAttrib(
+                    handle,
+                    WindowAttributeSetter.AutoIconify,
+                    false);
             }
 
             glfw.SetWindowMonitor(handle, monitor, 0, 0, width, height, refresh);
