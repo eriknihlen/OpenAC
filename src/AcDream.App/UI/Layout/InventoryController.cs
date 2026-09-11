@@ -492,6 +492,17 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         || item.Type.HasFlag(ItemType.Container)
         || item.ItemsCapacity > 0;
 
+    private int CountBags(uint containerId)
+    {
+        int count = 0;
+        foreach (uint guid in _objects.GetContents(containerId))
+        {
+            if (_objects.Get(guid) is { } item && IsBag(item))
+                count++;
+        }
+        return count;
+    }
+
     private int CountLooseContents(uint containerId)
     {
         int count = 0;
@@ -691,10 +702,35 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     {
         if (payload.SourceKind == ItemDragSource.ShortcutBar)
             return ItemDragAcceptance.None;
-        return EvaluateDrop(targetList, targetCell, payload.ObjId, out _, out _)
-            == InventoryContainerPlacementRejection.None
-                ? ItemDragAcceptance.Accept
-                : ItemDragAcceptance.Reject;
+        InventoryContainerPlacementRejection legality = EvaluateDrop(
+            targetList, targetCell, payload.ObjId, out _, out uint destination);
+        if (IsCapacityRejection(legality)
+            && ResolveFallthroughContainer(payload.ObjId, destination, out _) != 0u)
+        {
+            legality = InventoryContainerPlacementRejection.None;
+        }
+        return legality == InventoryContainerPlacementRejection.None
+            ? ItemDragAcceptance.Accept
+            : ItemDragAcceptance.Reject;
+    }
+
+    private static bool IsCapacityRejection(InventoryContainerPlacementRejection rejection) =>
+        rejection is InventoryContainerPlacementRejection.ItemCapacityFull
+            or InventoryContainerPlacementRejection.ContainerCapacityFull;
+
+    /// <summary>
+    /// When the pack the player named has no room, the pack the item goes
+    /// to instead: the main pack, then the side packs in order (0 when none
+    /// has room, with the capacity rejection to report against the player).
+    /// </summary>
+    private uint ResolveFallthroughContainer(
+        uint itemId,
+        uint namedContainer,
+        out InventoryContainerPlacementRejection refusal)
+    {
+        uint root = _playerGuid();
+        return InventoryPlacementSearch.ChooseContainer(
+            _objects, itemId, root, namedContainer, root, out refusal);
     }
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
@@ -711,6 +747,29 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             item,
             out _,
             out uint legalityDestination);
+        uint fallthrough = 0u;
+        if (IsCapacityRejection(legality))
+        {
+            fallthrough = ResolveFallthroughContainer(
+                item, legalityDestination, out InventoryContainerPlacementRejection noRoom);
+            if (fallthrough == 0u)
+            {
+                // Nothing in the inventory has room: the notice names the
+                // inventory as a whole, not the pack that was dropped on.
+                if (InventoryContainerPlacementPolicy.ComposeClientLocal(
+                        noRoom,
+                        _objects.Get(item),
+                        _objects.Get(_playerGuid()),
+                        _playerGuid()) is { } fullNotice)
+                {
+                    _itemInteraction?.ReportClientLocal(fullNotice);
+                }
+                return;
+            }
+            legality = InventoryContainerPlacementPolicy.Evaluate(
+                _objects, item, fallthrough, _playerGuid());
+            legalityDestination = fallthrough;
+        }
         if (legality != InventoryContainerPlacementRejection.None)
         {
             if (InventoryContainerPlacementPolicy.ComposeClientLocal(
@@ -768,6 +827,18 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             }
         }
         else return;
+
+        if (fallthrough != 0u)
+        {
+            // The named pack was full; append into the pack that has room
+            // (a pack joins the player's pack list, an item its loose items).
+            container = fallthrough;
+            placement = container != _playerGuid()
+                ? _objects.GetContents(container).Count
+                : sourceIsBag
+                    ? CountBags(container)
+                    : CountLooseContents(container);
+        }
 
         if (container == item) return;                                                         // never into itself
 

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
@@ -1618,7 +1619,7 @@ public class InventoryControllerTests
     }
 
     [Fact]
-    public void OnDragOver_fullSideBag_rejects_butGridAccepts()
+    public void OnDragOver_fullSideBag_acceptsBecauseTheDropFallsThrough_andGridAccepts()
     {
         var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -1627,7 +1628,9 @@ public class InventoryControllerTests
         objects.AddOrUpdate(new ClientObject { ObjectId = 0xFFFFu });
         var ctrl = (IItemListDragHandler)Bind(layout, objects);
 
-        Assert.Equal(ItemDragAcceptance.Reject,
+        // Hover tests legality only; a full bag still accepts because the
+        // drop falls through to a pack with room.
+        Assert.Equal(ItemDragAcceptance.Accept,
             ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xFFFFu)));  // full bag → red
         Assert.Equal(ItemDragAcceptance.Accept,
             ctrl.OnDragOver(grid, grid.GetItem(0)!, Payload(0xFFFFu)));               // grid → green
@@ -1651,7 +1654,9 @@ public class InventoryControllerTests
         var controller = (IItemListDragHandler)Bind(layout, objects);
         UiItemSlot mainPack = top.GetItem(0)!;
 
-        Assert.Equal(ItemDragAcceptance.Reject,
+        // The main pack is full, but the drop still has somewhere to go: the
+        // item's own side bag takes it back, so the hover accepts.
+        Assert.Equal(ItemDragAcceptance.Accept,
             controller.OnDragOver(top, mainPack, Payload(0xB0u)));
 
         Assert.True(objects.Remove(0xA1u));
@@ -1662,7 +1667,7 @@ public class InventoryControllerTests
     }
 
     [Fact]
-    public void GroundPack_rejectsContentsGrid_butEmptyPackSlotAcceptsAndPicksUpAtThatSlot()
+    public void GroundPack_droppedOnTheContentsGrid_fallsThroughToThePackList()
     {
         const uint droppedPack = 0x700000C0u;
         var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
@@ -1716,11 +1721,73 @@ public class InventoryControllerTests
             SourceSlot: 0,
             SourceCell: source);
 
+        // Hover tests legality only, and the drop falls through to the
+        // pack list when the player can carry another container.
         Assert.Equal(
-            ItemDragAcceptance.Reject,
+            ItemDragAcceptance.Accept,
             controller.OnDragOver(grid, grid.GetItem(0)!, payload));
         controller.HandleDropRelease(grid, grid.GetItem(0)!, payload);
-        Assert.Empty(puts);
+
+        Assert.Equal(new[] { (droppedPack, Player, 2) }, puts);
+        Assert.True(interaction.TryGetPendingBackpackPlacement(droppedPack, out var pending));
+        Assert.Equal(Player, pending.ContainerId);
+        Assert.Equal(2, pending.Placement);
+    }
+
+    [Fact]
+    public void GroundPack_emptyPackSlotAcceptsAndPicksUpAtThatSlot()
+    {
+        const uint droppedPack = 0x700000C0u;
+        var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Player,
+            Type = ItemType.Creature,
+            ItemsCapacity = 102,
+            ContainersCapacity = 7,
+        });
+        SeedBag(objects, 0x500000C1u, slot: 0);
+        SeedBag(objects, 0x500000C2u, slot: 1);
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = droppedPack,
+            Name = "Dropped Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 24,
+        });
+        var puts = new List<(uint Item, uint Container, int Placement)>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
+                new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            groundObjectId: () => droppedPack,
+            backpackContainerId: () => Player,
+            placeInBackpack: static (_, _, _) => { });
+        using var controller = InventoryController.Bind(
+            layout,
+            objects,
+            () => Player,
+            iconIds: static (_, _, _, _, _) => 0u,
+            strength: () => 100,
+            selection: new SelectionState(),
+            datFont: null,
+            sendPutItemInContainer: (item, container, placement) =>
+                puts.Add((item, container, placement)),
+            itemInteraction: interaction);
+        var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
+        source.SetItem(droppedPack, 0u);
+        var payload = new ItemDragPayload(
+            droppedPack,
+            ItemDragSource.Ground,
+            SourceSlot: 0,
+            SourceCell: source);
 
         UiItemSlot emptyPackSlot = containers.GetItem(2)!;
         Assert.Equal(0u, emptyPackSlot.ItemId);
@@ -1818,5 +1885,316 @@ public class InventoryControllerTests
                 if (lines.Count > 0) return lines[0].Text;
             }
         return "";
+    }
+
+    // ── OpenAC #5: a press must survive the appraisal-driven rebuild ─────────
+
+    private sealed class ExaminingInventoryFixture : IDisposable
+    {
+        public readonly UiRoot Root = new() { Width = 800, Height = 600 };
+        public readonly UiItemList Grid;
+        public readonly ClientObjectTable Objects = new();
+        public readonly SelectionState Selection = new();
+        public readonly List<uint> Appraisals = [];
+        public readonly ItemInteractionController Interaction;
+        public readonly InventoryController Inventory;
+        public readonly AppraisalUiController Appraisal;
+
+        public ExaminingInventoryFixture()
+        {
+            var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+            // The shared layout stacks every widget at (0,0); move the grid
+            // clear of its front siblings so a press lands on a cell.
+            grid.Left = 100f;
+            grid.Top = 100f;
+            Grid = grid;
+            Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = Player,
+                Type = ItemType.Creature,
+                ItemsCapacity = 102,
+            });
+            SeedContained(Objects, 0xAu, Player, slot: 0);
+            Interaction = new ItemInteractionController(
+                Objects,
+                new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(Objects)),
+                new InteractionState(),
+                playerGuid: () => Player,
+                sendUse: null,
+                sendUseWithTarget: null,
+                sendWield: null,
+                sendDrop: null,
+                sendExamine: Appraisals.Add,
+                nowMs: () => 1_000);
+            Appraisal = AppraisalUiController.Bind(
+                FixtureLoader.LoadExamination(),
+                Objects,
+                Interaction,
+                Selection,
+                new CombatState(),
+                new Spellbook(),
+                () => "Tester",
+                (_, _) => { },
+                _ => { },
+                () => { },
+                () => { })!;
+            Appraisal.OnShown();
+            Inventory = InventoryController.Bind(
+                layout,
+                Objects,
+                () => Player,
+                iconIds: static (_, _, _, _, _) => 0x99u,
+                strength: () => 100,
+                selection: Selection,
+                datFont: null,
+                itemInteraction: Interaction);
+            Root.AddChild(layout.Root);
+        }
+
+        public (int x, int y) CentreOf(UiItemSlot cell)
+        {
+            var sp = cell.ScreenPosition;
+            return ((int)sp.X + 8, (int)sp.Y + 8);
+        }
+
+        public void Dispose()
+        {
+            Appraisal.Dispose();
+            Inventory.Dispose();
+            Interaction.Dispose();
+        }
+    }
+
+    [Fact]
+    public void PressWithExaminationWindowOpen_keepsCaptureAndPromotesToDrag()
+    {
+        using var f = new ExaminingInventoryFixture();
+        UiItemSlot cell = f.Grid.GetItem(0)!;
+        Assert.Equal(0xAu, cell.ItemId);
+        var (x, y) = f.CentreOf(cell);
+
+        Assert.Same(cell, f.Root.Pick(x, y));
+        f.Root.OnMouseDown(UiMouseButton.Left, x, y);
+
+        // The press selected the item and the open window examined it —
+        // the exact chain the reporter had running.
+        Assert.Equal(0xAu, f.Selection.SelectedObjectId);
+        Assert.Equal(new uint[] { 0xAu }, f.Appraisals);
+        Assert.Equal(1, f.Interaction.BusyCount);
+        Assert.Same(cell, f.Grid.GetItem(0));
+        Assert.Same(cell, f.Root.Captured);
+
+        f.Root.OnMouseMove(x + 10, y);
+
+        Assert.Same(cell, f.Root.DragSource);
+        Assert.Equal(0xAu, Assert.IsType<ItemDragPayload>(f.Root.DragPayload).ObjId);
+    }
+
+    [Fact]
+    public void DoubleClickWithExaminationWindowOpen_reachesThePressedSlot()
+    {
+        using var f = new ExaminingInventoryFixture();
+        UiItemSlot cell = f.Grid.GetItem(0)!;
+        int doubleClicks = 0;
+        Action? inner = cell.DoubleClicked;
+        cell.DoubleClicked = () => { doubleClicks++; inner?.Invoke(); };
+        var (x, y) = f.CentreOf(cell);
+
+        f.Root.Tick(0d, 1_000);
+        f.Root.OnMouseDown(UiMouseButton.Left, x, y);
+        f.Root.OnMouseUp(UiMouseButton.Left, x, y);
+        f.Root.Tick(0d, 1_100);
+        f.Root.OnMouseDown(UiMouseButton.Left, x, y);
+        f.Root.OnMouseUp(UiMouseButton.Left, x, y);
+
+        Assert.Same(cell, f.Grid.GetItem(0));
+        Assert.Equal(1, doubleClicks);
+    }
+
+    // ── Pack choice when the named pack is full (the client picks a pack with room) ──
+
+    private static void SeedPlayerAndPacks(ClientObjectTable objects, int mainCapacity)
+    {
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Player,
+            Name = "Tester",
+            Type = ItemType.Creature,
+            ItemsCapacity = mainCapacity,
+            ContainersCapacity = 7,
+        });
+    }
+
+    private static void SeedPack(ClientObjectTable objects, uint guid, int slot, int capacity)
+    {
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = guid,
+            Name = $"Pack {guid:X}",
+            Type = ItemType.Container,
+            ItemsCapacity = capacity,
+        });
+        objects.MoveItem(guid, Player, slot);
+    }
+
+    [Fact]
+    public void Drop_onto_full_main_pack_goes_to_the_first_side_pack_with_room()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 1, capacity: 2);                          // room here
+        SeedPack(objects, 0xD, slot: 2, capacity: 2);
+        SeedContained(objects, 0xB, 0xD, slot: 0, type: ItemType.Misc);        // the dragged item
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            systemMessage: messages.Add,
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot cell = grid.GetItem(0)!;
+
+        Assert.Equal(
+            ItemDragAcceptance.Accept,
+            controller.OnDragOver(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Inventory, 0, cell)));
+        controller.HandleDropRelease(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Inventory, 0, cell));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, 0) }, puts);
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public void Drop_when_every_pack_is_full_reports_the_backpack_full_and_sends_nothing()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 1, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);        // side pack full
+        const uint chest = 0x70000001u;
+        objects.AddOrUpdate(new ClientObject { ObjectId = chest, Type = ItemType.Container, ItemsCapacity = 10 });
+        SeedContained(objects, 0xB, chest, slot: 0, type: ItemType.Misc);      // dragged from a chest
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            groundObjectId: () => chest,
+            systemMessage: messages.Add,
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot cell = grid.GetItem(0)!;
+
+        Assert.Equal(
+            ItemDragAcceptance.Reject,
+            controller.OnDragOver(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Ground, 0, cell)));
+        controller.HandleDropRelease(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Ground, 0, cell));
+
+        Assert.Empty(puts);
+        Assert.Equal(new[] { "Backpack is completely full!" }, messages);
+    }
+
+    [Fact]
+    public void Pickup_with_a_full_main_pack_goes_to_the_first_side_pack_with_room()
+    {
+        var (layout, _, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 1, capacity: 2);
+        const uint chest = 0x70000001u;
+        const uint loot = 0x70000002u;
+        objects.AddOrUpdate(new ClientObject { ObjectId = chest, Type = ItemType.Container, ItemsCapacity = 10 });
+        SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
+        var pickups = new List<(uint item, uint container, int placement)>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            nowMs: () => 1_000,
+            groundObjectId: () => chest,
+            backpackContainerId: () => Player,
+            placeInBackpack: (item, container, placement) =>
+                pickups.Add((item, container, placement)));
+        using var inventory = InventoryController.Bind(
+            layout,
+            objects,
+            () => Player,
+            iconIds: static (_, _, _, _, _) => 0u,
+            strength: () => 100,
+            selection: new SelectionState(),
+            datFont: null,
+            itemInteraction: interaction);
+
+        Assert.True(interaction.ActivateItem(loot));
+
+        Assert.Equal(new[] { (loot, 0xCu, 0) }, pickups);
+    }
+
+    [Fact]
+    public void Pickup_when_every_pack_is_full_reports_the_backpack_full_and_sends_nothing()
+    {
+        var (layout, _, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 1, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);
+        const uint chest = 0x70000001u;
+        const uint loot = 0x70000002u;
+        objects.AddOrUpdate(new ClientObject { ObjectId = chest, Type = ItemType.Container, ItemsCapacity = 10 });
+        SeedContained(objects, loot, chest, slot: 0, type: ItemType.Misc);
+        var pickups = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            nowMs: () => 1_000,
+            groundObjectId: () => chest,
+            backpackContainerId: () => Player,
+            placeInBackpack: (item, container, placement) =>
+                pickups.Add((item, container, placement)),
+            systemMessage: messages.Add);
+        using var inventory = InventoryController.Bind(
+            layout,
+            objects,
+            () => Player,
+            iconIds: static (_, _, _, _, _) => 0u,
+            strength: () => 100,
+            selection: new SelectionState(),
+            datFont: null,
+            itemInteraction: interaction);
+
+        Assert.True(interaction.ActivateItem(loot));
+
+        Assert.Empty(pickups);
+        Assert.Equal(new[] { "Backpack is completely full!" }, messages);
     }
 }

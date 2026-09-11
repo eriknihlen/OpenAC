@@ -818,15 +818,37 @@ public sealed class ItemInteractionController : IDisposable
         return sends && ExecuteUseActions(decision.Actions);
     }
 
+    /// <summary>
+    /// Picks up a world item into the inventory. The pack the request names
+    /// is the one the player has open (or the main pack when asked); when it
+    /// has no room the item goes to the main pack, then to the first side
+    /// pack with room, and when nothing has room the "completely full"
+    /// notice is shown and nothing is sent. The server fills exactly the
+    /// pack it is asked for, so the choice must be made here.
+    /// </summary>
     public bool PlaceWorldItemInBackpack(uint itemGuid, bool mainPack = false)
     {
         if (itemGuid == 0u || _placeInBackpack is null)
             return false;
 
-        uint containerId = mainPack ? _playerGuid() : _backpackContainerId();
-        if (containerId == 0u)
-            containerId = _playerGuid();
+        uint root = _playerGuid();
+        uint target = mainPack ? root : _backpackContainerId();
+        if (target == 0u)
+            target = root;
         const int placement = 0;
+
+        uint containerId = InventoryPlacementSearch.ChooseContainer(
+            _objects, itemGuid, root, target, root,
+            out InventoryContainerPlacementRejection noRoom);
+        if (containerId == 0u)
+        {
+            if (InventoryContainerPlacementPolicy.ComposeClientLocal(
+                    noRoom, _objects.Get(itemGuid), _objects.Get(root), root) is { } fullNotice)
+            {
+                ReportClientLocal(fullNotice);
+            }
+            return true;
+        }
 
         if (TryPlanAutoMerge(itemGuid) is { } merge)
         {

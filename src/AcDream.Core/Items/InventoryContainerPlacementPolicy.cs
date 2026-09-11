@@ -92,9 +92,10 @@ public static class InventoryContainerPlacementPolicy
                 $"The {destinationName} is being traded",
             InventoryContainerPlacementRejection.RecursiveContainment =>
                 "You cannot place an object within itself!",
+            // The player's own inventory is named "Backpack" in the item form.
             InventoryContainerPlacementRejection.ItemCapacityFull =>
                 destination?.ObjectId == playerId
-                    ? $"{destinationName} is completely full!"
+                    ? "Backpack is completely full!"
                     : $"The {destinationName} is completely full!",
             InventoryContainerPlacementRejection.ContainerCapacityFull =>
                 destination?.ObjectId == playerId
