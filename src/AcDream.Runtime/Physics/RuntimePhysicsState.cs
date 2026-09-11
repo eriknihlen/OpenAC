@@ -1823,6 +1823,11 @@ public sealed class RuntimePhysicsState : IDisposable
                 acknowledgement.LandblockId,
                 acknowledgement.Generation,
                 acknowledgement.Ready));
+        // Admission is closed → prefix admissible. Recover any deferred ops
+        // under this landblock whose spawn cell is ready (unbound or stale
+        // Expected) so dormant first-entry does not wait for a later Evaluate.
+        _ = SetPosition.TryRecoverDeferredForLandblock(
+            acknowledgement.LandblockId);
         return new RuntimeCollisionGenerationCommit(
             acknowledgement,
             Array.Empty<uint>(),

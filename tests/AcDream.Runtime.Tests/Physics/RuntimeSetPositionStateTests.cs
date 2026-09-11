@@ -2235,6 +2235,238 @@ public sealed class RuntimeSetPositionStateTests
     }
 
     [Fact]
+    public void CommittedGenerationWithoutExactIndoorCell_RecoversWhenSpawnBecomesReadyWithoutNewAdmission()
+    {
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001134u, 1);
+        _ = AttachBody(lifetime, record, SourceCell);
+        var observer = new PlacementObserver();
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+        RuntimeSetPositionOutcome deferred = lifetime.Physics.SetPosition.Apply(
+            record,
+            record.PositionAuthorityVersion,
+            Command(Request(
+                DestinationIndoorCell,
+                new Vector3(10f, 12f, 7f))));
+        Assert.Equal(RuntimeSetPositionStatus.DeferredCell, deferred.Status);
+        Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(
+            deferred.Projection));
+
+        RuntimeCollisionAdmission missing = lifetime.Physics
+            .BeginCollisionAdmission(DestinationLandblock);
+        using (PreparedLandblockCollisionGeneration prepared =
+               lifetime.Physics.PrepareCollisionGeneration(missing))
+        {
+            lifetime.Physics.StageCollisionAssets(
+                missing,
+                prepared,
+                CollisionAssets(DestinationLandblock));
+            Assert.True(CommitPrepared(
+                lifetime.Physics,
+                missing,
+                prepared).Committed);
+        }
+        Assert.Equal(1, lifetime.Physics.CaptureOwnership()
+            .UnboundDeferredSetPositionCellCount);
+        Assert.Single(observer.Deltas);
+
+        // Spawn EnvCell arrives on the live cache after commit, with no later
+        // collision admission — the login first-entry strand case.
+        Assert.NotNull(engine.DataCache);
+        AddSyntheticCell(engine.DataCache, DestinationIndoorCell);
+        Assert.Equal(
+            1,
+            lifetime.Physics.SetPosition.TryRecoverUnboundDeferredWhenSpawnReady(
+                DestinationIndoorCell));
+
+        RuntimePlacementProjectionSnapshot placed = observer.Deltas[^1].Placement;
+        Assert.Equal(RuntimePlacementProjectionKind.Place, placed.Kind);
+        Assert.Equal(DestinationIndoorCell, placed.Token.ExactCellId);
+        RuntimePhysicsOwnershipSnapshot final = lifetime.Physics.CaptureOwnership();
+        Assert.Equal(0, final.UnboundDeferredSetPositionCellCount);
+        Assert.Equal(0, final.DeferredSetPositionBucketCount);
+    }
+
+    [Fact]
+    public void ParkedOnExpectedAfterAuthority_RecoversWhenSpawnBecomesReadyWithoutNewAdmission()
+    {
+        // Indoor login race: landblock collision already at authority N, then
+        // set-position parks on Expected N+1 because the EnvCell is still
+        // missing. When the EnvCell arrives with no later admission, recover
+        // must rebind onto N — otherwise first-entry stays unpublished forever.
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001135u, 1);
+        _ = AttachBody(lifetime, record, SourceCell);
+        var observer = new PlacementObserver();
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+
+        RuntimeCollisionAdmission prior = lifetime.Physics
+            .BeginCollisionAdmission(DestinationLandblock);
+        using (PreparedLandblockCollisionGeneration prepared =
+               lifetime.Physics.PrepareCollisionGeneration(prior))
+        {
+            lifetime.Physics.StageCollisionAssets(
+                prior,
+                prepared,
+                CollisionAssets(DestinationLandblock));
+            Assert.True(CommitPrepared(
+                lifetime.Physics,
+                prior,
+                prepared).Committed);
+        }
+        Assert.Equal(
+            1UL,
+            lifetime.Physics.CollisionGenerationAuthority(DestinationIndoorCell));
+        Assert.Equal(
+            2UL,
+            lifetime.Physics.ExpectedCollisionGeneration(DestinationIndoorCell));
+
+        RuntimeSetPositionOutcome deferred = lifetime.Physics.SetPosition.Apply(
+            record,
+            record.PositionAuthorityVersion,
+            Command(Request(
+                DestinationIndoorCell,
+                new Vector3(10f, 12f, 7f))));
+        Assert.Equal(RuntimeSetPositionStatus.DeferredCell, deferred.Status);
+        Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(
+            deferred.Projection));
+        Assert.Equal(1, lifetime.Physics.CaptureOwnership()
+            .DeferredSetPositionBucketCount);
+        Assert.Equal(0, lifetime.Physics.CaptureOwnership()
+            .UnboundDeferredSetPositionCellCount);
+        Assert.Single(observer.Deltas);
+
+        Assert.NotNull(engine.DataCache);
+        AddSyntheticCell(engine.DataCache, DestinationIndoorCell);
+        Assert.Equal(
+            1,
+            lifetime.Physics.SetPosition.TryRecoverUnboundDeferredWhenSpawnReady(
+                DestinationIndoorCell));
+
+        RuntimePlacementProjectionSnapshot placed = observer.Deltas[^1].Placement;
+        Assert.Equal(RuntimePlacementProjectionKind.Place, placed.Kind);
+        Assert.Equal(DestinationIndoorCell, placed.Token.ExactCellId);
+        RuntimePhysicsOwnershipSnapshot final = lifetime.Physics.CaptureOwnership();
+        Assert.Equal(0, final.UnboundDeferredSetPositionCellCount);
+        Assert.Equal(0, final.DeferredSetPositionBucketCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SpawnReadyRecoveryRetainsOrderedSurvivorsWhenObserverStartsAdmission(bool unbound)
+    {
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeEntityRecord[] records = Enumerable.Range(0, 3)
+            .Select(index => CreateRecord(lifetime, 0x70001140u + (uint)index, 1))
+            .ToArray();
+        RuntimeCollisionAdmission? replacement = null;
+        var placed = new List<RuntimeEntityKey>();
+        var observer = new PlacementObserver(delta =>
+        {
+            if (delta.Placement.Kind != RuntimePlacementProjectionKind.Place)
+                return;
+            placed.Add(delta.Placement.Token.Entity);
+            Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(
+                delta.Placement.Token));
+            if (replacement is null)
+                replacement = lifetime.Physics.BeginCollisionAdmission(DestinationLandblock);
+        });
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+
+        void CommitMissingCell()
+        {
+            RuntimeCollisionAdmission admission = lifetime.Physics
+                .BeginCollisionAdmission(DestinationLandblock);
+            using PreparedLandblockCollisionGeneration prepared = lifetime.Physics
+                .PrepareCollisionGeneration(admission);
+            lifetime.Physics.StageCollisionAssets(
+                admission, prepared, CollisionAssets(DestinationLandblock));
+            Assert.True(CommitPrepared(lifetime.Physics, admission, prepared).Committed);
+        }
+
+        if (!unbound)
+            CommitMissingCell();
+        foreach (RuntimeEntityRecord record in records)
+        {
+            _ = AttachBody(lifetime, record, SourceCell);
+            RuntimeSetPositionOutcome deferred = lifetime.Physics.SetPosition.Apply(
+                record,
+                record.PositionAuthorityVersion,
+                Command(Request(DestinationIndoorCell, new Vector3(10f, 12f, 7f))));
+            Assert.Equal(RuntimeSetPositionStatus.DeferredCell, deferred.Status);
+            Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(deferred.Projection));
+        }
+        if (unbound)
+            CommitMissingCell();
+        Assert.Equal(unbound ? 1 : 0, lifetime.Physics.CaptureOwnership()
+            .UnboundDeferredSetPositionCellCount);
+
+        AddSyntheticCell(engine.DataCache!, DestinationIndoorCell);
+        Assert.Equal(3, lifetime.Physics.SetPosition
+            .TryRecoverUnboundDeferredWhenSpawnReady(DestinationIndoorCell));
+        Assert.NotNull(replacement);
+        Assert.Equal(new[] { records[0].Key!.Value }, placed);
+        Assert.True(lifetime.Physics.SetPosition.IsDeferred(records[1]));
+        Assert.True(lifetime.Physics.SetPosition.IsDeferred(records[2]));
+        Assert.Equal(1, lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+        Assert.Equal(0, lifetime.Physics.CaptureOwnership().UnboundDeferredSetPositionCellCount);
+        Assert.Equal(0, lifetime.Physics.SetPosition
+            .TryRecoverUnboundDeferredWhenSpawnReady(DestinationIndoorCell));
+
+        using PreparedLandblockCollisionGeneration ready = lifetime.Physics
+            .PrepareCollisionGeneration(replacement);
+        lifetime.Physics.StageCollisionAssets(
+            replacement, ready, CollisionAssets(DestinationLandblock));
+        AddSyntheticCell(ready.DataCache, DestinationIndoorCell);
+        Assert.True(CommitPrepared(lifetime.Physics, replacement, ready).Committed);
+        Assert.Equal(
+            new[] { records[1].Key!.Value, records[2].Key!.Value },
+            placed.Where(key => key != records[0].Key));
+        Assert.All(records, record => Assert.False(lifetime.Physics.SetPosition.IsDeferred(record)));
+        Assert.Equal(0, lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+        Assert.Equal(0, lifetime.Physics.CaptureOwnership().UnboundDeferredSetPositionCellCount);
+    }
+
+    [Fact]
+    public void SpawnReadyRecoveryKeepsUnacknowledgedWithdrawalIndexed()
+    {
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeCollisionAdmission admission = lifetime.Physics
+            .BeginCollisionAdmission(DestinationLandblock);
+        using (PreparedLandblockCollisionGeneration prepared = lifetime.Physics
+               .PrepareCollisionGeneration(admission))
+        {
+            lifetime.Physics.StageCollisionAssets(
+                admission, prepared, CollisionAssets(DestinationLandblock));
+            Assert.True(CommitPrepared(lifetime.Physics, admission, prepared).Committed);
+        }
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001144u, 1);
+        _ = AttachBody(lifetime, record, SourceCell);
+        var observer = new PlacementObserver();
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+        RuntimeSetPositionOutcome deferred = lifetime.Physics.SetPosition.Apply(
+            record, record.PositionAuthorityVersion,
+            Command(Request(DestinationIndoorCell, new Vector3(10f, 12f, 7f))));
+        Assert.Equal(RuntimeSetPositionStatus.DeferredCell, deferred.Status);
+        AddSyntheticCell(engine.DataCache!, DestinationIndoorCell);
+        Assert.Equal(1, lifetime.Physics.SetPosition
+            .TryRecoverUnboundDeferredWhenSpawnReady(DestinationIndoorCell));
+        Assert.Single(observer.Deltas);
+        Assert.True(lifetime.Physics.SetPosition.IsDeferred(record));
+        Assert.Equal(1, lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+
+        Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(deferred.Projection));
+        Assert.Equal(RuntimePlacementProjectionKind.Place, observer.Deltas[^1].Placement.Kind);
+        Assert.False(lifetime.Physics.SetPosition.IsDeferred(record));
+        Assert.Equal(0, lifetime.Physics.CaptureOwnership().DeferredSetPositionBucketCount);
+    }
+
+    [Fact]
     public void CollisionAdmissionSupersessionAndInvalidationPreserveDeferredSurvivorOrder()
     {
         PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
