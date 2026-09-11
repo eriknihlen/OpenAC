@@ -35,18 +35,35 @@ internal static class RuntimeRemoteSteadyStatePosition
             Disposition: RuntimeAuthoritativePositionDisposition.Interpolate,
         };
 
+    /// <summary>
+    /// True when <see cref="ApplyInterpolate"/> would move the body straight
+    /// to the wire position rather than queue it: the first sample, a body
+    /// that will not be ticked, or a body too far from the target.
+    /// </summary>
+    internal static bool WouldSnap(
+        RemoteMotion remote,
+        Vector3 worldPosition,
+        bool willBeDrTicked)
+    {
+        ArgumentNullException.ThrowIfNull(remote);
+        bool firstUp = remote.LastServerPosTime <= 0.0;
+        float bodyToTarget = Vector3.Distance(remote.Body.Position, worldPosition);
+        return firstUp || !willBeDrTicked || bodyToTarget > BodySnapThreshold;
+    }
+
     internal static Action ApplyInterpolate(
         RemoteMotion remote,
         Vector3 worldPosition,
         Quaternion orientation,
         bool isMovingTo,
-        bool willBeDrTicked)
+        bool willBeDrTicked,
+        uint targetCellId = 0u)
     {
         ArgumentNullException.ThrowIfNull(remote);
 
         bool firstUp = remote.LastServerPosTime <= 0.0;
         float bodyToTarget = Vector3.Distance(remote.Body.Position, worldPosition);
-        if (firstUp || !willBeDrTicked || bodyToTarget > BodySnapThreshold)
+        if (WouldSnap(remote, worldPosition, willBeDrTicked))
         {
             if (AcDream.Core.Physics.PhysicsDiagnostics.ShouldLogRemoteSlide(
                     AcDream.Core.Physics.PhysicsDiagnostics.RemoteSlideAttributionGuid))
@@ -76,7 +93,9 @@ internal static class RuntimeRemoteSteadyStatePosition
             orientation,
             isMovingTo,
             remote.Body.Position,
-            remote.Body.Orientation);
+            remote.Body.Orientation,
+            targetCellId,
+            (remote.CellId & 0xFFFFu) >= 0x100u ? 20f : 100f);
         if (immediate is { } close)
             remote.Body.Orientation = close;
         if (AcDream.Core.Physics.PhysicsDiagnostics.ShouldLogRemoteSlide(

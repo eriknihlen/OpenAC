@@ -660,7 +660,8 @@ internal sealed class LiveEntityNetworkUpdateController
 
     internal readonly record struct RemoteContactRouting(
         RemoteContactArm Arm,
-        RuntimeRemotePlacementExecutionStatus? Placement);
+        RuntimeRemotePlacementExecutionStatus? Placement,
+        RuntimeRemoteSteadyStatePosition.Action? Interpolation = null);
 
     internal static RemoteContactRouting ApplyRemoteContactRouting(
         RuntimeRemotePlacementDriveController placementDrive,
@@ -721,14 +722,16 @@ internal sealed class LiveEntityNetworkUpdateController
                         route!.Value));
 
             case RuntimeRemoteAcceptedPositionArm.NearInterpolate:
-                RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
-                    remote,
-                    worldPos,
-                    rotation,
-                    isMovingTo: remote.Movement.IsMovingTo(),
-                    willBeDrTicked);
                 return new RemoteContactRouting(
-                    RemoteContactArm.SteadyStateInterpolate, Placement: null);
+                    RemoteContactArm.SteadyStateInterpolate,
+                    Placement: null,
+                    Interpolation: RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
+                        remote,
+                        worldPos,
+                        rotation,
+                        isMovingTo: remote.Movement.IsMovingTo(),
+                        willBeDrTicked,
+                        (canonical.Snapshot.Physics?.Position ?? canonical.Snapshot.Position)?.LandblockId ?? 0u));
 
             case RuntimeRemoteAcceptedPositionArm.AirborneNoOperation:
                 throw new InvalidOperationException(
@@ -738,14 +741,16 @@ internal sealed class LiveEntityNetworkUpdateController
                     + "at all on that branch.");
 
             default:
-                RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
-                    remote,
-                    worldPos,
-                    rotation,
-                    isMovingTo: remote.Movement.IsMovingTo(),
-                    willBeDrTicked);
                 return new RemoteContactRouting(
-                    RemoteContactArm.UnroutedCatchUp, Placement: null);
+                    RemoteContactArm.UnroutedCatchUp,
+                    Placement: null,
+                    Interpolation: RuntimeRemoteSteadyStatePosition.ApplyInterpolate(
+                        remote,
+                        worldPos,
+                        rotation,
+                        isMovingTo: remote.Movement.IsMovingTo(),
+                        willBeDrTicked,
+                        (canonical.Snapshot.Physics?.Position ?? canonical.Snapshot.Position)?.LandblockId ?? 0u));
         }
     }
 
@@ -821,13 +826,56 @@ internal sealed class LiveEntityNetworkUpdateController
         RemoteMotion remote,
         RemoteContactArm arm,
         uint wireCellId)
+        => TryAdoptWireCellAfterRouting(
+            remote,
+            new RemoteContactRouting(arm, Placement: null),
+            wireCellId);
+
+    /// <summary>
+    /// Adopts the wire cell as the body's cell only when the routing moved
+    /// the body to the wire pose. Placements own their own cell commit, and
+    /// a queued interpolation changes nothing physical yet: the body keeps
+    /// its committed cell until its own sweeps carry it across.
+    /// </summary>
+    internal static bool TryAdoptWireCellAfterRouting(
+        RemoteMotion remote,
+        RemoteContactRouting routing,
+        uint wireCellId)
     {
         ArgumentNullException.ThrowIfNull(remote);
-        if (arm is RemoteContactArm.FarSnapPlacement
+        if (routing.Arm is RemoteContactArm.FarSnapPlacement
             or RemoteContactArm.TeleportPlacement)
+            return false;
+        if (routing.Interpolation is RuntimeRemoteSteadyStatePosition.Action.Enqueued)
             return false;
         remote.CellId = wireCellId;
         return true;
+    }
+
+    /// <summary>
+    /// True when the accepted position will only be queued for interpolation
+    /// (no teleport or far placement, a grounded body, and a target within
+    /// the snap threshold of a ticked body), so the committed cell must not
+    /// be replaced by the wire cell before or after routing.
+    /// </summary>
+    private bool WillOnlyQueueInterpolation(
+        uint guid,
+        RuntimeAuthoritativePositionRoute? route,
+        System.Numerics.Vector3 worldPos)
+    {
+        if (RuntimeRemoteTeleportPosition.OwnsTeleportPlacement(route))
+            return false;
+        if (!_liveEntities!.TryGetRemoteMotionRuntime(guid, out IRuntimeRemoteMotion? runtime)
+            || runtime is not RemoteMotion remote)
+            return false;
+        if (!remote.Body.InContact)
+            return false;
+        RuntimeRemoteAcceptedPositionArm arm = RuntimeRemoteFarSnapPosition.ResolveArm(route);
+        if (arm is RuntimeRemoteAcceptedPositionArm.FarSnapPlacement
+            or RuntimeRemoteAcceptedPositionArm.AirborneNoOperation)
+            return false;
+        return !RuntimeRemoteSteadyStatePosition.WouldSnap(
+            remote, worldPos, WillAdvanceRemoteMotion(guid, remote));
     }
 
     private static RuntimeRemoteAcceptedPositionArm ToConstraintArm(
@@ -1244,8 +1292,11 @@ internal sealed class LiveEntityNetworkUpdateController
             worldPos,
             p.LandblockId,
             rot);
-        if (!_liveEntities!.RebucketLiveEntity(update.Guid, p.LandblockId)
-            || !_liveEntities.TryGetRecord(
+        bool queuedInterpolationOnly = WillOnlyQueueInterpolation(
+            update.Guid, earlyRemoteRoute, worldPos);
+        if ((!queuedInterpolationOnly
+                && !_liveEntities!.RebucketLiveEntity(update.Guid, p.LandblockId))
+            || !_liveEntities!.TryGetRecord(
                 update.Guid,
                 out LiveEntityRecord afterRebucket)
             || !ReferenceEquals(afterRebucket, positionRecord)
@@ -1444,7 +1495,7 @@ internal sealed class LiveEntityNetworkUpdateController
             RuntimeRemoteSteadyStatePosition.TryArmConstraintAfterOperation(
                 ToConstraintArm(arm), rmState);
 
-            TryAdoptWireCellAfterRouting(rmState, arm, p.LandblockId);
+            TryAdoptWireCellAfterRouting(rmState, routing.Value, p.LandblockId);
 
             rmState.LastServerPos = worldPos;
             rmState.LastServerPosTime = nowSec;

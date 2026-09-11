@@ -301,6 +301,42 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
         Assert.Equal(fixture.Remote.Body.Position, fixture.Entity.Position);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NearInterpolate_DifferentWireCellPreservesCommittedBodyCell(bool firstUpdate)
+    {
+        using var fixture = new Fixture(CreatureGuid);
+        EntityPhysicsHost host = fixture.InstallHost();
+        const uint committedCell = SourceLandblock | 0x01E4u;
+        const uint wireCell = SourceLandblock | 0x01E5u;
+        var committedPose = new Vector3(2f, 2f, SpawnHeight);
+        var target = new Vector3(4f, 3f, SpawnHeight);
+        fixture.Remote.Body.TransientState = TransientStateFlags.Active
+            | TransientStateFlags.Contact;
+        fixture.Remote.Body.Position = committedPose;
+        fixture.Remote.CellId = committedCell;
+        Assert.True(fixture.Runtime.RebucketLiveEntity(CreatureGuid, committedCell));
+        fixture.Remote.LastServerPos = committedPose;
+        fixture.Remote.LastServerPosTime = firstUpdate ? 0d
+            : (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds - 0.15;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            target, wireCell, teleportSequence: 1,
+            guid: CreatureGuid, isGrounded: true));
+
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        Assert.Equal(wireCell, canonical.Snapshot.Position!.Value.LandblockId);
+        Assert.Equal(firstUpdate ? target : committedPose, fixture.Remote.Body.Position);
+        Assert.Equal(!firstUpdate, fixture.Remote.Interp.IsActive);
+        uint expectedCell = firstUpdate ? wireCell : committedCell;
+        Assert.Equal(expectedCell, fixture.Remote.CellId);
+        Assert.Equal(expectedCell, canonical.FullCellId);
+        Assert.Equal(expectedCell, fixture.Entity.ParentCellId);
+        Assert.Equal(expectedCell, host.Position.ObjCellId);
+        Assert.Equal(fixture.Remote.Body.Position, fixture.Entity.Position);
+    }
     // ── Scenario 6: far snap ─────────────────────────────────────────────
 
     [Theory]

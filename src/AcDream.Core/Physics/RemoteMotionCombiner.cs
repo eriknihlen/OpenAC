@@ -13,7 +13,8 @@ public sealed class RemoteMotionCombiner
         InterpolationManager interp,
         float maxSpeed,
         MotionDeltaFrame output,
-        bool inContact = true)
+        bool inContact = true,
+        bool isSticky = false)
     {
         ArgumentNullException.ThrowIfNull(rootMotionLocalFrame);
         ArgumentNullException.ThrowIfNull(interp);
@@ -27,7 +28,8 @@ public sealed class RemoteMotionCombiner
             ori,
             maxSpeed,
             output,
-            inContact);
+            inContact,
+            isSticky);
 
         return interpolationOverwrote;
     }

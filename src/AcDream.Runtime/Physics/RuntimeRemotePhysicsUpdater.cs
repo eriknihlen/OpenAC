@@ -19,6 +19,106 @@ internal sealed class RuntimeRemotePhysicsUpdater
         _physics = physics ?? throw new ArgumentNullException(nameof(physics));
     }
 
+    internal void AdvanceInterpolationRecovery(
+        RuntimeEntityRecord record, RemoteMotion remote,
+        System.Collections.Immutable.ImmutableArray<AcDream.Core.Physics.FlatCollisionSphere> spheres,
+        float scale, float stepUpHeight, float stepDownHeight,
+        AcDream.Core.Physics.ObjectInfoState moverFlags,
+        float radius = 0.48f, float height = 1.835f)
+    {
+        bool OwnsBody() => _physics.Entities.IsCurrent(record)
+            && ReferenceEquals(record.RemoteMotion, remote)
+            && ReferenceEquals(record.PhysicsBody, remote.Body);
+        if (!OwnsBody())
+            return;
+        RuntimeSetPositionState placement = _physics.SetPosition;
+        bool hasTarget = remote.Interp.TryGetRecoveryTarget(out var target);
+        RuntimeEntityPlacementToken pending = remote.InterpolationRecoveryPlacement;
+        if (pending.IsValid)
+        {
+            if (hasTarget && target == remote.InterpolationRecoveryTarget)
+            {
+                if (placement.TryPeekAcknowledgedPlacement(pending, out var projection))
+                {
+                    placement.ConsumeAcknowledgedPlacement(pending, projection);
+                    placement.ForgetPlacementCompletion(pending);
+                    remote.InterpolationRecoveryPlacement = default;
+                    remote.Interp.CompleteRecovery(target);
+                    return;
+                }
+                if (placement.IsPlacementCurrent(pending))
+                    return;
+            }
+            CancelInterpolationRecovery(remote);
+            if (!OwnsBody())
+                return;
+            hasTarget = remote.Interp.TryGetRecoveryTarget(out target);
+        }
+        if (!hasTarget || target.CellId == 0u
+            || !_physics.TryGetWorldFrameOffset(target.CellId, out float offsetX, out float offsetY))
+        {
+            return;
+        }
+        if (spheres.IsDefaultOrEmpty)
+        {
+            if (radius < 0.05f)
+            {
+                radius = 0.48f;
+                height = 1.835f;
+            }
+            spheres = height > 0f
+                ? [new(new(0f, 0f, radius), radius),
+                   new(new(0f, 0f, height - radius), radius)]
+                : [new(new(0f, 0f, radius), radius)];
+            scale = 1f;
+        }
+        RuntimeEntityPlacementToken token = placement.TryBeginExclusivePlacement(
+            record, record.PositionAuthorityVersion, RuntimeSetPositionOperationKind.RemoteAuthoritative);
+        if (!token.IsValid)
+            return;
+        remote.InterpolationRecoveryPlacement = token;
+        remote.InterpolationRecoveryTarget = target;
+        placement.WatchPlacementCompletion(token);
+        var request = new AcDream.Core.Physics.PhysicsSetPositionRequest(
+            target.Position, target.Orientation, target.CellId,
+            target.Position - new System.Numerics.Vector3(offsetX, offsetY, 0f),
+            spheres, scale, stepUpHeight, stepDownHeight,
+            MoverFlags: moverFlags,
+            Flags: AcDream.Core.Physics.PhysicsSetPositionFlags.Teleport
+                | AcDream.Core.Physics.PhysicsSetPositionFlags.Slide
+                | AcDream.Core.Physics.PhysicsSetPositionFlags.SendPositionEvent);
+        var command = new RuntimeSetPositionCommand(request,
+            RuntimeSetPositionOperationKind.RemoteAuthoritative,
+            _physics.PlacementSimulationTime(remote.Body.LastUpdateTime),
+            record.VelocityAuthorityVersion, offsetX, offsetY);
+        RuntimeSetPositionOutcome outcome = placement.SubmitPreparedPlacement(token, command);
+        if (!OwnsBody() || remote.InterpolationRecoveryPlacement != token)
+            return;
+        if (outcome.Error == AcDream.Core.Physics.PhysicsSetPositionError.Ok
+            && outcome.Residence == AcDream.Core.Physics.PhysicsResidenceDisposition.Committed
+            && placement.IsPlacementCompletionTracked(token))
+        {
+            placement.ForgetPlacementCompletion(token);
+            remote.InterpolationRecoveryPlacement = default;
+            remote.Interp.CompleteRecovery(target);
+        }
+        else if (outcome.Status != RuntimeSetPositionStatus.DeferredCell)
+        {
+            CancelInterpolationRecovery(remote);
+        }
+    }
+
+    private void CancelInterpolationRecovery(RemoteMotion remote)
+    {
+        RuntimeEntityPlacementToken token = remote.InterpolationRecoveryPlacement;
+        remote.InterpolationRecoveryPlacement = default;
+        _physics.SetPosition.ForgetPlacementCompletion(token);
+        RuntimePlacementCancellationReceipt cancellation = _physics.SetPosition
+            .ForgetExactPlacement(token, restoreCancelledPark: true);
+        if (cancellation.IsValid)
+            _physics.SetPosition.PublishCancellation(cancellation);
+    }
+
     private static bool IsPlayerGuid(uint guid) => (guid & 0xFF000000u) == 0x50000000u;
 
 
@@ -119,7 +219,8 @@ internal sealed class RuntimeRemotePhysicsUpdater
                     rm.Interp,
                     maxSpeedNpc,
                     pmDelta,
-                    inContact: rm.Body.InContact);
+                    inContact: rm.Body.InContact,
+                    isSticky: (rm.Host?.PositionManager.GetStickyObjectId() ?? 0u) != 0u);
                 npcHost.PositionManager.AdjustOffset(pmDelta, dt);
                 rm.Body.IsFullyConstrained = npcHost.PositionManager.IsFullyConstrained();
                 ApplyPositionManagerDelta(rm.Body, pmDelta);
@@ -139,7 +240,8 @@ internal sealed class RuntimeRemotePhysicsUpdater
                     rm.Interp,
                     maxSpeedNpc,
                     pmDelta,
-                    inContact: rm.Body.InContact);
+                    inContact: rm.Body.InContact,
+                    isSticky: (rm.Host?.PositionManager.GetStickyObjectId() ?? 0u) != 0u);
                 ApplyPositionManagerDelta(rm.Body, pmDelta);
             }
             rm.Body.calc_acceleration();
@@ -375,7 +477,17 @@ internal sealed class RuntimeRemotePhysicsUpdater
             rm.Host?.TargetManager,
             rm.Movement,
             sequencer?.Manager,
-            rm.Host?.PositionManager);
+            position: null);
+        if (IsCurrentOwner(record, rm, objectClockEpoch, externalOwnerValid))
+        {
+            AdvanceInterpolationRecovery(record, rm, sphereList, sphereScale,
+                stepUpHeight, stepDownHeight,
+                (IsPlayerGuid(record.ServerGuid)
+                    ? AcDream.Core.Physics.ObjectInfoState.IsPlayer | AcDream.Core.Physics.ObjectInfoState.EdgeSlide
+                    : AcDream.Core.Physics.ObjectInfoState.EdgeSlide) | moverPvpState, radius, height);
+        }
+        if (IsCurrentOwner(record, rm, objectClockEpoch, externalOwnerValid))
+            rm.Host?.PositionManager.UseTime();
         return IsCurrentOwner(
             record,
             rm,
@@ -436,7 +548,8 @@ internal sealed class RuntimeRemotePhysicsUpdater
             rm.Interp,
             rm.Motion.GetAdjustedMaxSpeed(),
             positionDelta,
-            inContact: rm.Body.InContact);
+            inContact: rm.Body.InContact,
+                    isSticky: (rm.Host?.PositionManager.GetStickyObjectId() ?? 0u) != 0u);
         rm.Host?.PositionManager.AdjustOffset(positionDelta, dt);
         if (rm.Host is { } hiddenHost)
             rm.Body.IsFullyConstrained = hiddenHost.PositionManager.IsFullyConstrained();
@@ -537,7 +650,17 @@ internal sealed class RuntimeRemotePhysicsUpdater
             rm.Host?.TargetManager,
             rm.Movement,
             partArrayHandleMovement,
-            rm.Host?.PositionManager);
+            position: null);
+        if (IsCurrentOwner(record, rm, objectClockEpoch, externalOwnerValid))
+        {
+            AdvanceInterpolationRecovery(record, rm, sphereList, sphereScale,
+                stepUpHeight, stepDownHeight,
+                (IsPlayerGuid(record.ServerGuid)
+                    ? AcDream.Core.Physics.ObjectInfoState.IsPlayer | AcDream.Core.Physics.ObjectInfoState.EdgeSlide
+                    : AcDream.Core.Physics.ObjectInfoState.EdgeSlide) | moverPvpState, radius, height);
+        }
+        if (IsCurrentOwner(record, rm, objectClockEpoch, externalOwnerValid))
+            rm.Host?.PositionManager.UseTime();
         return IsCurrentOwner(
             record,
             rm,

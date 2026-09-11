@@ -1149,6 +1149,22 @@ internal sealed class RuntimeSetPositionState : IDisposable
             restoreCancelledPark: restoreCancelledPark);
     }
 
+    internal RuntimeEntityPlacementToken TryBeginExclusivePlacement(
+        RuntimeEntityRecord record,
+        ulong expectedPositionAuthorityVersion,
+        RuntimeSetPositionOperationKind kind)
+    {
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.Key is not { } key
+            || _operations.ContainsKey(key)
+            || HasRetainedCompletion(key))
+        {
+            return default;
+        }
+        return BeginAcceptedPlacementCore(record, expectedPositionAuthorityVersion,
+            kind, default, captureMoverPreparationAuthority: false);
+    }
     internal RuntimeEntityPlacementToken TryBeginExclusiveAuthoredPlacement(
         RuntimeEntityRecord record,
         ulong expectedPositionAuthorityVersion,

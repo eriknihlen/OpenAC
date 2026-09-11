@@ -24,6 +24,204 @@ public sealed class RuntimeSetPositionStateTests
     private const uint DestinationIndoorCell = DestinationLandblock | 0x0100u;
 
     [Fact]
+    public void InterpolationRecoveryRetainsTargetWhenDestinationIsSolid()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime(FlatEngine(SourceLandblock, 0f));
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001F05u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell, PhysicsStateFlags.None);
+        Vector3 start = new(1f, 20f, 7f);
+        body.SnapToCell(SourceCell, start, start);
+        var remote = new RemoteMotion(body);
+        lifetime.Physics.SetRemoteMotion(record, remote);
+        lifetime.Physics.ObserveLocalWorldFrame(SourceCell, false);
+        lifetime.Physics.Engine.ShadowObjects.Register(
+            0x8601u, 0u, new Vector3(12.1f, 20f, 7f), Quaternion.Identity,
+            10f, 0f, 0f, SourceLandblock, ShadowCollisionType.Cylinder,
+            cylHeight: 10f, state: (uint)PhysicsStateFlags.Static, seedCellId: SourceCell);
+        Vector3 target = new(12.1f, 20f, 7f);
+        remote.Interp.Enqueue(target, Quaternion.Identity, false,
+            body.Position, body.Orientation, targetCellId: SourceCell, autonomyBlipDistance: 1f);
+        var updater = new RuntimeRemotePhysicsUpdater(lifetime.Physics);
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            updater.AdvanceInterpolationRecovery(record, remote, [], 1f,
+                0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+            Assert.Equal(start, body.Position);
+            Assert.True(remote.Interp.TryGetRecoveryTarget(out var pending));
+            Assert.Equal(target, pending.Position);
+            Assert.False(remote.InterpolationRecoveryPlacement.IsValid);
+        }
+    }
+
+    [Fact]
+    public void InterpolationRecoveryPlacesAcrossBlockingWallAndAdjustsNearObstruction()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime(FlatEngine(SourceLandblock, 0f));
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001F04u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell, PhysicsStateFlags.None);
+        var remote = new RemoteMotion(body);
+        lifetime.Physics.SetRemoteMotion(record, remote);
+        lifetime.Physics.ObserveLocalWorldFrame(SourceCell, false);
+        AddInterpolationWall(lifetime.Physics.Engine, lifetime.Physics.DataCache);
+        Vector3 start = body.Position;
+        Vector3 target = new(15f, 20f, 7f);
+        ResolveResult sweep = lifetime.Physics.Engine.ResolveWithTransition(
+            start, target, SourceCell, 0.48f, 1.835f, 0.4f, 0.4f,
+            isOnGround: false, movingEntityId: record.LocalEntityId!.Value);
+        Assert.True(sweep.Position.X < 12f, $"Wall did not block sweep: {sweep.Position}");
+        remote.Interp.Enqueue(target, Quaternion.Identity, false,
+            body.Position, body.Orientation, targetCellId: SourceCell, autonomyBlipDistance: 1f);
+        var updater = new RuntimeRemotePhysicsUpdater(lifetime.Physics);
+
+        updater.Tick(record, remote, 1f, null, 0.01f, record.ObjectClockEpoch,
+            new MotionDeltaFrame(), 0.48f, 1.835f, 0, 0);
+
+        Assert.Equal(target, body.Position);
+        Assert.False(remote.Interp.IsActive);
+        Assert.True(lifetime.Physics.SetPosition.TryGetPreparedMoverSphereCount(record, out int sphereCount));
+        Assert.Equal(2, sphereCount);
+        while (lifetime.Physics.SetPosition.TryPeekProjection(out var projection))
+            lifetime.Physics.SetPosition.AcknowledgeProjection(projection.Token);
+
+        Vector3 penetrating = new(12.1f, 20f, 7f);
+        remote.Interp.Enqueue(penetrating, Quaternion.Identity, false,
+            body.Position, body.Orientation, targetCellId: SourceCell, autonomyBlipDistance: 1f);
+        updater.AdvanceInterpolationRecovery(record, remote, [], 1f, 0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+        Assert.False(remote.Interp.IsActive);
+        Assert.NotEqual(target, body.Position);
+        Assert.InRange(Vector3.Distance(penetrating, body.Position), 0.01f, 0.7f);
+        Assert.True(MathF.Abs(body.Position.X - 12f) >= 0.479f,
+            $"Recovery sphere still overlaps wall: {body.Position}");
+        Assert.False(remote.InterpolationRecoveryPlacement.IsValid);
+    }
+
+    private static void AddInterpolationWall(PhysicsEngine engine, PhysicsDataCache cache)
+    {
+        const uint gfxId = 0x0100F0A1u;
+        var polygon = new ResolvedPolygon
+        {
+            Vertices = [new(0f, -5f, -5f), new(0f, -5f, 5f),
+                        new(0f, 5f, 5f), new(0f, 5f, -5f)],
+            Plane = new Plane(-Vector3.UnitX, 0f),
+            NumPoints = 4,
+            SidesType = CullMode.None,
+        };
+        var leaf = new PhysicsBSPNode
+        {
+            Type = BSPNodeType.Leaf,
+            BoundingSphere = new Sphere { Origin = Vector3.Zero, Radius = 8f },
+        };
+        leaf.Polygons.Add(0);
+        cache.RegisterGfxObjForTest(gfxId, new GfxObjPhysics
+        {
+            BSP = new PhysicsBSPTree { Root = leaf },
+            PhysicsPolygons = new Dictionary<ushort, Polygon>(),
+            Vertices = new VertexArray(),
+            Resolved = new Dictionary<ushort, ResolvedPolygon> { [0] = polygon },
+            BoundingSphere = new Sphere { Origin = Vector3.Zero, Radius = 8f },
+        });
+        engine.ShadowObjects.Register(0x8600u, gfxId, new Vector3(12f, 20f, 7f),
+            Quaternion.Identity, 8f, 0f, 0f, SourceLandblock, ShadowCollisionType.BSP,
+            state: (uint)(PhysicsStateFlags.Static | PhysicsStateFlags.HasPhysicsBsp), isStatic: true);
+    }
+
+    [Fact]
+    public void InterpolationRecoveryDoesNotClearCorrectionEnqueuedByPlacementCallback()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime(FlatEngine(SourceLandblock, 0f));
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001F03u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell, PhysicsStateFlags.None);
+        var remote = new RemoteMotion(body);
+        lifetime.Physics.SetRemoteMotion(record, remote);
+        lifetime.Physics.ObserveLocalWorldFrame(SourceCell, false);
+        Vector3 first = new(130f, 20f, 7f);
+        uint firstCell = TerrainSurface.ComputeOutdoorCellId(SourceLandblock, first.X, first.Y);
+        Vector3 next = new(205f, 20f, 7f);
+        remote.Interp.Enqueue(first, Quaternion.Identity, false,
+            body.Position, body.Orientation, targetCellId: firstCell);
+        var observer = new PlacementObserver(delta =>
+        {
+            if (delta.Placement.Kind == RuntimePlacementProjectionKind.Place)
+                remote.Interp.Enqueue(next, Quaternion.Identity, false,
+                    body.Position, body.Orientation, targetCellId: DestinationCell);
+        });
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+
+        new RuntimeRemotePhysicsUpdater(lifetime.Physics).AdvanceInterpolationRecovery(
+            record, remote, [], 1f, 0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+
+        Assert.Equal(first, body.Position);
+        Assert.True(remote.Interp.TryGetRecoveryTarget(out var target));
+        Assert.Equal(next, target.Position);
+        Assert.Equal(DestinationCell, target.CellId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InterpolationRecoveryPublishesCanonicalQueuedPose(bool hidden)
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime(FlatEngine(SourceLandblock, 0f));
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001F01u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell, PhysicsStateFlags.None);
+        var remote = new RemoteMotion(body);
+        lifetime.Physics.SetRemoteMotion(record, remote);
+        lifetime.Physics.ObserveLocalWorldFrame(SourceCell, false);
+        var observer = new PlacementObserver(_ => { });
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+        Vector3 target = new(130f, 20f, 7f);
+        uint targetCell = TerrainSurface.ComputeOutdoorCellId(SourceLandblock, target.X, target.Y);
+        Quaternion orientation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.7f);
+        remote.Interp.Enqueue(target, orientation, false, body.Position, body.Orientation, targetCellId: targetCell);
+        var updater = new RuntimeRemotePhysicsUpdater(lifetime.Physics);
+
+        if (hidden)
+            updater.TickHidden(record, remote, 0.01f, record.ObjectClockEpoch, 0.48f, 1.835f);
+        else
+            updater.Tick(record, remote, 1f, null, 0.01f, record.ObjectClockEpoch,
+                new MotionDeltaFrame(), 0.48f, 1.835f, 0, 0);
+
+        Assert.Equal(target, body.Position);
+        Assert.Equal(orientation, body.Orientation);
+        Assert.Equal(targetCell, record.FullCellId);
+        Assert.False(remote.Interp.IsActive);
+        Assert.Contains(observer.Deltas, delta => delta.Placement.Kind == RuntimePlacementProjectionKind.Place);
+    }
+
+    [Fact]
+    public void InterpolationRecoveryRetainsDeferredOperationUntilNewCorrectionSupersedesIt()
+    {
+        using var lifetime = new RuntimeEntityObjectLifetime(FlatEngine(SourceLandblock, 0f));
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001F02u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell, PhysicsStateFlags.None);
+        var remote = new RemoteMotion(body);
+        lifetime.Physics.SetRemoteMotion(record, remote);
+        lifetime.Physics.ObserveLocalWorldFrame(SourceCell, false);
+        remote.Interp.Enqueue(new Vector3(205f, 20f, 7f), Quaternion.Identity,
+            false, body.Position, body.Orientation, targetCellId: DestinationCell);
+        var updater = new RuntimeRemotePhysicsUpdater(lifetime.Physics);
+
+        updater.AdvanceInterpolationRecovery(record, remote, [], 1f, 0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+        RuntimeEntityPlacementToken first = remote.InterpolationRecoveryPlacement;
+        Assert.True(first.IsValid);
+        Assert.True(remote.Interp.IsActive);
+        updater.AdvanceInterpolationRecovery(record, remote, [], 1f, 0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+        Assert.Equal(first, remote.InterpolationRecoveryPlacement);
+        Assert.True(lifetime.Physics.SetPosition.IsPlacementCurrent(first));
+
+        Vector3 correction = new(15f, 20f, 7f);
+        remote.Interp.Enqueue(correction, Quaternion.Identity, false,
+            body.Position, body.Orientation, targetCellId: SourceCell);
+        updater.AdvanceInterpolationRecovery(record, remote, [], 1f, 0.4f, 0.4f, ObjectInfoState.EdgeSlide);
+
+        Assert.False(lifetime.Physics.SetPosition.IsPlacementCurrent(first));
+        Assert.Equal(correction, body.Position);
+        Assert.Equal(SourceCell, record.FullCellId);
+        Assert.False(remote.Interp.IsActive);
+    }
+
+    [Fact]
     public void AcceptedTokenExistsBeforeHostPreparationAndRejectsInvalidPortalAuthority()
     {
         using var lifetime = new RuntimeEntityObjectLifetime();

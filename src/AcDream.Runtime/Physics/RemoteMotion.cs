@@ -90,6 +90,9 @@ internal sealed class RemoteMotion :
     void IRuntimeRemotePlacement.LeaveGround() =>
         Motion.LeaveGround();
 
+    internal RuntimeEntityPlacementToken InterpolationRecoveryPlacement;
+    internal AcDream.Core.Physics.InterpolationRecoveryTarget InterpolationRecoveryTarget;
+
     public bool Airborne;
 
     public AcDream.Core.Physics.InterpolationManager Interp { get; } =

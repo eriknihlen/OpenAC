@@ -790,7 +790,7 @@ public static class CellTransit
         var candidates = new CellArray();
         var containing = BuildCellSetAndPickContaining(
             cache, worldSpheres, numSpheres, currentCellId,
-            carriedBlockOrigin, candidates);
+            carriedBlockOrigin, candidates, out _);
         cellSet = candidates;
         return containing;
     }
@@ -804,7 +804,26 @@ public static class CellTransit
         Vector3? carriedBlockOrigin = null)
         => BuildCellSetAndPickContaining(
             cache, worldSpheres, numSpheres, currentCellId,
-            carriedBlockOrigin, candidates);
+            carriedBlockOrigin, candidates, out _);
+
+    /// <summary>
+    /// Same as <see cref="FindCellSet(PhysicsDataCache, IReadOnlyList{Sphere}, int, uint, CellArray, Vector3?)"/>,
+    /// and reports whether the returned id is a cell that actually contains
+    /// the sphere. When every resident candidate rejects the point the
+    /// movement path keeps the seed cell and <paramref name="containingCellFound"/>
+    /// is false; placement treats that as "no cell" and rejects the candidate.
+    /// </summary>
+    internal static uint FindCellSet(
+        PhysicsDataCache cache,
+        IReadOnlyList<Sphere> worldSpheres,
+        int numSpheres,
+        uint currentCellId,
+        CellArray candidates,
+        Vector3? carriedBlockOrigin,
+        out bool containingCellFound)
+        => BuildCellSetAndPickContaining(
+            cache, worldSpheres, numSpheres, currentCellId,
+            carriedBlockOrigin, candidates, out containingCellFound);
 
     private static uint BuildCellSetAndPickContaining(
         PhysicsDataCache cache,
@@ -812,8 +831,10 @@ public static class CellTransit
         int numSpheres,
         uint currentCellId,
         Vector3? carriedBlockOrigin,
-        CellArray candidates)
+        CellArray candidates,
+        out bool containingCellFound)
     {
+        containingCellFound = true;
         candidates.Clear();
         int sphereCount = EffectiveSphereCount(worldSpheres, numSpheres);
         if (sphereCount == 0) return currentCellId;
@@ -933,6 +954,9 @@ public static class CellTransit
                         (candidates as CellArray)?.UnionTarget);
                     if (recovered != 0u && recovered != currentCellId)
                         return recovered;
+                    // Every resident candidate rejected the point and the
+                    // seed cell does not contain it either.
+                    containingCellFound = false;
                 }
             }
         }

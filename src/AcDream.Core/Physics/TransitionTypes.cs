@@ -2479,9 +2479,20 @@ public sealed class Transition
             sp.NumSphere,
             sp.CheckCellId,
             sp.CellCandidates,
-            sp.CarriedBlockOrigin);
+            sp.CarriedBlockOrigin,
+            out bool containingCellFound);
         CellArray cellSet = sp.CellCandidates;
         LogCellarCellSetSummary(engine, containingCellId, cellSet, footCenter, sphereRadius);
+
+        // A placement candidate that no resident cell contains is rejected
+        // outright, the way a null containing cell fails placement
+        // validation; the ordinary movement path keeps its seed-cell
+        // fallback.
+        if (!containingCellFound
+            && sp.InsertType is InsertType.InitialPlacement or InsertType.Placement)
+        {
+            return TransitionState.Collided;
+        }
 
         if ((sp.CheckCellId & 0xFFFFu) >= 0x0100u
             || (containingCellId & 0xFFFFu) >= 0x0100u)

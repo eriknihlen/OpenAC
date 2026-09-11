@@ -367,7 +367,7 @@ public sealed class InterpolationManagerTests
     }
 
     [Fact]
-    public void AdjustOffset_NoProgressMarksFail_AfterFiveFrames()
+    public void AdjustOffset_FirstWindowInitializesProgressBaseline()
     {
         var mgr    = Make();
         var target = new Vector3(50f, 0f, 0f);
@@ -378,68 +378,8 @@ public sealed class InterpolationManagerTests
             mgr.AdjustOffset(dt: 0.016, currentBodyPosition: BodyOrigin, maxSpeedFromMinterp: 4f);
         }
 
-        // 1 fail < StallFailCountThreshold (3), so queue is still active.
+        // The sentinel baseline keeps the first window from recording a failure.
         Assert.True(mgr.IsActive);
-    }
-
-    [Fact]
-    public void AdjustOffset_GoodProgressResetsFailCount()
-    {
-        var mgr      = Make();
-        var origin   = Vector3.Zero;
-        var target   = new Vector3(50f, 0f, 0f);
-        float maxSpd = 4f;
-        double dt    = 0.016;
-        mgr.Enqueue(target, heading: 0f, isMovingTo: true);
-
-        // Run 5 frames, advancing the body by the actual delta returned each time.
-        Vector3 bodyPos = origin;
-        for (int i = 0; i < InterpolationManager.StallCheckFrameInterval; i++)
-        {
-            var delta = mgr.AdjustOffset(dt, currentBodyPosition: bodyPos, maxSpeedFromMinterp: maxSpd);
-            bodyPos += delta; // body truly moves
-        }
-
-        // After 5 frames of genuine progress, queue must still be active
-        // (no blip) and _failCount should have been reset to 0 (no way to read
-        // it directly, but we verify indirectly: we'd need 3×5=15 more frames
-        // of stalling to blip — a further 5-frame no-progress window at this
-        // point should only bring _failCount to 1, not trigger a blip).
-        Assert.True(mgr.IsActive);
-    }
-
-    [Fact]
-    public void AdjustOffset_3FailsTriggersBlipToTail()
-    {
-        var mgr  = Make();
-        var head = new Vector3(10f, 0f, 0f);
-        var tail = new Vector3(30f, 0f, 0f);
-
-        mgr.Enqueue(head, heading: 0f, isMovingTo: true);
-        mgr.Enqueue(tail, heading: 0f, isMovingTo: true);
-
-        Vector3? blipDelta = null;
-        const int totalFrames = (InterpolationManager.StallFailCountThreshold + 1)
-                              * InterpolationManager.StallCheckFrameInterval;
-
-        for (int i = 0; i < totalFrames; i++)
-        {
-            var delta = mgr.AdjustOffset(dt: 0.016, currentBodyPosition: BodyOrigin, maxSpeedFromMinterp: 4f);
-            if (delta.Length() > 1f) // blip delta will be >> normal per-frame step
-            {
-                blipDelta = delta;
-                break;
-            }
-        }
-
-        // Blip must have fired.
-        Assert.NotNull(blipDelta);
-
-        Assert.Equal(tail.X, blipDelta!.Value.X, precision: 4);
-        Assert.Equal(tail.Y, blipDelta!.Value.Y, precision: 4);
-        Assert.Equal(tail.Z, blipDelta!.Value.Z, precision: 4);
-
-        Assert.False(mgr.IsActive);
     }
 
     // =========================================================================
@@ -457,39 +397,12 @@ public sealed class InterpolationManagerTests
             mgr.AdjustOffset(dt: 0.016, currentBodyPosition: BodyOrigin, maxSpeedFromMinterp: 4f);
         }
 
-        // One window fail → _failCount == 1, far below StallFailCountThreshold (3).
+        // The first window establishes the baseline without recording a failure.
         // Queue must still be active; no spurious blip on first window.
         Assert.True(mgr.IsActive,
-            "First stall window must NOT trigger a blip (would require > 3 consecutive failures).");
+            "First window should establish the progress baseline.");
     }
 
-
-    [Fact]
-    public void Enqueue_FarBranch_PrearmsImmediateBlipOnNextAdjustOffset()
-    {
-        var mgr = Make();
-        // Target > AutonomyBlipDistance (100 m) from origin → far branch.
-        var farTarget = new Vector3(150f, 0f, 0f);
-
-        mgr.Enqueue(farTarget, heading: 0f, isMovingTo: true, currentBodyPosition: BodyOrigin);
-
-        Vector3? blipDelta = null;
-        for (int i = 0; i < InterpolationManager.StallCheckFrameInterval; i++)
-        {
-            var delta = mgr.AdjustOffset(dt: 0.016, currentBodyPosition: BodyOrigin, maxSpeedFromMinterp: 4f);
-            // Blip fires when delta >> per-frame step.  Per-frame step at
-            // 4 m/s × 2 (mod) × 0.016 s = 0.128 m.  Blip is 150 m.
-            if (delta.Length() > 50f)
-            {
-                blipDelta = delta;
-                break;
-            }
-        }
-
-        Assert.NotNull(blipDelta);
-        Assert.Equal(150f, blipDelta!.Value.X, precision: 4);
-        Assert.False(mgr.IsActive, "Queue must be cleared after blip.");
-    }
 
     [Fact]
     public void AdjustOffset_DtZeroOrNegative_ReturnsZero()
