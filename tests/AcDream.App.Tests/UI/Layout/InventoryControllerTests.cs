@@ -568,6 +568,135 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public void InteractionStateChange_refreshesCellsInPlace_withoutRebuilding()
+    {
+        var (layout, grid, containers, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
+                new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null);
+        Bind(layout, objects, itemInteraction: interaction);
+
+        UiItemSlot cell = grid.GetItem(0)!;
+        UiItemSlot bagCell = containers.GetItem(0)!;
+        UiItemSlot mainPack = top.GetItem(0)!;
+
+        interaction.IncrementBusyCount();
+
+        Assert.Same(cell, grid.GetItem(0));
+        Assert.Same(bagCell, containers.GetItem(0));
+        Assert.Same(mainPack, top.GetItem(0));
+    }
+
+    [Fact]
+    public void PressedCellSurvivesAppraisalOnSelection_soTheFirstClickCanDrag()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+        var selection = new SelectionState();
+        var appraisals = new List<uint>();
+        using var interaction = new ItemInteractionController(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(
+                new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            sendExamine: appraisals.Add);
+        Bind(layout, objects, selection: selection, itemInteraction: interaction);
+
+        // What AppraisalUiController does while its window is open.
+        selection.Changed += transition =>
+        {
+            if (transition.SelectedObjectId is uint id && id != 0u)
+                interaction.ExamineSelectedOrEnterMode(id);
+        };
+
+        // BuildLayout leaves every list at the origin.
+        grid.Left = 0;
+        grid.Top = 260;
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(layout.Root);
+
+        UiItemSlot cell = grid.GetItem(0)!;
+        var (cellX, cellY) = AbsoluteCentre(cell);
+
+        root.OnMouseMove(cellX, cellY);
+        root.OnMouseDown(UiMouseButton.Left, cellX, cellY);
+
+        Assert.Equal(0xAu, selection.SelectedObjectId);
+        Assert.Equal(new uint[] { 0xAu }, appraisals);
+        Assert.Equal(1, interaction.BusyCount);
+
+        Assert.Same(cell, grid.GetItem(0));
+        Assert.Same(cell, root.Captured);
+
+        root.OnMouseMove(cellX + 12, cellY);
+
+        Assert.Same(cell, root.DragSource);
+        var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
+        Assert.Equal(0xAu, payload.ObjId);
+    }
+
+    [Fact]
+    public void PressedCellSurvivesAppraisalResponse_soTheFirstClickCanDrag()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+        Bind(layout, objects);
+
+        grid.Left = 0;
+        grid.Top = 260;
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(layout.Root);
+
+        UiItemSlot cell = grid.GetItem(0)!;
+        var (cellX, cellY) = AbsoluteCentre(cell);
+
+        root.OnMouseMove(cellX, cellY);
+        root.OnMouseDown(UiMouseButton.Left, cellX, cellY);
+        Assert.Same(cell, root.Captured);
+
+        // What GameEventWiring does with an appraisal reply.
+        var properties = new PropertyBundle();
+        properties.Ints[1u] = 42;
+        Assert.True(objects.UpdateAppraisal(0xAu, properties, Array.Empty<uint>()));
+
+        Assert.Same(cell, grid.GetItem(0));
+        Assert.Same(cell, root.Captured);
+
+        root.OnMouseMove(cellX + 12, cellY);
+
+        Assert.Same(cell, root.DragSource);
+        var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
+        Assert.Equal(0xAu, payload.ObjId);
+    }
+
+    private static (int x, int y) AbsoluteCentre(UiElement element)
+    {
+        float x = 0f, y = 0f;
+        for (UiElement? e = element; e is not null; e = e.Parent)
+        {
+            x += e.Left;
+            y += e.Top;
+        }
+        return ((int)(x + element.Width / 2f), (int)(y + element.Height / 2f));
+    }
+
+    [Fact]
     public void TargetMode_suppressesSelectedSquare_onPendingSource()
     {
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
