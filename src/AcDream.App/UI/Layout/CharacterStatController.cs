@@ -421,11 +421,23 @@ public static class CharacterStatController
                 return;
             }
 
+            CharacterSheet sheet = data();
             CharacterSkill? selectedSkill =
                 skillSel[0] >= 0 && skillSel[0] < currentSkillRows.Count
-                    ? currentSkillRows[skillSel[0]].Skill
+                    ? FindSkill(sheet, currentSkillRows[skillSel[0]].Skill.Id)
                     : null;
-            RefreshSkillRaiseButtons(selectedSkill, data(), allRaise1, allRaise10);
+            RefreshSkillRaiseButtons(selectedSkill, sheet, allRaise1, allRaise10);
+        }
+
+        void SoftRefreshSkillRows()
+        {
+            CharacterSheet sheet = data();
+            for (int i = 0; i < currentSkillRows.Count; i++)
+            {
+                SkillRowBinding row = currentSkillRows[i];
+                if (FindSkill(sheet, row.Skill.Id) is { } live)
+                    currentSkillRows[i] = row with { Skill = live };
+            }
         }
 
         void RefreshAfterRaise(uint? selectedSkillId)
@@ -439,23 +451,31 @@ public static class CharacterStatController
                     selectedSkillId = currentSkillRows[skillSel[0]].Skill.Id;
                 }
 
-                RebuildActiveList();
-
-                skillSel[0] = -1;
-                if (selectedSkillId is uint id)
+                // Row values already follow data(); only rebuild when bucket/order identity changes.
+                if (!SkillLayoutMatches(currentSkillRows, data()))
                 {
-                    for (int i = 0; i < currentSkillRows.Count; i++)
+                    RebuildActiveList();
+
+                    skillSel[0] = -1;
+                    if (selectedSkillId is uint id)
                     {
-                        if (currentSkillRows[i].Skill.Id == id)
+                        for (int i = 0; i < currentSkillRows.Count; i++)
                         {
-                            skillSel[0] = i;
-                            break;
+                            if (currentSkillRows[i].Skill.Id == id)
+                            {
+                                skillSel[0] = i;
+                                break;
+                            }
                         }
                     }
-                }
 
-                ApplySkillSelectionVisuals(skillSel[0], currentSkillRows, spriteResolve);
-                SetFooterSelected(skillSel[0] >= 0);
+                    ApplySkillSelectionVisuals(skillSel[0], currentSkillRows, spriteResolve);
+                    SetFooterSelected(skillSel[0] >= 0);
+                }
+                else
+                {
+                    SoftRefreshSkillRows();
+                }
             }
 
             RefreshActiveRaiseButtons();
@@ -465,6 +485,37 @@ public static class CharacterStatController
             () => RefreshAfterRaise(null),
             SwitchTab,
             () => activeTab[0]);
+    }
+
+    /// <summary>
+    /// True when the skills list still has the same ordered identity that
+    /// <see cref="BuildSkillRows"/> would produce (ids, advancement class, and
+    /// usable-untrained flag). Level/cost changes do not count as layout changes.
+    /// </summary>
+    private static bool SkillLayoutMatches(
+        IReadOnlyList<SkillRowBinding> rows,
+        CharacterSheet sheet)
+    {
+        int expectedCount = 0;
+        int rowIndex = 0;
+        foreach (CharacterSkill skill in EnumerateDisplaySkills(sheet))
+        {
+            expectedCount++;
+            if (rowIndex >= rows.Count)
+                return false;
+
+            CharacterSkill bound = rows[rowIndex].Skill;
+            if (bound.Id != skill.Id
+                || bound.AdvancementClass != skill.AdvancementClass
+                || bound.UsableUntrained != skill.UsableUntrained)
+            {
+                return false;
+            }
+
+            rowIndex++;
+        }
+
+        return expectedCount == rows.Count;
     }
 
     private static UiScrollbar? PrepareSkillScrollbar(
@@ -782,23 +833,26 @@ public static class CharacterStatController
         return null;
     }
 
+    private static IEnumerable<CharacterSkill> EnumerateDisplaySkills(CharacterSheet sheet)
+    {
+        foreach (var skill in OrderedSkills(sheet, CharacterSkillAdvancementClass.Specialized, usableUntrained: null))
+            yield return skill;
+        foreach (var skill in OrderedSkills(sheet, CharacterSkillAdvancementClass.Trained, usableUntrained: null))
+            yield return skill;
+        foreach (var skill in OrderedSkills(sheet, CharacterSkillAdvancementClass.Untrained, usableUntrained: true))
+            yield return skill;
+        foreach (var skill in OrderedSkills(sheet, CharacterSkillAdvancementClass.Untrained, usableUntrained: false))
+            yield return skill;
+    }
+
     private static CharacterSkill? SkillAtDisplayIndex(CharacterSheet sheet, int index)
     {
         if (index < 0) return null;
         int n = 0;
-        foreach (var bucket in new[]
+        foreach (var skill in EnumerateDisplaySkills(sheet))
         {
-            OrderedSkills(sheet, CharacterSkillAdvancementClass.Specialized, usableUntrained: null),
-            OrderedSkills(sheet, CharacterSkillAdvancementClass.Trained, usableUntrained: null),
-            OrderedSkills(sheet, CharacterSkillAdvancementClass.Untrained, usableUntrained: true),
-            OrderedSkills(sheet, CharacterSkillAdvancementClass.Untrained, usableUntrained: false),
-        })
-        {
-            foreach (var skill in bucket)
-            {
-                if (n == index) return skill;
-                n++;
-            }
+            if (n == index) return skill;
+            n++;
         }
         return null;
     }
@@ -908,8 +962,12 @@ public static class CharacterStatController
 
         ApplySkillSelectionVisuals(newSel, rows, spriteResolve);
 
-        CharacterSkill? selectedSkill = newSel >= 0 && newSel < rows.Count ? rows[newSel].Skill : null;
-        RefreshSkillRaiseButtons(selectedSkill, data(), allRaise1, allRaise10);
+        CharacterSheet sheet = data();
+        CharacterSkill? selectedSkill =
+            newSel >= 0 && newSel < rows.Count
+                ? FindSkill(sheet, rows[newSel].Skill.Id)
+                : null;
+        RefreshSkillRaiseButtons(selectedSkill, sheet, allRaise1, allRaise10);
     }
 
     private static void ApplySkillSelectionVisuals(
@@ -1071,10 +1129,12 @@ public static class CharacterStatController
         else
         {
             var rows = skillRows();
-            CharacterSkill? selectedSkill =
+            uint? selectedId =
                 skillSel[0] >= 0 && skillSel[0] < rows.Count
-                    ? rows[skillSel[0]].Skill
+                    ? rows[skillSel[0]].Skill.Id
                     : null;
+            CharacterSkill? selectedSkill =
+                selectedId is uint id ? FindSkill(sheet, id) : null;
             selectedSkillId = selectedSkill?.Id;
             request = TryBuildSkillRaiseRequest(sheet, selectedSkill, amount);
         }
