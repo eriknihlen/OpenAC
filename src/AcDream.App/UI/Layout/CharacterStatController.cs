@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using AcDream.App.UI;
 
@@ -358,6 +359,11 @@ public static class CharacterStatController
         {
             if (statList is null) return;
 
+            // The rebuild replaces the viewport, so its scroll model is new.
+            int previousScrollY = activeListEntries
+                .OfType<UiScrollablePanel>()
+                .FirstOrDefault()?.Scroll.ScrollY ?? 0;
+
             foreach (var entry in activeListEntries)
                 statList.RemoveChild(entry);
             activeListEntries.Clear();
@@ -390,6 +396,14 @@ public static class CharacterStatController
             {
                 currentAttributeRows = BuildAttributeRows(viewport, rowDatFont, spriteResolve, data, attrSel,
                     allRaise1, allRaise10, SetFooterSelected, iconDidResolve);
+            }
+
+            if (previousScrollY > 0)
+            {
+                // SetScrollY clamps against MaxScroll, which is zero until the
+                // scroll model has the rebuilt content and view heights.
+                viewport.LayoutScrollableChildren();
+                viewport.Scroll.SetScrollY(previousScrollY);
             }
 
             if (skillScrollbar is not null)
