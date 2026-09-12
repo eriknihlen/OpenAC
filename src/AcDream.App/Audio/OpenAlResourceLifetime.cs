@@ -9,11 +9,18 @@ internal interface IOpenAlResourceApi
     ALContext? ContextApi { get; }
 
     nint OpenDevice();
-    nint CreateContext(nint device);
+
+    /// <summary>True when this device lets a context turn its output limiter off.</summary>
+    bool SupportsOutputLimiterControl(nint device);
+
+    nint CreateContext(nint device, int[]? attributes);
+
+    /// <summary>The device's current output-limiter setting.</summary>
+    int ReadOutputLimiterState(nint device);
+
     bool MakeContextCurrent(nint context);
     uint GenerateSource();
     void Configure3DSource(uint source);
-    void ConfigureUiSource(uint source);
     void DisableAlDistanceAttenuation();
     void StopSource(uint source);
     void DeleteSource(uint source);
@@ -45,8 +52,30 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
 
     public nint OpenDevice() => (nint)ContextApi.OpenDevice(string.Empty);
 
-    public nint CreateContext(nint device) =>
-        (nint)ContextApi.CreateContext((Device*)device, null);
+    public bool SupportsOutputLimiterControl(nint device) =>
+        ContextApi.IsExtensionPresent(
+            (Device*)device,
+            OpenAlContextAttributes.OutputLimiterExtension);
+
+    public nint CreateContext(nint device, int[]? attributes)
+    {
+        if (attributes is null)
+            return (nint)ContextApi.CreateContext((Device*)device, null);
+
+        fixed (int* pinned = attributes)
+            return (nint)ContextApi.CreateContext((Device*)device, pinned);
+    }
+
+    public int ReadOutputLimiterState(nint device)
+    {
+        int value = 0;
+        ContextApi.GetContextProperty(
+            (Device*)device,
+            (GetContextInteger)OpenAlContextAttributes.OutputLimiter,
+            1,
+            &value);
+        return value;
+    }
 
     public bool MakeContextCurrent(nint context) =>
         ContextApi.MakeContextCurrent((Context*)context);
@@ -58,13 +87,6 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
         AudioApi.SetSourceProperty(source, SourceFloat.Gain, 1f);
         AudioApi.SetSourceProperty(source, SourceFloat.RolloffFactor, 0f);
         AudioApi.SetSourceProperty(source, SourceBoolean.SourceRelative, true);
-        AudioApi.SetSourceProperty(source, SourceBoolean.Looping, false);
-    }
-
-    public void ConfigureUiSource(uint source)
-    {
-        AudioApi.SetSourceProperty(source, SourceBoolean.SourceRelative, true);
-        AudioApi.SetSourceProperty(source, SourceFloat.Gain, 1f);
         AudioApi.SetSourceProperty(source, SourceBoolean.Looping, false);
     }
 
@@ -114,6 +136,22 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
     public nint Device => _device;
     public nint Context => _context;
 
+    /// <summary>Whether this device let us ask for the output limiter at all.</summary>
+    public bool OutputLimiterControllable { get; private set; }
+
+    /// <summary>The limiter setting read before the context was created.</summary>
+    public int? OutputLimiterStateBefore { get; private set; }
+
+    /// <summary>The limiter setting read once the context was live.</summary>
+    public int? OutputLimiterStateAfter { get; private set; }
+
+    /// <summary>The one line describing what the limiter was and is doing.</summary>
+    public string DescribeOutputLimiter() =>
+        OpenAlContextAttributes.Describe(
+            OutputLimiterControllable,
+            OutputLimiterStateBefore,
+            OutputLimiterStateAfter);
+
     public bool IsCleanupComplete =>
         _sources.All(static source => source.Released)
         && _buffers.All(static buffer => buffer.Released)
@@ -134,7 +172,14 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
             throw new InvalidOperationException("An OpenAL device is required before its context.");
         if (_context != 0)
             throw new InvalidOperationException("The OpenAL context already exists.");
-        _context = _api.CreateContext(_device);
+
+        OutputLimiterControllable = _api.SupportsOutputLimiterControl(_device);
+        if (OutputLimiterControllable)
+            OutputLimiterStateBefore = _api.ReadOutputLimiterState(_device);
+
+        _context = _api.CreateContext(
+            _device,
+            OpenAlContextAttributes.Build(OutputLimiterControllable));
         return _context != 0;
     }
 
@@ -143,6 +188,9 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
         if (_context == 0)
             throw new InvalidOperationException("An OpenAL context is required before activation.");
         _contextCurrent = _api.MakeContextCurrent(_context);
+        // The limiter setting only means anything once a context is live.
+        if (_contextCurrent && OutputLimiterControllable)
+            OutputLimiterStateAfter = _api.ReadOutputLimiterState(_device);
         return _contextCurrent;
     }
 
@@ -151,14 +199,6 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
         uint source = _api.GenerateSource();
         _sources.Add(new SourceState(source));
         _api.Configure3DSource(source);
-        return source;
-    }
-
-    public uint CreateUiSource()
-    {
-        uint source = _api.GenerateSource();
-        _sources.Add(new SourceState(source));
-        _api.ConfigureUiSource(source);
         return source;
     }
 

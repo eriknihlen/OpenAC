@@ -543,11 +543,12 @@ public sealed class ContentEffectsAudioCompositionTests
         public AL? AudioApi => null;
         public ALContext? ContextApi => null;
         public nint OpenDevice() => 1;
-        public nint CreateContext(nint device) => 2;
+        public bool SupportsOutputLimiterControl(nint device) => false;
+        public nint CreateContext(nint device, int[]? attributes) => 2;
+        public int ReadOutputLimiterState(nint device) => OpenAlContextAttributes.Off;
         public bool MakeContextCurrent(nint context) => true;
         public uint GenerateSource() => _nextSource++;
         public void Configure3DSource(uint source) { }
-        public void ConfigureUiSource(uint source) { }
         public void DisableAlDistanceAttenuation() { }
         public void StopSource(uint source) { }
         public void DeleteSource(uint source) { }

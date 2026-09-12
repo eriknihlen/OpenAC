@@ -20,22 +20,11 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     private bool _available;
     private bool _disposed;
 
-    // ── Pools ────────────────────────────────────────────────────────────────
-    private const int PoolSize3D = 16;
-    private const int PoolSizeUi = 4;
-
-    private sealed class Slot3D
-    {
-        public uint SourceId;
-        public uint OwnerId;
-        public bool InUse;
-        public float Priority;
-    }
-    private readonly Slot3D[] _pool3D = CreateWorldSlots();
-    private int _pool3DCursor; // round-robin start
+    // ── Voices ───────────────────────────────────────────────────────────────
+    private readonly WorldVoicePool _voices = new();
     private bool _worldAudioSuspended;
 
-    private readonly uint[] _poolUi = new uint[PoolSizeUi];
+    private Func<uint, bool>? _isStillPlaying;
 
     private Vector3 _listenerPosition;
     private float _listenerHeadingDegrees;
@@ -108,22 +97,14 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
                 return;
             }
 
-            // Initialise 3D source pool.
-            for (int i = 0; i < PoolSize3D; i++)
-            {
-                uint src = _resources.Create3DSource();
-                _pool3D[i].SourceId = src;
-            }
-
-            // UI sources are source-relative (attached to listener) so they
-            // ignore 3D position.
-            for (int i = 0; i < PoolSizeUi; i++)
-            {
-                uint src = _resources.CreateUiSource();
-                _poolUi[i] = src;
-            }
+            // One pool for everything: world sounds, ambients and interface
+            // sounds all speak through these sixteen sources.
+            for (int i = 0; i < _voices.Count; i++)
+                _voices[i].SourceId = _resources.Create3DSource();
 
             api.DisableAlDistanceAttenuation();
+
+            Console.WriteLine(_resources.DescribeOutputLimiter());
 
             _available = true;
         }
@@ -186,8 +167,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint waveId,
         WaveData wave,
         Vector3 position,
-        float volume,
-        float priority)
+        float volume)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -202,39 +182,30 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        int slotIdx = AcquireWorldSlot(priority);
-        if (slotIdx < 0) return false;    // nothing lower-priority — drop
+        WorldVoicePool.Voice? voice = ClaimVoice(ownerId);
+        if (voice is null) return false;    // every voice busy — drop the sound
 
-        float gain = RetailSoundMixer.LinearGain(mix.Decibels);
-        var slot = _pool3D[slotIdx];
-        _al.SourceStop(slot.SourceId);
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, 0);  // detach old
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, (int)buffer);
-        _al.SetSourceProperty(slot.SourceId, SourceFloat.Gain, gain);
-        ApplyPan(slot.SourceId, mix.Pan);
-        _al.SetSourceProperty(slot.SourceId, SourceBoolean.Looping, false);
-        _al.SourcePlay(slot.SourceId);
-
-        slot.InUse = true;
-        slot.OwnerId = ownerId;
-        slot.Priority = priority;
-        _pool3DCursor = RetailVoicePool.AdvanceCursor(slotIdx, PoolSize3D);
+        Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
         return true;
     }
 
-    private int AcquireWorldSlot(float priority)
-    {
-        Span<VoiceSlotState> slots = stackalloc VoiceSlotState[PoolSize3D];
-        for (int i = 0; i < PoolSize3D; i++)
-        {
-            Slot3D s = _pool3D[i];
-            slots[i] = new VoiceSlotState(
-                Occupied: s.InUse,
-                StillPlaying: s.InUse && IsStillPlaying(s.SourceId),
-                Priority: s.Priority);
-        }
+    private WorldVoicePool.Voice? ClaimVoice(uint ownerId) =>
+        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId);
 
-        return RetailVoicePool.Acquire(slots, _pool3DCursor, priority);
+    /// <summary>
+    /// Hand a claimed voice its sound and start it. This is the one place a
+    /// voice is bound to a buffer, so it is the one place its level, its pan
+    /// and its recorded priority are set.
+    /// </summary>
+    private void Speak(WorldVoicePool.Voice voice, uint buffer, float gain, int pan)
+    {
+        _al!.SourceStop(voice.SourceId);
+        _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, 0);  // detach old
+        _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, (int)buffer);
+        _al.SetSourceProperty(voice.SourceId, SourceFloat.Gain, gain);
+        ApplyPan(voice.SourceId, pan);
+        _al.SetSourceProperty(voice.SourceId, SourceBoolean.Looping, false);
+        _al.SourcePlay(voice.SourceId);
     }
 
     private void ApplyPan(uint sourceId, int pan)
@@ -253,8 +224,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public void SuspendWorldAudio()
     {
         _worldAudioSuspended = true;
-        for (int i = 0; i < _pool3D.Length; i++)
-            StopWorldSlot(_pool3D[i]);
+        for (int i = 0; i < _voices.Count; i++)
+            Silence(_voices[i]);
     }
 
     public void ResumeWorldAudio() => _worldAudioSuspended = false;
@@ -264,42 +235,33 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         if (ownerId == 0)
             return;
 
-        for (int i = 0; i < _pool3D.Length; i++)
+        for (int i = 0; i < _voices.Count; i++)
         {
-            Slot3D slot = _pool3D[i];
-            if (slot.InUse && slot.OwnerId == ownerId)
-                StopWorldSlot(slot);
+            WorldVoicePool.Voice voice = _voices[i];
+            if (voice.InUse && voice.OwnerId == ownerId)
+                Silence(voice);
         }
     }
 
     /// <summary>
-    /// Play a raw WaveData blob as a 2D UI sound (no falloff, ignores
-    /// listener position).
+    /// Play a raw WaveData blob as an interface sound: centred, with no
+    /// distance falloff, but sharing the same sixteen voices as everything
+    /// else. When they are all busy the interface sound is dropped too.
     /// </summary>
     public bool PlayUiWave(uint waveId, WaveData wave, float volume = 1f)
     {
         if (!_available || _al is null) return false;
 
-        uint buffer = EnsureBuffer(waveId, wave);
-        if (buffer == 0) return false;
-
-        // UI pool: find a free source (first not-playing), else round-robin.
-        int slotIdx = -1;
-        for (int i = 0; i < PoolSizeUi; i++)
-        {
-            if (!IsStillPlaying(_poolUi[i])) { slotIdx = i; break; }
-        }
-        if (slotIdx < 0) slotIdx = 0; // always replace slot 0 as a last resort
-
         if (!RetailSoundMixer.TryGetAttenuation(0f, volume, EffectMaster, out int decibels))
             return false;
 
-        uint src = _poolUi[slotIdx];
-        _al.SourceStop(src);
-        _al.SetSourceProperty(src, SourceInteger.Buffer, 0);
-        _al.SetSourceProperty(src, SourceInteger.Buffer, (int)buffer);
-        _al.SetSourceProperty(src, SourceFloat.Gain, RetailSoundMixer.LinearGain(decibels));
-        _al.SourcePlay(src);
+        uint buffer = EnsureBuffer(waveId, wave);
+        if (buffer == 0) return false;
+
+        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        if (voice is null) return false;
+
+        Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);
         return true;
     }
 
@@ -312,8 +274,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint waveId,
         WaveData wave,
         Vector3 position,
-        float volume,
-        float priority)
+        float volume)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -328,33 +289,17 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        int slotIdx = AcquireWorldSlot(priority);
-        if (slotIdx < 0) return false;
+        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        if (voice is null) return false;
 
-        Slot3D slot = _pool3D[slotIdx];
-        _al.SourceStop(slot.SourceId);
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, 0);
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, (int)buffer);
-        _al.SetSourceProperty(
-            slot.SourceId,
-            SourceFloat.Gain,
-            RetailSoundMixer.LinearGain(mix.Decibels));
-        ApplyPan(slot.SourceId, mix.Pan);
-        _al.SetSourceProperty(slot.SourceId, SourceBoolean.Looping, false);
-        _al.SourcePlay(slot.SourceId);
-
-        slot.InUse = true;
-        slot.OwnerId = 0;
-        slot.Priority = priority;
-        _pool3DCursor = RetailVoicePool.AdvanceCursor(slotIdx, PoolSize3D);
+        Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
         return true;
     }
 
     public bool PlayAmbientFromCenter(
         uint waveId,
         WaveData wave,
-        float volume,
-        float priority)
+        float volume)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -364,25 +309,10 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        int slotIdx = AcquireWorldSlot(priority);
-        if (slotIdx < 0) return false;
+        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        if (voice is null) return false;
 
-        Slot3D slot = _pool3D[slotIdx];
-        _al.SourceStop(slot.SourceId);
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, 0);
-        _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, (int)buffer);
-        _al.SetSourceProperty(
-            slot.SourceId,
-            SourceFloat.Gain,
-            RetailSoundMixer.LinearGain(decibels));
-        ApplyPan(slot.SourceId, 0);
-        _al.SetSourceProperty(slot.SourceId, SourceBoolean.Looping, false);
-        _al.SourcePlay(slot.SourceId);
-
-        slot.InUse = true;
-        slot.OwnerId = 0;
-        slot.Priority = priority;
-        _pool3DCursor = RetailVoicePool.AdvanceCursor(slotIdx, PoolSize3D);
+        Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);
         return true;
     }
 
@@ -444,13 +374,9 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     {
         if (_al is null) return false;
 
-        for (int i = 0; i < PoolSize3D; i++)
+        for (int i = 0; i < _voices.Count; i++)
         {
-            if (IsSourceBoundTo(_pool3D[i].SourceId, bufferId)) return true;
-        }
-        for (int i = 0; i < PoolSizeUi; i++)
-        {
-            if (IsSourceBoundTo(_poolUi[i], bufferId)) return true;
+            if (IsSourceBoundTo(_voices[i].SourceId, bufferId)) return true;
         }
         return false;
     }
@@ -480,24 +406,14 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         return state == (int)SourceState.Playing;
     }
 
-    private void StopWorldSlot(Slot3D slot)
+    private void Silence(WorldVoicePool.Voice voice)
     {
-        if (_available && _al is not null && slot.SourceId != 0)
+        if (_available && _al is not null && voice.SourceId != 0)
         {
-            _al.SourceStop(slot.SourceId);
-            _al.SetSourceProperty(slot.SourceId, SourceInteger.Buffer, 0);
+            _al.SourceStop(voice.SourceId);
+            _al.SetSourceProperty(voice.SourceId, SourceInteger.Buffer, 0);
         }
 
-        slot.OwnerId = 0;
-        slot.Priority = 0f;
-        slot.InUse = false;
-    }
-
-    private static Slot3D[] CreateWorldSlots()
-    {
-        var slots = new Slot3D[PoolSize3D];
-        for (int i = 0; i < slots.Length; i++)
-            slots[i] = new Slot3D();
-        return slots;
+        WorldVoicePool.Vacate(voice);
     }
 }

@@ -35,7 +35,7 @@ public sealed class AudioHookSink : IAnimationHookSink
         switch (hook)
         {
             case SoundHook s:
-                Play(entityId, entityWorldPosition, (uint)s.Id, volume: 1f, priority: 1f);
+                Play(entityId, entityWorldPosition, (uint)s.Id, volume: 1f);
                 break;
 
             case SoundTableHook st:
@@ -43,10 +43,11 @@ public sealed class AudioHookSink : IAnimationHookSink
                 break;
 
             case SoundTweakedHook stw:
-                Play(entityId, entityWorldPosition,
-                    waveId: (uint)stw.SoundId,
-                    volume: stw.Volume > 0 ? stw.Volume : 1f,
-                    priority: stw.Priority);
+                // A tweaked hook carries its own odds of making a sound at all.
+                // Thunder is authored this way: the hook comes round on its
+                // cadence and usually loses the roll.
+                if (TweakedSoundHooks.TryRoll(stw, _rng, out uint tweakedWave, out float tweakedVolume))
+                    Play(entityId, entityWorldPosition, tweakedWave, tweakedVolume);
                 break;
 
             // All the visual-only hooks (Scale, Luminous, Diffuse, …)
@@ -88,8 +89,7 @@ public sealed class AudioHookSink : IAnimationHookSink
         Play(
             entityId, worldPosition,
             waveId: (uint)entry.Id,
-            volume: wireVolume,
-            priority: entry.Priority);
+            volume: wireVolume);
     }
 
     private static void WireProbe(uint entityId, uint soundType, string outcome)
@@ -120,9 +120,8 @@ public sealed class AudioHookSink : IAnimationHookSink
                 break;
 
             case SoundTweakedHook stw:
-                PlayUi(
-                    (uint)stw.SoundId,
-                    stw.Volume > 0 ? stw.Volume : 1f);
+                if (TweakedSoundHooks.TryRoll(stw, _rng, out uint tweakedWave, out float tweakedVolume))
+                    PlayUi(tweakedWave, tweakedVolume);
                 break;
         }
     }
@@ -151,12 +150,10 @@ public sealed class AudioHookSink : IAnimationHookSink
         Play(
             entityId, worldPos,
             waveId: (uint)entry.Id,
-            volume: entry.Volume * volumeMult,
-            priority: entry.Priority);
+            volume: entry.Volume * volumeMult);
     }
 
-    private void Play(uint entityId, Vector3 worldPos, uint waveId,
-        float volume, float priority)
+    private void Play(uint entityId, Vector3 worldPos, uint waveId, float volume)
     {
         if (waveId == 0) return;
         WaveData? wave = _cache.GetWave(waveId);
@@ -166,8 +163,7 @@ public sealed class AudioHookSink : IAnimationHookSink
             waveId,
             wave,
             worldPos,
-            volume,
-            priority);
+            volume);
     }
 }
 

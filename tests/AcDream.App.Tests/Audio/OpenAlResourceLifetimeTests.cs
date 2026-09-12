@@ -12,21 +12,86 @@ public sealed class OpenAlResourceLifetimeTests
         var engine = new OpenAlAudioEngine(new Factory(api));
 
         Assert.True(engine.IsAvailable);
-        Assert.Equal(20, api.GeneratedSources.Count);
+        // OpenAC #42: one pool of sixteen for everything. An interface sound
+        // shares these voices, so there is no second set of sources to make.
+        Assert.Equal(16, api.GeneratedSources.Count);
         Assert.Equal(16, api.Configured3D.Count);
-        Assert.Equal(4, api.ConfiguredUi.Count);
 
         engine.Dispose();
         engine.Dispose();
 
         Assert.True(engine.IsDisposalComplete);
-        Assert.Equal(20, api.DeletedSources.Count);
+        Assert.Equal(16, api.DeletedSources.Count);
         Assert.Equal(
-            Enumerable.Range(1, 20).Reverse().Select(value => (uint)value),
+            Enumerable.Range(1, 16).Reverse().Select(value => (uint)value),
             api.DeletedSources);
         Assert.Equal(1, api.ClearCurrentCalls);
         Assert.Equal(1, api.DestroyContextCalls);
         Assert.Equal(1, api.CloseDeviceCalls);
+    }
+
+    // OpenAC #42: the backend's output limiter pulls the whole mix down when a
+    // burst of sounds clips it. The context asks for it off wherever the device
+    // allows, and says so once at startup.
+    [Fact]
+    public void ContextCreation_AsksForTheOutputLimiterOff_AndReportsItOff()
+    {
+        var api = new RecordingApi();
+
+        var engine = new OpenAlAudioEngine(new Factory(api));
+
+        Assert.True(engine.IsAvailable);
+        Assert.Equal(
+            new[]
+            {
+                OpenAlContextAttributes.OutputLimiter,
+                OpenAlContextAttributes.Off,
+                OpenAlContextAttributes.EndOfList,
+            },
+            api.ContextAttributes);
+        engine.Dispose();
+    }
+
+    [Fact]
+    public void ContextCreation_AsksForNothing_WhenTheDeviceCannotControlTheLimiter()
+    {
+        var api = new RecordingApi { OutputLimiterSupported = false };
+
+        var engine = new OpenAlAudioEngine(new Factory(api));
+
+        Assert.True(engine.IsAvailable);
+        Assert.Null(api.ContextAttributes);
+        Assert.Equal(0, api.LimiterReads);
+        engine.Dispose();
+    }
+
+    [Fact]
+    public void OutputLimiterAttributes_AreBuiltOnlyWhenTheDeviceSupportsThem()
+    {
+        Assert.Equal(
+            new[]
+            {
+                OpenAlContextAttributes.OutputLimiter,
+                OpenAlContextAttributes.Off,
+                OpenAlContextAttributes.EndOfList,
+            },
+            OpenAlContextAttributes.Build(outputLimiterControllable: true));
+        Assert.Null(OpenAlContextAttributes.Build(outputLimiterControllable: false));
+    }
+
+    [Theory]
+    [InlineData(true, 1, 0, "[audio] output limiter: was on, now off")]
+    [InlineData(true, 0, 0, "[audio] output limiter: was off, now off")]
+    [InlineData(true, 1, null, "[audio] output limiter: was on, now unknown")]
+    [InlineData(false, null, null,
+        "[audio] output limiter: this device does not let us turn it off")]
+    public void OutputLimiterReport_StatesWhatItWasAndWhatItIs(
+        bool controllable,
+        int? before,
+        int? after,
+        string expected)
+    {
+        Assert.Equal(expected, OpenAlContextAttributes.Describe(controllable, before, after));
     }
 
     [Fact]
@@ -119,17 +184,42 @@ public sealed class OpenAlResourceLifetimeTests
         public nint ContextResult { get; set; } = 202;
         public uint? ConfigureFailureSource { get; set; }
         public uint? DeleteFailureSource { get; set; }
+        public bool OutputLimiterSupported { get; set; } = true;
+        public int[]? ContextAttributes { get; private set; }
+        public int LimiterReads { get; private set; }
         public List<uint> GeneratedSources { get; } = [];
         public List<uint> Configured3D { get; } = [];
-        public List<uint> ConfiguredUi { get; } = [];
         public List<uint> DeletedSources { get; } = [];
         public int ClearCurrentCalls { get; private set; }
         public int DestroyContextCalls { get; private set; }
         public int CloseDeviceCalls { get; private set; }
 
+        // A device that limits until it is told not to.
+        private int _limiterState = 1;
+
         public nint OpenDevice() => DeviceResult;
 
-        public nint CreateContext(nint device) => ContextResult;
+        public bool SupportsOutputLimiterControl(nint device) => OutputLimiterSupported;
+
+        public nint CreateContext(nint device, int[]? attributes)
+        {
+            ContextAttributes = attributes;
+            if (attributes is not null)
+            {
+                for (int i = 0; i + 1 < attributes.Length; i += 2)
+                {
+                    if (attributes[i] == OpenAlContextAttributes.OutputLimiter)
+                        _limiterState = attributes[i + 1];
+                }
+            }
+            return ContextResult;
+        }
+
+        public int ReadOutputLimiterState(nint device)
+        {
+            LimiterReads++;
+            return _limiterState;
+        }
 
         public bool MakeContextCurrent(nint context)
         {
@@ -148,12 +238,6 @@ public sealed class OpenAlResourceLifetimeTests
         public void Configure3DSource(uint source)
         {
             Configured3D.Add(source);
-            ThrowIfConfiguredFailure(source);
-        }
-
-        public void ConfigureUiSource(uint source)
-        {
-            ConfiguredUi.Add(source);
             ThrowIfConfiguredFailure(source);
         }
 
