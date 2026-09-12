@@ -66,6 +66,7 @@ public sealed class SelectionInteractionControllerTests
         public ClosestCombatTarget? FindClosestHostileMonster() => Closest;
         public bool IsUseable(uint serverGuid) => Useable;
         public bool IsPickupable(uint serverGuid) => Pickupable;
+        public bool IsStuckInWorld(uint serverGuid) => false;
         public bool IsWieldedByPlayer(uint serverGuid) => WieldedByPlayer;
         public bool IsWieldedPositionState(uint serverGuid)
             => WieldedPositionStates.Contains(serverGuid);

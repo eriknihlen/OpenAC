@@ -77,6 +77,9 @@ internal interface IWorldSelectionQuery
     uint? FindLastAttacker() => null;
     bool IsUseable(uint serverGuid);
     bool IsPickupable(uint serverGuid);
+
+    /// <summary>A loose world object the server flagged as stuck in place.</summary>
+    bool IsStuckInWorld(uint serverGuid);
     bool IsWieldedByPlayer(uint serverGuid);
     bool IsWieldedPositionState(uint serverGuid);
     bool TryGetApproach(uint serverGuid, out InteractionApproach approach);
@@ -103,22 +106,6 @@ internal sealed class WorldSelectionQuery
     private const uint StuckObjectFlag = 0x0004u;
     private const float DefaultUseRadius = 0.6f;
     private const float AceCanChargeDistance = 7.5f;
-
-    private const uint SmallItemMask =
-        (uint)(ItemType.MeleeWeapon
-             | ItemType.Armor
-             | ItemType.Clothing
-             | ItemType.Jewelry
-             | ItemType.Food
-             | ItemType.Money
-             | ItemType.Misc
-             | ItemType.MissileWeapon
-             | ItemType.Container
-             | ItemType.Gem
-             | ItemType.SpellComponents
-             | ItemType.Writable
-             | ItemType.Key
-             | ItemType.Caster);
 
     private readonly LiveEntityRuntime _liveEntities;
     private readonly ClientObjectTable _objects;
@@ -556,15 +543,25 @@ internal sealed class WorldSelectionQuery
             && item.ContainerId == 0u
             && item.CurrentlyEquippedLocation != EquipMask.None;
 
+    /// <summary>
+    /// Whether a world object may be lifted into a pack. There is no list of
+    /// item types here: any loose object can be picked up unless it is stuck
+    /// in place or is a container that holds other containers (a chest, a
+    /// corpse). Creatures and items someone else wields are refused by the
+    /// caller with their own messages.
+    /// </summary>
     public bool IsPickupable(uint serverGuid)
     {
-        if (!_liveEntities.TryGetSnapshot(serverGuid, out var spawn)
-            || ((spawn.ObjectDescriptionFlags ?? 0u) & StuckObjectFlag) != 0u)
-        {
+        if (!_liveEntities.TryGetSnapshot(serverGuid, out var spawn))
             return false;
-        }
-        return ((spawn.ItemType ?? 0u) & SmallItemMask) != 0u;
+        if (((spawn.ObjectDescriptionFlags ?? 0u) & StuckObjectFlag) != 0u)
+            return false;
+        return (spawn.ContainersCapacity ?? 0) == 0;
     }
+
+    public bool IsStuckInWorld(uint serverGuid)
+        => _liveEntities.TryGetSnapshot(serverGuid, out var spawn)
+            && ((spawn.ObjectDescriptionFlags ?? 0u) & StuckObjectFlag) != 0u;
 
     public bool TryGetApproach(
         uint serverGuid,

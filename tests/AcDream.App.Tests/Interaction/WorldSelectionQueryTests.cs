@@ -93,7 +93,8 @@ public sealed class WorldSelectionQueryTests
             float scale = 1f,
             Quaternion? rotation = null,
             float? useRadius = null,
-            byte? radarBehavior = null)
+            byte? radarBehavior = null,
+            int? containersCapacity = null)
         {
             WorldSession.EntitySpawn spawn = Spawn(guid, instance) with
             {
@@ -101,6 +102,7 @@ public sealed class WorldSelectionQueryTests
                 Useability = useability,
                 ObjectDescriptionFlags = objectDescriptionFlags,
                 UseRadius = useRadius,
+                ContainersCapacity = containersCapacity,
             };
             Runtime.RegisterLiveEntity(spawn);
             WorldEntity entity = Runtime.MaterializeLiveEntity(
@@ -569,8 +571,32 @@ public sealed class WorldSelectionQueryTests
 
         Assert.False(h.Query.IsUseable(stuckComponent));
         Assert.False(h.Query.IsPickupable(stuckComponent));
+        Assert.True(h.Query.IsStuckInWorld(stuckComponent));
         Assert.False(h.Query.IsUseable(looseComponent));
         Assert.True(h.Query.IsPickupable(looseComponent));
+        Assert.False(h.Query.IsStuckInWorld(looseComponent));
+    }
+
+    // OpenAC #41: there is no list of pickable item types. A loose cooking
+    // ingredient (a plant) that is not usable is still picked up; only a
+    // container that holds containers is refused.
+    [Fact]
+    public void PickupIsNotGatedOnItemType_OnlyStuckAndContainerOfContainers()
+    {
+        var h = new Harness();
+        const uint plant = 0x7000_0030u;
+        const uint alchemyBase = 0x7000_0031u;
+        const uint chest = 0x7000_0032u;
+        const uint pouch = 0x7000_0033u;
+        h.Add(plant, Vector3.UnitX, ItemType.CraftCookingBase, useability: 1u);
+        h.Add(alchemyBase, Vector3.UnitX * 2f, ItemType.CraftAlchemyBase, useability: 1u);
+        h.Add(chest, Vector3.UnitX * 3f, ItemType.Container, containersCapacity: 2);
+        h.Add(pouch, Vector3.UnitX * 4f, ItemType.Container, containersCapacity: 0);
+
+        Assert.True(h.Query.IsPickupable(plant));
+        Assert.True(h.Query.IsPickupable(alchemyBase));
+        Assert.False(h.Query.IsPickupable(chest));
+        Assert.True(h.Query.IsPickupable(pouch));
     }
 
     [Fact]

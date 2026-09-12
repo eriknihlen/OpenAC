@@ -65,6 +65,7 @@ public sealed class CombatCameraTargetSourceTests
         public ClosestCombatTarget? FindClosestHostileMonster() => null;
         public bool IsUseable(uint serverGuid) => false;
         public bool IsPickupable(uint serverGuid) => false;
+        public bool IsStuckInWorld(uint serverGuid) => false;
         public bool IsWieldedByPlayer(uint serverGuid) => false;
         public bool IsWieldedPositionState(uint serverGuid) => false;
         public bool TryGetApproach(uint serverGuid, out InteractionApproach approach)

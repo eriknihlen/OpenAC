@@ -771,6 +771,12 @@ internal sealed class SelectionInteractionController
                 _toast?.Invoke(RetailMessages.CannotPickUpCreatures);
             return false;
         }
+        if (_query.IsStuckInWorld(serverGuid))
+        {
+            if (showToast)
+                _toast?.Invoke(RetailMessages.CannotBePickedUp(_query.Describe(serverGuid)));
+            return false;
+        }
         if (_query.IsWieldedPositionState(serverGuid)
             && !_items.IsOwnedByPlayer(serverGuid))
         {

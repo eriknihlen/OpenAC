@@ -1366,6 +1366,7 @@ public sealed class CurrentGameRuntimeAdapterTests
             new(target, DistanceSquared: 4f);
         public bool IsUseable(uint serverGuid) => serverGuid == target;
         public bool IsPickupable(uint serverGuid) => false;
+        public bool IsStuckInWorld(uint serverGuid) => false;
         public bool IsWieldedByPlayer(uint serverGuid) => false;
         public bool IsWieldedPositionState(uint serverGuid) => false;
 
