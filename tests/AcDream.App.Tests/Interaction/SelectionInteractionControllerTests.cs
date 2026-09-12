@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.App.Interaction;
 using AcDream.App.UI;
 using AcDream.App.World;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -137,6 +138,23 @@ public sealed class SelectionInteractionControllerTests
         }
     }
 
+    private sealed class CombatTargetOperations(SelectionState selection)
+        : IRuntimeCombatTargetOperations
+    {
+        public bool AutoTarget { get; set; }
+        public uint? Reacquires { get; set; }
+        public int Calls { get; private set; }
+
+        public uint? SelectClosestTarget()
+        {
+            Calls++;
+            if (Reacquires is not { } guid)
+                return null;
+            selection.Select(guid, SelectionChangeSource.System);
+            return guid;
+        }
+    }
+
     private sealed class Harness
     {
         public readonly Query Query = new();
@@ -151,6 +169,9 @@ public sealed class SelectionInteractionControllerTests
         public readonly List<PendingBackpackPlacement> PendingPlacements = new();
         public readonly List<PendingBackpackPlacement> CancelledPlacements = new();
         public readonly ItemInteractionController Items;
+        public readonly CombatState Combat = new();
+        public readonly CombatTargetOperations CombatTargetOperations;
+        public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
         public uint GroundObjectId { get; set; }
 
@@ -191,6 +212,11 @@ public sealed class SelectionInteractionControllerTests
                     controller!.SendPickup(item, container, placement),
                 requestUse: (guid, reservation) =>
                     controller!.RequestUse(guid, reservation));
+            CombatTargetOperations = new CombatTargetOperations(Selection);
+            CombatTarget = new RuntimeCombatTargetState(
+                Combat,
+                Selection,
+                CombatTargetOperations);
             Controller = controller = new SelectionInteractionController(
                 Selection,
                 Query,
@@ -198,7 +224,8 @@ public sealed class SelectionInteractionControllerTests
                 Transport,
                 Movement,
                 Toasts.Add,
-                Completions);
+                Completions,
+                combatTarget: CombatTarget);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
@@ -237,6 +264,24 @@ public sealed class SelectionInteractionControllerTests
         Assert.True(h.Controller.HandleInputAction(InputAction.EscapeKey));
 
         Assert.Null(h.Selection.SelectedObjectId);
+    }
+
+    [Fact]
+    public void Escape_WithAutomaticTargeting_DropsTheTargetForGood()
+    {
+        // OpenAC #40: one press used to empty the selection and have automatic
+        // targeting pick the same creature straight back up, so the target
+        // only flickered and the press appeared to do nothing.
+        var h = new Harness();
+        h.Combat.SetCombatMode(CombatMode.Melee);
+        h.CombatTargetOperations.AutoTarget = true;
+        h.CombatTargetOperations.Reacquires = Target;
+        h.Selection.Select(Target, SelectionChangeSource.World);
+
+        Assert.True(h.Controller.HandleInputAction(InputAction.EscapeKey));
+
+        Assert.Null(h.Selection.SelectedObjectId);
+        Assert.Equal(0, h.CombatTargetOperations.Calls);
     }
 
     [Fact]

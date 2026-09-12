@@ -106,6 +106,97 @@ public sealed class RuntimeCombatTargetStateTests
         Assert.Null(selection.SelectedObjectId);
     }
 
+    [Fact]
+    public void WillingDeselect_AutoTargetEnabled_LeavesSelectionEmpty()
+    {
+        var combat = new CombatState();
+        combat.SetCombatMode(CombatMode.Melee);
+        var selection = new SelectionState();
+        selection.Select(0x50000001u, SelectionChangeSource.World);
+        int calls = 0;
+        using var controller = new RuntimeCombatTargetState(
+            combat,
+            selection,
+            new Operations(true, () =>
+            {
+                calls++;
+                selection.Select(0x50000001u, SelectionChangeSource.System);
+                return 0x50000001u;
+            }));
+
+        controller.NotifyTargetWillinglyLost();
+        selection.Clear(SelectionChangeSource.Keyboard);
+
+        Assert.Equal(0, calls);
+        Assert.Null(selection.SelectedObjectId);
+    }
+
+    [Fact]
+    public void WillingDeselect_ConsumesTheMarkForExactlyOneChange()
+    {
+        var combat = new CombatState();
+        combat.SetCombatMode(CombatMode.Melee);
+        var selection = new SelectionState();
+        selection.Select(0x50000001u, SelectionChangeSource.World);
+        int calls = 0;
+        using var controller = new RuntimeCombatTargetState(
+            combat,
+            selection,
+            new Operations(true, () => { calls++; return null; }));
+
+        controller.NotifyTargetWillinglyLost();
+        selection.Clear(SelectionChangeSource.Keyboard);
+        Assert.Equal(0, calls);
+
+        selection.Select(0x50000002u, SelectionChangeSource.World);
+        selection.Clear(SelectionChangeSource.Keyboard);
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void RemovedTarget_WithNoWillingDeselect_StillAcquiresANewTarget()
+    {
+        var combat = new CombatState();
+        combat.SetCombatMode(CombatMode.Melee);
+        var selection = new SelectionState();
+        selection.Select(0x50000001u, SelectionChangeSource.World);
+        int calls = 0;
+        using var controller = new RuntimeCombatTargetState(
+            combat,
+            selection,
+            new Operations(true, () => { calls++; return null; }));
+
+        selection.Clear(
+            SelectionChangeSource.System,
+            SelectionChangeReason.SelectedObjectRemoved);
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void SessionReset_DropsAPendingWillingDeselectMark()
+    {
+        var combat = new CombatState();
+        combat.SetCombatMode(CombatMode.Melee);
+        var selection = new SelectionState();
+        selection.Select(0x50000001u, SelectionChangeSource.World);
+        int calls = 0;
+        using var controller = new RuntimeCombatTargetState(
+            combat,
+            selection,
+            new Operations(true, () => { calls++; return null; }));
+
+        controller.NotifyTargetWillinglyLost();
+        selection.Reset();
+        Assert.Equal(0, calls);
+
+        selection.Select(0x50000002u, SelectionChangeSource.World);
+        selection.Clear(SelectionChangeSource.Keyboard);
+
+        Assert.Equal(1, calls);
+    }
+
     private sealed class Operations(
         bool autoTarget,
         Func<uint?> selectClosestTarget)

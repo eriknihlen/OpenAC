@@ -852,7 +852,8 @@ internal sealed class LivePresentationCompositionPhase
                 interaction.RetainedUi?.Runtime.SelectedObjectController?
                     .FocusSplitStackEntry(guid) ?? false,
             fellowshipMembers: () =>
-                d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid));
+                d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid),
+            combatTarget: d.Runtime.ActionOwner.CombatTarget);
         selectionInteractionSource.Bind(selectionInteractions);
         bindings.Adopt(
             "world selection",

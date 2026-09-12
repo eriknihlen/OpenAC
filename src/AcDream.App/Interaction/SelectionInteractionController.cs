@@ -21,6 +21,7 @@ internal sealed class SelectionInteractionController
     private readonly Action<string>? _toast;
     private readonly Func<uint, bool>? _splitStack;
     private readonly Func<IEnumerable<uint>> _fellowshipMembers;
+    private readonly RuntimeCombatTargetState? _combatTarget;
 
     public SelectionInteractionController(
         SelectionState selection,
@@ -31,7 +32,8 @@ internal sealed class SelectionInteractionController
         Action<string>? toast = null,
         PlayerApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
-        Func<IEnumerable<uint>>? fellowshipMembers = null)
+        Func<IEnumerable<uint>>? fellowshipMembers = null,
+        RuntimeCombatTargetState? combatTarget = null)
     {
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _query = query ?? throw new ArgumentNullException(nameof(query));
@@ -44,6 +46,7 @@ internal sealed class SelectionInteractionController
             ?? new PlayerApproachCompletionState();
         _splitStack = splitStack;
         _fellowshipMembers = fellowshipMembers ?? (() => Array.Empty<uint>());
+        _combatTarget = combatTarget;
     }
 
     public bool HandleInputAction(InputAction action)
@@ -169,6 +172,11 @@ internal sealed class SelectionInteractionController
                 _items.CancelTargetMode();
                 return true;
             case InputAction.EscapeKey when _selection.SelectedObjectId is not null:
+                // The player asked to drop the target, so say so before the
+                // selection empties: automatic targeting would otherwise pick
+                // the same creature straight back up and the press would only
+                // make the target flicker.
+                _combatTarget?.NotifyTargetWillinglyLost();
                 _selection.Clear(SelectionChangeSource.Keyboard);
                 return true;
             default:
