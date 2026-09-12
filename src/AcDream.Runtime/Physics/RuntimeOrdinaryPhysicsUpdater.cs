@@ -113,13 +113,25 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
         Vector3 integratedPosition = body.Position;
         uint sourceCellId = record.FullCellId;
         uint resolvedCellId = sourceCellId;
-        bool frameChanged = integratedPosition != priorPosition
-            || body.Orientation != priorOrientation;
         uint movingEntityId = record.LocalEntityId ?? 0u;
+        bool hasSweepShape = !sphereList.IsDefaultOrEmpty || radius >= 0.05f;
+
+        // An object only moves through a sweep of its collision shape. With
+        // nothing to sweep, or when the sweep is refused, it keeps its
+        // origin and only its orientation advances; its velocity keeps
+        // integrating, so it stays put rather than sinking through the
+        // world (the sign hung on a wall carries no collision spheres).
+        void HoldOrigin(bool deactivateOnWalkable)
+        {
+            body.SetFrameInCurrentCell(priorPosition, body.Orientation);
+            body.CachedVelocity = Vector3.Zero;
+            if (deactivateOnWalkable && body.OnWalkable)
+                body.TransientState &= ~TransientStateFlags.Active;
+        }
 
         if (integratedPosition != priorPosition
             && sourceCellId != 0
-            && radius >= 0.05f
+            && hasSweepShape
             && _physics.Engine.LandblockCount > 0)
         {
             ResolveResult resolved = _physics.Engine.ResolveWithTransition(
@@ -162,13 +174,19 @@ internal sealed class RuntimeOrdinaryPhysicsUpdater
             }
             else
             {
-                body.CachedVelocity = Vector3.Zero;
+                HoldOrigin(deactivateOnWalkable: false);
             }
+        }
+        else if (integratedPosition != priorPosition && !hasSweepShape)
+        {
+            HoldOrigin(deactivateOnWalkable: true);
         }
         else
         {
             body.CachedVelocity = Vector3.Zero;
         }
+        bool frameChanged = body.Position != priorPosition
+            || body.Orientation != priorOrientation;
 
         if (!IsCurrent(
                 record,

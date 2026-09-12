@@ -248,4 +248,79 @@ public sealed class LiveEntityOrdinaryPhysicsUpdaterTests
     {
         public DatReaderWriter.DBObjs.Animation? LoadAnimation(uint id) => null;
     }
+
+    // A server object whose setup carries no collision shape (a sign hung on
+    // a wall) keeps its origin under gravity; only its velocity integrates.
+    [Fact]
+    public void NoCollisionShape_HoldsOriginUnderGravity()
+    {
+        var spatial = new GpuWorldState();
+        spatial.AddLandblock(EmptyLandblock(0xA9B4FFFFu));
+        spatial.AddLandblock(EmptyLandblock(0xAAB4FFFFu));
+        var live = LiveEntityRuntimeFixture.Create(
+            spatial,
+            new DelegateLiveEntityResourceLifecycle(_ => { }, _ => { }));
+        PopulateBoundaryEngine(live.Physics.Engine);
+        var hung = new Vector3(100f, 10f, 60f);
+        LiveEntityRecord record = live.RegisterAndMaterializeProjection(
+            Spawn(),
+            id => new WorldEntity
+            {
+                Id = id,
+                ServerGuid = Guid,
+                SourceGfxObjOrSetupId = 0x02000001u,
+                Position = hung,
+                Rotation = Quaternion.Identity,
+                MeshRefs = Array.Empty<MeshRef>(),
+                ParentCellId = SourceCell,
+            },
+            isLocalPlayer: true);
+        WorldEntity entity = Assert.IsType<WorldEntity>(record.WorldEntity);
+
+        var remote = new AcDream.Runtime.Physics.RemoteMotion
+        {
+            CellId = SourceCell,
+        };
+        remote.Body.TransientState = TransientStateFlags.Active;
+        remote.Body.SnapToCell(SourceCell, hung, hung);
+        live.SetRemoteMotionRuntime(Guid, remote);
+        Assert.True(live.ClearRemoteMotionRuntime(Guid));
+        ulong epoch = record.ObjectClockEpoch;
+        PhysicsBody body = Assert.IsType<PhysicsBody>(record.PhysicsBody);
+        // Already falling, the way the original client leaves such an object
+        // after its gravity has integrated for a while.
+        body.set_velocity(new Vector3(0f, 0f, -1f));
+
+        var updater = new LiveEntityOrdinaryPhysicsUpdater(
+            live.Physics,
+            (_, _) => (0f, 0f),
+            (_, _) => (System.Collections.Immutable.ImmutableArray<FlatCollisionSphere>.Empty, 1f, 0.01f, 0.01f));
+        var rootFrame = new Frame
+        {
+            Origin = Vector3.Zero,
+            Orientation = Quaternion.Identity,
+        };
+
+        for (int tick = 0; tick < 5; tick++)
+        {
+            Assert.True(updater.Tick(
+                live,
+                record,
+                entity,
+                rootFrame,
+                objectScale: 1f,
+                quantum: 0.1f,
+                liveCenterX: 0xA9,
+                liveCenterY: 0xB4,
+                objectClockEpoch: epoch,
+                sequencer: null,
+                captureAnimationHooks: (_, _) => { }));
+        }
+
+        Assert.Equal(hung, entity.Position);
+        Assert.Equal(hung, body.Position);
+        Assert.Equal(SourceCell, record.FullCellId);
+        Assert.True(body.Velocity.Z < 0f, "the velocity keeps integrating");
+        Assert.Equal(Vector3.Zero, body.CachedVelocity);
+    }
 }
