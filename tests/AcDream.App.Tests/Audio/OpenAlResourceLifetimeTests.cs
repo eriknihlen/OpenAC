@@ -64,6 +64,32 @@ public sealed class OpenAlResourceLifetimeTests
         engine.Dispose();
     }
 
+    // Resizing the pool hands sources back and takes new ones. Teardown then
+    // owes exactly the live ones, once each: a source already released must not
+    // be deleted a second time, and must not be missing from the count either.
+    [Fact]
+    public void ResizingThePool_LeavesTeardownOwingExactlyTheLiveSources()
+    {
+        var api = new RecordingApi();
+        var engine = new OpenAlAudioEngine(
+            new Factory(api),
+            new AudioMixerOptions { VoiceCount = 20 });
+
+        engine.ApplyMixerOptions(new AudioMixerOptions { RetailMixer = true });
+        Assert.Equal([20u, 19u, 18u, 17u], api.DeletedSources);
+
+        engine.ApplyMixerOptions(new AudioMixerOptions { VoiceCount = 18 });
+        Assert.Equal(22, api.GeneratedSources.Count);    // 20 + 2 more
+
+        engine.Dispose();
+
+        Assert.True(engine.IsDisposalComplete);
+        Assert.Equal(22, api.DeletedSources.Count);
+        Assert.Equal(
+            api.DeletedSources.Count,
+            api.DeletedSources.Distinct().Count());
+    }
+
     // An engine that never came up has no sources to resize, and must not try.
     [Fact]
     public void AnUnavailableEngine_IgnoresNewMixerSettings()
@@ -71,7 +97,8 @@ public sealed class OpenAlResourceLifetimeTests
         var api = new RecordingApi { ContextResult = 0 };
         var engine = new OpenAlAudioEngine(new Factory(api));
 
-        engine.ApplyMixerOptions(new AudioMixerOptions { VoiceCount = 64 });
+        Assert.False(engine.ApplyMixerOptions(
+            new AudioMixerOptions { VoiceCount = 64 }));
 
         Assert.False(engine.IsAvailable);
         Assert.Empty(api.GeneratedSources);

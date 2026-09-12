@@ -44,7 +44,8 @@ public sealed class WorldVoicePoolTests
         for (int i = 0; i < pool.Count; i++)
         {
             // A realistic mix: interface clicks land among world sounds.
-            WorldVoicePool.Voice? voice = pool.Claim(
+            WorldVoicePool.Voice? voice = ClaimPlain(
+                pool,
                 Playing,
                 ownerId: (uint)(i + 1),
                 isInterface: i % 4 == 0);
@@ -77,11 +78,27 @@ public sealed class WorldVoicePoolTests
 
     private static bool Finished(uint sourceId) => false;
 
+    // The shorthand the tests that predate the settings use: one sound with no
+    // id, so the per-sound cap has nothing to count, and no authored priority.
+    private static WorldVoicePool.Voice? ClaimPlain(
+        WorldVoicePool pool,
+        Func<uint, bool> isStillPlaying,
+        uint ownerId,
+        bool isInterface) =>
+        pool.Claim(
+            isStillPlaying,
+            ownerId,
+            isInterface,
+            authoredPriority: 0f,
+            waveId: 0u,
+            nowMs: 0L,
+            out _);
+
     [Fact]
     public void TheShippedMixer_HasSixteenVoices_AndTheDefaultHasThirtyTwo()
     {
         Assert.Equal(16, new WorldVoicePool(ShippedMixer).Count);
-        Assert.Equal(32, new WorldVoicePool().Count);
+        Assert.Equal(32, new WorldVoicePool(AudioMixerOptions.Default).Count);
     }
 
     [Fact]
@@ -102,7 +119,7 @@ public sealed class WorldVoicePoolTests
     {
         WorldVoicePool pool = FilledPool(out _);
 
-        Assert.Null(pool.Claim(Playing, ownerId: 0xDEADu, isInterface: false));
+        Assert.Null(ClaimPlain(pool, Playing, ownerId: 0xDEADu, isInterface: false));
 
         for (int i = 0; i < pool.Count; i++)
         {
@@ -256,14 +273,14 @@ public sealed class WorldVoicePoolTests
     {
         WorldVoicePool pool = FilledPool(out _);
 
-        Assert.Null(pool.Claim(Playing, ownerId: 0u, isInterface: true));
+        Assert.Null(ClaimPlain(pool, Playing, ownerId: 0u, isInterface: true));
         for (int i = 0; i < pool.Count; i++)
             Assert.Equal((uint)(i + 1), pool[i].OwnerId);   // nothing was taken
 
         WorldVoicePool.Vacate(pool[3]);
 
         WorldVoicePool.Voice taken = Assert.IsType<WorldVoicePool.Voice>(
-            pool.Claim(Playing, ownerId: 0u, isInterface: true));
+            ClaimPlain(pool, Playing, ownerId: 0u, isInterface: true));
         Assert.Same(pool[3], taken);
         Assert.True(taken.IsInterface);
     }
@@ -278,9 +295,9 @@ public sealed class WorldVoicePoolTests
             pool[i].SourceId = (uint)(i + 1);
 
         WorldVoicePool.Voice world = Assert.IsType<WorldVoicePool.Voice>(
-            pool.Claim(Playing, ownerId: 0x50000001u, isInterface: false));
+            ClaimPlain(pool, Playing, ownerId: 0x50000001u, isInterface: false));
         WorldVoicePool.Voice cue = Assert.IsType<WorldVoicePool.Voice>(
-            pool.Claim(Playing, ownerId: 0u, isInterface: true));
+            ClaimPlain(pool, Playing, ownerId: 0u, isInterface: true));
 
         WorldVoicePool.Voice[] silenced = pool.SilencedByWorldChange().ToArray();
 
@@ -304,7 +321,7 @@ public sealed class WorldVoicePoolTests
         WorldVoicePool pool = FilledPool(out _);
 
         WorldVoicePool.Voice reclaimed = Assert.IsType<WorldVoicePool.Voice>(
-            pool.Claim(Finished, ownerId: 0xBEEFu, isInterface: false));
+            ClaimPlain(pool, Finished, ownerId: 0xBEEFu, isInterface: false));
 
         Assert.Equal(0xBEEFu, reclaimed.OwnerId);
         Assert.True(reclaimed.InUse);
@@ -322,7 +339,9 @@ public sealed class WorldVoicePoolTests
         Assert.False(claimed[5].IsInterface);
         Assert.Equal(0u, claimed[5].OwnerId);
         Assert.Equal(0u, claimed[5].WaveId);
-        Assert.Same(claimed[5], pool.Claim(Playing, ownerId: 0x1234u, isInterface: false));
+        Assert.Same(
+            claimed[5],
+            ClaimPlain(pool, Playing, ownerId: 0x1234u, isInterface: false));
     }
 
     // Changing the setting while the client runs: the voices the pool no

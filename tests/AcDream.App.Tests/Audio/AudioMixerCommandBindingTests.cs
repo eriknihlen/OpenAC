@@ -76,6 +76,58 @@ public sealed class AudioMixerCommandBindingTests
         Assert.Empty(harness.Saved);
     }
 
+    // A setting is written down BEFORE the running mixer is changed, so a save
+    // that fails leaves both alone and says so. The other order would leave a
+    // mixer running settings nothing remembers.
+    [Fact]
+    public void ASaveThatFails_LeavesTheRunningMixerAloneAndSaysSo()
+    {
+        var harness = new Harness(savesFail: true);
+
+        Assert.True(harness.Commands.TryHandle("/mixer voices 40"));
+
+        Assert.Equal(AudioMixerCommandBinding.SaveFailed, Assert.Single(harness.Said));
+        Assert.Equal(32, harness.Engine.MixerOptions.EffectiveVoiceCount);
+        Assert.Equal(32, harness.Api.GeneratedSources.Count);
+        Assert.Empty(harness.Saved);
+    }
+
+    // With no audio device there is no mixer to change. Reporting the new
+    // settings as if they were in force would be a lie, so the reply says
+    // where they actually took effect.
+    [Fact]
+    public void WithNoMixerRunning_TheSettingsAreSavedAndTheReplySaysSo()
+    {
+        var harness = new Harness(audioAvailable: false);
+
+        Assert.True(harness.Commands.TryHandle("/mixer voices 40"));
+
+        Assert.Equal(40, Assert.Single(harness.Saved).VoiceCount);
+        Assert.Equal(
+            [
+                "mixer: retail mixer off, 40 voices, authored priority on, "
+                + "at most 4 voices per sound",
+                AudioMixerCommandBinding.NoMixerRunning,
+            ],
+            harness.Said);
+        Assert.Empty(harness.Api.GeneratedSources);
+    }
+
+    // Reading the settings is not changing them, so it never claims a mixer
+    // that is not there.
+    [Fact]
+    public void WithNoMixerRunning_ReadingTheSettingsSaysNothingExtra()
+    {
+        var harness = new Harness(audioAvailable: false);
+
+        Assert.True(harness.Commands.TryHandle("/mixer"));
+
+        Assert.Equal(
+            "mixer: retail mixer off, 32 voices, authored priority on, "
+            + "at most 4 voices per sound",
+            Assert.Single(harness.Said));
+    }
+
     [Fact]
     public void WithoutACommandLineOrAudio_ThereIsNothingToBind()
     {
@@ -83,7 +135,7 @@ public sealed class AudioMixerCommandBindingTests
             commands: null,
             engine: null,
             () => AudioMixerOptions.Default,
-            _ => { },
+            _ => true,
             _ => { }));
     }
 
@@ -100,10 +152,11 @@ public sealed class AudioMixerCommandBindingTests
 
     private sealed class Harness
     {
-        internal Harness()
+        internal Harness(bool audioAvailable = true, bool savesFail = false)
         {
+            Api.ContextResult = audioAvailable ? 202 : 0;
             Engine = new OpenAlAudioEngine(new Factory(Api), AudioMixerOptions.Default);
-            Assert.True(Engine.IsAvailable);
+            Assert.Equal(audioAvailable, Engine.IsAvailable);
             Binding = Assert.IsType<AudioMixerCommandBinding>(
                 AudioMixerCommandBinding.TryRegister(
                     Commands,
@@ -111,8 +164,11 @@ public sealed class AudioMixerCommandBindingTests
                     () => _settings,
                     settings =>
                     {
+                        if (savesFail)
+                            return false;
                         _settings = settings;
                         Saved.Add(settings);
+                        return true;
                     },
                     Said.Add));
         }
@@ -146,9 +202,11 @@ public sealed class AudioMixerCommandBindingTests
         public List<uint> GeneratedSources { get; } = [];
         public List<uint> DeletedSources { get; } = [];
 
+        public nint ContextResult { get; set; } = 202;
+
         public nint OpenDevice() => 101;
         public bool SupportsOutputLimiterControl(nint device) => false;
-        public nint CreateContext(nint device, int[]? attributes) => 202;
+        public nint CreateContext(nint device, int[]? attributes) => ContextResult;
         public int? ReadOutputLimiterState(nint device) => null;
         public bool MakeContextCurrent(nint context) => true;
 

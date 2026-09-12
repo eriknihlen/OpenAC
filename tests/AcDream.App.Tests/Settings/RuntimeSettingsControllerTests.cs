@@ -487,6 +487,62 @@ public sealed partial class RuntimeSettingsControllerTests
         Assert.False(cmd.Value);
     }
 
+    // OpenAC #42 follow-up: the mixer settings are read once at startup, from
+    // storage, and handed to the audio composition from this property. Nothing
+    // else reads the file.
+    [Fact]
+    public void TheMixerSettingsAreReadFromStorageOnce()
+    {
+        var storage = new FakeStorage
+        {
+            AudioMixerValue = new AudioMixerOptions
+            {
+                VoiceCount = 48,
+                MaxVoicesPerWave = 6,
+            },
+        };
+
+        var controller = CreateController(storage);
+
+        Assert.Equal(1, storage.AudioMixerLoads);
+        Assert.Same(storage.AudioMixerValue, controller.AudioMixer);
+        Assert.Equal(48, controller.AudioMixer.VoiceCount);
+    }
+
+    [Fact]
+    public void SaveAudioMixerWritesItDownAndRemembersIt()
+    {
+        var events = new List<string>();
+        var storage = new FakeStorage(events);
+        var controller = CreateController(storage, events);
+        events.Clear();
+
+        var chosen = new AudioMixerOptions { VoiceCount = 64, RetailMixer = false };
+        Assert.True(controller.SaveAudioMixer(chosen));
+
+        Assert.Equal(["save-audio-mixer"], events);
+        Assert.Same(chosen, controller.AudioMixer);
+        Assert.Same(chosen, storage.AudioMixerValue);
+    }
+
+    // A failed save must report failure and leave the remembered settings
+    // alone: its caller does not change the running mixer unless this said yes.
+    [Fact]
+    public void SaveAudioMixerThatFails_ReportsFailureAndKeepsTheOldSettings()
+    {
+        var events = new List<string>();
+        var storage = new FakeStorage(events) { ThrowOnAudioMixerSave = true };
+        var controller = CreateController(storage, events);
+        AudioMixerOptions before = controller.AudioMixer;
+        events.Clear();
+
+        Assert.False(controller.SaveAudioMixer(
+            new AudioMixerOptions { VoiceCount = 64 }));
+
+        Assert.Equal(["save-audio-mixer"], events);
+        Assert.Same(before, controller.AudioMixer);
+    }
+
     [Fact]
     public void SaveAudioPersistsThenPushesLiveApplyAudioWithTheSavedSnapshot()
     {
@@ -1379,6 +1435,8 @@ public sealed partial class RuntimeSettingsControllerTests
 
         public bool ThrowOnAudioSave { get; init; }
 
+        public bool ThrowOnAudioMixerSave { get; init; }
+
         public bool ThrowOnChatSave { get; init; }
 
         public DisplaySettings LoadDisplay()
@@ -1396,11 +1454,19 @@ public sealed partial class RuntimeSettingsControllerTests
         public AudioMixerOptions AudioMixerValue { get; set; } =
             AudioMixerOptions.Default;
 
-        public AudioMixerOptions LoadAudioMixer() => AudioMixerValue;
+        public int AudioMixerLoads { get; private set; }
+
+        public AudioMixerOptions LoadAudioMixer()
+        {
+            AudioMixerLoads++;
+            return AudioMixerValue;
+        }
 
         public void SaveAudioMixer(AudioMixerOptions mixer)
         {
             _events.Add("save-audio-mixer");
+            if (ThrowOnAudioMixerSave)
+                throw new IOException("audio mixer persistence failed");
             AudioMixerValue = mixer;
         }
 

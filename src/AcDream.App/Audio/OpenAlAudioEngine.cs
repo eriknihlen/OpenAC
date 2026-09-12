@@ -174,15 +174,21 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     /// Put new mixer settings in force without restarting: the pool grows or
     /// shrinks, and the sources it needs are made or released to match. A
     /// voice the pool no longer has room for stops whatever it was playing.
-    /// An engine that never came up keeps its settings for its next start.
     /// </summary>
-    internal void ApplyMixerOptions(AudioMixerOptions mixer)
+    /// <returns>
+    /// False when there is no mixer running to change — an engine that never
+    /// came up, or one already torn down. Its caller has to say so rather than
+    /// report a change that did not happen; the settings themselves are the
+    /// caller's to keep, and a later start reads them.
+    /// </returns>
+    internal bool ApplyMixerOptions(AudioMixerOptions mixer)
     {
         ArgumentNullException.ThrowIfNull(mixer);
         if (!_available || _resources is null)
-            return;
+            return false;
 
         _voices.ApplyOptions(mixer, RetireVoice, _resources.Create3DSource);
+        return true;
     }
 
     private void RetireVoice(WorldVoicePool.Voice voice)

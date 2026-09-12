@@ -435,7 +435,12 @@ internal sealed class RuntimeSettingsController :
     /// Write the mixer settings down. Applying them to the running mixer is the
     /// audio engine's job; this owns only what survives the session.
     /// </summary>
-    public void SaveAudioMixer(AudioMixerOptions mixer)
+    /// <returns>
+    /// Whether they were written. A failed save leaves the remembered settings
+    /// alone, so the caller must not go on to change the running mixer: it
+    /// would then be running settings nothing remembers.
+    /// </returns>
+    public bool SaveAudioMixer(AudioMixerOptions mixer)
     {
         ArgumentNullException.ThrowIfNull(mixer);
         try
@@ -443,10 +448,12 @@ internal sealed class RuntimeSettingsController :
             _storage.SaveAudioMixer(mixer);
             AudioMixer = mixer;
             _log($"settings: audio mixer saved to {_storage.Location}");
+            return true;
         }
         catch (Exception ex)
         {
             _log($"settings: audio mixer save failed: {ex.Message}");
+            return false;
         }
     }
 

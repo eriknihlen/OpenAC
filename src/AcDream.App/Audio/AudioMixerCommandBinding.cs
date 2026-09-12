@@ -12,16 +12,23 @@ namespace AcDream.App.Audio;
 /// </summary>
 internal sealed class AudioMixerCommandBinding : IDisposable
 {
+    internal const string SaveFailed =
+        "mixer: the settings could not be saved, so nothing changed.";
+
+    internal const string NoMixerRunning =
+        "mixer: saved, but there is no mixer running to change - it will start "
+        + "this way next time.";
+
     private readonly OpenAlAudioEngine _engine;
     private readonly Func<AudioMixerOptions> _read;
-    private readonly Action<AudioMixerOptions> _persist;
+    private readonly Func<AudioMixerOptions, bool> _persist;
     private readonly Action<string> _say;
     private IDisposable? _registration;
 
     private AudioMixerCommandBinding(
         OpenAlAudioEngine engine,
         Func<AudioMixerOptions> read,
-        Action<AudioMixerOptions> persist,
+        Func<AudioMixerOptions, bool> persist,
         Action<string> say)
     {
         _engine = engine;
@@ -38,7 +45,7 @@ internal sealed class AudioMixerCommandBinding : IDisposable
         IPluginCommandRegistry? commands,
         OpenAlAudioEngine? engine,
         Func<AudioMixerOptions> read,
-        Action<AudioMixerOptions> persist,
+        Func<AudioMixerOptions, bool> persist,
         Action<string> say)
     {
         ArgumentNullException.ThrowIfNull(read);
@@ -60,16 +67,27 @@ internal sealed class AudioMixerCommandBinding : IDisposable
             _read(),
             command.Arguments);
 
-        // Written down first: a setting the player can see reported but that a
-        // failed save would lose is worse than one that never changed.
+        bool running = true;
         if (result.Changed)
         {
-            _persist(result.Options);
-            _engine.ApplyMixerOptions(result.Options);
+            // Written down first, and only then applied: a setting reported as
+            // changed that a failed save would lose is worse than one that
+            // never changed, and a running mixer nothing remembers is worse
+            // still.
+            if (!_persist(result.Options))
+            {
+                _say(SaveFailed);
+                return;
+            }
+
+            running = _engine.ApplyMixerOptions(result.Options);
         }
 
         foreach (string line in result.Lines)
             _say(line);
+
+        if (!running)
+            _say(NoMixerRunning);
     }
 
     public void Dispose()

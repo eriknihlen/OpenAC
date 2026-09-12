@@ -57,11 +57,6 @@ internal sealed class WorldVoicePool
     private AudioMixerOptions _options;
     private int _cursor;
 
-    public WorldVoicePool()
-        : this(AudioMixerOptions.Default)
-    {
-    }
-
     public WorldVoicePool(AudioMixerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -76,20 +71,6 @@ internal sealed class WorldVoicePool
     public int Count => _voices.Count;
 
     public Voice this[int index] => _voices[index];
-
-    /// <summary>
-    /// Claim a voice for a new sound, or return null when there is none to
-    /// claim and the sound is therefore dropped.
-    /// </summary>
-    public Voice? Claim(Func<uint, bool> isStillPlaying, uint ownerId, bool isInterface) =>
-        Claim(
-            isStillPlaying,
-            ownerId,
-            isInterface,
-            authoredPriority: 0f,
-            waveId: 0u,
-            nowMs: 0L,
-            out _);
 
     /// <summary>
     /// Claim a voice for a new sound, or return null when there is none to

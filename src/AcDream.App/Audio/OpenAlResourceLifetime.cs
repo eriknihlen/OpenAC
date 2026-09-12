@@ -221,15 +221,19 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
 
     /// <summary>
     /// Release one source while the engine keeps running — the mixer pool
-    /// shrinking. The caller has already stopped whatever it was playing.
+    /// shrinking. The caller has already stopped whatever it was playing. The
+    /// entry leaves the owned list rather than staying in it as released:
+    /// resizing the pool repeatedly would otherwise grow the list without
+    /// bound, and teardown would walk entries it has nothing to do.
     /// </summary>
     public void ReleaseSource(uint source)
     {
-        SourceState state = _sources.LastOrDefault(candidate =>
-            candidate.Id == source && !candidate.Released)
-            ?? throw new InvalidOperationException($"OpenAL source {source} is not owned.");
+        int index = _sources.FindLastIndex(candidate =>
+            candidate.Id == source && !candidate.Released);
+        if (index < 0)
+            throw new InvalidOperationException($"OpenAL source {source} is not owned.");
         _api.DeleteSource(source);
-        state.Released = true;
+        _sources.RemoveAt(index);
     }
 
     public void OwnBuffer(uint buffer)
