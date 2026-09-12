@@ -119,6 +119,8 @@ public sealed class SocialFellowshipPageControllerTests
         public uint LocalPlayerGuid;
         public Func<uint, uint, UiElement?> TemplateResolver = FakeRowResolver;
         public Func<uint, uint, string?> ResolveString = static (_, _) => null;
+        public Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? ResolveTemplate;
+        public Func<uint, long>? ExperienceToRaiseLevel;
         public bool PanelOpenInWorld = true;
 
         public SocialFellowshipPageController.Bindings Build() => new(
@@ -136,7 +138,9 @@ public sealed class SocialFellowshipPageControllerTests
             LocalPlayerGuid: () => LocalPlayerGuid,
             CurrentCharacterOption: id => Options.TryGetValue(id, out bool v) && v,
             SetCharacterOption: (id, value) => { Options[id] = value; Calls.Add($"set-option:{id}:{value}"); },
-            ResolveString: ResolveString);
+            ResolveString: ResolveString,
+            ResolveTemplate: ResolveTemplate,
+            ExperienceToRaiseLevel: ExperienceToRaiseLevel);
     }
 
 
@@ -199,7 +203,7 @@ public sealed class SocialFellowshipPageControllerTests
 
         UiText stats = Assert.IsType<UiText>(UiElement.FindDescendant(row, RowStatsTextId));
         // 1-member even split -> 1.0 -> "100%" (lane B §7.2 table index 0).
-        Assert.Equal("12  100%", stats.LinesProvider().Single().Text);
+        Assert.Equal("12/100%", stats.LinesProvider().Single().Text);
 
         var health = Assert.IsType<UiMeter>(UiElement.FindDescendant(row, RowHealthMeterId));
         Assert.Equal(0.55f, health.Fill()!.Value, 3);
@@ -440,11 +444,11 @@ public sealed class SocialFellowshipPageControllerTests
     // ── D5 display ───────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(false, true, 1, "12  0%")]
-    [InlineData(true, true, 9, "12  31%")]   // even split, 9 fellows -> 0.3111111 -> truncate(31.11) = 31
-    [InlineData(true, false, 3, "12")]       // proportional -> no acdream XP table -> level only, no invented %
-    [InlineData(true, true, 6, "12  44%")]
-    [InlineData(true, true, 8, "12  34%")]
+    [InlineData(false, true, 1, "12/0%")]
+    [InlineData(true, true, 9, "12/31%")]   // even split, 9 fellows -> 0.3111111 -> truncate(31.11) = 31
+    [InlineData(true, false, 3, "12/100%")] // proportional: the only fellow carries the whole share
+    [InlineData(true, true, 6, "12/44%")]
+    [InlineData(true, true, 8, "12/34%")]
     public void FormatStatsText_MatchesD5Rules(bool shareXp, bool evenSplit, int memberCount, string expected)
     {
         UiElement root = BuildPageRoot(out UiTemplateListBox listBox, out _);
@@ -457,6 +461,7 @@ public sealed class SocialFellowshipPageControllerTests
                 EvenXpSplit = evenSplit, MemberCount = memberCount,
             },
             Members = [member],
+            ExperienceToRaiseLevel = level => level * 1000L,
         };
 
         SocialFellowshipPageController.Bind(root, b.Build());
@@ -464,6 +469,72 @@ public sealed class SocialFellowshipPageControllerTests
         UiElement row = Assert.Single(listBox.ViewportForTest!.Children);
         UiText stats = Assert.IsType<UiText>(UiElement.FindDescendant(row, RowStatsTextId));
         Assert.Equal(expected, stats.LinesProvider().Single().Text);
+    }
+
+    // OpenAC #38: the authored row is wider than the list, so its
+    // right-justified stats text would end under the scrollbar; the text
+    // gives up exactly that overlap on its right.
+    [Fact]
+    public void StatsText_GivesUpTheRowsOverlapPastTheList()
+    {
+        UiElement root = BuildPageRoot(out UiTemplateListBox listBox, out _);
+        listBox.Width = 271f;
+        var member = new RuntimeFellowMemberSnapshot(0x50000001u, "Alice", 12, 100, 80, 60, 100, 80, 60, false);
+        var b = new FellowshipBindingsBuilder
+        {
+            Snapshot = new RuntimeFellowshipSnapshot { IsInFellowship = true, Revision = 1, MemberCount = 1 },
+            Members = [member],
+            TemplateResolver = (_, _) =>
+            {
+                UiElement row = BuildFakeFellowRow();
+                row.Width = 279f;
+                UiElement stats = UiElement.FindDescendant(row, RowStatsTextId)!;
+                stats.Left = 199f;
+                stats.Width = 80f;
+                return row;
+            },
+        };
+
+        SocialFellowshipPageController.Bind(root, b.Build());
+
+        UiElement row = Assert.Single(listBox.ViewportForTest!.Children);
+        UiElement stats = UiElement.FindDescendant(row, RowStatsTextId)!;
+        Assert.Equal(199f, stats.Left);
+        Assert.Equal(72f, stats.Width);
+    }
+
+    // OpenAC #38: the share of an uneven split is each fellow's next-level
+    // cost over the sum of everyone's, and the text comes from the authored
+    // "level/share%" template.
+    [Fact]
+    public void FormatStatsText_ProportionalSplit_UsesNextLevelCostsAndTheAuthoredTemplate()
+    {
+        UiElement root = BuildPageRoot(out UiTemplateListBox listBox, out _);
+        var alice = new RuntimeFellowMemberSnapshot(0x50000001u, "Alice", 12, 100, 80, 60, 100, 80, 60, false);
+        var bob = new RuntimeFellowMemberSnapshot(0x50000002u, "Bob", 20, 100, 80, 60, 100, 80, 60, false);
+        var seen = new List<(uint table, uint key, string level, string percent)>();
+        var b = new FellowshipBindingsBuilder
+        {
+            Snapshot = new RuntimeFellowshipSnapshot
+            {
+                IsInFellowship = true, Revision = 1, ShareXp = true,
+                EvenXpSplit = false, MemberCount = 2,
+            },
+            Members = [alice, bob],
+            ExperienceToRaiseLevel = level => level * 100L,   // 1200 and 2000 -> 37% and 62%
+            ResolveTemplate = (table, key, vars) =>
+            {
+                seen.Add((table, key, vars[5286556u], vars[174673717u]));
+                return $"{vars[5286556u]}/{vars[174673717u]}%";
+            },
+        };
+
+        SocialFellowshipPageController.Bind(root, b.Build());
+
+        UiElement[] rows = listBox.ViewportForTest!.Children.ToArray();
+        Assert.Equal("12/37%", Assert.IsType<UiText>(UiElement.FindDescendant(rows[0], RowStatsTextId)).LinesProvider().Single().Text);
+        Assert.Equal("20/62%", Assert.IsType<UiText>(UiElement.FindDescendant(rows[1], RowStatsTextId)).LinesProvider().Single().Text);
+        Assert.All(seen, entry => Assert.Equal((0x23000001u, 0x003B5A03u), (entry.table, entry.key)));
     }
 
 

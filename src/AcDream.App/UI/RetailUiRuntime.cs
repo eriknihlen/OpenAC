@@ -3014,6 +3014,18 @@ public sealed class RetailUiRuntime : IDisposable
         Console.WriteLine("[UI] retail jump bar from gmFloatyPowerBarUI LayoutDesc 0x21000072.");
     }
 
+    /// <summary>The experience a fellow needs to go from their level to the next.</summary>
+    private static long ExperienceToRaiseLevel(
+        DatReaderWriter.DBObjs.ExperienceTable? table, uint level)
+    {
+        var levels = table?.Levels;
+        if (levels is null || level + 1 >= levels.Length)
+            return 0L;
+        ulong current = levels[level];
+        ulong next = levels[level + 1];
+        return next > current ? (long)Math.Min(next - current, (ulong)long.MaxValue) : 0L;
+    }
+
     private void MountSocialPanel()
     {
         ElementInfo? rootInfo;
@@ -3060,6 +3072,11 @@ public sealed class RetailUiRuntime : IDisposable
         }
 
         var fellowshipStrings = new DatStringResolver(_bindings.Assets.Dats);
+        DatReaderWriter.DBObjs.ExperienceTable? experienceTable;
+        lock (_bindings.Assets.DatLock)
+        {
+            experienceTable = Layout.CharacterSheetProvider.LoadExperienceTable(_bindings.Assets.Dats);
+        }
 
         var callbacks = new Layout.SocialPanelController.Callbacks(
             Toggle: () => ToggleWindow(WindowNames.SocialPanel),
@@ -3079,7 +3096,15 @@ public sealed class RetailUiRuntime : IDisposable
                 CurrentCharacterOption: id => _bindings.Options.CurrentCharacterOption((uint)id),
                 SetCharacterOption: (id, value) => _bindings.Options.CommandBus().Publish(
                     new SetSingleCharacterOptionRuntimeCmd((uint)id, value)),
-                ResolveString: (tableId, stringId) => fellowshipStrings.Resolve(tableId, stringId)),
+                ResolveString: (tableId, stringId) => fellowshipStrings.Resolve(tableId, stringId),
+                ResolveTemplate: (tableId, keyHash, variables) =>
+                {
+                    lock (_bindings.Assets.DatLock)
+                    {
+                        return fellowshipStrings.ResolveTemplate(tableId, keyHash, variables);
+                    }
+                },
+                ExperienceToRaiseLevel: level => ExperienceToRaiseLevel(experienceTable, level)),
             Allegiance: new Layout.SocialAllegiancePageController.Bindings(
                 Snapshot: _bindings.Social.AllegianceSnapshot,
                 Monarch: _bindings.Social.AllegianceMonarch,

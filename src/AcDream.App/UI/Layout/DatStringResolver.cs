@@ -61,6 +61,18 @@ public sealed class DatStringResolver
         IReadOnlyDictionary<uint, string> variables)
     {
         ArgumentNullException.ThrowIfNull(key);
+        return ResolveTemplate(tableId, ComputeHash(key), variables);
+    }
+
+    /// <summary>
+    /// The same interleave for an entry addressed by its key hash, for the
+    /// templates the game keeps by id rather than by name.
+    /// </summary>
+    public string? ResolveTemplate(
+        uint tableId,
+        uint keyHash,
+        IReadOnlyDictionary<uint, string> variables)
+    {
         ArgumentNullException.ThrowIfNull(variables);
         if (tableId == 0u)
             return null;
@@ -72,7 +84,7 @@ public sealed class DatStringResolver
         }
 
         if (table is null
-            || !table.Strings.TryGetValue(ComputeHash(key), out var entry)
+            || !table.Strings.TryGetValue(keyHash, out var entry)
             || entry.Strings.Count == 0)
             return null;
 

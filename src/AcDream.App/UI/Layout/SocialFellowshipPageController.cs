@@ -34,6 +34,12 @@ public sealed class SocialFellowshipPageController
     private const uint OptionStringTableId = 0x23000003u;
     private const uint FellowshipStringTableId = 0x23000001u;
 
+    // The authored "level/share%" entry of the fellowship string table and
+    // its two variable ids.
+    private const uint StatsTemplateKey = 0x003B5A03u;
+    private const uint StatsLevelVariable = 5286556u;
+    private const uint StatsPercentVariable = 174673717u;
+
     private static readonly float[] EvenSplitPercentTable =
         [1.0f, 0.75f, 0.6f, 0.55f, 0.5f, 0.45f, 0.4f, 0.35f, 0.3111111f, 0.28f];
 
@@ -59,7 +65,9 @@ public sealed class SocialFellowshipPageController
         Func<uint> LocalPlayerGuid,
         Func<CharacterOptionId, bool> CurrentCharacterOption,
         Action<CharacterOptionId, bool> SetCharacterOption,
-        Func<uint, uint, string?> ResolveString);
+        Func<uint, uint, string?> ResolveString,
+        Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? ResolveTemplate = null,
+        Func<uint, long>? ExperienceToRaiseLevel = null);
 
     private readonly record struct FellowRowWidgets(
         UiDatElement? NameBand,
@@ -452,7 +460,7 @@ public sealed class SocialFellowshipPageController
             RebuildRoster(members, snapshot);
         else
             foreach (RuntimeFellowMemberSnapshot member in members)
-                UpdateRow(member, snapshot);
+                UpdateRow(member, snapshot, members);
 
         if (_selectedFellowGuid != 0u && !_memberGuids.Contains(_selectedFellowGuid))
             _selectedFellowGuid = 0u;
@@ -496,14 +504,27 @@ public sealed class SocialFellowshipPageController
             {
                 uint guid = member.Guid;
                 statsText.OnClick = () => SelectFellow(guid);
+                KeepClearOfScrollbar(row, statsText);
             }
         }
 
         foreach (RuntimeFellowMemberSnapshot member in members)
-            UpdateRow(member, snapshot);
+            UpdateRow(member, snapshot, members);
     }
 
-    private void UpdateRow(RuntimeFellowMemberSnapshot member, RuntimeFellowshipSnapshot snapshot)
+    // The authored row is wider than the list, so its right-justified text
+    // ends under the scrollbar; the text keeps the list's right edge instead.
+    private void KeepClearOfScrollbar(UiElement row, UiText statsText)
+    {
+        float overlap = row.Width - (_listBox?.Width ?? row.Width);
+        if (overlap > 0f && statsText.Width > overlap)
+            statsText.Width -= overlap;
+    }
+
+    private void UpdateRow(
+        RuntimeFellowMemberSnapshot member,
+        RuntimeFellowshipSnapshot snapshot,
+        IReadOnlyList<RuntimeFellowMemberSnapshot> members)
     {
         if (!_rows.TryGetValue(member.Guid, out FellowRowWidgets widgets)) return;
 
@@ -518,7 +539,7 @@ public sealed class SocialFellowshipPageController
 
         if (widgets.Stats is { } statsText)
         {
-            string text = FormatStatsText(member, snapshot);
+            string text = FormatStatsText(member, snapshot, members);
             statsText.LinesProvider = () => [new UiText.Line(text, MemberNameColor)];
         }
 
@@ -527,16 +548,39 @@ public sealed class SocialFellowshipPageController
         SetVitals(widgets.Mana, member.CurrentMana, member.MaxMana);
     }
 
-    private static string FormatStatsText(RuntimeFellowMemberSnapshot member, RuntimeFellowshipSnapshot snapshot)
+    // "level/share%": no sharing shows 0; an even split uses the share
+    // table; otherwise each fellow's share is the experience their next
+    // level costs, over the sum of everyone's.
+    private string FormatStatsText(
+        RuntimeFellowMemberSnapshot member,
+        RuntimeFellowshipSnapshot snapshot,
+        IReadOnlyList<RuntimeFellowMemberSnapshot> members)
     {
-        if (!snapshot.ShareXp)
-            return $"{member.Level}  0%";
-        if (snapshot.EvenXpSplit)
+        double share = 0d;
+        if (snapshot.ShareXp)
         {
-            float pct = EvenSplitPercent(snapshot.MemberCount);
-            return $"{member.Level}  {(int)((double)pct * 100.0)}%";
+            if (snapshot.EvenXpSplit)
+                share = EvenSplitPercent(snapshot.MemberCount);
+            else if (_bindings.ExperienceToRaiseLevel is { } toRaise)
+            {
+                double sum = 0d;
+                foreach (RuntimeFellowMemberSnapshot fellow in members)
+                    sum += toRaise(fellow.Level);
+                if (sum > 0d)
+                    share = toRaise(member.Level) / sum;
+            }
         }
-        return member.Level.ToString();
+        int percent = (int)(share * 100.0);
+
+        string? authored = _bindings.ResolveTemplate?.Invoke(
+            FellowshipStringTableId,
+            StatsTemplateKey,
+            new Dictionary<uint, string>
+            {
+                [StatsLevelVariable] = member.Level.ToString(),
+                [StatsPercentVariable] = percent.ToString(),
+            });
+        return authored ?? $"{member.Level}/{percent}%";
     }
 
     private static float EvenSplitPercent(int memberCount) =>
@@ -568,7 +612,8 @@ public sealed class SocialFellowshipPageController
 
         if (_rows.Count == 0) return;
         RuntimeFellowshipSnapshot snapshot = _bindings.Snapshot();
-        foreach (RuntimeFellowMemberSnapshot member in _bindings.Members())
-            UpdateRow(member, snapshot);
+        List<RuntimeFellowMemberSnapshot> members = _bindings.Members().ToList();
+        foreach (RuntimeFellowMemberSnapshot member in members)
+            UpdateRow(member, snapshot, members);
     }
 }
