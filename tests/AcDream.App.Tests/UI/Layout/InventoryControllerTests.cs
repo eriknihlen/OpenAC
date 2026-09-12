@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
@@ -68,9 +69,10 @@ public class InventoryControllerTests
         Spellbook? burdenSpellbook = null,
         ShortcutStore? shortcuts = null,
         UiShortcutDigitGraphics? shortcutDigits = null,
-        CombatState? combat = null)
+        CombatState? combat = null,
+        Func<ItemType, uint, uint, uint, uint, uint>? iconIds = null)
         => InventoryController.Bind(layout, objects, () => Player,
-            iconIds: (_, _, _, _, _) => 0u,
+            iconIds: iconIds ?? ((_, _, _, _, _) => 0u),
             strength: strengthProvider ?? (() => strength), datFont: null,
             ownerName: ownerName is null ? null : () => ownerName,
             sendUse: uses is null ? null : g => uses.Add(g),
@@ -88,6 +90,66 @@ public class InventoryControllerTests
             shortcuts: shortcuts,
             shortcutDigits: shortcutDigits,
             combat: combat);
+
+    // ── #35: a rend or imbue re-sends the whole item description; the cell has
+    //        to pick up the new underlay without a relog.
+
+    [Fact]
+    public void RefreshedDescription_redrawsTheCellWithTheNewUnderlay()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xA, Player, slot: 0);
+
+        Bind(layout, objects, iconIds: (_, _, underlay, _, _) => underlay);
+
+        Assert.Equal(0u, grid.GetItem(0)!.IconTexture);
+
+        objects.Ingest(new WeenieData(
+            Guid: 0xA,
+            Name: null,
+            Type: null,
+            WeenieClassId: 0u,
+            IconId: 0u,
+            IconOverlayId: 0u,
+            IconUnderlayId: 0x06001234u,
+            Effects: 0u,
+            Value: null,
+            StackSize: null,
+            StackSizeMax: null,
+            Burden: null,
+            ContainerId: null,
+            WielderId: null,
+            ValidLocations: null,
+            CurrentWieldedLocation: null,
+            Priority: null,
+            ItemsCapacity: null,
+            ContainersCapacity: null,
+            Structure: null,
+            MaxStructure: null,
+            Workmanship: null));
+
+        Assert.Equal(0x06001234u, grid.GetItem(0)!.IconTexture);
+    }
+
+    [Fact]
+    public void ChangedIconOverlay_redrawsTheCell()
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xA, Player, slot: 0);
+
+        Bind(layout, objects, iconIds: (_, _, _, overlay, _) => overlay);
+
+        Assert.Equal(0u, grid.GetItem(0)!.IconTexture);
+
+        objects.UpdateDataIdProperty(
+            0xA,
+            (uint)AcDream.Core.Properties.PropertyDataId.IconOverlay,
+            0x06005678u);
+
+        Assert.Equal(0x06005678u, grid.GetItem(0)!.IconTexture);
+    }
 
     private static UiButton MakeButton(uint id)
     {

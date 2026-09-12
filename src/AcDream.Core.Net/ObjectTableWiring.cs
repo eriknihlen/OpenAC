@@ -41,6 +41,57 @@ public static class ObjectTableWiring
         session.PlayerIntPropertyUpdated += playerIntUpdated;
         subscriptions.Add(() => session.PlayerIntPropertyUpdated -= playerIntUpdated);
 
+        // A re-sent description refreshes an object we already hold — the icon
+        // underlay a rend adds, the overlay an imbue adds, a revealed Aetheria.
+        // It carries the same fields a first-time description does, so the same
+        // ingest applies it; it must not run the arrival of a new object.
+        Action<WorldSession.EntitySpawn> descriptionRefreshed = spawn =>
+        {
+            if (accepting?.Invoke() == false) return;
+            table.Ingest(ToWeenieData(spawn));
+        };
+        session.EntityDescriptionRefreshed += descriptionRefreshed;
+        subscriptions.Add(
+            () => session.EntityDescriptionRefreshed -= descriptionRefreshed);
+
+        Action<WorldSession.ObjectDataIdPropertyUpdate> objectDataIdUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            table.UpdateDataIdProperty(u.Guid, u.Property, u.Value);
+        };
+        session.ObjectDataIdPropertyUpdated += objectDataIdUpdated;
+        subscriptions.Add(
+            () => session.ObjectDataIdPropertyUpdated -= objectDataIdUpdated);
+
+        Action<WorldSession.PlayerDataIdPropertyUpdate> playerDataIdUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            if (playerGuid is not null)
+                table.UpdateDataIdProperty(playerGuid(), u.Property, u.Value);
+        };
+        session.PlayerDataIdPropertyUpdated += playerDataIdUpdated;
+        subscriptions.Add(
+            () => session.PlayerDataIdPropertyUpdated -= playerDataIdUpdated);
+
+        Action<WorldSession.ObjectInstanceIdPropertyUpdate> objectInstanceIdUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            table.UpdateInstanceIdProperty(u.Guid, u.Property, u.Value);
+        };
+        session.ObjectInstanceIdPropertyUpdated += objectInstanceIdUpdated;
+        subscriptions.Add(
+            () => session.ObjectInstanceIdPropertyUpdated -= objectInstanceIdUpdated);
+
+        Action<WorldSession.PlayerInstanceIdPropertyUpdate> playerInstanceIdUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            if (playerGuid is not null)
+                table.UpdateInstanceIdProperty(playerGuid(), u.Property, u.Value);
+        };
+        session.PlayerInstanceIdPropertyUpdated += playerInstanceIdUpdated;
+        subscriptions.Add(
+            () => session.PlayerInstanceIdPropertyUpdated -= playerInstanceIdUpdated);
+
         Action<WorldSession.PlayerInt64PropertyUpdate> playerInt64Updated = u =>
         {
             if (accepting?.Invoke() == false) return;

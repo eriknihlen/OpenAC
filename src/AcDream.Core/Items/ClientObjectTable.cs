@@ -658,6 +658,44 @@ public sealed class ClientObjectTable
             item.CooldownDuration = cooldownDuration;
     }
 
+    /// <summary>
+    /// Applies one data-id property the server changed on an object we already
+    /// hold. The three icon ids also live in typed fields the item panels read,
+    /// so they are mirrored there; everything else stays in the property bag.
+    /// </summary>
+    public bool UpdateDataIdProperty(uint itemId, uint propertyId, uint value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        item.Properties.DataIds[propertyId] = value;
+        switch ((Properties.PropertyDataId)propertyId)
+        {
+            case Properties.PropertyDataId.Icon:
+                item.IconId = value;
+                break;
+            case Properties.PropertyDataId.IconOverlay:
+                item.IconOverlayId = value;
+                break;
+            case Properties.PropertyDataId.IconUnderlay:
+                item.IconUnderlayId = value;
+                break;
+        }
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies one instance-id property the server changed on an object we
+    /// already hold. Placement (container, wielder) has its own ordered routes,
+    /// so this only records the value and republishes the object.
+    /// </summary>
+    public bool UpdateInstanceIdProperty(uint itemId, uint propertyId, uint value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        item.Properties.InstanceIds[propertyId] = value;
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
     public bool UpdateInt64Property(uint itemId, uint propertyId, long value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
