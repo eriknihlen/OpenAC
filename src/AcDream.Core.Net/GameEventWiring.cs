@@ -658,7 +658,23 @@ public static class GameEventWiring
                     item.Desc.IconUnderlayId,
                     item.Desc.IconOverlayId,
                     item.Desc.UiEffects,
-                    item.Desc.PluralName);
+                    item.Desc.PluralName,
+                    item.Desc.ValidLocations,
+                    item.Desc.Priority,
+                    item.Desc.ItemsCapacity,
+                    item.Desc.ContainersCapacity,
+                    item.Desc.Structure,
+                    item.Desc.MaxStructure,
+                    item.Desc.Workmanship,
+                    item.Desc.Burden,
+                    item.Desc.MaterialType,
+                    item.Desc.TargetType,
+                    item.Desc.CombatUse,
+                    item.Desc.AmmoType,
+                    item.Desc.ObjectDescriptionFlags,
+                    item.Desc.Useability,
+                    item.Desc.HookItemTypes,
+                    item.Desc.HookType);
             }
 
             vendor?.Apply(p.Value.VendorGuid, profile, shopItems);

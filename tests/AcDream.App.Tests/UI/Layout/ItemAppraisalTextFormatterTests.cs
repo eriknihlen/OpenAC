@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
+using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
 
@@ -839,6 +840,180 @@ public sealed class ItemAppraisalTextFormatterTests
 
         Assert.Contains("Damage: 30 - 40, Slashing/Electrical", report);
         Assert.Contains("Elemental Damage Bonus: 4, Slashing/Electrical.", report);
+    }
+
+    public static TheoryData<string, uint, uint, int, int, bool, string, string?>
+        VendorParityCases()
+        => new()
+        {
+            // name, validLocations, priority, itemsCapacity, containersCapacity,
+            // isHook, a line the case must produce (so parity is never vacuous),
+            // and a line it must not produce
+            {
+                "weapon", (uint)EquipMask.MeleeWeapon, 0u, 0, 0, false,
+                "Damage: 30 - 40", null
+            },
+            {
+                "armor", (uint)EquipMask.ChestArmor, 0x0C00u, 0, 0, false,
+                "Covers Chest, Abdomen", null
+            },
+            {
+                "pack", 0u, 0u, 24, 1, false,
+                "Can hold up to 24 items and 1 containers.", null
+            },
+            {
+                // A hooked item takes its equip locations from the hook report
+                // and drops the capacity lines, so the two reports only match
+                // when the listing knows it is on a hook at all.
+                "hooked", 0u, 0u, 24, 1, true,
+                "Damage: 30 - 40", "Can hold up to 24 items"
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(VendorParityCases))]
+    public void Issue37_VendorListingAndSpawnedObject_AppraiseIdentically(
+        string label,
+        uint validLocations,
+        uint priority,
+        int itemsCapacity,
+        int containersCapacity,
+        bool isHook,
+        string expectedLine,
+        string? forbiddenLine)
+    {
+        Assert.False(string.IsNullOrEmpty(label));
+
+        const uint ItemGuid = 0x50002000u;
+        const uint VendorGuid = 0x40001000u;
+        const uint HealerFlag = (uint)PublicWeenieFlags.Healer;
+
+        // The one description both paths are handed.
+        const string Name = "Silifi";
+        const uint WeenieClassId = 42u;
+        const uint IconId = 0x1234u;
+        const int Value = 250;
+        const int Burden = 450;
+        const uint MaterialType = 60u;
+        const uint TargetType = 0x00000080u;
+        const byte CombatUse = 1;
+        const ushort AmmoType = 3;
+        const int Structure = 40;
+        const int MaxStructure = 100;
+        const float Workmanship = 8.5f;
+        const uint Useability = 0x00000008u;
+        uint? hookItemTypes = isHook ? 0x0000FFFFu : null;
+        uint? hookType = isHook ? 0x00000002u : null;
+
+        var vendorObjects = new ClientObjectTable();
+        var vendor = new VendorState();
+        using var materializer = new VendorShopItemMaterializer(vendor, vendorObjects);
+        Assert.True(vendor.Apply(
+            VendorGuid,
+            default,
+            new[]
+            {
+                new VendorShopItem(
+                    ItemGuid,
+                    StackSize: -1,
+                    WeenieClassId: WeenieClassId,
+                    Name: Name,
+                    ItemType: (uint)ItemType.MeleeWeapon,
+                    IconId: IconId,
+                    Value: Value,
+                    ValidLocations: validLocations,
+                    Priority: priority,
+                    ItemsCapacity: itemsCapacity,
+                    ContainersCapacity: containersCapacity,
+                    Structure: Structure,
+                    MaxStructure: MaxStructure,
+                    Workmanship: Workmanship,
+                    Burden: Burden,
+                    MaterialType: MaterialType,
+                    TargetType: TargetType,
+                    CombatUse: CombatUse,
+                    AmmoType: AmmoType,
+                    PublicWeenieBitfield: HealerFlag,
+                    Useability: Useability,
+                    HookItemTypes: hookItemTypes,
+                    HookType: hookType),
+            }));
+        ClientObject? listed = vendorObjects.Get(ItemGuid);
+        Assert.NotNull(listed);
+
+        var spawnedObjects = new ClientObjectTable();
+        spawnedObjects.Ingest(ObjectTableWiring.ToWeenieData(
+            new WorldSession.EntitySpawn(
+                Guid: ItemGuid,
+                Position: null,
+                SetupTableId: null,
+                AnimPartChanges: [],
+                TextureChanges: [],
+                SubPalettes: [],
+                BasePaletteId: null,
+                ObjScale: null,
+                Name: Name,
+                ItemType: (uint)ItemType.MeleeWeapon,
+                MotionState: null,
+                MotionTableId: null,
+                ObjectDescriptionFlags: HealerFlag,
+                TargetType: TargetType,
+                IconId: IconId,
+                WeenieClassId: WeenieClassId,
+                Value: Value,
+                Burden: Burden,
+                ItemsCapacity: itemsCapacity,
+                ContainersCapacity: containersCapacity,
+                ValidLocations: validLocations,
+                Priority: priority,
+                Structure: Structure,
+                MaxStructure: MaxStructure,
+                Workmanship: Workmanship,
+                CombatUse: CombatUse,
+                AmmoType: AmmoType,
+                Useability: Useability,
+                HookItemTypes: hookItemTypes,
+                HookType: hookType,
+                MaterialType: MaterialType)));
+        ClientObject? spawned = spawnedObjects.Get(ItemGuid);
+        Assert.NotNull(spawned);
+
+        var properties = new PropertyBundle();
+        properties.Ints[19u] = Value;
+        properties.Ints[5u] = Burden;
+        properties.Ints[105u] = 8;
+        properties.Ints[106u] = 300;
+        properties.Ints[107u] = 250;
+        properties.Ints[108u] = 500;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            hook: isHook
+                ? new AppraiseInfoParser.HookProfile(
+                    Flags: 0u,
+                    ValidLocations: (uint)EquipMask.MeleeWeapon,
+                    AmmoType: 0u)
+                : null,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 1u,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string listedReport = ItemAppraisalTextFormatter.Build(
+            listed!, appraisal, _ => null);
+        string spawnedReport = ItemAppraisalTextFormatter.Build(
+            spawned!, appraisal, _ => null);
+
+        Assert.Equal(spawnedReport, listedReport);
+        Assert.Contains(expectedLine, listedReport);
+        if (forbiddenLine is not null)
+            Assert.DoesNotContain(forbiddenLine, listedReport);
     }
 
     private static AppraiseInfoParser.Parsed Parsed(

@@ -27,7 +27,26 @@ public readonly record struct VendorShopItem(
     uint IconUnderlayId = 0u,
     uint IconOverlayId = 0u,
     uint Effects = 0u,
-    string? PluralName = null);
+    string? PluralName = null,
+    // The rest of the listed item's description. A shop listing carries the
+    // same full item description a spawned object does, so assessing an item
+    // in a vendor's list must read exactly like assessing it in your pack.
+    uint? ValidLocations = null,
+    uint? Priority = null,
+    int? ItemsCapacity = null,
+    int? ContainersCapacity = null,
+    int? Structure = null,
+    int? MaxStructure = null,
+    float? Workmanship = null,
+    int? Burden = null,
+    uint? MaterialType = null,
+    uint? TargetType = null,
+    byte? CombatUse = null,
+    ushort? AmmoType = null,
+    uint? PublicWeenieBitfield = null,
+    uint? Useability = null,
+    uint? HookItemTypes = null,
+    uint? HookType = null);
 
 public enum VendorStateTransitionKind
 {

@@ -96,18 +96,28 @@ public sealed class VendorShopItemMaterializer : IDisposable
         Value: item.Value,
         StackSize: VendorSplitPolicy.ResolveAuthoredStackSize(item.DescStackSize, item.MaxStackSize),
         StackSizeMax: item.MaxStackSize,
-        Burden: null,
+        Burden: item.Burden,
+        // The vendor owns the listing, so the container is the vendor and the
+        // item is unwielded regardless of what the listing's description says.
         ContainerId: vendorId,
         WielderId: 0u,
-        ValidLocations: null,
+        ValidLocations: item.ValidLocations,
         CurrentWieldedLocation: null,
-        Priority: null,
-        ItemsCapacity: null,
-        ContainersCapacity: null,
-        Structure: null,
-        MaxStructure: null,
-        Workmanship: null,
-        PluralName: item.PluralName);
+        Priority: item.Priority,
+        ItemsCapacity: item.ItemsCapacity,
+        ContainersCapacity: item.ContainersCapacity,
+        Structure: item.Structure,
+        MaxStructure: item.MaxStructure,
+        Workmanship: item.Workmanship,
+        Useability: item.Useability,
+        TargetType: item.TargetType,
+        HookItemTypes: item.HookItemTypes,
+        HookType: item.HookType,
+        PublicWeenieBitfield: item.PublicWeenieBitfield,
+        CombatUse: item.CombatUse,
+        PluralName: item.PluralName,
+        AmmoType: item.AmmoType,
+        MaterialType: item.MaterialType);
 
     public void Dispose()
     {
