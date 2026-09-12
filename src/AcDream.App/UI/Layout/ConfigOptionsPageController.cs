@@ -1007,6 +1007,30 @@ public static class ConfigOptionsPageController
             storeOnly: false,
             rangeLowKey: "ID_Graphics_Value_Close", rangeHighKey: "ID_Graphics_Value_Far");
 
+        // An acdream-only row, in the Graphics block beside the three settings
+        // it qualifies. It has no authored caption of its own, so it is built
+        // with explicit text the way this page's other acdream-only rows are.
+        // The change is live: it is read again on the next frame drawn.
+        BuildExplicitToggleRow(
+            listBox,
+            "Keep Distant Buildings",
+            DisplaySettings.Default.KeepDistantBuildings,
+            page,
+            read: () => bindings.LoadDisplay().KeepDistantBuildings,
+            apply: value =>
+            {
+                bindings.SaveDisplay(
+                    bindings.LoadDisplay() with { KeepDistantBuildings = value });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "A building whose detail levels end in \"draw nothing\" falls "
+                + "back to its simplest mesh instead of disappearing. We draw "
+                + "objects much further out than those levels were made for, so "
+                + "without this a distant building can vanish while the fences "
+                + "and stairs around it stay.");
+
         display = bindings.LoadDisplay();
     }
 

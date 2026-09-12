@@ -66,12 +66,22 @@ public sealed class WalkBuilding
 
     public float PartZeroScaleZ = 1f;
 
+    /// <param name="keepDistantBuildings">
+    /// When a building's detail ladder ends in an entry that names no mesh at
+    /// all — "at this distance, draw nothing" — take the nearest entry below it
+    /// that does name one instead of drawing nothing. Our object range reaches
+    /// much further than the ladder's authors assumed, and the small objects
+    /// around a building carry no ladder, so honouring that entry leaves fences
+    /// and stairs standing around a building that is no longer there. Off, the
+    /// ladder is honoured exactly as authored.
+    /// </param>
     public WalkBuildingSelection Select(
         float viewerDistance,
         float degradeDistance,
         float degradeMultiplier,
         bool degradesDisabled = false,
-        int forcedLevel = -1)
+        int forcedLevel = -1,
+        bool keepDistantBuildings = false)
     {
         if (DegradeLevels.Length == 0)
             return new WalkBuildingSelection(GfxObjId, DrawingBsp, 0, 1u);
@@ -90,13 +100,27 @@ public sealed class WalkBuilding
                 : (double)level.IdealDist
                     + ((double)level.IdealDist - level.MinDist) * degradeMultiplier;
             if (effective < threshold)
-                return new WalkBuildingSelection(
-                    level.GfxObjId, level.DrawingBsp, i, level.Mode);
+                return SelectionAt(i);
         }
         return SelectionAt(DegradeLevels.Length - 1);
 
         WalkBuildingSelection SelectionAt(int index)
         {
+            // The ladder's entries come straight from the authored data, so
+            // even the nearest one can name no mesh; when none of them does,
+            // the building draws nothing, exactly as authored.
+            if (keepDistantBuildings && DegradeLevels[index].GfxObjId == 0)
+            {
+                for (int i = index - 1; i >= 0; i--)
+                {
+                    if (DegradeLevels[i].GfxObjId != 0)
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+
             WalkBuildingDegradeLevel level = DegradeLevels[index];
             return new WalkBuildingSelection(
                 level.GfxObjId, level.DrawingBsp, index, level.Mode);

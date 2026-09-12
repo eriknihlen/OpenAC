@@ -103,7 +103,8 @@ internal sealed class RetailPViewRenderer
                     ctx.ViewerCellId,
                     weatherGateOpen,
                     ctx.BuildingDegradesDisabled,
-                    walkExecutor.Dispatcher);
+                    walkExecutor.Dispatcher,
+                    ctx.KeepDistantBuildings);
             }
             else
             {
@@ -116,7 +117,8 @@ internal sealed class RetailPViewRenderer
                     ctx.ViewerCellId,
                     weatherGateOpen,
                     ctx.BuildingDegradesDisabled,
-                    walkExecutor.Dispatcher);
+                    walkExecutor.Dispatcher,
+                    ctx.KeepDistantBuildings);
             }
             Walk.WalkProductionFrameContext walkContext = _walkFrameContextScratch;
             _walkLandscape!.SetViewer(ctx.ViewerCellId, ctx.ViewerEyePos);
@@ -432,6 +434,7 @@ public sealed class RetailPViewFrameInput
     public bool RenderSky { get; private set; }
     public bool RenderWeather { get; private set; }
     public bool BuildingDegradesDisabled { get; private set; }
+    public bool KeepDistantBuildings { get; private set; }
     public float DayFraction { get; private set; }
     public DayGroupData? ActiveDayGroup { get; private set; }
     public SkyKeyframe SkyKeyframe { get; private set; }
@@ -470,7 +473,8 @@ public sealed class RetailPViewFrameInput
         Vector3 playerViewPosition,
         Matrix4x4 cameraView,
         CameraCellResolution cameraCellResolution,
-        bool buildingDegradesDisabled = false)
+        bool buildingDegradesDisabled = false,
+        bool keepDistantBuildings = false)
     {
         RootCell = rootCell;
         NearbyBuildingCells = nearbyBuildingCells;
@@ -498,6 +502,7 @@ public sealed class RetailPViewFrameInput
         CameraView = cameraView;
         CameraCellResolution = cameraCellResolution;
         BuildingDegradesDisabled = buildingDegradesDisabled;
+        KeepDistantBuildings = keepDistantBuildings;
         return this;
     }
 }

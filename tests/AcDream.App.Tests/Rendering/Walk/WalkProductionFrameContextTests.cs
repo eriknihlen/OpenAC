@@ -22,6 +22,21 @@ public sealed class WalkProductionFrameContextTests
     }
 
     [Fact]
+    public void FrameResetRestoresTheDistantBuildingPolicy()
+    {
+        var ctx = new WalkProductionFrameContext(
+            new CellVisibility(), new WalkBuildingRegistry(), Vector3.Zero, Vector3.UnitY,
+            SimpleViewProjection(), 1024f, 768f, keepDistantBuildings: true);
+        Assert.True(((IRetailFrameWalkContext)ctx).KeepDistantBuildings);
+        ctx.Reset(Vector3.Zero, Vector3.UnitY, SimpleViewProjection(), 1024f, 768f);
+        Assert.False(((IRetailFrameWalkContext)ctx).KeepDistantBuildings);
+        ctx.Reset(
+            Vector3.Zero, Vector3.UnitY, SimpleViewProjection(), 1024f, 768f,
+            keepDistantBuildings: true);
+        Assert.True(((IRetailFrameWalkContext)ctx).KeepDistantBuildings);
+    }
+
+    [Fact]
     public void GetVisible_ResolvesThroughTheCommittedCellVisibilityRegistry()
     {
         var cellVisibility = new CellVisibility();

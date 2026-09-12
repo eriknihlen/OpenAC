@@ -479,7 +479,8 @@ internal sealed class FrameRootCompositionPhase
                 d.RenderRange,
                 worldSceneDiagnostics,
                 live.WorldAvailability,
-                atmosphericInputs);
+                atmosphericInputs,
+                new DisplayBuildingDetailPolicy(d.Settings));
             worldSceneRenderer =
                 new AcDream.App.Rendering.Gpu.Vk.VulkanWorldScenePhase(
                     host.GpuFrameLifetime,

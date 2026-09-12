@@ -75,6 +75,29 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void KeepDistantBuildings_round_trips_and_defaults_on_for_older_files()
+    {
+        // A settings file written before the setting existed keeps distant
+        // buildings, the same as a fresh install.
+        File.WriteAllText(_tempPath, """
+            {
+              "version": 1,
+              "display": { "resolution": "1366x768" }
+            }
+            """);
+        var store = new SettingsStore(_tempPath);
+        Assert.True(store.LoadDisplay().KeepDistantBuildings);
+
+        store.SaveDisplay(
+            DisplaySettings.Default with { KeepDistantBuildings = false });
+        Assert.False(new SettingsStore(_tempPath).LoadDisplay().KeepDistantBuildings);
+
+        store.SaveDisplay(
+            DisplaySettings.Default with { KeepDistantBuildings = true });
+        Assert.True(new SettingsStore(_tempPath).LoadDisplay().KeepDistantBuildings);
+    }
+
+    [Fact]
     public void LoadDisplay_falls_back_per_field_when_keys_missing()
     {
         // Partial file — only resolution set; everything else should

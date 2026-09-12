@@ -304,6 +304,29 @@ public sealed class WorldSceneRendererTests
     }
 
     [Fact]
+    public void PViewWorld_DistantBuildingPolicyIsReadAgainOnEveryFrame()
+    {
+        var root = new LoadedCell { CellId = 0x01010001u };
+        var rig = new Rig(false, false, root);
+
+        rig.Renderer.Render(default);
+        Assert.True(rig.PView.LastInput!.KeepDistantBuildings);
+
+        rig.BuildingDetail.KeepDistantBuildings = false;
+        rig.Renderer.Render(default);
+        Assert.False(rig.PView.LastInput!.KeepDistantBuildings);
+
+        rig.BuildingDetail.KeepDistantBuildings = true;
+        rig.Renderer.Render(default);
+        Assert.True(rig.PView.LastInput!.KeepDistantBuildings);
+    }
+
+    private sealed class MutableBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+    {
+        public bool KeepDistantBuildings { get; set; } = true;
+    }
+
+    [Fact]
     public void OutdoorPView_SkipsPostWorldParticleReplayAndFlatWeather()
     {
         var root = new LoadedCell
@@ -596,8 +619,12 @@ public sealed class WorldSceneRendererTests
                 Passes,
                 new WorldRenderRangeState(4, 12),
                 diagnostics,
-                availability);
+                availability,
+                atmosphere: null,
+                BuildingDetail);
         }
+
+        public MutableBuildingDetailPolicy BuildingDetail { get; } = new();
 
         public List<string> Calls { get; }
 

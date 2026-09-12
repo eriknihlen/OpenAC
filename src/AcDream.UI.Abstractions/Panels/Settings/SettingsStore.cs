@@ -56,7 +56,8 @@ public sealed class SettingsStore
                 TextureFiltering:        ReadInt  (disp, "textureFiltering",        d.TextureFiltering),
                 LandscapeDrawDistance:   ReadInt  (disp, "landscapeDrawDistance",   d.LandscapeDrawDistance),
                 BuildingDetailTextures:  ReadBool (disp, "buildingDetailTextures",  d.BuildingDetailTextures),
-                MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha))
+                MultiPassAlpha:          ReadBool (disp, "multiPassAlpha",          d.MultiPassAlpha),
+                KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -667,6 +668,7 @@ public sealed class SettingsStore
             ["fullscreen"]  = d.Fullscreen,
             ["gamma"]       = d.Gamma,
             ["graphicsPerformance"]      = d.GraphicsPerformance,
+            ["keepDistantBuildings"]     = d.KeepDistantBuildings,
             ["landscapeDrawDistance"]    = d.LandscapeDrawDistance,
             ["landscapeTextureDetail"]   = d.LandscapeTextureDetail,
             ["multiPassAlpha"]           = d.MultiPassAlpha,
