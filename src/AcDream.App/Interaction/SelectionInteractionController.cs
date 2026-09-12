@@ -21,7 +21,7 @@ internal sealed class SelectionInteractionController
     private readonly Action<string>? _toast;
     private readonly Func<uint, bool>? _splitStack;
     private readonly Func<IEnumerable<uint>> _fellowshipMembers;
-    private readonly RuntimeCombatTargetState? _combatTarget;
+    private readonly RuntimeCombatTargetState _combatTarget;
 
     public SelectionInteractionController(
         SelectionState selection,
@@ -29,11 +29,11 @@ internal sealed class SelectionInteractionController
         ItemInteractionController items,
         IRuntimeInteractionTransport transport,
         IPlayerInteractionMovementSink movement,
+        RuntimeCombatTargetState combatTarget,
         Action<string>? toast = null,
         PlayerApproachCompletionState? approachCompletions = null,
         Func<uint, bool>? splitStack = null,
-        Func<IEnumerable<uint>>? fellowshipMembers = null,
-        RuntimeCombatTargetState? combatTarget = null)
+        Func<IEnumerable<uint>>? fellowshipMembers = null)
     {
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _query = query ?? throw new ArgumentNullException(nameof(query));
@@ -41,12 +41,13 @@ internal sealed class SelectionInteractionController
         _transactions = _items.RuntimeTransactions;
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _movement = movement ?? throw new ArgumentNullException(nameof(movement));
+        _combatTarget = combatTarget
+            ?? throw new ArgumentNullException(nameof(combatTarget));
         _toast = toast;
         _approachCompletions = approachCompletions
             ?? new PlayerApproachCompletionState();
         _splitStack = splitStack;
         _fellowshipMembers = fellowshipMembers ?? (() => Array.Empty<uint>());
-        _combatTarget = combatTarget;
     }
 
     public bool HandleInputAction(InputAction action)
@@ -176,7 +177,7 @@ internal sealed class SelectionInteractionController
                 // selection empties: automatic targeting would otherwise pick
                 // the same creature straight back up and the press would only
                 // make the target flicker.
-                _combatTarget?.NotifyTargetWillinglyLost();
+                _combatTarget.NotifyTargetWillinglyLost();
                 _selection.Clear(SelectionChangeSource.Keyboard);
                 return true;
             default:

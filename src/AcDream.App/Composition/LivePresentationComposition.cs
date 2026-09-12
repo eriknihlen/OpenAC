@@ -846,14 +846,14 @@ internal sealed class LivePresentationCompositionPhase
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,
                 d.PlayerApproachCompletions),
+            d.Runtime.ActionOwner.CombatTarget,
             d.Toast,
             d.PlayerApproachCompletions,
             splitStack: guid =>
                 interaction.RetainedUi?.Runtime.SelectedObjectController?
                     .FocusSplitStackEntry(guid) ?? false,
             fellowshipMembers: () =>
-                d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid),
-            combatTarget: d.Runtime.ActionOwner.CombatTarget);
+                d.Runtime.Fellowship.GetMembers().Select(static member => member.Guid));
         selectionInteractionSource.Bind(selectionInteractions);
         bindings.Adopt(
             "world selection",

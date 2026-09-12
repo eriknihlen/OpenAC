@@ -223,9 +223,9 @@ public sealed class SelectionInteractionControllerTests
                 Items,
                 Transport,
                 Movement,
+                CombatTarget,
                 Toasts.Add,
-                Completions,
-                combatTarget: CombatTarget);
+                Completions);
             Items.PendingBackpackPlacementRequested += PendingPlacements.Add;
             Items.PendingBackpackPlacementCancelled += CancelledPlacements.Add;
         }
