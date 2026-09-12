@@ -197,6 +197,14 @@ public sealed partial class WorldSession : IDisposable
 
     public event Action<EntitySpawn>? EntitySpawned;
 
+    /// <summary>
+    /// Fires when the server re-sends a complete description for an object that
+    /// already exists (0xF7DB). The payload carries the same fields a first-time
+    /// description does; it refreshes what we already hold rather than bringing a
+    /// new object into the world.
+    /// </summary>
+    public event Action<EntitySpawn>? EntityDescriptionRefreshed;
+
     public event Action<DeleteObject.Parsed>? EntityDeleted;
 
     public event Action<PickupEvent.Parsed>? EntityPickedUp;
@@ -246,6 +254,33 @@ public sealed partial class WorldSession : IDisposable
     public readonly record struct PlayerInt64PropertyUpdate(uint Property, long Value);
 
     public event Action<PlayerInt64PropertyUpdate>? PlayerInt64PropertyUpdated;
+
+    public readonly record struct ObjectDataIdPropertyUpdate(
+        uint Guid, uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a public data-id property update
+    /// (0x02D8) — one PropertyDataId changed on a visible object. Icon, icon
+    /// overlay and icon underlay travel this way.</summary>
+    public event Action<ObjectDataIdPropertyUpdate>? ObjectDataIdPropertyUpdated;
+
+    public readonly record struct PlayerDataIdPropertyUpdate(uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a private data-id property update
+    /// (0x02D7) — one PropertyDataId changed on the player.</summary>
+    public event Action<PlayerDataIdPropertyUpdate>? PlayerDataIdPropertyUpdated;
+
+    public readonly record struct ObjectInstanceIdPropertyUpdate(
+        uint Guid, uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a public instance-id property update
+    /// (0x02DA) — one PropertyInstanceId changed on a visible object.</summary>
+    public event Action<ObjectInstanceIdPropertyUpdate>? ObjectInstanceIdPropertyUpdated;
+
+    public readonly record struct PlayerInstanceIdPropertyUpdate(uint Property, uint Value);
+
+    /// <summary>Fires when the session parses a private instance-id property update
+    /// (0x02D9) — one PropertyInstanceId changed on the player.</summary>
+    public event Action<PlayerInstanceIdPropertyUpdate>? PlayerInstanceIdPropertyUpdated;
 
     public readonly record struct StackSizeUpdate(uint Guid, int StackSize, int Value);
 
@@ -1221,6 +1256,15 @@ public sealed partial class WorldSession : IDisposable
                     EntitySpawned?.Invoke(ToEntitySpawn(parsed.Value));
                 }
             }
+            else if (op == CreateObject.UpdateOpcode)
+            {
+                var parsed = CreateObject.TryParseUpdate(body);
+                if (parsed is not null)
+                {
+                    EntityDescriptionRefreshed?.Invoke(
+                        ToEntitySpawn(parsed.Value));
+                }
+            }
             else if (op == DeleteObject.Opcode)
             {
                 var parsed = DeleteObject.TryParse(body);
@@ -1372,6 +1416,38 @@ public sealed partial class WorldSession : IDisposable
                 if (p is not null)
                     PlayerInt64PropertyUpdated?.Invoke(
                         new PlayerInt64PropertyUpdate(p.Value.Property, p.Value.Value));
+            }
+            else if (op == PublicUpdatePropertyDataId.Opcode)
+            {
+                var p = PublicUpdatePropertyDataId.TryParse(body);
+                if (p is not null)
+                    ObjectDataIdPropertyUpdated?.Invoke(
+                        new ObjectDataIdPropertyUpdate(
+                            p.Value.Guid, p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePropertyDataId.Opcode)
+            {
+                var p = PrivateUpdatePropertyDataId.TryParse(body);
+                if (p is not null)
+                    PlayerDataIdPropertyUpdated?.Invoke(
+                        new PlayerDataIdPropertyUpdate(
+                            p.Value.Property, p.Value.Value));
+            }
+            else if (op == PublicUpdatePropertyInstanceId.Opcode)
+            {
+                var p = PublicUpdatePropertyInstanceId.TryParse(body);
+                if (p is not null)
+                    ObjectInstanceIdPropertyUpdated?.Invoke(
+                        new ObjectInstanceIdPropertyUpdate(
+                            p.Value.Guid, p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePropertyInstanceId.Opcode)
+            {
+                var p = PrivateUpdatePropertyInstanceId.TryParse(body);
+                if (p is not null)
+                    PlayerInstanceIdPropertyUpdated?.Invoke(
+                        new PlayerInstanceIdPropertyUpdate(
+                            p.Value.Property, p.Value.Value));
             }
             else if (op == SetStackSize.Opcode)
             {

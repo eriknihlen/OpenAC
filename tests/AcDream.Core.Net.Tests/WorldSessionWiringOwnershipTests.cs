@@ -30,6 +30,11 @@ public sealed class WorldSessionWiringOwnershipTests
         Assert.Equal(1, HandlerCount(session, nameof(session.PlayerInt64PropertyUpdated)));
         Assert.Equal(1, HandlerCount(session, nameof(session.StackSizeUpdated)));
         Assert.Equal(1, HandlerCount(session, nameof(session.InventoryObjectRemoved)));
+        Assert.Equal(1, HandlerCount(session, nameof(session.EntityDescriptionRefreshed)));
+        Assert.Equal(1, HandlerCount(session, nameof(session.ObjectDataIdPropertyUpdated)));
+        Assert.Equal(1, HandlerCount(session, nameof(session.PlayerDataIdPropertyUpdated)));
+        Assert.Equal(1, HandlerCount(session, nameof(session.ObjectInstanceIdPropertyUpdated)));
+        Assert.Equal(1, HandlerCount(session, nameof(session.PlayerInstanceIdPropertyUpdated)));
 
         registration.Dispose();
         registration.Dispose();
@@ -39,6 +44,11 @@ public sealed class WorldSessionWiringOwnershipTests
         Assert.Equal(0, HandlerCount(session, nameof(session.PlayerInt64PropertyUpdated)));
         Assert.Equal(0, HandlerCount(session, nameof(session.StackSizeUpdated)));
         Assert.Equal(0, HandlerCount(session, nameof(session.InventoryObjectRemoved)));
+        Assert.Equal(0, HandlerCount(session, nameof(session.EntityDescriptionRefreshed)));
+        Assert.Equal(0, HandlerCount(session, nameof(session.ObjectDataIdPropertyUpdated)));
+        Assert.Equal(0, HandlerCount(session, nameof(session.PlayerDataIdPropertyUpdated)));
+        Assert.Equal(0, HandlerCount(session, nameof(session.ObjectInstanceIdPropertyUpdated)));
+        Assert.Equal(0, HandlerCount(session, nameof(session.PlayerInstanceIdPropertyUpdated)));
     }
 
     [Fact]

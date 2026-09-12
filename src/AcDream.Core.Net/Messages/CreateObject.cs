@@ -9,6 +9,15 @@ public static class CreateObject
 {
     public const uint Opcode = 0xF745u;
 
+    /// <summary>
+    /// The server re-sends a complete object description under this opcode when an
+    /// object that already exists changed in a way a single property update cannot
+    /// say: a tinkered or imbued item, a revealed Aetheria, a hook whose item
+    /// changed. The body after the opcode is identical to a first-time
+    /// description, so the same reader parses both.
+    /// </summary>
+    public const uint UpdateOpcode = 0xF7DBu;
+
     /// <summary>AC dat id type prefix for GfxObj (visual model) ids.</summary>
     public const uint GfxObjTypePrefix = 0x01000000u;
     /// <summary>Palette dat id type prefix.</summary>
@@ -188,7 +197,16 @@ public static class CreateObject
         IReadOnlyList<TextureChange> TextureChanges,
         IReadOnlyList<AnimPartChange> AnimPartChanges);
 
-    public static Parsed? TryParse(ReadOnlySpan<byte> body)
+    public static Parsed? TryParse(ReadOnlySpan<byte> body) =>
+        TryParse(body, Opcode);
+
+    /// <summary>
+    /// Parses a re-sent description for an object that already exists.
+    /// </summary>
+    public static Parsed? TryParseUpdate(ReadOnlySpan<byte> body) =>
+        TryParse(body, UpdateOpcode);
+
+    private static Parsed? TryParse(ReadOnlySpan<byte> body, uint expectedOpcode)
     {
         ServerPosition? position = null;
         uint? setupTableId = null;
@@ -215,7 +233,7 @@ public static class CreateObject
             int pos = 0;
 
             uint opcode = ReadU32(body, ref pos);
-            if (opcode != Opcode)
+            if (opcode != expectedOpcode)
                 return null;
 
             uint guid = ReadU32(body, ref pos);
