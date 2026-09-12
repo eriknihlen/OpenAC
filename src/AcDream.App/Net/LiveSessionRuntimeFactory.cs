@@ -599,6 +599,7 @@ internal sealed class LiveSessionRuntimeFactory
         PlayerGuid: () => _player.Identity.ServerGuid,
         SendTalk: session.SendTalk,
         SendTell: session.SendTell,
+        SendTalkDirect: session.SendTalkDirect,
         SendChannel: session.SendChannel,
         SendTurbineChat: (
             roomId,

@@ -61,6 +61,25 @@ public sealed class ChatCommandTargetState : IDisposable
         }
     }
 
+    /// <summary>
+    /// Records who a tell was just addressed to so the retell verb has a
+    /// target. The send records it directly because the transcript line an
+    /// outgoing tell produces comes back from the server and carries no
+    /// addressee this state can key on.
+    /// </summary>
+    public void NoteOutgoingTell(string targetName)
+    {
+        if (string.IsNullOrEmpty(targetName))
+            return;
+
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _lastOutgoingTellTarget = targetName;
+        }
+    }
+
     public void ResetSession()
     {
         lock (_gate)

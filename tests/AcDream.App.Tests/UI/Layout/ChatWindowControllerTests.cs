@@ -285,6 +285,52 @@ public class ChatWindowControllerTests
     }
 
     [Fact]
+    public void TellToSelected_CarriesThePickedObjectId_Issue50()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+
+        ChatWindowController? ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            selectedTargetName: () => "Aun Tanua",
+            selectedTargetGuid: () => 0x8000ABCDu);
+        Assert.NotNull(ctrl);
+        UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
+
+        menu.OnOpen!.Invoke();
+        menu.OnSelect!.Invoke(menu.Items[1].Payload);
+        ctrl!.Input.OnSubmit!.Invoke("hello");
+
+        SendChatCmd tell = Assert.IsType<SendChatCmd>(Assert.Single(bus.Published));
+        Assert.Equal(ChatChannelKind.Tell, tell.Channel);
+        Assert.Equal("Aun Tanua", tell.TargetName);
+        Assert.Equal(0x8000ABCDu, tell.TargetGuid);
+    }
+
+    [Fact]
+    public void PickingAChannelDropsThePickedObjectId_Issue50()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+
+        ChatWindowController? ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(), null, null, NoTex,
+            selectedTargetName: () => "Aun Tanua",
+            selectedTargetGuid: () => 0x8000ABCDu);
+        Assert.NotNull(ctrl);
+        UiMenu menu = Assert.IsType<UiMenu>(layout.FindElement(0x10000014u));
+
+        menu.OnOpen!.Invoke();
+        menu.OnSelect!.Invoke(menu.Items[1].Payload);
+        menu.OnSelect.Invoke(ChatChannelKind.Say);
+        ctrl!.Input.OnSubmit!.Invoke("/tell Dww, hello");
+
+        SendChatCmd tell = Assert.IsType<SendChatCmd>(Assert.Single(bus.Published));
+        Assert.Equal("Dww", tell.TargetName);
+        Assert.Equal(0u, tell.TargetGuid);
+    }
+
+    [Fact]
     public void TalkFocusSpecials_AreInertAndUnnamedWithNothingSelected()
     {
         var (rootInfo, layout, vm) = BuildTestTree();

@@ -145,6 +145,9 @@ public sealed class DirectGameRuntimeCommandAdapter
             case RuntimeChatChannel.Say:
                 session!.SendTalk(command.Text);
                 break;
+            case RuntimeChatChannel.Tell when command.TargetGuid != 0u:
+                session!.SendTalkDirect(command.TargetGuid, command.Text);
+                break;
             case RuntimeChatChannel.Tell
                 when !string.IsNullOrWhiteSpace(command.TargetName):
                 session!.SendTell(command.TargetName, command.Text);

@@ -84,10 +84,17 @@ public enum RuntimeChatChannel
     AllegianceBroadcast,
 }
 
+/// <summary>
+/// A chat line a host asks the session to send. <c>TargetGuid</c> is non-zero
+/// only when the addressee is a known object rather than a name; a tell then
+/// aims at that object, which reaches creatures and NPCs that a name lookup
+/// cannot address.
+/// </summary>
 public readonly record struct RuntimeChatCommand(
     RuntimeChatChannel Channel,
     string Text,
-    string? TargetName = null);
+    string? TargetName = null,
+    uint TargetGuid = 0u);
 
 public enum RuntimePortalCommand
 {

@@ -14,6 +14,7 @@ public sealed record LiveChatCommandBindings(
     Func<uint> PlayerGuid,
     Action<string> SendTalk,
     Action<string, string> SendTell,
+    Action<uint, string> SendTalkDirect,
     Action<uint, string> SendChannel,
     Action<uint, uint, uint, uint, string, uint> SendTurbineChat,
     Action<string>? Log = null,
@@ -52,6 +53,7 @@ public sealed class LiveChatCommandRoute
         ArgumentNullException.ThrowIfNull(bindings.PlayerGuid);
         ArgumentNullException.ThrowIfNull(bindings.SendTalk);
         ArgumentNullException.ThrowIfNull(bindings.SendTell);
+        ArgumentNullException.ThrowIfNull(bindings.SendTalkDirect);
         ArgumentNullException.ThrowIfNull(bindings.SendChannel);
         ArgumentNullException.ThrowIfNull(bindings.SendTurbineChat);
 
@@ -145,9 +147,7 @@ public sealed class LiveChatCommandRoute
                 return;
 
             case ChatChannelKind.Tell:
-                if (string.IsNullOrEmpty(command.TargetName))
-                    return;
-                SendIfActive(() => bindings.SendTell(command.TargetName, command.Text));
+                RouteTell(bindings, command);
                 return;
         }
 
@@ -170,6 +170,38 @@ public sealed class LiveChatCommandRoute
         }
 
         RouteLegacyChannel(bindings, command.Channel, command.Text);
+    }
+
+    private void RouteTell(
+        LiveChatCommandBindings bindings,
+        SendChatCmd command)
+    {
+        // An addressee picked in the world is aimed at by id: that reaches
+        // creatures and shopkeepers, which a name lookup cannot address, and
+        // the name is not needed to address it. Speaking to a picked object
+        // leaves the retell target alone — that target is a name, and
+        // retelling one to a creature would go back through the name lookup
+        // that cannot reach it.
+        if (command.TargetGuid != 0u)
+        {
+            SendIfActive(() =>
+                bindings.SendTalkDirect(command.TargetGuid, command.Text));
+            return;
+        }
+
+        if (string.IsNullOrEmpty(command.TargetName))
+            return;
+
+        if (!SendIfActive(() =>
+                bindings.SendTell(command.TargetName, command.Text)))
+        {
+            return;
+        }
+
+        // Remember who we just spoke to so the retell verb has a target. The
+        // transcript line for our own tell comes back from the server, so the
+        // send is the only place that knows the addressee.
+        bindings.Communication.CommandTargets.NoteOutgoingTell(command.TargetName);
     }
 
     private void RoutePublicChat(

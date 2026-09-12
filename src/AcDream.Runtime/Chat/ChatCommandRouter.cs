@@ -13,7 +13,8 @@ public static class ChatCommandRouter
         IChatCommandFeedback feedback,
         ICommandBus bus,
         ChatChannelKind defaultChannel,
-        string? defaultTellTarget = null)
+        string? defaultTellTarget = null,
+        uint defaultTellTargetGuid = 0u)
     {
         ArgumentNullException.ThrowIfNull(feedback);
         ArgumentNullException.ThrowIfNull(bus);
@@ -93,15 +94,28 @@ public static class ChatCommandRouter
             return SubmitOutcome.ClientHandled;
         }
 
+        if (ChatInputParser.IsRetellMissingLastTellee(
+                trimmed,
+                feedback.LastOutgoingTellTarget))
+        {
+            feedback.ShowInterfaceText("You must first provide a name using @tell");
+            return SubmitOutcome.ClientHandled;
+        }
+
         var parsed = ChatInputParser.Parse(
             trimmed,
             defaultChannel,
             feedback.LastIncomingTellSender,
             feedback.LastOutgoingTellTarget,
-            defaultTellTarget);
+            defaultTellTarget,
+            defaultTellTargetGuid);
         if (parsed is { } chat)
         {
-            bus.Publish(new SendChatCmd(chat.Channel, chat.TargetName, chat.Text));
+            bus.Publish(new SendChatCmd(
+                chat.Channel,
+                chat.TargetName,
+                chat.Text,
+                chat.TargetGuid));
             return SubmitOutcome.Sent;
         }
 

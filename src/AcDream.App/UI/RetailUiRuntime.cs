@@ -1419,6 +1419,8 @@ public sealed class RetailUiRuntime : IDisposable
                 string? name = _bindings.Toolbar.ResolveName(selected);
                 return string.IsNullOrWhiteSpace(name) ? null : name;
             },
+            selectedTargetGuid: () =>
+                _bindings.Toolbar.Selection.SelectedObjectId ?? 0u,
             chatStrings: key => new DatStringResolver(_bindings.Assets.Dats)
                 .Resolve(0x23000001u, DatStringResolver.ComputeHash(key)),
             resolveFont: _bindings.Assets.ResolveFont);

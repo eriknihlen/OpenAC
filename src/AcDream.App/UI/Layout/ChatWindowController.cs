@@ -103,6 +103,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
     }
 
     private string? _tellTarget;
+    private uint _tellTargetGuid;
 
     private Func<string, string?>? _chatStrings;
 
@@ -167,6 +168,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         BitmapFont? debugFont,
         Func<uint, (uint tex, int w, int h)> resolve,
         Func<string?>? selectedTargetName = null,
+        Func<uint>? selectedTargetGuid = null,
         Func<string, string?>? chatStrings = null,
         Func<uint, UiDatFont?>? resolveFont = null)
     {
@@ -241,7 +243,12 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         c.Input.TextReplacer = text =>
             ChatTextReplacements.Expand(text, vm.LastIncomingTellSender);
         c.Input.OnSubmit = text => ChatCommandRouter.Submit(
-            text, vm, busProvider(), c._activeChannel, c._tellTarget);
+            text,
+            vm,
+            busProvider(),
+            c._activeChannel,
+            c._tellTarget,
+            c._tellTargetGuid);
 
         if (c.Input.LayoutPolicy is { } inputPolicy)
         {
@@ -321,12 +328,16 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
                     case ChatChannelKind ch:
                         c._activeChannel = ch;
                         c._tellTarget = null;
+                        c._tellTargetGuid = 0u;
                         menu.Selected = p;
                         break;
 
                     case TalkFocusSpecial.TellToSelected when SelectedName() is { } name:
                         c._activeChannel = ChatChannelKind.Tell;
                         c._tellTarget = name;
+                        // Keep the picked object's id: speaking to whoever is
+                        // selected aims at the object, not at its name.
+                        c._tellTargetGuid = selectedTargetGuid?.Invoke() ?? 0u;
                         menu.Selected = p;
                         break;
 
