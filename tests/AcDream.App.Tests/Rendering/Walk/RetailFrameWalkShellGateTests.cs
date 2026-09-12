@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Numerics;
+using System.Reflection;
+using AcDream.App.Rendering.Wb;
 using AcDream.App.Rendering.Walk;
 
 namespace AcDream.App.Tests.Rendering.Walk;
@@ -202,5 +205,86 @@ public sealed class RetailFrameWalkShellGateTests
 
         Assert.Equal(0, recorder.BuildingTurns);
         Assert.Empty(recorder.InteriorCells);
+    }
+
+    // ── the production answer behind IsBuildingShellDrawable ────────────────
+
+    private static void SetRuntimeHiddenMarkers(WbMeshAdapter adapter, params uint[] markerIds)
+    {
+        FieldInfo field = typeof(WbMeshAdapter).GetField(
+            "_runtimeHiddenMarker", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "WbMeshAdapter._runtimeHiddenMarker field not found — test relies on this exact name.");
+        var markers = new HashSet<uint>(markerIds);
+        field.SetValue(adapter, (Func<uint, bool>)markers.Contains);
+    }
+
+    private static IReadOnlyCollection<ulong> PreparationRequests(WbDrawDispatcher dispatcher)
+    {
+        FieldInfo field = typeof(WbDrawDispatcher).GetField(
+            "_missRequested", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "WbDrawDispatcher._missRequested field not found — test relies on this exact name.");
+        return (HashSet<ulong>)field.GetValue(dispatcher)!;
+    }
+
+    [Fact]
+    public void A_never_drawn_marker_level_is_refused_and_never_asked_for()
+    {
+        using var fx = new WalkFrameDriverTests.DispatcherFixture();
+        const uint markerId = 0x010001ECu;
+        SetRuntimeHiddenMarkers(fx.MeshAdapter, markerId);
+
+        Assert.False(fx.Dispatcher.IsShellDrawable(markerId));
+        Assert.False(fx.Dispatcher.IsShellDrawable(markerId));
+
+        // A level that never draws at any distance is the same state as a level
+        // authored blank: nothing to wait for, so nothing is requested.
+        Assert.Empty(PreparationRequests(fx.Dispatcher));
+    }
+
+    [Fact]
+    public void A_shell_that_is_merely_absent_is_refused_and_requested_once()
+    {
+        using var fx = new WalkFrameDriverTests.DispatcherFixture();
+        const uint absentId = 0x0100BEEFu;
+
+        Assert.False(fx.Dispatcher.IsShellDrawable(absentId));
+        Assert.False(fx.Dispatcher.IsShellDrawable(absentId));
+
+        Assert.Equal(new ulong[] { absentId }, PreparationRequests(fx.Dispatcher));
+    }
+
+    [Fact]
+    public void A_blank_level_is_refused_without_consulting_the_mesh_layer()
+    {
+        using var fx = new WalkFrameDriverTests.DispatcherFixture();
+
+        Assert.False(fx.Dispatcher.IsShellDrawable(0u));
+
+        Assert.Empty(PreparationRequests(fx.Dispatcher));
+    }
+
+    [Fact]
+    public void A_prepared_shell_is_drawable_and_asks_for_nothing()
+    {
+        using var fx = new WalkFrameDriverTests.DispatcherFixture();
+        const uint preparedId = 0x0100ABCDu;
+        InjectRenderData(fx.Manager, preparedId, new ObjectRenderData());
+
+        Assert.True(fx.Dispatcher.IsShellDrawable(preparedId));
+
+        Assert.Empty(PreparationRequests(fx.Dispatcher));
+    }
+
+    private static void InjectRenderData(
+        ObjectMeshManager manager, ulong id, ObjectRenderData data)
+    {
+        FieldInfo field = typeof(ObjectMeshManager).GetField(
+            "_renderData", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "ObjectMeshManager._renderData field not found — test relies on this exact name.");
+        var dict = (ConcurrentDictionary<ulong, ObjectRenderData>)field.GetValue(manager)!;
+        dict[id] = data;
     }
 }

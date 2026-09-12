@@ -256,9 +256,9 @@ public static class WalkBuildingPortals
 public interface IWalkShellResidency
 {
     /// <summary>True when <paramref name="gfxObjId"/>'s geometry can be drawn
-    /// in this frame, or is authored never to draw. False means "not here
-    /// yet" — the caller must behave as though the whole building were
-    /// absent, not draw part of it.</summary>
+    /// in this frame. False covers both "not here yet" and "never draws at
+    /// all" — either way the caller must behave as though the whole building
+    /// were absent, rather than draw part of it.</summary>
     bool IsShellDrawable(uint gfxObjId);
 }
 
