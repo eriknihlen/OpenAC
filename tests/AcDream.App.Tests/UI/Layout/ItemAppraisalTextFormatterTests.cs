@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
+using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
 
@@ -839,6 +840,146 @@ public sealed class ItemAppraisalTextFormatterTests
 
         Assert.Contains("Damage: 30 - 40, Slashing/Electrical", report);
         Assert.Contains("Elemental Damage Bonus: 4, Slashing/Electrical.", report);
+    }
+
+    public static TheoryData<string, uint, uint, int, int, string> VendorParityCases()
+        => new()
+        {
+            // name, validLocations, priority, itemsCapacity, containersCapacity,
+            // a line the case must actually produce (so parity is never vacuous)
+            { "weapon", (uint)EquipMask.MeleeWeapon, 0u, 0, 0, "Damage: 30 - 40" },
+            { "armor", (uint)EquipMask.ChestArmor, 0x0C00u, 0, 0, "Covers Chest, Abdomen" },
+            {
+                "pack", 0u, 0u, 24, 1,
+                "Can hold up to 24 items and 1 containers."
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(VendorParityCases))]
+    public void Issue37_VendorListingAndSpawnedObject_AppraiseIdentically(
+        string label,
+        uint validLocations,
+        uint priority,
+        int itemsCapacity,
+        int containersCapacity,
+        string expectedLine)
+    {
+        Assert.False(string.IsNullOrEmpty(label));
+
+        const uint ItemGuid = 0x50002000u;
+        const uint VendorGuid = 0x40001000u;
+        const uint HealerFlag = (uint)PublicWeenieFlags.Healer;
+
+        // The one description both paths are handed.
+        const string Name = "Silifi";
+        const uint WeenieClassId = 42u;
+        const uint IconId = 0x1234u;
+        const int Value = 250;
+        const int Burden = 450;
+        const uint MaterialType = 60u;
+        const uint TargetType = 0x00000080u;
+        const byte CombatUse = 1;
+        const ushort AmmoType = 3;
+        const int Structure = 40;
+        const int MaxStructure = 100;
+        const float Workmanship = 8.5f;
+
+        var vendorObjects = new ClientObjectTable();
+        var vendor = new VendorState();
+        using var materializer = new VendorShopItemMaterializer(vendor, vendorObjects);
+        Assert.True(vendor.Apply(
+            VendorGuid,
+            default,
+            new[]
+            {
+                new VendorShopItem(
+                    ItemGuid,
+                    StackSize: -1,
+                    WeenieClassId: WeenieClassId,
+                    Name: Name,
+                    ItemType: (uint)ItemType.MeleeWeapon,
+                    IconId: IconId,
+                    Value: Value,
+                    ValidLocations: validLocations,
+                    Priority: priority,
+                    ItemsCapacity: itemsCapacity,
+                    ContainersCapacity: containersCapacity,
+                    Structure: Structure,
+                    MaxStructure: MaxStructure,
+                    Workmanship: Workmanship,
+                    Burden: Burden,
+                    MaterialType: MaterialType,
+                    TargetType: TargetType,
+                    CombatUse: CombatUse,
+                    AmmoType: AmmoType,
+                    PublicWeenieBitfield: HealerFlag),
+            }));
+        ClientObject? listed = vendorObjects.Get(ItemGuid);
+        Assert.NotNull(listed);
+
+        var spawnedObjects = new ClientObjectTable();
+        spawnedObjects.Ingest(ObjectTableWiring.ToWeenieData(
+            new WorldSession.EntitySpawn(
+                Guid: ItemGuid,
+                Position: null,
+                SetupTableId: null,
+                AnimPartChanges: [],
+                TextureChanges: [],
+                SubPalettes: [],
+                BasePaletteId: null,
+                ObjScale: null,
+                Name: Name,
+                ItemType: (uint)ItemType.MeleeWeapon,
+                MotionState: null,
+                MotionTableId: null,
+                ObjectDescriptionFlags: HealerFlag,
+                TargetType: TargetType,
+                IconId: IconId,
+                WeenieClassId: WeenieClassId,
+                Value: Value,
+                Burden: Burden,
+                ItemsCapacity: itemsCapacity,
+                ContainersCapacity: containersCapacity,
+                ValidLocations: validLocations,
+                Priority: priority,
+                Structure: Structure,
+                MaxStructure: MaxStructure,
+                Workmanship: Workmanship,
+                CombatUse: CombatUse,
+                AmmoType: AmmoType,
+                MaterialType: MaterialType)));
+        ClientObject? spawned = spawnedObjects.Get(ItemGuid);
+        Assert.NotNull(spawned);
+
+        var properties = new PropertyBundle();
+        properties.Ints[19u] = Value;
+        properties.Ints[5u] = Burden;
+        properties.Ints[105u] = 8;
+        properties.Ints[106u] = 300;
+        properties.Ints[107u] = 250;
+        properties.Ints[108u] = 500;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 1u,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string listedReport = ItemAppraisalTextFormatter.Build(
+            listed!, appraisal, _ => null);
+        string spawnedReport = ItemAppraisalTextFormatter.Build(
+            spawned!, appraisal, _ => null);
+
+        Assert.Equal(spawnedReport, listedReport);
+        Assert.Contains(expectedLine, listedReport);
     }
 
     private static AppraiseInfoParser.Parsed Parsed(

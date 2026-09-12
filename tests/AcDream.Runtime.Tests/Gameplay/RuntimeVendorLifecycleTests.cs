@@ -214,6 +214,84 @@ public sealed class RuntimeVendorLifecycleTests
     }
 
     [Fact]
+    public void ApproachVendorEvent_CarriesTheCompleteItemDescriptionThroughToTheObjectTable()
+    {
+        // A listed item used to lose the description fields the assessment
+        // panel gates its weapon/coverage/capacity blocks on, so a vendor
+        // listing read shorter than the same item in the pack.
+        using GameRuntime runtime = Create();
+        using IDisposable wiring = GameEventWiring.WireAll(
+            _dispatcher,
+            runtime.InventoryOwner.Objects,
+            new CombatState(),
+            new Spellbook(),
+            new ChatLog(),
+            vendor: runtime.InventoryOwner.Vendor);
+
+        Dispatch(BuildApproachVendorPayload(
+            vendorGuid: 0x40001000u,
+            categories: 0u, minValue: 0u, maxValue: 0u, dealsMagic: false,
+            buyPrice: 1f, sellPrice: 1f, currencyWcid: 0u, currencyAmount: 0u,
+            currencyName: "",
+            items:
+            [
+                new VendorItemFixture(
+                    0x50002000u, 1, "Silifi", 42u, 0x1234u,
+                    (uint)ItemType.MeleeWeapon, 250,
+                    ValidLocations: (uint)EquipMask.MeleeWeapon,
+                    Priority: 0x00000002u,
+                    ItemsCapacity: 7,
+                    ContainersCapacity: 2,
+                    Structure: 40,
+                    MaxStructure: 100,
+                    Workmanship: 8.5f,
+                    Burden: 450,
+                    MaterialType: 60u,
+                    TargetType: 0x00000080u,
+                    CombatUse: (byte)1,
+                    AmmoType: (ushort)3,
+                    ObjectDescriptionFlags: (uint)PublicWeenieFlags.Healer),
+            ]));
+
+        VendorShopItem listed = Assert.Single(runtime.InventoryOwner.Vendor.Items);
+        Assert.Equal((uint)EquipMask.MeleeWeapon, listed.ValidLocations);
+        Assert.Equal(0x00000002u, listed.Priority);
+        Assert.Equal(7, listed.ItemsCapacity);
+        Assert.Equal(2, listed.ContainersCapacity);
+        Assert.Equal(40, listed.Structure);
+        Assert.Equal(100, listed.MaxStructure);
+        Assert.Equal(8.5f, listed.Workmanship);
+        Assert.Equal(450, listed.Burden);
+        Assert.Equal(60u, listed.MaterialType);
+        Assert.Equal(0x00000080u, listed.TargetType);
+        Assert.Equal((byte)1, listed.CombatUse);
+        Assert.Equal((ushort)3, listed.AmmoType);
+        Assert.Equal((uint)PublicWeenieFlags.Healer, listed.PublicWeenieBitfield);
+
+        ClientObject? shopItem = runtime.InventoryOwner.Objects.Get(0x50002000u);
+        Assert.NotNull(shopItem);
+        Assert.Equal(EquipMask.MeleeWeapon, shopItem!.ValidLocations);
+        Assert.Equal(0x00000002u, shopItem.Priority);
+        Assert.Equal(7, shopItem.ItemsCapacity);
+        Assert.Equal(2, shopItem.ContainersCapacity);
+        Assert.Equal(40, shopItem.Structure);
+        Assert.Equal(100, shopItem.MaxStructure);
+        Assert.Equal(8.5f, shopItem.Workmanship);
+        Assert.Equal(450, shopItem.Burden);
+        Assert.Equal(60u, shopItem.MaterialType);
+        Assert.Equal(0x00000080u, shopItem.TargetType);
+        Assert.Equal((byte)1, shopItem.CombatUse);
+        Assert.Equal((ushort)3, shopItem.AmmoType);
+        Assert.Equal((uint)PublicWeenieFlags.Healer, shopItem.PublicWeenieBitfield);
+
+        // The vendor still owns the listing: container and wield state are the
+        // materializer's, not the description's.
+        Assert.Equal(0x40001000u, shopItem.ContainerId);
+        Assert.Equal(0u, shopItem.WielderId);
+        Assert.Equal(EquipMask.None, shopItem.CurrentlyEquippedLocation);
+    }
+
+    [Fact]
     public void SecondUse_AfterLocalXClose_StillDispatchesOverTheWireAndReopensOnReapproach()
     {
         using GameRuntime runtime = Create();
@@ -333,7 +411,20 @@ public sealed class RuntimeVendorLifecycleTests
         uint WeenieClassId,
         uint RawIconId,
         uint ItemType,
-        int? Value);
+        int? Value,
+        uint? ValidLocations = null,
+        uint? Priority = null,
+        int? ItemsCapacity = null,
+        int? ContainersCapacity = null,
+        int? Structure = null,
+        int? MaxStructure = null,
+        float? Workmanship = null,
+        int? Burden = null,
+        uint? MaterialType = null,
+        uint? TargetType = null,
+        byte? CombatUse = null,
+        ushort? AmmoType = null,
+        uint ObjectDescriptionFlags = 0u);
 
     private IDisposable Wire(VendorState vendor) => GameEventWiring.WireAll(
         _dispatcher,
@@ -395,19 +486,55 @@ public sealed class RuntimeVendorLifecycleTests
             WireU32(b, packed);
             WireU32(b, item.ItemGuid);
 
-            // Fixed PWD prefix (PublicWeenieDescParser.Parse). Only weenieFlags
-            // bit 0x8 (Value) is set here — the single optional-tail field
-            // these fixtures need.
-            uint weenieFlags = item.Value.HasValue ? 0x00000008u : 0u;
+            // Fixed PWD prefix, then the optional tail in the exact order the
+            // description parser reads it.
+            uint weenieFlags = 0u;
+            if (item.ItemsCapacity.HasValue) weenieFlags |= 0x00000002u;
+            if (item.ContainersCapacity.HasValue) weenieFlags |= 0x00000004u;
+            if (item.AmmoType.HasValue) weenieFlags |= 0x00000100u;
+            if (item.Value.HasValue) weenieFlags |= 0x00000008u;
+            if (item.TargetType.HasValue) weenieFlags |= 0x00080000u;
+            if (item.CombatUse.HasValue) weenieFlags |= 0x00000200u;
+            if (item.Structure.HasValue) weenieFlags |= 0x00000400u;
+            if (item.MaxStructure.HasValue) weenieFlags |= 0x00000800u;
+            if (item.ValidLocations.HasValue) weenieFlags |= 0x00010000u;
+            if (item.Priority.HasValue) weenieFlags |= 0x00040000u;
+            if (item.Workmanship.HasValue) weenieFlags |= 0x01000000u;
+            if (item.Burden.HasValue) weenieFlags |= 0x00200000u;
+            if (item.MaterialType.HasValue) weenieFlags |= 0x80000000u;
             WireU32(b, weenieFlags);
             WireStr16L(b, item.Name);
             WirePackedDword(b, item.WeenieClassId);
             WirePackedDword(b, item.RawIconId);
             WireU32(b, item.ItemType);
-            WireU32(b, 0u); // objectDescriptionFlags
+            WireU32(b, item.ObjectDescriptionFlags);
             WireAlign(b);
+            if (item.ItemsCapacity.HasValue)
+                b.Add(unchecked((byte)(sbyte)item.ItemsCapacity.Value));
+            if (item.ContainersCapacity.HasValue)
+                b.Add(unchecked((byte)(sbyte)item.ContainersCapacity.Value));
+            if (item.AmmoType.HasValue)
+                WireU16(b, item.AmmoType.Value);
             if (item.Value.HasValue)
                 WireU32(b, unchecked((uint)item.Value.Value));
+            if (item.TargetType.HasValue)
+                WireU32(b, item.TargetType.Value);
+            if (item.CombatUse.HasValue)
+                b.Add(item.CombatUse.Value);
+            if (item.Structure.HasValue)
+                WireU16(b, (ushort)item.Structure.Value);
+            if (item.MaxStructure.HasValue)
+                WireU16(b, (ushort)item.MaxStructure.Value);
+            if (item.ValidLocations.HasValue)
+                WireU32(b, item.ValidLocations.Value);
+            if (item.Priority.HasValue)
+                WireU32(b, item.Priority.Value);
+            if (item.Workmanship.HasValue)
+                WireF32(b, item.Workmanship.Value);
+            if (item.Burden.HasValue)
+                WireU16(b, (ushort)item.Burden.Value);
+            if (item.MaterialType.HasValue)
+                WireU32(b, item.MaterialType.Value);
             WireAlign(b);
         }
         return b.ToArray();
