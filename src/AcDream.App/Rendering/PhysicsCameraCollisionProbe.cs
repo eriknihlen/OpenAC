@@ -41,13 +41,34 @@ public sealed class PhysicsCameraCollisionProbe : ICameraCollisionProbe
 
         Vector3 eye = FromSpherePath(r.Position, ViewerSphereRadius);
 
-        if (r.Ok) return new CameraSweepResult(eye, r.CellId);
+        if (r.Ok) return new CameraSweepResult(KeepAboveWater(eye, r.CellId), r.CellId);
 
         var (eyeCell, eyeFound) = _physics.AdjustPosition(cellId, desiredEye);
-        if (eyeFound) return new CameraSweepResult(desiredEye, eyeCell);
+        if (eyeFound) return new CameraSweepResult(KeepAboveWater(desiredEye, eyeCell), eyeCell);
 
         // === Fallback 2 (pc:92886-92887): set_viewer(player_pos), viewer_cell = null ===
         return new CameraSweepResult(playerPos, 0u);
+    }
+
+    /// <summary>
+    /// The eye never goes below the water. Outdoors, the terrain height of a
+    /// water cell is the water surface, so an eye that ended up under it is
+    /// lifted back to the surface plus its own radius. Cells inside a
+    /// building or dungeon have no water, and an eye over terrain that is
+    /// not resident is left alone.
+    /// </summary>
+    private Vector3 KeepAboveWater(Vector3 eye, uint eyeCellId)
+    {
+        if ((eyeCellId & 0xFFFFu) >= 0x0100u) return eye;
+        if (_physics.SampleWaterDepth(eye.X, eye.Y) <= 0f) return eye;
+        float? surface = _physics.SampleTerrainZ(eye.X, eye.Y);
+        return surface is { } z ? ClampAboveWater(eye, z, ViewerSphereRadius) : eye;
+    }
+
+    internal static Vector3 ClampAboveWater(Vector3 eye, float waterSurfaceZ, float margin)
+    {
+        float floor = waterSurfaceZ + margin;
+        return eye.Z < floor ? eye with { Z = floor } : eye;
     }
 
     internal static Vector3 ToSpherePath(Vector3 spherePoint, float radius)

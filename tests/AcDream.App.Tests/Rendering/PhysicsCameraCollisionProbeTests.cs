@@ -24,6 +24,22 @@ public class PhysicsCameraCollisionProbeTests
         Assert.Equal(p.Z, back.Z, 5);
     }
 
+    // OpenAC #6b: the eye never goes below the water surface.
+    [Theory]
+    [InlineData(-3f, 0.3f)]   // under the surface: lifted to surface + radius
+    [InlineData(0.1f, 0.3f)]  // just above but inside the margin: lifted
+    [InlineData(2f, 2f)]      // clear of the water: untouched
+    public void ClampAboveWater_LiftsAnEyeThatIsUnderTheSurface(float eyeZ, float expectedZ)
+    {
+        var eye = new Vector3(5f, 7f, eyeZ);
+
+        var clamped = PhysicsCameraCollisionProbe.ClampAboveWater(eye, waterSurfaceZ: 0f, margin: 0.3f);
+
+        Assert.Equal(5f, clamped.X);
+        Assert.Equal(7f, clamped.Y);
+        Assert.Equal(expectedZ, clamped.Z, 5);
+    }
+
     [Fact]
     public void SweepEye_NoStartingCell_SnapsToPlayer()
     {
