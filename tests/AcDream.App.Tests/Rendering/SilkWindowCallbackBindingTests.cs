@@ -412,14 +412,22 @@ public sealed class SilkWindowCallbackBindingTests
             pacing,
             gate);
 
-        Task<Exception> first = Task.Run(() => Record.Exception(binding.Attach));
+        Task<Exception> first = Task.Factory.StartNew(
+            () => Record.Exception(binding.Attach),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         Assert.True(surface.AddEntered.Wait(TimeSpan.FromSeconds(5)));
         using var secondStarted = new ManualResetEventSlim(false);
-        Task<Exception> second = Task.Run(() =>
-        {
-            secondStarted.Set();
-            return Record.Exception(binding.Attach);
-        });
+        Task<Exception> second = Task.Factory.StartNew(
+            () =>
+            {
+                secondStarted.Set();
+                return Record.Exception(binding.Attach);
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         Assert.True(secondStarted.Wait(TimeSpan.FromSeconds(5)));
         Exception secondError = await second.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsType<InvalidOperationException>(secondError);

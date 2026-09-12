@@ -198,7 +198,10 @@ public sealed class LandblockConcretePresentationPipelineTests
             maxGpuUploadBytes: 1_000_000,
             maxGlRetireOperations: 64,
             destinationReserveFraction: 0.75f);
-        var meter = new StreamingWorkMeter(budget);
+        var meter = new StreamingWorkMeter(
+            budget,
+            timestamp: static () => 0,
+            timestampFrequency: 1);
 
         LandblockPublicationAdvance advance = pipeline.PublishLoaded(
             result,
