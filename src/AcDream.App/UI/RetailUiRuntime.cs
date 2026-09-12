@@ -3138,6 +3138,13 @@ public sealed class RetailUiRuntime : IDisposable
                                 [Layout.DatStringResolver.PlayerVariable] = playerName,
                             });
                     }
+                },
+                ResolveTemplate: (tableId, keyHash, variables) =>
+                {
+                    lock (_bindings.Assets.DatLock)
+                    {
+                        return fellowshipStrings.ResolveTemplate(tableId, keyHash, variables);
+                    }
                 }),
             Friends: _bindings.Social.Friends,
             Squelch: _bindings.Social.Squelch,

@@ -59,7 +59,8 @@ public sealed class SocialPanelControllerTests
         Func<uint, uint, UiElement?>? templateResolver = null,
         Func<uint, uint, string?>? resolveString = null,
         Func<uint, string?>? resolveWorldObjectName = null,
-        Func<string, Action<bool>, uint>? showConfirmation = null)
+        Func<string, Action<bool>, uint>? showConfirmation = null,
+        Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? resolveTemplate = null)
     {
         calls ??= new List<string>();
         return new SocialAllegiancePageController.Bindings(
@@ -79,7 +80,8 @@ public sealed class SocialPanelControllerTests
             TemplateResolver: templateResolver ?? FakeRowTemplateResolver,
             ResolveString: resolveString ?? ((_, _) => null),
             ResolveWorldObjectName: resolveWorldObjectName ?? (_ => null),
-            ShowConfirmation: showConfirmation ?? ((_, _) => 0u));
+            ShowConfirmation: showConfirmation ?? ((_, _) => 0u),
+            ResolveTemplate: resolveTemplate);
     }
 
     private static SocialPanelController.Callbacks MakeCallbacks(
@@ -528,6 +530,110 @@ public sealed class SocialPanelControllerTests
         Assert.NotNull(capturedCallback);
         capturedCallback!(true);
         Assert.Contains($"allegiance-kick:{vassalGuid:X8}", calls);
+    }
+
+    // OpenAC #48: the passed-up experience groups its digits and goes through
+    // the authored allegiance entry — on a vassal row and on the patron block
+    // alike.
+    [Fact]
+    public void Allegiance_ExperiencePassedUp_IsGroupedAndAuthored()
+    {
+        const uint selfGuid = 100u;
+        const uint patronGuid = 300u;
+        const uint vassalGuid = 401u;
+        var self = new RuntimeAllegianceMemberSnapshot(
+            selfGuid, patronGuid, true, "Me", 0, 0, 0, 0, 0u, 987_654u, 0, 0, true);
+        var patron = new RuntimeAllegianceMemberSnapshot(
+            patronGuid, 0u, true, "Patron", 0, 0, 0, 0, 0u, 0u, 0, 0, true);
+        var vassal = new RuntimeAllegianceMemberSnapshot(
+            vassalGuid, selfGuid, true, "Vassal One", 0, 0, 0, 0, 0u, 1_500_000u, 0, 0, true);
+        var resolved = new List<(uint Table, uint Key, string Value)>();
+        ImportedLayout layout = FixtureLoader.LoadSocialPanelHost();
+        UiElement? TaggedVassalRowResolver(uint layoutId, uint elementId)
+        {
+            var row = new UiPanel();
+            var name = new UiText();
+            name.DatElementId = 0x10000268u;
+            row.AddChild(name);
+            var experience = new UiText();
+            experience.DatElementId = 0x10000269u;
+            row.AddChild(experience);
+            return row;
+        }
+        SocialAllegiancePageController.Bindings bindings = MakeAllegianceBindings(
+            snapshot: new RuntimeAllegianceSnapshot { HasProfile = true, Revision = 1 },
+            patron: guid => guid == selfGuid ? patron : null,
+            member: guid => guid == selfGuid ? self : guid == vassalGuid ? vassal : null,
+            vassals: guid => guid == selfGuid ? [vassal] : [],
+            localPlayerGuid: selfGuid,
+            templateResolver: TaggedVassalRowResolver,
+            resolveTemplate: (table, key, variables) =>
+            {
+                string value = Assert.Single(variables).Value;
+                Assert.Equal(DatStringResolver.ComputeHash("VALUE"), Assert.Single(variables).Key);
+                resolved.Add((table, key, value));
+                return $"[{value}]";
+            });
+
+        SocialPanelController? controller = SocialPanelController.Bind(
+            layout, MakeCallbacks(allegianceBindings: bindings));
+        Assert.NotNull(controller);
+
+        UiElement allegiancePage = UiElement.FindDescendant(controller!.TabPanel, 0x10000291u)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(allegiancePage, 0x10000260u));
+        UiElement row = Assert.Single(listBox.ViewportForTest!.Children);
+        var rowExperience = Assert.IsType<UiText>(UiElement.FindDescendant(row, 0x10000269u));
+        Assert.Equal("[1,500,000]", Assert.Single(rowExperience.LinesProvider()).Text);
+
+        UiElement patronField = UiElement.FindDescendant(allegiancePage, 0x1000025Au)!;
+        var patronExperience = Assert.IsType<UiText>(
+            UiElement.FindDescendant(patronField, 0x10000492u));
+        Assert.Equal("[987,654]", Assert.Single(patronExperience.LinesProvider()).Text);
+
+        Assert.All(resolved, entry =>
+        {
+            Assert.Equal(0x23000001u, entry.Table);
+            Assert.Equal(
+                DatStringResolver.ComputeHash("ID_Allegiance_VassalExperiencePassedUp"),
+                entry.Key);
+        });
+        Assert.Contains(resolved, entry => entry.Value == "1,500,000");
+        Assert.Contains(resolved, entry => entry.Value == "987,654");
+    }
+
+    [Fact]
+    public void Allegiance_ExperiencePassedUp_WithoutTheAuthoredEntry_IsStillGrouped()
+    {
+        const uint selfGuid = 100u;
+        const uint vassalGuid = 401u;
+        var vassal = new RuntimeAllegianceMemberSnapshot(
+            vassalGuid, selfGuid, true, "Vassal One", 0, 0, 0, 0, 0u, 1_500_000u, 0, 0, true);
+        ImportedLayout layout = FixtureLoader.LoadSocialPanelHost();
+        UiElement? TaggedVassalRowResolver(uint layoutId, uint elementId)
+        {
+            var row = new UiPanel();
+            var experience = new UiText();
+            experience.DatElementId = 0x10000269u;
+            row.AddChild(experience);
+            return row;
+        }
+        SocialAllegiancePageController.Bindings bindings = MakeAllegianceBindings(
+            snapshot: new RuntimeAllegianceSnapshot { HasProfile = true, Revision = 1 },
+            vassals: guid => guid == selfGuid ? [vassal] : [],
+            localPlayerGuid: selfGuid,
+            templateResolver: TaggedVassalRowResolver);
+
+        SocialPanelController? controller = SocialPanelController.Bind(
+            layout, MakeCallbacks(allegianceBindings: bindings));
+        Assert.NotNull(controller);
+
+        UiElement allegiancePage = UiElement.FindDescendant(controller!.TabPanel, 0x10000291u)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(allegiancePage, 0x10000260u));
+        UiElement row = Assert.Single(listBox.ViewportForTest!.Children);
+        var rowExperience = Assert.IsType<UiText>(UiElement.FindDescendant(row, 0x10000269u));
+        Assert.Equal("1,500,000", Assert.Single(rowExperience.LinesProvider()).Text);
     }
 
     // ── CF-1: 0x001F subscription arming points ─────────────────────────────

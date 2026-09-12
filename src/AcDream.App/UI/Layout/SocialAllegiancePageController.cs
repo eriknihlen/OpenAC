@@ -61,7 +61,19 @@ public sealed class SocialAllegiancePageController
         Func<uint, uint, string?> ResolveString,
         Func<uint, string?> ResolveWorldObjectName,
         Func<string, Action<bool>, uint> ShowConfirmation,
-        Func<string, string, string?>? ResolvePlayerTemplate = null);
+        Func<string, string, string?>? ResolvePlayerTemplate = null,
+        Func<uint, uint, IReadOnlyDictionary<uint, string>, string?>? ResolveTemplate = null);
+
+    /// <summary>
+    /// The authored "experience passed up" entry every passed-up number on
+    /// this page goes through — the monarch-is-patron block, the patron
+    /// block and each vassal row alike.
+    /// </summary>
+    private static readonly uint ExperiencePassedUpTemplateKey =
+        DatStringResolver.ComputeHash("ID_Allegiance_VassalExperiencePassedUp");
+
+    /// <summary>The entry's one variable.</summary>
+    private static readonly uint ValueVariable = DatStringResolver.ComputeHash("VALUE");
 
     private readonly record struct VassalRowWidgets(
         UiText? Name,
@@ -377,8 +389,27 @@ public sealed class SocialAllegiancePageController
         if (patronIsMonarch)
         {
             uint tithed = _bindings.Member(_bindings.LocalPlayerGuid())?.CpTithed ?? 0u;
-            SetLine(_monarchExperiencePassedUp, ref _lastMonarchExperiencePassedUp, tithed.ToString(), TextColor);
+            SetLine(
+                _monarchExperiencePassedUp,
+                ref _lastMonarchExperiencePassedUp,
+                ExperiencePassedUpText(tithed),
+                TextColor);
         }
+    }
+
+    /// <summary>
+    /// The passed-up experience as the page shows it: the number with its
+    /// digits grouped (1,500,000 — the game's number text always groups),
+    /// placed into the authored entry when the string table has it.
+    /// </summary>
+    private string ExperiencePassedUpText(uint tithed)
+    {
+        string value = tithed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        return _bindings.ResolveTemplate?.Invoke(
+                StringTableId,
+                ExperiencePassedUpTemplateKey,
+                new Dictionary<uint, string> { [ValueVariable] = value })
+            ?? value;
     }
 
     private void RefreshPatronBlock(
@@ -401,7 +432,11 @@ public sealed class SocialAllegiancePageController
         _patronField.Enabled = patronData.IsLoggedIn;
 
         uint tithed = _bindings.Member(_bindings.LocalPlayerGuid())?.CpTithed ?? 0u;
-        SetLine(_patronExperiencePassedUp, ref _lastPatronExperiencePassedUp, tithed.ToString(), TextColor);
+        SetLine(
+            _patronExperiencePassedUp,
+            ref _lastPatronExperiencePassedUp,
+            ExperiencePassedUpText(tithed),
+            TextColor);
     }
 
     private void RefreshCheckboxSelection()
@@ -508,7 +543,7 @@ public sealed class SocialAllegiancePageController
 
         if (widgets.ExperiencePassedUp is { } xpText)
         {
-            string tithed = vassal.CpTithed.ToString();
+            string tithed = ExperiencePassedUpText(vassal.CpTithed);
             xpText.LinesProvider = () => [new UiText.Line(tithed, TextColor)];
         }
 
