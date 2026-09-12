@@ -117,6 +117,23 @@ internal static class VitalRechargePlanner
         IAutomationSurface automation,
         VitalSettings settings,
         CombatSettings combatSettings,
+        out VitalRechargeChoice choice) => TryPlanHelper(
+            automation,
+            settings,
+            combatSettings,
+            trace: null,
+            out choice);
+
+    /// <summary>
+    /// <paramref name="trace"/> receives the helper spell walk's pick and
+    /// rejections, in the buff pass's own wording, so a connected run can
+    /// show why a tier was skipped or nothing was cast at all.
+    /// </summary>
+    public static bool TryPlanHelper(
+        IAutomationSurface automation,
+        VitalSettings settings,
+        CombatSettings combatSettings,
+        Action<string>? trace,
         out VitalRechargeChoice choice)
     {
         ArgumentNullException.ThrowIfNull(automation);
@@ -158,6 +175,7 @@ internal static class VitalRechargePlanner
                     automation,
                     basis,
                     combatSettings,
+                    trace,
                     out PluginSpellInfo spell))
             {
                 continue;
@@ -902,6 +920,7 @@ internal static class VitalRechargePlanner
         IAutomationSurface automation,
         in PluginSpellInfo reference,
         CombatSettings combatSettings,
+        Action<string>? trace,
         out PluginSpellInfo spell)
     {
         var tiers = new List<PluginSpellInfo>();
@@ -930,8 +949,9 @@ internal static class VitalRechargePlanner
                 ? automation.Items.CaptureOwnedItems()
                 : [],
             combatSettings.BlacklistedSpellComponents,
-            static _ => { },
-            static (_, _, _) => { });
+            text => trace?.Invoke(text),
+            (walked, pick, rejections) =>
+                trace?.Invoke(FormatHelperTrace(walked, pick, rejections)));
         var line = new BuffLine(
             reference.Family, BuffTargetKind.Other, reference.Name, tiers)
         {
@@ -943,6 +963,29 @@ internal static class VitalRechargePlanner
             combatSettings.HuntSkillExcessOverDifficulty,
             castability,
             out spell);
+    }
+
+    /// <summary>
+    /// The buff pass's tier-trace wording: the pick, then every rejected
+    /// tier above it with its reason (all of them when nothing was picked).
+    /// </summary>
+    private static string FormatHelperTrace(
+        BuffLine line,
+        PluginSpellInfo? pick,
+        IReadOnlyList<BuffTierRejection> rejections)
+    {
+        int floor = pick?.Tier ?? int.MinValue;
+        var higher = new List<string>();
+        foreach (BuffTierRejection rejection in rejections)
+        {
+            if (rejection.Spell.Tier > floor)
+                higher.Add($"{rejection.Spell.Name} {rejection.Reason}");
+        }
+        string pickedText = pick is { } spell
+            ? $"picked {spell.Name} (gen {spell.Tier})"
+            : "picked nothing";
+        string rejectedText = higher.Count == 0 ? "none" : string.Join(", ", higher);
+        return $"Helping: {line.Reference.Name} \u2014 {pickedText}; rejected: {rejectedText}";
     }
 
     private static bool CanCast(ICharacterInfo character, PluginSpellInfo spell) =>
@@ -1009,6 +1052,7 @@ internal sealed class VitalRechargeController
     private double _staminaBoostRemaining;
     private double _manaBoostRemaining;
     private bool _vitalsRequested;
+    private string? _lastHelperTrace;
 
     public VitalRechargeController(
         IPluginHost host,
@@ -1103,6 +1147,7 @@ internal sealed class VitalRechargeController
                 automation,
                 _settings,
                 _combatSettings,
+                TraceHelper,
                 out helper))
         {
             Status = "Vitals ready";
@@ -1160,6 +1205,9 @@ internal sealed class VitalRechargeController
         _pending = new Pending(choice, revision);
         _pendingSeconds = 0d;
         Status = $"Recharging {choice.Vital}: {choice.Name}";
+        _host.Log.Info(choice.TargetObjectId == 0u
+            ? $"Vitals: {choice.Vital} \u2192 {choice.Name} on self"
+            : $"Vitals: {choice.Vital} \u2192 {choice.Name} at fellow 0x{choice.TargetObjectId:X8}");
         return true;
     }
 
@@ -1172,7 +1220,20 @@ internal sealed class VitalRechargeController
         // The host drops its subscription with the session; only the
         // plugin-side memory of it is stale here.
         _vitalsRequested = false;
+        _lastHelperTrace = null;
         Status = IdleStatus;
+    }
+
+    /// <summary>
+    /// One launch-log line per distinct helper walk result; a repeated tick
+    /// with the same pick and rejections stays quiet, like the buff pass.
+    /// </summary>
+    private void TraceHelper(string line)
+    {
+        if (line == _lastHelperTrace)
+            return;
+        _lastHelperTrace = line;
+        _host.Log.Info(line);
     }
 
     private void SyncVitalsRequest(IAutomationSurface automation, bool wanted)

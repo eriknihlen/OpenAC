@@ -302,6 +302,59 @@ public sealed class VitalRechargeTests
     }
 
     /// <summary>
+    /// The helper's tier walk is only as gateable as its trace: a connected
+    /// run has to show which tiers were skipped and why, the way the buff
+    /// pass already does. Mutation: drop the trace pass-through and the
+    /// sink stays empty while the walk silently settles for gen 6.
+    /// </summary>
+    [Fact]
+    public void HelperTierWalkTracesItsPickAndRejections()
+    {
+        var yew = new PluginSpellComponentSet(7u, 26u, 39u, 51u);
+        var willow = new PluginSpellComponentSet(7u, 26u, 39u, 61u);
+        PluginSpellInfo replenish = Spell(
+            (uint)SpellId.Replenish, "Replenish", 81u, 300)
+            with { ComponentSet = yew, IsSelfTargeted = false };
+        PluginSpellInfo revitalizeSelf = Spell(
+            0x10E1u, "Incantation of Revitalize Self", 81u, 400)
+            with { ComponentSet = willow, Tier = 8 };
+        PluginSpellInfo revitalizeOther8 = Spell(
+            0x10E0u, "Incantation of Revitalize Other", 81u, 400)
+            with { ComponentSet = yew, Tier = 8, IsSelfTargeted = false };
+        PluginSpellInfo revitalizeOther6 = Spell(
+            0x04A4u, "Revitalize Other VI", 81u, 250)
+            with { ComponentSet = yew, Tier = 6, IsSelfTargeted = false };
+        var surface = new Surface
+        {
+            Mode = PluginCombatMode.Magic,
+            Spells = [revitalizeSelf, revitalizeOther8, revitalizeOther6],
+            Lookup = [replenish],
+            InFellowship = true,
+            Skills = [Skill(33u, 300u)],
+            Fellows =
+            [
+                Fellow(71u, "Winded", health: 100, distance: 10f)
+                    with { CurrentStamina = 5u },
+            ],
+        };
+        var trace = new List<string>();
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface,
+            new VitalSettings { HelperStamina = 0.5 },
+            new CombatSettings(),
+            trace.Add,
+            out VitalRechargeChoice choice));
+
+        Assert.Equal(revitalizeOther6.SpellId, choice.SpellId);
+        string line = Assert.Single(trace);
+        Assert.StartsWith("Helping: Replenish", line, StringComparison.Ordinal);
+        Assert.Contains("picked Revitalize Other VI (gen 6)", line);
+        Assert.Contains("Incantation of Revitalize Other skill 300 < 425", line);
+        Assert.Contains("Incantation of Revitalize Self comp set", line);
+    }
+
+    /// <summary>
     /// A fellow's vitals are only as good as the server's last stream of
     /// them: none yet, or older than the trust window, means unknown.
     /// Mutation: drop the age gate and the stale 5 %-health fellow is healed
@@ -527,12 +580,22 @@ public sealed class VitalRechargeTests
     private sealed class Host(Surface surface) : IPluginHost
     {
         public bool HasUi => false;
-        public IPluginLogger Log => null!;
+        public FakeLogger Logger { get; } = new();
+        public IPluginLogger Log => Logger;
         public IGameState State => null!;
         public IEvents Events => null!;
         public ISelectionService Selection => null!;
         public IUiRegistry Ui => null!;
         public IAutomationSurface Automation => surface;
+    }
+
+    private sealed class FakeLogger : IPluginLogger
+    {
+        public List<string> Infos { get; } = [];
+        public List<string> Warnings { get; } = [];
+        public void Info(string message) => Infos.Add(message);
+        public void Warn(string message) => Warnings.Add(message);
+        public void Error(string message, Exception? exception = null) { }
     }
 
     private sealed class Surface :
