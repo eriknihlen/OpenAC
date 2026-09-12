@@ -288,8 +288,10 @@ public sealed class WorldSceneRendererTests
         Assert.Contains("pview:draw", rig.Calls);
     }
 
+    // OpenAC #6: buildings draw their full mesh at every distance in normal
+    // play, not only from the overhead view.
     [Fact]
-    public void PViewWorld_OverheadDetailOverrideIsReplacedOnEveryFrame()
+    public void PViewWorld_BuildingDetailLadderIsOffInEveryView()
     {
         var root = new LoadedCell { CellId = 0x01010001u };
         var rig = new Rig(false, false, root);
@@ -300,7 +302,7 @@ public sealed class WorldSceneRendererTests
 
         rig.Frames.Frame = normal;
         rig.Renderer.Render(default);
-        Assert.False(rig.PView.LastInput!.BuildingDegradesDisabled);
+        Assert.True(rig.PView.LastInput!.BuildingDegradesDisabled);
     }
 
     [Fact]
