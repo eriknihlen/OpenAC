@@ -22,9 +22,13 @@ internal static class OpenAlContextAttributes
 
     /// <summary>
     /// The attribute key selecting the output limiter. The binding we use does
-    /// not name it, so it is spelled out here.
+    /// not name it, so it is spelled out here — and it has a trap next door: the
+    /// key one below this one is a different attribute that only a loopback
+    /// device accepts. A normal playback device drops that one at context
+    /// creation without raising anything, and refuses to read it back at all, so
+    /// getting this digit wrong is silent in both directions.
     /// </summary>
-    internal const int OutputLimiter = 0x1999;
+    internal const int OutputLimiter = 0x199A;
 
     /// <summary>The attribute value meaning "off".</summary>
     internal const int Off = 0;
@@ -57,17 +61,23 @@ internal static class OpenAlContextAttributes
             : null;
 
     /// <summary>
-    /// The single startup line reporting what the limiter was doing and what it
-    /// is doing now.
+    /// The single startup line: what we asked the limiter to do, and what the
+    /// device says it is doing.
     /// </summary>
-    internal static string Describe(bool outputLimiterControllable, int? before, int? after) =>
+    /// <remarks>
+    /// There is deliberately nothing here about what the limiter was doing
+    /// before. The setting does not exist until a context is created, so a
+    /// reading taken earlier can only ever answer "off" and would be evidence of
+    /// nothing at all.
+    /// </remarks>
+    internal static string Describe(bool outputLimiterControllable, int? reported) =>
         outputLimiterControllable
-            ? $"[audio] output limiter: was {State(before)}, now {State(after)}"
+            ? $"[audio] output limiter: asked for off, device reports {State(reported)}"
             : "[audio] output limiter: this device does not let us turn it off";
 
     private static string State(int? value) => value switch
     {
-        null => "unknown",
+        null => "nothing",
         Off => "off",
         _ => "on",
     };

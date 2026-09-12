@@ -49,7 +49,9 @@ public sealed class OpenAlResourceLifetimeTests
                 OpenAlContextAttributes.EndOfList,
             },
             api.ContextAttributes);
-        Assert.Equal("[audio] output limiter: was on, now off", engine.OutputLimiterReport);
+        Assert.Equal(
+            "[audio] output limiter: asked for off, device reports off",
+            engine.OutputLimiterReport);
         engine.Dispose();
     }
 
@@ -69,21 +71,30 @@ public sealed class OpenAlResourceLifetimeTests
         engine.Dispose();
     }
 
-    // The state is asked for before any context exists, so a device is entitled
-    // to answer nothing. Saying "off" there would be a lie in the one line whose
-    // job is to report what the limiter is doing.
+    // A device that answers nothing must not be reported as "off" — that would
+    // be a lie in the one line whose job is to report what the limiter is doing.
     [Fact]
-    public void AnUnansweredLimiterRead_IsReportedAsUnknown_NotAsOff()
+    public void AnUnansweredLimiterRead_IsReportedAsNothing_NotAsOff()
     {
-        var api = new RecordingApi { AnswersBeforeContext = false };
+        var api = new RecordingApi { OutputLimiterAnswers = false };
 
         var engine = new OpenAlAudioEngine(new Factory(api));
 
         Assert.True(engine.IsAvailable);
         Assert.Equal(
-            "[audio] output limiter: was unknown, now off",
+            "[audio] output limiter: asked for off, device reports nothing",
             engine.OutputLimiterReport);
         engine.Dispose();
+    }
+
+    // Nothing at runtime can catch a wrong key: the device drops the wrong
+    // attribute at context creation without complaining, and refuses to read it
+    // back. The key one below this one is a real attribute that only a loopback
+    // device accepts, so a single wrong digit is silent in both directions.
+    [Fact]
+    public void TheOutputLimiterAttributeKey_IsTheLimiterKey_NotTheOneNextToIt()
+    {
+        Assert.Equal(0x199A, OpenAlContextAttributes.OutputLimiter);
     }
 
     [Fact]
@@ -116,18 +127,17 @@ public sealed class OpenAlResourceLifetimeTests
     }
 
     [Theory]
-    [InlineData(true, 1, 0, "[audio] output limiter: was on, now off")]
-    [InlineData(true, 0, 0, "[audio] output limiter: was off, now off")]
-    [InlineData(true, 1, null, "[audio] output limiter: was on, now unknown")]
-    [InlineData(false, null, null,
+    [InlineData(true, 0, "[audio] output limiter: asked for off, device reports off")]
+    [InlineData(true, 1, "[audio] output limiter: asked for off, device reports on")]
+    [InlineData(true, null, "[audio] output limiter: asked for off, device reports nothing")]
+    [InlineData(false, null,
         "[audio] output limiter: this device does not let us turn it off")]
-    public void OutputLimiterReport_StatesWhatItWasAndWhatItIs(
+    public void OutputLimiterReport_StatesWhatWeAskedForAndWhatTheDeviceSays(
         bool controllable,
-        int? before,
-        int? after,
+        int? reported,
         string expected)
     {
-        Assert.Equal(expected, OpenAlContextAttributes.Describe(controllable, before, after));
+        Assert.Equal(expected, OpenAlContextAttributes.Describe(controllable, reported));
     }
 
     [Fact]
@@ -221,7 +231,7 @@ public sealed class OpenAlResourceLifetimeTests
         public uint? ConfigureFailureSource { get; set; }
         public uint? DeleteFailureSource { get; set; }
         public bool OutputLimiterSupported { get; set; } = true;
-        public bool AnswersBeforeContext { get; set; } = true;
+        public bool OutputLimiterAnswers { get; set; } = true;
         public int[]? ContextAttributes { get; private set; }
         public int LimiterReads { get; private set; }
         public List<uint> GeneratedSources { get; } = [];
@@ -233,7 +243,6 @@ public sealed class OpenAlResourceLifetimeTests
 
         // A device that limits until it is told not to.
         private int _limiterState = 1;
-        private bool _contextCreated;
 
         public nint OpenDevice() => DeviceResult;
 
@@ -242,7 +251,6 @@ public sealed class OpenAlResourceLifetimeTests
         public nint CreateContext(nint device, int[]? attributes)
         {
             ContextAttributes = attributes;
-            _contextCreated = true;
             if (attributes is not null)
             {
                 for (int i = 0; i + 1 < attributes.Length; i += 2)
@@ -257,7 +265,7 @@ public sealed class OpenAlResourceLifetimeTests
         public int? ReadOutputLimiterState(nint device)
         {
             LimiterReads++;
-            return !_contextCreated && !AnswersBeforeContext ? null : _limiterState;
+            return OutputLimiterAnswers ? _limiterState : null;
         }
 
         public bool MakeContextCurrent(nint context)

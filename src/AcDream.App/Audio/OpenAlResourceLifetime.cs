@@ -78,9 +78,21 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
             (GetContextInteger)OpenAlContextAttributes.OutputLimiter,
             1,
             &value);
-        return OpenAlContextAttributes.ReadLimiterState(
+
+        ContextError error = ContextApi.GetError((Device*)device);
+        int? state = OpenAlContextAttributes.ReadLimiterState(
             value,
-            errored: ContextApi.GetError((Device*)device) != ContextError.NoError);
+            errored: error != ContextError.NoError);
+        if (state is null)
+        {
+            // Say exactly what the device left behind, so a driver that wrote
+            // nothing can be told apart from one that objected. Silent on a
+            // device that answers, which is every device that supports this.
+            Console.WriteLine(FormattableString.Invariant(
+                $"[audio] output limiter read answered nothing: raw 0x{value:X8}, error 0x{(int)error:X4}"));
+        }
+
+        return state;
     }
 
     public bool MakeContextCurrent(nint context) =>
@@ -145,18 +157,18 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
     /// <summary>Whether this device let us ask for the output limiter at all.</summary>
     public bool OutputLimiterControllable { get; private set; }
 
-    /// <summary>The limiter setting read before the context was created.</summary>
-    public int? OutputLimiterStateBefore { get; private set; }
+    /// <summary>
+    /// What the device reports its limiter doing once the context is live, or
+    /// null when it answered nothing. There is deliberately no reading from
+    /// before the context: the setting does not exist until a context is
+    /// created, so an earlier read can only ever say "off" and would prove
+    /// nothing.
+    /// </summary>
+    public int? OutputLimiterReported { get; private set; }
 
-    /// <summary>The limiter setting read once the context was live.</summary>
-    public int? OutputLimiterStateAfter { get; private set; }
-
-    /// <summary>The one line describing what the limiter was and is doing.</summary>
+    /// <summary>The one line saying what we asked for and what the device says.</summary>
     public string DescribeOutputLimiter() =>
-        OpenAlContextAttributes.Describe(
-            OutputLimiterControllable,
-            OutputLimiterStateBefore,
-            OutputLimiterStateAfter);
+        OpenAlContextAttributes.Describe(OutputLimiterControllable, OutputLimiterReported);
 
     public bool IsCleanupComplete =>
         _sources.All(static source => source.Released)
@@ -180,10 +192,6 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
             throw new InvalidOperationException("The OpenAL context already exists.");
 
         OutputLimiterControllable = _api.SupportsOutputLimiterControl(_device);
-        // There is no context yet, so a device is entitled not to answer this
-        // one; "unknown" is then what the startup line says.
-        if (OutputLimiterControllable)
-            OutputLimiterStateBefore = _api.ReadOutputLimiterState(_device);
 
         _context = _api.CreateContext(
             _device,
@@ -196,9 +204,10 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
         if (_context == 0)
             throw new InvalidOperationException("An OpenAL context is required before activation.");
         _contextCurrent = _api.MakeContextCurrent(_context);
-        // The limiter setting only means anything once a context is live.
+        // The limiter setting only exists once a context is live, so this is the
+        // first and only moment the question can be asked meaningfully.
         if (_contextCurrent && OutputLimiterControllable)
-            OutputLimiterStateAfter = _api.ReadOutputLimiterState(_device);
+            OutputLimiterReported = _api.ReadOutputLimiterState(_device);
         return _contextCurrent;
     }
 
