@@ -52,6 +52,14 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
 
     public Vector4 LabelColor { get; set; } = Vector4.One;
 
+    /// <summary>
+    /// Asked for the label's colour each frame when set, so a caption that has
+    /// to dim and undim while its panel is open can do so without anything
+    /// having to push a new colour in. Unset leaves <see cref="LabelColor"/>
+    /// in charge.
+    /// </summary>
+    public Func<Vector4>? LabelColorProvider { get; set; }
+
     public string? TooltipText { get; set; }
 
     /// <inheritdoc />
@@ -420,7 +428,17 @@ public sealed class UiButton : UiElement, IUiGlobalTimeListener, IUiDatStateful
             if (ValueBox is { X: var valueBoxX } && valueBoxX > boxX)
                 boxWidth = MathF.Min(boxWidth, valueBoxX - boxX);
 
-            DrawBlockLabel(ctx, label, lf, LabelColor, boxX, boxY, boxWidth, boxHeight, LabelAlign, LabelOffsetX);
+            DrawBlockLabel(
+                ctx,
+                label,
+                lf,
+                LabelColorProvider?.Invoke() ?? LabelColor,
+                boxX,
+                boxY,
+                boxWidth,
+                boxHeight,
+                LabelAlign,
+                LabelOffsetX);
         }
 
         if (ValueLabel is { Length: > 0 } value && ValueFont is { } vf)

@@ -19,21 +19,15 @@ internal sealed class AudioMixerCommandBinding : IDisposable
         "mixer: saved, but there is no mixer running to change - it will start "
         + "this way next time.";
 
-    private readonly OpenAlAudioEngine _engine;
-    private readonly Func<AudioMixerOptions> _read;
-    private readonly Func<AudioMixerOptions, bool> _persist;
+    private readonly AudioMixerSettings _mixer;
     private readonly Action<string> _say;
     private IDisposable? _registration;
 
     private AudioMixerCommandBinding(
-        OpenAlAudioEngine engine,
-        Func<AudioMixerOptions> read,
-        Func<AudioMixerOptions, bool> persist,
+        AudioMixerSettings mixer,
         Action<string> say)
     {
-        _engine = engine;
-        _read = read;
-        _persist = persist;
+        _mixer = mixer;
         _say = say;
     }
 
@@ -43,18 +37,14 @@ internal sealed class AudioMixerCommandBinding : IDisposable
     /// </summary>
     public static AudioMixerCommandBinding? TryRegister(
         IPluginCommandRegistry? commands,
-        OpenAlAudioEngine? engine,
-        Func<AudioMixerOptions> read,
-        Func<AudioMixerOptions, bool> persist,
+        AudioMixerSettings? mixer,
         Action<string> say)
     {
-        ArgumentNullException.ThrowIfNull(read);
-        ArgumentNullException.ThrowIfNull(persist);
         ArgumentNullException.ThrowIfNull(say);
-        if (commands is null || engine is null)
+        if (commands is null || mixer is null)
             return null;
 
-        var binding = new AudioMixerCommandBinding(engine, read, persist, say);
+        var binding = new AudioMixerCommandBinding(mixer, say);
         binding._registration = commands.Register(
             AudioMixerCommand.Verb,
             binding.Execute);
@@ -64,23 +54,22 @@ internal sealed class AudioMixerCommandBinding : IDisposable
     internal void Execute(PluginCommand command)
     {
         AudioMixerCommandResult result = AudioMixerCommand.Execute(
-            _read(),
+            _mixer.Current,
             command.Arguments);
 
         bool running = true;
         if (result.Changed)
         {
-            // Written down first, and only then applied: a setting reported as
-            // changed that a failed save would lose is worse than one that
-            // never changed, and a running mixer nothing remembers is worse
-            // still.
-            if (!_persist(result.Options))
+            // The command and the Options panel share one save-then-apply
+            // owner, so both orders are the same order.
+            AudioMixerChange change = _mixer.Change(result.Options);
+            if (!change.Saved)
             {
                 _say(SaveFailed);
                 return;
             }
 
-            running = _engine.ApplyMixerOptions(result.Options);
+            running = change.MixerRunning;
         }
 
         foreach (string line in result.Lines)

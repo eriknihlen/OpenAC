@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using AcDream.App.Audio;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
+using AcDream.Core.Audio;
+using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
 
@@ -248,7 +251,8 @@ public sealed class ConfigOptionsPageControllerTests
         public List<ChatSettings> ChatSaves { get; } = new();
 
         public ConfigOptionsPageController.Bindings ToBindings(
-            ConfigOptionsPageController.RenderPackBindings? renderPacks = null) => new(
+            ConfigOptionsPageController.RenderPackBindings? renderPacks = null,
+            ConfigOptionsPageController.AudioMixerBindings? audioMixer = null) => new(
             LoadDisplay: () => Display,
             SaveDisplay: value => { Display = value; DisplaySaves.Add(value); },
             LoadAudio: () => Audio,
@@ -259,6 +263,7 @@ public sealed class ConfigOptionsPageControllerTests
             SaveChat: value => { Chat = value; ChatSaves.Add(value); })
         {
             RenderPacks = renderPacks,
+            AudioMixer = audioMixer,
         };
     }
 
@@ -1448,6 +1453,286 @@ public sealed class ConfigOptionsPageControllerTests
             child.ApplyAnchor(e.Width, e.Height);
             ApplyAnchorRecursive(child);
         }
+    }
+
+    // ── OpenAC #42 follow-up: the mixer knobs in the Sound block ────────────
+    // The four acdream-only mixer rows sit after "Play Sound Only When Active"
+    // and change the mixer through the same save-then-apply owner the /mixer
+    // command uses.
+
+    private const uint ToggleCheckboxId = 0x10000219u;
+    private const uint SliderCaptionId = 0x1000021Bu;
+    private const uint SliderLeafId = 0x1000021Cu;
+    private const uint SliderRangeLowId = 0x1000021Eu;
+    private const uint SliderRangeHighId = 0x1000021Fu;
+
+    private const int RetailMixerItem = 6;
+    private const int VoicesItem = 7;
+    private const int PriorityItem = 8;
+    private const int VoicesPerSoundItem = 9;
+
+    private const int RetailMixerRow = 8;
+    private const int VoicesRow = 9;
+    private const int PriorityRow = 10;
+    private const int VoicesPerSoundRow = 11;
+
+    private sealed class FakeMixer
+    {
+        internal AudioMixerOptions Stored { get; private set; } = AudioMixerOptions.Default;
+
+        internal List<AudioMixerOptions> Saves { get; } = new();
+
+        internal bool SavesFail { get; set; }
+
+        internal ConfigOptionsPageController.AudioMixerBindings Bindings =>
+            new(() => Stored, Save);
+
+        internal bool Save(AudioMixerOptions options)
+        {
+            if (SavesFail)
+                return false;
+            Stored = options;
+            Saves.Add(options);
+            return true;
+        }
+    }
+
+    private static (OptionsPanelController Panel, IReadOnlyList<UiElement> Items) BindWithMixer(
+        ConfigOptionsPageController.AudioMixerBindings mixer)
+    {
+        ImportedLayout layout = FixtureLoader.LoadOptionsPanelHost();
+        OptionsPanelController controller = OptionsPanelController.Bind(
+            layout,
+            new OptionsPanelController.Callbacks(
+                Toggle: () => { },
+                RequestExitToCharacterSelection: () => { },
+                ExitGame: () => { },
+                UseMouseTurningSettings: () => { },
+                DisplaySystemMessage: _ => { }))!;
+
+        bool bound = ConfigOptionsPageController.Bind(
+            layout,
+            controller.ConfigPage,
+            MakeTemplateResolver(),
+            (_, _) => "x",
+            new FakeBindings().ToBindings(audioMixer: mixer));
+        Assert.True(bound);
+
+        var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
+        UiElement viewport = Assert.Single(listBox.Children);
+        return (controller, viewport.Children.ToList());
+    }
+
+    private static UiButton Checkbox(UiElement item) =>
+        Assert.IsType<UiButton>(UiElement.FindDescendant(item, ToggleCheckboxId));
+
+    private static UiScrollbar Slider(UiElement item) =>
+        Assert.IsType<UiScrollbar>(UiElement.FindDescendant(item, SliderLeafId));
+
+    private static UiText.Line TextLine(UiElement item, uint elementId)
+    {
+        var text = Assert.IsType<UiText>(UiElement.FindDescendant(item, elementId));
+        return Assert.Single(text.LinesProvider());
+    }
+
+    [Fact]
+    public void TheFourMixerRows_AreBuiltInTheSoundBlock_WithTheirCaptionsAndRanges()
+    {
+        var mixer = new FakeMixer();
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) =
+            BindWithMixer(mixer.Bindings);
+
+        // Four rows more than the authored retail page has on its own.
+        Assert.Equal(43, items.Count);
+        Assert.Equal(34, panel.ConfigPage.Rows.Count);
+
+        Assert.Equal("Retail Mixer", Checkbox(items[RetailMixerItem]).Label);
+        Assert.Equal("Voices", TextLine(items[VoicesItem], SliderCaptionId).Text);
+        Assert.Equal("Priority", Checkbox(items[PriorityItem]).Label);
+        Assert.Equal(
+            "Voices Per Sound",
+            TextLine(items[VoicesPerSoundItem], SliderCaptionId).Text);
+
+        Assert.Equal("16", TextLine(items[VoicesItem], SliderRangeLowId).Text);
+        Assert.Equal("64", TextLine(items[VoicesItem], SliderRangeHighId).Text);
+        Assert.Equal("Off", TextLine(items[VoicesPerSoundItem], SliderRangeLowId).Text);
+        Assert.Equal("8", TextLine(items[VoicesPerSoundItem], SliderRangeHighId).Text);
+
+        Assert.IsType<BoolOptionRow>(panel.ConfigPage.Rows[RetailMixerRow]);
+        Assert.IsType<FloatOptionRow>(panel.ConfigPage.Rows[VoicesRow]);
+        Assert.IsType<BoolOptionRow>(panel.ConfigPage.Rows[PriorityRow]);
+        Assert.IsType<FloatOptionRow>(panel.ConfigPage.Rows[VoicesPerSoundRow]);
+
+        // Every row says what it does when hovered.
+        Assert.Contains("16 voices", Checkbox(items[RetailMixerItem]).TooltipText);
+        Assert.Contains("at once", Slider(items[VoicesItem]).TooltipText);
+        Assert.Contains("footstep", Checkbox(items[PriorityItem]).TooltipText);
+        Assert.Contains("oldest", Slider(items[VoicesPerSoundItem]).TooltipText);
+
+        // The rows start on the remembered values, not on invented ones.
+        Assert.False(Checkbox(items[RetailMixerItem]).Selected);
+        Assert.True(Checkbox(items[PriorityItem]).Selected);
+        Assert.Equal(
+            AudioMixerOptions.DefaultVoiceCount,
+            ((FloatOptionRow)panel.ConfigPage.Rows[VoicesRow]).Current);
+        Assert.Equal(
+            AudioMixerOptions.DefaultMaxVoicesPerWave,
+            ((FloatOptionRow)panel.ConfigPage.Rows[VoicesPerSoundRow]).Current);
+        Assert.Empty(mixer.Saves);
+    }
+
+    [Fact]
+    public void TurningTheRetailMixerOn_SavesIt_AndDimsTheThreeSettingsItOverrides()
+    {
+        var mixer = new FakeMixer();
+        (_, IReadOnlyList<UiElement> items) = BindWithMixer(mixer.Bindings);
+
+        Assert.NotEqual(
+            UiRenderContext.StoreOnlyCaptionColor,
+            TextLine(items[VoicesItem], SliderCaptionId).Color);
+        Assert.Equal(Vector4.One, Checkbox(items[PriorityItem]).LabelColorProvider!());
+        Assert.NotEqual(
+            UiRenderContext.StoreOnlyCaptionColor,
+            TextLine(items[VoicesPerSoundItem], SliderCaptionId).Color);
+
+        UiButton retailMixer = Checkbox(items[RetailMixerItem]);
+        retailMixer.Selected = true;
+        retailMixer.OnClick!();
+
+        Assert.True(Assert.Single(mixer.Saves).RetailMixer);
+        Assert.Equal(
+            UiRenderContext.StoreOnlyCaptionColor,
+            TextLine(items[VoicesItem], SliderCaptionId).Color);
+        Assert.Equal(
+            UiRenderContext.StoreOnlyCaptionColor,
+            Checkbox(items[PriorityItem]).LabelColorProvider!());
+        Assert.Equal(
+            UiRenderContext.StoreOnlyCaptionColor,
+            TextLine(items[VoicesPerSoundItem], SliderCaptionId).Color);
+
+        // Dimmed, not rewritten: the three keep their values for when the
+        // retail mixer goes off again.
+        Assert.Equal(AudioMixerOptions.DefaultVoiceCount, mixer.Stored.VoiceCount);
+        Assert.True(mixer.Stored.UseAuthoredPriority);
+        Assert.Equal(
+            AudioMixerOptions.DefaultMaxVoicesPerWave,
+            mixer.Stored.MaxVoicesPerWave);
+    }
+
+    [Fact]
+    public void TheVoicesSlider_WritesWholeNumbersInsideSixteenToSixtyFour()
+    {
+        var mixer = new FakeMixer();
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) =
+            BindWithMixer(mixer.Bindings);
+        UiScrollbar voices = Slider(items[VoicesItem]);
+        var row = (FloatOptionRow)panel.ConfigPage.Rows[VoicesRow];
+
+        List<float> rowValues = new();
+        foreach (float normalized in new[] { 0f, 0.013f, 0.5f, 0.77f, 1f })
+        {
+            voices.ScalarChanged!(normalized);
+            rowValues.Add(row.Current);
+        }
+
+        // The row itself steps in whole voices — a slider that ran free would
+        // show 16.6 voices and save 17.
+        Assert.Equal([16f, 17f, 40f, 53f, 64f], rowValues);
+        Assert.Equal(
+            [16, 17, 40, 53, 64],
+            mixer.Saves.Select(static saved => saved.VoiceCount).ToArray());
+        Assert.All(
+            mixer.Saves,
+            static saved => Assert.InRange(
+                saved.VoiceCount,
+                AudioMixerOptions.MinimumVoiceCount,
+                AudioMixerOptions.MaximumVoiceCount));
+
+        Slider(items[VoicesPerSoundItem]).ScalarChanged!(0.5f);
+        Assert.Equal(4, mixer.Stored.MaxVoicesPerWave);
+    }
+
+    [Fact]
+    public void ASaveThatFails_LeavesTheRowOnTheStoredValue()
+    {
+        var mixer = new FakeMixer { SavesFail = true };
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) =
+            BindWithMixer(mixer.Bindings);
+
+        UiScrollbar voices = Slider(items[VoicesItem]);
+        float storedPosition = voices.ScalarPosition;
+        voices.ScalarChanged!(1f);
+
+        Assert.Empty(mixer.Saves);
+        Assert.Equal(AudioMixerOptions.DefaultVoiceCount, mixer.Stored.VoiceCount);
+        Assert.Equal(storedPosition, voices.ScalarPosition);
+        Assert.Equal(
+            AudioMixerOptions.DefaultVoiceCount,
+            ((FloatOptionRow)panel.ConfigPage.Rows[VoicesRow]).Current);
+
+        UiButton priority = Checkbox(items[PriorityItem]);
+        priority.Selected = false;
+        priority.OnClick!();
+
+        Assert.Empty(mixer.Saves);
+        Assert.True(mixer.Stored.UseAuthoredPriority);
+        Assert.True(priority.Selected);
+        Assert.True(((BoolOptionRow)panel.ConfigPage.Rows[PriorityRow]).Current);
+    }
+
+    [Fact]
+    public void TheCommandAndThePanel_ChangeTheMixerThroughOneSaveAndApplyPath()
+    {
+        AudioMixerOptions stored = AudioMixerOptions.Default;
+        List<AudioMixerOptions> persisted = new();
+        List<AudioMixerOptions> applied = new();
+        var owner = new AudioMixerSettings(
+            () => stored,
+            options =>
+            {
+                stored = options;
+                persisted.Add(options);
+                return true;
+            },
+            options =>
+            {
+                applied.Add(options);
+                return true;
+            });
+
+        var commands = new PluginCommandRegistry();
+        using AudioMixerCommandBinding binding = Assert.IsType<AudioMixerCommandBinding>(
+            AudioMixerCommandBinding.TryRegister(commands, owner, _ => { }));
+
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) = BindWithMixer(
+            new ConfigOptionsPageController.AudioMixerBindings(
+                () => owner.Current,
+                options => owner.Change(options).Saved));
+
+        Assert.True(commands.TryHandle("/mixer voices 40"));
+
+        Assert.Equal(40, Assert.Single(persisted).VoiceCount);
+        Assert.Equal(40, Assert.Single(applied).VoiceCount);
+
+        // The panel reads the live settings, so the command's change is what
+        // the row shows the next time it is read.
+        panel.ConfigPage.ReloadFromLive();
+        Assert.Equal(40f, ((FloatOptionRow)panel.ConfigPage.Rows[VoicesRow]).Current);
+        // 40 of 16..64 sits the slider thumb halfway along its travel.
+        Assert.InRange(Slider(items[VoicesItem]).ScalarPosition, 0.499f, 0.501f);
+
+        UiButton priority = Checkbox(items[PriorityItem]);
+        priority.Selected = false;
+        priority.OnClick!();
+
+        // Two changes, two saves, two applies — one path, not two.
+        Assert.Equal(2, persisted.Count);
+        Assert.Equal(2, applied.Count);
+        Assert.False(persisted[1].UseAuthoredPriority);
+        Assert.False(applied[1].UseAuthoredPriority);
+        Assert.Equal(40, persisted[1].VoiceCount);
     }
 
 }

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using AcDream.App.Rendering;
 using AcDream.App.UI;
+using AcDream.Core.Audio;
 using AcDream.Plugin.Abstractions.Rendering;
 using AcDream.UI.Abstractions.Panels.Settings;
 
@@ -114,7 +115,25 @@ public static class ConfigOptionsPageController
         Action<ChatSettings> SaveChat)
     {
         public RenderPackBindings? RenderPacks { get; init; }
+
+        /// <summary>
+        /// The mixer seam. Every graphical host supplies it; it is null only
+        /// where a caller binds the authored retail rows alone, and then the
+        /// four acdream-only mixer rows are simply not built.
+        /// </summary>
+        public AudioMixerBindings? AudioMixer { get; init; }
     }
+
+    /// <summary>
+    /// How the mixer rows read and change the mixer settings: the same
+    /// save-then-apply owner the <c>/mixer</c> command uses, so the command and
+    /// the panel cannot disagree. <c>Save</c> answers false when the settings
+    /// could not be written down — nothing changed, and the row goes back to
+    /// showing what is remembered.
+    /// </summary>
+    public sealed record AudioMixerBindings(
+        Func<AudioMixerOptions> Load,
+        Func<AudioMixerOptions, bool> Save);
 
     public sealed record RenderPackBindings(
         Func<IReadOnlyList<RenderPackChoice>> LoadChoices)
@@ -578,7 +597,11 @@ public static class ConfigOptionsPageController
                         bool.Parse(defaultValue),
                         page,
                         read: () => bool.Parse(Read()),
-                        apply: value => Apply(value ? "true" : "false"),
+                        apply: value =>
+                        {
+                            Apply(value ? "true" : "false");
+                            return true;
+                        },
                         IsCurrent);
                     break;
 
@@ -598,7 +621,11 @@ public static class ConfigOptionsPageController
                         double.Parse(defaultValue, CultureInfo.InvariantCulture),
                         page,
                         read: () => double.Parse(Read(), CultureInfo.InvariantCulture),
-                        apply: value => Apply(FormatNumeric(value, setting.Kind)),
+                        apply: value =>
+                        {
+                            Apply(FormatNumeric(value, setting.Kind));
+                            return true;
+                        },
                         IsCurrent);
                     break;
 
@@ -781,7 +808,104 @@ public static class ConfigOptionsPageController
             apply: value => bindings.SaveAudio(bindings.LoadAudio() with { PlaySoundOnlyWhenActive = value }),
             storeOnly: true);
 
+        if (bindings.AudioMixer is { } mixer)
+            BindMixerRows(listBox, page, mixer);
+
         audio = bindings.LoadAudio();
+    }
+
+    /// <summary>
+    /// The highest per-sound cap the row offers. The setting itself allows more
+    /// (up to the voice count), but past a handful of copies of one sound the
+    /// cap stops doing the job it exists for.
+    /// </summary>
+    private const int MaxVoicesPerWaveCeiling = 8;
+
+    /// <summary>
+    /// The four acdream-only mixer rows, in the Sound block they belong to:
+    /// how many sounds can play at once and what happens when they all are.
+    /// They have no authored captions of their own, so they are built with
+    /// explicit text the way this page's other acdream-only rows are. Every
+    /// change is live and remembered through the one shared seam; while
+    /// "Retail Mixer" is on it overrides the three below, which are shown
+    /// dimmed and keep their values.
+    /// </summary>
+    private static void BindMixerRows(
+        UiTemplateListBox listBox,
+        OptionPage page,
+        AudioMixerBindings mixer)
+    {
+        AudioMixerOptions defaults = AudioMixerOptions.Default;
+        bool Overridden() => mixer.Load().RetailMixer;
+
+        BuildExplicitToggleRow(
+            listBox,
+            "Retail Mixer",
+            defaults.RetailMixer,
+            page,
+            read: () => mixer.Load().RetailMixer,
+            apply: value => mixer.Save(mixer.Load() with { RetailMixer = value }),
+            isCurrent: static () => true,
+            tooltip:
+                "Mix exactly like the original client: 16 voices, no priority, "
+                + "no per-sound cap. Overrides the three settings below.");
+
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "Voices",
+            AudioMixerOptions.MinimumVoiceCount,
+            AudioMixerOptions.MaximumVoiceCount,
+            step: 1d,
+            integer: true,
+            defaults.VoiceCount,
+            page,
+            read: () => mixer.Load().VoiceCount,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                VoiceCount = (int)Math.Round(value),
+            }),
+            isCurrent: static () => true,
+            tooltip: "How many sounds can play at once. The original client used 16.",
+            dimmed: Overridden);
+
+        BuildExplicitToggleRow(
+            listBox,
+            "Priority",
+            defaults.UseAuthoredPriority,
+            page,
+            read: () => mixer.Load().UseAuthoredPriority,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                UseAuthoredPriority = value,
+            }),
+            isCurrent: static () => true,
+            tooltip:
+                "An important sound (a hit, a spell, an interface cue) may take "
+                + "the voice of a quieter one such as a footstep when all voices "
+                + "are busy.",
+            dimmed: Overridden);
+
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "Voices Per Sound",
+            AudioMixerOptions.NoPerWaveCap,
+            MaxVoicesPerWaveCeiling,
+            step: 1d,
+            integer: true,
+            defaults.MaxVoicesPerWave,
+            page,
+            read: () => mixer.Load().MaxVoicesPerWave,
+            apply: value => mixer.Save(mixer.Load() with
+            {
+                MaxVoicesPerWave = (int)Math.Round(value),
+            }),
+            isCurrent: static () => true,
+            tooltip:
+                "How many copies of the same sound may play at once; a further "
+                + "copy replaces the oldest.",
+            dimmed: Overridden,
+            rangeLowText: "Off",
+            rangeHighText: MaxVoicesPerWaveCeiling.ToString(CultureInfo.InvariantCulture));
     }
 
 
@@ -1566,35 +1690,57 @@ public static class ConfigOptionsPageController
         return menu;
     }
 
+    /// <param name="apply">
+    /// Makes the change; false when it was refused (a failed save), and then
+    /// the row goes back to showing what is actually stored.
+    /// </param>
+    /// <param name="dimmed">
+    /// Asked every frame whether the caption should be dimmed, for a row whose
+    /// setting is currently overridden by another one.
+    /// </param>
     private static UiButton? BuildExplicitToggleRow(
         UiTemplateListBox listBox,
         string labelText,
         bool defaultValue,
         OptionPage page,
         Func<bool> read,
-        Action<bool> apply,
-        Func<bool> isCurrent)
+        Func<bool, bool> apply,
+        Func<bool> isCurrent,
+        string? tooltip = null,
+        Func<bool>? dimmed = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(ToggleTemplateIndex);
         UiButton? checkbox = row is null ? null : FindCheckbox(row);
         if (checkbox is null)
         {
             Console.WriteLine(
-                $"[render-pack] Toggle template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: toggle template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
 
         checkbox.Label = labelText;
         checkbox.LabelColor = Vector4.One;
+        if (dimmed is not null)
+            checkbox.LabelColorProvider = () => dimmed()
+                ? UiRenderContext.StoreOnlyCaptionColor
+                : Vector4.One;
+        if (tooltip is not null)
+            checkbox.TooltipText = tooltip;
         bool initial = read();
         checkbox.Selected = initial;
-        var option = new BoolOptionRow(
+        BoolOptionRow? option = null;
+        option = new BoolOptionRow(
             initial,
             defaultValue,
             apply: value =>
             {
                 checkbox.Selected = value;
-                if (isCurrent()) apply(value);
+                if (!isCurrent() || apply(value))
+                    return;
+                bool stored = read();
+                checkbox.Selected = stored;
+                option!.RefreshFromLink(stored);
             },
             read: () => isCurrent() ? read() : initial,
             refresh: value => checkbox.Selected = value);
@@ -1606,6 +1752,18 @@ public static class ConfigOptionsPageController
         return checkbox;
     }
 
+    /// <param name="apply">
+    /// Makes the change; false when it was refused (a failed save), and then
+    /// the row goes back to showing what is actually stored.
+    /// </param>
+    /// <param name="dimmed">
+    /// Asked every frame whether the caption should be dimmed, for a row whose
+    /// setting is currently overridden by another one.
+    /// </param>
+    /// <param name="rangeLowText">
+    /// The caption under the low end of the slider, for a value whose meaning
+    /// is a word rather than the number itself. Defaults to the number.
+    /// </param>
     private static UiScrollbar? BuildExplicitNumericSliderRow(
         UiTemplateListBox listBox,
         string labelText,
@@ -1616,51 +1774,69 @@ public static class ConfigOptionsPageController
         double defaultValue,
         OptionPage page,
         Func<double> read,
-        Action<double> apply,
-        Func<bool> isCurrent)
+        Func<double, bool> apply,
+        Func<bool> isCurrent,
+        string? tooltip = null,
+        Func<bool>? dimmed = null,
+        string? rangeLowText = null,
+        string? rangeHighText = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(RangedSliderTemplateIndex);
         if (row is null)
         {
             Console.WriteLine(
-                $"[render-pack] Slider template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: slider template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
         if (UiElement.FindDescendant(row, SliderLabelElementId) is UiText label)
         {
             label.LinesProvider = () =>
             [
-                new UiText.Line(labelText, label.DefaultColor),
+                new UiText.Line(
+                    labelText,
+                    dimmed?.Invoke() == true
+                        ? UiRenderContext.StoreOnlyCaptionColor
+                        : label.DefaultColor),
             ];
         }
         if (UiElement.FindDescendant(row, SliderRangeMinElementId) is UiText low)
         {
-            string text = FormatExplicitNumber(min, integer);
+            string text = rangeLowText ?? FormatExplicitNumber(min, integer);
             low.LinesProvider = () => [new UiText.Line(text, low.DefaultColor)];
         }
         if (UiElement.FindDescendant(row, SliderRangeMaxElementId) is UiText high)
         {
-            string text = FormatExplicitNumber(max, integer);
+            string text = rangeHighText ?? FormatExplicitNumber(max, integer);
             high.LinesProvider = () => [new UiText.Line(text, high.DefaultColor)];
         }
         if (UiElement.FindDescendant(row, SliderElementId) is not UiScrollbar slider)
         {
             Console.WriteLine(
-                $"[render-pack] No slider leaf found for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: no slider leaf found for "
+                + $"'{labelText}'.");
             return null;
         }
+
+        if (tooltip is not null)
+            slider.TooltipText = tooltip;
 
         double initialValue = SnapExplicitNumber(read(), min, max, step, integer);
         float initial = (float)initialValue;
         slider.SetScalarPosition((float)((initialValue - min) / (max - min)));
-        var option = new FloatOptionRow(
+        FloatOptionRow? option = null;
+        option = new FloatOptionRow(
             initial,
             (float)SnapExplicitNumber(defaultValue, min, max, step, integer),
             apply: value =>
             {
                 double snapped = SnapExplicitNumber(value, min, max, step, integer);
                 slider.SetScalarPosition((float)((snapped - min) / (max - min)));
-                if (isCurrent()) apply(snapped);
+                if (!isCurrent() || apply(snapped))
+                    return;
+                double stored = SnapExplicitNumber(read(), min, max, step, integer);
+                slider.SetScalarPosition((float)((stored - min) / (max - min)));
+                option!.RefreshFromLink((float)stored);
             },
             read: () => isCurrent()
                 ? (float)SnapExplicitNumber(read(), min, max, step, integer)

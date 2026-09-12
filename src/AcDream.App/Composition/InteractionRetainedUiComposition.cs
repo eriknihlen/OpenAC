@@ -49,6 +49,7 @@ internal sealed record InteractionRetainedUiDependencies(
     AcDream.App.Streaming.DeferredLocalPlayerTeleportNetworkSink TeleportSink,
     string KeyBindingsFilePath,
     RuntimeSettingsController Settings,
+    AcDream.App.Audio.AudioMixerSettings AudioMixer,
     BuildingDegradeController BuildingDegrades,
     GameRuntime Runtime,
     IRuntimeCombatAttackOperations CombatAttackOperations,
@@ -853,6 +854,9 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     SaveDisplay: d.Settings.SaveDisplay,
                     LoadAudio: () => d.Settings.Audio,
                     SaveAudio: d.Settings.SaveAudio,
+                    AudioMixer: new ConfigOptionsPageController.AudioMixerBindings(
+                        () => d.AudioMixer.Current,
+                        mixer => d.AudioMixer.Change(mixer).Saved),
                     LoadRenderPackChoices: d.RenderPackCatalog is null
                         ? null
                         : () => d.RenderPackCatalog.Snapshot().Entries

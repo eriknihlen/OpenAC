@@ -145,6 +145,7 @@ public sealed record OptionsRuntimeBindings(
     Action<DisplaySettings> SaveDisplay,
     Func<AudioSettings> LoadAudio,
     Action<AudioSettings> SaveAudio,
+    Layout.ConfigOptionsPageController.AudioMixerBindings AudioMixer,
     Func<IReadOnlyList<Layout.ConfigOptionsPageController.RenderPackChoice>>?
         LoadRenderPackChoices = null,
     Func<long>? LoadRenderPackCatalogRevision = null,
@@ -2549,6 +2550,7 @@ public sealed class RetailUiRuntime : IDisposable
                     LoadChat: () => _bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default,
                     SaveChat: chat => _bindings.Chat.Store?.SaveChat(chat))
                 {
+                    AudioMixer = _bindings.Options.AudioMixer,
                     RenderPacks = _bindings.Options.LoadRenderPackChoices is { } load
                         ? new Layout.ConfigOptionsPageController.RenderPackBindings(load)
                         {

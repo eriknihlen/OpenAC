@@ -133,9 +133,7 @@ public sealed class AudioMixerCommandBindingTests
     {
         Assert.Null(AudioMixerCommandBinding.TryRegister(
             commands: null,
-            engine: null,
-            () => AudioMixerOptions.Default,
-            _ => true,
+            mixer: null,
             _ => { }));
     }
 
@@ -157,19 +155,21 @@ public sealed class AudioMixerCommandBindingTests
             Api.ContextResult = audioAvailable ? 202 : 0;
             Engine = new OpenAlAudioEngine(new Factory(Api), AudioMixerOptions.Default);
             Assert.Equal(audioAvailable, Engine.IsAvailable);
+            Mixer = new AudioMixerSettings(
+                () => _settings,
+                settings =>
+                {
+                    if (savesFail)
+                        return false;
+                    _settings = settings;
+                    Saved.Add(settings);
+                    return true;
+                },
+                Engine.ApplyMixerOptions);
             Binding = Assert.IsType<AudioMixerCommandBinding>(
                 AudioMixerCommandBinding.TryRegister(
                     Commands,
-                    Engine,
-                    () => _settings,
-                    settings =>
-                    {
-                        if (savesFail)
-                            return false;
-                        _settings = settings;
-                        Saved.Add(settings);
-                        return true;
-                    },
+                    Mixer,
                     Said.Add));
         }
 
@@ -180,6 +180,8 @@ public sealed class AudioMixerCommandBindingTests
         internal PluginCommandRegistry Commands { get; } = new();
 
         internal OpenAlAudioEngine Engine { get; }
+
+        internal AudioMixerSettings Mixer { get; }
 
         internal AudioMixerCommandBinding Binding { get; }
 

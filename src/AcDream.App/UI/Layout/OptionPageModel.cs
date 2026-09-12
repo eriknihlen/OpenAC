@@ -67,6 +67,18 @@ public sealed class BoolOptionRow : IOptionRow
         _notifyPageOptionChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Take a value the row did not choose — the live value it is bound to
+    /// changed elsewhere, or a change of its own was refused — without
+    /// applying it back.
+    /// </summary>
+    public void RefreshFromLink(bool value)
+    {
+        _current = value;
+        _refresh?.Invoke(value);
+        _notifyPageOptionChanged?.Invoke();
+    }
+
     public void AttachPageNotify(Action notify) => _notifyPageOptionChanged = notify;
 
     public void SaveCurrentValue()

@@ -284,6 +284,10 @@ public sealed class InteractionRetainedUiCompositionTests
                     new AcDream.App.Streaming.DeferredLocalPlayerTeleportNetworkSink(),
                 KeyBindingsFilePath: "keybinds.json",
                 Settings: null!,
+                AudioMixer: new AcDream.App.Audio.AudioMixerSettings(
+                    static () => AcDream.Core.Audio.AudioMixerOptions.Default,
+                    static _ => true,
+                    static _ => false),
                 BuildingDegrades: new BuildingDegradeController(
                     () => DisplaySettings.Default),
                 Runtime: runtime,

@@ -145,6 +145,14 @@ public sealed class GameWindow :
     private Exception? _runFailure;
     private readonly DisplayFramePacingController _displayFramePacing;
     private readonly RuntimeSettingsController _runtimeSettings;
+
+    /// <summary>
+    /// The one owner that writes a mixer setting down and then changes the
+    /// running mixer. The <c>/mixer</c> command and the Options panel's Config
+    /// tab both go through it.
+    /// </summary>
+    private readonly AcDream.App.Audio.AudioMixerSettings _audioMixerSettings;
+
     private readonly BuildingDegradeController _buildingDegrades;
 
     private AcDream.App.Streaming.LandblockStreamer? _streamer;
@@ -511,6 +519,10 @@ public sealed class GameWindow :
                 _applicationPaths.SettingsFile),
             log: Console.WriteLine,
             characterOptionValue: _runtime.CharacterOwner.Options.GetOptionBit);
+        _audioMixerSettings = new AcDream.App.Audio.AudioMixerSettings(
+            () => _runtimeSettings.AudioMixer,
+            _runtimeSettings.SaveAudioMixer,
+            mixer => _audioEngine?.ApplyMixerOptions(mixer) ?? false);
         _buildingDegrades = new BuildingDegradeController(
             () => _runtimeSettings.DisplayPreview);
         _animationDiagnostics = AnimationPresentationDiagnostics.FromEnvironment();
@@ -822,9 +834,7 @@ public sealed class GameWindow :
         _audioSink = value.HookSink;
         _audioMixerCommand = AcDream.App.Audio.AudioMixerCommandBinding.TryRegister(
             _automation?.PluginCommands,
-            value.Engine,
-            () => _runtimeSettings.AudioMixer,
-            _runtimeSettings.SaveAudioMixer,
+            _audioMixerSettings,
             line => _runtimeCommunication.AddText(
                 line, AcDream.Core.Chat.RetailLogTextType.ClientLocal));
     }
@@ -1266,6 +1276,7 @@ public sealed class GameWindow :
                     _localPlayerTeleportSink,
                     _applicationPaths.KeyBindingsFile,
                     _runtimeSettings,
+                    _audioMixerSettings,
                     _buildingDegrades,
                     _runtime,
                     _combatAttackOperations,
