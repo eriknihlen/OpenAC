@@ -299,11 +299,12 @@ public sealed class InventoryTransactionState : IDisposable
 
     private void OnMoveFailed(MoveRequestFailure failure)
     {
-        if (CompleteInventoryResponse(failure.ItemId, _objects.Get(failure.ItemId))
-            is { } failed)
-        {
+        uint itemId = failure.ItemId;
+        // A guid-less refusal can only be about the sole pending request.
+        if (itemId == 0u && _pendingRequest is { } current)
+            itemId = current.ItemId;
+        if (CompleteInventoryResponse(itemId, _objects.Get(itemId)) is { } failed)
             Dispatch(RequestFailed, failed, failure.WeenieError);
-        }
     }
 
     private void OnObjectRemoved(ClientObject item) =>

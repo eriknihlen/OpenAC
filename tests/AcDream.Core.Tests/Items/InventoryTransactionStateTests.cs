@@ -281,6 +281,28 @@ public sealed class InventoryTransactionStateTests
         Assert.Equal(1, failures);
     }
 
+    [Fact]
+    public void RejectMoveWithNoGuidResolvesTheSoleOutstandingPendingRequest()
+    {
+        var objects = CreateTable();
+        using var state = new InventoryTransactionState(objects);
+        var failures = new List<(PendingInventoryRequest Request, uint Error)>();
+        state.RequestFailed += (request, error) => failures.Add((request, error));
+
+        Assert.True(state.TryDispatch(InventoryRequestKind.Pickup, First, static () => true));
+
+        // Observed: InventoryServerSaveFailed guid=0x00000000 on a quest-cooldown pickup refusal.
+        objects.RejectMove(0u, 0x43Eu);
+
+        (PendingInventoryRequest failed, uint error) = Assert.Single(failures);
+        Assert.Equal(First, failed.ItemId);
+        Assert.Equal(0x43Eu, error);
+        Assert.False(state.HasPendingRequest);
+
+        // The gate must reopen: the next request (standing in for the next corpse's "use") must dispatch.
+        Assert.True(state.TryDispatch(InventoryRequestKind.Pickup, Second, static () => true));
+    }
+
     private static ClientObjectTable CreateTable()
     {
         var objects = new ClientObjectTable();
