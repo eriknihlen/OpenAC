@@ -208,13 +208,33 @@ internal sealed class RenderFrameDiagnosticsController :
         _frameCount = 0;
     }
 
+    /// <summary>
+    /// The release this build is, as the window title shows it: the assembly's
+    /// informational version without any build metadata suffix.
+    /// </summary>
+    internal static readonly string ProductVersion = ReadProductVersion();
+
+    private static string ReadProductVersion()
+    {
+        string? informational = typeof(RenderFrameDiagnosticsController).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(informational))
+            informational = typeof(RenderFrameDiagnosticsController).Assembly.GetName().Version?.ToString(3);
+        if (string.IsNullOrWhiteSpace(informational))
+            return "dev";
+        int metadata = informational.IndexOf('+');
+        return metadata >= 0 ? informational[..metadata] : informational;
+    }
+
     internal static string FormatTitle(
         double fps,
         double averageFrameMilliseconds,
         int visibleLandblocks,
         int totalLandblocks,
         RenderFrameTitleFacts facts) =>
-        $"acdream | {fps:F0} fps | {averageFrameMilliseconds:F1} ms | "
+        $"acdream {ProductVersion} | {fps:F0} fps | {averageFrameMilliseconds:F1} ms | "
         + $"lb {visibleLandblocks}/{totalLandblocks} | "
         + $"ent {facts.EntityCount}/anim {facts.AnimatedEntityCount} | "
         + $"PY{facts.Calendar.Year} {facts.Calendar.Month} {facts.Calendar.Day} "

@@ -48,6 +48,15 @@ public sealed class RenderFrameDiagnosticsControllerTests
         Assert.Equal(RenderFrameDiagnosticsSnapshot.Initial, harness.Controller.Snapshot);
     }
 
+    // The window title names the release this build is.
+    [Fact]
+    public void ProductVersion_IsTheReleaseNumberWithoutBuildMetadata()
+    {
+        string version = RenderFrameDiagnosticsController.ProductVersion;
+        Assert.Matches(@"^\d+\.\d+\.\d+", version);
+        Assert.DoesNotContain("+", version);
+    }
+
     [Fact]
     public void Publish_AtHalfSecondPublishesTitleThenResourcesThenSnapshot()
     {
@@ -59,7 +68,7 @@ public sealed class RenderFrameDiagnosticsControllerTests
 
         Assert.Equal(["facts", "title", "resources", "log"], harness.Calls);
         Assert.Equal(
-            "acdream | 4 fps | 250.0 ms | lb 17/43 | ent 3721/anim 226 | "
+            $"acdream {RenderFrameDiagnosticsController.ProductVersion} | 4 fps | 250.0 ms | lb 17/43 | ent 3721/anim 226 | "
             + "PY117 Leafcull 22 DawnsongAndHalf (df=0.3125)",
             harness.Title);
         Assert.Equal(
