@@ -207,15 +207,21 @@ public sealed class ChatVM : IDisposable, IChatCommandFeedback
                 Kind: entry.Kind,
                 CombatKind: entry.CombatKind,
                 LogTextType: entry.LogTextType,
-                Spans: spans);
+                Spans: spans,
+                Sequence: entry.Sequence);
         }
         return lines;
     }
 }
 
+/// <param name="Sequence">
+/// Identity of the log entry this line was formatted from — stable while entries are appended
+/// and older ones dropped. 0 when the line has no entry behind it.
+/// </param>
 public readonly record struct FormattedLine(
     string Text,
     ChatKind Kind,
     CombatLineKind? CombatKind,
     uint LogTextType,
-    IReadOnlyList<ChatTextSpan>? Spans = null);
+    IReadOnlyList<ChatTextSpan>? Spans = null,
+    long Sequence = 0);

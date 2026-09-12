@@ -37,6 +37,10 @@ public sealed class FloatingChatWindowController : IRetainedPanelController
     public RetailWindowHandle? WindowHandle { get; private set; }
 
     private IReadOnlyList<UiText.Line> _cachedTranscriptLines = Array.Empty<UiText.Line>();
+
+    /// <summary>Line identities parallel to <see cref="_cachedTranscriptLines"/>, so a text
+    /// selection stays on the message it was made on as the transcript moves under it.</summary>
+    private readonly List<UiText.LineKey> _cachedTranscriptLineKeys = new();
     private long _cachedTranscriptRevision = -1;
     private ulong _cachedFilter;
     private float _cachedTranscriptWrapWidth = float.NaN;
@@ -94,6 +98,7 @@ public sealed class FloatingChatWindowController : IRetainedPanelController
         c.Transcript.OneLine = false;
         c.Transcript.Selectable = true;
         c.Transcript.LinesProvider = () => c.GetTranscriptLines(vm, windowFilters);
+        c.Transcript.LineKeysProvider = () => c._cachedTranscriptLineKeys;
 
         c.Input = input;
         c.Input.DatFont = datFont;
@@ -199,7 +204,12 @@ public sealed class FloatingChatWindowController : IRetainedPanelController
         bool Accept(uint logTextType) => windowFilters.ShouldDisplay(
             WindowId, ChatWindowState.BroadcastTargetWindow, logTextType);
         var result = ChatTranscriptRenderer.BuildLines(
-            detailed, maxW, measure, Accept, Transcript.DefaultColor);
+            detailed,
+            maxW,
+            measure,
+            Accept,
+            Transcript.DefaultColor,
+            keysPerLine: _cachedTranscriptLineKeys);
 
         _cachedTranscriptRevision = revision;
         _cachedFilter = filter;

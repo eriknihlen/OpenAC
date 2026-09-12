@@ -35,10 +35,25 @@ public sealed class UiText : UiElement, IUiDatStateful
 
     public readonly record struct Pos(int Line, int Col);
 
+    /// <summary>
+    /// Stable identity of one shown line: which source item produced it, and the character
+    /// offset inside that item's text where this line begins. Two lines wrapped out of the
+    /// same item share a <paramref name="Source"/> and differ in <paramref name="Start"/>.
+    /// </summary>
+    public readonly record struct LineKey(long Source, int Start);
+
     public Func<Pos, bool>? OnCharClick { get; set; }
 
     /// <summary>Provider of the lines to show, oldest-first. Polled each frame.</summary>
     public Func<IReadOnlyList<Line>> LinesProvider { get; set; } = static () => Array.Empty<Line>();
+
+    /// <summary>
+    /// Optional identities for the lines <see cref="LinesProvider"/> returns, one per line and
+    /// in the same order. Supplying them anchors a selection to the TEXT it was made on, so it
+    /// survives lines arriving, old lines being dropped, and a re-wrap; without them the
+    /// selection is a pair of raw line/column indices, which is fine for text that never moves.
+    /// </summary>
+    public Func<IReadOnlyList<LineKey>>? LineKeysProvider { get; set; }
 
     public Func<IReadOnlyList<TextRun>>? RunsProvider { get; set; }
 
@@ -127,11 +142,7 @@ public sealed class UiText : UiElement, IUiDatStateful
             IsEditControl = value;
             CapturesPointerDrag = value;
             if (!value)
-            {
-                _selecting = false;
-                _selAnchor = null;
-                _selCaret = null;
-            }
+                ClearSelection();
         }
     }
 
@@ -153,6 +164,7 @@ public sealed class UiText : UiElement, IUiDatStateful
     private const float WheelLines = 1f;
 
     private IReadOnlyList<Line> _lastLines = Array.Empty<Line>();
+    private IReadOnlyList<LineKey> _lastLineKeys = Array.Empty<LineKey>();
     private BitmapFont? _lastFont;
     private UiDatFont? _lastDatFont;
     private float _lastLineHeight = 16f;
@@ -169,6 +181,12 @@ public sealed class UiText : UiElement, IUiDatStateful
     private Pos? _selAnchor;   // where the drag started
     private Pos? _selCaret;
     private bool _selecting;
+
+    /// <summary>A selection endpoint pinned to the text under it rather than to a line index.</summary>
+    private readonly record struct Anchored(long Source, int Offset);
+
+    private Anchored? _anchoredStart;   // identity of _selAnchor, when the lines are keyed
+    private Anchored? _anchoredCaret;   // identity of _selCaret
 
     public UiText()
     {
@@ -408,9 +426,8 @@ public sealed class UiText : UiElement, IUiDatStateful
         var bitmapFont = datFont is null ? (Font ?? ctx.DefaultFont) : null;
         if (datFont is null && bitmapFont is null) return;
 
-        var lines = LinesProvider();
+        var lines = RefreshLines();
 
-        _lastLines = lines;
         _lastDatFont = datFont;
         _lastFont = bitmapFont;
         _lastLineHeight = datFont is not null ? datFont.LineHeight : bitmapFont!.LineHeight;
@@ -644,6 +661,7 @@ public sealed class UiText : UiElement, IUiDatStateful
                 var p = HitChar(e.Data1, e.Data2);
                 _selAnchor = p;
                 _selCaret = p;
+                _anchoredStart = _anchoredCaret = AnchoredAt(p);
                 _selecting = true;
                 return true;
             }
@@ -653,7 +671,9 @@ public sealed class UiText : UiElement, IUiDatStateful
                 if (!Selectable) return false;
                 if (_selecting)
                 {
-                    _selCaret = HitChar(e.Data1, e.Data2);
+                    var caret = HitChar(e.Data1, e.Data2);
+                    _selCaret = caret;
+                    _anchoredCaret = AnchoredAt(caret);
                     return true;
                 }
                 return false;
@@ -700,12 +720,116 @@ public sealed class UiText : UiElement, IUiDatStateful
         var lines = _lastLines;
         if (lines.Count == 0)
         {
-            _selAnchor = _selCaret = null;
+            ClearSelection();
             return;
         }
         int last = lines.Count - 1;
-        _selAnchor = new Pos(0, 0);
-        _selCaret = new Pos(last, lines[last].Text.Length);
+        var anchor = new Pos(0, 0);
+        var caret = new Pos(last, lines[last].Text.Length);
+        _selAnchor = anchor;
+        _selCaret = caret;
+        _anchoredStart = AnchoredAt(anchor);
+        _anchoredCaret = AnchoredAt(caret);
+    }
+
+    /// <summary>
+    /// Poll the line providers and put the selection back on its own text — the providers may
+    /// have handed us a different set of lines than the selection was made against, with lines
+    /// appended, old ones dropped, and everything re-wrapped. Runs once per drawn frame.
+    /// </summary>
+    internal IReadOnlyList<Line> RefreshLines()
+    {
+        _lastLines = LinesProvider();
+        _lastLineKeys = LineKeysProvider?.Invoke() ?? Array.Empty<LineKey>();
+        ReanchorSelection();
+        return _lastLines;
+    }
+
+    private void ClearSelection()
+    {
+        _selecting = false;
+        _selAnchor = null;
+        _selCaret = null;
+        _anchoredStart = null;
+        _anchoredCaret = null;
+    }
+
+    /// <summary>
+    /// Pin a line/column to the text under it, when the provider identifies its lines.
+    /// Null means the lines are not identified at all, and the selection stays index-based.
+    /// </summary>
+    private Anchored? AnchoredAt(Pos position)
+    {
+        var keys = _lastLineKeys;
+        if (keys.Count == 0)
+            return null;
+        // A row with no identity of its own — the two lists momentarily out of step — takes the
+        // nearest one. Handing back nothing would quietly put the selection back on raw indices,
+        // which is the one thing identities exist to prevent, and it would do it without a sign.
+        LineKey key = keys[Math.Clamp(position.Line, 0, keys.Count - 1)];
+        return new Anchored(key.Source, key.Start + position.Col);
+    }
+
+    /// <summary>
+    /// Move the selection back onto the text it was made on. When the text is gone the whole
+    /// selection goes with it — the same thing that happens when a line is deleted out from
+    /// under a selection anywhere else.
+    /// </summary>
+    private void ReanchorSelection()
+    {
+        if (_anchoredStart is not { } start || _anchoredCaret is not { } caret)
+            return;
+
+        if (!TryResolveAnchor(_lastLineKeys, _lastLines, start.Source, start.Offset, out Pos anchorPos)
+            || !TryResolveAnchor(_lastLineKeys, _lastLines, caret.Source, caret.Offset, out Pos caretPos))
+        {
+            ClearSelection();
+            return;
+        }
+
+        _selAnchor = anchorPos;
+        _selCaret = caretPos;
+    }
+
+    /// <summary>
+    /// Find where the character at <paramref name="offset"/> of source item
+    /// <paramref name="source"/> sits in the current lines. False when that item is no longer
+    /// shown. An offset that the current wrap no longer exposes clamps to the nearest end of
+    /// the item, so a selection narrows rather than pointing at unrelated text. Pure — unit
+    /// testable without a font or a frame.
+    /// </summary>
+    public static bool TryResolveAnchor(
+        IReadOnlyList<LineKey> keys,
+        IReadOnlyList<Line> lines,
+        long source,
+        int offset,
+        out Pos position)
+    {
+        position = default;
+        int count = Math.Min(keys.Count, lines.Count);
+        int lastOfSource = -1;
+        for (int i = 0; i < count; i++)
+        {
+            if (keys[i].Source != source) continue;
+            lastOfSource = i;
+
+            int start = keys[i].Start;
+            if (offset < start)
+            {
+                // The text this offset named is no longer shown ahead of this line.
+                position = new Pos(i, 0);
+                return true;
+            }
+            if (offset <= start + lines[i].Text.Length)
+            {
+                position = new Pos(i, offset - start);
+                return true;
+            }
+        }
+
+        if (lastOfSource < 0) return false;
+        position = new Pos(lastOfSource, lines[lastOfSource].Text.Length);
+        return true;
     }
 
     private bool TryGetOrderedSelection(out Pos start, out Pos end)
