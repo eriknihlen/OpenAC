@@ -474,7 +474,9 @@ public sealed class RetailPViewFrameInput
         Matrix4x4 cameraView,
         CameraCellResolution cameraCellResolution,
         bool buildingDegradesDisabled = false,
-        bool keepDistantBuildings = false)
+        // The shipped default, so a caller that forgets this argument cannot
+        // silently bring back vanishing distant buildings.
+        bool keepDistantBuildings = true)
     {
         RootCell = rootCell;
         NearbyBuildingCells = nearbyBuildingCells;

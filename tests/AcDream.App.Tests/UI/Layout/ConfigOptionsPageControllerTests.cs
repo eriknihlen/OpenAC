@@ -1608,7 +1608,8 @@ public sealed class ConfigOptionsPageControllerTests
         (OptionsPanelController panel, IReadOnlyList<UiElement> items) =
             BindWithMixer(mixer.Bindings);
 
-        // Four rows more than the authored retail page has on its own.
+        // Five rows more than the authored retail page has on its own: these
+        // four, plus the Graphics block's Keep Distant Buildings.
         Assert.Equal(44, items.Count);
         Assert.Equal(35, panel.ConfigPage.Rows.Count);
 
