@@ -41,6 +41,57 @@ public sealed class RuntimeFellowshipStateTests
             Departed: []);
 
     [Fact]
+    public void VitalsAge_StartsUnknown_AndCountsFromTheLastPerFellowUpdate()
+    {
+        var clock = new ManualTimeProvider();
+        var state = new RuntimeFellowshipState(clock);
+        state.ApplyFullUpdate(FullUpdate(Member(SelfGuid), Member(OtherGuid)));
+
+        Assert.True(state.View.TryGetMember(OtherGuid, out RuntimeFellowMemberSnapshot other));
+        Assert.Null(other.VitalsAgeSeconds);
+
+        state.ApplyUpdateFellow(new GameEvents.FellowshipUpdateFellow(
+            OtherGuid, Member(OtherGuid, currentHealth: 40u), UpdateType: 3u));
+        clock.Advance(TimeSpan.FromSeconds(4));
+        Assert.True(state.View.TryGetMember(OtherGuid, out other));
+        Assert.Equal(4d, other.VitalsAgeSeconds!.Value, 6);
+
+        // A later full roster is not a vitals sample.
+        clock.Advance(TimeSpan.FromSeconds(3));
+        state.ApplyFullUpdate(FullUpdate(
+            Member(SelfGuid), Member(OtherGuid, currentHealth: 100u)));
+        Assert.True(state.View.TryGetMember(OtherGuid, out other));
+        Assert.Equal(7d, other.VitalsAgeSeconds!.Value, 6);
+
+        // A member the roster dropped comes back unknown.
+        state.ApplyFullUpdate(FullUpdate(Member(SelfGuid)));
+        state.ApplyFullUpdate(FullUpdate(Member(SelfGuid), Member(OtherGuid)));
+        Assert.True(state.View.TryGetMember(OtherGuid, out other));
+        Assert.Null(other.VitalsAgeSeconds);
+    }
+
+    [Fact]
+    public void VitalsSubscription_IsTheOrOfPanelAndAutomation_SentOncePerChange()
+    {
+        var state = new RuntimeFellowshipState();
+
+        Assert.False(state.SetPanelVisible(false, out _));
+        Assert.True(state.SetPanelVisible(true, out bool wire));
+        Assert.True(wire);
+        Assert.False(state.SetVitalsRequested(true, out _));
+        Assert.False(state.SetPanelVisible(false, out _));
+        Assert.True(state.SetVitalsRequested(false, out wire));
+        Assert.False(wire);
+        Assert.True(state.SetVitalsRequested(true, out wire));
+        Assert.True(wire);
+
+        state.ResetSession();
+        Assert.False(state.SetVitalsRequested(false, out _));
+        Assert.True(state.SetPanelVisible(true, out wire));
+        Assert.True(wire);
+    }
+
+    [Fact]
     public void ApplyFullUpdate_ReplacesTheWholeRosterAndFlags()
     {
         var state = new RuntimeFellowshipState();

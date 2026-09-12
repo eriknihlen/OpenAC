@@ -154,12 +154,10 @@ internal static class VitalRechargePlanner
                 return true;
             }
             if (!automation.Spells.TryGet(baseSpell, out PluginSpellInfo basis)
-                || !TryFindFamily(
-                    automation.Spells.KnownSelfBuffs,
-                    basis.Family,
-                    automation.Character,
-                    automation.Spells,
-                    combatSettings.BlacklistedSpellComponents,
+                || !TryResolveHelperSpell(
+                    automation,
+                    basis,
+                    combatSettings,
                     out PluginSpellInfo spell))
             {
                 continue;
@@ -852,6 +850,13 @@ internal static class VitalRechargePlanner
             checked((int)Math.Floor(sourceCurrent * multiplier)));
     }
 
+    /// <summary>
+    /// A fellow's vitals are trusted only this long after the server last
+    /// streamed them; older samples (or none at all) mean "unknown", never
+    /// "still low".
+    /// </summary>
+    internal const double FellowVitalsTrustSeconds = 10d;
+
     private static PluginFellowMember? Lowest(
         IReadOnlyList<PluginFellowMember> members,
         VitalKind vital,
@@ -862,8 +867,12 @@ internal static class VitalRechargePlanner
         double bestFraction = double.PositiveInfinity;
         foreach (PluginFellowMember member in members)
         {
-            if (member.Distance > maximumDistance)
+            if (member.VitalsAgeSeconds is not { } age
+                || age >= FellowVitalsTrustSeconds
+                || member.Distance > maximumDistance)
+            {
                 continue;
+            }
             (uint current, uint maximum) = vital switch
             {
                 VitalKind.Health => (member.CurrentHealth, member.MaxHealth),
@@ -883,34 +892,57 @@ internal static class VitalRechargePlanner
         return best;
     }
 
-    private static bool TryFindFamily(
-        IReadOnlyList<PluginSpellInfo> known,
-        uint family,
-        ICharacterInfo character,
-        ISpellCatalog catalog,
-        string blacklistedComponents,
-        out PluginSpellInfo pick)
+    /// <summary>
+    /// The helper spell is the best castable tier of the reference's family
+    /// that stays on the reference's own line — a family holds both the Self
+    /// and the Other line, and only the component set tells them apart. Same
+    /// accept as the buff walk, with the hunting skill margin.
+    /// </summary>
+    private static bool TryResolveHelperSpell(
+        IAutomationSurface automation,
+        in PluginSpellInfo reference,
+        CombatSettings combatSettings,
+        out PluginSpellInfo spell)
     {
-        pick = default;
-        bool found = false;
-        foreach (PluginSpellInfo spell in known)
+        var tiers = new List<PluginSpellInfo>();
+        foreach (PluginSpellInfo candidate in automation.Spells.KnownSelfBuffs)
         {
-            if (spell.Family != family
-                || SpellComponentPolicy.UsesBlacklistedComponent(
-                    catalog,
-                    spell,
-                    blacklistedComponents)
-                || !CanCast(character, spell))
-                continue;
-            if (!found
-                || spell.Quality > pick.Quality
-                || spell.Quality == pick.Quality && spell.Tier > pick.Tier)
-            {
-                pick = spell;
-                found = true;
-            }
+            if (candidate.Family == reference.Family)
+                tiers.Add(candidate);
         }
-        return found;
+        tiers.Sort(static (a, b) =>
+        {
+            if (a.Tier != b.Tier)
+                return b.Tier.CompareTo(a.Tier);
+            if (a.Quality != b.Quality)
+                return b.Quality.CompareTo(a.Quality);
+            return a.SpellId.CompareTo(b.SpellId);
+        });
+
+        var skillLevels = new Dictionary<uint, uint>();
+        foreach (PluginSkillInfo skill in automation.Character.Skills)
+            skillLevels[skill.SkillId] = skill.Current;
+
+        var castability = new BuffCastability(
+            automation.Spells,
+            automation.Magic,
+            automation.Items.IsAvailable
+                ? automation.Items.CaptureOwnedItems()
+                : [],
+            combatSettings.BlacklistedSpellComponents,
+            static _ => { },
+            static (_, _, _) => { });
+        var line = new BuffLine(
+            reference.Family, BuffTargetKind.Other, reference.Name, tiers)
+        {
+            ReferenceOverride = reference,
+        };
+        return BuffPlan.TryPickTier(
+            line,
+            skillLevels,
+            combatSettings.HuntSkillExcessOverDifficulty,
+            castability,
+            out spell);
     }
 
     private static bool CanCast(ICharacterInfo character, PluginSpellInfo spell) =>
@@ -976,6 +1008,7 @@ internal sealed class VitalRechargeController
     private double _healthBoostRemaining;
     private double _staminaBoostRemaining;
     private double _manaBoostRemaining;
+    private bool _vitalsRequested;
 
     public VitalRechargeController(
         IPluginHost host,
@@ -1009,7 +1042,14 @@ internal sealed class VitalRechargeController
             _pending = null;
             ClearBoosts();
             Status = IdleStatus;
+            SyncVitalsRequest(automation, wanted: false);
             return false;
+        }
+        if (helpers)
+        {
+            SyncVitalsRequest(
+                automation,
+                wanted: _settings.HelpOthers && automation.Fellowship.IsInFellowship);
         }
 
         if (_pending is { } pending)
@@ -1129,7 +1169,23 @@ internal sealed class VitalRechargeController
         _pendingSeconds = 0d;
         _retryDelay = 0d;
         ClearBoosts();
+        // The host drops its subscription with the session; only the
+        // plugin-side memory of it is stale here.
+        _vitalsRequested = false;
         Status = IdleStatus;
+    }
+
+    private void SyncVitalsRequest(IAutomationSurface automation, bool wanted)
+    {
+        if (wanted == _vitalsRequested)
+            return;
+        if (!automation.IsAvailable)
+        {
+            _vitalsRequested = false;
+            return;
+        }
+        if (automation.Fellowship.RequestVitals(wanted).Accepted)
+            _vitalsRequested = wanted;
     }
 
     private void ArmBoost(VitalKind vital)

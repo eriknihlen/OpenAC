@@ -13,6 +13,13 @@ public readonly record struct PluginFellowMember(
     float Distance)
 {
     public bool ShareLoot { get; init; }
+
+    /// <summary>
+    /// Seconds since the server last streamed this fellow's vitals; null when
+    /// it never has. The stream runs only while the host holds a vitals
+    /// subscription (see <see cref="IFellowshipAutomation.RequestVitals"/>).
+    /// </summary>
+    public double? VitalsAgeSeconds { get; init; }
 }
 
 public enum PluginFellowshipCommandStatus
@@ -52,5 +59,13 @@ public interface IFellowshipAutomation
     PluginFellowshipCommandResult AssignLeader(uint targetObjectId) =>
         new(PluginFellowshipCommandStatus.Unavailable);
     PluginFellowshipCommandResult SetOpen(bool isOpen) =>
+        new(PluginFellowshipCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Ask the host to keep the server's fellow-vitals stream flowing (the
+    /// server sends it only to a client that has declared its fellowship
+    /// panel open). Idempotent; released automatically at session reset.
+    /// </summary>
+    PluginFellowshipCommandResult RequestVitals(bool requested) =>
         new(PluginFellowshipCommandStatus.Unavailable);
 }

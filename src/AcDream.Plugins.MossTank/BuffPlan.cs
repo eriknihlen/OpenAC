@@ -356,6 +356,19 @@ public static class BuffPlan
         IReadOnlyDictionary<uint, uint> skillLevels,
         BuffSettings settings,
         IBuffCastability? castability,
+        out PluginSpellInfo pick) =>
+        TryPickTier(
+            line,
+            skillLevels,
+            settings.SkillExcessOverDifficulty,
+            castability,
+            out pick);
+
+    public static bool TryPickTier(
+        BuffLine line,
+        IReadOnlyDictionary<uint, uint> skillLevels,
+        int skillExcessOverDifficulty,
+        IBuffCastability? castability,
         out PluginSpellInfo pick)
     {
         pick = default;
@@ -384,7 +397,7 @@ public static class BuffPlan
                 rejections?.Add(new BuffTierRejection(tier, "skill unknown"));
                 continue;
             }
-            int needed = tier.Difficulty + settings.SkillExcessOverDifficulty;
+            int needed = tier.Difficulty + skillExcessOverDifficulty;
             if (level < needed)
             {
                 rejections?.Add(new BuffTierRejection(tier, $"skill {level} < {needed}"));

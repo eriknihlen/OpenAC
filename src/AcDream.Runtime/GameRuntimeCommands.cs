@@ -323,6 +323,14 @@ public interface IRuntimeFellowshipCommands
     RuntimeCommandResult SetPanelOpen(
         RuntimeGenerationToken expectedGeneration,
         bool panelOpen);
+
+    /// <summary>
+    /// Automation's own claim on the fellow-vitals stream, independent of
+    /// the panel; the wire carries the OR of the two.
+    /// </summary>
+    RuntimeCommandResult RequestVitals(
+        RuntimeGenerationToken expectedGeneration,
+        bool requested);
 }
 
 /// <summary>Generation-gated allegiance outbound actions.</summary>

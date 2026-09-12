@@ -1788,59 +1788,7 @@ public sealed class MossTankPanelTests
             IsBeneficial: true);
 
     [Fact]
-    public void RandomHelperDrawsItsTargetAtRandomAcrossTheNearbyPlayers()
-    {
-        var automation = RandomHelperAutomation();
-        automation.WorldObjects.Add(NearbyPlayer(0x50000009u, "Fellow A"));
-        automation.WorldObjects.Add(NearbyPlayer(0x5000000Au, "Fellow B"));
-        var host = new FakeHost(automation);
-        var panel = new MossTankPanel(host);
-        host.Selection.Select(10);
-        panel.AddSelectedItem();   // the gate needs a profiled wand
-        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
-        panel.ToggleCombat();
-
-        for (int tick = 0; tick < 200; tick++)
-            panel.OnTick(0.3d);
-
-        Assert.True(
-            automation.CastTargets.Count >= 5,
-            $"only {automation.CastTargets.Count} helper casts");
-        Assert.Equal(2, automation.CastTargets.Distinct().Count());
-    }
-
-    [Fact]
-    public void RandomHelperCastsTheBestKnownTierOfTheDrawnStem()
-    {
-        var automation = RandomHelperAutomation();
-        automation.KnownSelfBuffs =
-        [
-            NamedSpell(500, 600, "Armor Other I", 33u),
-            NamedSpell(506, 600, "Armor Other VI", 33u) with { Tier = 6 },
-        ];
-        automation.WorldObjects.Add(NearbyPlayer(0x50000009u, "Fellow A"));
-        var host = new FakeHost(automation);
-        var panel = new MossTankPanel(host);
-        host.Selection.Select(10);
-        panel.AddSelectedItem();   // the gate needs a profiled wand
-        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
-        panel.ToggleCombat();
-
-        for (int tick = 0; tick < 20; tick++)
-            panel.OnTick(0.3d);
-
-        Assert.NotEmpty(automation.CastSpellIds);
-        Assert.All(automation.CastSpellIds, id => Assert.Equal(506u, id));
-    }
-
-    private static PluginWorldObject NearbyPlayer(uint objectId, string name) =>
-        new(objectId, 123u, name, PluginObjectClass.Player, 0u, 0u, 0u)
-        {
-            HasPosition = true,
-            Position = NavigationAt(0f).Position,
-        };
-
-    private static CombatCapableFakeAutomation RandomHelperAutomation()
+    public void RandomHelperPositionIsHeldInertWithTheSettingOn()
     {
         var automation = new CombatCapableFakeAutomation
         {
@@ -1865,7 +1813,24 @@ public sealed class MossTankPanelTests
         {
             Mode = PluginCombatMode.Magic,
         };
-        return automation;
+        automation.WorldObjects.Add(
+            new PluginWorldObject(
+                0x50000009u, 123u, "Fellow A", PluginObjectClass.Player, 0u, 0u, 0u)
+            {
+                HasPosition = true,
+                Position = NavigationAt(0f).Position,
+            });
+        var host = new FakeHost(automation);
+        var panel = new MossTankPanel(host);
+        host.Selection.Select(10);
+        panel.AddSelectedItem();
+        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
+        panel.ToggleCombat();
+
+        for (int tick = 0; tick < 200; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.CastTargets);
     }
 
     private static FakeAutomation BuffPassAutomation() => new()
@@ -2173,62 +2138,6 @@ public sealed class MossTankPanelTests
             panel.OnTick(0.3d);
 
         Assert.Contains("EnterMode:Peace", automation.CallLog);
-    }
-
-    [Fact]
-    public void RandomHelperPreparesThroughTheSharedGateBeforeCasting()
-    {
-        var automation = new CombatCapableFakeAutomation
-        {
-            CurrentHealth = 100,
-            MaxHealth = 100,
-            CurrentStamina = 100,
-            MaxStamina = 100,
-            CurrentMana = 100,
-            MaxMana = 100,
-            ItemEntries = [Item(10, "War Wand", itemType: 0x00008000u)],
-            EquipmentItems =
-            [
-                EquipmentItem(10, "War Wand", itemType: 0x00008000u),
-            ],
-        };
-        automation.CombatSnapshot = automation.CombatSnapshot with
-        {
-            Mode = PluginCombatMode.Melee,
-        };
-        automation.KnownSelfBuffs =
-        [
-            NamedSpell(500, 600, "Armor Other I", 33u),
-        ];
-        automation.WorldObjects.Add(new PluginWorldObject(
-            0x50000009u,
-            123u,
-            "Fellow",
-            PluginObjectClass.Player,
-            0u,
-            0u,
-            0u)
-        {
-            HasPosition = true,
-            Position = NavigationAt(0f).Position,
-        });
-        var host = new FakeHost(automation);
-        var panel = new MossTankPanel(host);
-        host.Selection.Select(10);
-        panel.AddSelectedItem();
-        panel.SetMetaOption("RandomHelperBuffs", Truthy(true));
-
-        panel.ToggleCombat();
-        for (int tick = 0; tick < 20; tick++)
-            panel.OnTick(0.3d);
-
-        int peace = automation.CallLog.IndexOf("EnterMode:Peace");
-        int equip = automation.CallLog.IndexOf("Equip:0000000A");
-        int magic = automation.CallLog.IndexOf("EnterMode:Magic");
-        Assert.True(
-            peace >= 0 && equip > peace && magic > equip,
-            "RandomHelper did not sequence through the gate. CallLog: "
-                + string.Join(" | ", automation.CallLog));
     }
 
     [Fact]

@@ -3137,6 +3137,7 @@ internal sealed class AppAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
         return result.Count == 0
@@ -3146,6 +3147,11 @@ internal sealed class AppAutomationSurface
 
     public IReadOnlyList<PluginFellowMember> CaptureRoster() =>
         CaptureFellowshipMembers(includeSelf: true);
+
+    public PluginFellowshipCommandResult RequestVitals(bool requested) =>
+        InvokeFellowship(commands => commands.FellowshipCommands.RequestVitals(
+            commands.Generation,
+            requested));
 
     public PluginFellowshipCommandResult Create(
         string name,
@@ -3235,6 +3241,7 @@ internal sealed class AppAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
         return result.Count == 0

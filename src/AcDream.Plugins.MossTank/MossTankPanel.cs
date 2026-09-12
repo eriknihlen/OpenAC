@@ -62,7 +62,6 @@ internal sealed partial class MossTankPanel : IBuffRuleHost
     private bool _fastCastMovementActive;
     private long _fastCastStartCompletionRevision;
     private double _fastCastMovementElapsed;
-    private double _randomHelperRemaining;
     private const double TransactionSuspensionWatchdogSeconds =
         SpellCastTracker.WorstCaseBusySeconds;
 
@@ -4107,7 +4106,6 @@ internal sealed partial class MossTankPanel : IBuffRuleHost
         ClearFastCastMovement();
         _buffRule.ClearCastAttempt();
         _buffRule.ClearRecastLock();
-        _randomHelperRemaining = 0d;
         _combat.ClearActionLocks();
         _vitalRecharge.Reset();
         _vitalHelperRecharge.Reset();
@@ -4449,106 +4447,6 @@ internal sealed partial class MossTankPanel : IBuffRuleHost
 
     internal void PokeScheduler() => _scheduler.Poke();
 
-    private bool TickRandomHelper(double elapsedSeconds, bool canAct)
-    {
-        _randomHelperRemaining = Math.Max(
-            0d,
-            _randomHelperRemaining - Math.Max(0d, elapsedSeconds));
-        if (!canAct
-            || !_buffSettings.RandomHelperBuffs
-            || _randomHelperRemaining > 0d
-            || !_host.Automation.IsAvailable
-            || _host.Automation.Items.IsBusy)
-        {
-            return false;
-        }
-        if (_castTracker.IsBusy || _host.Automation.Magic.IsCasting)
-            return true;
-
-        PluginNavigationSnapshot navigation =
-            _host.Automation.Navigation.Snapshot;
-        if (!navigation.IsAvailable)
-            return false;
-
-        // ba.cs:102-111 — every Player object other than self inside 0.075
-        // landblock units. The trace note's ≈240 m/unit puts that at 18 m.
-        PluginWorldObject[] players = _host.Automation.Objects.CaptureObjects()
-            .Where(value => value.ObjectClass == PluginObjectClass.Player
-                && value.ObjectId != _host.Automation.Character.ObjectId
-                && value.HasPosition
-                && navigation.Position.HorizontalDistanceMeters(value.Position)
-                    < 18d)
-            .OrderBy(static value => value.ObjectId)
-            .ToArray();
-        if (players.Length == 0)
-            return false;
-
-        // ba.cs:116 — ONE random target, drawn before the spell loop and kept
-        // for whatever the loop settles on.
-        PluginWorldObject player = players[_randomHelper.Next(players.Length)];
-
-        // ba.cs:29-40 — the eleven hardcoded Tier-I "Other" stems, in VTank's
-        // own order.
-        string[] stems =
-        [
-            "Endurance Other", "Regeneration Other", "Rejuvenation Other",
-            "Armor Other", "Blade Protection Other",
-            "Bludgeoning Protection Other", "Cold Protection Other",
-            "Fire Protection Other", "Lightning Protection Other",
-            "Piercing Protection Other", "Acid Protection Other",
-        ];
-
-        var castability = new BuffCastability(
-            _host.Automation.Spells,
-            _host.Automation.Magic,
-            _host.Automation.Items.IsAvailable
-                ? _host.Automation.Items.CaptureOwnedItems()
-                : [],
-            _buffSettings.BlacklistedSpellComponents,
-            text => Announce(text),
-            static (_, _, _) => { });
-        for (int attempt = 0; attempt < 100; attempt++)
-        {
-            string stem = stems[_randomHelper.Next(stems.Length)];
-            if (!BuffSelfRule.ResolveBestKnown(
-                    _host.Automation,
-                    stem,
-                    _buffSettings,
-                    castability,
-                    out PluginSpellInfo spell))
-            {
-                continue;
-            }
-
-            if (!_combatModeGate.TryPrepare(PluginCombatMode.Magic))
-            {
-                _status = _combatModeGate.Status;
-                return true;
-            }
-            if (_host.Automation.Magic.EvaluateGate(spell.SpellId, player.ObjectId)
-                    != PluginCastGate.Ready
-                || !_host.Automation.Magic.Cast(spell.SpellId, player.ObjectId))
-            {
-                continue;
-            }
-
-            _randomHelperRemaining = Math.Max(
-                0.25d,
-                _buffSettings.RandomHelperIntervalSeconds);
-            EmitMacroLog(
-                MacroLogChannel.SpellCast,
-                $"Casting: {spell.Name} on {player.ObjectId} ({player.Name})");
-            _host.Log.Info(
-                $"MossTank: random helper {spell.Name} -> {player.Name}");
-            return true;
-        }
-        // ba.cs:125 — a hundred draws with nothing to show for them.
-        return false;
-    }
-
-    /// <summary><c>ba.m_f</c> (<c>ba.cs:20</c>).</summary>
-    private readonly Random _randomHelper = new();
-
     private void ShowFirstRunGuidance()
     {
         if (!_firstRunGuidancePending || !_host.Automation.IsAvailable)
@@ -4632,7 +4530,6 @@ internal sealed partial class MossTankPanel : IBuffRuleHost
         _metaViews.DestroyAll();
         ResetCommandSession();
         _buffRule.Reset();
-        _randomHelperRemaining = 0d;
         _coverageSpellSnapshot = null;
         _coverageRefreshRemaining = 0d;
         _status = "Idle.";
@@ -4657,7 +4554,6 @@ internal sealed partial class MossTankPanel : IBuffRuleHost
         _expressions.ClearSession();
         ResetCommandSession();
         _buffRule.Reset();
-        _randomHelperRemaining = 0d;
         _coverageSpellSnapshot = null;
         _coverageRefreshRemaining = 0d;
         _combatSettings.MetaState = MetaEngine.DefaultState;

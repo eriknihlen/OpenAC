@@ -974,10 +974,27 @@ public sealed class DirectGameRuntimeCommandAdapter
             Validate(expectedGeneration, out WorldSession? session);
         if (gate != RuntimeCommandStatus.Accepted)
             return Result(gate);
-        session!.SendFellowshipUpdateRequest(panelOpen);
+        if (_runtime.FellowshipOwner.SetPanelVisible(panelOpen, out bool subscribe))
+            session!.SendFellowshipUpdateRequest(subscribe);
         return EmitResult(
             RuntimeCommandDomain.Fellowship,
             operation: 6,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult RequestVitals(
+        RuntimeGenerationToken expectedGeneration,
+        bool requested)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out WorldSession? session);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        if (_runtime.FellowshipOwner.SetVitalsRequested(requested, out bool subscribe))
+            session!.SendFellowshipUpdateRequest(subscribe);
+        return EmitResult(
+            RuntimeCommandDomain.Fellowship,
+            operation: 7,
             RuntimeCommandStatus.Accepted);
     }
 

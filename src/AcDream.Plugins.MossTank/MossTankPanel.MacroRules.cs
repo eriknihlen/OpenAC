@@ -213,12 +213,11 @@ internal sealed partial class MossTankPanel : IMacroRuleProvider
             "fused into RechargeSelfNormal — VitalPlan.Threshold merges the "
                 + "Normal and NoTarget settings (KB 02 §5.5)."),
 
-        MacroRuleSlot.RandomHelper => new ControllerMacroRule(
+        MacroRuleSlot.RandomHelper => new AbsentMacroRule(
             "RandomHelper",
-            context => TickRandomHelper(
-                context.ElapsedSeconds,
-                context.CanAct),
-            gate: () => _combat.Enabled && !_buffRule.IsBursting),
+            "not run — the shipped rule cannot cast (its draw loop only wins "
+                + "on an uncastable pick), so the position is held inert; the "
+                + "RandomHelper settings still load and save."),
 
         MacroRuleSlot.IdlePeace => new MacroRulePreChain(
             _idlePeace,

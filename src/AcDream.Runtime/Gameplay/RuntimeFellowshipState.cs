@@ -20,7 +20,11 @@ public sealed class RuntimeFellowshipState : IDisposable
     private readonly object _gate = new();
     private readonly TimeProvider _timeProvider;
     private readonly Dictionary<uint, GameEvents.FellowMember> _members = [];
+    private readonly Dictionary<uint, DateTimeOffset> _vitalsUpdatedAt = [];
     private readonly Dictionary<uint, int> _fellowsDeparted = [];
+    private bool _panelVisible;
+    private bool _vitalsRequested;
+    private bool _sentVitalsSubscription;
     private string _name = string.Empty;
     private uint _leaderGuid;
     private bool _shareXp;
@@ -52,6 +56,13 @@ public sealed class RuntimeFellowshipState : IDisposable
             _members.Clear();
             foreach (GameEvents.FellowMember member in update.Members)
                 _members[member.Guid] = member;
+            // A full roster carries vitals, but only a per-fellow update
+            // counts as a live vitals sample.
+            foreach (uint guid in _vitalsUpdatedAt.Keys.ToArray())
+            {
+                if (!_members.ContainsKey(guid))
+                    _vitalsUpdatedAt.Remove(guid);
+            }
             _fellowsDeparted.Clear();
             foreach (GameEvents.FellowshipDepartedMember departed in update.Departed)
                 _fellowsDeparted[departed.Guid] = departed.DepartedTimestamp;
@@ -76,9 +87,43 @@ public sealed class RuntimeFellowshipState : IDisposable
             if (isNewMember && _locked && !IsAdmissibleWhileLocked(update.MemberGuid))
                 return;
             _members[update.MemberGuid] = update.Member;
+            _vitalsUpdatedAt[update.MemberGuid] = _timeProvider.GetUtcNow();
             RecalculateEvenXpSplit();
             Bump();
         }
+    }
+
+    /// <summary>
+    /// The server streams fellow vitals only to a client that has declared
+    /// its fellowship panel open. The panel and automation can each want that
+    /// stream; the wire carries the OR of the two, sent once per change.
+    /// Returns true when the caller must send <paramref name="subscribe"/>.
+    /// </summary>
+    public bool SetPanelVisible(bool visible, out bool subscribe)
+    {
+        lock (_gate)
+        {
+            _panelVisible = visible;
+            return ResolveVitalsSubscription(out subscribe);
+        }
+    }
+
+    public bool SetVitalsRequested(bool requested, out bool subscribe)
+    {
+        lock (_gate)
+        {
+            _vitalsRequested = requested;
+            return ResolveVitalsSubscription(out subscribe);
+        }
+    }
+
+    private bool ResolveVitalsSubscription(out bool subscribe)
+    {
+        subscribe = _panelVisible || _vitalsRequested;
+        if (_sentVitalsSubscription == subscribe)
+            return false;
+        _sentVitalsSubscription = subscribe;
+        return true;
     }
 
     private bool IsAdmissibleWhileLocked(uint guid)
@@ -128,6 +173,7 @@ public sealed class RuntimeFellowshipState : IDisposable
             }
             if (_members.Remove(quitterGuid))
             {
+                _vitalsUpdatedAt.Remove(quitterGuid);
                 RecalculateEvenXpSplit();
                 Bump();
             }
@@ -147,6 +193,7 @@ public sealed class RuntimeFellowshipState : IDisposable
             }
             if (_members.Remove(dismissedGuid))
             {
+                _vitalsUpdatedAt.Remove(dismissedGuid);
                 RecalculateEvenXpSplit();
                 Bump();
             }
@@ -230,7 +277,11 @@ public sealed class RuntimeFellowshipState : IDisposable
             || _isOpen
             || _locked;
         _members.Clear();
+        _vitalsUpdatedAt.Clear();
         _fellowsDeparted.Clear();
+        _panelVisible = false;
+        _vitalsRequested = false;
+        _sentVitalsSubscription = false;
         _name = string.Empty;
         _leaderGuid = 0u;
         _shareXp = false;
@@ -273,7 +324,7 @@ public sealed class RuntimeFellowshipState : IDisposable
                     member = default;
                     return false;
                 }
-                member = ToSnapshot(raw);
+                member = ToSnapshot(raw, owner._timeProvider.GetUtcNow());
                 return true;
             }
         }
@@ -282,16 +333,18 @@ public sealed class RuntimeFellowshipState : IDisposable
         {
             lock (owner._gate)
             {
+                DateTimeOffset now = owner._timeProvider.GetUtcNow();
                 var result = new RuntimeFellowMemberSnapshot[owner._members.Count];
                 int i = 0;
                 foreach (GameEvents.FellowMember raw in owner._members.Values)
-                    result[i++] = ToSnapshot(raw);
+                    result[i++] = ToSnapshot(raw, now);
                 return result;
             }
         }
 
-        private static RuntimeFellowMemberSnapshot ToSnapshot(
-            GameEvents.FellowMember raw) =>
+        private RuntimeFellowMemberSnapshot ToSnapshot(
+            GameEvents.FellowMember raw,
+            DateTimeOffset now) =>
             new(
                 raw.Guid,
                 raw.Name,
@@ -302,6 +355,12 @@ public sealed class RuntimeFellowshipState : IDisposable
                 raw.CurrentHealth,
                 raw.CurrentStamina,
                 raw.CurrentMana,
-                raw.ShareLoot != 0u);
+                raw.ShareLoot != 0u)
+            {
+                VitalsAgeSeconds = owner._vitalsUpdatedAt.TryGetValue(
+                        raw.Guid, out DateTimeOffset updatedAt)
+                    ? Math.Max(0d, (now - updatedAt).TotalSeconds)
+                    : null,
+            };
     }
 }

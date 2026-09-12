@@ -257,6 +257,117 @@ public sealed class VitalRechargeTests
         Assert.Equal(strong.SpellId, choice.SpellId);
     }
 
+    /// <summary>
+    /// One family holds both the Self and the Other line (Revitalize Self
+    /// and Revitalize Other share family 81); the reference is the Other
+    /// spell and only the component set keeps the pick on its line.
+    /// Mutation: drop the component-set term from the tier accept and the
+    /// higher-quality Self spell wins — and is cast "at" the fellow.
+    /// </summary>
+    [Fact]
+    public void HelperSpellStaysOnTheReferencesOwnLine()
+    {
+        var yew = new PluginSpellComponentSet(7u, 26u, 39u, 51u);
+        var willow = new PluginSpellComponentSet(7u, 26u, 39u, 61u);
+        PluginSpellInfo replenish = Spell(
+            (uint)SpellId.Replenish, "Replenish", 81u, 300)
+            with { ComponentSet = yew, IsSelfTargeted = false };
+        PluginSpellInfo revitalizeSelf = Spell(
+            0x10E1u, "Incantation of Revitalize Self", 81u, 400)
+            with { ComponentSet = willow, Tier = 8 };
+        PluginSpellInfo revitalizeOther = Spell(
+            0x04A4u, "Revitalize Other VI", 81u, 250)
+            with { ComponentSet = yew, Tier = 6, IsSelfTargeted = false };
+        var surface = new Surface
+        {
+            Mode = PluginCombatMode.Magic,
+            Spells = [revitalizeSelf, revitalizeOther],
+            Lookup = [replenish],
+            InFellowship = true,
+            Skills = [Skill(33u, 500u)],
+            Fellows =
+            [
+                Fellow(71u, "Winded", health: 100, distance: 10f)
+                    with { CurrentStamina = 5u },
+            ],
+        };
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface,
+            new VitalSettings { HelperStamina = 0.5 },
+            out VitalRechargeChoice choice));
+        Assert.Equal(VitalKind.Stamina, choice.Vital);
+        Assert.Equal(revitalizeOther.SpellId, choice.SpellId);
+        Assert.Equal(71u, choice.TargetObjectId);
+    }
+
+    /// <summary>
+    /// A fellow's vitals are only as good as the server's last stream of
+    /// them: none yet, or older than the trust window, means unknown.
+    /// Mutation: drop the age gate and the stale 5 %-health fellow is healed
+    /// forever.
+    /// </summary>
+    [Fact]
+    public void HelperTrustsOnlyFreshlyStreamedVitals()
+    {
+        var surface = new Surface
+        {
+            Mode = PluginCombatMode.Magic,
+            Spells = [Spell(300u, "Adja's Grace", 900u, 100)],
+            Lookup = [Spell((uint)SpellId.AdjaSGift, "Adja's Gift", 900u, 100)],
+            InFellowship = true,
+            Skills = [Skill(33u, 400u)],
+            Fellows =
+            [
+                Fellow(70u, "Stale", health: 5, distance: 10f)
+                    with { VitalsAgeSeconds = VitalRechargePlanner.FellowVitalsTrustSeconds },
+                Fellow(71u, "Never", health: 5, distance: 10f)
+                    with { VitalsAgeSeconds = null },
+                Fellow(72u, "Fresh", health: 15, distance: 10f)
+                    with { VitalsAgeSeconds = 2d },
+            ],
+        };
+
+        Assert.True(VitalRechargePlanner.TryPlanHelper(
+            surface,
+            new VitalSettings(),
+            out VitalRechargeChoice choice));
+        Assert.Equal(72u, choice.TargetObjectId);
+    }
+
+    /// <summary>
+    /// The helper controller holds the host's vitals subscription exactly
+    /// while it is helping others, so the stream flows without the
+    /// fellowship panel; the self-recharge controller never touches it.
+    /// Mutation: delete the sync and no request is ever made.
+    /// </summary>
+    [Fact]
+    public void HelperControllerHoldsTheVitalsSubscriptionWhileHelpingOthers()
+    {
+        var surface = new Surface { InFellowship = true };
+        var settings = new VitalSettings { HelpOthers = true };
+        var helper = new VitalRechargeController(
+            new Host(surface), settings, new CombatSettings());
+        var self = new VitalRechargeController(
+            new Host(surface), settings, new CombatSettings());
+
+        self.Tick(0.3d, enabled: true, noTarget: true, helpers: false);
+        Assert.Empty(surface.VitalsRequests);
+
+        helper.Tick(0.3d, enabled: true, noTarget: true, helpers: true);
+        helper.Tick(0.3d, enabled: true, noTarget: true, helpers: true);
+        Assert.Equal([true], surface.VitalsRequests);
+
+        settings.HelpOthers = false;
+        helper.Tick(0.3d, enabled: true, noTarget: true, helpers: true);
+        Assert.Equal([true, false], surface.VitalsRequests);
+
+        settings.HelpOthers = true;
+        helper.Tick(0.3d, enabled: true, noTarget: true, helpers: true);
+        helper.Tick(0.3d, enabled: false, noTarget: true, helpers: true);
+        Assert.Equal([true, false, true, false], surface.VitalsRequests);
+    }
+
     [Fact]
     public void HealKitChanceUsesRetailLogisticDifficultyFormula()
     {
@@ -408,7 +519,21 @@ public sealed class VitalRechargeTests
         string name,
         uint health,
         float distance) => new(
-            id, name, health, 100u, 100u, 100u, 100u, 100u, distance);
+            id, name, health, 100u, 100u, 100u, 100u, 100u, distance)
+        {
+            VitalsAgeSeconds = 0d,
+        };
+
+    private sealed class Host(Surface surface) : IPluginHost
+    {
+        public bool HasUi => false;
+        public IPluginLogger Log => null!;
+        public IGameState State => null!;
+        public IEvents Events => null!;
+        public ISelectionService Selection => null!;
+        public IUiRegistry Ui => null!;
+        public IAutomationSurface Automation => surface;
+    }
 
     private sealed class Surface :
         IAutomationSurface,
@@ -488,6 +613,12 @@ public sealed class VitalRechargeTests
 
         public IReadOnlyList<PluginInventoryItem> CaptureOwnedItems() => Items;
         public IReadOnlyList<PluginFellowMember> CaptureMembers() => Fellows;
+        public List<bool> VitalsRequests { get; } = [];
+        public PluginFellowshipCommandResult RequestVitals(bool requested)
+        {
+            VitalsRequests.Add(requested);
+            return new(PluginFellowshipCommandStatus.Accepted);
+        }
         public IReadOnlyList<PluginCombatTarget> CaptureHostileTargets(float maximumDistance) => [];
         public PluginCombatCommandResult EnterDefaultMode() => new(PluginCombatCommandStatus.AlreadyReady);
         public PluginCombatCommandResult BeginPhysicalAttack(uint targetObjectId, PluginAttackHeight height, float power) => new(PluginCombatCommandStatus.Started);

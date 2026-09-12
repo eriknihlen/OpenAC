@@ -971,10 +971,26 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: true);
         if (gate != RuntimeCommandStatus.Accepted)
             return Result(gate);
-        _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(panelOpen));
+        if (_fellowship.SetPanelVisible(panelOpen, out bool subscribe))
+            _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(subscribe));
         return EmitResult(
             RuntimeCommandDomain.Fellowship,
             operation: 6,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult RequestVitals(
+        RuntimeGenerationToken expectedGeneration,
+        bool requested)
+    {
+        RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        if (_fellowship.SetVitalsRequested(requested, out bool subscribe))
+            _commands.Publish(new FellowshipUpdateRequestRuntimeCmd(subscribe));
+        return EmitResult(
+            RuntimeCommandDomain.Fellowship,
+            operation: 7,
             RuntimeCommandStatus.Accepted);
     }
 

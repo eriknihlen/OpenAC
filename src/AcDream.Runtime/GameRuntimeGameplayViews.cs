@@ -121,7 +121,14 @@ public readonly record struct RuntimeFellowMemberSnapshot(
     uint CurrentHealth,
     uint CurrentStamina,
     uint CurrentMana,
-    bool ShareLoot);
+    bool ShareLoot)
+{
+    /// <summary>
+    /// Seconds since this fellow's last per-fellow vitals update; null until
+    /// the first one arrives (a full roster does not count).
+    /// </summary>
+    public double? VitalsAgeSeconds { get; init; }
+}
 
 public readonly record struct RuntimeFellowshipSnapshot(
     long Revision,
