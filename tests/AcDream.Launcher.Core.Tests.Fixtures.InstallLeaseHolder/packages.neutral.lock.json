@@ -199,8 +199,8 @@
       "acdream-bake": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.0, )",
-          "AcDream.Platform": "[0.1.0, )",
+          "AcDream.Content": "[0.1.4, )",
+          "AcDream.Platform": "[0.1.4, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.9, )"
         }
@@ -208,7 +208,7 @@
       "acdream.content": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.0, )",
+          "AcDream.Core": "[0.1.4, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "SixLabors.ImageSharp": "[3.1.12, )"
         }
@@ -216,7 +216,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.0, )",
+          "AcDream.Plugin.Abstractions": "[0.1.4, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.Core": "[0.0.18, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
@@ -227,7 +227,7 @@
       "acdream.launcher.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Platform": "[0.1.0, )"
+          "AcDream.Platform": "[0.1.4, )"
         }
       },
       "acdream.platform": {

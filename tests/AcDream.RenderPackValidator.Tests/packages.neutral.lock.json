@@ -99,7 +99,7 @@
       "acdream.tools.renderpackvalidator": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.0, )"
+          "AcDream.Plugin.Abstractions": "[0.1.4, )"
         }
       }
     }
