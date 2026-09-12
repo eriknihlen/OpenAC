@@ -103,6 +103,12 @@ internal static unsafe partial class GraphicalVulkanLoader
 
     internal static void PublishEnvironmentVariable(string name, string? value)
     {
+        if (!OperatingSystem.IsMacOS())
+        {
+            throw new PlatformNotSupportedException(
+                "Publishing to the native environment requires macOS.");
+        }
+
         // .NET's copy of the environment is not the one the native loader reads.
         Environment.SetEnvironmentVariable(name, value);
         if (value is null)

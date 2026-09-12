@@ -127,6 +127,30 @@ public sealed partial class GraphicalVulkanLoaderTests
             "inside PublishEnvironmentVariable; route all other callers through it.");
     }
 
+    [Fact]
+    public void PublishEnvironmentVariableRequiresMacOS()
+    {
+        string name = "ACDREAM_TEST_" + Guid.NewGuid().ToString("N");
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                GraphicalVulkanLoader.PublishEnvironmentVariable(name, null);
+            }
+            else
+            {
+                Assert.Throws<PlatformNotSupportedException>(
+                    () => GraphicalVulkanLoader.PublishEnvironmentVariable(name, "/tmp/probe"));
+            }
+
+            Assert.Null(Environment.GetEnvironmentVariable(name));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
+    }
+
     [LibraryImport("libSystem.dylib", EntryPoint = "getenv", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint Getenv(string name);
 
