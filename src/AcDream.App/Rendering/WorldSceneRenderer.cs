@@ -211,7 +211,11 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
                         roots.PlayerViewPosition,
                         camera.Camera.View,
                         _diagnostics.CameraCellResolution,
-                        buildingDegradesDisabled: camera.IsOverheadView));
+                        // Buildings always draw their full mesh, whatever the
+                        // distance: with our far object range, the authored
+                        // distance ladder hid a building while the small objects
+                        // around it stayed visible.
+                        buildingDegradesDisabled: true));
 
                 _particleVisibility.MarkVisibleLandscapeCells(
                     pviewResult.VisibleLandscapeCells);
