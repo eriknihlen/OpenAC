@@ -846,6 +846,7 @@ internal sealed class LivePresentationCompositionPhase
             new PlayerInteractionMovementSink(
                 () => d.PlayerController.Controller,
                 d.PlayerApproachCompletions),
+            d.Runtime.ActionOwner.CombatTarget,
             d.Toast,
             d.PlayerApproachCompletions,
             splitStack: guid =>

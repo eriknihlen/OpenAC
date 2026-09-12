@@ -852,7 +852,8 @@ public sealed class CurrentGameRuntimeAdapterTests
                 query,
                 _items,
                 new SelectionTransport(() => _session?.IsInWorld == true),
-                new NoopInteractionMovement());
+                new NoopInteractionMovement(),
+                _gameRuntime.ActionOwner.CombatTarget);
 
             Host = CreateHost(
                 _session,

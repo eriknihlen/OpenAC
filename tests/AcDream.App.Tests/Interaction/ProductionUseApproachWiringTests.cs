@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.App.Interaction;
 using AcDream.App.UI;
 using AcDream.App.World;
+using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
@@ -71,6 +72,12 @@ public sealed class ProductionUseApproachWiringTests
         }
     }
 
+    private sealed class NoAutomaticTarget : IRuntimeCombatTargetOperations
+    {
+        public bool AutoTarget => false;
+        public uint? SelectClosestTarget() => null;
+    }
+
     private sealed class Harness : IDisposable
     {
         public readonly RuntimeEntityObjectLifetime RuntimeLifetime = new();
@@ -79,6 +86,8 @@ public sealed class ProductionUseApproachWiringTests
         public readonly PlayerApproachCompletionState Completions = new();
         public readonly IPlayerApproachCompletionSink CompletionLifetime;
         public readonly SelectionState Selection = new();
+        public readonly CombatState Combat = new();
+        public readonly RuntimeCombatTargetState CombatTarget;
         public readonly ClientObjectTable Objects = new();
         public readonly InventoryTransactionState Inventory;
         public readonly RuntimeInteractionTransactionState Transactions;
@@ -177,6 +186,10 @@ public sealed class ProductionUseApproachWiringTests
                     guid => TargetHosts.GetValueOrDefault(guid));
             }
 
+            CombatTarget = new RuntimeCombatTargetState(
+                Combat,
+                Selection,
+                new NoAutomaticTarget());
             Inventory = new InventoryTransactionState(Objects);
             Transactions = new RuntimeInteractionTransactionState(Inventory);
             SelectionInteractionController? selectionController = null;
@@ -203,6 +216,7 @@ public sealed class ProductionUseApproachWiringTests
                 new PlayerInteractionMovementSink(
                     () => MovementController,
                     Completions),
+                CombatTarget,
                 toast: null,
                 Completions);
         }
@@ -241,7 +255,11 @@ public sealed class ProductionUseApproachWiringTests
                 interruptCurrentMovement: static () => { });
         }
 
-        public void Dispose() => RuntimeLifetime.Dispose();
+        public void Dispose()
+        {
+            CombatTarget.Dispose();
+            RuntimeLifetime.Dispose();
+        }
     }
 
     [Fact]
