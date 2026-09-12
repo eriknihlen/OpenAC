@@ -247,4 +247,8 @@ public sealed class PrivateUpdatePositionTests
             BindingFlags.NonPublic | BindingFlags.Instance)!;
         method.Invoke(session, [new ReadOnlyMemory<byte>(datagram), null, true]);
     }
+
+    [Fact]
+    public void Opcode_IsTheServersPrivatePositionUpdate()
+        => Assert.Equal(0x02DBu, PrivateUpdatePosition.Opcode);
 }
