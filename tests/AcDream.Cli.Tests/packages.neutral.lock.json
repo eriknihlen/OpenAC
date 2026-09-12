@@ -285,7 +285,7 @@
       "acdream.cli": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.4, )",
+          "AcDream.Core": "[0.1.5, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
           "SixLabors.ImageSharp": "[3.1.12, )"
         }
@@ -293,7 +293,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.4, )",
+          "AcDream.Plugin.Abstractions": "[0.1.5, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.Core": "[0.0.18, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",

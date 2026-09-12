@@ -387,12 +387,12 @@
       "acdream.app": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.4, )",
-          "AcDream.Core": "[0.1.4, )",
-          "AcDream.Core.Net": "[0.1.4, )",
-          "AcDream.Platform": "[0.1.4, )",
-          "AcDream.Runtime": "[0.1.4, )",
-          "AcDream.UI.Abstractions": "[0.1.4, )",
+          "AcDream.Content": "[0.1.5, )",
+          "AcDream.Core": "[0.1.5, )",
+          "AcDream.Core.Net": "[0.1.5, )",
+          "AcDream.Platform": "[0.1.5, )",
+          "AcDream.Runtime": "[0.1.5, )",
+          "AcDream.UI.Abstractions": "[0.1.5, )",
           "Arch": "[2.1.0, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "Chorizite.Core": "[0.0.18, )",
@@ -414,7 +414,7 @@
       "acdream.content": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.4, )",
+          "AcDream.Core": "[0.1.5, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "SixLabors.ImageSharp": "[3.1.12, )"
         }
@@ -422,7 +422,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.4, )",
+          "AcDream.Plugin.Abstractions": "[0.1.5, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.Core": "[0.0.18, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
@@ -433,7 +433,7 @@
       "acdream.core.net": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.4, )"
+          "AcDream.Core": "[0.1.5, )"
         }
       },
       "acdream.platform": {
@@ -445,18 +445,18 @@
       "acdream.runtime": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.4, )",
-          "AcDream.Core": "[0.1.4, )",
-          "AcDream.Core.Net": "[0.1.4, )",
-          "AcDream.Platform": "[0.1.4, )",
-          "AcDream.Plugin.Abstractions": "[0.1.4, )"
+          "AcDream.Content": "[0.1.5, )",
+          "AcDream.Core": "[0.1.5, )",
+          "AcDream.Core.Net": "[0.1.5, )",
+          "AcDream.Platform": "[0.1.5, )",
+          "AcDream.Plugin.Abstractions": "[0.1.5, )"
         }
       },
       "acdream.ui.abstractions": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.4, )",
-          "AcDream.Runtime": "[0.1.4, )",
+          "AcDream.Core": "[0.1.5, )",
+          "AcDream.Runtime": "[0.1.5, )",
           "Silk.NET.Input": "[2.23.0, )"
         }
       },
