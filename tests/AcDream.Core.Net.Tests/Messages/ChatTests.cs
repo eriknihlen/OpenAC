@@ -56,6 +56,42 @@ public sealed class ChatTests
     }
 
     [Fact]
+    public void BuildTalkDirect_WritesMessageThenTargetId_Issue50()
+    {
+        byte[] body = ChatRequests.BuildTalkDirect(
+            gameActionSequence: 7, targetGuid: 0x8000ABCDu, message: "hey");
+
+        Assert.Equal(ChatRequests.GameActionEnvelope,
+            BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(0)));
+        Assert.Equal(7u, BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(4)));
+        Assert.Equal(0x0032u, ChatRequests.TalkDirectOpcode);
+        Assert.Equal(ChatRequests.TalkDirectOpcode,
+            BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(8)));
+
+        ushort len = BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(12));
+        Assert.Equal(3, len);
+        Assert.Equal("hey", Encoding.ASCII.GetString(body.AsSpan(14, 3)));
+
+        // "hey" record = 2+3=5, padded to 8; the id follows it.
+        Assert.Equal(0x8000ABCDu,
+            BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(20)));
+        Assert.Equal(24, body.Length);
+    }
+
+    [Fact]
+    public void BuildTalkDirect_PadsTheMessageBeforeTheTargetId_Issue50()
+    {
+        // 2 + 4 = 6 bytes of record pad out to 8.
+        byte[] body = ChatRequests.BuildTalkDirect(
+            gameActionSequence: 1, targetGuid: 0x50000001u, message: "abcd");
+
+        Assert.Equal(24, body.Length);
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(18)));
+        Assert.Equal(0x50000001u,
+            BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(20)));
+    }
+
+    [Fact]
     public void BuildChatChannel_IncludesChannelId()
     {
         byte[] body = ChatRequests.BuildChatChannel(

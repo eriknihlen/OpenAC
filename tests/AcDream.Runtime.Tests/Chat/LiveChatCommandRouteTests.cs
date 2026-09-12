@@ -21,6 +21,7 @@ public sealed class LiveChatCommandRouteTests
             () => 0x50000001u,
             text => sent.Add($"talk:{text}"),
             (target, text) => sent.Add($"tell:{target}:{text}"),
+            (guid, text) => sent.Add($"talkdirect:{guid:X8}:{text}"),
             (channel, text) => sent.Add($"channel:{channel:X8}:{text}"),
             (_, _, _, _, text, _) => sent.Add($"turbine:{text}")));
 
@@ -70,6 +71,7 @@ public sealed class LiveChatCommandRouteTests
             text => sent.Add($"talk:{text}"),
             (_, _) => { },
             (_, _) => { },
+            (_, _) => { },
             (_, _, _, _, _, _) => { },
             ResolvePose: command => string.Equals(
                     command,
@@ -109,6 +111,7 @@ public sealed class LiveChatCommandRouteTests
             _ => { }, communication, communication.Chat,
             communication.TurbineChat, character, () => 1u,
             text => sent.Add($"talk:{text}"), (_, _) => { }, (_, _) => { },
+            (_, _) => { },
             (_, _, _, _, _, _) => { },
             ResolvePose: _ => new RetailChatPose(7u, string.Empty, string.Empty),
             ExecuteMotion: motion => sent.Add($"motion:{motion}")));

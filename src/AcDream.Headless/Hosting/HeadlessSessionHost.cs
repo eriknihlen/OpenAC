@@ -750,6 +750,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         PlayerGuid: () => runtime.PlayerIdentity.ServerGuid,
         SendTalk: session.SendTalk,
         SendTell: session.SendTell,
+        SendTalkDirect: session.SendTalkDirect,
         SendChannel: session.SendChannel,
         SendTurbineChat: session.SendTurbineChatTo,
         Log: message => _diagnostics.Message(

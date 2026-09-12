@@ -5,7 +5,8 @@ public static class ChatInputParser
     public readonly record struct ParsedInput(
         ChatChannelKind Channel,
         string? TargetName,
-        string Text);
+        string Text,
+        uint TargetGuid = 0u);
 
     // Alias tables. Order matters only for error messages — verb
     // matching is exact-token, not prefix.
@@ -77,12 +78,19 @@ public static class ChatInputParser
     public static bool IsReplyMissingLastTeller(string trimmed, string? lastTellSender) =>
         string.IsNullOrEmpty(lastTellSender) && TryParseMessageOnly(trimmed, ReplyAliases, out _);
 
+    public static bool IsRetellMissingLastTellee(
+        string trimmed,
+        string? lastOutgoingTellTarget) =>
+        string.IsNullOrEmpty(lastOutgoingTellTarget)
+        && TryParseMessageOnly(trimmed, RetellAliases, out _);
+
     public static ParsedInput? Parse(
         string raw,
         ChatChannelKind defaultChannel,
         string? lastTellSender,
         string? lastOutgoingTellTarget = null,
-        string? defaultTellTarget = null)
+        string? defaultTellTarget = null,
+        uint defaultTellTargetGuid = 0u)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
         var trimmed = raw.Trim();
@@ -98,7 +106,8 @@ public static class ChatInputParser
                     defaultChannel,
                     lastTellSender,
                     lastOutgoingTellTarget,
-                    defaultTellTarget);
+                    defaultTellTarget,
+                    defaultTellTargetGuid);
             }
             return new ParsedInput(ChatChannelKind.Say, null, trimmed);
         }
@@ -148,7 +157,11 @@ public static class ChatInputParser
         {
             return string.IsNullOrEmpty(defaultTellTarget)
                 ? null
-                : new ParsedInput(ChatChannelKind.Tell, defaultTellTarget, trimmed);
+                : new ParsedInput(
+                    ChatChannelKind.Tell,
+                    defaultTellTarget,
+                    trimmed,
+                    defaultTellTargetGuid);
         }
 
         return new ParsedInput(defaultChannel, null, trimmed);

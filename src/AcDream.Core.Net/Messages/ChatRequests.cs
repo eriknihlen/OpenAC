@@ -9,6 +9,7 @@ public static class ChatRequests
     public const uint GameActionEnvelope = 0xF7B1u;
     public const uint TalkOpcode        = 0x0015u;
     public const uint TellOpcode        = 0x005Du;
+    public const uint TalkDirectOpcode  = 0x0032u;
     public const uint ChatChannelOpcode = 0x0147u;
 
     /// <summary>Send a local /say message (heard by anyone within ~20m).</summary>
@@ -36,6 +37,26 @@ public static class ChatRequests
         BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8), TellOpcode);
         Array.Copy(msg,  0, body, 12, msg.Length);
         Array.Copy(name, 0, body, 12 + msg.Length, name.Length);
+        return body;
+    }
+
+    /// <summary>
+    /// Direct speech aimed at one already-identified object rather than at a
+    /// name. The server resolves the id against the objects around us, so this
+    /// reaches creatures and NPCs that a by-name tell cannot address.
+    /// </summary>
+    public static byte[] BuildTalkDirect(uint gameActionSequence, uint targetGuid, string message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        byte[] msg = PackString16L(message);
+        byte[] body = new byte[16 + msg.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(body,           GameActionEnvelope);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4), gameActionSequence);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8), TalkDirectOpcode);
+        Array.Copy(msg, 0, body, 12, msg.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(12 + msg.Length),
+            targetGuid);
         return body;
     }
 

@@ -1527,6 +1527,14 @@ public sealed partial class WorldSession : IDisposable
         SendGameAction(body);
     }
 
+    public void SendTalkDirect(uint targetGuid, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        uint seq = NextGameActionSequence();
+        byte[] body = ChatRequests.BuildTalkDirect(seq, targetGuid, text);
+        SendGameAction(body);
+    }
+
     public void SendChannel(uint channelId, string text)
     {
         ArgumentNullException.ThrowIfNull(text);

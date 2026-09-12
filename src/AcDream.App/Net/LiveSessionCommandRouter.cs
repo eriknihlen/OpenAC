@@ -13,6 +13,7 @@ internal sealed record LiveSessionCommandBindings(
     Func<uint> PlayerGuid,
     Action<string> SendTalk,
     Action<string, string> SendTell,
+    Action<uint, string> SendTalkDirect,
     Action<uint, string> SendChannel,
     Action<uint, uint, uint, uint, string, uint> SendTurbineChat,
     Action<ShortcutEntry> AddShortcut,
@@ -144,6 +145,7 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
         ArgumentNullException.ThrowIfNull(bindings.PlayerGuid);
         ArgumentNullException.ThrowIfNull(bindings.SendTalk);
         ArgumentNullException.ThrowIfNull(bindings.SendTell);
+        ArgumentNullException.ThrowIfNull(bindings.SendTalkDirect);
         ArgumentNullException.ThrowIfNull(bindings.SendChannel);
         ArgumentNullException.ThrowIfNull(bindings.SendTurbineChat);
         ArgumentNullException.ThrowIfNull(bindings.Communication);
@@ -162,6 +164,7 @@ internal sealed class LiveSessionCommandRouter : ILiveSessionCommandRouting
             bindings.PlayerGuid,
             bindings.SendTalk,
             bindings.SendTell,
+            bindings.SendTalkDirect,
             bindings.SendChannel,
             bindings.SendTurbineChat,
             bindings.Log,
