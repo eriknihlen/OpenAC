@@ -73,6 +73,23 @@ public sealed class TweakedSoundHooksTests
         Assert.False(TweakedSoundHooks.TryRoll(unlikely, new ScriptedRandom(0.5f), out _, out _));
     }
 
+    // The other float of the same pair is the hook's authored priority — how
+    // important the sound is when the mixer has to choose whose voice a new
+    // sound takes. The reader has the two names the wrong way round, so reading
+    // the priority off the field called Priority would read the play odds
+    // instead: a footstep authored at 0.1 odds would outrank a death cry.
+    [Fact]
+    public void TheAuthoredPriority_IsTheSecondAuthoredFloat()
+    {
+        SoundTweakedHook hook = Hook(0x0A000001u, 0.1f, 0.9f, volume: 1f);
+
+        Assert.Equal(0.9f, TweakedSoundHooks.AuthoredPriority(hook));
+        Assert.Equal(0.1f, TweakedSoundHooks.PlayProbability(hook));
+        Assert.NotEqual(
+            TweakedSoundHooks.AuthoredPriority(hook),
+            TweakedSoundHooks.PlayProbability(hook));
+    }
+
     [Fact]
     public void AlwaysAndNever_AreTheEndsOfTheRange()
     {

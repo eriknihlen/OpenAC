@@ -67,6 +67,9 @@ internal sealed record ContentEffectsAudioDependencies(
     Action<string> Log,
     Action<string> Error)
 {
+    /// <summary>How the mixer allocates its voices, from the client settings.</summary>
+    public AudioMixerOptions MixerOptions { get; init; } = AudioMixerOptions.Default;
+
     public RuntimeCharacterState Character => Runtime.CharacterOwner;
 
     public LiveSessionController Session => Runtime.Session;
@@ -141,7 +144,7 @@ internal interface IContentEffectsAudioCompositionFactory
     DatSoundCache CreateSoundCache(
         IDatReaderWriter dats,
         long maximumDecodedBytes);
-    OpenAlAudioEngine CreateAudioEngine();
+    OpenAlAudioEngine CreateAudioEngine(AudioMixerOptions mixer);
     DictionaryEntitySoundTable CreateEntitySoundTables();
     AudioHookSink CreateAudioSink(
         OpenAlAudioEngine engine,
@@ -305,7 +308,8 @@ internal sealed class RetailContentEffectsAudioCompositionFactory
         long maximumDecodedBytes) =>
         new(dats, maximumDecodedBytes);
 
-    public OpenAlAudioEngine CreateAudioEngine() => new();
+    public OpenAlAudioEngine CreateAudioEngine(AudioMixerOptions mixer) =>
+        new(mixer);
 
     public DictionaryEntitySoundTable CreateEntitySoundTables() => new();
 
@@ -553,7 +557,7 @@ internal sealed class ContentEffectsAudioCompositionPhase :
             Fault(ContentEffectsAudioCompositionPoint.SoundCacheCreated);
             engineLease = audioScope.Acquire(
                 "OpenAL audio engine",
-                _factory.CreateAudioEngine,
+                () => _factory.CreateAudioEngine(_dependencies.MixerOptions),
                 static value => value.Dispose());
             OpenAlAudioEngine engine = engineLease.Resource;
             Fault(ContentEffectsAudioCompositionPoint.AudioEngineCreated);

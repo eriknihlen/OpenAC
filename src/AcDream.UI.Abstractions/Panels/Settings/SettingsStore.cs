@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AcDream.Core.Audio;
 using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.UI.Abstractions.Panels.Settings;
@@ -115,6 +116,44 @@ public sealed class SettingsStore
 
     public void SaveAudio(AudioSettings audio)
         => SaveSection("audio", BuildAudioObject(audio));
+
+    /// <summary>
+    /// The mixer settings. They live in a section of their own rather than
+    /// among the game's sound options: those are written whole from the options
+    /// panel, which would drop anything it does not know about.
+    /// </summary>
+    public AudioMixerOptions LoadAudioMixer()
+    {
+        if (!File.Exists(_path)) return AudioMixerOptions.Default;
+        try
+        {
+            using var stream = File.OpenRead(_path);
+            var doc  = JsonDocument.Parse(stream);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("audioMixer", out var mixer)
+                || mixer.ValueKind != JsonValueKind.Object)
+                return AudioMixerOptions.Default;
+
+            var d = AudioMixerOptions.Default;
+            return new AudioMixerOptions
+            {
+                RetailMixer = ReadBool(mixer, "retailMixer", d.RetailMixer),
+                VoiceCount  = ReadInt (mixer, "voiceCount",  d.VoiceCount),
+                UseAuthoredPriority =
+                    ReadBool(mixer, "useAuthoredPriority", d.UseAuthoredPriority),
+                MaxVoicesPerWave =
+                    ReadInt (mixer, "maxVoicesPerWave", d.MaxVoicesPerWave),
+            }.Normalized();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"settings: failed to load {_path}: {ex.Message} — using defaults");
+            return AudioMixerOptions.Default;
+        }
+    }
+
+    public void SaveAudioMixer(AudioMixerOptions mixer)
+        => SaveSection("audioMixer", BuildAudioMixerObject(mixer));
 
     public ChatSettings LoadChat()
     {
@@ -686,6 +725,16 @@ public sealed class SettingsStore
             ["sfx"]                     = a.Sfx,
             ["sfxEnabled"]              = a.SfxEnabled,
             ["soundFeatures"]           = a.SoundFeatures,
+        };
+
+    private static SortedDictionary<string, object> BuildAudioMixerObject(
+        AudioMixerOptions m)
+        => new(StringComparer.Ordinal)
+        {
+            ["maxVoicesPerWave"]    = m.MaxVoicesPerWave,
+            ["retailMixer"]         = m.RetailMixer,
+            ["useAuthoredPriority"] = m.UseAuthoredPriority,
+            ["voiceCount"]          = m.VoiceCount,
         };
 
     /// <summary>

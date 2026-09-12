@@ -60,8 +60,9 @@ public sealed class UiSoundController
             return false;
 
         // PlaySoundFromCenter takes no volume argument, so the authored entry
-        // volume is the one that reaches the mixer.
-        return _engine.PlayUiWave(waveId, wave, entry.Volume);
+        // volume is the one that reaches the mixer. Interface cues are authored
+        // high-priority, which is what keeps them audible in a crowd.
+        return _engine.PlayUiWave(waveId, wave, entry.Volume, entry.Priority);
     }
 
     public bool PlayEnvironCue(uint changeType) =>

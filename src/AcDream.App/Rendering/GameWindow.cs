@@ -232,6 +232,7 @@ public sealed class GameWindow :
     private AcDream.Core.Audio.DatSoundCache? _soundCache;
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
+    private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -819,6 +820,13 @@ public sealed class GameWindow :
         _audioEngine = value.Engine;
         _entitySoundTables = value.EntitySoundTables;
         _audioSink = value.HookSink;
+        _audioMixerCommand = AcDream.App.Audio.AudioMixerCommandBinding.TryRegister(
+            _automation?.PluginCommands,
+            value.Engine,
+            () => _runtimeSettings.AudioMixer,
+            _runtimeSettings.SaveAudioMixer,
+            line => _runtimeCommunication.AddText(
+                line, AcDream.Core.Chat.RetailLogTextType.ClientLocal));
     }
 
     void IGameWindowWorldRenderPublication.PublishSceneLighting(
@@ -1196,7 +1204,10 @@ public sealed class GameWindow :
                     _translucencyFades,
                     _options.NoAudio,
                     Console.WriteLine,
-                    Console.Error.WriteLine),
+                    Console.Error.WriteLine)
+                {
+                    MixerOptions = _runtimeSettings.AudioMixer,
+                },
                 this).Compose(platformResult, hostInputCamera),
             (platformResult, hostInputCamera, contentEffectsAudio) =>
                 new SettingsDevToolsCompositionPhase(
@@ -1543,6 +1554,7 @@ public sealed class GameWindow :
         if (!_lifetime.HasShutdownRoots)
         {
             PersistKeyBindingsAtShutdown();
+            _audioMixerCommand?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());

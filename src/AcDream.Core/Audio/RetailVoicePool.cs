@@ -2,7 +2,17 @@ using System;
 
 namespace AcDream.Core.Audio;
 
-public readonly record struct VoiceSlotState(bool Occupied, bool StillPlaying, float Priority);
+/// <summary>
+/// What one voice is holding when a new sound asks for a place to play. The
+/// wave id and the start time are what the per-sound cap needs: which sound
+/// this is, and which copy of it has been playing longest.
+/// </summary>
+public readonly record struct VoiceSlotState(
+    bool Occupied,
+    bool StillPlaying,
+    float Priority,
+    uint WaveId = 0,
+    long StartedAtMs = 0);
 
 public static class RetailVoicePool
 {
@@ -10,13 +20,13 @@ public static class RetailVoicePool
     public const int NoSlot = -1;
 
     /// <summary>
-    /// The priority every voice records, and the priority every new sound asks
-    /// with. One value for the whole pool is what the game itself does, and it
-    /// is what makes the second pass below unreachable: a slot is taken from a
-    /// still-playing voice only when the recorded priority is <em>strictly</em>
-    /// lower than the new one, and nothing is strictly lower than itself. So a
-    /// sound that has started always finishes, and the seventeenth simultaneous
-    /// sound is dropped instead of cutting one of the sixteen short.
+    /// The priority a voice records when no authored priority is in force: one
+    /// value for the whole pool, which is what the game itself does. It is also
+    /// what makes the second pass below unreachable: a voice is taken from a
+    /// still-playing sound only when its recorded priority is
+    /// <em>strictly</em> lower than the new one, and nothing is strictly lower
+    /// than itself. So a sound that has started always finishes, and the next
+    /// one is dropped instead of cutting a playing one short.
     /// </summary>
     public const float VoicePriority = 0f;
 

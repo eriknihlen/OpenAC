@@ -1,4 +1,5 @@
 using AcDream.App.Audio;
+using AcDream.Core.Audio;
 using Silk.NET.OpenAL;
 
 namespace AcDream.App.Tests.Audio;
@@ -12,22 +13,68 @@ public sealed class OpenAlResourceLifetimeTests
         var engine = new OpenAlAudioEngine(new Factory(api));
 
         Assert.True(engine.IsAvailable);
-        // OpenAC #42: one pool of sixteen for everything. An interface sound
-        // shares these voices, so there is no second set of sources to make.
-        Assert.Equal(16, api.GeneratedSources.Count);
-        Assert.Equal(16, api.Configured3D.Count);
+        // OpenAC #42: one pool for everything. An interface sound shares these
+        // voices, so there is no second set of sources to make. How many there
+        // are is a client setting, and thirty-two is its default.
+        Assert.Equal(32, api.GeneratedSources.Count);
+        Assert.Equal(32, api.Configured3D.Count);
 
         engine.Dispose();
         engine.Dispose();
 
         Assert.True(engine.IsDisposalComplete);
-        Assert.Equal(16, api.DeletedSources.Count);
+        Assert.Equal(32, api.DeletedSources.Count);
         Assert.Equal(
-            Enumerable.Range(1, 16).Reverse().Select(value => (uint)value),
+            Enumerable.Range(1, 32).Reverse().Select(value => (uint)value),
             api.DeletedSources);
         Assert.Equal(1, api.ClearCurrentCalls);
         Assert.Equal(1, api.DestroyContextCalls);
         Assert.Equal(1, api.CloseDeviceCalls);
+    }
+
+    // The shipped mixer is sixteen voices, so the knob that asks for it makes
+    // sixteen sources and not one more.
+    [Fact]
+    public void TheRetailMixerSetting_MakesExactlySixteenSources()
+    {
+        var api = new RecordingApi();
+
+        var engine = new OpenAlAudioEngine(
+            new Factory(api),
+            new AudioMixerOptions { RetailMixer = true, VoiceCount = 64 });
+
+        Assert.True(engine.IsAvailable);
+        Assert.Equal(16, api.GeneratedSources.Count);
+        Assert.Equal(16, engine.MixerOptions.EffectiveVoiceCount);
+        engine.Dispose();
+    }
+
+    // A voice count out of range cannot make the engine ask the driver for a
+    // silly number of sources.
+    [Fact]
+    public void AnOutOfRangeVoiceCount_IsBroughtInsideItsRange()
+    {
+        var api = new RecordingApi();
+
+        var engine = new OpenAlAudioEngine(
+            new Factory(api),
+            new AudioMixerOptions { VoiceCount = 4096 });
+
+        Assert.Equal(AudioMixerOptions.MaximumVoiceCount, api.GeneratedSources.Count);
+        engine.Dispose();
+    }
+
+    // An engine that never came up has no sources to resize, and must not try.
+    [Fact]
+    public void AnUnavailableEngine_IgnoresNewMixerSettings()
+    {
+        var api = new RecordingApi { ContextResult = 0 };
+        var engine = new OpenAlAudioEngine(new Factory(api));
+
+        engine.ApplyMixerOptions(new AudioMixerOptions { VoiceCount = 64 });
+
+        Assert.False(engine.IsAvailable);
+        Assert.Empty(api.GeneratedSources);
     }
 
     // OpenAC #42: the backend's output limiter pulls the whole mix down when a

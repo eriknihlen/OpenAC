@@ -1,3 +1,4 @@
+using AcDream.Core.Audio;
 using AcDream.Core.Net.Messages;
 using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.UI.Abstractions.Settings;
@@ -14,6 +15,8 @@ internal interface IRuntimeSettingsStorage
 
     AudioSettings LoadAudio();
 
+    AudioMixerOptions LoadAudioMixer();
+
     ChatSettings LoadChat();
 
     CharacterSettings LoadCharacter(string toonKey);
@@ -23,6 +26,8 @@ internal interface IRuntimeSettingsStorage
     void SaveDisplay(DisplaySettings display);
 
     void SaveAudio(AudioSettings audio);
+
+    void SaveAudioMixer(AudioMixerOptions mixer);
 
     void SaveChat(ChatSettings chat);
 
@@ -48,6 +53,8 @@ internal sealed class JsonRuntimeSettingsStorage : IRuntimeSettingsStorage
 
     public AudioSettings LoadAudio() => _store.LoadAudio();
 
+    public AudioMixerOptions LoadAudioMixer() => _store.LoadAudioMixer();
+
     public ChatSettings LoadChat() => _store.LoadChat();
 
     public CharacterSettings LoadCharacter(string toonKey) =>
@@ -58,6 +65,9 @@ internal sealed class JsonRuntimeSettingsStorage : IRuntimeSettingsStorage
     public void SaveDisplay(DisplaySettings display) => _store.SaveDisplay(display);
 
     public void SaveAudio(AudioSettings audio) => _store.SaveAudio(audio);
+
+    public void SaveAudioMixer(AudioMixerOptions mixer) =>
+        _store.SaveAudioMixer(mixer);
 
     public void SaveChat(ChatSettings chat) => _store.SaveChat(chat);
 
@@ -152,6 +162,7 @@ internal sealed class RuntimeSettingsController :
         _characterOptionValue = characterOptionValue;
 
         Audio = _storage.LoadAudio();
+        AudioMixer = _storage.LoadAudioMixer();
         Chat = _storage.LoadChat();
         _defaultCharacter = _storage.LoadCharacter(DefaultToonKey);
         Character = _defaultCharacter;
@@ -173,6 +184,12 @@ internal sealed class RuntimeSettingsController :
     public DisplaySettings Display { get; private set; }
 
     public AudioSettings Audio { get; private set; }
+
+    /// <summary>
+    /// The mixer settings: how many sounds can be audible at once and what
+    /// happens when they all are. Client settings, not game options.
+    /// </summary>
+    public AudioMixerOptions AudioMixer { get; private set; }
 
     public ChatSettings Chat { get; private set; }
 
@@ -411,6 +428,25 @@ internal sealed class RuntimeSettingsController :
         catch (Exception ex)
         {
             _log($"settings: audio save failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Write the mixer settings down. Applying them to the running mixer is the
+    /// audio engine's job; this owns only what survives the session.
+    /// </summary>
+    public void SaveAudioMixer(AudioMixerOptions mixer)
+    {
+        ArgumentNullException.ThrowIfNull(mixer);
+        try
+        {
+            _storage.SaveAudioMixer(mixer);
+            AudioMixer = mixer;
+            _log($"settings: audio mixer saved to {_storage.Location}");
+        }
+        catch (Exception ex)
+        {
+            _log($"settings: audio mixer save failed: {ex.Message}");
         }
     }
 

@@ -21,7 +21,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     private bool _disposed;
 
     // ── Voices ───────────────────────────────────────────────────────────────
-    private readonly WorldVoicePool _voices = new();
+    private readonly WorldVoicePool _voices;
     private bool _worldAudioSuspended;
 
     private Func<uint, bool>? _isStillPlaying;
@@ -65,13 +65,21 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public int ResidentBufferCount => _bufferBudget.Count;
 
     public OpenAlAudioEngine()
-        : this(new SilkOpenAlResourceApiFactory())
+        : this(new SilkOpenAlResourceApiFactory(), AudioMixerOptions.Default)
     {
     }
 
-    internal OpenAlAudioEngine(IOpenAlResourceApiFactory apiFactory)
+    public OpenAlAudioEngine(AudioMixerOptions mixer)
+        : this(new SilkOpenAlResourceApiFactory(), mixer)
+    {
+    }
+
+    internal OpenAlAudioEngine(
+        IOpenAlResourceApiFactory apiFactory,
+        AudioMixerOptions? mixer = null)
     {
         ArgumentNullException.ThrowIfNull(apiFactory);
+        _voices = new WorldVoicePool(mixer ?? AudioMixerOptions.Default);
         IOpenAlResourceApi api;
         try
         {
@@ -104,7 +112,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
             }
 
             // One pool for everything: world sounds, ambients and interface
-            // sounds all speak through these sixteen sources.
+            // sounds all speak through these sources.
             for (int i = 0; i < _voices.Count; i++)
                 _voices[i].SourceId = _resources.Create3DSource();
 
@@ -159,6 +167,31 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         _al = null;
     }
 
+    /// <summary>The mixer settings in force.</summary>
+    internal AudioMixerOptions MixerOptions => _voices.Options;
+
+    /// <summary>
+    /// Put new mixer settings in force without restarting: the pool grows or
+    /// shrinks, and the sources it needs are made or released to match. A
+    /// voice the pool no longer has room for stops whatever it was playing.
+    /// An engine that never came up keeps its settings for its next start.
+    /// </summary>
+    internal void ApplyMixerOptions(AudioMixerOptions mixer)
+    {
+        ArgumentNullException.ThrowIfNull(mixer);
+        if (!_available || _resources is null)
+            return;
+
+        _voices.ApplyOptions(mixer, RetireVoice, _resources.Create3DSource);
+    }
+
+    private void RetireVoice(WorldVoicePool.Voice voice)
+    {
+        Silence(voice);
+        if (voice.SourceId != 0)
+            _resources!.ReleaseSource(voice.SourceId);
+    }
+
     // ── IAudioEngine ─────────────────────────────────────────────────────────
 
     public void SetListener(float posX, float posY, float posZ, float headingDegrees)
@@ -174,7 +207,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint waveId,
         WaveData wave,
         Vector3 position,
-        float volume)
+        float volume,
+        float priority)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -189,23 +223,53 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId);
-        if (voice is null) return false;    // every voice busy — drop the sound
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(
+            ownerId, waveId, priority, out bool tookPlayingVoice);
+        if (voice is null)                  // every voice busy — drop the sound
+        {
+            ProbeVoices("dropped world", waveId, ownerId);
+            return false;
+        }
+
+        if (tookPlayingVoice)
+            ProbeVoices("stole for world", waveId, ownerId);
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
         return true;
     }
 
-    private WorldVoicePool.Voice? ClaimWorldVoice(uint ownerId) =>
-        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId, isInterface: false);
+    private WorldVoicePool.Voice? ClaimWorldVoice(
+        uint ownerId,
+        uint waveId,
+        float priority,
+        out bool tookPlayingVoice) =>
+        _voices.Claim(
+            _isStillPlaying ??= IsStillPlaying,
+            ownerId,
+            isInterface: false,
+            authoredPriority: priority,
+            waveId: waveId,
+            nowMs: Environment.TickCount64,
+            out tookPlayingVoice);
 
-    private WorldVoicePool.Voice? ClaimInterfaceVoice() =>
-        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId: 0, isInterface: true);
+    private WorldVoicePool.Voice? ClaimInterfaceVoice(
+        uint waveId,
+        float priority,
+        out bool tookPlayingVoice) =>
+        _voices.Claim(
+            _isStillPlaying ??= IsStillPlaying,
+            ownerId: 0,
+            isInterface: true,
+            authoredPriority: priority,
+            waveId: waveId,
+            nowMs: Environment.TickCount64,
+            out tookPlayingVoice);
 
     /// <summary>
     /// Hand a claimed voice its sound and start it. This is the one place a
-    /// voice is bound to a buffer, so it is the one place its level, its pan
-    /// and its recorded priority are set.
+    /// voice is bound to a buffer, so it is the one place its level and its pan
+    /// are set. It is also the teardown of whatever the voice held before,
+    /// which is what a voice taken from a playing sound needs.
     /// </summary>
     private void Speak(WorldVoicePool.Voice voice, uint buffer, float gain, int pan)
     {
@@ -216,6 +280,32 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         ApplyPan(voice.SourceId, pan);
         _al.SetSourceProperty(voice.SourceId, SourceBoolean.Looping, false);
         _al.SourcePlay(voice.SourceId);
+    }
+
+    private long _lastProbeDumpMs;
+
+    // Temporary probe (ACDREAM_PROBE_AUDIO_VOICES=1): what every voice holds
+    // at the moment a sound is dropped or takes a voice from a playing one, at
+    // most twice a second.
+    private void ProbeVoices(string what, uint waveId, uint ownerId)
+    {
+        if (!AudioDiagnostics.ProbeVoicesEnabled || _al is null) return;
+        long now = Environment.TickCount64;
+        if (now - _lastProbeDumpMs < 500) return;
+        _lastProbeDumpMs = now;
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append(FormattableString.Invariant(
+            $"[probe-voices] {what} wave=0x{waveId:X8} owner=0x{ownerId:X8}; voices:"));
+        for (int i = 0; i < _voices.Count; i++)
+        {
+            WorldVoicePool.Voice v = _voices[i];
+            _al.GetSourceProperty(v.SourceId, GetSourceInteger.SourceState, out int state);
+            _al.GetSourceProperty(v.SourceId, SourceFloat.SecOffset, out float offset);
+            sb.Append(FormattableString.Invariant(
+                $" [{i}] wave=0x{v.WaveId:X8} owner=0x{v.OwnerId:X8}{(v.IsInterface ? " ui" : "")} prio={v.Priority:0.00} state={(SourceState)state} at={offset:0.00}s age={now - v.SpokeAtMs}ms"));
+        }
+        Console.WriteLine(sb.ToString());
     }
 
     private void ApplyPan(uint sourceId, int pan)
@@ -258,10 +348,10 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     /// <summary>
     /// Play a raw WaveData blob as an interface sound: centred, with no
-    /// distance falloff, but sharing the same sixteen voices as everything
-    /// else. When they are all busy the interface sound is dropped too.
+    /// distance falloff, but sharing the same voices as everything else. When
+    /// they are all busy the interface sound is dropped too.
     /// </summary>
-    public bool PlayUiWave(uint waveId, WaveData wave, float volume = 1f)
+    public bool PlayUiWave(uint waveId, WaveData wave, float volume, float priority)
     {
         if (!_available || _al is null) return false;
 
@@ -271,8 +361,16 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimInterfaceVoice();
-        if (voice is null) return false;
+        WorldVoicePool.Voice? voice = ClaimInterfaceVoice(
+            waveId, priority, out bool tookPlayingVoice);
+        if (voice is null)
+        {
+            ProbeVoices("dropped ui", waveId, 0);
+            return false;
+        }
+
+        if (tookPlayingVoice)
+            ProbeVoices("stole for ui", waveId, 0);
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);
         return true;
@@ -287,7 +385,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint waveId,
         WaveData wave,
         Vector3 position,
-        float volume)
+        float volume,
+        float priority)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -302,8 +401,16 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId: 0);
-        if (voice is null) return false;
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(
+            ownerId: 0, waveId, priority, out bool tookPlayingVoice);
+        if (voice is null)
+        {
+            ProbeVoices("dropped ambient", waveId, 0);
+            return false;
+        }
+
+        if (tookPlayingVoice)
+            ProbeVoices("stole for ambient", waveId, 0);
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
         return true;
@@ -312,7 +419,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public bool PlayAmbientFromCenter(
         uint waveId,
         WaveData wave,
-        float volume)
+        float volume,
+        float priority)
     {
         if (_worldAudioSuspended || !_available || _al is null) return false;
 
@@ -322,8 +430,16 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId: 0);
-        if (voice is null) return false;
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(
+            ownerId: 0, waveId, priority, out bool tookPlayingVoice);
+        if (voice is null)
+        {
+            ProbeVoices("dropped ambient-center", waveId, 0);
+            return false;
+        }
+
+        if (tookPlayingVoice)
+            ProbeVoices("stole for ambient-center", waveId, 0);
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);
         return true;

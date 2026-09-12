@@ -466,13 +466,17 @@ public sealed class ContentEffectsAudioCompositionTests
             return new DatSoundCache(dats, maximumDecodedBytes);
         }
 
-        public OpenAlAudioEngine CreateAudioEngine()
+        public OpenAlAudioEngine CreateAudioEngine(AudioMixerOptions mixer)
         {
             AudioFactoryCalls++;
+            LastMixerOptions = mixer;
             LastAudioEngine = new OpenAlAudioEngine(
-                new AudioApiFactory(new FakeAudioApi()));
+                new AudioApiFactory(new FakeAudioApi()),
+                mixer);
             return LastAudioEngine;
         }
+
+        internal AudioMixerOptions? LastMixerOptions { get; private set; }
 
         public DictionaryEntitySoundTable CreateEntitySoundTables() => new();
         public AudioHookSink CreateAudioSink(

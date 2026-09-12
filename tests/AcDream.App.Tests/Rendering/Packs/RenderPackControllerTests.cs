@@ -1079,6 +1079,13 @@ public sealed class RenderPackControllerTests
 
         public AudioSettings LoadAudio() => AudioSettings.Default;
 
+        public AcDream.Core.Audio.AudioMixerOptions LoadAudioMixer() =>
+            AcDream.Core.Audio.AudioMixerOptions.Default;
+
+        public void SaveAudioMixer(AcDream.Core.Audio.AudioMixerOptions mixer)
+        {
+        }
+
         public ChatSettings LoadChat() => ChatSettings.Default;
 
         public CharacterSettings LoadCharacter(string toonKey) => CharacterSettings.Default;

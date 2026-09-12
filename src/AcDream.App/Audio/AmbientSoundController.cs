@@ -141,11 +141,12 @@ public sealed class AmbientSoundController
 
         if (firing.Position is { } position)
         {
-            _engine.PlayAmbient3DWave(waveId, wave, position, volume);
+            _engine.PlayAmbient3DWave(
+                waveId, wave, position, volume, entry.Priority);
             return;
         }
 
-        _engine.PlayAmbientFromCenter(waveId, wave, volume);
+        _engine.PlayAmbientFromCenter(waveId, wave, volume, entry.Priority);
     }
 
     private static bool IsIndoorCell(uint objCellId) => (objCellId & 0xFFFFu) >= 0x0100u;

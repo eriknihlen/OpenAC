@@ -29,6 +29,22 @@ public static class TweakedSoundHooks
     }
 
     /// <summary>
+    /// The hook's authored priority: how important this sound is, in [0,1],
+    /// when the mixer has to choose which voice a new sound takes.
+    /// <para>
+    /// It is the <em>second</em> float of the authored record, which the dat
+    /// reader surfaces under the name <c>Probability</c> — the mirror image of
+    /// <see cref="PlayProbability"/> and the same swap stated once here rather
+    /// than at every call site.
+    /// </para>
+    /// </summary>
+    public static float AuthoredPriority(SoundTweakedHook hook)
+    {
+        ArgumentNullException.ThrowIfNull(hook);
+        return hook.Probability;
+    }
+
+    /// <summary>
     /// Roll the hook's probability and, when it wins, report the sound to play
     /// and the volume to play it at.
     /// </summary>

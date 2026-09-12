@@ -2,6 +2,7 @@ using AcDream.App.Diagnostics;
 using AcDream.App.Net;
 using AcDream.App.Rendering;
 using AcDream.App.Settings;
+using AcDream.Core.Audio;
 using AcDream.Core.Net.Messages;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Settings;
@@ -1390,6 +1391,17 @@ public sealed partial class RuntimeSettingsControllerTests
         {
             AudioLoads++;
             return AudioValue;
+        }
+
+        public AudioMixerOptions AudioMixerValue { get; set; } =
+            AudioMixerOptions.Default;
+
+        public AudioMixerOptions LoadAudioMixer() => AudioMixerValue;
+
+        public void SaveAudioMixer(AudioMixerOptions mixer)
+        {
+            _events.Add("save-audio-mixer");
+            AudioMixerValue = mixer;
         }
 
         public ChatSettings LoadChat()
