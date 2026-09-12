@@ -259,26 +259,29 @@ public sealed class InventoryTransactionStateTests
         Assert.False(state.HasPendingRequest);
     }
 
+    // OpenAC #53: while a request is pending, a move failure resolves THAT
+    // request whatever guid the wire carries; with nothing pending it is
+    // ignored.
     [Fact]
-    public void RequestFailedRequiresTheLatchedGuidAndAnActivePending()
+    public void RequestFailedResolvesTheLatchedRequestWhateverGuidTheWireCarries()
     {
         var objects = CreateTable();
         using var state = new InventoryTransactionState(objects);
-        int failures = 0;
-        state.RequestFailed += (_, _) => failures++;
+        var failures = new List<(PendingInventoryRequest Request, uint Error)>();
+        state.RequestFailed += (request, error) => failures.Add((request, error));
 
         Assert.True(state.TryDispatch(
             InventoryRequestKind.DropToWorld, First, static () => true));
 
         objects.RejectMove(Second, 0x426u);
-        Assert.Equal(0, failures);
-        Assert.True(state.HasPendingRequest);
-
-        objects.RejectMove(First, 0x426u);
-        Assert.Equal(1, failures);
+        (PendingInventoryRequest failed, uint error) = Assert.Single(failures);
+        Assert.Equal(First, failed.ItemId);
+        Assert.Equal(0x426u, error);
+        Assert.False(state.HasPendingRequest);
 
         objects.RejectMove(First, 0x1Du);
-        Assert.Equal(1, failures);
+        Assert.Single(failures);
+        Assert.False(state.HasPendingRequest);
     }
 
     [Fact]
