@@ -767,6 +767,80 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.Equal("Ghost", names.ResolveCreature(77));
     }
 
+    // OpenAC #36: a weapon's damage-type mask names every set bit, joined
+    // with "/", in the game's own order and spelling; only a mask with no
+    // type at all is "unknown type".
+    [Theory]
+    [InlineData(0x0003u, "Damage: 30 - 40, Slashing/Piercing")]
+    [InlineData(0x0006u, "Damage: 30 - 40, Piercing/Bludgeoning")]
+    [InlineData(0x0040u, "Damage: 30 - 40, Electrical")]
+    [InlineData(0x0400u, "Damage: 30 - 40, Nether")]
+    [InlineData(0x1000_0000u, "Damage: 30 - 40, Prismatic")]
+    [InlineData(0x1000_0001u, "Damage: 30 - 40, Slashing/Prismatic")]
+    [InlineData(0x0000u, "Damage: 30 - 40, unknown type")]
+    public void WeaponDamageLine_NamesEverySetDamageType(uint damageType, string expected)
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            Name = "Spiked Sword",
+            Type = ItemType.MeleeWeapon,
+            ValidLocations = EquipMask.MeleeWeapon,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[353u] = 2;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: damageType,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(obj, appraisal, _ => null);
+
+        Assert.Contains(expected, report);
+    }
+
+    [Fact]
+    public void ElementalDamageBonus_NamesTheCombinedTypeTheSameWay()
+    {
+        var obj = new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            Name = "Crackling Sword",
+            Type = ItemType.MeleeWeapon,
+            ValidLocations = EquipMask.MeleeWeapon,
+        };
+        var properties = new PropertyBundle();
+        properties.Ints[353u] = 2;
+        properties.Ints[204u] = 4;
+        AppraiseInfoParser.Parsed appraisal = Parsed(
+            properties,
+            weapon: new AppraiseInfoParser.WeaponProfile(
+                DamageType: 0x0041u,
+                WeaponTime: 30u,
+                WeaponSkill: 44u,
+                Damage: 40u,
+                DamageVariance: 0.25d,
+                DamageMod: 1d,
+                WeaponLength: 1d,
+                MaxVelocity: 0d,
+                WeaponOffense: 1d,
+                MaxVelocityEstimated: 0u));
+
+        string report = ItemAppraisalTextFormatter.Build(obj, appraisal, _ => null);
+
+        Assert.Contains("Damage: 30 - 40, Slashing/Electrical", report);
+        Assert.Contains("Elemental Damage Bonus: 4, Slashing/Electrical.", report);
+    }
+
     private static AppraiseInfoParser.Parsed Parsed(
         PropertyBundle properties,
         uint[]? spells = null,

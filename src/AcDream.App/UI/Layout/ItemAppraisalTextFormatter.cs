@@ -225,9 +225,11 @@ public static class ItemAppraisalTextFormatter
                     : weapon.Damage.ToString(CultureInfo.InvariantCulture);
                 if (!launcher)
                 {
-                    damage += TryDamageTypeName(weapon.DamageType, out string? type)
-                        ? $", {type}"
-                        : ", unknown type";
+                    // Only a mask with no type at all is "unknown"; any set
+                    // bits are named, however many there are.
+                    damage += weapon.DamageType == 0u
+                        ? ", unknown type"
+                        : $", {DamageTypeToString(weapon.DamageType)}";
                 }
             }
             ItemAppraisalFontStyle damageStyle = EnchantmentStyle(
@@ -246,7 +248,7 @@ public static class ItemAppraisalTextFormatter
                 report.Line(
                     $"Elemental Damage Bonus: "
                     + $"{elementalBonus.ToString(CultureInfo.InvariantCulture)}, "
-                    + $"{DamageTypeName(weapon.DamageType)}.");
+                    + $"{DamageTypeToString(weapon.DamageType)}.");
 
             if (launcher)
             {
@@ -562,7 +564,7 @@ public static class ItemAppraisalTextFormatter
         if (properties.Floats.ContainsKey(157u)
             && properties.Ints.TryGetValue(263u, out int resistanceType))
             special.Add(
-                $"Resistance Cleaving: {DamageTypeName((uint)resistanceType)}");
+                $"Resistance Cleaving: {DamageTypeToString((uint)resistanceType)}");
         if (properties.DataIds.ContainsKey(55u))
             special.Add("Cast on Strike");
         if (properties.GetBool(99u))
@@ -875,7 +877,7 @@ public static class ItemAppraisalTextFormatter
             && properties.Ints.TryGetValue(45u, out int damageType))
         {
             report.Paragraph(
-                $"Damage bonus for {DamageTypeName((uint)damageType)} spells:",
+                $"Damage bonus for {DamageTypeToString((uint)damageType)} spells:",
                 EnchantmentStyle(
                     appraisal.ResistEnchantments,
                     0x2000u));
@@ -1259,24 +1261,37 @@ public static class ItemAppraisalTextFormatter
             damage > 10d ? "G4" : "G3",
             CultureInfo.InvariantCulture);
 
-    private static bool TryDamageTypeName(uint type, out string? name)
+    /// <summary>
+    /// The damage types a mask names, in the game's own order and joined
+    /// with "/" — a weapon that both slashes and pierces is
+    /// "Slashing/Piercing". Only the named bits appear; a mask with none of
+    /// them is the empty string, which is what the game shows too.
+    /// </summary>
+    private static readonly (uint Bit, string Name)[] DamageTypeNames =
+    [
+        (0x0000_0001u, "Slashing"),
+        (0x0000_0002u, "Piercing"),
+        (0x0000_0004u, "Bludgeoning"),
+        (0x0000_0008u, "Cold"),
+        (0x0000_0010u, "Fire"),
+        (0x0000_0020u, "Acid"),
+        (0x0000_0040u, "Electrical"),
+        (0x0000_0400u, "Nether"),
+        (0x1000_0000u, "Prismatic"),
+    ];
+
+    private static string DamageTypeToString(uint type)
     {
-        name = type switch
+        var names = new System.Text.StringBuilder();
+        foreach ((uint bit, string name) in DamageTypeNames)
         {
-            1u => "Slashing",
-            2u => "Piercing",
-            4u => "Bludgeoning",
-            8u => "Cold",
-            16u => "Fire",
-            32u => "Acid",
-            64u => "Electric",
-            128u => "Health",
-            256u => "Stamina",
-            512u => "Mana",
-            1024u => "Nether",
-            _ => null,
-        };
-        return name is not null;
+            if ((type & bit) == 0u)
+                continue;
+            if (names.Length > 0)
+                names.Append('/');
+            names.Append(name);
+        }
+        return names.ToString();
     }
 
     private static string ClothingCoverage(uint priority)
@@ -1609,11 +1624,6 @@ public static class ItemAppraisalTextFormatter
             ? ItemAppraisalFontStyle.Beneficial
             : ItemAppraisalFontStyle.Detrimental;
     }
-
-    private static string DamageTypeName(uint type)
-        => TryDamageTypeName(type, out string? name)
-            ? name!
-            : $"type {type.ToString(CultureInfo.InvariantCulture)}";
 
     private static string WeaponSubtype(int type) => type switch
     {
