@@ -828,6 +828,11 @@ internal sealed class LivePresentationCompositionPhase
                 CharacterOptionId.CoordinatesOnRadar),
             uiLocked: () => d.Character.Options.GetOptionBit(
                 CharacterOptionId.LockUI),
+            // Fellows and the fellowship leader take their own blip colours;
+            // without this the radar never learned who was in the fellowship.
+            relationshipFor: guid => new AcDream.Core.Ui.RadarRelationshipTraits(
+                IsFellowshipMember: d.Runtime.Fellowship.TryGetMember(guid, out _),
+                IsFellowshipLeader: d.Runtime.Fellowship.Snapshot.LeaderGuid == guid),
             spatialQuery: () => worldState);
         bindings.Adopt(
             "radar snapshot",

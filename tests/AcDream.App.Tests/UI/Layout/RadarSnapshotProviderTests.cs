@@ -61,6 +61,70 @@ public sealed class RadarSnapshotProviderTests
         Assert.Equal(RadarBlipColors.Gold.Green * 0.65f, blip.Color.Y, 5);
     }
 
+    // OpenAC #47: a fellow's blip and the leader's blip take their own
+    // colours; another player at the same range keeps the default colour.
+    [Fact]
+    public void BuildSnapshot_ColorsFellowsByTheRelationshipItIsGiven()
+    {
+        const uint player = 1u;
+        const uint fellow = 2u;
+        const uint leader = 3u;
+        const uint stranger = 4u;
+        var objects = new ClientObjectTable();
+        objects.Ingest(Weenie(player, "Player", ItemType.Creature));
+        foreach ((uint guid, string name) in new[] { (fellow, "Fellow"), (leader, "Leader"), (stranger, "Stranger") })
+        {
+            objects.Ingest(Weenie(guid, name, ItemType.Creature) with
+            {
+                RadarBehavior = (byte)RadarBehavior.ShowAlways,
+            });
+        }
+
+        var entities = new Dictionary<uint, WorldEntity>
+        {
+            [player] = Entity(player, Vector3.Zero, Quaternion.Identity),
+            [fellow] = Entity(fellow, new Vector3(0f, 15f, 0f), Quaternion.Identity),
+            [leader] = Entity(leader, new Vector3(15f, 0f, 0f), Quaternion.Identity),
+            [stranger] = Entity(stranger, new Vector3(-15f, 0f, 0f), Quaternion.Identity),
+        };
+        var spawns = new Dictionary<uint, WorldSession.EntitySpawn>
+        {
+            [player] = Spawn(player) with { ObjectDescriptionFlags = 0x00000008u }, // BF_PLAYER
+            [fellow] = Spawn(fellow) with { ObjectDescriptionFlags = 0x00000008u },
+            [leader] = Spawn(leader) with { ObjectDescriptionFlags = 0x00000008u },
+            [stranger] = Spawn(stranger) with { ObjectDescriptionFlags = 0x00000008u },
+        };
+
+        var provider = new RadarSnapshotProvider(
+            objects, new RadarEntities(() => entities), () => spawns,
+            playerGuid: () => player,
+            playerYawRadians: () => 0f,
+            playerCellId: () => 0xA9B40001u,
+            selectedGuid: () => null,
+            coordinatesOnRadar: () => true,
+            uiLocked: () => false,
+            relationshipFor: guid => new RadarRelationshipTraits(
+                IsFellowshipMember: guid is fellow or leader,
+                IsFellowshipLeader: guid == leader));
+
+        var snapshot = provider.BuildSnapshot();
+
+        Assert.Equal(3, snapshot.Blips.Count);
+        UiRadarBlip fellowBlip = Assert.Single(snapshot.Blips, blip => blip.ObjectId == fellow);
+        UiRadarBlip leaderBlip = Assert.Single(snapshot.Blips, blip => blip.ObjectId == leader);
+        UiRadarBlip strangerBlip = Assert.Single(snapshot.Blips, blip => blip.ObjectId == stranger);
+
+        // The same range dims every blip alike, so the hue is the difference.
+        float dim = strangerBlip.Color.Y;
+        Assert.Equal(RadarBlipColors.Fellowship.Red * dim, fellowBlip.Color.X, 5);
+        Assert.Equal(RadarBlipColors.Fellowship.Green * dim, fellowBlip.Color.Y, 5);
+        Assert.Equal(RadarBlipColors.Fellowship.Blue * dim, fellowBlip.Color.Z, 5);
+        Assert.Equal(RadarBlipColors.FellowshipLeader.Red * dim, leaderBlip.Color.X, 5);
+        Assert.Equal(RadarBlipColors.FellowshipLeader.Green * dim, leaderBlip.Color.Y, 5);
+        Assert.Equal(RadarBlipColors.Default.Red * dim, strangerBlip.Color.X, 5);
+        Assert.Equal(RadarBlipColors.Default.Blue * dim, strangerBlip.Color.Z, 5);
+    }
+
     [Fact]
     public void BuildSnapshot_RejectsShowNever_AndHidesIndoorCoordinates()
     {
