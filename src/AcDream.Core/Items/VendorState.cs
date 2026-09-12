@@ -43,7 +43,10 @@ public readonly record struct VendorShopItem(
     uint? TargetType = null,
     byte? CombatUse = null,
     ushort? AmmoType = null,
-    uint? PublicWeenieBitfield = null);
+    uint? PublicWeenieBitfield = null,
+    uint? Useability = null,
+    uint? HookItemTypes = null,
+    uint? HookType = null);
 
 public enum VendorStateTransitionKind
 {

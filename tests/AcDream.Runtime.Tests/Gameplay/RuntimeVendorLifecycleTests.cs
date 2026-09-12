@@ -250,7 +250,10 @@ public sealed class RuntimeVendorLifecycleTests
                     TargetType: 0x00000080u,
                     CombatUse: (byte)1,
                     AmmoType: (ushort)3,
-                    ObjectDescriptionFlags: (uint)PublicWeenieFlags.Healer),
+                    ObjectDescriptionFlags: (uint)PublicWeenieFlags.Healer,
+                    Useability: 0x00000008u,
+                    HookItemTypes: 0x0000FFFFu,
+                    HookType: 0x00000002u),
             ]));
 
         VendorShopItem listed = Assert.Single(runtime.InventoryOwner.Vendor.Items);
@@ -267,6 +270,9 @@ public sealed class RuntimeVendorLifecycleTests
         Assert.Equal((byte)1, listed.CombatUse);
         Assert.Equal((ushort)3, listed.AmmoType);
         Assert.Equal((uint)PublicWeenieFlags.Healer, listed.PublicWeenieBitfield);
+        Assert.Equal(0x00000008u, listed.Useability);
+        Assert.Equal(0x0000FFFFu, listed.HookItemTypes);
+        Assert.Equal(0x00000002u, listed.HookType);
 
         ClientObject? shopItem = runtime.InventoryOwner.Objects.Get(0x50002000u);
         Assert.NotNull(shopItem);
@@ -283,6 +289,10 @@ public sealed class RuntimeVendorLifecycleTests
         Assert.Equal((byte)1, shopItem.CombatUse);
         Assert.Equal((ushort)3, shopItem.AmmoType);
         Assert.Equal((uint)PublicWeenieFlags.Healer, shopItem.PublicWeenieBitfield);
+        Assert.Equal(0x00000008u, shopItem.Useability);
+        Assert.Equal(0x0000FFFFu, shopItem.HookItemTypes);
+        Assert.Equal(0x00000002u, shopItem.HookType);
+        Assert.True(shopItem.IsHook);
 
         // The vendor still owns the listing: container and wield state are the
         // materializer's, not the description's.
@@ -424,7 +434,10 @@ public sealed class RuntimeVendorLifecycleTests
         uint? TargetType = null,
         byte? CombatUse = null,
         ushort? AmmoType = null,
-        uint ObjectDescriptionFlags = 0u);
+        uint ObjectDescriptionFlags = 0u,
+        uint? Useability = null,
+        uint? HookItemTypes = null,
+        uint? HookType = null);
 
     private IDisposable Wire(VendorState vendor) => GameEventWiring.WireAll(
         _dispatcher,
@@ -502,6 +515,9 @@ public sealed class RuntimeVendorLifecycleTests
             if (item.Workmanship.HasValue) weenieFlags |= 0x01000000u;
             if (item.Burden.HasValue) weenieFlags |= 0x00200000u;
             if (item.MaterialType.HasValue) weenieFlags |= 0x80000000u;
+            if (item.Useability.HasValue) weenieFlags |= 0x00000010u;
+            if (item.HookItemTypes.HasValue) weenieFlags |= 0x20000000u;
+            if (item.HookType.HasValue) weenieFlags |= 0x10000000u;
             WireU32(b, weenieFlags);
             WireStr16L(b, item.Name);
             WirePackedDword(b, item.WeenieClassId);
@@ -517,6 +533,8 @@ public sealed class RuntimeVendorLifecycleTests
                 WireU16(b, item.AmmoType.Value);
             if (item.Value.HasValue)
                 WireU32(b, unchecked((uint)item.Value.Value));
+            if (item.Useability.HasValue)
+                WireU32(b, item.Useability.Value);
             if (item.TargetType.HasValue)
                 WireU32(b, item.TargetType.Value);
             if (item.CombatUse.HasValue)
@@ -533,6 +551,10 @@ public sealed class RuntimeVendorLifecycleTests
                 WireF32(b, item.Workmanship.Value);
             if (item.Burden.HasValue)
                 WireU16(b, (ushort)item.Burden.Value);
+            if (item.HookItemTypes.HasValue)
+                WireU32(b, item.HookItemTypes.Value);
+            if (item.HookType.HasValue)
+                WireU16(b, (ushort)item.HookType.Value);
             if (item.MaterialType.HasValue)
                 WireU32(b, item.MaterialType.Value);
             WireAlign(b);

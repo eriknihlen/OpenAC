@@ -671,7 +671,10 @@ public static class GameEventWiring
                     item.Desc.TargetType,
                     item.Desc.CombatUse,
                     item.Desc.AmmoType,
-                    item.Desc.ObjectDescriptionFlags);
+                    item.Desc.ObjectDescriptionFlags,
+                    item.Desc.Useability,
+                    item.Desc.HookItemTypes,
+                    item.Desc.HookType);
             }
 
             vendor?.Apply(p.Value.VendorGuid, profile, shopItems);

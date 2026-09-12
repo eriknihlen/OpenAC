@@ -842,16 +842,31 @@ public sealed class ItemAppraisalTextFormatterTests
         Assert.Contains("Elemental Damage Bonus: 4, Slashing/Electrical.", report);
     }
 
-    public static TheoryData<string, uint, uint, int, int, string> VendorParityCases()
+    public static TheoryData<string, uint, uint, int, int, bool, string, string?>
+        VendorParityCases()
         => new()
         {
             // name, validLocations, priority, itemsCapacity, containersCapacity,
-            // a line the case must actually produce (so parity is never vacuous)
-            { "weapon", (uint)EquipMask.MeleeWeapon, 0u, 0, 0, "Damage: 30 - 40" },
-            { "armor", (uint)EquipMask.ChestArmor, 0x0C00u, 0, 0, "Covers Chest, Abdomen" },
+            // isHook, a line the case must produce (so parity is never vacuous),
+            // and a line it must not produce
             {
-                "pack", 0u, 0u, 24, 1,
-                "Can hold up to 24 items and 1 containers."
+                "weapon", (uint)EquipMask.MeleeWeapon, 0u, 0, 0, false,
+                "Damage: 30 - 40", null
+            },
+            {
+                "armor", (uint)EquipMask.ChestArmor, 0x0C00u, 0, 0, false,
+                "Covers Chest, Abdomen", null
+            },
+            {
+                "pack", 0u, 0u, 24, 1, false,
+                "Can hold up to 24 items and 1 containers.", null
+            },
+            {
+                // A hooked item takes its equip locations from the hook report
+                // and drops the capacity lines, so the two reports only match
+                // when the listing knows it is on a hook at all.
+                "hooked", 0u, 0u, 24, 1, true,
+                "Damage: 30 - 40", "Can hold up to 24 items"
             },
         };
 
@@ -863,7 +878,9 @@ public sealed class ItemAppraisalTextFormatterTests
         uint priority,
         int itemsCapacity,
         int containersCapacity,
-        string expectedLine)
+        bool isHook,
+        string expectedLine,
+        string? forbiddenLine)
     {
         Assert.False(string.IsNullOrEmpty(label));
 
@@ -884,6 +901,9 @@ public sealed class ItemAppraisalTextFormatterTests
         const int Structure = 40;
         const int MaxStructure = 100;
         const float Workmanship = 8.5f;
+        const uint Useability = 0x00000008u;
+        uint? hookItemTypes = isHook ? 0x0000FFFFu : null;
+        uint? hookType = isHook ? 0x00000002u : null;
 
         var vendorObjects = new ClientObjectTable();
         var vendor = new VendorState();
@@ -913,7 +933,10 @@ public sealed class ItemAppraisalTextFormatterTests
                     TargetType: TargetType,
                     CombatUse: CombatUse,
                     AmmoType: AmmoType,
-                    PublicWeenieBitfield: HealerFlag),
+                    PublicWeenieBitfield: HealerFlag,
+                    Useability: Useability,
+                    HookItemTypes: hookItemTypes,
+                    HookType: hookType),
             }));
         ClientObject? listed = vendorObjects.Get(ItemGuid);
         Assert.NotNull(listed);
@@ -948,6 +971,9 @@ public sealed class ItemAppraisalTextFormatterTests
                 Workmanship: Workmanship,
                 CombatUse: CombatUse,
                 AmmoType: AmmoType,
+                Useability: Useability,
+                HookItemTypes: hookItemTypes,
+                HookType: hookType,
                 MaterialType: MaterialType)));
         ClientObject? spawned = spawnedObjects.Get(ItemGuid);
         Assert.NotNull(spawned);
@@ -961,6 +987,12 @@ public sealed class ItemAppraisalTextFormatterTests
         properties.Ints[108u] = 500;
         AppraiseInfoParser.Parsed appraisal = Parsed(
             properties,
+            hook: isHook
+                ? new AppraiseInfoParser.HookProfile(
+                    Flags: 0u,
+                    ValidLocations: (uint)EquipMask.MeleeWeapon,
+                    AmmoType: 0u)
+                : null,
             weapon: new AppraiseInfoParser.WeaponProfile(
                 DamageType: 1u,
                 WeaponTime: 30u,
@@ -980,6 +1012,8 @@ public sealed class ItemAppraisalTextFormatterTests
 
         Assert.Equal(spawnedReport, listedReport);
         Assert.Contains(expectedLine, listedReport);
+        if (forbiddenLine is not null)
+            Assert.DoesNotContain(forbiddenLine, listedReport);
     }
 
     private static AppraiseInfoParser.Parsed Parsed(
