@@ -145,6 +145,7 @@ jobs:
           dotnet test tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --no-build --nologo --filter $filter
           dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~MacMonotonicFramePacingWaiterTests'
           dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~AppCredentialResolverTests&Lane=MacOS'
+          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~GraphicalVulkanLoaderTests'
 
       - name: Build and verify the Apple-silicon release payloads
         shell: pwsh

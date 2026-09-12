@@ -9,9 +9,10 @@ internal sealed record PackagedVulkanLayout(
     string DriverLibraryPath,
     string DriverManifestPath);
 
-internal static unsafe class GraphicalVulkanLoader
+internal static unsafe partial class GraphicalVulkanLoader
 {
     internal const string DriverFilesEnvironmentVariable = "VK_DRIVER_FILES";
+    private const int NativeEnvironmentCallSuccess = 0;
 
     private static readonly object Gate = new();
     private static string? _packagedLoaderPath;
@@ -50,7 +51,7 @@ internal static unsafe class GraphicalVulkanLoader
 
             string? previousDriverFiles = Environment.GetEnvironmentVariable(
                 DriverFilesEnvironmentVariable);
-            Environment.SetEnvironmentVariable(
+            PublishEnvironmentVariable(
                 DriverFilesEnvironmentVariable,
                 layout.DriverManifestPath);
 
@@ -84,11 +85,40 @@ internal static unsafe class GraphicalVulkanLoader
             catch
             {
                 NativeLibrary.Free(loaderHandle);
-                Environment.SetEnvironmentVariable(
-                    DriverFilesEnvironmentVariable,
-                    previousDriverFiles);
+                try
+                {
+                    PublishEnvironmentVariable(
+                        DriverFilesEnvironmentVariable,
+                        previousDriverFiles);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The failure that brought us here is the one worth reporting.
+                }
+
                 throw;
             }
+        }
+    }
+
+    internal static void PublishEnvironmentVariable(string name, string? value)
+    {
+        // .NET's copy of the environment is not the one the native loader reads.
+        Environment.SetEnvironmentVariable(name, value);
+        if (value is null)
+        {
+            if (Unsetenv(name) != NativeEnvironmentCallSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Could not clear '{name}' from the native environment " +
+                    $"(errno {Marshal.GetLastPInvokeError()}).");
+            }
+        }
+        else if (Setenv(name, value, overwrite: 1) != NativeEnvironmentCallSuccess)
+        {
+            throw new InvalidOperationException(
+                $"Could not publish '{name}' to the native environment " +
+                $"(errno {Marshal.GetLastPInvokeError()}).");
         }
     }
 
@@ -155,4 +185,18 @@ internal static unsafe class GraphicalVulkanLoader
 
         return layout;
     }
+
+    [LibraryImport(
+        "libSystem.dylib",
+        EntryPoint = "setenv",
+        StringMarshalling = StringMarshalling.Utf8,
+        SetLastError = true)]
+    private static partial int Setenv(string name, string value, int overwrite);
+
+    [LibraryImport(
+        "libSystem.dylib",
+        EntryPoint = "unsetenv",
+        StringMarshalling = StringMarshalling.Utf8,
+        SetLastError = true)]
+    private static partial int Unsetenv(string name);
 }
