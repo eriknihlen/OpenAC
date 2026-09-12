@@ -101,6 +101,17 @@ public static class ObjectTableWiring
         session.PlayerInt64PropertyUpdated += playerInt64Updated;
         subscriptions.Add(() => session.PlayerInt64PropertyUpdated -= playerInt64Updated);
 
+        // A saved position slot the server rewrites mid-session — the corpse
+        // landmark among them. It is the player's own state, not object-table
+        // state, so it goes straight to the local-player owner.
+        Action<WorldSession.PlayerPositionUpdate> playerPositionUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            localPlayer?.OnPosition(u.PositionType, ToPosition(u.Position));
+        };
+        session.PlayerPositionUpdated += playerPositionUpdated;
+        subscriptions.Add(() => session.PlayerPositionUpdated -= playerPositionUpdated);
+
         Action<WorldSession.StackSizeUpdate> stackSizeUpdated = u =>
         {
             if (accepting?.Invoke() == false) return;
@@ -154,6 +165,19 @@ public static class ObjectTableWiring
     {
         table.RemoveLogicalGeneration(delete.Guid, delete.InstanceSequence);
     }
+
+    /// <summary>
+    /// The wire carries a saved position as a cell id, an origin, and an
+    /// orientation whose real part is written first; the engine's quaternion
+    /// takes it last. Both the login snapshot and the mid-session pushes go
+    /// through here so they cannot disagree about that ordering.
+    /// </summary>
+    internal static AcDream.Core.Physics.Position ToPosition(
+        Messages.PlayerDescriptionParser.WorldPosition wire) =>
+        new(
+            wire.LandblockId,
+            new System.Numerics.Vector3(wire.X, wire.Y, wire.Z),
+            new System.Numerics.Quaternion(wire.Qx, wire.Qy, wire.Qz, wire.Qw));
 
     internal static void ApplyPlayerInt64PropertyUpdate(
         ClientObjectTable table,
