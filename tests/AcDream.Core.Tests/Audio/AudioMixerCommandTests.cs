@@ -106,7 +106,10 @@ public sealed class AudioMixerCommandTests
     [Theory]
     [InlineData("perwave 0", AudioMixerOptions.NoPerWaveCap)]
     [InlineData("perwave 8", 8)]
-    [InlineData("perwave 999", 32)]     // never more than the voices there are
+    // The command cannot ask for a cap the settings row could not show: one
+    // ceiling, or the row would quietly write 8 back over a stored 20.
+    [InlineData("perwave 20", AudioMixerOptions.MaximumMaxVoicesPerWave)]
+    [InlineData("perwave 999", AudioMixerOptions.MaximumMaxVoicesPerWave)]
     public void PerWave_SetsTheCapInsideItsRange(string arguments, int expected)
     {
         AudioMixerCommandResult result = AudioMixerCommand.Execute(
@@ -194,6 +197,8 @@ public sealed class AudioMixerCommandTests
             MaxVoicesPerWave = 40,
         }.Normalized();
 
-        Assert.Equal(16, tooManyPerWave.MaxVoicesPerWave);
+        Assert.Equal(
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
+            tooManyPerWave.MaxVoicesPerWave);
     }
 }

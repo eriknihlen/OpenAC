@@ -2548,9 +2548,9 @@ public sealed class RetailUiRuntime : IDisposable
                     LoadCameraTurning: _bindings.Options.LoadCameraTurning,
                     SaveCameraTurning: _bindings.Options.SaveCameraTurning,
                     LoadChat: () => _bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default,
-                    SaveChat: chat => _bindings.Chat.Store?.SaveChat(chat))
+                    SaveChat: chat => _bindings.Chat.Store?.SaveChat(chat),
+                    AudioMixer: _bindings.Options.AudioMixer)
                 {
-                    AudioMixer = _bindings.Options.AudioMixer,
                     RenderPacks = _bindings.Options.LoadRenderPackChoices is { } load
                         ? new Layout.ConfigOptionsPageController.RenderPackBindings(load)
                         {

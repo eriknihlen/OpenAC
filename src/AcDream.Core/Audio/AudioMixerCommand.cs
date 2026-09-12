@@ -25,7 +25,7 @@ public static class AudioMixerCommand
 
     public const string Usage =
         "/mixer | /mixer retail on|off | /mixer voices 16-64 | "
-        + "/mixer priority on|off | /mixer perwave 0-64";
+        + "/mixer priority on|off | /mixer perwave 0-8";
 
     public static AudioMixerCommandResult Execute(
         AudioMixerOptions current,
@@ -53,10 +53,8 @@ public static class AudioMixerCommand
             "perwave" => TryReadCount(words, out int perWave)
                 ? before with
                 {
-                    MaxVoicesPerWave = Math.Clamp(
-                        perWave,
-                        AudioMixerOptions.NoPerWaveCap,
-                        AudioMixerOptions.MaximumVoiceCount),
+                    MaxVoicesPerWave =
+                        AudioMixerOptions.ClampMaxVoicesPerWave(perWave),
                 }
                 : null,
             _ => null,

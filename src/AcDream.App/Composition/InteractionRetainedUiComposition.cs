@@ -294,6 +294,23 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
             isVisible);
     }
 
+    /// <summary>
+    /// The Config tab's mixer seam: the one save-then-apply owner the
+    /// <c>/mixer</c> command uses, and the same line about where the change
+    /// took effect, since a row has no reply of its own to put it in.
+    /// </summary>
+    internal static ConfigOptionsPageController.AudioMixerBindings
+        CreateAudioMixerBindings(
+            AcDream.App.Audio.AudioMixerSettings mixer,
+            Action<string> say)
+    {
+        ArgumentNullException.ThrowIfNull(mixer);
+        ArgumentNullException.ThrowIfNull(say);
+        return new ConfigOptionsPageController.AudioMixerBindings(
+            () => mixer.Current,
+            options => mixer.ChangeAndReport(options, say));
+    }
+
     public IDisposable BindCombatTarget(
         InteractionRetainedUiDependencies d,
         DeferredSelectionUiAuthority selection) =>
@@ -854,9 +871,11 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     SaveDisplay: d.Settings.SaveDisplay,
                     LoadAudio: () => d.Settings.Audio,
                     SaveAudio: d.Settings.SaveAudio,
-                    AudioMixer: new ConfigOptionsPageController.AudioMixerBindings(
-                        () => d.AudioMixer.Current,
-                        mixer => d.AudioMixer.Change(mixer).Saved),
+                    AudioMixer: CreateAudioMixerBindings(
+                        d.AudioMixer,
+                        text => d.Communication.AddText(
+                            text,
+                            RetailLogTextType.ClientLocal)),
                     LoadRenderPackChoices: d.RenderPackCatalog is null
                         ? null
                         : () => d.RenderPackCatalog.Snapshot().Entries

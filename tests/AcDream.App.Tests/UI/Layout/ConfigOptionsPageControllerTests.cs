@@ -250,6 +250,13 @@ public sealed class ConfigOptionsPageControllerTests
         public List<CameraTurningSettings> CameraTurningSaves { get; } = new();
         public List<ChatSettings> ChatSaves { get; } = new();
 
+        /// <summary>
+        /// The mixer seam every graphical host supplies, so the retail rows
+        /// are bound the way production binds them: with the four acdream-only
+        /// mixer rows appended to the Sound block.
+        /// </summary>
+        public FakeMixer Mixer { get; } = new();
+
         public ConfigOptionsPageController.Bindings ToBindings(
             ConfigOptionsPageController.RenderPackBindings? renderPacks = null,
             ConfigOptionsPageController.AudioMixerBindings? audioMixer = null) => new(
@@ -260,10 +267,10 @@ public sealed class ConfigOptionsPageControllerTests
             LoadCameraTurning: () => CameraTurning,
             SaveCameraTurning: value => { CameraTurning = value; CameraTurningSaves.Add(value); },
             LoadChat: () => Chat,
-            SaveChat: value => { Chat = value; ChatSaves.Add(value); })
+            SaveChat: value => { Chat = value; ChatSaves.Add(value); },
+            AudioMixer: audioMixer ?? Mixer.Bindings)
         {
             RenderPacks = renderPacks,
-            AudioMixer = audioMixer,
         };
     }
 
@@ -305,12 +312,12 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
-    public void Bind_Succeeds_AndRegistersExactly30Rows()
+    public void Bind_Succeeds_AndRegistersExactly34Rows()
     {
         (OptionsPanelController controller, _, bool bound) = BindReal();
 
         Assert.True(bound);
-        Assert.Equal(30, controller.ConfigPage.Rows.Count);
+        Assert.Equal(34, controller.ConfigPage.Rows.Count);
     }
 
     [Fact]
@@ -326,6 +333,10 @@ public sealed class ConfigOptionsPageControllerTests
             typeof(BoolOptionRow), typeof(FloatOptionRow),      // Ambient trio
             typeof(BoolOptionRow), typeof(FloatOptionRow),      // Interface trio
             typeof(BoolOptionRow),                              // Play sound only when active
+            typeof(BoolOptionRow),                              // Retail Mixer
+            typeof(FloatOptionRow),                             // Voices
+            typeof(BoolOptionRow),                              // Priority
+            typeof(FloatOptionRow),                             // Voices Per Sound
 
             typeof(FloatOptionRow),
             typeof(FloatOptionRow),
@@ -360,7 +371,7 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
-    public void Bind_ListBoxStacks39Items_SixHeaders_SixSeparators_27OptionRows()
+    public void Bind_ListBoxStacks43Items_SixHeaders_SixSeparators_31OptionRows()
     {
         ImportedLayout layout = FixtureLoader.LoadOptionsPanelHost();
         OptionsPanelController controller = OptionsPanelController.Bind(
@@ -382,7 +393,7 @@ public sealed class ConfigOptionsPageControllerTests
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
 
         UiElement viewport = Assert.Single(listBox.Children);
-        Assert.Equal(39, viewport.Children.Count);
+        Assert.Equal(43, viewport.Children.Count);
     }
 
     [Fact]
@@ -446,8 +457,8 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        Assert.Equal(43, Assert.Single(listBox.Children).Children.Count);
-        Assert.Equal(32, controller.ConfigPage.Rows.Count);
+        Assert.Equal(47, Assert.Single(listBox.Children).Children.Count);
+        Assert.Equal(36, controller.ConfigPage.Rows.Count);
 
         List<UiMenu> menus = CollectMenus(configSlot);
         UiMenu packMenu = menus[^2];
@@ -536,7 +547,7 @@ public sealed class ConfigOptionsPageControllerTests
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
         UiMenu packMenu = CollectMenus(configSlot)[^2];
-        Assert.Equal(44, listBox.ItemCount);
+        Assert.Equal(48, listBox.ItemCount);
         Assert.Contains(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
 
         discovered = [beta];
@@ -546,8 +557,8 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.DoesNotContain(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
         Assert.Contains(packMenu.Items, item => Equals(item.Payload, "pack.beta"));
         Assert.Equal(RenderPackSelectionSettings.RetailPackId, packMenu.Selected);
-        Assert.Equal(43, listBox.ItemCount);
-        Assert.Equal(32, controller.ConfigPage.Rows.Count);
+        Assert.Equal(47, listBox.ItemCount);
+        Assert.Equal(36, controller.ConfigPage.Rows.Count);
         controller.ConfigPage.Reset();
         Assert.Equal(RenderPackSelectionSettings.RetailPackId, packMenu.Selected);
         Assert.DoesNotContain(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
@@ -561,7 +572,7 @@ public sealed class ConfigOptionsPageControllerTests
         packMenu.BeforeOpen!();
 
         Assert.Equal("pack.beta", packMenu.Selected);
-        Assert.Equal(43, listBox.ItemCount);
+        Assert.Equal(47, listBox.ItemCount);
         Assert.Equal("Medium", CollectMenus(configSlot)[^1].Items.Single().Label);
     }
 
@@ -633,16 +644,16 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        Assert.Equal(47, listBox.ItemCount);
-        Assert.Equal(36, controller.ConfigPage.Rows.Count);
+        Assert.Equal(51, listBox.ItemCount);
+        Assert.Equal(40, controller.ConfigPage.Rows.Count);
 
         IReadOnlyList<UiElement> items = listBox.ViewportForTest!.Children;
         var enabled = Assert.IsType<UiButton>(
-            UiElement.FindDescendant(items[42], 0x10000219u));
+            UiElement.FindDescendant(items[46], 0x10000219u));
         var strength = Assert.IsType<UiScrollbar>(
-            UiElement.FindDescendant(items[43], 0x1000021Cu));
+            UiElement.FindDescendant(items[47], 0x1000021Cu));
         var samples = Assert.IsType<UiScrollbar>(
-            UiElement.FindDescendant(items[44], 0x1000021Cu));
+            UiElement.FindDescendant(items[48], 0x1000021Cu));
         List<UiMenu> menus = CollectMenus(configSlot);
         UiMenu packMenu = menus[^3];
         UiMenu presetMenu = menus[^2];
@@ -664,8 +675,8 @@ public sealed class ConfigOptionsPageControllerTests
         presetMenu.OnSelect!("high");
         Assert.Equal("high", fake.Display.RenderPack.PresetId);
         Assert.Equal(4, fake.Display.RenderPack.SettingOverrides.Count);
-        Assert.Equal(47, listBox.ItemCount);
-        Assert.Equal(36, controller.ConfigPage.Rows.Count);
+        Assert.Equal(51, listBox.ItemCount);
+        Assert.Equal(40, controller.ConfigPage.Rows.Count);
         int savesBeforeStaleWidget = fake.DisplaySaves.Count;
         oldModeMenu.OnSelect!("low");
         Assert.Equal(savesBeforeStaleWidget, fake.DisplaySaves.Count);
@@ -675,21 +686,21 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.Equal("2.0.0", fake.Display.RenderPack.PackVersion);
         Assert.Equal("default", fake.Display.RenderPack.PresetId);
         Assert.Empty(fake.Display.RenderPack.SettingOverrides);
-        Assert.Equal(44, listBox.ItemCount); // header + pack + preset + one setting + separator
-        Assert.Equal(33, controller.ConfigPage.Rows.Count);
+        Assert.Equal(48, listBox.ItemCount); // header + pack + preset + one setting + separator
+        Assert.Equal(37, controller.ConfigPage.Rows.Count);
 
         oldModeMenu.OnSelect!("high");
         Assert.Empty(fake.Display.RenderPack.SettingOverrides);
 
         controller.ConfigPage.Reset();
         Assert.Equal("pack.alpha", fake.Display.RenderPack.PackId);
-        Assert.Equal(47, listBox.ItemCount);
-        Assert.Equal(36, controller.ConfigPage.Rows.Count);
+        Assert.Equal(51, listBox.ItemCount);
+        Assert.Equal(40, controller.ConfigPage.Rows.Count);
 
         controller.ConfigPage.Defaults();
         Assert.True(fake.Display.RenderPack.IsRetail);
-        Assert.Equal(43, listBox.ItemCount);
-        Assert.Equal(32, controller.ConfigPage.Rows.Count);
+        Assert.Equal(47, listBox.ItemCount);
+        Assert.Equal(36, controller.ConfigPage.Rows.Count);
     }
 
     [Fact]
@@ -744,7 +755,7 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        UiElement enabledRow = listBox.ViewportForTest!.Children[42];
+        UiElement enabledRow = listBox.ViewportForTest!.Children[46];
         var enabled = Assert.IsType<UiButton>(
             UiElement.FindDescendant(enabledRow, 0x10000219u));
         enabled.Selected = true;
@@ -785,7 +796,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void SliderRow_CameraAdjustmentSpeed_ConvertsRealUnitOutOf0To1Range()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (FloatOptionRow)controller.ConfigPage.Rows[9]; // AdjustmentSpeed
+        var row = (FloatOptionRow)controller.ConfigPage.Rows[13]; // AdjustmentSpeed
 
         row.SetCurrentValue(62.5f);
 
@@ -900,7 +911,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_Resolution_IsStringBacked_AndWritesThroughDisplayBindings()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (StringOptionRow)controller.ConfigPage.Rows[12]; // Resolution
+        var row = (StringOptionRow)controller.ConfigPage.Rows[16]; // Resolution
 
         row.SetCurrentValue("1920x1080");
 
@@ -911,7 +922,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void ToggleRow_UseMouseTurning_WritesTheConfigTabOwnPreference_NotTheWireBit()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (BoolOptionRow)controller.ConfigPage.Rows[27]; // Use Mouse Turning
+        var row = (BoolOptionRow)controller.ConfigPage.Rows[31]; // Use Mouse Turning
 
         row.SetCurrentValue(true);
 
@@ -922,7 +933,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontSize_WritesThroughChatBindings_WithoutTouchingHearFlags()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[29];
+        var row = (IntOptionRow)controller.ConfigPage.Rows[33];
 
         row.SetCurrentValue(3);
 
@@ -985,7 +996,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, _) = BindReal();
         IReadOnlyList<IOptionRow> rows = controller.ConfigPage.Rows;
-        Assert.Equal(30, rows.Count);
+        Assert.Equal(34, rows.Count);
 
         object[] expected =
         [
@@ -995,31 +1006,36 @@ public sealed class ConfigOptionsPageControllerTests
             true, 1.0f,         // 5-6  Interface trio
             true,               // 7  Play Sound Only When Active
 
+            false,              // 8  Retail Mixer (acdream-only)
+            32f,                // 9  Voices
+            true,               // 10 Priority
+            4f,                 // 11 Voices Per Sound
+
             0.45f,
             40.0f,
-            90.0f,              // 10 Field Of View
-            true,               // 11 Align To Slope
+            90.0f,              // 14 Field Of View
+            true,               // 15 Align To Slope
 
             "1280x720",
                                 //    DisplaySettings.Default.Resolution; production
                                 //    passes the desktop mode via DisplayModeCatalog)
-            true,               // 13 Full Screen
-            false,              // 14 Sync To Refresh
-            0f,                 // 15 Screen Brightness
-            false,              // 16 Automatic Degrades
-            0f,                 // 17 Graphics Performance
-            50.0f,              // 18 Degrade Distance
+            true,               // 17 Full Screen
+            false,              // 18 Sync To Refresh
+            0f,                 // 19 Screen Brightness
+            false,              // 20 Automatic Degrades
+            0f,                 // 21 Graphics Performance
+            50.0f,              // 22 Degrade Distance
 
-            2,                  // 19 Landscape Texture Detail
-            1,                  // 20 Environment Texture Detail
-            1,                  // 21 Texture Filtering
+            2,                  // 23 Landscape Texture Detail
+            1,                  // 24 Environment Texture Detail
+            1,                  // 25 Texture Filtering
             8,
-            true,               // 23 Building Detail Textures
-            false,              // 24 Multi-Pass Alpha
+            true,               // 27 Building Detail Textures
+            false,              // 28 Multi-Pass Alpha
 
-            0.55f,              // 25 Mouse Look Sensitivity
-            false,              // 26 Invert Mouselook Y Axis
-            false,              // 27 Use Mouse Turning
+            0.55f,              // 29 Mouse Look Sensitivity
+            false,              // 30 Invert Mouselook Y Axis
+            false,              // 31 Use Mouse Turning
 
             2,
             1,
@@ -1047,9 +1063,9 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, FakeBindings bindings, bool bound) = BindReal();
         Assert.True(bound);
-        var automatic = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[16]);
-        var bias = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[17]);
-        var distance = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[18]);
+        var automatic = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[20]);
+        var bias = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[21]);
+        var distance = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[22]);
 
         automatic.SetCurrentValue(true);
         bias.SetCurrentValue(-0.35f);
@@ -1270,7 +1286,7 @@ public sealed class ConfigOptionsPageControllerTests
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => null);
 
         Assert.True(bound);
-        Assert.Equal(30, controller.ConfigPage.Rows.Count);
+        Assert.Equal(34, controller.ConfigPage.Rows.Count);
     }
 
 
@@ -1284,28 +1300,35 @@ public sealed class ConfigOptionsPageControllerTests
         (3, RowKind.TrioToggle, false, "Disable Ambient Sound"),      // LIVE
         (4, RowKind.TrioToggle, true, "Disable Interface Sound"),
         (5, RowKind.Toggle, true, "Play Sound Only When Active"),
-        (8, RowKind.Slider, true, "Camera Stiffness"),
-        (9, RowKind.Slider, true, "Camera Adjustment Speed"),
-        (10, RowKind.Slider, false, "Field Of View"),                 // NEXT-LAUNCH
-        (11, RowKind.Toggle, true, "Align To Slope"),
-        (14, RowKind.Menu, false, "Resolution"),                      // LIVE
-        (15, RowKind.Toggle, false, "Full Screen"),                   // LIVE
-        (16, RowKind.Toggle, false, "Sync To Refresh"),               // NEXT-LAUNCH
-        (17, RowKind.Slider, true, "Screen Brightness"),              // review S2
-        (18, RowKind.Toggle, false, "Automatic Degrades"),            // LIVE
-        (19, RowKind.Slider, false, "Graphics Performance"),          // LIVE
-        (20, RowKind.Slider, false, "Degrade Distance"),              // LIVE
-        (23, RowKind.Menu, true, "Landscape Texture Detail"),
-        (24, RowKind.Menu, true, "Environment Texture Detail"),
-        (25, RowKind.Menu, true, "Texture Filtering"),
-        (26, RowKind.Menu, false, "Landscape Draw Distance"),
-        (27, RowKind.Toggle, false, "Building Detail Textures"),
-        (28, RowKind.Toggle, true, "Multi-Pass Alpha"),
-        (31, RowKind.Slider, true, "Mouse Look Sensitivity"),
-        (32, RowKind.Toggle, true, "Invert Mouselook Y Axis"),
-        (33, RowKind.Toggle, true, "Use Mouse Turning"),
-        (36, RowKind.Menu, true, "Chat Font Face"),
-        (37, RowKind.Menu, true, "Chat Font Size"),
+        // The four acdream-only mixer rows, appended to the Sound block. LIVE,
+        // so undimmed: the three Retail Mixer overrides dim only while it is
+        // on, which TurningTheRetailMixerOn_... pins.
+        (6, RowKind.Toggle, false, "Retail Mixer"),
+        (7, RowKind.Slider, false, "Voices"),
+        (8, RowKind.Toggle, false, "Priority"),
+        (9, RowKind.Slider, false, "Voices Per Sound"),
+        (12, RowKind.Slider, true, "Camera Stiffness"),
+        (13, RowKind.Slider, true, "Camera Adjustment Speed"),
+        (14, RowKind.Slider, false, "Field Of View"),                 // NEXT-LAUNCH
+        (15, RowKind.Toggle, true, "Align To Slope"),
+        (18, RowKind.Menu, false, "Resolution"),                      // LIVE
+        (19, RowKind.Toggle, false, "Full Screen"),                   // LIVE
+        (20, RowKind.Toggle, false, "Sync To Refresh"),               // NEXT-LAUNCH
+        (21, RowKind.Slider, true, "Screen Brightness"),              // review S2
+        (22, RowKind.Toggle, false, "Automatic Degrades"),            // LIVE
+        (23, RowKind.Slider, false, "Graphics Performance"),          // LIVE
+        (24, RowKind.Slider, false, "Degrade Distance"),              // LIVE
+        (27, RowKind.Menu, true, "Landscape Texture Detail"),
+        (28, RowKind.Menu, true, "Environment Texture Detail"),
+        (29, RowKind.Menu, true, "Texture Filtering"),
+        (30, RowKind.Menu, false, "Landscape Draw Distance"),
+        (31, RowKind.Toggle, false, "Building Detail Textures"),
+        (32, RowKind.Toggle, true, "Multi-Pass Alpha"),
+        (35, RowKind.Slider, true, "Mouse Look Sensitivity"),
+        (36, RowKind.Toggle, true, "Invert Mouselook Y Axis"),
+        (37, RowKind.Toggle, true, "Use Mouse Turning"),
+        (40, RowKind.Menu, true, "Chat Font Face"),
+        (41, RowKind.Menu, true, "Chat Font Size"),
     };
 
     private static Vector4? FindTextLineColor(UiElement root, uint elementId)
@@ -1328,7 +1351,7 @@ public sealed class ConfigOptionsPageControllerTests
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
         UiElement viewport = Assert.Single(listBox.Children);
         IReadOnlyList<UiElement> items = viewport.Children.ToList();
-        Assert.Equal(39, items.Count);
+        Assert.Equal(43, items.Count);
 
         const uint ToggleCheckboxElementId = 0x10000219u;
         const uint SliderLabelElementId = 0x1000021Bu;
@@ -1465,6 +1488,7 @@ public sealed class ConfigOptionsPageControllerTests
     private const uint SliderLeafId = 0x1000021Cu;
     private const uint SliderRangeLowId = 0x1000021Eu;
     private const uint SliderRangeHighId = 0x1000021Fu;
+    private const uint MenuLeafId = 0x10000224u;
 
     private const int RetailMixerItem = 6;
     private const int VoicesItem = 7;
@@ -1559,6 +1583,17 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.Equal("64", TextLine(items[VoicesItem], SliderRangeHighId).Text);
         Assert.Equal("Off", TextLine(items[VoicesPerSoundItem], SliderRangeLowId).Text);
         Assert.Equal("8", TextLine(items[VoicesPerSoundItem], SliderRangeHighId).Text);
+
+        // The authored retail sound rows still come first, and the four are
+        // appended inside the same block, before its separator: the menu row,
+        // the three toggle+slider trios, the authored toggle, then ours.
+        Assert.NotNull(UiElement.FindDescendant(items[1], MenuLeafId));
+        Assert.IsType<UiOptionToggleSlider>(items[2]);
+        Assert.IsType<UiOptionToggleSlider>(items[3]);
+        Assert.IsType<UiOptionToggleSlider>(items[4]);
+        Assert.Equal("x", Checkbox(items[5]).Label);   // the DAT-resolved caption
+        Assert.Null(UiElement.FindDescendant(items[10], ToggleCheckboxId));
+        Assert.Null(UiElement.FindDescendant(items[10], SliderLeafId));
 
         Assert.IsType<BoolOptionRow>(panel.ConfigPage.Rows[RetailMixerRow]);
         Assert.IsType<FloatOptionRow>(panel.ConfigPage.Rows[VoicesRow]);
@@ -1680,6 +1715,54 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.True(mixer.Stored.UseAuthoredPriority);
         Assert.True(priority.Selected);
         Assert.True(((BoolOptionRow)panel.ConfigPage.Rows[PriorityRow]).Current);
+    }
+
+    // The command and the row share one ceiling for the per-sound cap. When
+    // they did not, `/mixer perwave 20` stored 20, the row could only show 8,
+    // and hiding the panel (Reset -> RestoreSavedValue) wrote that 8 back over
+    // the 20 the player had asked for.
+    [Fact]
+    public void ACommandedCap_IsInsideTheRowsRange_AndTheRowNeverWritesBackAValueItOnlyDisplayed()
+    {
+        AudioMixerOptions stored = AudioMixerOptions.Default;
+        List<AudioMixerOptions> persisted = new();
+        var owner = new AudioMixerSettings(
+            () => stored,
+            options =>
+            {
+                stored = options;
+                persisted.Add(options);
+                return true;
+            },
+            static _ => true);
+
+        var commands = new PluginCommandRegistry();
+        using AudioMixerCommandBinding binding = Assert.IsType<AudioMixerCommandBinding>(
+            AudioMixerCommandBinding.TryRegister(commands, owner, _ => { }));
+
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) = BindWithMixer(
+            new ConfigOptionsPageController.AudioMixerBindings(
+                () => owner.Current,
+                options => owner.ChangeAndReport(options, _ => { })));
+
+        Assert.True(commands.TryHandle("/mixer perwave 20"));
+        Assert.Equal(
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
+            Assert.Single(persisted).MaxVoicesPerWave);
+
+        // Opening the panel reads the live value; the row shows exactly it.
+        panel.ConfigPage.OnShown();
+        var row = (FloatOptionRow)panel.ConfigPage.Rows[VoicesPerSoundRow];
+        Assert.Equal((float)AudioMixerOptions.MaximumMaxVoicesPerWave, row.Current);
+        Assert.Equal(1f, Slider(items[VoicesPerSoundItem]).ScalarPosition);
+
+        // Hiding it reverts changed rows. Nothing changed, so nothing is
+        // written, and what is stored is still what the command asked for.
+        panel.ConfigPage.OnHidden();
+        Assert.Single(persisted);
+        Assert.Equal(
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
+            stored.MaxVoicesPerWave);
     }
 
     [Fact]

@@ -12,13 +12,6 @@ namespace AcDream.App.Audio;
 /// </summary>
 internal sealed class AudioMixerCommandBinding : IDisposable
 {
-    internal const string SaveFailed =
-        "mixer: the settings could not be saved, so nothing changed.";
-
-    internal const string NoMixerRunning =
-        "mixer: saved, but there is no mixer running to change - it will start "
-        + "this way next time.";
-
     private readonly AudioMixerSettings _mixer;
     private readonly Action<string> _say;
     private IDisposable? _registration;
@@ -62,10 +55,13 @@ internal sealed class AudioMixerCommandBinding : IDisposable
         {
             // The command and the Options panel share one save-then-apply
             // owner, so both orders are the same order.
+            // Not ChangeAndReport: the command's own reply goes between the
+            // save and the "no mixer running" line, so it says the two lines
+            // in its own order.
             AudioMixerChange change = _mixer.Change(result.Options);
             if (!change.Saved)
             {
-                _say(SaveFailed);
+                _say(AudioMixerSettings.SaveFailed);
                 return;
             }
 
@@ -76,7 +72,7 @@ internal sealed class AudioMixerCommandBinding : IDisposable
             _say(line);
 
         if (!running)
-            _say(NoMixerRunning);
+            _say(AudioMixerSettings.NoMixerRunning);
     }
 
     public void Dispose()

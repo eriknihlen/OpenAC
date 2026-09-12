@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using AcDream.App.Audio;
 using AcDream.App.Combat;
 using AcDream.App.Composition;
+using AcDream.Core.Audio;
 using AcDream.App.Diagnostics;
 using AcDream.App.Rendering;
 using AcDream.App.Settings;
@@ -465,6 +467,84 @@ public sealed class InteractionRetainedUiCompositionTests
                 throw new InvalidOperationException("publication failed");
             Result = result;
         }
+    }
+
+    // OpenAC #42 follow-up: the Config tab's mixer seam is the one
+    // save-then-apply owner the /mixer command uses, not a second path.
+    [Fact]
+    public void TheComposedMixerSeam_SavesThenAppliesThroughTheOneOwner()
+    {
+        AudioMixerOptions stored = AudioMixerOptions.Default;
+        List<string> order = new();
+        var owner = new AudioMixerSettings(
+            () => stored,
+            options =>
+            {
+                stored = options;
+                order.Add("persist");
+                return true;
+            },
+            _ =>
+            {
+                order.Add("apply");
+                return true;
+            });
+        List<string> said = new();
+
+        ConfigOptionsPageController.AudioMixerBindings seam =
+            RetailInteractionRetainedUiCompositionFactory.CreateAudioMixerBindings(
+                owner,
+                said.Add);
+
+        Assert.Equal(AudioMixerOptions.Default, seam.Load());
+        Assert.True(seam.Save(AudioMixerOptions.Default with { VoiceCount = 40 }));
+
+        Assert.Equal(["persist", "apply"], order);
+        Assert.Equal(40, seam.Load().VoiceCount);
+        Assert.Empty(said);
+    }
+
+    [Fact]
+    public void TheComposedMixerSeam_SaysWhereTheChangeTookEffect()
+    {
+        AudioMixerOptions stored = AudioMixerOptions.Default;
+        List<string> applied = new();
+        var noMixer = new AudioMixerSettings(
+            () => stored,
+            options =>
+            {
+                stored = options;
+                return true;
+            },
+            static _ => false);
+        List<string> said = new();
+
+        Assert.True(
+            RetailInteractionRetainedUiCompositionFactory.CreateAudioMixerBindings(
+                noMixer,
+                said.Add)
+                .Save(AudioMixerOptions.Default with { VoiceCount = 40 }));
+        Assert.Equal(AudioMixerSettings.NoMixerRunning, Assert.Single(said));
+        Assert.Equal(40, stored.VoiceCount);
+
+        said.Clear();
+        var refuses = new AudioMixerSettings(
+            () => stored,
+            static _ => false,
+            options =>
+            {
+                applied.Add("apply");
+                return true;
+            });
+
+        Assert.False(
+            RetailInteractionRetainedUiCompositionFactory.CreateAudioMixerBindings(
+                refuses,
+                said.Add)
+                .Save(AudioMixerOptions.Default with { VoiceCount = 48 }));
+        Assert.Equal(AudioMixerSettings.SaveFailed, Assert.Single(said));
+        Assert.Empty(applied);
+        Assert.Equal(40, stored.VoiceCount);
     }
 
     private static T Stub<T>() where T : class =>

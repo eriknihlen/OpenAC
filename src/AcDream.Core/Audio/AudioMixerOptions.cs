@@ -31,6 +31,15 @@ public sealed record AudioMixerOptions
     /// <summary>The value of <see cref="MaxVoicesPerWave"/> that means "no cap".</summary>
     public const int NoPerWaveCap = 0;
 
+    /// <summary>
+    /// The most voices one sound may hold. The cap exists to stop a crowd of
+    /// one sound from holding the whole pool, and past a handful of copies it
+    /// has stopped doing that, so this is the ceiling everywhere: the command,
+    /// <see cref="Normalized"/>, and the settings row all clamp to it, and
+    /// none of them can therefore store a value another would not show.
+    /// </summary>
+    public const int MaximumMaxVoicesPerWave = 8;
+
     public const int DefaultVoiceCount = 32;
 
     public const int DefaultMaxVoicesPerWave = 4;
@@ -56,8 +65,9 @@ public sealed record AudioMixerOptions
     public bool UseAuthoredPriority { get; init; } = true;
 
     /// <summary>
-    /// How many voices one sound may hold at once, or
-    /// <see cref="NoPerWaveCap"/> for no limit. This is what stops a crowd of
+    /// How many voices one sound may hold at once, from
+    /// <see cref="NoPerWaveCap"/> (no limit) to
+    /// <see cref="MaximumMaxVoicesPerWave"/>. This is what stops a crowd of
     /// footsteps from holding the whole pool.
     /// </summary>
     public int MaxVoicesPerWave { get; init; } = DefaultMaxVoicesPerWave;
@@ -71,25 +81,28 @@ public sealed record AudioMixerOptions
 
     /// <summary>The per-sound cap actually in force.</summary>
     public int EffectiveMaxVoicesPerWave =>
-        RetailMixer
-            ? NoPerWaveCap
-            : Math.Clamp(MaxVoicesPerWave, NoPerWaveCap, EffectiveVoiceCount);
+        RetailMixer ? NoPerWaveCap : ClampMaxVoicesPerWave(MaxVoicesPerWave);
 
     /// <summary>
     /// The same settings with every value inside its range. A settings file
     /// edited by hand, or a value from an older build, cannot put the mixer in
     /// a state it could not otherwise reach.
     /// </summary>
-    public AudioMixerOptions Normalized()
-    {
-        int voices = ClampVoiceCount(VoiceCount);
-        return this with
+    public AudioMixerOptions Normalized() =>
+        this with
         {
-            VoiceCount = voices,
-            MaxVoicesPerWave = Math.Clamp(MaxVoicesPerWave, NoPerWaveCap, voices),
+            VoiceCount = ClampVoiceCount(VoiceCount),
+            MaxVoicesPerWave = ClampMaxVoicesPerWave(MaxVoicesPerWave),
         };
-    }
 
     public static int ClampVoiceCount(int voiceCount) =>
         Math.Clamp(voiceCount, MinimumVoiceCount, MaximumVoiceCount);
+
+    /// <summary>
+    /// The per-sound cap inside its range. The ceiling is below
+    /// <see cref="MinimumVoiceCount"/>, so the cap can never exceed the voices
+    /// there are to cap.
+    /// </summary>
+    public static int ClampMaxVoicesPerWave(int maxVoicesPerWave) =>
+        Math.Clamp(maxVoicesPerWave, NoPerWaveCap, MaximumMaxVoicesPerWave);
 }

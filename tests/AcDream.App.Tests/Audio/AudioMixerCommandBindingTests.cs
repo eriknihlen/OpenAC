@@ -86,7 +86,7 @@ public sealed class AudioMixerCommandBindingTests
 
         Assert.True(harness.Commands.TryHandle("/mixer voices 40"));
 
-        Assert.Equal(AudioMixerCommandBinding.SaveFailed, Assert.Single(harness.Said));
+        Assert.Equal(AudioMixerSettings.SaveFailed, Assert.Single(harness.Said));
         Assert.Equal(32, harness.Engine.MixerOptions.EffectiveVoiceCount);
         Assert.Equal(32, harness.Api.GeneratedSources.Count);
         Assert.Empty(harness.Saved);
@@ -107,7 +107,7 @@ public sealed class AudioMixerCommandBindingTests
             [
                 "mixer: retail mixer off, 40 voices, authored priority on, "
                 + "at most 4 voices per sound",
-                AudioMixerCommandBinding.NoMixerRunning,
+                AudioMixerSettings.NoMixerRunning,
             ],
             harness.Said);
         Assert.Empty(harness.Api.GeneratedSources);

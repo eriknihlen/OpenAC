@@ -25,6 +25,18 @@ internal readonly record struct AudioMixerChange(bool Saved, bool MixerRunning);
 /// </summary>
 internal sealed class AudioMixerSettings
 {
+    /// <summary>Said when the settings could not be written down.</summary>
+    internal const string SaveFailed =
+        "mixer: the settings could not be saved, so nothing changed.";
+
+    /// <summary>
+    /// Said when the settings were written down but there was no mixer to
+    /// change. Reporting them as in force would be a lie.
+    /// </summary>
+    internal const string NoMixerRunning =
+        "mixer: saved, but there is no mixer running to change - it will start "
+        + "this way next time.";
+
     private readonly Func<AudioMixerOptions> _read;
     private readonly Func<AudioMixerOptions, bool> _persist;
     private readonly Func<AudioMixerOptions, bool> _applyToRunningMixer;
@@ -66,5 +78,24 @@ internal sealed class AudioMixerSettings
         return new AudioMixerChange(
             Saved: true,
             MixerRunning: _applyToRunningMixer(options));
+    }
+
+    /// <summary>
+    /// Change the settings and say where the change took effect, for a caller
+    /// that has no reply of its own to put the answer in (the settings row).
+    /// </summary>
+    /// <returns>Whether the settings were written down.</returns>
+    public bool ChangeAndReport(AudioMixerOptions options, Action<string> say)
+    {
+        ArgumentNullException.ThrowIfNull(say);
+        AudioMixerChange change = Change(options);
+        if (!change.Saved)
+        {
+            say(SaveFailed);
+            return false;
+        }
+        if (!change.MixerRunning)
+            say(NoMixerRunning);
+        return true;
     }
 }

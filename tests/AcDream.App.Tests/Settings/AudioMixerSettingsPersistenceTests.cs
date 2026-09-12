@@ -64,7 +64,9 @@ public sealed class AudioMixerSettingsPersistenceTests : IDisposable
         AudioMixerOptions loaded = new SettingsStore(PathName).LoadAudioMixer();
 
         Assert.Equal(AudioMixerOptions.MaximumVoiceCount, loaded.VoiceCount);
-        Assert.Equal(AudioMixerOptions.MaximumVoiceCount, loaded.MaxVoicesPerWave);
+        Assert.Equal(
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
+            loaded.MaxVoicesPerWave);
     }
 
     // The game's own sound options are written whole from the options panel.

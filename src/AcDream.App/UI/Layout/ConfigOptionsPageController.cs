@@ -112,16 +112,10 @@ public static class ConfigOptionsPageController
         Func<CameraTurningSettings> LoadCameraTurning,
         Action<CameraTurningSettings> SaveCameraTurning,
         Func<ChatSettings> LoadChat,
-        Action<ChatSettings> SaveChat)
+        Action<ChatSettings> SaveChat,
+        AudioMixerBindings AudioMixer)
     {
         public RenderPackBindings? RenderPacks { get; init; }
-
-        /// <summary>
-        /// The mixer seam. Every graphical host supplies it; it is null only
-        /// where a caller binds the authored retail rows alone, and then the
-        /// four acdream-only mixer rows are simply not built.
-        /// </summary>
-        public AudioMixerBindings? AudioMixer { get; init; }
     }
 
     /// <summary>
@@ -808,18 +802,10 @@ public static class ConfigOptionsPageController
             apply: value => bindings.SaveAudio(bindings.LoadAudio() with { PlaySoundOnlyWhenActive = value }),
             storeOnly: true);
 
-        if (bindings.AudioMixer is { } mixer)
-            BindMixerRows(listBox, page, mixer);
+        BindMixerRows(listBox, page, bindings.AudioMixer);
 
         audio = bindings.LoadAudio();
     }
-
-    /// <summary>
-    /// The highest per-sound cap the row offers. The setting itself allows more
-    /// (up to the voice count), but past a handful of copies of one sound the
-    /// cap stops doing the job it exists for.
-    /// </summary>
-    private const int MaxVoicesPerWaveCeiling = 8;
 
     /// <summary>
     /// The four acdream-only mixer rows, in the Sound block they belong to:
@@ -889,7 +875,7 @@ public static class ConfigOptionsPageController
             listBox,
             "Voices Per Sound",
             AudioMixerOptions.NoPerWaveCap,
-            MaxVoicesPerWaveCeiling,
+            AudioMixerOptions.MaximumMaxVoicesPerWave,
             step: 1d,
             integer: true,
             defaults.MaxVoicesPerWave,
@@ -905,7 +891,8 @@ public static class ConfigOptionsPageController
                 + "copy replaces the oldest.",
             dimmed: Overridden,
             rangeLowText: "Off",
-            rangeHighText: MaxVoicesPerWaveCeiling.ToString(CultureInfo.InvariantCulture));
+            rangeHighText: AudioMixerOptions.MaximumMaxVoicesPerWave
+                .ToString(CultureInfo.InvariantCulture));
     }
 
 
@@ -1219,7 +1206,8 @@ public static class ConfigOptionsPageController
         if (listBox.AddItemFromTemplateList(HeaderTemplateIndex) is not UiText header)
         {
             Console.WriteLine(
-                "[render-pack] Config header template did not build as UiText.");
+                "[UI] ConfigOptionsPageController: explicit header template "
+                + "did not build as UiText.");
             return;
         }
 
@@ -1617,7 +1605,8 @@ public static class ConfigOptionsPageController
         if (row is null)
         {
             Console.WriteLine(
-                $"[render-pack] Config menu template did not build for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: menu template did not "
+                + $"build for '{labelText}'.");
             return null;
         }
 
@@ -1632,7 +1621,8 @@ public static class ConfigOptionsPageController
         if (UiElement.FindDescendant(row, MenuElementId) is not UiMenu menu)
         {
             Console.WriteLine(
-                $"[render-pack] No UiMenu leaf found for '{labelText}'.");
+                "[UI] ConfigOptionsPageController: no UiMenu leaf found for "
+                + $"'{labelText}'.");
             return null;
         }
 
