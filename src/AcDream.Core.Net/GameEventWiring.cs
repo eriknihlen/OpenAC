@@ -839,13 +839,7 @@ public static class GameEventWiring
                 localPlayer.OnProperties(p.Value.Properties);
                 localPlayer.OnPositions(p.Value.Positions.ToDictionary(
                     static pair => pair.Key,
-                    static pair => new AcDream.Core.Physics.Position(
-                        pair.Value.LandblockId,
-                        new System.Numerics.Vector3(
-                            pair.Value.X, pair.Value.Y, pair.Value.Z),
-                        new System.Numerics.Quaternion(
-                            pair.Value.Qx, pair.Value.Qy,
-                            pair.Value.Qz, pair.Value.Qw))));
+                    static pair => ObjectTableWiring.ToPosition(pair.Value)));
 
                 foreach (var attr in p.Value.Attributes)
                 {

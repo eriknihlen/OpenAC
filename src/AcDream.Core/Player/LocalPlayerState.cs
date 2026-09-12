@@ -198,6 +198,17 @@ public sealed class LocalPlayerState
         CharacterChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Replace ONE saved position slot, leaving every other slot alone. The
+    /// server pushes a single slot whenever it moves — the character dies, ties
+    /// a portal, or sets a recall — and the rest of the table stays as it was.
+    /// </summary>
+    public void OnPosition(uint positionType, Position position)
+    {
+        _positions[positionType] = position;
+        CharacterChanged?.Invoke();
+    }
+
     /// <summary>Snapshot for one skill, or <c>null</c> if it has not arrived yet.</summary>
     public SkillSnapshot? GetSkill(uint skillId) =>
         _skills.TryGetValue(skillId, out var s) ? s : null;

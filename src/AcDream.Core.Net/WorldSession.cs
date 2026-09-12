@@ -282,6 +282,14 @@ public sealed partial class WorldSession : IDisposable
     /// (0x02D9) — one PropertyInstanceId changed on the player.</summary>
     public event Action<PlayerInstanceIdPropertyUpdate>? PlayerInstanceIdPropertyUpdated;
 
+    public readonly record struct PlayerPositionUpdate(
+        uint PositionType, PlayerDescriptionParser.WorldPosition Position);
+
+    /// <summary>Fires when the session parses a private position update (0x02DB) — one
+    /// saved position slot changed on the player. Death rewrites the last-outside-death
+    /// slot this way, so /corpse only follows the current corpse if this is applied.</summary>
+    public event Action<PlayerPositionUpdate>? PlayerPositionUpdated;
+
     public readonly record struct StackSizeUpdate(uint Guid, int StackSize, int Value);
 
     /// <summary>Fires when the session parses a SetStackSize (0x0197) top-level GameMessage.</summary>
@@ -1448,6 +1456,14 @@ public sealed partial class WorldSession : IDisposable
                     PlayerInstanceIdPropertyUpdated?.Invoke(
                         new PlayerInstanceIdPropertyUpdate(
                             p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePosition.Opcode)
+            {
+                var p = PrivateUpdatePosition.TryParse(body);
+                if (p is not null)
+                    PlayerPositionUpdated?.Invoke(
+                        new PlayerPositionUpdate(
+                            p.Value.PositionType, p.Value.Position));
             }
             else if (op == SetStackSize.Opcode)
             {
