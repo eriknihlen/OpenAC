@@ -177,11 +177,13 @@ internal static class ChatTranscriptRenderer
         Vector4 defaultColor,
         Vector4? tagColor = null,
         List<IReadOnlyList<UiText.TextRun>?>? runsPerLine = null,
-        List<IReadOnlyList<(int Start, int Length, ChatTextTag Tag)>?>? tagsPerLine = null)
+        List<IReadOnlyList<(int Start, int Length, ChatTextTag Tag)>?>? tagsPerLine = null,
+        List<UiText.LineKey>? keysPerLine = null)
     {
         var result = new List<UiText.Line>(detailed.Count);
         runsPerLine?.Clear();
         tagsPerLine?.Clear();
+        keysPerLine?.Clear();
         if (detailed.Count == 0)
             return result;
 
@@ -197,28 +199,34 @@ internal static class ChatTranscriptRenderer
             if (RetailChatColorTable.TryGetColor(d.LogTextType, out Vector4 resolved))
                 currentColor = resolved;
             int searchFrom = 0;
+            // Where this message's text begins relative to the message the log holds: the
+            // oldest shown message can have its head cut off by the character budget, and a
+            // line identity has to survive that cut moving.
+            int messageOffset = lineIndex == start.LineIndex ? start.CharacterOffset : 0;
             foreach (string frag in WrapText(d.Text, maxW, measure))
             {
                 result.Add(new UiText.Line(frag, currentColor));
 
+                int at = frag.Length == 0
+                    ? searchFrom
+                    : d.Text.IndexOf(frag, searchFrom, StringComparison.Ordinal);
+                bool located = at >= 0;
+                if (located && frag.Length > 0)
+                    searchFrom = at + frag.Length;
+
+                keysPerLine?.Add(new UiText.LineKey(
+                    d.Sequence,
+                    messageOffset + (located ? at : searchFrom)));
+
                 if (runsPerLine is null && tagsPerLine is null)
                     continue;
 
-                if (d.Spans is not { Count: > 0 } spans || frag.Length == 0)
+                if (d.Spans is not { Count: > 0 } spans || frag.Length == 0 || !located)
                 {
                     runsPerLine?.Add(null);
                     tagsPerLine?.Add(null);
                     continue;
                 }
-
-                int at = d.Text.IndexOf(frag, searchFrom, StringComparison.Ordinal);
-                if (at < 0)
-                {
-                    runsPerLine?.Add(null);
-                    tagsPerLine?.Add(null);
-                    continue;
-                }
-                searchFrom = at + frag.Length;
 
                 runsPerLine?.Add(RunsForFragment(
                     spans,

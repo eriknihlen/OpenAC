@@ -72,6 +72,10 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
 
     private readonly List<IReadOnlyList<UiText.TextRun>?> _cachedTranscriptRuns = new();
 
+    /// <summary>Line identities parallel to <see cref="_cachedTranscriptLines"/>, so a text
+    /// selection stays on the message it was made on as the transcript moves under it.</summary>
+    private readonly List<UiText.LineKey> _cachedTranscriptLineKeys = new();
+
     private readonly List<IReadOnlyList<(int Start, int Length, ChatTextTag Tag)>?>
         _cachedTranscriptTags = new();
 
@@ -214,6 +218,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         c.Transcript.OneLine = false;
         c.Transcript.Selectable = true;
         c.Transcript.LinesProvider   = () => c.GetTranscriptLines(vm);
+        c.Transcript.LineKeysProvider = () => c._cachedTranscriptLineKeys;
         c.Transcript.LineRunsProvider = index =>
             index >= 0 && index < c._cachedTranscriptRuns.Count
                 ? c._cachedTranscriptRuns[index]
@@ -498,6 +503,9 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         var detailed = vm.RecentLinesDetailed();
         if (detailed.Count == 0)
         {
+            _cachedTranscriptRuns.Clear();
+            _cachedTranscriptTags.Clear();
+            _cachedTranscriptLineKeys.Clear();
             return StoreTranscriptLayout(
                 Array.Empty<UiText.Line>(), revision, filter, maxW, datFont, debugFont);
         }
@@ -519,7 +527,8 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             Transcript.DefaultColor,
             Transcript.TagColor,
             _cachedTranscriptRuns,
-            _cachedTranscriptTags);
+            _cachedTranscriptTags,
+            _cachedTranscriptLineKeys);
         return StoreTranscriptLayout(result, revision, filter, maxW, datFont, debugFont);
     }
 

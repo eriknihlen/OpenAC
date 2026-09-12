@@ -12,6 +12,7 @@ public sealed class ChatLog
     private readonly int _maxEntries;
     private uint _localPlayerGuid;
     private long _revision;
+    private long _sequence;
 
     private string _lastSystemText = "";
     private DateTime _lastSystemAt = DateTime.MinValue;
@@ -208,6 +209,10 @@ public sealed class ChatLog
 
     private void Append(ChatEntry entry)
     {
+        // Stamp every entry with an identity that is never reused, so anything holding on to
+        // one line (a text selection, say) can still find it after older entries are dropped
+        // and every remaining entry's position in the buffer has shifted.
+        entry = entry with { Sequence = Interlocked.Increment(ref _sequence) };
         _buffer.Enqueue(entry);
         while (_buffer.Count > _maxEntries)
             _buffer.TryDequeue(out _);
@@ -253,4 +258,10 @@ public readonly record struct ChatEntry(
     public string ChannelName { get; init; } = "";
 
     public uint LogTextType { get; init; } = 0x00u;
+
+    /// <summary>
+    /// Append order, unique for the lifetime of the log and never reused. 0 on an entry that
+    /// was never appended; the log assigns it as the entry goes in.
+    /// </summary>
+    public long Sequence { get; init; }
 }
