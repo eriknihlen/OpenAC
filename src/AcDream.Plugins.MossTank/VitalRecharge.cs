@@ -1052,7 +1052,7 @@ internal sealed class VitalRechargeController
     private double _staminaBoostRemaining;
     private double _manaBoostRemaining;
     private bool _vitalsRequested;
-    private string? _lastHelperTrace;
+    private readonly HashSet<string> _helperTraceLines = new(StringComparer.Ordinal);
 
     public VitalRechargeController(
         IPluginHost host,
@@ -1220,19 +1220,19 @@ internal sealed class VitalRechargeController
         // The host drops its subscription with the session; only the
         // plugin-side memory of it is stale here.
         _vitalsRequested = false;
-        _lastHelperTrace = null;
+        _helperTraceLines.Clear();
         Status = IdleStatus;
     }
 
     /// <summary>
-    /// One launch-log line per distinct helper walk result; a repeated tick
-    /// with the same pick and rejections stays quiet, like the buff pass.
+    /// Each distinct helper walk line reaches the launch log once per session:
+    /// the walk result and its missing-component warnings interleave, so a
+    /// last-line memory would repeat both on every tick.
     /// </summary>
     private void TraceHelper(string line)
     {
-        if (line == _lastHelperTrace)
+        if (!_helperTraceLines.Add(line))
             return;
-        _lastHelperTrace = line;
         _host.Log.Info(line);
     }
 
