@@ -34,6 +34,13 @@ The filter is the portable gate described in `release-gate.md`. Tests behind a
 `Lane` need a specific resource; run them when you have it, for example
 `--filter "Lane=Vulkan"` on a machine with a GPU.
 
+On Linux, `bash tools/build-linux.sh` runs the Release build with .NET and
+NuGet state isolated under
+`XDG_CACHE_HOME` (or `/tmp`). This is useful in containers and CI workers with
+a read-only home directory. It redirects generated package locks to that cache
+so local restores do not rewrite tracked package-lock files. Pass `--test` to
+run the portable test filter afterward.
+
 ## Prepare the content package
 
 Rendering and collision read a validated prepared package instead of decoding
