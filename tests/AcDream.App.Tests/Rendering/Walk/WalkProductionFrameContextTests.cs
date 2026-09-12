@@ -1,4 +1,6 @@
+using System.Linq;
 using System.Numerics;
+using System.Reflection;
 using AcDream.App.Rendering;
 using AcDream.App.Rendering.Walk;
 
@@ -34,6 +36,48 @@ public sealed class WalkProductionFrameContextTests
             Vector3.Zero, Vector3.UnitY, SimpleViewProjection(), 1024f, 768f,
             keepDistantBuildings: true);
         Assert.True(((IRetailFrameWalkContext)ctx).KeepDistantBuildings);
+    }
+
+    // The frame renderer forwards its frame input into the constructor and into
+    // Reset POSITIONALLY, and three of the trailing arguments are bools: the
+    // weather gate, the overhead ladder override, and the distant-building
+    // policy. Reordering them here still compiles at the call site and silently
+    // swaps two policies, so the order is pinned. The forwarding call itself
+    // sits inside a method that needs a live pass executor and cannot be driven
+    // from a unit test, which is why the shape is guarded instead.
+    [Fact]
+    public void FrameEntryPointsKeepTheArgumentOrderTheRendererForwardsPositionally()
+    {
+        (string Name, Type Type)[] tail =
+        [
+            ("viewerCellId", typeof(uint)),
+            ("weatherGateOpen", typeof(bool)),
+            ("buildingDegradesDisabled", typeof(bool)),
+            ("shellResidency", typeof(IWalkShellResidency)),
+            ("keepDistantBuildings", typeof(bool)),
+        ];
+
+        ConstructorInfo ctor = Assert.Single(
+            typeof(WalkProductionFrameContext).GetConstructors());
+        MethodInfo reset = Assert.Single(
+            typeof(WalkProductionFrameContext).GetMethods(
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public),
+            method => method.Name == "Reset");
+
+        foreach (MethodBase entry in new MethodBase[] { ctor, reset })
+        {
+            ParameterInfo[] parameters = entry.GetParameters();
+            ParameterInfo[] actualTail = parameters[^tail.Length..];
+            Assert.Equal(
+                tail.Select(value => value.Name).ToArray(),
+                actualTail.Select(value => value.Name).ToArray());
+            Assert.Equal(
+                tail.Select(value => value.Type).ToArray(),
+                actualTail.Select(value => value.ParameterType).ToArray());
+            Assert.True(
+                actualTail[^1].HasDefaultValue,
+                "the distant-building policy must stay optional for test hosts.");
+        }
     }
 
     [Fact]

@@ -331,6 +331,36 @@ public sealed class RetailFrameWalkTests
     }
 
     [Fact]
+    public void KeepDistantBuildingsWalksDownTheLadder_NeverUpToACheaperLevel()
+    {
+        var nearBsp = new WalkBspNode();
+        var farBsp = new WalkBspNode();
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0x01000061u, 3u, 1f, 2f, 3f, nearBsp),
+                new(0u, 5u, 3f, 4f, 5f, null),
+                new(0x01000063u, 7u, 5f, 6f, 7f, farBsp),
+            ],
+        };
+
+        // The blank entry sits in the MIDDLE of the ladder: effective distance 3
+        // is past level 0's band and inside level 1's, so the ladder picks the
+        // blank one. The rule walks DOWN to level 0 — the fuller, more expensive
+        // mesh — rather than on to level 2. That is deliberate: a level below the
+        // chosen one is never coarser than what the distance asked for, while
+        // level 2 is what the authors meant for a distance we are not at.
+        Assert.Equal(
+            new WalkBuildingSelection(0x01000061u, nearBsp, 0, 3u),
+            building.Select(3f, 0f, 0f, keepDistantBuildings: true));
+
+        WalkBuildingSelection asAuthored = building.Select(3f, 0f, 0f);
+        Assert.Equal(0u, asAuthored.GfxObjId);
+        Assert.Equal(1, asAuthored.Level);
+    }
+
+    [Fact]
     public void KeepDistantBuildingsLeavesALadderWithoutABlankEntryAlone()
     {
         var nearBsp = new WalkBspNode();
