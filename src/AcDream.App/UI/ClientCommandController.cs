@@ -1,5 +1,6 @@
 using System.Globalization;
 using AcDream.Core.Chat;
+using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Core.Ui;
 using AcDream.Core.Social;
@@ -877,7 +878,7 @@ public sealed class ClientCommandController
             {
                 if (price == 0)
                 {
-                    _bindings.ShowSystemMessage("Please specify a value greater than zero.");
+                    _bindings.ShowSystemMessage("Please specify a value greater than 0.");
                     return;
                 }
                 maximumPrice = price;
@@ -904,15 +905,19 @@ public sealed class ClientCommandController
 
     private static bool TryGetComponentCategory(string value, out uint category)
     {
+        // These must stay the same numbering the component catalog groups by,
+        // or a named category fills a different one.
         category = value.ToLowerInvariant() switch
         {
-            "scarab" or "scarabs" => 0u,
-            "herb" or "herbs" => 1u,
-            "powderedgem" or "powderedgems" or "powder" or "powders" => 2u,
-            "alchemicalsubstance" or "alchemicalsubstances" or "potion" or "potions" => 3u,
-            "talisman" or "talismans" => 4u,
-            "taper" or "tapers" => 5u,
-            "pea" or "peas" => 6u,
+            "scarab" or "scarabs" => VendorComponentFill.ScarabCategory,
+            "herb" or "herbs" => VendorComponentFill.HerbCategory,
+            "powderedgem" or "powderedgems" or "powder" or "powders" =>
+                VendorComponentFill.PowderedGemCategory,
+            "alchemicalsubstance" or "alchemicalsubstances" or "potion" or "potions" =>
+                VendorComponentFill.AlchemicalSubstanceCategory,
+            "talisman" or "talismans" => VendorComponentFill.TalismanCategory,
+            "taper" or "tapers" => VendorComponentFill.TaperCategory,
+            "pea" or "peas" => VendorComponentFill.PeaCategory,
             _ => uint.MaxValue,
         };
         return category != uint.MaxValue;

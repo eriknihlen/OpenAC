@@ -296,6 +296,52 @@ public sealed class ClientCommandControllerTests
         Assert.Equal(["Component list cleared.", "You need an open vendor."], messages);
     }
 
+    /// <summary>An open vendor reaches the fill instead of the refusal.</summary>
+    [Fact]
+    public void FillComponents_WithAnOpenVendor_FillsTheBuyList()
+    {
+        var calls = new List<string>();
+        var messages = new List<string>();
+        var controller = NewController(calls, messages: messages, vendorOpen: true);
+
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, ""));
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "scarabs"));
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "500"));
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "tapers 500"));
+
+        Assert.Equal(
+            [
+                "fillcomps::0",
+                "fillcomps:0:0",
+                "fillcomps::500",
+                "fillcomps:5:500",
+            ],
+            calls);
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public void FillComponents_RejectsBadArgumentsBeforeReachingTheVendor()
+    {
+        var calls = new List<string>();
+        var messages = new List<string>();
+        var controller = NewController(calls, messages: messages, vendorOpen: true);
+
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "scarabs 0"));
+        controller.Execute(new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "widgets"));
+        controller.Execute(
+            new ExecuteClientCommandCmd(ClientCommandId.FillComponents, "scarabs 500 extra"));
+
+        Assert.Empty(calls);
+        Assert.Equal(
+            [
+                "Please specify a value greater than 0.",
+                "Invalid component type specified.",
+                "Please use @help fillcomps for proper usage.",
+            ],
+            messages);
+    }
+
 
     [Fact]
     public void HouseAbandon_BothStagesAccepted_ShowsBothPromptsThenSendsExactlyOnce()
@@ -855,7 +901,7 @@ public sealed class ClientCommandControllerTests
         Assert.Equal([expected], clientLocal);
     }
 
-    private static ClientCommandController NewController(
+    internal static ClientCommandController NewController(
         List<string>? calls = null,
         List<uint>? errors = null,
         uint? playerBitfield = 0x02000028u,
@@ -872,7 +918,8 @@ public sealed class ClientCommandControllerTests
         Func<bool>? isPersistentDaylight = null,
         Action<bool>? setPersistentDaylight = null,
         Action<int>? setLandscapeRadius = null,
-        Action<float>? setFieldOfView = null)
+        Action<float>? setFieldOfView = null,
+        Action<uint?, uint>? fillComponentBuyList = null)
     {
         calls ??= [];
         errors ??= [];
@@ -944,7 +991,8 @@ public sealed class ClientCommandControllerTests
             () => lastTeller,
             () => calls.Add("clearcomps"),
             () => vendorOpen,
-            (category, price) => calls.Add($"fillcomps:{category}:{price}"),
+            fillComponentBuyList
+                ?? ((category, price) => calls.Add($"fillcomps:{category}:{price}")),
             () => calls.Add("pklite"),
             () => false,
             title => calls.Add("title:" + title),

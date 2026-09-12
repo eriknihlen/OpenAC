@@ -67,6 +67,16 @@ public sealed class VendorStagingList
         return VendorStagingAddOutcome.Added;
     }
 
+    /// <summary>Drops the newest staged row outright, whatever its quantity.</summary>
+    public bool RemoveTail()
+    {
+        if (_entries.Count == 0)
+            return false;
+        _entries.RemoveAt(_entries.Count - 1);
+        Changed?.Invoke();
+        return true;
+    }
+
     public bool Remove(uint itemGuid, int amount)
     {
         int index = _entries.FindIndex(entry => entry.ItemGuid == itemGuid);

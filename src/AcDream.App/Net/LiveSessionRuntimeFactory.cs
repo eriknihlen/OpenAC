@@ -519,8 +519,11 @@ internal sealed class LiveSessionRuntimeFactory
             {
                 session.SendClearDesiredComponents();
             },
-            HasOpenVendor: () => false,
-            FillComponentBuyList: (_, _) => { },
+            HasOpenVendor: () => _domain.Inventory.Vendor.VendorId != 0u,
+            FillComponentBuyList: (category, maximumPrice) =>
+                _ui.RetailUi?.FillComponentBuyList(
+                    category ?? VendorComponentFill.AnyCategory,
+                    maximumPrice),
             EnterPkLite: session.SendEnterPkLite,
             IsUsingTurbineChat: () => _domain.Communication.TurbineChat.Enabled,
             SetChatTitle: _ => { },

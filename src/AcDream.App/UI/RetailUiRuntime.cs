@@ -1122,6 +1122,37 @@ public sealed class RetailUiRuntime : IDisposable
         });
     }
 
+    /// <summary>
+    /// Fills the open vendor's buy list from the component book's desired
+    /// counts. Reads each desired component's category and name from the
+    /// component catalog and its owned count from everything the player is
+    /// carrying, then lets the vendor panel stage the buys.
+    /// </summary>
+    /// <param name="category">
+    /// A single component category, or <see cref="VendorComponentFill.AnyCategory"/> for all.
+    /// </param>
+    /// <param name="maximumPrice">The spending ceiling, or 0 for no ceiling.</param>
+    public void FillComponentBuyList(uint category, uint maximumPrice)
+    {
+        if (VendorController is null)
+            return;
+
+        MagicRuntimeBindings magic = _bindings.Magic;
+        VendorController.FillComponentBuyList(
+            VendorComponentFill.BuildDesires(
+                magic.Spellbook.DesiredComponents,
+                magic.Objects,
+                magic.PlayerGuid(),
+                weenieClassId => magic.Components.TryGetValue(
+                    weenieClassId,
+                    out SpellComponentDescriptor? descriptor)
+                    ? new ComponentDescription(descriptor.Category, descriptor.Name)
+                    : null,
+                _bindings.Vendor.State.Items),
+            category,
+            (int)maximumPrice);
+    }
+
     public void CloseWindow(string name)
     {
         if (RetailPanelCatalog.TryGetPanelId(name, out uint panelId))
