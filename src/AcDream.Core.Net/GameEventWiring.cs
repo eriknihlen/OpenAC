@@ -538,31 +538,34 @@ public static class GameEventWiring
                     ToActiveEnchantment(entry, receivedAt)));
             }
         });
+        // An enchantment that ran out is announced here, because nothing
+        // else says so; one that was dispelled is not, because the dispel's
+        // own text arrives as ordinary chat.
         registrar.Register(GameEventType.MagicRemoveEnchantment, e =>
         {
             var p = GameEvents.ParseMagicRemoveEnchantment(e.Payload.Span);
-            if (p is not null) spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
-        });
-        registrar.Register(GameEventType.MagicRemoveMultipleEnchantments, e =>
-        {
-            var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
-            if (entries is not null)
-                spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
-        });
-        registrar.Register(GameEventType.MagicDispelEnchantment, e =>
-        {
-            var p = GameEvents.ParseMagicDispelEnchantment(e.Payload.Span);
             if (p is null) return;
             spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
             NotifyOfEnchantmentRemoval((uint)p.Value.SpellId);
         });
-        registrar.Register(GameEventType.MagicDispelMultipleEnchantments, e =>
+        registrar.Register(GameEventType.MagicRemoveMultipleEnchantments, e =>
         {
             var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
             if (entries is null) return;
             spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
             foreach (var entry in entries)
                 NotifyOfEnchantmentRemoval((uint)entry.SpellId);
+        });
+        registrar.Register(GameEventType.MagicDispelEnchantment, e =>
+        {
+            var p = GameEvents.ParseMagicDispelEnchantment(e.Payload.Span);
+            if (p is not null) spellbook.OnEnchantmentRemoved(p.Value.Layer, p.Value.SpellId);
+        });
+        registrar.Register(GameEventType.MagicDispelMultipleEnchantments, e =>
+        {
+            var entries = GameEvents.ParseMagicLayeredSpellList(e.Payload.Span);
+            if (entries is not null)
+                spellbook.OnEnchantmentsRemoved(entries.Select(item => ((uint)item.SpellId, (uint)item.Layer)));
         });
 
         const uint VitaePenaltySpellId = 0x29Au;

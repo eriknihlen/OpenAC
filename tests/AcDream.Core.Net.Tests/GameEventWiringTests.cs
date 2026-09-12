@@ -1771,8 +1771,33 @@ public sealed class GameEventWiringTests
         Assert.Empty(rentPayment);
     }
 
+    // OpenAC #44: the client is the only thing that says an enchantment ran
+    // out, so the plain removal announces it; a dispel does not, since the
+    // dispel's own text arrives as ordinary chat.
     [Fact]
-    public void DispelledEnchantment_AnnouncesItsExpiryAtTheRetailTextType()
+    public void AnExpiredEnchantment_AnnouncesItsExpiryAtTheRetailTextType()
+    {
+        var lines = new List<(string Text, RetailLogTextType Type)>();
+        var dispatcher = new GameEventDispatcher();
+        GameEventWiring.WireAll(
+            dispatcher,
+            new ClientObjectTable(),
+            new CombatState(),
+            SpellbookWithNames(),
+            new ChatLog(),
+            onInterfaceText: (text, type) => lines.Add((text, type)));
+
+        dispatcher.Dispatch(GameEventEnvelope.TryParse(WrapEnvelope(
+            GameEventType.MagicRemoveEnchantment,
+            DispelPayload(spellId: 1234, layer: 1)))!.Value);
+
+        Assert.Equal(
+            ("Fire Protection Self has expired.", RetailLogTextType.Magic),
+            Assert.Single(lines));
+    }
+
+    [Fact]
+    public void ADispelledEnchantment_LeavesQuietly()
     {
         var lines = new List<(string Text, RetailLogTextType Type)>();
         var dispatcher = new GameEventDispatcher();
@@ -1788,13 +1813,11 @@ public sealed class GameEventWiringTests
             GameEventType.MagicDispelEnchantment,
             DispelPayload(spellId: 1234, layer: 1)))!.Value);
 
-        Assert.Equal(
-            ("Fire Protection Self has expired.", RetailLogTextType.Magic),
-            Assert.Single(lines));
+        Assert.Empty(lines);
     }
 
     [Fact]
-    public void DispelledVitaeReadsAsAPenalty()
+    public void ExpiredVitaeReadsAsAPenalty()
     {
         var lines = new List<(string Text, RetailLogTextType Type)>();
         var dispatcher = new GameEventDispatcher();
@@ -1807,14 +1830,14 @@ public sealed class GameEventWiringTests
             onInterfaceText: (text, type) => lines.Add((text, type)));
 
         dispatcher.Dispatch(GameEventEnvelope.TryParse(WrapEnvelope(
-            GameEventType.MagicDispelEnchantment,
+            GameEventType.MagicRemoveEnchantment,
             DispelPayload(spellId: 0x29A, layer: 1)))!.Value);
 
         Assert.Equal("Vitae penalty has expired.", Assert.Single(lines).Text);
     }
 
     [Fact]
-    public void ADispelledSpellMissingFromTheTablePrintsNothing()
+    public void AnExpiredSpellMissingFromTheTablePrintsNothing()
     {
         var lines = new List<(string Text, RetailLogTextType Type)>();
         var dispatcher = new GameEventDispatcher();
@@ -1827,7 +1850,7 @@ public sealed class GameEventWiringTests
             onInterfaceText: (text, type) => lines.Add((text, type)));
 
         dispatcher.Dispatch(GameEventEnvelope.TryParse(WrapEnvelope(
-            GameEventType.MagicDispelEnchantment,
+            GameEventType.MagicRemoveEnchantment,
             DispelPayload(spellId: 4321, layer: 1)))!.Value);
 
         Assert.Empty(lines);
