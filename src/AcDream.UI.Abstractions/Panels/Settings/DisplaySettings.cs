@@ -126,7 +126,8 @@ public sealed record DisplaySettings(
     int TextureFiltering = 1,
     int LandscapeDrawDistance = 8,
     bool BuildingDetailTextures = true,
-    bool MultiPassAlpha = false)
+    bool MultiPassAlpha = false,
+    bool KeepDistantBuildings = true)
 {
     public RenderPackSelectionSettings RenderPack { get; init; } =
         RenderPackSelectionSettings.Retail;

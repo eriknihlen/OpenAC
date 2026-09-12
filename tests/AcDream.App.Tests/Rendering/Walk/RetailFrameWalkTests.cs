@@ -85,6 +85,7 @@ public sealed class RetailFrameWalkTests
         public Vector3 ViewpointInBuilding(WalkBuilding building) => Vector3.Zero;
         public virtual float ViewerDistanceTo(WalkBuilding building) => 0f;
         public bool BuildingDegradesDisabled { get; set; }
+        public bool KeepDistantBuildings { get; set; }
         public IWalkFrameContext CellContext => this;
         public WalkPlane CyPlane { get; set; } = new(new Vector3(0, 0, 1), 0f);
         public void SetActiveView(WalkPortalView views, int index) { }
@@ -295,6 +296,118 @@ public sealed class RetailFrameWalkTests
         Assert.Equal(2, clamped.Level);
         Assert.Equal(13u, clamped.Mode);
         Assert.Equal(0u, clamped.GfxObjId);
+    }
+
+    [Fact]
+    public void KeepDistantBuildingsFallsBackToTheNearestLevelThatNamesAMesh()
+    {
+        var nearBsp = new WalkBspNode();
+        var middleBsp = new WalkBspNode();
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0x01000031u, 3u, 1f, 2f, 3f, nearBsp),
+                new(0x01000032u, 5u, 3f, 4f, 5f, middleBsp),
+                new(0u, 7u, 5f, 6f, 7f, null),
+                new(0u, 9u, 7f, 8f, 9f, null),
+            ],
+        };
+
+        // Far enough that the ladder ends on its last entry, which names no
+        // mesh: the rule walks back to the nearest entry that does.
+        Assert.Equal(
+            new WalkBuildingSelection(0x01000032u, middleBsp, 1, 5u),
+            building.Select(
+                float.PositiveInfinity, 0f, 0f, keepDistantBuildings: true));
+
+        // Off, the ladder is honoured exactly as authored.
+        WalkBuildingSelection asAuthored =
+            building.Select(float.PositiveInfinity, 0f, 0f);
+        Assert.Equal(0u, asAuthored.GfxObjId);
+        Assert.Equal(3, asAuthored.Level);
+        Assert.Equal(9u, asAuthored.Mode);
+        Assert.Null(asAuthored.DrawingBsp);
+    }
+
+    [Fact]
+    public void KeepDistantBuildingsLeavesALadderWithoutABlankEntryAlone()
+    {
+        var nearBsp = new WalkBspNode();
+        var farBsp = new WalkBspNode();
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0x01000041u, 3u, 1f, 2f, 3f, nearBsp),
+                new(0x01000042u, 5u, 3f, 4f, 5f, farBsp),
+            ],
+        };
+
+        var expectedNear = new WalkBuildingSelection(0x01000041u, nearBsp, 0, 3u);
+        var expectedFar = new WalkBuildingSelection(0x01000042u, farBsp, 1, 5u);
+
+        Assert.Equal(expectedNear, building.Select(0f, 0f, 0f));
+        Assert.Equal(expectedNear, building.Select(0f, 0f, 0f, keepDistantBuildings: true));
+        Assert.Equal(expectedFar, building.Select(float.PositiveInfinity, 0f, 0f));
+        Assert.Equal(
+            expectedFar,
+            building.Select(float.PositiveInfinity, 0f, 0f, keepDistantBuildings: true));
+    }
+
+    [Fact]
+    public void KeepDistantBuildingsDrawsNothingWhenNoLevelNamesAMesh()
+    {
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0u, 3u, 1f, 2f, 3f, null),
+                new(0u, 5u, 3f, 4f, 5f, null),
+            ],
+        };
+
+        WalkBuildingSelection selection = building.Select(
+            float.PositiveInfinity, 0f, 0f, keepDistantBuildings: true);
+        Assert.Equal(0u, selection.GfxObjId);
+        Assert.Equal(1, selection.Level);
+    }
+
+    [Fact]
+    public void KeepDistantBuildingsReachesSelectionThroughTheWalkContext()
+    {
+        var nearBsp = new WalkBspNode();
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0x01000051u, 3u, 1f, 2f, 3f, nearBsp),
+                new(0u, 7u, 5f, 6f, 7f, null),
+            ],
+        };
+        var walk = new RetailFrameWalk();
+        var context = new DistanceContext(450f);
+
+        var authored = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, authored);
+        Assert.Empty(authored.ShellSelections);
+
+        context.KeepDistantBuildings = true;
+        var kept = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, kept);
+        Assert.Equal(0x01000051u, Assert.Single(kept.ShellSelections).GfxObjId);
+
+        // The overhead view still turns the whole ladder off: level 0 either way.
+        context.BuildingDegradesDisabled = true;
+        var overhead = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, overhead);
+        Assert.Equal(0x01000051u, Assert.Single(overhead.ShellSelections).GfxObjId);
+
+        context.KeepDistantBuildings = false;
+        context.BuildingDegradesDisabled = false;
+        var restored = new Recorder();
+        walk.DrawBuilding(building, new WalkPortalView(), context, restored);
+        Assert.Empty(restored.ShellSelections);
     }
 
     private sealed class DistanceContext(float distance) : TestContext

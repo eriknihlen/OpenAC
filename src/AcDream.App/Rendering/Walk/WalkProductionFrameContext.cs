@@ -64,7 +64,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         uint viewerCellId = 0u,
         bool weatherGateOpen = false,
         bool buildingDegradesDisabled = false,
-        IWalkShellResidency? shellResidency = null)
+        IWalkShellResidency? shellResidency = null,
+        bool keepDistantBuildings = false)
     {
         _cells = cells ?? throw new ArgumentNullException(nameof(cells));
         _buildings = buildings ?? throw new ArgumentNullException(nameof(buildings));
@@ -72,7 +73,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
             viewProjection, viewportWidth, viewportHeight);
         Reset(
             worldViewpoint, forward, viewProjection, viewportWidth, viewportHeight,
-            viewerCellId, weatherGateOpen, buildingDegradesDisabled, shellResidency);
+            viewerCellId, weatherGateOpen, buildingDegradesDisabled, shellResidency,
+            keepDistantBuildings);
     }
 
     internal void Reset(
@@ -84,7 +86,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         uint viewerCellId = 0u,
         bool weatherGateOpen = false,
         bool buildingDegradesDisabled = false,
-        IWalkShellResidency? shellResidency = null)
+        IWalkShellResidency? shellResidency = null,
+        bool keepDistantBuildings = false)
     {
         _shellResidency = shellResidency;
         _rays.Reset(viewProjection, viewportWidth, viewportHeight);
@@ -95,6 +98,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         ViewerCellId = viewerCellId;
         WeatherGateOpen = weatherGateOpen;
         BuildingDegradesDisabled = buildingDegradesDisabled;
+        KeepDistantBuildings = keepDistantBuildings;
         _activeViewVertCount = 0;
         CyPlane = new WalkPlane(forward, -Vector3.Dot(worldViewpoint, forward) - ZNear);
     }
@@ -105,6 +109,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
     public uint ViewerCellId { get; private set; }
     public bool WeatherGateOpen { get; private set; }
     public bool BuildingDegradesDisabled { get; private set; }
+    public bool KeepDistantBuildings { get; private set; }
     public WalkPlane CyPlane { get; private set; }
     public IWalkRayCaster Rays => _rays;
     public IWalkFrameContext CellContext => this;

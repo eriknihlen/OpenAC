@@ -2,7 +2,9 @@ using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Selection;
 using AcDream.App.Rendering.Packs;
 using AcDream.App.Rendering.Vfx;
+using AcDream.App.Settings;
 using AcDream.App.Streaming;
+using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.Core.Rendering;
 
 namespace AcDream.App.Rendering;
@@ -30,6 +32,34 @@ internal interface IPreparedWorldSceneFramePhase : IWorldSceneFramePhase
         in PreparedWorldSceneFrame prepared);
 
     void CancelPreparedEnhanced(in PreparedWorldSceneFrame prepared);
+}
+
+/// <summary>How much of a building's authored detail ladder the frame walk is
+/// allowed to honour. Asked once per frame, so a change the player makes takes
+/// effect on the next one.</summary>
+internal interface IWorldSceneBuildingDetailPolicy
+{
+    /// <summary>True when a building whose ladder would have it draw nothing at
+    /// this distance falls back to the nearest cheaper mesh the ladder does
+    /// name, rather than disappearing.</summary>
+    bool KeepDistantBuildings { get; }
+}
+
+internal sealed class DefaultBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+{
+    public static DefaultBuildingDetailPolicy Instance { get; } = new();
+
+    public bool KeepDistantBuildings => DisplaySettings.Default.KeepDistantBuildings;
+}
+
+internal sealed class DisplayBuildingDetailPolicy : IWorldSceneBuildingDetailPolicy
+{
+    private readonly IRuntimeSettingsPreviewSource _settings;
+
+    public DisplayBuildingDetailPolicy(IRuntimeSettingsPreviewSource settings)
+        => _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+
+    public bool KeepDistantBuildings => _settings.DisplayPreview.KeepDistantBuildings;
 }
 
 internal sealed class WorldScenePViewRenderer : IWorldScenePViewRenderer
@@ -69,6 +99,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
     private readonly IWorldSceneDiagnostics _diagnostics;
     private readonly IWorldGenerationAvailability _availability;
     private readonly IAtmosphericWorldFrameSink? _atmosphere;
+    private readonly IWorldSceneBuildingDetailPolicy _buildingDetail;
     private readonly RetailPViewFrameInput _pviewFrameInput = new();
     private WorldRenderFrame _preparedEnhancedWorld;
     private bool _hasPreparedEnhancedWorld;
@@ -88,7 +119,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         IWorldRenderRangeSource renderRange,
         IWorldSceneDiagnostics diagnostics,
         IWorldGenerationAvailability? availability = null,
-        IAtmosphericWorldFrameSink? atmosphere = null)
+        IAtmosphericWorldFrameSink? atmosphere = null,
+        IWorldSceneBuildingDetailPolicy? buildingDetail = null)
     {
         _foundation = foundation ?? throw new ArgumentNullException(nameof(foundation));
         _login = login ?? throw new ArgumentNullException(nameof(login));
@@ -106,6 +138,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _availability = availability ?? AlwaysAvailableWorldGeneration.Instance;
         _atmosphere = atmosphere;
+        _buildingDetail = buildingDetail ?? DefaultBuildingDetailPolicy.Instance;
     }
 
     public WorldRenderFrameOutcome Render(RenderFrameInput input)
@@ -211,11 +244,8 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
                         roots.PlayerViewPosition,
                         camera.Camera.View,
                         _diagnostics.CameraCellResolution,
-                        // Buildings always draw their full mesh, whatever the
-                        // distance: with our far object range, the authored
-                        // distance ladder hid a building while the small objects
-                        // around it stayed visible.
-                        buildingDegradesDisabled: true));
+                        buildingDegradesDisabled: camera.IsOverheadView,
+                        keepDistantBuildings: _buildingDetail.KeepDistantBuildings));
 
                 _particleVisibility.MarkVisibleLandscapeCells(
                     pviewResult.VisibleLandscapeCells);
