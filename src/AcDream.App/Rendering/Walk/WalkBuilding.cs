@@ -248,6 +248,20 @@ public static class WalkBuildingPortals
     }
 }
 
+/// <summary>Answers whether one building shell's selected mesh is present and
+/// drawable right now. A building's meshes arrive asynchronously here, so the
+/// id a degrade level names is not by itself proof that anything can be drawn
+/// for it; this is the question the walk asks before it commits to drawing a
+/// building at all.</summary>
+public interface IWalkShellResidency
+{
+    /// <summary>True when <paramref name="gfxObjId"/>'s geometry can be drawn
+    /// in this frame. False covers both "not here yet" and "never draws at
+    /// all" — either way the caller must behave as though the whole building
+    /// were absent, rather than draw part of it.</summary>
+    bool IsShellDrawable(uint gfxObjId);
+}
+
 public interface IWalkBuildingFrameContext
 {
     Vector3 ViewpointInBuilding(WalkBuilding building);

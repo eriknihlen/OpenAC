@@ -17,7 +17,7 @@ using DatReaderWriter.Enums;
 
 namespace AcDream.App.Rendering.Wb;
 
-public sealed partial class WbDrawDispatcher : IDisposable
+public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResidency
 {
     public enum EntitySet
     {

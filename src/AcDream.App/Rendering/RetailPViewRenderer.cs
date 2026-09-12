@@ -102,7 +102,8 @@ internal sealed class RetailPViewRenderer
                     viewportHeight,
                     ctx.ViewerCellId,
                     weatherGateOpen,
-                    ctx.BuildingDegradesDisabled);
+                    ctx.BuildingDegradesDisabled,
+                    walkExecutor.Dispatcher);
             }
             else
             {
@@ -114,7 +115,8 @@ internal sealed class RetailPViewRenderer
                     viewportHeight,
                     ctx.ViewerCellId,
                     weatherGateOpen,
-                    ctx.BuildingDegradesDisabled);
+                    ctx.BuildingDegradesDisabled,
+                    walkExecutor.Dispatcher);
             }
             Walk.WalkProductionFrameContext walkContext = _walkFrameContextScratch;
             _walkLandscape!.SetViewer(ctx.ViewerCellId, ctx.ViewerEyePos);

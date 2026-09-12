@@ -86,6 +86,31 @@ public sealed partial class WbDrawDispatcher
 
     internal bool WalkClassificationPending { get; private set; }
 
+    /// <summary>The walk's building-shell residency question. A shell is
+    /// drawable once its geometry is prepared. Two answers are permanent
+    /// refusals rather than waits: a level authored blank (id zero), and an id
+    /// the mesh layer classifies as a never-drawn placement marker, whose own
+    /// ladder resolves to nothing at every viewing distance. Both are the same
+    /// "this level has no object" state, and a building that selects one draws
+    /// nothing at all — no shell and no look-in — so neither asks for
+    /// preparation. Only a genuine miss does, exactly once per frame and by the
+    /// same route classification uses, so a waiting building cannot starve the
+    /// request that would let it in.</summary>
+    public bool IsShellDrawable(uint gfxObjId)
+    {
+        if (gfxObjId == 0)
+            return false;
+        if (_meshAdapter.MeshManager is null)
+            return true;   // no mesh source in this composition: nothing to wait for
+        if (_meshAdapter.IsRuntimeHiddenMarker(gfxObjId))
+            return false;  // never drawn at any distance: a refusal, not a wait
+        if (_meshAdapter.TryGetRenderData(gfxObjId) is not null)
+            return true;
+        if (_missRequested.Add(gfxObjId))
+            _meshAdapter.EnsureLoaded(gfxObjId);
+        return false;
+    }
+
     internal bool AdmitCachedWalkPart(
         in RenderProjectionRecord record,
         in WalkCachedPart part,
