@@ -46,6 +46,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
 
     private readonly CellVisibility _cells;
     private readonly WalkBuildingRegistry _buildings;
+    private IWalkShellResidency? _shellResidency;
     private Matrix4x4 _viewProjection;
     private readonly InverseViewProjectionRayCaster _rays;
 
@@ -62,7 +63,8 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         float viewportHeight,
         uint viewerCellId = 0u,
         bool weatherGateOpen = false,
-        bool buildingDegradesDisabled = false)
+        bool buildingDegradesDisabled = false,
+        IWalkShellResidency? shellResidency = null)
     {
         _cells = cells ?? throw new ArgumentNullException(nameof(cells));
         _buildings = buildings ?? throw new ArgumentNullException(nameof(buildings));
@@ -70,7 +72,7 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
             viewProjection, viewportWidth, viewportHeight);
         Reset(
             worldViewpoint, forward, viewProjection, viewportWidth, viewportHeight,
-            viewerCellId, weatherGateOpen, buildingDegradesDisabled);
+            viewerCellId, weatherGateOpen, buildingDegradesDisabled, shellResidency);
     }
 
     internal void Reset(
@@ -81,8 +83,10 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
         float viewportHeight,
         uint viewerCellId = 0u,
         bool weatherGateOpen = false,
-        bool buildingDegradesDisabled = false)
+        bool buildingDegradesDisabled = false,
+        IWalkShellResidency? shellResidency = null)
     {
+        _shellResidency = shellResidency;
         _rays.Reset(viewProjection, viewportWidth, viewportHeight);
         WorldViewpoint = worldViewpoint;
         _viewProjection = viewProjection;
@@ -112,6 +116,9 @@ public sealed class WalkProductionFrameContext : IWalkFrameContext, IRetailFrame
 
     public WalkCell? GetVisible(uint cellId)
         => _cells.TryGetCell(cellId, out LoadedCell? cell) ? cell?.Walk : null;
+
+    public bool IsBuildingShellDrawable(uint gfxObjId)
+        => _shellResidency is null || _shellResidency.IsShellDrawable(gfxObjId);
 
     public void SetActiveView(WalkPortalView views, int index)
     {

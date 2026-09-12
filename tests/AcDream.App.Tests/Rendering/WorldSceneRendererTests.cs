@@ -622,6 +622,19 @@ public sealed class WorldSceneRendererTests
         public WorldSceneRenderer Renderer { get; }
     }
 
+    private static void InjectRenderData(
+        ObjectMeshManager manager, ulong id, ObjectRenderData data)
+    {
+        FieldInfo field = typeof(ObjectMeshManager).GetField(
+            "_renderData", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException(
+                "ObjectMeshManager._renderData field not found — test relies on this exact name.");
+        var dict =
+            (System.Collections.Concurrent.ConcurrentDictionary<ulong, ObjectRenderData>)
+            field.GetValue(manager)!;
+        dict[id] = data;
+    }
+
     private sealed class OutdoorAlphaOwnerFixture : IDisposable
     {
         private readonly RecordingGpuDevice _device;
@@ -697,6 +710,12 @@ public sealed class WorldSceneRendererTests
                 GfxObjId = 0x0100_0001u,
                 DrawingBsp = new WalkBspNode { InPortals = [] },
             };
+            // The walk refuses a building whose selected shell mesh is not
+            // present, so give this empty-owner fixture a resident (empty)
+            // mesh for the one id it draws; the drain-site order under test
+            // is what this fixture exists to pin.
+            InjectRenderData(
+                _meshAdapter.MeshManager!, building.GfxObjId, new ObjectRenderData());
             var entry = new WalkBuildingFactory.Entry(
                 building,
                 Matrix4x4.Identity,
