@@ -618,7 +618,13 @@ internal sealed class ContentEffectsAudioCompositionPhase :
         {
             registrations.Register(audioSink);
             Fault(ContentEffectsAudioCompositionPoint.AudioHookRegistered);
-            _dependencies.Log("audio: OpenAL engine ready (16 voices, 3D positional)");
+            AudioMixerOptions mixer = graph.Engine.MixerOptions;
+            string mixerSummary = mixer.RetailMixer
+                ? "retail mixer"
+                : FormattableString.Invariant(
+                    $"authored priority {(mixer.EffectiveUseAuthoredPriority ? "on" : "off")}, per-sound cap {mixer.EffectiveMaxVoicesPerWave}");
+            _dependencies.Log(FormattableString.Invariant(
+                $"audio: OpenAL engine ready ({mixer.EffectiveVoiceCount} voices, 3D positional; {mixerSummary})"));
         }
         else
         {
