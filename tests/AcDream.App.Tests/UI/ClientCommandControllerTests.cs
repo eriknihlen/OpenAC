@@ -901,7 +901,7 @@ public sealed class ClientCommandControllerTests
         Assert.Equal([expected], clientLocal);
     }
 
-    private static ClientCommandController NewController(
+    internal static ClientCommandController NewController(
         List<string>? calls = null,
         List<uint>? errors = null,
         uint? playerBitfield = 0x02000028u,
@@ -918,7 +918,8 @@ public sealed class ClientCommandControllerTests
         Func<bool>? isPersistentDaylight = null,
         Action<bool>? setPersistentDaylight = null,
         Action<int>? setLandscapeRadius = null,
-        Action<float>? setFieldOfView = null)
+        Action<float>? setFieldOfView = null,
+        Action<uint?, uint>? fillComponentBuyList = null)
     {
         calls ??= [];
         errors ??= [];
@@ -990,7 +991,8 @@ public sealed class ClientCommandControllerTests
             () => lastTeller,
             () => calls.Add("clearcomps"),
             () => vendorOpen,
-            (category, price) => calls.Add($"fillcomps:{category}:{price}"),
+            fillComponentBuyList
+                ?? ((category, price) => calls.Add($"fillcomps:{category}:{price}")),
             () => calls.Add("pklite"),
             () => false,
             title => calls.Add("title:" + title),

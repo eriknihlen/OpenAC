@@ -938,6 +938,10 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                 _systemMessage?.Invoke(VendorStagingList.TooMuchMessage);
         }
 
+        // Every buy is applied and the rollback happens at the end, rather
+        // than at the row that hit the ceiling; the outcome is the same only
+        // because staging a guid that is already listed merges into its row
+        // in place and so never moves the newest row.
         if (plan.AbortedOnPrice)
         {
             _buyStaging.RemoveTail();
