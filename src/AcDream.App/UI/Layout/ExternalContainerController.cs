@@ -232,9 +232,13 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             item.ObjectId,
             _selection.SelectedObjectId ?? 0u,
             fullStack);
-        int placement = targetCell.ItemId != 0u
-            ? Math.Max(0, targetCell.SlotIndex)
-            : _objects.GetContents(_openContainer).Count;
+        // Reordering inside the container keeps the hovered slot; an item
+        // arriving from the inventory goes to the top, the way the game does it.
+        int placement = item.ContainerId != _openContainer
+            ? 0
+            : targetCell.ItemId != 0u
+                ? Math.Max(0, targetCell.SlotIndex)
+                : _objects.GetContents(_openContainer).Count;
 
         InventoryRequestKind kind = amount < fullStack
             ? InventoryRequestKind.SplitToContainer

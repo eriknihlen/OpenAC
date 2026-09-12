@@ -404,4 +404,26 @@ public sealed class ExternalContainerControllerTests
         Assert.True(h.Interaction.PlaceWorldItemInBackpack(pickup));
         Assert.Equal(new uint[] { pickup }, h.Pickups);
     }
+
+    // ── OpenAC #34: an item from the pack lands at the top of the chest.
+
+    [Fact]
+    public void DropOwnedItemIntoChest_goesToTheTop()
+    {
+        using var h = new Harness();
+        const uint first = 0x70000101u;
+        const uint second = 0x70000102u;
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = first, Type = ItemType.Misc });
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = second, Type = ItemType.Misc });
+        h.Open(Chest, new ContainerContentEntry(first, 0u), new ContainerContentEntry(second, 0u));
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = Item, Type = ItemType.Misc });
+        h.Objects.MoveItem(Item, Player, 0);
+        var source = new UiItemSlot { SourceKind = ItemDragSource.Inventory };
+        source.SetItem(Item, 0u);
+        var payload = new ItemDragPayload(Item, ItemDragSource.Inventory, 0, source);
+
+        h.Controller.HandleDropRelease(h.Contents, h.Contents.GetItem(1)!, payload);
+
+        Assert.Equal(new[] { (Item, Chest, 0) }, h.Puts);
+    }
 }

@@ -878,14 +878,19 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             && TryMergeStacks(item, targetCell.ItemId))
             return;
 
-        bool sourceIsBag = _objects.Get(item) is { } dragged && IsBag(dragged);
+        ClientObject? dragged = _objects.Get(item);
+        bool sourceIsBag = dragged is not null && IsBag(dragged);
         uint container; int placement;
         if (targetList == _contentsGrid)
         {
             container = EffectiveOpen();
-            placement = targetCell.ItemId != 0
-                ? targetCell.SlotIndex
-                : CountLooseContents(container);                                              // first empty = append after visible loose items
+            // Reordering inside the list keeps the hovered slot; anything that
+            // arrives from elsewhere goes to the top, the way the game does it.
+            placement = dragged?.ContainerId != container
+                ? 0
+                : targetCell.ItemId != 0
+                    ? targetCell.SlotIndex
+                    : CountLooseContents(container);                                          // first empty = append after visible loose items
         }
         else if (targetList == _containerList || targetList == _topContainer)
         {
@@ -893,28 +898,26 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             {
                 container = _playerGuid();
                 if (container == 0u) return;
-                placement = Math.Max(0, targetCell.SlotIndex);
+                placement = dragged?.ContainerId != container
+                    ? 0
+                    : Math.Max(0, targetCell.SlotIndex);
             }
             else
             {
                 if (targetCell.ItemId == 0 || targetCell.ItemId == item) return;
                 container = targetCell.ItemId;                                                  // the bag / main pack
                 if (IsContainerFull(container)) return;                                         // red already shown
-                placement = _objects.GetContents(container).Count;                              // append into it
+                placement = 0;                                                                  // a drop on a pack goes to its top
             }
         }
         else return;
 
         if (fallthrough != 0u)
         {
-            // The named pack was full; append into the pack that has room
-            // (a pack joins the player's pack list, an item its loose items).
+            // The named pack was full; the pack that has room takes the item
+            // at its top, like any arrival from elsewhere.
             container = fallthrough;
-            placement = container != _playerGuid()
-                ? _objects.GetContents(container).Count
-                : sourceIsBag
-                    ? CountBags(container)
-                    : CountLooseContents(container);
+            placement = 0;
         }
 
         if (container == item) return;                                                         // never into itself
