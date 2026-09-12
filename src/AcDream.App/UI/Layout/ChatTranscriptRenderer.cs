@@ -207,6 +207,9 @@ internal static class ChatTranscriptRenderer
             {
                 result.Add(new UiText.Line(frag, currentColor));
 
+                if (runsPerLine is null && tagsPerLine is null && keysPerLine is null)
+                    continue;
+
                 int at = frag.Length == 0
                     ? searchFrom
                     : d.Text.IndexOf(frag, searchFrom, StringComparison.Ordinal);

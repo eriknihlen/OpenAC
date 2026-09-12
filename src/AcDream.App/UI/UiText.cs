@@ -756,14 +756,17 @@ public sealed class UiText : UiElement, IUiDatStateful
 
     /// <summary>
     /// Pin a line/column to the text under it, when the provider identifies its lines.
-    /// Null means the lines are not keyed, and the selection stays index-based.
+    /// Null means the lines are not identified at all, and the selection stays index-based.
     /// </summary>
     private Anchored? AnchoredAt(Pos position)
     {
         var keys = _lastLineKeys;
-        if (position.Line < 0 || position.Line >= keys.Count)
+        if (keys.Count == 0)
             return null;
-        LineKey key = keys[position.Line];
+        // A row with no identity of its own — the two lists momentarily out of step — takes the
+        // nearest one. Handing back nothing would quietly put the selection back on raw indices,
+        // which is the one thing identities exist to prevent, and it would do it without a sign.
+        LineKey key = keys[Math.Clamp(position.Line, 0, keys.Count - 1)];
         return new Anchored(key.Source, key.Start + position.Col);
     }
 

@@ -130,6 +130,17 @@ public class UiTextSelectionAnchorTests
             Text.RefreshLines();
         }
 
+        /// <summary>
+        /// Show rows whose last row carries no identity of its own — the two lists one step out
+        /// of step, which must not cost the selection its anchor.
+        /// </summary>
+        public void ShowWithOneUnkeyedTrailingRow(IEnumerable<(long Source, string Text)> rows)
+        {
+            Show(rows);
+            CurrentKeys.RemoveAt(CurrentKeys.Count - 1);
+            Text.RefreshLines();
+        }
+
         public void DragRows(int fromRow, int toRow) => Drag(Text, fromRow, toRow);
     }
 
@@ -232,6 +243,45 @@ public class UiTextSelectionAnchorTests
         transcript.Show(Rows(4, 5, 6, 7));
 
         Assert.Equal("message 5\nmessage 6\n", transcript.Text.SelectedText());
+    }
+
+    [Fact]
+    public void KeyedSelection_KeepsItsAnchorWhenARowHasNoIdentity()
+    {
+        var transcript = new Transcript(keyed: true);
+        transcript.ShowWithOneUnkeyedTrailingRow(Rows(1, 2, 3, 4));
+
+        // The drag ends on the row with no identity of its own. It takes the nearest one, so
+        // the caret pins to message 3; dropping the anchor here would put the whole selection
+        // back on raw row indices without a word about it.
+        transcript.DragRows(1, 3);
+        Assert.Equal("message 2\nmessage 3\n", transcript.Text.SelectedText());
+
+        transcript.ShowWithOneUnkeyedTrailingRow(Rows(2, 3, 4, 5));
+
+        // Both endpoints followed their own text one row up.
+        Assert.Equal("message 2\n", transcript.Text.SelectedText());
+        // Rows 1..3 of the new list would have been this, had the anchor been lost.
+        Assert.NotEqual("message 3\nmessage 4\n", transcript.Text.SelectedText());
+    }
+
+    [Fact]
+    public void BuildLines_WithNoCollectorsDoesNotScanForFragmentOffsets()
+    {
+        // Callers that want neither runs, tags, nor identities must pay for none of it.
+        var detailed = new[]
+        {
+            new FormattedLine("one two", ChatKind.System, null, 0x00u, null, Sequence: 11),
+        };
+
+        List<UiText.Line> lines = ChatTranscriptRenderer.BuildLines(
+            detailed,
+            maxW: 3f,
+            measure: static s => s.Length,
+            accept: null,
+            defaultColor: White);
+
+        Assert.Equal(["one", "two"], [.. System.Linq.Enumerable.Select(lines, l => l.Text)]);
     }
 
     // ── End to end over the real chat pipeline ──────────────────────────────────────────
