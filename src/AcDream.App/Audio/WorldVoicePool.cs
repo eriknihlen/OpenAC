@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using AcDream.Core.Audio;
 
 namespace AcDream.App.Audio;
@@ -28,6 +29,14 @@ internal sealed class WorldVoicePool
         public bool InUse;
 
         /// <summary>
+        /// Whether this voice is carrying an interface sound rather than a sound
+        /// in the world. Interface sounds share the pool but do not belong to the
+        /// world, so a world change does not stop them: the cue that plays as you
+        /// step into a portal has to outlive the world it is leaving.
+        /// </summary>
+        public bool IsInterface;
+
+        /// <summary>
         /// The priority recorded when the voice was claimed. It is always
         /// <see cref="RetailVoicePool.VoicePriority"/>; the field exists because
         /// the allocator reads it, not because it ever varies.
@@ -51,7 +60,10 @@ internal sealed class WorldVoicePool
     /// sound has finished is free again even though it was never released.
     /// </param>
     /// <param name="ownerId">The entity the new sound belongs to, or 0.</param>
-    public Voice? Claim(Func<uint, bool> isStillPlaying, uint ownerId)
+    /// <param name="isInterface">
+    /// True for an interface sound, which a world change leaves alone.
+    /// </param>
+    public Voice? Claim(Func<uint, bool> isStillPlaying, uint ownerId, bool isInterface)
     {
         ArgumentNullException.ThrowIfNull(isStillPlaying);
 
@@ -75,9 +87,25 @@ internal sealed class WorldVoicePool
         Voice claimed = _voices[index];
         claimed.InUse = true;
         claimed.OwnerId = ownerId;
+        claimed.IsInterface = isInterface;
         claimed.Priority = RetailVoicePool.VoicePriority;
         _cursor = RetailVoicePool.AdvanceCursor(index, VoiceCount);
         return claimed;
+    }
+
+    /// <summary>
+    /// The voices a world change takes down with it: every one that is not
+    /// carrying an interface sound. Interface cues keep playing across the
+    /// change — one of them is the sound of making it happen.
+    /// </summary>
+    public IEnumerable<Voice> SilencedByWorldChange()
+    {
+        for (int i = 0; i < VoiceCount; i++)
+        {
+            Voice voice = _voices[i];
+            if (!voice.IsInterface)
+                yield return voice;
+        }
     }
 
     /// <summary>Give a voice back to the pool. The caller silences the source.</summary>
@@ -85,6 +113,7 @@ internal sealed class WorldVoicePool
     {
         ArgumentNullException.ThrowIfNull(voice);
         voice.OwnerId = 0;
+        voice.IsInterface = false;
         voice.Priority = RetailVoicePool.VoicePriority;
         voice.InUse = false;
     }

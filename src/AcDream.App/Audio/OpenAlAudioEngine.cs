@@ -54,6 +54,12 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public float AmbientVolume{ get; set; } = 0.8f;
     public bool  IsAvailable => _available;
 
+    /// <summary>
+    /// The one startup line describing what the output limiter was doing and
+    /// what it is doing now, or null when the engine never came up.
+    /// </summary>
+    internal string? OutputLimiterReport { get; private set; }
+
     public long ResidentBufferBytes => _bufferBudget.ResidentBytes;
 
     public int ResidentBufferCount => _bufferBudget.Count;
@@ -104,7 +110,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
             api.DisableAlDistanceAttenuation();
 
-            Console.WriteLine(_resources.DescribeOutputLimiter());
+            OutputLimiterReport = _resources.DescribeOutputLimiter();
+            Console.WriteLine(OutputLimiterReport);
 
             _available = true;
         }
@@ -182,15 +189,18 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimVoice(ownerId);
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId);
         if (voice is null) return false;    // every voice busy — drop the sound
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
         return true;
     }
 
-    private WorldVoicePool.Voice? ClaimVoice(uint ownerId) =>
-        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId);
+    private WorldVoicePool.Voice? ClaimWorldVoice(uint ownerId) =>
+        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId, isInterface: false);
+
+    private WorldVoicePool.Voice? ClaimInterfaceVoice() =>
+        _voices.Claim(_isStillPlaying ??= IsStillPlaying, ownerId: 0, isInterface: true);
 
     /// <summary>
     /// Hand a claimed voice its sound and start it. This is the one place a
@@ -224,8 +234,11 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     public void SuspendWorldAudio()
     {
         _worldAudioSuspended = true;
-        for (int i = 0; i < _voices.Count; i++)
-            Silence(_voices[i]);
+        // Only the world goes quiet. An interface cue is not part of the world
+        // being taken down — the portal-enter sound plays at exactly this
+        // moment and has to be allowed to finish.
+        foreach (WorldVoicePool.Voice voice in _voices.SilencedByWorldChange())
+            Silence(voice);
     }
 
     public void ResumeWorldAudio() => _worldAudioSuspended = false;
@@ -258,7 +271,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        WorldVoicePool.Voice? voice = ClaimInterfaceVoice();
         if (voice is null) return false;
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);
@@ -289,7 +302,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId: 0);
         if (voice is null) return false;
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(mix.Decibels), mix.Pan);
@@ -309,7 +322,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         uint buffer = EnsureBuffer(waveId, wave);
         if (buffer == 0) return false;
 
-        WorldVoicePool.Voice? voice = ClaimVoice(ownerId: 0);
+        WorldVoicePool.Voice? voice = ClaimWorldVoice(ownerId: 0);
         if (voice is null) return false;
 
         Speak(voice, buffer, RetailSoundMixer.LinearGain(decibels), pan: 0);

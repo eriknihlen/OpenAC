@@ -15,8 +15,11 @@ internal interface IOpenAlResourceApi
 
     nint CreateContext(nint device, int[]? attributes);
 
-    /// <summary>The device's current output-limiter setting.</summary>
-    int ReadOutputLimiterState(nint device);
+    /// <summary>
+    /// The device's current output-limiter setting, or null when the device does
+    /// not answer the question.
+    /// </summary>
+    int? ReadOutputLimiterState(nint device);
 
     bool MakeContextCurrent(nint context);
     uint GenerateSource();
@@ -66,15 +69,18 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
             return (nint)ContextApi.CreateContext((Device*)device, pinned);
     }
 
-    public int ReadOutputLimiterState(nint device)
+    public int? ReadOutputLimiterState(nint device)
     {
-        int value = 0;
+        int value = OpenAlContextAttributes.Unanswered;
+        ContextApi.GetError((Device*)device);   // clear anything already pending
         ContextApi.GetContextProperty(
             (Device*)device,
             (GetContextInteger)OpenAlContextAttributes.OutputLimiter,
             1,
             &value);
-        return value;
+        return OpenAlContextAttributes.ReadLimiterState(
+            value,
+            errored: ContextApi.GetError((Device*)device) != ContextError.NoError);
     }
 
     public bool MakeContextCurrent(nint context) =>
@@ -174,6 +180,8 @@ internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup
             throw new InvalidOperationException("The OpenAL context already exists.");
 
         OutputLimiterControllable = _api.SupportsOutputLimiterControl(_device);
+        // There is no context yet, so a device is entitled not to answer this
+        // one; "unknown" is then what the startup line says.
         if (OutputLimiterControllable)
             OutputLimiterStateBefore = _api.ReadOutputLimiterState(_device);
 

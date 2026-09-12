@@ -545,7 +545,7 @@ public sealed class ContentEffectsAudioCompositionTests
         public nint OpenDevice() => 1;
         public bool SupportsOutputLimiterControl(nint device) => false;
         public nint CreateContext(nint device, int[]? attributes) => 2;
-        public int ReadOutputLimiterState(nint device) => OpenAlContextAttributes.Off;
+        public int? ReadOutputLimiterState(nint device) => OpenAlContextAttributes.Off;
         public bool MakeContextCurrent(nint context) => true;
         public uint GenerateSource() => _nextSource++;
         public void Configure3DSource(uint source) { }

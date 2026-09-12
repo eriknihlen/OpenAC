@@ -33,6 +33,21 @@ internal static class OpenAlContextAttributes
     internal const int EndOfList = 0;
 
     /// <summary>
+    /// The value we put in the buffer before asking the device, so that a device
+    /// which writes nothing can be told apart from one that answers "off".
+    /// </summary>
+    internal const int Unanswered = int.MinValue;
+
+    /// <summary>
+    /// What a limiter read actually told us. The value counts only when the
+    /// device wrote one and raised no error; anything else is unknown, which is
+    /// what the startup line then says. Reporting a silent non-answer as "off"
+    /// would be a lie in the one line whose job is to report the limiter.
+    /// </summary>
+    internal static int? ReadLimiterState(int value, bool errored) =>
+        errored || value == Unanswered ? null : value;
+
+    /// <summary>
     /// The attribute list for a new context: limiter off when the device can be
     /// asked, and nothing at all when it cannot.
     /// </summary>
