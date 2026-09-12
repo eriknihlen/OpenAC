@@ -163,6 +163,11 @@ public class WaterSemanticsTests
         var heights = new byte[81];   // all zero -> terrain Z = 0 everywhere
         var heightTable = new float[256];
         var types = water ? AllVertices(WaterTerrainByte) : AllVertices(DryTerrainByte);
+        // One dry vertex at the far corner: the cell under the body stays fully
+        // flooded (wading), while the block as a whole is not the open sea,
+        // which no walker may enter at all.
+        if (water)
+            types[80] = DryTerrainByte;
 
         engine.AddLandblock(
             landblockId: TestLandblockId,

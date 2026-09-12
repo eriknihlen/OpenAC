@@ -38,6 +38,14 @@ public sealed class TerrainSurface
     private readonly float[,] _z;               // pre-resolved heights [x, y]
     private readonly bool[,] _cornerIsWater;   // per-VERTEX water flag [x, y] — SurfChar[(type >> 2) & 0x1F]
     private readonly byte[,] _cellWaterType;
+
+    /// <summary>
+    /// The block as a whole: 0 = no water, 1 = some water, 2 = every cell
+    /// fully under water (open sea). Only a full 8 x 8 block can be sea.
+    /// </summary>
+    public byte BlockWaterType { get; }
+
+    public bool IsEntirelyWater => BlockWaterType == 2;
     private readonly uint _landblockX;
     private readonly uint _landblockY;
 
@@ -105,6 +113,16 @@ public sealed class TerrainSurface
                     _ => 1,   // PartiallyWater
                 };
             }
+
+        bool anyWater = false;
+        bool everyCellFlooded = true;
+        for (int cx = 0; cx < CellsPerSide; cx++)
+            for (int cy = 0; cy < CellsPerSide; cy++)
+            {
+                if (_cellWaterType[cx, cy] != 0) anyWater = true;
+                if (_cellWaterType[cx, cy] != 2) everyCellFlooded = false;
+            }
+        BlockWaterType = !anyWater ? (byte)0 : everyCellFlooded ? (byte)2 : (byte)1;
     }
 
     public float SampleZ(float localX, float localY)

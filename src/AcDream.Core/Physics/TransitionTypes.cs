@@ -2030,14 +2030,16 @@ public sealed class Transition
                         cellId, footCenter.X, footCenter.Y);
                     if (terrainWalkable is { } terrain)
                     {
-                        var terrainState = ValidateWalkable(
-                            footCenter,
-                            sphereRadius,
-                            terrain.Plane,
-                            terrain.IsWater,
-                            terrain.WaterDepth,
-                            cellId: terrain.CellId,
-                            walkableVertices: terrain.Vertices);
+                        var terrainState = OpenSeaBlocks(terrain)
+                            ? TransitionState.Collided
+                            : ValidateWalkable(
+                                footCenter,
+                                sphereRadius,
+                                terrain.Plane,
+                                terrain.IsWater,
+                                terrain.WaterDepth,
+                                cellId: terrain.CellId,
+                                walkableVertices: terrain.Vertices);
 
                         if (PhysicsDiagnostics.ProbeIndoorBspEnabled)
                         {
@@ -2440,6 +2442,12 @@ public sealed class Transition
             footCenter.Y);
         if (terrainWalkable is not null)
         {
+            if (OpenSeaBlocks(terrainWalkable.Value))
+            {
+                if ((ObjectInfo.State & ObjectInfoState.Contact) == 0)
+                    ci.CollidedWithEnvironment = true;
+                return TransitionState.Collided;
+            }
             var terrainState = ValidateWalkable(footCenter, sphereRadius, terrainWalkable.Value.Plane,
                                     terrainWalkable.Value.IsWater,
                                     terrainWalkable.Value.WaterDepth,
@@ -2452,6 +2460,16 @@ public sealed class Transition
 
         return TransitionState.OK;
     }
+
+    /// <summary>
+    /// The open sea is a wall: a landblock whose every cell is under water
+    /// refuses any mover except the camera and missiles, before its terrain
+    /// is even tested for a walkable surface.
+    /// </summary>
+    private bool OpenSeaBlocks(in TerrainWalkableSample terrain) =>
+        terrain.BlockEntirelyWater
+        && !ObjectInfo.IsViewer
+        && (ObjectInfo.MoverPhysicsState & PhysicsStateFlags.Missile) == 0;
 
     private TransitionState RunCheckOtherCellsAndAdvance(
         PhysicsEngine engine, Vector3 footCenter, float sphereRadius)

@@ -12,7 +12,8 @@ internal readonly record struct TerrainWalkableSample(
     TerrainTriangleVertices Vertices,
     float WaterDepth,
     bool IsWater,
-    uint CellId);
+    uint CellId,
+    bool BlockEntirelyWater = false);
 
 public sealed class PhysicsEngine
 {
@@ -879,7 +880,8 @@ public sealed class PhysicsEngine
             vertices,
             waterDepth,
             isWater,
-            fullCellId);
+            fullCellId,
+            landblock.Terrain.IsEntirelyWater);
     }
 
     private static Vector3 OffsetTerrainVertex(Vector3 vertex, LandblockPhysics landblock)
