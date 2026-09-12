@@ -877,7 +877,7 @@ public sealed class ClientCommandController
             {
                 if (price == 0)
                 {
-                    _bindings.ShowSystemMessage("Please specify a value greater than zero.");
+                    _bindings.ShowSystemMessage("Please specify a value greater than 0.");
                     return;
                 }
                 maximumPrice = price;

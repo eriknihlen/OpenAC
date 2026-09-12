@@ -902,6 +902,58 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             _systemMessage?.Invoke(VendorStagingList.TooMuchMessage);
     }
 
+    /// <summary>
+    /// Fills the Buying list from the component book's desired counts: every
+    /// component of the requested category the player is short of is staged
+    /// up to what this shop stocks, stopping once the staged total reaches
+    /// the price ceiling. Shows the Spell Components listing and the Buying
+    /// tab afterwards, the way pressing Add does.
+    /// </summary>
+    /// <param name="category">
+    /// A single component category, or <see cref="VendorComponentFill.AnyCategory"/> for all.
+    /// </param>
+    /// <param name="maximumPrice">The spending ceiling, or 0 for no ceiling.</param>
+    public void FillComponentBuyList(
+        IReadOnlyList<ComponentFillDesire> desires,
+        uint category,
+        int maximumPrice)
+    {
+        ArgumentNullException.ThrowIfNull(desires);
+        if (_vendor.VendorId == 0u)
+            return;
+
+        SelectCategory((uint)ItemType.SpellComponents);
+
+        ComponentFillPlan plan = VendorComponentFill.Plan(
+            desires,
+            category,
+            maximumPrice,
+            _vendor.Items,
+            _vendor.Profile,
+            _buyStaging.Entries);
+
+        foreach (ComponentFillAdd add in plan.Adds)
+        {
+            if (_buyStaging.Add(add.ItemGuid, add.Quantity) == VendorStagingAddOutcome.Capped)
+                _systemMessage?.Invoke(VendorStagingList.TooMuchMessage);
+        }
+
+        if (plan.AbortedOnPrice)
+        {
+            _buyStaging.RemoveTail();
+            _systemMessage?.Invoke(VendorComponentFill.AbortedOnPriceMessage);
+        }
+
+        if (plan.ShortComponents.Count > 0)
+        {
+            _systemMessage?.Invoke(
+                VendorComponentFill.FormatShortComponents(plan.ShortComponents));
+            _systemMessage?.Invoke(string.Empty);
+        }
+
+        ShowTab(VendorPanelTab.Buying);
+    }
+
     private static int BuyStagingRemovalAmount(VendorShopItem item) =>
         (item.MaxStackSize ?? 1) > 1 ? -1 : 1;
 

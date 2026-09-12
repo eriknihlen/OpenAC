@@ -2498,4 +2498,108 @@ public sealed class VendorUiControllerTests
 
         Assert.Equal(0, h.Objects.Get(PlayerOwnedArmorGuid)!.SellState);
     }
+
+    private const uint TaperShopGuid = 0x60000401u;
+    private const uint ScarabShopGuid = 0x60000402u;
+    private const uint TaperWcid = 0x0000055Cu;
+    private const uint ScarabWcid = 0x0000029Au;
+    private const uint PeaWcid = 0x000004DFu;
+
+    private static VendorShopItem Component(uint guid, uint weenieClassId, string name, int stock) =>
+        new(guid, stock, weenieClassId, name, (uint)ItemType.SpellComponents, 200u, 5,
+            DescStackSize: 1, MaxStackSize: 100);
+
+    /// <summary>The command fills the Buying list from the desired counts.</summary>
+    [Fact]
+    public void FillComponentBuyList_StagesEachShortfallAndOpensTheBuyingTab()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(sellRate: 1.0f), new[]
+        {
+            Component(TaperShopGuid, TaperWcid, "Prismatic Taper", -1),
+            Component(ScarabShopGuid, ScarabWcid, "Lead Scarab", -1),
+        });
+
+        h.Controller.FillComponentBuyList(
+            [
+                new ComponentFillDesire(TaperWcid, 5u, "Prismatic Taper", 20, 12),
+                new ComponentFillDesire(ScarabWcid, 0u, "Lead Scarab", 5, 0),
+            ],
+            VendorComponentFill.AnyCategory,
+            maximumPrice: 0);
+
+        Assert.Equal(2, h.BuyingList.GetNumUIItems());
+        Assert.True(h.BuyingPage.Visible);
+        Assert.Empty(h.SystemMessages);
+
+        h.BuyAllButton.OnClick!.Invoke();
+
+        (_, IReadOnlyList<(int Amount, uint ItemGuid)> items, _) = Assert.Single(h.BuyAlls);
+        Assert.Equal(
+            new (int Amount, uint ItemGuid)[] { (8, TaperShopGuid), (5, ScarabShopGuid) },
+            items);
+    }
+
+    [Fact]
+    public void FillComponentBuyList_ReportsComponentsTheShopCannotSupply()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(sellRate: 1.0f), new[]
+        {
+            Component(TaperShopGuid, TaperWcid, "Prismatic Taper", 3),
+        });
+
+        h.Controller.FillComponentBuyList(
+            [
+                new ComponentFillDesire(TaperWcid, 5u, "Prismatic Taper", 20, 12),
+                new ComponentFillDesire(PeaWcid, 6u, "Pea", 4, 0),
+            ],
+            VendorComponentFill.AnyCategory,
+            maximumPrice: 0);
+
+        Assert.Equal(1, h.BuyingList.GetNumUIItems());
+        Assert.Equal(
+            new[] { "There was not enough: Prismatic Taper, Pea", "" },
+            h.SystemMessages);
+    }
+
+    [Fact]
+    public void FillComponentBuyList_PriceCeilingRollsBackTheCrossingBuyAndSaysSo()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(sellRate: 1.0f), new[]
+        {
+            Component(TaperShopGuid, TaperWcid, "Prismatic Taper", -1),
+            Component(ScarabShopGuid, ScarabWcid, "Lead Scarab", -1),
+        });
+
+        // 10 tapers at 5 each already meets a 50 ceiling, so the scarab row
+        // aborts and the tapers row it appended is dropped.
+        h.Controller.FillComponentBuyList(
+            [
+                new ComponentFillDesire(TaperWcid, 5u, "Prismatic Taper", 10, 0),
+                new ComponentFillDesire(ScarabWcid, 0u, "Lead Scarab", 10, 0),
+            ],
+            VendorComponentFill.AnyCategory,
+            maximumPrice: 50);
+
+        Assert.Equal(0, h.BuyingList.GetNumUIItems());
+        Assert.Equal(
+            new[] { VendorComponentFill.AbortedOnPriceMessage },
+            h.SystemMessages);
+    }
+
+    [Fact]
+    public void FillComponentBuyList_WithNoOpenVendor_StagesNothing()
+    {
+        var h = new Harness();
+
+        h.Controller.FillComponentBuyList(
+            [new ComponentFillDesire(TaperWcid, 5u, "Prismatic Taper", 20, 12)],
+            VendorComponentFill.AnyCategory,
+            maximumPrice: 0);
+
+        Assert.Equal(0, h.BuyingList.GetNumUIItems());
+        Assert.Empty(h.SystemMessages);
+    }
 }

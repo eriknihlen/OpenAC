@@ -8,6 +8,36 @@ public sealed class VendorStagingListTests
     private const uint ItemB = 0x60000102u;
 
     [Fact]
+    public void RemoveTailDropsTheNewestRowOutright()
+    {
+        var list = new VendorStagingList();
+        int changes = 0;
+        list.Add(ItemA, 5);
+        list.Add(ItemB, 7);
+        list.Changed += () => changes++;
+
+        Assert.True(list.RemoveTail());
+
+        VendorStagingEntry entry = Assert.Single(list.Entries);
+        Assert.Equal(ItemA, entry.ItemGuid);
+        Assert.Equal(5, entry.Quantity);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public void RemoveTailOnAnEmptyListDoesNothing()
+    {
+        var list = new VendorStagingList();
+        int changes = 0;
+        list.Changed += () => changes++;
+
+        Assert.False(list.RemoveTail());
+
+        Assert.True(list.IsEmpty);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
     public void AddAppendsANewEntry()
     {
         var list = new VendorStagingList();

@@ -1122,6 +1122,64 @@ public sealed class RetailUiRuntime : IDisposable
         });
     }
 
+    /// <summary>
+    /// Fills the open vendor's buy list from the component book's desired
+    /// counts. Reads each desired component's category and name from the
+    /// component catalog and its owned count from everything the player is
+    /// carrying, then lets the vendor panel stage the buys.
+    /// </summary>
+    /// <param name="category">
+    /// A single component category, or <see cref="VendorComponentFill.AnyCategory"/> for all.
+    /// </param>
+    /// <param name="maximumPrice">The spending ceiling, or 0 for no ceiling.</param>
+    public void FillComponentBuyList(uint category, uint maximumPrice)
+    {
+        if (VendorController is null)
+            return;
+
+        MagicRuntimeBindings magic = _bindings.Magic;
+        uint player = magic.PlayerGuid();
+
+        var owned = new Dictionary<uint, int>();
+        foreach (ClientObject item in magic.Objects.Objects)
+        {
+            if (!magic.Objects.IsOwnedByObject(item.ObjectId, player))
+                continue;
+            owned.TryGetValue(item.WeenieClassId, out int count);
+            owned[item.WeenieClassId] = count + Math.Max(1, item.StackSize);
+        }
+
+        var desires = new List<ComponentFillDesire>();
+        foreach ((uint weenieClassId, uint desired) in magic.Spellbook.DesiredComponents)
+        {
+            if (desired == 0u)
+                continue;
+            magic.Components.TryGetValue(
+                weenieClassId,
+                out SpellComponentDescriptor? descriptor);
+            owned.TryGetValue(weenieClassId, out int ownedCount);
+            desires.Add(new ComponentFillDesire(
+                weenieClassId,
+                descriptor?.Category ?? VendorComponentFill.AnyCategory,
+                descriptor?.Name ?? string.Empty,
+                (int)desired,
+                ownedCount));
+        }
+
+        // Walk the rows in the order the component book lists them, so the
+        // component a price ceiling cuts off is the one the player can see
+        // it stopped at.
+        desires.Sort(static (left, right) =>
+        {
+            int byCategory = left.Category.CompareTo(right.Category);
+            return byCategory != 0
+                ? byCategory
+                : string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+        });
+
+        VendorController.FillComponentBuyList(desires, category, (int)maximumPrice);
+    }
+
     public void CloseWindow(string name)
     {
         if (RetailPanelCatalog.TryGetPanelId(name, out uint panelId))
