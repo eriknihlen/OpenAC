@@ -405,7 +405,8 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         _commands.Publish(new SendChatCmd(
             channel,
             command.TargetName,
-            command.Text));
+            command.Text,
+            command.TargetGuid));
         _events.EmitCommand(
             RuntimeCommandDomain.Chat,
             (int)command.Channel,

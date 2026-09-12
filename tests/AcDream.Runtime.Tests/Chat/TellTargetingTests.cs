@@ -114,7 +114,10 @@ public sealed class TellTargetingTests
                 defaultTellTargetGuid: 0x8000ABCDu));
 
         Assert.Equal(["talkdirect:8000ABCD:I would like to trade"], f.Sent);
-        Assert.Equal("Aun Tanua", f.Feedback.LastOutgoingTellTarget);
+
+        // Speaking to a picked object is not a tell by name, so it leaves the
+        // retell target where it was.
+        Assert.Null(f.Feedback.LastOutgoingTellTarget);
     }
 
     [Fact]
@@ -151,7 +154,36 @@ public sealed class TellTargetingTests
     }
 
     [Fact]
-    public void RetellAfterAPickedTarget_KeepsAimingAtTheName_Issue50()
+    public void SpeakingToAPickedTarget_LeavesTheRetellTargetAlone_Issue50()
+    {
+        using var f = new Fixture();
+
+        ChatCommandRouter.Submit(
+            "/tell Bob, hello", f.Feedback, f.Route, ChatChannelKind.Say);
+        ChatCommandRouter.Submit(
+            "and you",
+            f.Feedback,
+            f.Route,
+            ChatChannelKind.Tell,
+            defaultTellTarget: "Aun Tanua",
+            defaultTellTargetGuid: 0x8000ABCDu);
+        ChatCommandRouter.Submit(
+            "/rt again", f.Feedback, f.Route, ChatChannelKind.Say);
+
+        // The retell still reaches Bob. Aiming it at the creature would send
+        // its name to the name lookup, which cannot resolve a creature.
+        Assert.Equal("Bob", f.Feedback.LastOutgoingTellTarget);
+        Assert.Equal(
+            [
+                "tell:Bob:hello",
+                "talkdirect:8000ABCD:and you",
+                "tell:Bob:again",
+            ],
+            f.Sent);
+    }
+
+    [Fact]
+    public void RetellAfterOnlyAPickedTarget_HasNobodyToAimAt_Issue50()
     {
         using var f = new Fixture();
 
@@ -162,12 +194,24 @@ public sealed class TellTargetingTests
             ChatChannelKind.Tell,
             defaultTellTarget: "Aun Tanua",
             defaultTellTargetGuid: 0x8000ABCDu);
-        ChatCommandRouter.Submit(
-            "/rt again", f.Feedback, f.Route, ChatChannelKind.Say);
 
         Assert.Equal(
-            ["talkdirect:8000ABCD:hello", "tell:Aun Tanua:again"],
-            f.Sent);
+            SubmitOutcome.ClientHandled,
+            ChatCommandRouter.Submit(
+                "/rt again", f.Feedback, f.Route, ChatChannelKind.Say));
+
+        Assert.Equal(["talkdirect:8000ABCD:hello"], f.Sent);
+    }
+
+    [Fact]
+    public void APickedTargetNeedsNoName_Issue50()
+    {
+        using var f = new Fixture();
+
+        f.Route.Publish(new SendChatCmd(
+            ChatChannelKind.Tell, null, "hello", 0x8000ABCDu));
+
+        Assert.Equal(["talkdirect:8000ABCD:hello"], f.Sent);
     }
 
     [Fact]

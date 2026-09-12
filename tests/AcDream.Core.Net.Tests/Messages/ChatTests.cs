@@ -79,6 +79,21 @@ public sealed class ChatTests
     }
 
     [Fact]
+    public void BuildTalkDirect_UnpaddedMessageLeavesNoGapBeforeTheTargetId_Issue50()
+    {
+        // 2 + 2 = 4 bytes of record need no padding at all.
+        byte[] body = ChatRequests.BuildTalkDirect(
+            gameActionSequence: 2, targetGuid: 0x12345678u, message: "hi");
+
+        Assert.Equal(20, body.Length);
+        ushort len = BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(12));
+        Assert.Equal(2, len);
+        Assert.Equal("hi", Encoding.ASCII.GetString(body.AsSpan(14, 2)));
+        Assert.Equal(0x12345678u,
+            BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(16)));
+    }
+
+    [Fact]
     public void BuildTalkDirect_PadsTheMessageBeforeTheTargetId_Issue50()
     {
         // 2 + 4 = 6 bytes of record pad out to 8.

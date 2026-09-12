@@ -176,18 +176,27 @@ public sealed class LiveChatCommandRoute
         LiveChatCommandBindings bindings,
         SendChatCmd command)
     {
+        // An addressee picked in the world is aimed at by id: that reaches
+        // creatures and shopkeepers, which a name lookup cannot address, and
+        // the name is not needed to address it. Speaking to a picked object
+        // leaves the retell target alone — that target is a name, and
+        // retelling one to a creature would go back through the name lookup
+        // that cannot reach it.
+        if (command.TargetGuid != 0u)
+        {
+            SendIfActive(() =>
+                bindings.SendTalkDirect(command.TargetGuid, command.Text));
+            return;
+        }
+
         if (string.IsNullOrEmpty(command.TargetName))
             return;
 
-        // An addressee picked in the world is aimed at by id: that reaches
-        // creatures and shopkeepers, which a name lookup cannot address.
-        bool sent = command.TargetGuid != 0u
-            ? SendIfActive(() =>
-                bindings.SendTalkDirect(command.TargetGuid, command.Text))
-            : SendIfActive(() =>
-                bindings.SendTell(command.TargetName, command.Text));
-        if (!sent)
+        if (!SendIfActive(() =>
+                bindings.SendTell(command.TargetName, command.Text)))
+        {
             return;
+        }
 
         // Remember who we just spoke to so the retell verb has a target. The
         // transcript line for our own tell comes back from the server, so the

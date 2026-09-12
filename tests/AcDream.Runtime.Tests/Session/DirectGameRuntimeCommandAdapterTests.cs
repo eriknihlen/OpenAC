@@ -335,6 +335,54 @@ public sealed class DirectGameRuntimeCommandAdapterTests
 
 
     [Fact]
+    public void Tell_WithATargetId_AimsAtTheObject_NotAtAName_Issue50()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        RuntimeCommandResult result = adapter.Chat.Execute(
+            runtime.Generation,
+            new RuntimeChatCommand(
+                RuntimeChatChannel.Tell,
+                "hi",
+                TargetName: "Aun Tanua",
+                TargetGuid: 0x8000ABCDu));
+
+        Assert.True(result.Accepted);
+        byte[] sent = Assert.Single(gameActions);
+        Assert.Equal(
+            ChatRequests.TalkDirectOpcode,
+            BinaryPrimitives.ReadUInt32LittleEndian(sent.AsSpan(8)));
+        Assert.Equal(
+            0x8000ABCDu,
+            BinaryPrimitives.ReadUInt32LittleEndian(sent.AsSpan(16)));
+    }
+
+    [Fact]
+    public void Tell_WithoutATargetId_StillGoesByName_Issue50()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        RuntimeCommandResult result = adapter.Chat.Execute(
+            runtime.Generation,
+            new RuntimeChatCommand(
+                RuntimeChatChannel.Tell,
+                "hi",
+                TargetName: "Bob"));
+
+        Assert.True(result.Accepted);
+        byte[] sent = Assert.Single(gameActions);
+        Assert.Equal(
+            ChatRequests.TellOpcode,
+            BinaryPrimitives.ReadUInt32LittleEndian(sent.AsSpan(8)));
+    }
+
+    [Fact]
     public void SetTitle_SendsTheWireActionWithoutAnyLocalMutation()
     {
         (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
