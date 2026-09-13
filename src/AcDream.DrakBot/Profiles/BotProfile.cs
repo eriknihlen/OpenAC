@@ -378,4 +378,15 @@ public sealed record NavigationSettings
     /// route carries on, so the world around the new spot has arrived.
     /// </summary>
     public double PostPortalDelaySeconds { get; init; } = 4d;
+
+    /// <summary>
+    /// Follow a player instead of walking the route: a name, or
+    /// <c>leader</c> for the fellowship's leader; empty walks the route.
+    /// </summary>
+    public string Follow { get; init; } = string.Empty;
+
+    /// <summary>Stop this close to the followed player and set off again a little beyond it.</summary>
+    public float FollowStopMeters { get; init; } = 5f;
+
+    public float FollowResumeMeters { get; init; } = 8f;
 }

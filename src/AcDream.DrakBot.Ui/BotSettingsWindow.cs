@@ -711,6 +711,15 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Following (a name, or 'leader'; empty walks the route)");
+        string follow = navigation.Follow;
+        if (ImGui.InputText("Follow", ref follow, 64))
+            controller.Update(p => p with { Navigation = p.Navigation with { Follow = follow } });
+        float followStop = navigation.FollowStopMeters;
+        if (ImGui.SliderFloat("Stop within (m)", ref followStop, 1f, 20f, "%.0f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { FollowStopMeters = followStop, FollowResumeMeters = Math.Max(p.Navigation.FollowResumeMeters, followStop + 1f) } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Doors");
         DoorSettings doors = controller.Profile.Doors;
         bool openDoors = doors.Enabled;

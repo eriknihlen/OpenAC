@@ -53,6 +53,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 case "meta":
                     MetaCommand(rest);
                     break;
+                case "follow":
+                    Follow(rest);
+                    break;
                 case "patrol":
                     Say(controller.TryStartPatrol(out string patrol) ? patrol : $"cannot patrol: {patrol}");
                     break;
@@ -287,7 +290,17 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say("/drakbot los on|off; /drakbot los debug on|off");
         Say("/drakbot meta load <name>|clear|on|off|state <name>|states|debug on|off|eval <expr>|status");
         Say("/drakbot patrol; /drakbot goto <NS> <EW>; /drakbot hazard add|remove|clear");
+        Say("/drakbot follow <name>|leader|off");
         Say("/drakbot jump[w|x|z|c|s] [heading] [ms]   (also /ub jump...)");
+    }
+
+    private void Follow(string[] args)
+    {
+        string who = args.Length > 0 ? Rest(args, 0) : string.Empty;
+        if (who.Equals("off", StringComparison.OrdinalIgnoreCase) || who.Equals("stop", StringComparison.OrdinalIgnoreCase))
+            who = string.Empty;
+        controller.Update(p => p with { Navigation = p.Navigation with { Follow = who, Enabled = who.Length > 0 || p.Navigation.Enabled } });
+        Say(who.Length == 0 ? "following nobody; the route walks again" : $"following {who}");
     }
 
     private void GoTo(string[] args)

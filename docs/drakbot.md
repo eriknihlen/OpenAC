@@ -246,6 +246,11 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   in a hazard, the walk starts from the nearest safe cell.
 - `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.
 
+`/drakbot follow <name>` (or `leader`, for the fellowship's leader) walks
+after that player's live position instead of the route - setting off
+beyond the resume distance, stopping within the stop distance, holding
+when the player is not loaded - until `/drakbot follow off`.
+
 While a route is followed, a closed door within the Navigation tab's
 door range is opened before the walk goes on - used, watched, picked
 with a lockpick from the pack when that is allowed, and given up on
@@ -339,6 +344,7 @@ game's own look.
 /drakbot los on|off | debug on|off
 /drakbot meta load <name> | clear | on | off | state <name> | states | debug on|off | eval <expr> | status
 /drakbot patrol | goto <NS> <EW> | hazard add|remove|clear
+/drakbot follow <name> | leader | off
 /drakbot jump[w|x|z|c|s] [heading] [ms]      (also /ub jump...)
 /vt <anything VTank>      (translated by the meta engine)
 ```
@@ -400,8 +406,6 @@ In rough priority order:
 
 - **DoTs and life magic in combat** - the monster list covers war
   shapes, rings and the creature debuffs; drains and DoTs are not cast.
-- **Following the fellowship leader** via `IFellowshipAutomation`
-  (fellows are healed already).
 - **Meta state machine.** RynthScript is the intended language; the engine
   needs an "expression surface" that exposes the blackboard to it.
 - **Loot rule editing in the settings window.** Rules can be removed there

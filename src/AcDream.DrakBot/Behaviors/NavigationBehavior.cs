@@ -19,6 +19,9 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private readonly Walker _walker = new();
     private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
+    private bool _followMoving;
+    private double _lastFollowLookupAt = double.NegativeInfinity;
+    private uint _followId;
     private bool _wasInPortalSpace;
     private PluginNavigationPosition _lastPosition;
     private bool _hasLastPosition;
@@ -35,6 +38,9 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// <summary>What the route is doing at an action step, for the dashboard.</summary>
     public string ActionStatus => _actions.Status;
 
+    /// <summary>Following a player rather than a route.</summary>
+    public bool IsFollowing => settings().Follow.Length > 0;
+
     /// <summary>Replaces the route; an empty route clears navigation.</summary>
     public void SetRoute(Route? route)
     {
@@ -49,9 +55,17 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     public bool WantsControl(Blackboard board, out string reason)
     {
         reason = string.Empty;
-        if (!settings().Enabled || _follower is null || _follower.IsFinished)
+        NavigationSettings nav = settings();
+        if (!nav.Enabled || !board.Navigation.IsAvailable)
             return false;
-        if (!board.Navigation.IsAvailable)
+        if (nav.Follow.Length > 0)
+        {
+            if (board.Navigation.IsPortalSpace)
+                return false;
+            reason = $"following {nav.Follow}";
+            return true;
+        }
+        if (_follower is null || _follower.IsFinished)
             return false;
         // Nothing else should take over mid-teleport: the route is still
         // responsible for noticing the arrival.
@@ -68,6 +82,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         Blackboard board = context.Board;
         INavigationAutomation host = context.Surface.Navigation;
         NavigationSettings nav = settings();
+        if (nav.Follow.Length > 0)
+            return Follow(context, nav);
         if (_follower is null)
             return BehaviorStep.Done;
 
@@ -122,9 +138,71 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         }
     }
 
+    /// <summary>
+    /// Walks after a player's live position: set off once beyond the resume
+    /// distance, stop within the stop distance, hold when the player is not
+    /// loaded (another landblock, out of range).
+    /// </summary>
+    private BehaviorStep Follow(BehaviorContext context, NavigationSettings nav)
+    {
+        Blackboard board = context.Board;
+        INavigationAutomation host = context.Surface.Navigation;
+        if (board.Navigation.IsPortalSpace)
+        {
+            _walker.Reset(host);
+            return BehaviorStep.Continue;
+        }
+        if (_walker.ContinueRecovery(host, board.Now))
+            return BehaviorStep.Continue;
+
+        uint id = ResolveFollowId(context, nav, board);
+        if (id == 0u || !host.TryGetObject(id, out PluginNavigationObject leader))
+        {
+            _walker.Reset(host);
+            _followMoving = false;
+            return BehaviorStep.Fail($"{nav.Follow} is not in range");
+        }
+        double distance = leader.Position.HorizontalDistanceMeters(board.Navigation.Position);
+        if (_followMoving ? distance <= nav.FollowStopMeters : distance <= nav.FollowResumeMeters)
+        {
+            _followMoving = false;
+            _walker.Stop(host);
+            return BehaviorStep.Continue;
+        }
+        _followMoving = true;
+        float heading = RouteFollower.HeadingTo(board.Navigation.Position, leader.Position);
+        StuckRecovery? recovery = _walker.Toward(host, board.Navigation.Position, heading, board.Now, nav.TurnToleranceDegrees);
+        if (recovery is { } move)
+            _walker.BeginRecovery(host, move, board.Now);
+        return BehaviorStep.Continue;
+    }
+
+    private uint ResolveFollowId(BehaviorContext context, NavigationSettings nav, Blackboard board)
+    {
+        if (nav.Follow.Equals("leader", StringComparison.OrdinalIgnoreCase))
+        {
+            IFellowshipAutomation fellowship = context.Surface.Fellowship;
+            return fellowship.IsInFellowship && fellowship.LeaderObjectId != board.SelfId ? fellowship.LeaderObjectId : 0u;
+        }
+        // A named player: looked up by name now and then, not every tick.
+        if (_followId != 0u && context.Surface.Navigation.TryGetObject(_followId, out PluginNavigationObject known)
+            && known.Name.Equals(nav.Follow, StringComparison.OrdinalIgnoreCase))
+        {
+            return _followId;
+        }
+        if (board.Now - _lastFollowLookupAt < 1d)
+            return _followId;
+        _lastFollowLookupAt = board.Now;
+        _followId = context.Surface.Navigation.TryFindObject(nav.Follow, board.Navigation.Position, 500d, out PluginNavigationObject found)
+            ? found.ObjectId
+            : 0u;
+        return _followId;
+    }
+
     public void Interrupt(BehaviorContext context)
     {
         _walker.Reset(context.Surface.Navigation);
+        _followMoving = false;
         // An action mid-flight is abandoned; the step runs again from the
         // start when the route gets control back.
         _actions.Cancel();

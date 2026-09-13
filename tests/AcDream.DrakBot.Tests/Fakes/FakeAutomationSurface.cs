@@ -40,6 +40,7 @@ internal sealed class FakeAutomationSurface
 
     // ── fellowship ────────────────────────────────────────────────────────
     public List<PluginFellowMember> Fellows { get; } = [];
+    public uint LeaderObjectId { get; set; }
     public bool IsInFellowship => Fellows.Count > 0;
     public int MemberCount => Fellows.Count;
     public IReadOnlyList<PluginFellowMember> CaptureMembers() => Fellows.ToArray();
