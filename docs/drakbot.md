@@ -145,7 +145,8 @@ real dungeon's walls and ceiling.
 
 The bot's windows are Dear ImGui (`AcDream.DrakBot.Ui`), drawn by the
 client's immediate-mode overlay (`ACDREAM_IMGUI=0` turns the overlay off; the
-bot then falls back to a small retail-look status panel). The dashboard opens on start; `Settings`
+bot then falls back to a small retail-look status panel). Nothing is drawn
+until the character is in the world; the dashboard then opens, and `Settings`
 and `Nav builder` open from it.
 
 - **Dashboard** - start/stop, activity and reason, profile and route pickers,

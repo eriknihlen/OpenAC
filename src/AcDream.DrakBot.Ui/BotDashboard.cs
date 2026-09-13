@@ -50,6 +50,11 @@ public sealed class BotDashboard
 
     public void Draw()
     {
+        // The overlay draws from the login screen on; the bot has nothing to
+        // show until there is a character in the world, and the windows would
+        // sit over the character list otherwise.
+        if (!_surface.IsAvailable || !_surface.Character.IsInWorld)
+            return;
         _settings.Draw();
         _navBuilder.Draw();
         if (!_open)
