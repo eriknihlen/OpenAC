@@ -16,6 +16,7 @@ public sealed class BotSettingsWindow(BotController controller)
     private static readonly string[] StyleNames = ["Melee", "Missile", "Magic"];
     private static readonly string[] HeightNames = ["High", "Medium", "Low"];
     private static readonly string[] RouteModeNames = ["Loop", "Ping-pong", "Once"];
+    private static readonly string[] WarSpellPathNames = ["Straight (bolts, streaks)", "Arc (lobbed)"];
 
     private bool _open;
     private string _profileName = string.Empty;
@@ -159,6 +160,25 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = peace } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Reach");
+        float meleeRange = combat.MeleeRangeMeters;
+        if (ImGui.SliderFloat("Melee reach (m)", ref meleeRange, 1f, 6f, "%.1f"))
+            controller.Update(p => p with { Combat = p.Combat with { MeleeRangeMeters = meleeRange } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A melee target farther than this is walked up to first.");
+        float approachRange = combat.ApproachRangeMeters;
+        if (ImGui.SliderFloat("Approach to (m)", ref approachRange, 1f, 25f, "%.0f"))
+            controller.Update(p => p with { Combat = p.Combat with { ApproachRangeMeters = approachRange } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A ranged target with no line of sight is walked toward until it is this close or the path clears.");
+        int approachTimeout = (int)Math.Round(combat.ApproachTimeoutSeconds);
+        if (ImGui.SliderInt("Give up walking after (s)", ref approachTimeout, 3, 60))
+            controller.Update(p => p with { Combat = p.Combat with { ApproachTimeoutSeconds = approachTimeout } });
+
+        ImGui.Spacing();
+        DrawLineOfSight(combat.LineOfSight);
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Monsters (comma separated name fragments)");
         if (ImGui.InputText("Attack first", ref _priorityNames, 256, ImGuiInputTextFlags.EnterReturnsTrue)
             || ImGui.IsItemDeactivatedAfterEdit())
@@ -173,6 +193,64 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Combat = p.Combat with { IgnoreNames = names } });
         }
     }
+
+    private void DrawLineOfSight(LineOfSightSettings los)
+    {
+        ImGui.TextDisabled("Line of sight and obstacle sense");
+        bool enabled = los.Enabled;
+        if (ImGui.Checkbox("Check the path before each shot", ref enabled))
+            UpdateLineOfSight(p => p with { Enabled = enabled });
+        if (!enabled)
+            return;
+
+        int path = (int)los.WarSpellPath;
+        if (ImGui.Combo("War spells fly", ref path, WarSpellPathNames, WarSpellPathNames.Length))
+            UpdateLineOfSight(p => p with { WarSpellPath = (WarSpellPath)path });
+        if (los.WarSpellPath == WarSpellPath.Arc)
+        {
+            bool straightIndoors = los.StraightPathIndoors;
+            if (ImGui.Checkbox("Test the flat path indoors (arcs hit ceilings)", ref straightIndoors))
+                UpdateLineOfSight(p => p with { StraightPathIndoors = straightIndoors });
+            float arcSpeed = los.ArcLaunchSpeed;
+            if (ImGui.SliderFloat("Arc launch speed (m/s)", ref arcSpeed, 0f, 60f, arcSpeed <= 0f ? "client default" : "%.0f"))
+                UpdateLineOfSight(p => p with { ArcLaunchSpeed = arcSpeed });
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Slower launches lob higher. Zero uses the client's own figure.");
+        }
+        float missileSpeed = los.MissileLaunchSpeed;
+        if (ImGui.SliderFloat("Missile launch speed (m/s)", ref missileSpeed, 0f, 80f, missileSpeed <= 0f ? "client default" : "%.0f"))
+            UpdateLineOfSight(p => p with { MissileLaunchSpeed = missileSpeed });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Bows and crossbows shoot flatter than atlatls and thrown weapons. Zero uses the client's own figure.");
+
+        int strikes = los.BlacklistStrikes;
+        if (ImGui.SliderInt("Skip a target after N blocked checks", ref strikes, 1, 10))
+            UpdateLineOfSight(p => p with { BlacklistStrikes = strikes });
+        int blacklist = (int)Math.Round(los.BlacklistSeconds);
+        if (ImGui.SliderInt("Skip it for (s)", ref blacklist, 5, 300))
+            UpdateLineOfSight(p => p with { BlacklistSeconds = blacklist });
+
+        bool walk = los.CheckWalkPath;
+        if (ImGui.Checkbox("Check the ground before walking to a target", ref walk))
+            UpdateLineOfSight(p => p with { CheckWalkPath = walk });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Walks the character's own collision toward the target first; steers around what blocks it and skips targets nothing reaches. Melee too.");
+        if (walk)
+        {
+            float lookahead = los.WalkLookaheadMeters;
+            if (ImGui.SliderFloat("Steering look-ahead (m)", ref lookahead, 1f, 12f, "%.0f"))
+                UpdateLineOfSight(p => p with { WalkLookaheadMeters = lookahead });
+        }
+
+        bool debug = los.ShowDebugSamples;
+        if (ImGui.Checkbox("Draw the swept path", ref debug))
+            UpdateLineOfSight(p => p with { ShowDebugSamples = debug });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Asks the client to mark each collision check in the world, shots and walks alike: green where it passes, red where it stops.");
+    }
+
+    private void UpdateLineOfSight(Func<LineOfSightSettings, LineOfSightSettings> change) =>
+        controller.Update(p => p with { Combat = p.Combat with { LineOfSight = change(p.Combat.LineOfSight) } });
 
     private void DrawBuffs(BuffSettings buffs)
     {

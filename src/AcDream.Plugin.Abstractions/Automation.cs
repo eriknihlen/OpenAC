@@ -271,6 +271,8 @@ public interface IAutomationSurface
 
     IProjectileAutomation Projectiles => NoOpAutomationSurface.Instance;
 
+    IMovementProbeAutomation MovementProbe => NoOpAutomationSurface.Instance;
+
     ISelectionAutomation Selection => NoOpAutomationSurface.Instance;
 }
 
@@ -281,7 +283,7 @@ public sealed class NoOpAutomationSurface
       IFellowshipAutomation, IEnchantmentAutomation, INavigationAutomation
       , IWorldObjectAutomation, IWorldTimeAutomation, ILoginAutomation,
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
-      , ISelectionAutomation
+      , IMovementProbeAutomation, ISelectionAutomation
 {
     public static NoOpAutomationSurface Instance { get; } = new();
 
@@ -307,6 +309,7 @@ public sealed class NoOpAutomationSurface
     public INetworkAutomation Network => this;
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
+    public IMovementProbeAutomation MovementProbe => this;
     public ISelectionAutomation Selection => this;
 
     public void PostSystemMessage(string text)

@@ -1,4 +1,5 @@
 using AcDream.Bot.Behaviors;
+using AcDream.Bot.Combat;
 using AcDream.Bot.Profiles;
 using AcDream.Bot.Spells;
 using AcDream.Bot.Ui;
@@ -46,11 +47,16 @@ public sealed class BotPlugin : IAcDreamPlugin
         BotEngine engine = null!;
         var navigation = new NavigationBehavior(() => engine.Profile.Navigation);
         var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs);
+        var lineOfSight = new LineOfSightService(
+            surface.Projectiles,
+            surface.MovementProbe,
+            clock,
+            () => engine.Profile.Combat.LineOfSight);
         IBehavior[] behaviors =
         [
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals),
             buffs,
-            new CombatBehavior(spells, Casts(), () => engine.Profile.Combat),
+            new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
             new LootBehavior(() => engine.Profile.Loot),
             navigation,
         ];

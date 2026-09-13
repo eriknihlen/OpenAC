@@ -10,7 +10,8 @@ namespace AcDream.Bot.Tests.Fakes;
 internal sealed class FakeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation, ILootAutomation, INavigationAutomation,
-      IItemAutomation, IWorldObjectAutomation
+      IItemAutomation, IWorldObjectAutomation, IProjectileAutomation,
+      IMovementProbeAutomation
 {
     public List<string> Commands { get; } = [];
 
@@ -222,8 +223,15 @@ internal sealed class FakeAutomationSurface
     public bool IsMoving { get; set; }
     public PluginMovementIntent? Intent { get; private set; }
     public float? FacedHeading { get; private set; }
+    /// <summary>World positions served by <see cref="TryGetObject"/>.</summary>
+    public Dictionary<uint, PluginNavigationPosition> ObjectPositions { get; } = [];
     public bool TryGetObject(uint objectId, out PluginNavigationObject value)
     {
+        if (ObjectPositions.TryGetValue(objectId, out PluginNavigationPosition position))
+        {
+            value = new PluginNavigationObject(objectId, $"0x{objectId:X8}", position);
+            return true;
+        }
         value = default;
         return false;
     }
@@ -260,6 +268,88 @@ internal sealed class FakeAutomationSurface
         return string.Join("+", parts);
     }
 
+    // ── projectiles ───────────────────────────────────────────────────────
+    public bool ProjectilesAvailable { get; set; } = true;
+    bool IProjectileAutomation.IsAvailable => ProjectilesAvailable;
+    /// <summary>Verdict per target and aim height; <see cref="DefaultPathStatus"/> otherwise.</summary>
+    public Dictionary<(uint Target, PluginAttackHeight Height), PluginProjectilePathStatus> PathStatuses { get; } = [];
+    public PluginProjectilePathStatus DefaultPathStatus { get; set; } = PluginProjectilePathStatus.Clear;
+    public uint BlockingObjectId { get; set; } = 0x7000_0001u;
+    /// <summary>Every sweep asked for, as "target:kind:height"; queries are not commands.</summary>
+    public List<string> PathQueries { get; } = [];
+    public int PathEvaluations => PathQueries.Count;
+    public List<IReadOnlyList<PluginProjectileDebugSample>> ShownSamples { get; } = [];
+    public PluginProjectilePathRequest? LastPathRequest { get; private set; }
+
+    /// <summary>Marks a target blocked at every aim height.</summary>
+    public void BlockPath(uint targetId)
+    {
+        foreach (PluginAttackHeight height in Enum.GetValues<PluginAttackHeight>())
+            PathStatuses[(targetId, height)] = PluginProjectilePathStatus.Blocked;
+    }
+
+    public void ClearPath(uint targetId)
+    {
+        foreach (PluginAttackHeight height in Enum.GetValues<PluginAttackHeight>())
+            PathStatuses.Remove((targetId, height));
+    }
+
+    public PluginProjectilePathResult EvaluatePath(
+        uint targetObjectId, PluginProjectilePathKind kind, PluginAttackHeight targetHeight,
+        float projectileRadius, float stepDistance, int maximumCollisionChecks) =>
+        EvaluatePath(new PluginProjectilePathRequest(targetObjectId, kind, targetHeight));
+
+    public PluginProjectilePathResult EvaluatePath(in PluginProjectilePathRequest request)
+    {
+        LastPathRequest = request;
+        PathQueries.Add($"{request.TargetObjectId}:{request.Kind}:{request.TargetHeight}");
+        PluginProjectilePathStatus status = PathStatuses.TryGetValue(
+            (request.TargetObjectId, request.TargetHeight), out PluginProjectilePathStatus scripted)
+            ? scripted
+            : DefaultPathStatus;
+        var result = new PluginProjectilePathResult(
+            status,
+            CollisionChecks: 4,
+            BlockingObjectId: status == PluginProjectilePathStatus.Blocked ? BlockingObjectId : 0u);
+        if (request.CaptureDiagnostics)
+        {
+            result = result with
+            {
+                DebugSamples = [new PluginProjectileDebugSample(default, status == PluginProjectilePathStatus.Clear, 0.25f)],
+            };
+        }
+        return result;
+    }
+
+    public void ShowDebugSamples(IReadOnlyList<PluginProjectileDebugSample> samples) =>
+        ShownSamples.Add(samples);
+
+    // ── walking ───────────────────────────────────────────────────────────
+    public bool MovementProbeAvailable { get; set; } = true;
+    bool IMovementProbeAutomation.IsAvailable => MovementProbeAvailable;
+    /// <summary>Compass headings (rounded to whole degrees) the body cannot walk along.</summary>
+    public HashSet<int> BlockedWalkHeadings { get; } = [];
+    public PluginWalkProbeStatus DefaultWalkStatus { get; set; } = PluginWalkProbeStatus.Clear;
+    public uint WalkBlockingObjectId { get; set; } = 0x7000_0002u;
+    /// <summary>Every walk asked for, as "heading:distance:target"; queries are not commands.</summary>
+    public List<string> WalkQueries { get; } = [];
+
+    public PluginWalkProbeResult ProbeWalk(in PluginWalkProbeRequest request)
+    {
+        int heading = (int)MathF.Round(request.HeadingDegrees) % 360;
+        if (heading < 0)
+            heading += 360;
+        WalkQueries.Add($"{heading}:{request.DistanceMeters:0.#}:{request.TargetObjectId}");
+        PluginWalkProbeStatus status = BlockedWalkHeadings.Contains(heading)
+            ? PluginWalkProbeStatus.Blocked
+            : DefaultWalkStatus;
+        return new PluginWalkProbeResult(
+            status,
+            status == PluginWalkProbeStatus.Clear ? request.DistanceMeters : request.DistanceMeters * 0.25f,
+            CollisionChecks: 3,
+            BlockingObjectId: status == PluginWalkProbeStatus.Blocked ? WalkBlockingObjectId : 0u);
+    }
+
     // ── surface ───────────────────────────────────────────────────────────
     public ICharacterInfo Character => this;
     public ISpellCatalog Spells => this;
@@ -270,6 +360,8 @@ internal sealed class FakeAutomationSurface
     public INavigationAutomation Navigation => this;
     public IItemAutomation Items => this;
     public IWorldObjectAutomation Objects => this;
+    public IProjectileAutomation Projectiles => this;
+    public IMovementProbeAutomation MovementProbe => this;
 }
 
 internal sealed class FakeLogger : IPluginLogger

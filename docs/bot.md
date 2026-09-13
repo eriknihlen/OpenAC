@@ -47,11 +47,11 @@ BotPlugin            IAcDreamPlugin: wires host, /bot, windows, Tick
     IBehavior        WantsControl(board) / Execute(context) / Interrupt(context)
       vitals         Survival    heal / revitalize / mana; healing-kit fallback
       buffs          Buffing     keep configured self-buff families up
-      combat         Combat      target selection, mode, swing or war spell
+      combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule
       nav            Navigation  follow a route, turn-then-walk, stuck recovery
   Spells/            SpellSelector (name -> best known tier), CastTracker
-  Combat/            TargetSelector
+  Combat/            TargetSelector, LineOfSightService
   Loot/              LootRule / LootRuleSet (own JSON format)
   Navigation/        Route / Waypoint, RouteFollower, StuckDetector
   Profiles/          BotProfile (JSON), BotStore (plugin storage)
@@ -68,6 +68,70 @@ swing, one pickup), which is what lets a heal land between two swings.
 Timing comes from `IBotClock`, advanced by the host's tick delta, so timeouts
 and back-offs are deterministic in tests.
 
+## Line of sight, obstacle sense and approach
+
+The client's collision is the bot's one obstacle sense, for shots and for
+walking alike. `LineOfSightService` wraps two host sweeps and the bot never
+sees geometry - it only sees `Clear`, `Blocked` (with the blocking object)
+or "no answer":
+
+- `IProjectileAutomation` sweeps a missile-flagged sphere through the
+  client's own `PhysicsEngine` from the shooter's hands to a point on the
+  target's body. Walls, doors, hills and scenery block it the way they block
+  a real shot; other creatures, ethereal objects and the shooter do not.
+- `IMovementProbeAutomation.ProbeWalk` walks the character's own collision
+  body (the movement controller's spheres, scale and step heights) along a
+  compass heading, one grounded step at a time: knee-high steps are climbed,
+  ledges are stepped off and dropped from within a safe fall, and a wall, a
+  fence, a closed door or a cliff stops it. Creatures are ignored; they move.
+
+Ranged styles do not fire blind, and nobody walks into a wall:
+
+- **Trajectory.** Missile style sweeps a `Missile` arc (an arrow under
+  gravity). Magic sweeps `Straight` for bolts and streaks, or `Arc` when the
+  profile says the character casts arc spells; arcs are tested as flat paths
+  indoors by default because they meet ceilings. Launch speeds default to the
+  client's figures and can be overridden per profile (a slower launch lobs
+  higher).
+- **Aim heights.** The configured attack height is tried first, then the
+  other two. A missile attack uses whichever height was clear.
+- **Choosing a target.** Hostiles are ranked as before; the first one with a
+  clear path wins. A blocked target inside the approach range earns a
+  strike and is passed over; after N strikes in a row it is blacklisted for
+  a while and drops out of selection until the blacklist lapses or a later
+  sweep finds it clear. Strikes are counted once per fresh sweep, so a
+  cached verdict re-read every tick does not stack them.
+- **Approach.** When nothing can be shot from where the bot stands, it
+  walks toward the best hostile that is blocked beyond the approach range:
+  turn in place, hold a run forward, re-check the path every tick, stop when
+  it clears or the approach range is met, give up after a timeout. Melee
+  uses the same step to close to within its reach before pressing the
+  attack. The walk is one step like everything else: a heal interrupts it
+  and the movement intent is dropped.
+- **Walking with eyes open.** Before a hostile is chosen as something to
+  walk to - melee out of reach, or ranged and blocked beyond the approach
+  range - the service walks the body toward it; if the direct heading is
+  blocked it tries a fan of headings (30, 60 and 90 degrees to either side)
+  out to the steering look-ahead. A hostile no heading reaches earns a
+  strike and is passed over, so a monster behind a fence is blacklisted the
+  same way one behind a pillar is for a caster. While walking, the direct
+  heading is re-probed every tick; the bot steers along the first open fan
+  heading and comes back to the direct one when it clears. When nothing in
+  the fan is open it tries the navigation recoveries one at a time (back
+  up, strafe left, strafe right) and looks again; the stuck detector covers
+  whatever the probes did not model. Strikes are kept per sense: an open
+  walk forgives walk strikes, an open shot forgives shot strikes, and the
+  blacklist counts both.
+- **Fail open.** No projectile collision on the host, a spent collision
+  budget or an error all count as "no answer" and the shot goes ahead.
+- **Diagnostics.** The Combat tab's "Draw the swept path" asks the client to
+  mark every collision check in the world for the current target.
+
+The sweeps live in the client (`AcDream.App/Plugins/ProjectilePathProbe.cs`
+and `WalkPathProbe.cs`) and are covered by synthetic-landblock tests (walls,
+steps, ledges, cliffs, bystanders, arcs) plus installed-dat tests against a
+real dungeon's walls and ceiling.
+
 ## Windows
 
 The bot's windows are Dear ImGui, drawn by the client's immediate-mode
@@ -76,10 +140,15 @@ a small retail-look status panel). The dashboard opens on start; `Settings`
 and `Nav builder` open from it.
 
 - **Dashboard** - start/stop, activity and reason, profile and route pickers,
-  the four subsystem toggles, force rebuff, player and target vitals.
+  the four subsystem toggles, force rebuff, player and target vitals, and the
+  current target's line-of-sight state (clear, blocked by what, strikes,
+  blacklisted) and, while walking, which heading is open.
 - **Settings** - one tab per subsystem (Recharge, Combat, Buffs, Loot,
   Navigation). Every widget edits the live profile; `Save` persists it under
-  the name in the box.
+  the name in the box. The Combat tab carries reach (melee reach, approach
+  range, walk timeout) and the line-of-sight options (on/off, war spell
+  path, launch speeds, blacklist strikes and duration, walk checks and
+  steering look-ahead, path drawing).
 - **Nav builder** - record the current position as a waypoint, add pauses,
   remove steps, follow the draft, save it by name.
 
@@ -97,6 +166,7 @@ game's own look.
 /bot nav add | pause <seconds> | clear | use | save <name> | load <name> | list
 /bot style melee | missile | magic
 /bot buffs|combat|loot on|off
+/bot los on|off | debug on|off
 ```
 
 `nav add` records the character's current position as a waypoint on the
@@ -110,16 +180,20 @@ be edited by hand. `BotProfile` in `Profiles/BotProfile.cs` is the schema.
 `tests/AcDream.Bot.Tests` drives every behavior through
 `FakeAutomationSurface`, which records the commands the bot issued and lets
 a test play the server's answers back (`CompleteCast`, `CompleteSwing`,
-`CompletePickup`). `BotPluginHostingTests` runs the real `PluginSession`
-built-in path end to end.
+`CompletePickup`). Its `IProjectileAutomation` is scriptable per target and
+aim height (`BlockPath`, `ClearPath`, `PathStatuses`) and records every sweep
+asked for in `PathQueries`, separately from `Commands`; its
+`IMovementProbeAutomation` is scripted by heading (`BlockedWalkHeadings`,
+`DefaultWalkStatus`, recorded in `WalkQueries`) and `ObjectPositions` feeds
+the approach step. `BotPluginHostingTests` runs the real
+`PluginSession` built-in path end to end.
 
 ## What is not there yet
 
 In rough priority order:
 
-- **Combat range and approach.** The bot swings at whatever is in range; it
-  does not walk toward a target or back off a caster. Needs a "close to
-  target" behavior between combat and navigation.
+- **Backing off.** The bot walks toward targets it cannot reach or shoot
+  but never retreats from a melee monster while casting.
 - **Routes with doors and portals.** `WaypointKind` has `Point` and `Pause`;
   `Portal`/`UseObject`/`Chat` steps are the next additions and the follower is
   shaped to take them.

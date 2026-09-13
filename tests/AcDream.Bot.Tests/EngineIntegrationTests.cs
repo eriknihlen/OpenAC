@@ -1,4 +1,5 @@
 using AcDream.Bot.Behaviors;
+using AcDream.Bot.Combat;
 using AcDream.Bot.Profiles;
 using AcDream.Bot.Spells;
 using AcDream.Bot.Tests.Fakes;
@@ -20,11 +21,12 @@ public sealed class EngineIntegrationTests
         var spells = new SpellSelector(surface, surface, cooldowns.IsOnCooldown);
         CastTracker Casts() => new(surface, clock, cooldowns);
         BotEngine engine = null!;
+        var lineOfSight = new LineOfSightService(surface, surface, clock, () => engine.Profile.Combat.LineOfSight);
         IBehavior[] behaviors =
         [
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals),
             new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs),
-            new CombatBehavior(spells, Casts(), () => engine.Profile.Combat),
+            new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
             new LootBehavior(() => engine.Profile.Loot),
             new NavigationBehavior(() => engine.Profile.Navigation),
         ];
@@ -106,5 +108,31 @@ public sealed class EngineIntegrationTests
 
         engine.Stop();
         Assert.Equal("move:clear", surface.Commands[^1]);
+    }
+
+    [Fact]
+    public void LowHealthInterruptsAnApproachStopsTheWalkAndHeals()
+    {
+        var profile = new BotProfile
+        {
+            Buffs = new BuffSettings { Enabled = false },
+            Combat = new CombatSettings { Style = CombatStyle.Magic },
+            Loot = new LootSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, BotEngine engine) = Build(profile);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Magic };
+        surface.Hostiles.Add(new PluginCombatTarget(9, "Tusker", 0u, 15f, 0f, true, 1f));
+        surface.BlockPath(9u);
+        surface.ObjectPositions[9u] = surface.Position with { NorthSouth = 15d / 240d };
+
+        engine.Tick(0.1);
+        Assert.Equal("combat", engine.ActiveBehaviorName);
+        Assert.Equal(["move:forward"], surface.Commands);
+
+        surface.CurrentHealth = 30;
+        engine.Tick(0.1);
+        Assert.Equal("vitals", engine.ActiveBehaviorName);
+        Assert.Equal(["move:forward", "move:clear", "cast:51"], surface.Commands);
+        Assert.Null(surface.Intent);
     }
 }

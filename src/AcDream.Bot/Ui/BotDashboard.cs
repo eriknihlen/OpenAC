@@ -1,5 +1,6 @@
-﻿using System.Numerics;
+using System.Numerics;
 using AcDream.Bot.Behaviors;
+using AcDream.Bot.Combat;
 using AcDream.Bot.Navigation;
 using AcDream.Bot.Profiles;
 using AcDream.Plugin.Abstractions;
@@ -180,17 +181,109 @@ public sealed class BotDashboard
 
         ImGui.Spacing();
         ImGui.TextColored(ColMuted, "TARGET");
-        if (TryCurrentTarget(out PluginCombatTarget target))
+        if (TryCurrentTarget(out PluginCombatTarget target, out CombatBehavior? combat))
         {
             ImGui.Text($"{target.Name}  ({target.Distance:0.0} m)");
             float fraction = target.IsHealthKnown ? target.HealthFraction : 0f;
             ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ColHealth);
             ImGui.ProgressBar(fraction, new Vector2(-1f, 14f), target.IsHealthKnown ? $"{fraction:P0}" : "?");
             ImGui.PopStyleColor();
+            DrawLineOfSight(target.ObjectId, combat);
         }
         else
         {
             ImGui.TextDisabled("none");
+        }
+    }
+
+    private void DrawLineOfSight(uint targetId, CombatBehavior? combat)
+    {
+        ImGui.TextColored(ColMuted, "LoS");
+        ImGui.SameLine(36f);
+        if (combat is null)
+        {
+            ImGui.TextDisabled("n/a");
+            return;
+        }
+        LineOfSightService los = combat.LineOfSight;
+        if (!los.IsEnabled)
+        {
+            ImGui.TextDisabled("off");
+            return;
+        }
+        if (los.IsBlacklisted(targetId))
+        {
+            ImGui.TextColored(ColHealth, $"blacklisted {los.BlacklistSecondsRemaining(targetId):0}s");
+            return;
+        }
+        if (_controller.Profile.Combat.Style == CombatStyle.Melee)
+        {
+            DrawWalk(targetId, combat, los);
+            return;
+        }
+        if (!los.TryGetLast(targetId, out LineOfSightVerdict verdict))
+        {
+            ImGui.TextDisabled("not checked");
+            return;
+        }
+        string state = verdict.State switch
+        {
+            LineOfSightState.Clear => $"clear ({verdict.Kind}, {verdict.Height})",
+            LineOfSightState.Blocked => verdict.BlockingObjectId == 0u
+                ? $"blocked ({verdict.Kind})"
+                : $"blocked by 0x{verdict.BlockingObjectId:X8} ({verdict.Kind})",
+            _ => $"unknown ({verdict.Status})",
+        };
+        Vector4 color = verdict.State switch
+        {
+            LineOfSightState.Clear => ColStamina,
+            LineOfSightState.Blocked => ColHealth,
+            _ => ColMuted,
+        };
+        ImGui.TextColored(color, state);
+        int strikes = los.StrikesFor(targetId);
+        if (strikes > 0)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(ColMuted, $"strike {strikes}/{_controller.Profile.Combat.LineOfSight.BlacklistStrikes}");
+        }
+        if (combat.IsApproaching)
+        {
+            ImGui.TextColored(ColMuted, "Walk");
+            ImGui.SameLine(36f);
+            DrawWalk(targetId, combat, los);
+        }
+    }
+
+    /// <summary>The walk verdict: which heading is open, or that none is.</summary>
+    private void DrawWalk(uint targetId, CombatBehavior combat, LineOfSightService los)
+    {
+        if (!los.ChecksWalking)
+        {
+            ImGui.TextDisabled(combat.IsApproaching ? "closing in (unchecked)" : "n/a");
+            return;
+        }
+        if (!los.TryGetLastWalk(targetId, out WalkVerdict walk))
+        {
+            ImGui.TextDisabled(combat.IsApproaching ? "closing in" : "not checked");
+            return;
+        }
+        string text = walk.State switch
+        {
+            LineOfSightState.Clear => float.IsNaN(combat.ApproachHeadingDegrees)
+                ? "path open"
+                : $"walking {combat.ApproachHeadingDegrees:0}\u00b0",
+            LineOfSightState.Blocked => walk.BlockingObjectId == 0u
+                ? "no open heading"
+                : $"no open heading (0x{walk.BlockingObjectId:X8})",
+            _ => "unknown",
+        };
+        ImGui.TextColored(walk.State == LineOfSightState.Blocked ? ColHealth : ColStamina, text);
+        int strikes = los.StrikesFor(targetId);
+        if (strikes > 0)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(ColMuted, $"strike {strikes}/{_controller.Profile.Combat.LineOfSight.BlacklistStrikes}");
         }
     }
 
@@ -206,16 +299,14 @@ public sealed class BotDashboard
             _controller.SaveProfile();
     }
 
-    private bool TryCurrentTarget(out PluginCombatTarget target)
+    private bool TryCurrentTarget(out PluginCombatTarget target, out CombatBehavior? combat)
     {
         target = default;
         Blackboard? board = _controller.Engine.LastBoard;
+        combat = _controller.Engine.Behaviors.OfType<CombatBehavior>().FirstOrDefault();
         if (board is null)
             return false;
-        uint targetId = _controller.Engine.Behaviors
-            .OfType<CombatBehavior>()
-            .Select(static combat => combat.CurrentTargetId)
-            .FirstOrDefault();
+        uint targetId = combat?.CurrentTargetId ?? 0u;
         if (targetId == 0u)
             targetId = board.Combat.SelectedObjectId;
         foreach (PluginCombatTarget hostile in board.Hostiles)

@@ -36,9 +36,61 @@ public readonly record struct PluginProjectilePathResult(
         { get; init; } = Array.Empty<PluginProjectileDebugSample>();
 }
 
+/// <summary>
+/// One projectile-path query. The radius, step and budget defaults suit a
+/// war-spell bolt or an arrow; <see cref="LaunchSpeed"/> lets a caller
+/// model a slower, higher lob than the host's default for
+/// <see cref="PluginProjectilePathKind.Arc"/> and
+/// <see cref="PluginProjectilePathKind.Missile"/>.
+/// </summary>
+public readonly record struct PluginProjectilePathRequest(
+    uint TargetObjectId,
+    PluginProjectilePathKind Kind,
+    PluginAttackHeight TargetHeight)
+{
+    public float ProjectileRadius { get; init; } = 0.25f;
+
+    /// <summary>World meters swept per collision check.</summary>
+    public float StepDistance { get; init; } = 1.5f;
+
+    public int MaximumCollisionChecks { get; init; } = 128;
+
+    /// <summary>
+    /// Horizontal launch speed in meters per second for the gravity-bound
+    /// kinds; zero or negative takes the host's default. Ignored for
+    /// <see cref="PluginProjectilePathKind.Straight"/>.
+    /// </summary>
+    public float LaunchSpeed { get; init; }
+
+    /// <summary>Fill <see cref="PluginProjectilePathResult.DebugSamples"/>.</summary>
+    public bool CaptureDiagnostics { get; init; }
+}
+
 public interface IProjectileAutomation
 {
     bool IsAvailable => false;
+
+    /// <summary>
+    /// Structured form of <see cref="EvaluatePath(uint, PluginProjectilePathKind, PluginAttackHeight, float, float, int)"/>.
+    /// Hosts that do not understand <see cref="PluginProjectilePathRequest.LaunchSpeed"/>
+    /// fall back to the positional overloads with their default speeds.
+    /// </summary>
+    PluginProjectilePathResult EvaluatePath(in PluginProjectilePathRequest request) =>
+        request.CaptureDiagnostics
+            ? EvaluatePathWithDiagnostics(
+                request.TargetObjectId,
+                request.Kind,
+                request.TargetHeight,
+                request.ProjectileRadius,
+                request.StepDistance,
+                request.MaximumCollisionChecks)
+            : EvaluatePath(
+                request.TargetObjectId,
+                request.Kind,
+                request.TargetHeight,
+                request.ProjectileRadius,
+                request.StepDistance,
+                request.MaximumCollisionChecks);
 
     PluginProjectilePathResult EvaluatePath(
         uint targetObjectId,

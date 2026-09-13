@@ -27,7 +27,7 @@ internal sealed class AppAutomationSurface
       IRuntimeCommunicationObserver,
       INavigationAutomation, IWorldObjectAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
-      IProjectileAutomation, ISelectionAutomation, IDisposable
+      IProjectileAutomation, IMovementProbeAutomation, ISelectionAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private const int MaximumPluginChatMessages = 512;
@@ -155,6 +155,7 @@ internal sealed class AppAutomationSurface
     public INetworkAutomation Network => this;
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
+    public IMovementProbeAutomation MovementProbe => this;
     public ISelectionAutomation Selection => this;
 
     PluginRecoveryResult IRecoveryAutomation.ClearOneBusyReference()
@@ -1139,13 +1140,12 @@ internal sealed class AppAutomationSurface
         float projectileRadius,
         float stepDistance,
         int maximumCollisionChecks) => EvaluateProjectilePathRequest(
-            targetObjectId,
-            kind,
-            targetHeight,
-            projectileRadius,
-            stepDistance,
-            maximumCollisionChecks,
-            captureDiagnostics: false);
+            new PluginProjectilePathRequest(targetObjectId, kind, targetHeight)
+            {
+                ProjectileRadius = projectileRadius,
+                StepDistance = stepDistance,
+                MaximumCollisionChecks = maximumCollisionChecks,
+            });
 
     PluginProjectilePathResult IProjectileAutomation.EvaluatePathWithDiagnostics(
         uint targetObjectId,
@@ -1154,13 +1154,16 @@ internal sealed class AppAutomationSurface
         float projectileRadius,
         float stepDistance,
         int maximumCollisionChecks) => EvaluateProjectilePathRequest(
-            targetObjectId,
-            kind,
-            targetHeight,
-            projectileRadius,
-            stepDistance,
-            maximumCollisionChecks,
-            captureDiagnostics: true);
+            new PluginProjectilePathRequest(targetObjectId, kind, targetHeight)
+            {
+                ProjectileRadius = projectileRadius,
+                StepDistance = stepDistance,
+                MaximumCollisionChecks = maximumCollisionChecks,
+                CaptureDiagnostics = true,
+            });
+
+    PluginProjectilePathResult IProjectileAutomation.EvaluatePath(
+        in PluginProjectilePathRequest request) => EvaluateProjectilePathRequest(request);
 
     void IProjectileAutomation.ShowDebugSamples(
         IReadOnlyList<PluginProjectileDebugSample> samples)
@@ -1208,13 +1211,7 @@ internal sealed class AppAutomationSurface
     }
 
     private PluginProjectilePathResult EvaluateProjectilePathRequest(
-        uint targetObjectId,
-        PluginProjectilePathKind kind,
-        PluginAttackHeight targetHeight,
-        float projectileRadius,
-        float stepDistance,
-        int maximumCollisionChecks,
-        bool captureDiagnostics)
+        in PluginProjectilePathRequest request)
     {
         GameRuntime? runtime;
         PhysicsEngine? physics;
@@ -1225,25 +1222,26 @@ internal sealed class AppAutomationSurface
         }
         if (runtime is null || physics is null || !IsAvailable)
             return new(PluginProjectilePathStatus.Unavailable);
-        if (targetObjectId == 0u
-            || !float.IsFinite(projectileRadius)
-            || projectileRadius <= 0f
-            || !float.IsFinite(stepDistance)
-            || stepDistance <= 0f
-            || maximumCollisionChecks <= 0)
+        if (request.TargetObjectId == 0u
+            || !float.IsFinite(request.ProjectileRadius)
+            || request.ProjectileRadius <= 0f
+            || !float.IsFinite(request.StepDistance)
+            || request.StepDistance <= 0f
+            || request.MaximumCollisionChecks <= 0)
         {
             return new(PluginProjectilePathStatus.InvalidTarget);
         }
 
-        uint localId = runtime.PlayerIdentity.ServerGuid;
-        if (!runtime.EntityObjects.Entities.TryGetActive(
-                localId,
-                out RuntimeEntityRecord local)
-            || !runtime.EntityObjects.Entities.TryGetActive(
-                targetObjectId,
-                out RuntimeEntityRecord target)
+        // The sweep identifies bodies by the local entity id the shadow
+        // registry was fed, which is not the server guid the plugin holds.
+        RuntimeEntityDirectory entities = runtime.EntityObjects.Entities;
+        uint localGuid = runtime.PlayerIdentity.ServerGuid;
+        if (!entities.TryGetActive(localGuid, out RuntimeEntityRecord local)
+            || !entities.TryGetActive(request.TargetObjectId, out RuntimeEntityRecord target)
             || local.PhysicsBody is not { } localBody
             || target.PhysicsBody is not { } targetBody
+            || local.LocalEntityId is not { } localEntityId
+            || target.LocalEntityId is not { } targetEntityId
             || localBody.CellPosition.ObjCellId == 0u)
         {
             return new(PluginProjectilePathStatus.InvalidTarget);
@@ -1251,18 +1249,25 @@ internal sealed class AppAutomationSurface
 
         try
         {
-            return EvaluateProjectilePath(
+            PluginProjectilePathResult result = ProjectilePathProbe.Evaluate(
                 physics,
-                localId,
-                localBody,
-                targetObjectId,
-                targetBody,
-                kind,
-                targetHeight,
-                projectileRadius,
-                stepDistance,
-                maximumCollisionChecks,
-                captureDiagnostics);
+                ProjectileEndpoint(physics, localEntityId, localBody, local),
+                ProjectileEndpoint(physics, targetEntityId, targetBody, target),
+                request.Kind,
+                request.TargetHeight,
+                request.ProjectileRadius,
+                request.StepDistance,
+                request.MaximumCollisionChecks,
+                request.LaunchSpeed,
+                request.CaptureDiagnostics);
+            // Report whatever stopped the shot by the guid a plugin can
+            // look up; static scenery keeps its registry id.
+            if (result.BlockingObjectId != 0u
+                && entities.TryGetByLocalId(result.BlockingObjectId, out RuntimeEntityRecord blocker))
+            {
+                result = result with { BlockingObjectId = blocker.ServerGuid };
+            }
+            return result;
         }
         catch (Exception error)
         {
@@ -1272,176 +1277,100 @@ internal sealed class AppAutomationSurface
         }
     }
 
-    private static PluginProjectilePathResult EvaluateProjectilePath(
+    private static ProjectilePathEndpoint ProjectileEndpoint(
         PhysicsEngine physics,
-        uint localObjectId,
-        PhysicsBody local,
-        uint targetObjectId,
-        PhysicsBody target,
-        PluginProjectilePathKind kind,
-        PluginAttackHeight targetHeight,
-        float radius,
-        float stepDistance,
-        int maximumChecks,
-        bool captureDiagnostics)
+        uint entityId,
+        PhysicsBody body,
+        RuntimeEntityRecord record)
     {
-        System.Numerics.Vector3 baseDelta = target.Position - local.Position;
-        var horizontal = new System.Numerics.Vector2(baseDelta.X, baseDelta.Y);
-        float horizontalDistance = horizontal.Length();
-        if (!float.IsFinite(horizontalDistance)
-            || horizontalDistance <= PhysicsGlobals.EPSILON)
+        if (!ProjectilePathProbe.TryMeasureHeight(physics, entityId, body.Position, out float height))
         {
-            return new(PluginProjectilePathStatus.InvalidTarget);
+            float scale = record.Snapshot.ObjScale is { } objScale
+                && float.IsFinite(objScale) && objScale > 0f
+                ? objScale
+                : 1f;
+            height = ProjectilePathProbe.FallbackHeight * scale;
         }
-
-        System.Numerics.Vector2 direction = horizontal / horizontalDistance;
-        float sourceForward = kind switch
-        {
-            PluginProjectilePathKind.Arc => 0.44f,
-            PluginProjectilePathKind.Missile => 0.61f,
-            _ => 0.66f,
-        };
-        float sourceHeight = kind == PluginProjectilePathKind.Arc ? 1.8f : 1.2f;
-        float targetHeightMeters = targetHeight switch
-        {
-            PluginAttackHeight.Low => 0.3f,
-            PluginAttackHeight.High => 1.5f,
-            _ => 0.9f,
-        };
-        var current = local.Position + new System.Numerics.Vector3(
-            direction.X * sourceForward,
-            direction.Y * sourceForward,
-            sourceHeight);
-        var destination = target.Position + new System.Numerics.Vector3(
-            0f,
-            0f,
-            targetHeightMeters);
-        System.Numerics.Vector3 delta = destination - current;
-        horizontal = new System.Numerics.Vector2(delta.X, delta.Y);
-        horizontalDistance = horizontal.Length();
-        if (horizontalDistance <= PhysicsGlobals.EPSILON)
-            return new(PluginProjectilePathStatus.Clear);
-        direction = horizontal / horizontalDistance;
-
-        float speed = kind switch
-        {
-            PluginProjectilePathKind.Arc => 37.5185f,
-            PluginProjectilePathKind.Missile => 46f,
-            _ => 100f,
-        };
-        float totalTime = horizontalDistance / speed;
-        float verticalSpeed = kind == PluginProjectilePathKind.Straight
-            ? delta.Z / totalTime
-            : (delta.Z + 4.9f * totalTime * totalTime) / totalTime;
-        var velocity = new System.Numerics.Vector3(
-            direction.X * speed,
-            direction.Y * speed,
-            verticalSpeed);
-        float elapsed = 0f;
-        uint cellId = local.CellPosition.ObjCellId;
-        var probeBody = new PhysicsBody
-        {
-            State = PhysicsStateFlags.Missile
-                | PhysicsStateFlags.Inelastic
-                | PhysicsStateFlags.ReportCollisions,
-        };
-        List<PluginProjectileDebugSample>? debugSamples = captureDiagnostics
-            ? new List<PluginProjectileDebugSample>(
-                Math.Min(maximumChecks, 512))
-            : null;
-
-        for (int check = 1; check <= maximumChecks; check++)
-        {
-            float remaining = MathF.Max(0f, totalTime - elapsed);
-            if (remaining <= PhysicsGlobals.EPSILON)
-            {
-                return WithProjectileDebugSamples(
-                    new(PluginProjectilePathStatus.Clear, check - 1),
-                    debugSamples);
-            }
-            float velocityMagnitude = velocity.Length();
-            if (!float.IsFinite(velocityMagnitude)
-                || velocityMagnitude <= PhysicsGlobals.EPSILON)
-            {
-                return WithProjectileDebugSamples(
-                    new(
-                        PluginProjectilePathStatus.Error,
-                        check - 1,
-                        Notice: "The projectile trajectory became invalid."),
-                    debugSamples);
-            }
-            float quantum = MathF.Min(remaining, stepDistance / velocityMagnitude);
-            System.Numerics.Vector3 next = current + velocity * quantum;
-            if (quantum >= remaining - PhysicsGlobals.EPSILON)
-                next = destination;
-
-            ResolveResult resolved = physics.ResolveWithTransition(
-                current,
-                next,
-                cellId,
-                radius,
-                sphereHeight: 0f,
-                stepUpHeight: 0f,
-                stepDownHeight: 0f,
-                isOnGround: false,
-                body: probeBody,
-                moverFlags: ObjectInfoState.PathClipped,
-                movingEntityId: localObjectId,
-                localSphereOrigin: System.Numerics.Vector3.Zero,
-                designatedTargetId: targetObjectId);
-            float requestedDistance = System.Numerics.Vector3.Distance(current, next);
-            float deliveredDistance = System.Numerics.Vector3.Distance(
-                current,
-                resolved.Position);
-            bool stopped = !resolved.Ok
-                || resolved.CollidedWithEnvironment
-                || resolved.LastCollidedObjectId != 0u
-                || resolved.CollisionNormalValid
-                || deliveredDistance + 0.01f < requestedDistance;
-            bool targetHit = resolved.LastCollidedObjectId == targetObjectId;
-            debugSamples?.Add(new PluginProjectileDebugSample(
-                resolved.Position,
-                targetHit || !stopped,
-                radius));
-            if (targetHit)
-            {
-                return WithProjectileDebugSamples(
-                    new(
-                        PluginProjectilePathStatus.Clear,
-                        check,
-                        targetObjectId),
-                    debugSamples);
-            }
-            if (stopped)
-            {
-                return WithProjectileDebugSamples(
-                    new(
-                        PluginProjectilePathStatus.Blocked,
-                        check,
-                        resolved.LastCollidedObjectId),
-                    debugSamples);
-            }
-
-            current = resolved.Position;
-            cellId = resolved.CellId;
-            elapsed += quantum;
-            if (kind != PluginProjectilePathKind.Straight)
-                velocity.Z -= 9.8f * quantum;
-        }
-
-        return WithProjectileDebugSamples(
-            new(
-                PluginProjectilePathStatus.BudgetExceeded,
-                maximumChecks,
-                Notice: "The projectile collision-check budget was exhausted."),
-            debugSamples);
+        return new ProjectilePathEndpoint(
+            entityId,
+            body.Position,
+            body.CellPosition.ObjCellId,
+            height);
     }
 
-    private static PluginProjectilePathResult WithProjectileDebugSamples(
-        PluginProjectilePathResult result,
-        List<PluginProjectileDebugSample>? samples) => samples is null
-            ? result
-            : result with { DebugSamples = samples.ToArray() };
+    // ── IMovementProbeAutomation ────────────────────────────────────────
+    bool IMovementProbeAutomation.IsAvailable
+    {
+        get
+        {
+            lock (_gate)
+                return !_disposed && _projectilePhysics is not null && IsAvailable;
+        }
+    }
+
+    PluginWalkProbeResult IMovementProbeAutomation.ProbeWalk(in PluginWalkProbeRequest request)
+    {
+        GameRuntime? runtime;
+        PhysicsEngine? physics;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            physics = _projectilePhysics;
+        }
+        if (runtime is null || physics is null || !IsAvailable)
+            return new(PluginWalkProbeStatus.Unavailable, 0f);
+        PlayerMovementController? controller = runtime.MovementOwner.Controller;
+        if (controller is null || controller.CellId == 0u || controller.LocalEntityId == 0u)
+            return new(PluginWalkProbeStatus.Unavailable, 0f);
+        if (!float.IsFinite(request.HeadingDegrees)
+            || !float.IsFinite(request.DistanceMeters)
+            || request.DistanceMeters <= 0f
+            || !float.IsFinite(request.StepDistance)
+            || request.StepDistance <= 0f
+            || request.MaximumCollisionChecks <= 0)
+        {
+            return new(PluginWalkProbeStatus.Error, 0f, Notice: "The walk probe request is invalid.");
+        }
+
+        RuntimeEntityDirectory entities = runtime.EntityObjects.Entities;
+        uint targetEntityId = request.TargetObjectId != 0u
+            && entities.TryGetActive(request.TargetObjectId, out RuntimeEntityRecord target)
+            && target.LocalEntityId is { } targetLocalId
+            ? targetLocalId
+            : 0u;
+        try
+        {
+            PluginWalkProbeResult result = WalkPathProbe.Evaluate(
+                physics,
+                new WalkProbeMover(
+                    controller.LocalEntityId,
+                    controller.Position,
+                    controller.CellId,
+                    controller.SphereList,
+                    controller.ObjectScale,
+                    controller.StepUpHeight,
+                    controller.StepDownHeight),
+                request.HeadingDegrees,
+                request.DistanceMeters,
+                request.StepDistance,
+                request.MaximumCollisionChecks,
+                targetEntityId,
+                request.CaptureDiagnostics);
+            if (result.BlockingObjectId != 0u
+                && entities.TryGetByLocalId(result.BlockingObjectId, out RuntimeEntityRecord blocker))
+            {
+                result = result with { BlockingObjectId = blocker.ServerGuid };
+            }
+            return result;
+        }
+        catch (Exception error)
+        {
+            return new(
+                PluginWalkProbeStatus.Error,
+                0f,
+                Notice: error.GetBaseException().Message);
+        }
+    }
 
     // ── INavigationAutomation ─────────────────────────────────────────────
     PluginNavigationSnapshot INavigationAutomation.Snapshot

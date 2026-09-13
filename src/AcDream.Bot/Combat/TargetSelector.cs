@@ -14,15 +14,27 @@ public static class TargetSelector
         IReadOnlyList<PluginCombatTarget> hostiles,
         CombatSettings settings,
         uint currentTargetId,
-        out PluginCombatTarget target)
+        out PluginCombatTarget target,
+        Func<uint, bool>? exclude = null)
+    {
+        IReadOnlyList<PluginCombatTarget> ranked = Rank(hostiles, settings, currentTargetId, exclude);
+        target = ranked.Count == 0 ? default : ranked[0];
+        return ranked.Count != 0;
+    }
+
+    /// <summary>
+    /// Every eligible hostile, best first, so a caller that finds the best
+    /// one unusable (no line of sight, say) can fall through to the next.
+    /// </summary>
+    public static IReadOnlyList<PluginCombatTarget> Rank(
+        IReadOnlyList<PluginCombatTarget> hostiles,
+        CombatSettings settings,
+        uint currentTargetId,
+        Func<uint, bool>? exclude = null)
     {
         ArgumentNullException.ThrowIfNull(hostiles);
         ArgumentNullException.ThrowIfNull(settings);
-        target = default;
-        int bestPriorityRank = int.MaxValue;
-        float bestDistance = float.PositiveInfinity;
-        bool found = false;
-
+        var ranked = new List<(int Rank, float Distance, int Order, PluginCombatTarget Target)>();
         foreach (PluginCombatTarget candidate in hostiles)
         {
             if (candidate.Distance > settings.EngageDistance)
@@ -31,22 +43,27 @@ public static class TargetSelector
                 continue;
             if (candidate.IsHealthKnown && candidate.HealthFraction <= 0f)
                 continue;
+            if (exclude is not null && exclude(candidate.ObjectId))
+                continue;
 
             int priorityRank = PriorityRank(candidate.Name, settings.PriorityNames);
             float distance = candidate.ObjectId == currentTargetId
                 ? candidate.Distance * 0.5f
                 : candidate.Distance;
-
-            bool better = priorityRank < bestPriorityRank
-                || (priorityRank == bestPriorityRank && distance < bestDistance);
-            if (!better)
-                continue;
-            bestPriorityRank = priorityRank;
-            bestDistance = distance;
-            target = candidate;
-            found = true;
+            ranked.Add((priorityRank, distance, ranked.Count, candidate));
         }
-        return found;
+        ranked.Sort(static (left, right) =>
+        {
+            int order = left.Rank.CompareTo(right.Rank);
+            if (order == 0)
+                order = left.Distance.CompareTo(right.Distance);
+            // Sort is not stable; keep host order for exact ties.
+            return order != 0 ? order : left.Order.CompareTo(right.Order);
+        });
+        var result = new PluginCombatTarget[ranked.Count];
+        for (int index = 0; index < ranked.Count; index++)
+            result[index] = ranked[index].Target;
+        return result;
     }
 
     private static bool IsIgnored(string name, IReadOnlyList<string> ignoreNames)

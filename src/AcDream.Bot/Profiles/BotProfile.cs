@@ -120,6 +120,79 @@ public sealed record CombatSettings
 
     /// <summary>Return to peace mode once nothing is left to fight.</summary>
     public bool LeaveCombatWhenIdle { get; init; } = true;
+
+    /// <summary>A melee target farther than this is walked up to before the swing.</summary>
+    public float MeleeRangeMeters { get; init; } = 2.5f;
+
+    /// <summary>
+    /// A ranged target with no line of sight is walked toward until it is
+    /// this close or the path clears; inside this range a blocked target
+    /// earns blacklist strikes instead.
+    /// </summary>
+    public float ApproachRangeMeters { get; init; } = 6f;
+
+    /// <summary>Give up on walking toward one target after this long.</summary>
+    public double ApproachTimeoutSeconds { get; init; } = 12d;
+
+    public LineOfSightSettings LineOfSight { get; init; } = new();
+}
+
+/// <summary>How a war spell is modelled when checking whether it can reach.</summary>
+public enum WarSpellPath
+{
+    /// <summary>Bolts and streaks: a flat shot.</summary>
+    Straight,
+    /// <summary>Arc spells: a lob under gravity.</summary>
+    Arc,
+}
+
+/// <summary>
+/// Line-of-sight checks before ranged attacks. They run the client's own
+/// projectile collision, so nothing here describes geometry; the options
+/// pick the trajectory to test and decide what to do with a blocked target.
+/// </summary>
+public sealed record LineOfSightSettings
+{
+    public bool Enabled { get; init; } = true;
+
+    public WarSpellPath WarSpellPath { get; init; } = WarSpellPath.Straight;
+
+    /// <summary>Indoors an arc meets the ceiling; test the flat path there instead.</summary>
+    public bool StraightPathIndoors { get; init; } = true;
+
+    /// <summary>Horizontal launch speed used to model an arc spell; zero takes the client default.</summary>
+    public float ArcLaunchSpeed { get; init; }
+
+    /// <summary>Horizontal launch speed used to model an arrow or bolt; zero takes the client default.</summary>
+    public float MissileLaunchSpeed { get; init; }
+
+    /// <summary>A target found blocked this many times in a row is skipped for a while.</summary>
+    public int BlacklistStrikes { get; init; } = 3;
+
+    /// <summary>How long a blacklisted target is skipped.</summary>
+    public double BlacklistSeconds { get; init; } = 30d;
+
+    /// <summary>A verdict is reused for this long before the path is swept again.</summary>
+    public double CacheSeconds { get; init; } = 0.75d;
+
+    public float ProjectileRadius { get; init; } = 0.25f;
+
+    public float StepDistanceMeters { get; init; } = 1.5f;
+
+    public int MaximumCollisionChecks { get; init; } = 128;
+
+    /// <summary>Ask the client to draw the swept path.</summary>
+    public bool ShowDebugSamples { get; init; }
+
+    /// <summary>
+    /// Walk the character's own collision toward a target before and while
+    /// approaching it, steering around what blocks the way; a target no
+    /// heading reaches is struck like a ranged-blocked one.
+    /// </summary>
+    public bool CheckWalkPath { get; init; } = true;
+
+    /// <summary>How far ahead a steering heading is walked to call it open.</summary>
+    public float WalkLookaheadMeters { get; init; } = 4f;
 }
 
 public enum AttackHeight

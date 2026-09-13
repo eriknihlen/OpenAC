@@ -46,6 +46,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 case "loot":
                     Toggle(verb, rest);
                     break;
+                case "los":
+                    LineOfSight(rest);
+                    break;
                 default:
                     Help();
                     break;
@@ -68,7 +71,8 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
             + $"buffs {(profile.Buffs.Enabled ? "on" : "off")}, "
             + $"combat {(profile.Combat.Enabled ? "on" : "off")}, "
             + $"loot {(profile.Loot.Enabled ? "on" : "off")}, "
-            + $"nav {(profile.Navigation.Enabled ? "on" : "off")}");
+            + $"nav {(profile.Navigation.Enabled ? "on" : "off")}, "
+            + $"los {(profile.Combat.LineOfSight.Enabled ? "on" : "off")}");
         Route? route = controller.Navigation.Route;
         Say(route is null
             ? $"no route loaded; draft has {controller.DraftRoute.Waypoints.Count} waypoints"
@@ -189,12 +193,41 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say($"{feature} {(enabled.Value ? "on" : "off")}");
     }
 
+    private void LineOfSight(string[] args)
+    {
+        string sub = args.Length > 0 ? args[0].ToLowerInvariant() : string.Empty;
+        bool debug = sub == "debug";
+        string? flag = debug ? (args.Length > 1 ? args[1].ToLowerInvariant() : null) : sub;
+        bool? enabled = flag switch
+        {
+            "on" or "true" or "1" => true,
+            "off" or "false" or "0" => false,
+            _ => null,
+        };
+        if (enabled is null)
+        {
+            Say("usage: /bot los on|off | /bot los debug on|off");
+            return;
+        }
+        controller.Update(profile => profile with
+        {
+            Combat = profile.Combat with
+            {
+                LineOfSight = debug
+                    ? profile.Combat.LineOfSight with { ShowDebugSamples = enabled.Value }
+                    : profile.Combat.LineOfSight with { Enabled = enabled.Value },
+            },
+        });
+        Say($"line of sight {(debug ? "drawing " : string.Empty)}{(enabled.Value ? "on" : "off")}");
+    }
+
     private void Help()
     {
         Say("/bot start|stop|status|rebuff");
         Say("/bot profile list|load <name>|save [name]|reset");
         Say("/bot nav add|pause <s>|clear|use|save <name>|load <name>|list");
         Say("/bot style melee|missile|magic; /bot buffs|combat|loot on|off");
+        Say("/bot los on|off; /bot los debug on|off");
     }
 
     private void Say(string text) => chat.PostSystemMessage(text);
