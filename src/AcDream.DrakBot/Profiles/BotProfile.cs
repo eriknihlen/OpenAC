@@ -38,6 +38,8 @@ public sealed record BotProfile
 
     public SalvageSettings Salvage { get; init; } = new();
 
+    public SpellTierSettings SpellTiers { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -347,6 +349,18 @@ public sealed record ManaStoneSettings
 
     /// <summary>Only stones whose name contains one of these are used; empty means any mana stone.</summary>
     public IReadOnlyList<string> StoneNames { get; init; } = [];
+}
+
+/// <summary>
+/// The buffed skill a school needs before each spell tier is cast, tier I
+/// to VIII. RynthAi's defaults: the combat ladder sits where casts stop
+/// fizzling; the buff ladder at the game's minimums.
+/// </summary>
+public sealed record SpellTierSettings
+{
+    public IReadOnlyList<int> CombatMinimums { get; init; } = [0, 85, 135, 185, 235, 285, 335, 435];
+
+    public IReadOnlyList<int> BuffMinimums { get; init; } = [0, 85, 135, 185, 235, 285, 335, 435];
 }
 
 /// <summary>Salvaging looted items with the Ust, and merging the bags.</summary>

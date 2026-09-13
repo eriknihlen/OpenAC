@@ -121,6 +121,16 @@ corpses up to the keep count whatever the loot rules say. Nothing
 happens while hostiles are in range. VTank's enablemanatapping,
 manatapminmana and manastonelootcount options map onto these.
 
+## Spell tiers by skill
+
+Every cast goes through the tier gate: a spell's tier is allowed once
+the character's skill in its school reaches that tier's minimum, on one
+ladder for combat casts and another for buffs (both `0, 85, 135, 185,
+235, 285, 335, 435` by default; the Buffs tab edits them). A spell whose
+school is unknown, or a skill the host cannot read, is not gated. The
+selector then takes the highest allowed known tier, so a low-skill
+character casts what lands instead of fizzling on the top tier.
+
 ## Weapons and ammunition
 
 The Combat tab names a weapon per style (melee, missile, wand) and a

@@ -54,11 +54,15 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         IAutomationSurface surface = host.Automation;
         var clock = new TickClock();
         var cooldowns = new CastCooldowns(clock);
-        var spells = new SpellSelector(surface.Spells, surface.Magic, cooldowns.IsOnCooldown);
+        BotEngine engine = null!;
+        var spells = new SpellSelector(
+            surface.Spells,
+            surface.Magic,
+            cooldowns.IsOnCooldown,
+            new SpellTierGate(surface.Character, () => engine.Profile.SpellTiers));
         CastTracker Casts() => new(surface.Magic, clock, cooldowns);
         // Behaviors read the live profile through the engine, which does not
         // exist until they do; the closures resolve it lazily.
-        BotEngine engine = null!;
         var navigation = new NavigationBehavior(() => engine.Profile.Navigation);
         var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs, surface);
         var lineOfSight = new LineOfSightService(

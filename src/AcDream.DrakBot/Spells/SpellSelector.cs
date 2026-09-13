@@ -14,7 +14,8 @@ namespace AcDream.DrakBot.Spells;
 public sealed class SpellSelector(
     ISpellCatalog catalog,
     IMagicCommands magic,
-    Func<uint, bool>? isBlocked = null)
+    Func<uint, bool>? isBlocked = null,
+    SpellTierGate? tiers = null)
 {
     private static readonly string[] TierSuffixes =
     [
@@ -35,12 +36,12 @@ public sealed class SpellSelector(
 
     /// <summary>Highest known, castable tier of the self-buff family named by <paramref name="baseName"/>.</summary>
     public bool TryBestSelfBuff(string baseName, out PluginSpellInfo spell) =>
-        TryBest(catalog.KnownSelfBuffs, baseName, out spell);
+        TryBest(catalog.KnownSelfBuffs, baseName, out spell, buff: true);
 
     /// <summary>Highest known, castable tier of any known spell family named by <paramref name="baseName"/>.</summary>
     public bool TryBestKnown(string baseName, out PluginSpellInfo spell)
     {
-        if (TryBest(catalog.KnownSelfBuffs, baseName, out spell))
+        if (TryBest(catalog.KnownSelfBuffs, baseName, out spell, buff: true))
             return true;
         if (TryBest(catalog.KnownCombatSpells, baseName, out spell))
             return true;
@@ -62,7 +63,7 @@ public sealed class SpellSelector(
             {
                 continue;
             }
-            if (!IsCastable(candidate.SpellId))
+            if (!IsCastable(candidate, buff: false))
                 continue;
             int rank = candidate.Tier * 1000 + candidate.Quality;
             if (rank > bestRank)
@@ -134,7 +135,7 @@ public sealed class SpellSelector(
         int bestTier = int.MinValue;
         foreach (PluginSpellInfo candidate in pool)
         {
-            if (candidate.Family != family || !IsCastable(candidate.SpellId))
+            if (candidate.Family != family || !IsCastable(candidate, buff: false))
                 continue;
             if (candidate.Tier > bestTier)
             {
@@ -148,7 +149,8 @@ public sealed class SpellSelector(
     private bool TryBest(
         IReadOnlyList<PluginSpellInfo> pool,
         string baseName,
-        out PluginSpellInfo spell)
+        out PluginSpellInfo spell,
+        bool buff = false)
     {
         spell = default;
         string wanted = BaseName(baseName);
@@ -157,7 +159,7 @@ public sealed class SpellSelector(
         {
             if (!string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (!IsCastable(candidate.SpellId))
+            if (!IsCastable(candidate, buff))
                 continue;
             if (candidate.Tier > bestTier)
             {
@@ -168,6 +170,12 @@ public sealed class SpellSelector(
         return bestTier != int.MinValue;
     }
 
-    private bool IsCastable(uint spellId) =>
-        magic.HasComponents(spellId) && (isBlocked is null || !isBlocked(spellId));
+    private bool IsCastable(in PluginSpellInfo spell, bool buff)
+    {
+        if (!magic.HasComponents(spell.SpellId) || (isBlocked is not null && isBlocked(spell.SpellId)))
+            return false;
+        if (tiers is null)
+            return true;
+        return buff ? tiers.AllowsBuff(spell) : tiers.AllowsCombat(spell);
+    }
 }

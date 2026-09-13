@@ -27,6 +27,18 @@ public sealed class BotSettingsWindow(BotController controller)
     private int _selectedMonster = -1;
     private string _monsterName = string.Empty;
     private string _petDevice = string.Empty;
+
+    private static bool TryParseTiers(string text, out int[] tiers)
+    {
+        string[] parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        tiers = new int[parts.Length];
+        for (int index = 0; index < parts.Length; index++)
+        {
+            if (!int.TryParse(parts[index], out tiers[index]))
+                return false;
+        }
+        return tiers.Length == 8;
+    }
     private string _metaExpression = string.Empty;
     private string _metaResult = string.Empty;
     private string _newBuff = string.Empty;
@@ -508,6 +520,14 @@ public sealed class BotSettingsWindow(BotController controller)
         int rebuff = (int)buffs.RebuffWhenRemainingSeconds;
         if (ImGui.SliderInt("Rebuff with (seconds left)", ref rebuff, 5, 600))
             controller.Update(p => p with { Buffs = p.Buffs with { RebuffWhenRemainingSeconds = rebuff } });
+
+        ImGui.TextDisabled("Skill needed per tier I..VIII (buffed skill in the spell's school)");
+        string buffTiers = string.Join(", ", controller.Profile.SpellTiers.BuffMinimums);
+        if (ImGui.InputText("Buff tiers", ref buffTiers, 96, ImGuiInputTextFlags.EnterReturnsTrue) && TryParseTiers(buffTiers, out int[] parsedBuff))
+            controller.Update(p => p with { SpellTiers = p.SpellTiers with { BuffMinimums = parsedBuff } });
+        string combatTiers = string.Join(", ", controller.Profile.SpellTiers.CombatMinimums);
+        if (ImGui.InputText("Combat tiers", ref combatTiers, 96, ImGuiInputTextFlags.EnterReturnsTrue) && TryParseTiers(combatTiers, out int[] parsedCombat))
+            controller.Update(p => p with { SpellTiers = p.SpellTiers with { CombatMinimums = parsedCombat } });
 
         bool weapon = buffs.BuffWeapon;
         if (ImGui.Checkbox("Weapon auras", ref weapon))

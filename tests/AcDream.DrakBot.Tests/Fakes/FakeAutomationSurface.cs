@@ -87,6 +87,14 @@ internal sealed class FakeAutomationSurface
     IReadOnlyList<PluginActiveEnchantment> ICharacterInfo.ActiveEnchantments => Enchantments;
     public bool TryGetSkill(uint skillId, out PluginSkillInfo skill)
     {
+        foreach (PluginSkillInfo known in Skills)
+        {
+            if (known.SkillId == skillId)
+            {
+                skill = known;
+                return true;
+            }
+        }
         skill = default;
         return false;
     }
