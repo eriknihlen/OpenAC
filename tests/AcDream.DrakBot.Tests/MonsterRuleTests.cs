@@ -79,6 +79,67 @@ public sealed class MonsterRuleTests
         Assert.False(selector.TryBestOffensive("Cold", SpellShape.Bolt, ring: false, out _));
     }
 
+    private static PluginEquipmentItem Gear(uint id, string name, byte combatUse, uint ammoType, bool equipped, int stack = 1) =>
+        new(id, name, combatUse == 2 ? 0x100u : 0u, 0x1000u, equipped ? 0x1000u : 0u, 0x50000001u, 0u, combatUse, 0, 0, 0, 0d)
+        {
+            AmmoType = ammoType,
+            StackSize = stack,
+        };
+
+    [Fact]
+    public void AnArcherWieldsTheNamedBowAndAQuiverOfItsArrowsBeforeShooting()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Missile,
+            MissileWeapon = "Yumi",
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Missile };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 6f));
+        surface.Equipment.Add(Gear(1, "Spadone", 1, 0u, equipped: true));
+        surface.Equipment.Add(Gear(2, "Shou-jen Yumi", 2, 1u, equipped: false));
+        surface.Equipment.Add(Gear(3, "Deadly Frog Crotch Arrow", 3, 1u, equipped: false, stack: 100));
+        surface.Equipment.Add(Gear(4, "Deadly Broad Arrow", 3, 1u, equipped: false, stack: 250));
+        surface.Equipment.Add(Gear(5, "Crossbow Bolt", 3, 2u, equipped: false, stack: 999));
+
+        // The bow first; the attack waits and the character drops to peace for the swap.
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:2", surface.Commands);
+        Assert.Contains("mode:Peace", surface.Commands);
+        Assert.DoesNotContain(surface.Commands, c => c.StartsWith("attack", StringComparison.Ordinal));
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Peace };
+
+        // Then the biggest matching quiver, never the bolts.
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:4", surface.Commands);
+        Assert.DoesNotContain("equip:5", surface.Commands);
+
+        // Armed: back to missile mode and the attack goes out.
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("mode:Missile", surface.Commands);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Missile };
+        Step(behavior, surface, clock);
+        Step(behavior, surface, clock);
+        Assert.Contains(surface.Commands, c => c.StartsWith("attack", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AMissingWeaponFailsTheStepInsteadOfSwingingBareHanded()
+    {
+        var settings = new CombatSettings { Style = CombatStyle.Melee, MeleeWeapon = "Spadone", LineOfSight = new LineOfSightSettings { Enabled = false } };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 1f));
+
+        BehaviorStep step = Step(behavior, surface, clock);
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("Spadone", step.Reason);
+    }
+
     private static (FakeAutomationSurface Surface, CombatBehavior Behavior, TickClock Clock) Build(CombatSettings settings)
     {
         var surface = new FakeAutomationSurface();

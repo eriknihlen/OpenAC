@@ -202,6 +202,21 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = peace } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Weapons (by name; empty leaves the hands alone)");
+        string melee = combat.MeleeWeapon;
+        if (ImGui.InputText("Melee weapon", ref melee, 64))
+            controller.Update(p => p with { Combat = p.Combat with { MeleeWeapon = melee } });
+        string missile = combat.MissileWeapon;
+        if (ImGui.InputText("Missile weapon", ref missile, 64))
+            controller.Update(p => p with { Combat = p.Combat with { MissileWeapon = missile } });
+        string wand = combat.Wand;
+        if (ImGui.InputText("Wand", ref wand, 64))
+            controller.Update(p => p with { Combat = p.Combat with { Wand = wand } });
+        bool ammo = combat.KeepAmmunition;
+        if (ImGui.Checkbox("Keep the bow's ammunition wielded", ref ammo))
+            controller.Update(p => p with { Combat = p.Combat with { KeepAmmunition = ammo } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Reach");
         float meleeRange = combat.MeleeRangeMeters;
         if (ImGui.SliderFloat("Melee reach (m)", ref meleeRange, 1f, 6f, "%.1f"))
@@ -339,6 +354,9 @@ public sealed class BotSettingsWindow(BotController controller)
             int extra = Math.Max(0, Array.FindIndex(ElementNames, e => e.Equals(rule.ExtraVulnerability, StringComparison.OrdinalIgnoreCase)));
             if (ImGui.Combo("Second vulnerability", ref extra, ElementNames, ElementNames.Length))
                 Set(rule with { ExtraVulnerability = extra == 0 ? string.Empty : ElementNames[extra] });
+            string weapon = rule.Weapon;
+            if (ImGui.InputText("Weapon for this monster", ref weapon, 64))
+                Set(rule with { Weapon = weapon });
         }
 
         ImGui.Separator();

@@ -11,9 +11,32 @@ internal sealed class FakeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation, ILootAutomation, INavigationAutomation,
       IItemAutomation, IWorldObjectAutomation, IProjectileAutomation,
-      IMovementProbeAutomation, IEnchantmentAutomation, IFellowshipAutomation
+      IMovementProbeAutomation, IEnchantmentAutomation, IFellowshipAutomation, IEquipmentAutomation
 {
     public List<string> Commands { get; } = [];
+
+    // ── equipment ─────────────────────────────────────────────────────────
+    public List<PluginEquipmentItem> Equipment { get; } = [];
+    bool IEquipmentAutomation.IsAvailable => IsAvailable;
+    bool IEquipmentAutomation.IsBusy => false;
+    public IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment() => Equipment.ToArray();
+    /// <summary>Wields the item at once, unwielding anything in the same slot.</summary>
+    public PluginEquipmentCommandResult Equip(uint objectId, uint requestedLocation = 0u)
+    {
+        Commands.Add($"equip:{objectId}");
+        int index = Equipment.FindIndex(e => e.ObjectId == objectId);
+        if (index < 0)
+            return new(PluginEquipmentCommandStatus.InvalidItem);
+        PluginEquipmentItem item = Equipment[index];
+        for (int other = 0; other < Equipment.Count; other++)
+        {
+            if (Equipment[other].IsEquipped && Equipment[other].CombatUse == item.CombatUse)
+                Equipment[other] = Equipment[other] with { EquippedLocation = 0u };
+        }
+        Equipment[index] = item with { EquippedLocation = item.ValidLocations };
+        return new(PluginEquipmentCommandStatus.Started);
+    }
+    IEquipmentAutomation IAutomationSurface.Equipment => this;
 
     // ── fellowship ────────────────────────────────────────────────────────
     public List<PluginFellowMember> Fellows { get; } = [];

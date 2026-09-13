@@ -88,13 +88,24 @@ the profile's), the war spell's shape (bolt, arc, streak) and whether to
 ring instead once the profile's minimum number of hostiles stand within
 ring range, and the debuffs to land first - imperil, the element's
 vulnerability, a second vulnerability, fester, yield, broadside, gravity
-well. A rule named `Default` covers what nothing else matches; without one
-an unmatched monster is left alone. Debuffs are cast in that order until
+well, and a weapon to wield for it. A rule named `Default` covers what
+nothing else matches; without one an unmatched monster is left alone. Debuffs are cast in that order until
 the client's record of what the character landed shows them on the
 target; spells are chosen by family, so a lore-named top tier (Outlander's
 Insolence for Force Streak VII) is reached through its lower tiers. The
 tables of spell names are in `Spells/WarSpellNames.cs`; void magic stands
 in for war when only it is known.
+
+## Weapons and ammunition
+
+The Combat tab names a weapon per style (melee, missile, wand) and a
+monster rule may name another; before an attack the bot wields the named
+one through `IEquipmentAutomation`, dropping to peace mode while the swap
+lands, and with the missile style keeps a stack of the wielded bow's
+ammunition wielded (the largest matching stack, by the bow's ammo type).
+A named weapon that is not in the inventory, or a bow with nothing left
+to fire, fails the step rather than swinging bare-handed. Empty names
+leave the hands alone.
 
 ## Line of sight, obstacle sense and approach
 
@@ -318,7 +329,6 @@ In rough priority order:
 - **Doors on routes.** Portals, NPCs, recalls and chat lines are route
   steps now; a closed door in the way is still only handled by the stuck
   recoveries.
-- **Missile ammo and weapon swapping** via `IEquipmentAutomation`.
 - **DoTs and life magic in combat** - the monster list covers war
   shapes, rings and the creature debuffs; drains and DoTs are not cast.
 - **Following the fellowship leader** via `IFellowshipAutomation`

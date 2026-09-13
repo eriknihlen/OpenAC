@@ -179,6 +179,16 @@ public sealed record CombatSettings
     /// <summary>Rules that allow a ring cast one when this many hostiles stand within ring range.</summary>
     public int MinRingTargets { get; init; } = 3;
 
+    /// <summary>The weapon to wield for the melee style, by name; empty leaves the hands alone.</summary>
+    public string MeleeWeapon { get; init; } = string.Empty;
+
+    public string MissileWeapon { get; init; } = string.Empty;
+
+    public string Wand { get; init; } = string.Empty;
+
+    /// <summary>With the missile style, keep a stack of the wielded bow's ammunition wielded.</summary>
+    public bool KeepAmmunition { get; init; } = true;
+
     /// <summary>How far a ring reaches; zero never rings.</summary>
     public float RingRangeMeters { get; init; } = 8f;
 

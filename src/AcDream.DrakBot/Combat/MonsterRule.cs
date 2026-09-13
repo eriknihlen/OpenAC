@@ -51,6 +51,9 @@ public sealed record MonsterRule
 
     public bool GravityWell { get; init; }
 
+    /// <summary>A weapon to wield for this monster, by name; empty keeps the style's.</summary>
+    public string Weapon { get; init; } = string.Empty;
+
     public bool IsDefault => Name.Equals(DefaultName, StringComparison.OrdinalIgnoreCase);
 
     public bool Matches(string monsterName)

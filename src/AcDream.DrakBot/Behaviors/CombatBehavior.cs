@@ -29,6 +29,7 @@ public sealed class CombatBehavior(
     private const double SwingTimeoutSeconds = 10d;
     private const double ModeChangeTimeoutSeconds = 4d;
     private readonly Walker _walker = new();
+    private readonly WeaponReadiness _weapons = new();
 
     private Phase _phase;
     private uint _targetId;
@@ -189,6 +190,19 @@ public sealed class CombatBehavior(
             context.Log.Info($"approaching {target.Name} at {target.Distance:0.0}m");
             EnterPhase(Phase.Approaching, board.Now);
             return StepApproach(context, combat);
+        }
+
+        // The right weapon first: a swap in flight means peace mode and a
+        // wait, and a missing weapon or quiver is not worth swinging without.
+        MonsterRule? rule = combat.Monsters.Count > 0 ? MonsterRules.For(combat.Monsters, target.Name) : null;
+        switch (_weapons.Ensure(context.Surface.Equipment, combat, rule, board.Now, out string weaponDetail))
+        {
+            case WeaponReadiness.Verdict.Swapping:
+                if (board.Combat.Mode != PluginCombatMode.Peace)
+                    host.EnterMode(PluginCombatMode.Peace);
+                return BehaviorStep.Continue;
+            case WeaponReadiness.Verdict.Missing:
+                return BehaviorStep.Fail(weaponDetail);
         }
 
         PluginCombatMode desired = DesiredMode(combat.Style);
