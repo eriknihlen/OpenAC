@@ -667,9 +667,10 @@ public sealed class MetaEngine
         ["recharge-norm-hitp"] = "HealAt",
         ["recharge-norm-mana"] = "GetManaAt",
         ["recharge-norm-stam"] = "RestamAt",
-        ["recharge-notarg-hitp"] = "HealAt",
-        ["recharge-notarg-mana"] = "GetManaAt",
-        ["recharge-notarg-stam"] = "RestamAt",
+        ["recharge-notarg-hitp"] = "TopOffHP",
+        ["recharge-notarg-mana"] = "TopOffMana",
+        ["recharge-notarg-stam"] = "TopOffStam",
+        ["rebuftimeremainingseconds"] = "RebuffSecondsRemaining",
         ["idlepeacemode"] = "PeaceModeWhenIdle",
     };
 

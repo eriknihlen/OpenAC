@@ -11,9 +11,16 @@ internal sealed class FakeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation, ILootAutomation, INavigationAutomation,
       IItemAutomation, IWorldObjectAutomation, IProjectileAutomation,
-      IMovementProbeAutomation, IEnchantmentAutomation
+      IMovementProbeAutomation, IEnchantmentAutomation, IFellowshipAutomation
 {
     public List<string> Commands { get; } = [];
+
+    // ── fellowship ────────────────────────────────────────────────────────
+    public List<PluginFellowMember> Fellows { get; } = [];
+    public bool IsInFellowship => Fellows.Count > 0;
+    public int MemberCount => Fellows.Count;
+    public IReadOnlyList<PluginFellowMember> CaptureMembers() => Fellows.ToArray();
+    IFellowshipAutomation IAutomationSurface.Fellowship => this;
 
     // ── enchantments the character landed on others ───────────────────────
     /// <summary>Tracked enchantments per target, as the client records the character's own casts.</summary>

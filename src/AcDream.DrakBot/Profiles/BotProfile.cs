@@ -62,6 +62,25 @@ public sealed record VitalSettings
 
     /// <summary>Fall back to a healing kit when no heal spell is castable.</summary>
     public bool UseHealingKits { get; init; } = true;
+
+    /// <summary>
+    /// With no hostile in range, top vitals up to these higher fractions
+    /// too, so a fight starts full; zero leaves a vital to the fight
+    /// thresholds above.
+    /// </summary>
+    public double IdleHealthBelow { get; init; } = 0.95;
+
+    public double IdleStaminaBelow { get; init; } = 0.9;
+
+    public double IdleManaBelow { get; init; } = 0.9;
+
+    /// <summary>Heal fellows in range whose health falls under this fraction; zero never does.</summary>
+    public double HealFellowsBelow { get; init; }
+
+    public string HealOtherSpell { get; init; } = "Heal Other";
+
+    /// <summary>How far a fellow may be to be healed.</summary>
+    public float HealFellowsRangeMeters { get; init; } = 20f;
 }
 
 public sealed record BuffSettings

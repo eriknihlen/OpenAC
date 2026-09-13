@@ -54,7 +54,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
   BotEngine          priority arbiter; one Blackboard snapshot per tick
     Blackboard       vitals, enchantments, hostiles, corpses, position, casting
     IBehavior        WantsControl(board) / Execute(context) / Interrupt(context)
-      vitals         Survival    heal / revitalize / mana; healing-kit fallback
+      vitals         Survival    heal / revitalize / mana, idle top-off, heal fellows; healing-kit fallback
       buffs          Buffing     keep configured self-buff families, weapon auras and armor spells up
       combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule
@@ -321,8 +321,8 @@ In rough priority order:
 - **Missile ammo and weapon swapping** via `IEquipmentAutomation`.
 - **DoTs and life magic in combat** - the monster list covers war
   shapes, rings and the creature debuffs; drains and DoTs are not cast.
-- **Fellowship helpers** (heal a fellow, follow the leader) via
-  `IFellowshipAutomation`.
+- **Following the fellowship leader** via `IFellowshipAutomation`
+  (fellows are healed already).
 - **Meta state machine.** RynthScript is the intended language; the engine
   needs an "expression surface" that exposes the blackboard to it.
 - **Loot rule editing in the settings window.** Rules can be removed there

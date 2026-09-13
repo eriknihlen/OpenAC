@@ -17,12 +17,43 @@ public sealed class VitalRechargeBehaviorTests
         surface.SelfBuffs.Add(Spell.SelfBuff(60, "Revitalize Self IV", 201, 4));
         var clock = new TickClock();
         VitalSettings vitals = settings ?? new VitalSettings();
+        surface.CombatSpells.Add(Spell.Debuff(70, "Heal Other V", 210, 5));
         var casts = new CastTracker(surface, clock);
         var behavior = new VitalRechargeBehavior(
             new SpellSelector(surface, surface, casts.IsOnCooldown),
             casts,
-            () => vitals);
+            () => vitals,
+            surface);
         return (surface, behavior, clock);
+    }
+
+    [Fact]
+    public void TopsUpToTheIdleThresholdOnlyWithNothingInRange()
+    {
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build(
+            new VitalSettings { HealBelow = 0.5, IdleHealthBelow = 0.95 });
+        surface.CurrentHealth = 80;
+
+        Assert.True(behavior.WantsControl(Board(surface, clock), out string reason));
+        Assert.Contains("health", reason);
+
+        surface.Hostiles.Add(new PluginCombatTarget(7u, "Drudge", 0u, 8f, 0f, true, 1f));
+        Assert.False(behavior.WantsControl(Board(surface, clock), out _));
+    }
+
+    [Fact]
+    public void HealsTheWorstHurtFellowInRange()
+    {
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build(
+            new VitalSettings { HealFellowsBelow = 0.6, HealFellowsRangeMeters = 20f, IdleHealthBelow = 0d });
+        surface.Fellows.Add(new PluginFellowMember(0x5000_0002u, "Near", 30u, 100u, 0u, 0u, 0u, 0u, 5f));
+        surface.Fellows.Add(new PluginFellowMember(0x5000_0003u, "Worse", 10u, 100u, 0u, 0u, 0u, 0u, 8f));
+        surface.Fellows.Add(new PluginFellowMember(0x5000_0004u, "Far", 5u, 100u, 0u, 0u, 0u, 0u, 50f));
+
+        Assert.True(behavior.WantsControl(Board(surface, clock), out string reason));
+        Assert.Contains("Worse", reason);
+        behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal("cast:70@1342177283", surface.Commands[^1]);
     }
 
     private static Blackboard Board(FakeAutomationSurface surface, TickClock clock) =>

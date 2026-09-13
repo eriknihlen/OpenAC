@@ -64,7 +64,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             () => engine.Profile.Combat.LineOfSight);
         IBehavior[] behaviors =
         [
-            new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals),
+            new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),
             buffs,
             new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
             new LootBehavior(() => engine.Profile.Loot),

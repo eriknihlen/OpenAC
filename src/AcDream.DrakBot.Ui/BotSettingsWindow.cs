@@ -130,6 +130,30 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Vitals = p.Vitals with { ManaBelow = mana / 100d } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Top off with nothing in range (%; 0 = only the thresholds above)");
+        int idleHeal = (int)Math.Round(vitals.IdleHealthBelow * 100d);
+        if (ImGui.SliderInt("Health to", ref idleHeal, 0, 100))
+            controller.Update(p => p with { Vitals = p.Vitals with { IdleHealthBelow = idleHeal / 100d } });
+        int idleStamina = (int)Math.Round(vitals.IdleStaminaBelow * 100d);
+        if (ImGui.SliderInt("Stamina to", ref idleStamina, 0, 100))
+            controller.Update(p => p with { Vitals = p.Vitals with { IdleStaminaBelow = idleStamina / 100d } });
+        int idleMana = (int)Math.Round(vitals.IdleManaBelow * 100d);
+        if (ImGui.SliderInt("Mana to", ref idleMana, 0, 100))
+            controller.Update(p => p with { Vitals = p.Vitals with { IdleManaBelow = idleMana / 100d } });
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Fellows");
+        int healOthers = (int)Math.Round(vitals.HealFellowsBelow * 100d);
+        if (ImGui.SliderInt("Heal fellows at (%, 0 = never)", ref healOthers, 0, 99))
+            controller.Update(p => p with { Vitals = p.Vitals with { HealFellowsBelow = healOthers / 100d } });
+        float fellowRange = vitals.HealFellowsRangeMeters;
+        if (ImGui.SliderFloat("Within (m)", ref fellowRange, 3f, 40f, "%.0f"))
+            controller.Update(p => p with { Vitals = p.Vitals with { HealFellowsRangeMeters = fellowRange } });
+        string healOther = vitals.HealOtherSpell;
+        if (ImGui.InputText("Heal fellow spell", ref healOther, 64))
+            controller.Update(p => p with { Vitals = p.Vitals with { HealOtherSpell = healOther } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Spells (game names, tier picked automatically)");
         string healSpell = vitals.HealSpell;
         if (ImGui.InputText("Heal", ref healSpell, 64))

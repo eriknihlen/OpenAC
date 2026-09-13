@@ -287,6 +287,13 @@ public sealed class BotController : IMetaBot
             ["HealAt"] = (() => Pct(Profile.Vitals.HealBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { HealBelow = n / 100d } }); }),
             ["RestamAt"] = (() => Pct(Profile.Vitals.StaminaBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { StaminaBelow = n / 100d } }); }),
             ["GetManaAt"] = (() => Pct(Profile.Vitals.ManaBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { ManaBelow = n / 100d } }); }),
+            ["TopOffHP"] = (() => Pct(Profile.Vitals.IdleHealthBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { IdleHealthBelow = n / 100d } }); }),
+            ["TopOffStam"] = (() => Pct(Profile.Vitals.IdleStaminaBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { IdleStaminaBelow = n / 100d } }); }),
+            ["TopOffMana"] = (() => Pct(Profile.Vitals.IdleManaBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { IdleManaBelow = n / 100d } }); }),
+            ["HealOthersAt"] = (() => Pct(Profile.Vitals.HealFellowsBelow), v => { if (TryF(v, out double n)) Update(p => p with { Vitals = p.Vitals with { HealFellowsBelow = n / 100d } }); }),
+            ["RebuffSecondsRemaining"] = (() => F(Profile.Buffs.RebuffWhenRemainingSeconds), v => { if (TryF(v, out double n)) Update(p => p with { Buffs = p.Buffs with { RebuffWhenRemainingSeconds = n } }); }),
+            ["RingRange"] = (() => F(Profile.Combat.RingRangeMeters), v => { if (TryF(v, out double n)) Update(p => p with { Combat = p.Combat with { RingRangeMeters = (float)n } }); }),
+            ["MinRingTargets"] = (() => F(Profile.Combat.MinRingTargets), v => { if (TryF(v, out double n)) Update(p => p with { Combat = p.Combat with { MinRingTargets = (int)n } }); }),
             ["PeaceModeWhenIdle"] = (() => B(Profile.Combat.LeaveCombatWhenIdle), v => Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = ToBool(v) } })),
             ["CurrentNavPath"] = (() => Navigation.Route?.Name ?? string.Empty, v =>
             {
