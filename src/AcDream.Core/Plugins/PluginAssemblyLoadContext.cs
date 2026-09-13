@@ -5,7 +5,14 @@ namespace AcDream.Core.Plugins;
 
 internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext
 {
-    private const string AbstractionsAssemblyName = "AcDream.Plugin.Abstractions";
+    // Assemblies a plugin must share with the host rather than load privately:
+    // the contract, so interface identity matches, and ImGui.NET, so a plugin's
+    // ImGui calls land in the host's native context.
+    private static readonly HashSet<string> SharedAssemblies = new(StringComparer.Ordinal)
+    {
+        "AcDream.Plugin.Abstractions",
+        "ImGui.NET",
+    };
 
     private readonly AssemblyDependencyResolver _resolver;
 
@@ -17,8 +24,7 @@ internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // Share the abstractions assembly with the host — do NOT reload it in the plugin ALC
-        if (assemblyName.Name == AbstractionsAssemblyName)
+        if (assemblyName.Name is { } name && SharedAssemblies.Contains(name))
             return null;
 
         var path = _resolver.ResolveAssemblyToPath(assemblyName);

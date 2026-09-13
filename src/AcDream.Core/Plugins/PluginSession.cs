@@ -61,6 +61,68 @@ public sealed class PluginSession : IDisposable
     public IReadOnlyList<string> LoadedPluginIds =>
         _loaded.Select(static active => active.Loaded.Manifest.Id).ToArray();
 
+    /// <summary>
+    /// Hosts a plugin compiled into the client. It shares the scoped host,
+    /// command, storage and UI facilities of a discovered plugin but has no
+    /// assembly load context, so it lives and dies with the session. Built-ins
+    /// enable in call order and before anything <see cref="Start"/> discovers.
+    /// </summary>
+    public void AddBuiltIn(BuiltInPlugin builtIn)
+    {
+        ArgumentNullException.ThrowIfNull(builtIn);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_started)
+            throw new InvalidOperationException(
+                "Built-in plugins must be added before the session starts.");
+
+        var manifest = new PluginManifest(
+            builtIn.Id,
+            builtIn.DisplayName,
+            builtIn.Version,
+            EntryDll: "<built-in>",
+            PluginApi.Current,
+            Dependencies: []);
+        var scope = new ScopedPluginHost(_host, builtIn.Id, builtIn.DisplayName);
+        try
+        {
+            builtIn.Plugin.Initialize(scope);
+            builtIn.Plugin.Enable();
+        }
+        catch (Exception error)
+        {
+            try { builtIn.Plugin.Disable(); }
+            catch (Exception disableError)
+            {
+                SafeLog(
+                    static (log, message, exception) =>
+                        log.Error(message, exception),
+                    $"built-in plugin cleanup after enable failure failed: {builtIn.Id}",
+                    disableError);
+            }
+            scope.Dispose();
+            string errorText = Describe(error);
+            Report(new PluginSessionStatus(
+                builtIn.Id,
+                PluginSessionStatusKind.Failed,
+                errorText));
+            SafeLog(
+                static (log, message, _) => log.Warn(message),
+                $"built-in plugin failed: {builtIn.Id}: {errorText}",
+                null);
+            return;
+        }
+
+        _loaded.Add(new ActivePlugin(
+            new LoadedPlugin(manifest, builtIn.Plugin, LoadContext: null, Error: null),
+            scope,
+            RenderPackScope: null));
+        SafeLog(
+            static (log, message, _) => log.Info(message),
+            $"built-in plugin enabled: {builtIn.Id} ({builtIn.DisplayName})",
+            null);
+        Report(new PluginSessionStatus(builtIn.Id, PluginSessionStatusKind.Loaded));
+    }
+
     public void Start(
         IEnumerable<string> pluginRoots,
         IReadOnlyList<string>? allowList)
@@ -166,8 +228,10 @@ public sealed class PluginSession : IDisposable
     public IReadOnlyList<WeakReference> CaptureLoadContextWeakReferences() =>
         [
             .. _releasedContexts,
-            .. _loaded.Select(static active =>
-                new WeakReference(active.Loaded.LoadContext!)),
+            .. _loaded
+                .Where(static active => active.Loaded.LoadContext is not null)
+                .Select(static active =>
+                    new WeakReference(active.Loaded.LoadContext!)),
         ];
 
     public void Dispose()
@@ -201,10 +265,12 @@ public sealed class PluginSession : IDisposable
             // can keep the plugin assembly reachable.
             active.Scope.Dispose();
             ReleaseRenderScope(active.RenderPackScope, loaded.Manifest.Id);
+            if (loaded.LoadContext is null)
+                continue;
 
             try
             {
-                loaded.LoadContext!.Unload();
+                loaded.LoadContext.Unload();
             }
             catch (Exception error)
             {

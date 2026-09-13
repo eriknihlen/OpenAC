@@ -44,7 +44,8 @@ internal sealed class HeadlessPluginSession : IDisposable
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        IReadOnlyList<BuiltInPlugin>? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -67,6 +68,8 @@ internal sealed class HeadlessPluginSession : IDisposable
             status => Report(statusWriter, sessionId, status),
             renderPacks: null,
             supportedKinds: [PluginKind.Gameplay]);
+        foreach (BuiltInPlugin builtIn in builtIns ?? [])
+            plugins.AddBuiltIn(builtIn);
         return new HeadlessPluginSession(
             host,
             plugins,

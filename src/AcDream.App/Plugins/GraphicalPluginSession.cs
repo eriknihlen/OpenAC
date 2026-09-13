@@ -40,7 +40,8 @@ internal sealed class GraphicalPluginSession : IDisposable
         string sessionId,
         IPluginHost host,
         SessionStatusWriter statusWriter,
-        IRenderPackRegistry? renderPacks = null)
+        IRenderPackRegistry? renderPacks = null,
+        IReadOnlyList<BuiltInPlugin>? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -54,6 +55,8 @@ internal sealed class GraphicalPluginSession : IDisposable
             renderPacks is null
                 ? [PluginKind.Gameplay]
                 : [PluginKind.Gameplay, PluginKind.RenderPack]);
+        foreach (BuiltInPlugin builtIn in builtIns ?? [])
+            plugins.AddBuiltIn(builtIn);
         return new GraphicalPluginSession(
             plugins,
             [

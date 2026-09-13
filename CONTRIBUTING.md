@@ -53,6 +53,11 @@ holtburger are AGPL-3.0 and ACViewer is GPL-3.0; their code cannot be
 included in an MIT project. Reading them to understand a message layout is
 fine; copying is not.
 
+The built-in bot (`src/AcDream.Bot`) is held to a stricter rule: nothing in it
+may come from VirindiTank or any other closed automation tool - no decompiled
+code, no tables, no defaults, no option names, no fixture files, and no
+comments that cite their internals. `docs/bot.md` spells this out.
+
 ## AI-assisted contributions
 
 This project is built with heavy AI assistance and welcomes contributions made

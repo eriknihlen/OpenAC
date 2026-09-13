@@ -173,12 +173,32 @@ internal sealed class RetainedMouseInputBinding : IRetainedUiInputBinding
         EnsureDetachTransaction().CompleteOrThrow();
     }
 
-    private void OnDown(MouseButton button, int x, int y) =>
+    private bool ExternallyCaptured => _root.ExternalMouseCapture?.Invoke() == true;
+
+    private void OnDown(MouseButton button, int x, int y)
+    {
+        if (ExternallyCaptured)
+            return;
         Invoke(() => _root.OnMouseDown(MapButton(button), x, y));
+    }
+
+    // A release always lands so a drag the tree started cannot be stranded.
     private void OnUp(MouseButton button, int x, int y) =>
         Invoke(() => _root.OnMouseUp(MapButton(button), x, y));
-    private void OnMove(int x, int y) => Invoke(() => _root.OnMouseMove(x, y));
-    private void OnScroll(int amount) => Invoke(() => _root.OnScroll(amount));
+
+    private void OnMove(int x, int y)
+    {
+        if (ExternallyCaptured && _root.Captured is null)
+            return;
+        Invoke(() => _root.OnMouseMove(x, y));
+    }
+
+    private void OnScroll(int amount)
+    {
+        if (ExternallyCaptured)
+            return;
+        Invoke(() => _root.OnScroll(amount));
+    }
 
     private void Invoke(Action callback) =>
         _quiescence.Invoke(() =>
@@ -331,9 +351,19 @@ internal sealed class RetainedKeyboardInputBinding : IRetainedUiInputBinding
         _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _root = root ?? throw new ArgumentNullException(nameof(root));
         _quiescence = quiescence ?? throw new ArgumentNullException(nameof(quiescence));
-        _down = key => Invoke(() => _root.OnKeyDown((int)key));
+        _down = key =>
+        {
+            if (_root.ExternalKeyboardCapture?.Invoke() == true)
+                return;
+            Invoke(() => _root.OnKeyDown((int)key));
+        };
         _up = key => Invoke(() => _root.OnKeyUp((int)key));
-        _char = value => Invoke(() => _root.OnChar(value));
+        _char = value =>
+        {
+            if (_root.ExternalKeyboardCapture?.Invoke() == true)
+                return;
+            Invoke(() => _root.OnChar(value));
+        };
     }
 
     public bool IsDisposalComplete => _attached.All(static value => !value);

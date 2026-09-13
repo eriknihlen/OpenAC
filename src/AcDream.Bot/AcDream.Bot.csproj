@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The built-in bot. It depends on the plugin contract only, so every
+       decision it makes is testable against a fake automation surface and it
+       never reaches into the renderer, the wire protocol or client internals. -->
+  <PropertyGroup>
+    <RootNamespace>AcDream.Bot</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+    <!-- Tool windows are Dear ImGui, drawn through the host's overlay. -->
+    <PackageReference Include="ImGui.NET" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.Bot.Tests" />
+  </ItemGroup>
+</Project>

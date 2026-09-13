@@ -106,6 +106,16 @@ public sealed class UiRoot : UiElement
 
     public UiElement? Captured { get; private set; }
 
+    /// <summary>
+    /// A claim on input from outside the retained tree - the immediate-mode
+    /// overlay drawn above it. While it holds the pointer, presses, releases
+    /// and wheel turns are not delivered here; while it holds the keyboard,
+    /// keys and characters are not.
+    /// </summary>
+    public Func<bool>? ExternalMouseCapture { get; set; }
+
+    public Func<bool>? ExternalKeyboardCapture { get; set; }
+
     public bool WantsMouse =>
         Captured is not null
         || PopupHit(MouseX, MouseY) is not null

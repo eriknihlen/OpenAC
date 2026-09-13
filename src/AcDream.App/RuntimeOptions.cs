@@ -20,6 +20,8 @@ public sealed record RuntimeOptions(
     string? LiveUser,
     string? LivePass,
     bool DevTools,
+    /// <summary>The Dear ImGui overlay plugins draw tool windows with. Off with <c>ACDREAM_IMGUI=0</c>.</summary>
+    bool ImmediateUi,
     bool UncappedRendering,
     bool DumpMoveTruth,
     bool DumpSky,
@@ -88,6 +90,7 @@ public sealed record RuntimeOptions(
             LiveUser:            NullIfEmpty(env("ACDREAM_TEST_USER")),
             LivePass:            NullIfEmpty(env("ACDREAM_TEST_PASS")),
             DevTools:            IsExactlyOne(env("ACDREAM_DEVTOOLS")),
+            ImmediateUi:         env("ACDREAM_IMGUI")?.Trim() != "0",
             // Normal presentation is always bounded by VSync or a
             // refresh-rate software pacer. This explicit diagnostic is the
             // sole way to measure truly uncapped renderer throughput.

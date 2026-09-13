@@ -21,6 +21,9 @@ public interface IPluginHost
 
     IAutomationSurface Automation { get; }
 
+    /// <summary>Per-frame immediate-mode drawing; inert on hosts without a renderer.</summary>
+    IImmediateUiHost ImmediateUi => NoOpImmediateUiHost.Instance;
+
     IPluginStorage VtankProfiles => NoOpPluginStorage.Instance;
 
     IReadOnlyDictionary<string, string> SessionSettings =>

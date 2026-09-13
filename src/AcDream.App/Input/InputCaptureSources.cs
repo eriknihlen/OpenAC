@@ -9,16 +9,48 @@ internal interface IInputCaptureSource
     bool DevToolsWantCaptureKeyboard { get; }
 }
 
-internal sealed class DevToolsInputCaptureSource
+/// <summary>Something outside the retained UI that can claim the pointer or keyboard - the ImGui overlay.</summary>
+internal interface IExternalInputCapture
 {
-    public DevToolsInputCaptureSource(bool enabled)
+    bool WantCaptureMouse { get; }
+
+    bool WantCaptureKeyboard { get; }
+}
+
+/// <summary>
+/// The overlay's capture claim, bound once the overlay exists. Created with the
+/// window so gameplay input can hold a reference before the renderer is up.
+/// </summary>
+internal sealed class DevToolsInputCaptureSource : IExternalInputCapture
+{
+    private IExternalInputCapture? _source;
+
+    public IDisposable Bind(IExternalInputCapture source)
     {
-        _ = enabled;
+        ArgumentNullException.ThrowIfNull(source);
+        if (_source is not null)
+            throw new InvalidOperationException("Dev-tools input capture is already bound.");
+        _source = source;
+        return new Binding(this, source);
     }
 
-    public bool WantCaptureMouse => false;
+    public bool WantCaptureMouse => _source?.WantCaptureMouse ?? false;
 
-    public bool WantCaptureKeyboard => false;
+    public bool WantCaptureKeyboard => _source?.WantCaptureKeyboard ?? false;
+
+    private void Unbind(IExternalInputCapture expected)
+    {
+        if (ReferenceEquals(_source, expected))
+            _source = null;
+    }
+
+    private sealed class Binding(DevToolsInputCaptureSource owner, IExternalInputCapture expected) : IDisposable
+    {
+        private DevToolsInputCaptureSource? _owner = owner;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref _owner, null)?.Unbind(expected);
+    }
 }
 
 internal sealed class RetainedUiInputCaptureSlot

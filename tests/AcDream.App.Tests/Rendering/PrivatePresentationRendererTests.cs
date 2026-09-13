@@ -238,7 +238,7 @@ public sealed class PrivatePresentationRendererTests
     {
         public RenderFrameInput Input { get; private set; }
 
-        public void BeginFrame(float deltaSeconds) => calls.Add("devtools-begin");
+        public void BeginFrame(float deltaSeconds, int viewportWidth, int viewportHeight) => calls.Add("devtools-begin");
 
         public void AbortFrame() => calls.Add("devtools-abort");
 

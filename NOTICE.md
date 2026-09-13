@@ -44,6 +44,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Dear ImGui
+
+The in-game tool overlay (`src/AcDream.App/Rendering/Immediate/`) is driven by
+[Dear ImGui](https://github.com/ocornut/imgui) through the
+[ImGui.NET](https://github.com/ImGuiNET/ImGui.NET) bindings and the
+[cimgui](https://github.com/cimgui/cimgui) C wrapper they ship, all MIT. The
+overlay renders ImGui's draw lists with OpenAC's own Vulkan backend; no ImGui
+backend code is included.
+
 ## NuGet dependencies
 
 OpenAC's published payloads redistribute the following packages under their
@@ -52,6 +61,7 @@ own licenses. Each license text ships inside the package.
 | Package | License |
 |---|---|
 | Silk.NET (Vulkan, Windowing, Input, OpenAL) | MIT |
+| ImGui.NET (bundles Dear ImGui and cimgui natives) | MIT |
 | Avalonia, Avalonia.Desktop, Avalonia.Themes.Fluent | MIT |
 | Chorizite.Core, Chorizite.DatReaderWriter | MIT |
 | Arch | Apache-2.0 |

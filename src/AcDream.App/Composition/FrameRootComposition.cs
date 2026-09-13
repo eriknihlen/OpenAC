@@ -1,5 +1,6 @@
 using AcDream.App.Diagnostics;
 using AcDream.App.Input;
+using AcDream.App.UI;
 using AcDream.App.Rendering;
 using AcDream.App.Rendering.Scene;
 using AcDream.App.Rendering.Vfx;
@@ -49,6 +50,9 @@ internal sealed record FrameRootDependencies(
     IRenderFrameDiagnosticLog RenderDiagnosticLog,
     DebugVmRenderFactsPublisher DebugVmRenderFacts,
     IInputCaptureSource InputCapture,
+    DevToolsInputCaptureSource DevToolsCapture,
+    AcDream.App.Rendering.Immediate.ImGuiDrawerRegistry ImmediateUi,
+    string? ImmediateUiLayoutFile,
     DispatcherCameraInputSource CameraInput,
     LiveEntityAnimationRuntimeView<LiveEntityAnimationState> Animations,
     UpdateFrameClock UpdateClock,
@@ -727,6 +731,51 @@ internal sealed class FrameRootCompositionPhase
             d.Options.RetailUi && interaction.RetainedUi is { } retained
                 ? new RetainedGameplayUiFrame(retained.Runtime, d.Input)
                 : null;
+
+        // The immediate-mode overlay draws last, over the retail UI, and while
+        // it holds the pointer or keyboard the retained tree yields them.
+        AcDream.App.Rendering.Immediate.ImGuiOverlay? immediateUi = null;
+        if (d.Options.ImmediateUi)
+        {
+            try
+            {
+                immediateUi = new AcDream.App.Rendering.Immediate.ImGuiOverlay(
+                    host.GpuDevice,
+                    host.GpuFrameLifetime,
+                    d.Input,
+                    d.ImmediateUi,
+                    d.ImmediateUiLayoutFile,
+                    d.Log);
+            }
+            catch (Exception error) when (error is DllNotFoundException or TypeInitializationException)
+            {
+                d.Log($"immediate ui: overlay unavailable ({error.GetType().Name}: {error.Message})");
+                d.ImmediateUi.MarkUnavailable();
+            }
+            if (immediateUi is not null)
+                d.Log($"immediate ui: overlay ready ({d.ImmediateUi.Count} drawer(s) registered)");
+        }
+        if (immediateUi is not null)
+        {
+            AcDream.App.Rendering.Immediate.ImGuiOverlay overlay = immediateUi;
+            IDisposable captureBinding = d.DevToolsCapture.Bind(overlay);
+            UiRoot? retainedRoot = interaction.RetainedUi?.Runtime.Host.Root;
+            if (retainedRoot is not null)
+            {
+                retainedRoot.ExternalMouseCapture = () => overlay.WantCaptureMouse;
+                retainedRoot.ExternalKeyboardCapture = () => overlay.WantCaptureKeyboard;
+            }
+            bindings.Adopt("immediate ui overlay", new DisposableAction(() =>
+            {
+                if (retainedRoot is not null)
+                {
+                    retainedRoot.ExternalMouseCapture = null;
+                    retainedRoot.ExternalKeyboardCapture = null;
+                }
+                captureBinding.Dispose();
+                overlay.Dispose();
+            }));
+        }
         IPrivateFrameScreenshot? privateScreenshot =
             interaction.RetainedUi?.Screenshots is { } frameScreenshots
                 ? new PrivateFrameScreenshot(frameScreenshots)
@@ -742,10 +791,10 @@ internal sealed class FrameRootCompositionPhase
                 live.ChargenPreviewController,
                 live.SummaryPreviewController),
             retainedGameplayUi,
-            devTools: null);
+            devTools: immediateUi);
         var framePreparation = new RenderFramePreparationController(
             renderFrameResources,
-            devTools: null,
+            devTools: immediateUi,
             renderWeatherFrame,
             live.PaperdollPresenter);
         IRenderFramePostDiagnosticsPhase postDiagnostics =
@@ -857,4 +906,11 @@ internal sealed class FrameRootCompositionPhase
 
     private void Fault(FrameRootCompositionPoint point) =>
         _faultInjection?.Invoke(point);
+}
+
+internal sealed class DisposableAction(Action dispose) : IDisposable
+{
+    private Action? _dispose = dispose;
+
+    public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
 }

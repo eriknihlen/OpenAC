@@ -44,6 +44,12 @@
           "SixLabors.ImageSharp.Drawing": "2.1.7"
         }
       },
+      "ImGui.NET": {
+        "type": "Direct",
+        "requested": "[1.91.6.1, )",
+        "resolved": "1.91.6.1",
+        "contentHash": "Ph3j8pO6UM28PPJWP+5LEJSPVPkd8ivpVS8tRyY9b0IHn1HDIrMZ2o/FdiXaYW6YhNxMHmbevw6Jcfs+IDKi0Q=="
+      },
       "Serilog": {
         "type": "Direct",
         "requested": "[4.0.2, )",
@@ -444,6 +450,13 @@
         "type": "Transitive",
         "resolved": "0.1.1",
         "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
+      },
+      "acdream.bot": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Plugin.Abstractions": "[0.1.0, )",
+          "ImGui.NET": "[1.91.6.1, )"
+        }
       },
       "acdream.content": {
         "type": "Project",

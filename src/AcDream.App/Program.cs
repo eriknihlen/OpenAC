@@ -173,14 +173,22 @@ var host = new AppPluginHost(
     lootClassifiers,
     new FilePluginStorage(
         runtimeOptions.VtankProfileDirectoryOverride
-            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)));
+            ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
+    window.ImmediateUi);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,
     runtimeOptions.SessionId ?? "app",
     host,
     window.StatusWriter,
-    renderPackRegistry);
+    renderPackRegistry,
+    [
+        new AcDream.Core.Plugins.BuiltInPlugin(
+            AcDream.Bot.BotPlugin.Id,
+            AcDream.Bot.BotPlugin.DisplayName,
+            AcDream.Bot.BotPlugin.Version,
+            new AcDream.Bot.BotPlugin()),
+    ]);
 window.StartPluginHosting(pluginSession);
 
 try

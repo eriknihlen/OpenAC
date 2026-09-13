@@ -12,6 +12,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedPluginStorage _storage;
     private readonly ScopedPluginCommandRegistry _commands;
     private readonly ScopedLootClassifierRegistry _lootClassifiers;
+    private readonly ScopedImmediateUiHost _immediateUi;
     private bool _disposed;
 
     internal ScopedPluginHost(
@@ -34,6 +35,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.LootClassifiers,
             pluginId,
             pluginDisplayName);
+        _immediateUi = new ScopedImmediateUiHost(inner.ImmediateUi, pluginId);
     }
 
     public bool HasUi => _inner.HasUi;
@@ -46,6 +48,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
     public IPluginCommandRegistry Commands => _commands;
     public IPluginLootClassifierRegistry LootClassifiers => _lootClassifiers;
+    public IImmediateUiHost ImmediateUi => _immediateUi;
     public IReadOnlyDictionary<string, string> SessionSettings =>
         _inner is IPerPluginSessionSettings perPlugin
             ? perPlugin.SessionSettingsFor(_pluginId)
@@ -105,6 +108,52 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _ui.Dispose();
         _commands.Dispose();
         _lootClassifiers.Dispose();
+        _immediateUi.Dispose();
+    }
+
+    /// <summary>Immediate-UI draw callbacks, released with the plugin so no delegate outlives it.</summary>
+    private sealed class ScopedImmediateUiHost(IImmediateUiHost inner, string pluginId)
+        : IImmediateUiHost,
+          IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly List<IDisposable> _registrations = [];
+        private bool _disposed;
+
+        public bool IsAvailable => !_disposed && inner.IsAvailable;
+
+        public IDisposable Register(string name, Action draw)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNull(draw);
+            IDisposable registration = inner.Register($"{pluginId}/{name.Trim()}", draw);
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _registrations.Add(registration);
+                    return registration;
+                }
+            }
+            registration.Dispose();
+            throw new ObjectDisposedException(nameof(ScopedImmediateUiHost));
+        }
+
+        public void Dispose()
+        {
+            IDisposable[] registrations;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                registrations = _registrations.ToArray();
+                _registrations.Clear();
+            }
+            for (int index = registrations.Length - 1; index >= 0; index--)
+                registrations[index].Dispose();
+        }
     }
 
     private sealed class ScopedLootClassifierRegistry(

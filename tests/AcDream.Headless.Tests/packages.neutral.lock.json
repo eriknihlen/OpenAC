@@ -291,13 +291,21 @@
       "acdream-headless": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Runtime": "[0.1.7, )"
+          "AcDream.Bot": "[0.1.0, )",
+          "AcDream.Runtime": "[0.1.0, )"
+        }
+      },
+      "acdream.bot": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Plugin.Abstractions": "[0.1.0, )",
+          "ImGui.NET": "[1.91.6.1, )"
         }
       },
       "acdream.content": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.7, )",
+          "AcDream.Core": "[0.1.0, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "SixLabors.ImageSharp": "[3.1.12, )"
         }
@@ -305,7 +313,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.7, )",
+          "AcDream.Plugin.Abstractions": "[0.1.0, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.Core": "[0.0.18, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
@@ -316,13 +324,13 @@
       "acdream.core.net": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.7, )"
+          "AcDream.Core": "[0.1.0, )"
         }
       },
       "acdream.launcher.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Platform": "[0.1.7, )"
+          "AcDream.Platform": "[0.1.0, )"
         }
       },
       "acdream.platform": {
@@ -334,11 +342,11 @@
       "acdream.runtime": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.7, )",
-          "AcDream.Core": "[0.1.7, )",
-          "AcDream.Core.Net": "[0.1.7, )",
-          "AcDream.Platform": "[0.1.7, )",
-          "AcDream.Plugin.Abstractions": "[0.1.7, )"
+          "AcDream.Content": "[0.1.0, )",
+          "AcDream.Core": "[0.1.0, )",
+          "AcDream.Core.Net": "[0.1.0, )",
+          "AcDream.Platform": "[0.1.0, )",
+          "AcDream.Plugin.Abstractions": "[0.1.0, )"
         }
       },
       "BCnEncoder.Net": {
@@ -388,6 +396,12 @@
           "DotNet.Standard.Common": "2.0.1",
           "ZLibDotNet": "0.1.1"
         }
+      },
+      "ImGui.NET": {
+        "type": "CentralTransitive",
+        "requested": "[1.91.6.1, )",
+        "resolved": "1.91.6.1",
+        "contentHash": "Ph3j8pO6UM28PPJWP+5LEJSPVPkd8ivpVS8tRyY9b0IHn1HDIrMZ2o/FdiXaYW6YhNxMHmbevw6Jcfs+IDKi0Q=="
       },
       "Microsoft.Extensions.Logging.Abstractions": {
         "type": "CentralTransitive",

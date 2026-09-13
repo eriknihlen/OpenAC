@@ -14,6 +14,7 @@
     <PackageVersion Include="Chorizite.Core" Version="0.0.18" />
     <PackageVersion Include="Chorizite.DatReaderWriter" Version="2.1.7" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

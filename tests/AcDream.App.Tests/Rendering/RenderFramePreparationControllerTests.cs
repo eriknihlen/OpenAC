@@ -67,7 +67,7 @@ public sealed class RenderFramePreparationControllerTests
     {
         public float DeltaSeconds { get; private set; }
 
-        public void BeginFrame(float deltaSeconds)
+        public void BeginFrame(float deltaSeconds, int viewportWidth, int viewportHeight)
         {
             DeltaSeconds = deltaSeconds;
             calls.Add("devtools-begin");

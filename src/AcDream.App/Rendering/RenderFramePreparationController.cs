@@ -7,7 +7,7 @@ internal interface IRenderWeatherFramePhase
 
 internal interface IDevToolsFrameLifecycle : IRenderFrameFailureRecovery
 {
-    void BeginFrame(float deltaSeconds);
+    void BeginFrame(float deltaSeconds, int viewportWidth, int viewportHeight);
 
     void Render(double deltaSeconds, int viewportWidth, int viewportHeight);
 }
@@ -35,7 +35,10 @@ internal sealed class RenderFramePreparationController : IRenderFrameResourcePha
     {
         _resources.Prepare(input);
         _privateViewports?.PrepareResources();
-        _devTools?.BeginFrame((float)input.DeltaSeconds);
+        _devTools?.BeginFrame(
+            (float)input.DeltaSeconds,
+            input.ViewportWidth,
+            input.ViewportHeight);
         _weather.Tick(input.DeltaSeconds);
     }
 }

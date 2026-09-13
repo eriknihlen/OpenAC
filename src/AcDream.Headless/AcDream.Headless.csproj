@@ -15,5 +15,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
+    <ProjectReference Include="..\AcDream.Bot\AcDream.Bot.csproj" />
   </ItemGroup>
 </Project>

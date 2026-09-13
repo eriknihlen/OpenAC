@@ -1,3 +1,5 @@
+using AcDream.Bot;
+using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
@@ -285,7 +287,14 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginCommands,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                [
+                    new BuiltInPlugin(
+                        BotPlugin.Id,
+                        BotPlugin.DisplayName,
+                        BotPlugin.Version,
+                        new BotPlugin()),
+                ]);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(

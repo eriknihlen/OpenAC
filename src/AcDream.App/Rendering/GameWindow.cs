@@ -390,6 +390,11 @@ public sealed class GameWindow :
     private AcDream.UI.Abstractions.Input.InputDispatcher? _inputDispatcher;
     private readonly AcDream.App.Input.RetainedUiInputCaptureSlot _retainedInputCapture;
     private readonly AcDream.App.Input.CompositeInputCaptureSource _inputCapture;
+    private readonly AcDream.App.Input.DevToolsInputCaptureSource _devToolsCapture;
+    private readonly AcDream.App.Rendering.Immediate.ImGuiDrawerRegistry _immediateUi;
+
+    /// <summary>Per-frame immediate-mode draw callbacks; handed to the plugin host.</summary>
+    internal AcDream.Plugin.Abstractions.IImmediateUiHost ImmediateUi => _immediateUi;
     private readonly AcDream.App.Input.DispatcherMovementInputSource _movementInput;
     private readonly AcDream.App.Input.DispatcherCameraInputSource _cameraInput = new();
     private AcDream.App.Input.IMouseLookCursor? _mouseLookCursor;
@@ -500,8 +505,10 @@ public sealed class GameWindow :
             _runtime.CharacterOwner.Options.GetOptionBit(
                 AcDream.Core.Net.Messages.CharacterOptionId.DisplayTimeStamps);
         _retainedInputCapture = new AcDream.App.Input.RetainedUiInputCaptureSlot();
+        _devToolsCapture = new AcDream.App.Input.DevToolsInputCaptureSource();
+        _immediateUi = new AcDream.App.Rendering.Immediate.ImGuiDrawerRegistry(options.ImmediateUi);
         _inputCapture = new AcDream.App.Input.CompositeInputCaptureSource(
-            new AcDream.App.Input.DevToolsInputCaptureSource(options.DevTools),
+            _devToolsCapture,
             _retainedInputCapture);
         _movementInput = new AcDream.App.Input.DispatcherMovementInputSource(
             _playerControllerSlot,
@@ -1486,6 +1493,9 @@ public sealed class GameWindow :
                         _renderDiagnosticLog,
                         _debugVmRenderFacts,
                         _inputCapture,
+                        _devToolsCapture,
+                        _immediateUi,
+                        Path.Combine(_applicationPaths.ConfigDirectory, "imgui.ini"),
                         _cameraInput,
                         _animatedEntities,
                         _updateFrameClock,

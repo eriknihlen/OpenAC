@@ -107,7 +107,7 @@ public sealed class RenderFrameRecoveryIntegrationTests
         public int AbortCount { get; private set; }
         public int AbortSequence { get; private set; }
 
-        public void BeginFrame(float deltaSeconds)
+        public void BeginFrame(float deltaSeconds, int viewportWidth, int viewportHeight)
         {
             Assert.False(IsOpen);
             IsOpen = true;
