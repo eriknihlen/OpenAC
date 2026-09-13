@@ -30,6 +30,7 @@ public sealed class CombatBehavior(
     private const double ModeChangeTimeoutSeconds = 4d;
     private readonly Walker _walker = new();
     private readonly WeaponReadiness _weapons = new();
+    private readonly AmmoCrafter _fletcher = new();
 
     private Phase _phase;
     private uint _targetId;
@@ -225,6 +226,8 @@ public sealed class CombatBehavior(
                 return BehaviorStep.Continue;
             case WeaponReadiness.Verdict.Missing:
                 return BehaviorStep.Fail(weaponDetail);
+            case WeaponReadiness.Verdict.NoAmmunition:
+                return Fletch(context, weaponDetail);
         }
 
         PluginCombatMode desired = DesiredMode(combat.Style);
@@ -253,8 +256,36 @@ public sealed class CombatBehavior(
         return BehaviorStep.Continue;
     }
 
+    /// <summary>
+    /// Makes ammunition from bundles in the pack when the quiver is empty;
+    /// in peace mode, one combine at a time, then the swap gate wields it.
+    /// </summary>
+    private BehaviorStep Fletch(BehaviorContext context, string weaponDetail)
+    {
+        Blackboard board = context.Board;
+        if (board.Combat.Mode != PluginCombatMode.Peace)
+        {
+            context.Surface.Combat.EnterMode(PluginCombatMode.Peace);
+            return BehaviorStep.Continue;
+        }
+        AmmoCrafter.WeaponCategory category = AmmoCrafter.CategoryOf(_weapons.MissileWeaponName);
+        switch (_fletcher.Tick(context.Surface, category, board.Now, out string detail))
+        {
+            case AmmoCrafter.Verdict.Crafting:
+                return BehaviorStep.Continue;
+            case AmmoCrafter.Verdict.Crafted:
+                context.Log.Info(detail);
+                return BehaviorStep.Continue;
+            case AmmoCrafter.Verdict.Failed:
+                return BehaviorStep.Fail(detail);
+            default:
+                return BehaviorStep.Fail(weaponDetail);
+        }
+    }
+
     public void Interrupt(BehaviorContext context)
     {
+        _fletcher.Reset();
         if (_phase is Phase.Building or Phase.AwaitingSwing)
             context.Surface.Combat.AbortPhysicalAttack();
         _walker.Reset(context.Surface.Navigation);

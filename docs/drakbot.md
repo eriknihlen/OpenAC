@@ -128,9 +128,15 @@ monster rule may name another; before an attack the bot wields the named
 one through `IEquipmentAutomation`, dropping to peace mode while the swap
 lands, and with the missile style keeps a stack of the wielded bow's
 ammunition wielded (the largest matching stack, by the bow's ammo type).
-A named weapon that is not in the inventory, or a bow with nothing left
-to fire, fails the step rather than swinging bare-handed. Empty names
-leave the hands alone.
+A named weapon that is not in the inventory fails the step rather than
+swinging bare-handed. Empty names leave the hands alone.
+
+A bow with nothing left to fire is fed from wrapped bundles: the best
+recipe the character can fletch (Fletching trained; Deadly and Lethal
+Prismatic need it specialized) is combined twice in peace mode, a head
+bundle applied to a shaft bundle, each combine confirmed by the item use
+completion or the ammunition turning up, and the result is wielded. No
+bundles, or a combine that never lands, fails the step as before.
 
 ## Line of sight, obstacle sense and approach
 

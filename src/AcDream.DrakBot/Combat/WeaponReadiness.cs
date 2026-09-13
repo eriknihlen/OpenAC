@@ -29,9 +29,14 @@ public sealed class WeaponReadiness
         Ready,
         /// <summary>An equip went out; ask again next tick.</summary>
         Swapping,
-        /// <summary>The wanted weapon or ammunition is not in the inventory.</summary>
+        /// <summary>The wanted weapon is not in the inventory.</summary>
         Missing,
+        /// <summary>The missile weapon in hand has nothing left to fire; the caller may fletch some.</summary>
+        NoAmmunition,
     }
+
+    /// <summary>The missile weapon in hand at the last check, for the fletcher.</summary>
+    public string MissileWeaponName { get; private set; } = string.Empty;
 
     /// <summary>The name a style wants, from the rule first and the profile second; empty leaves the hands alone.</summary>
     public static string WantedWeapon(CombatSettings combat, MonsterRule? rule) =>
@@ -71,6 +76,7 @@ public sealed class WeaponReadiness
         if (weapon is null)
             return Verdict.Ready;
         uint ammoType = weapon.Value.AmmoType;
+        MissileWeaponName = weapon.Value.Name;
         if (ammoType == 0u)
             return Verdict.Ready;
         if (FirstEquipped(owned, item => item.CombatUse == CombatUseAmmo && (item.AmmoType & ammoType) != 0u) is not null)
@@ -87,7 +93,7 @@ public sealed class WeaponReadiness
         if (best is null)
         {
             detail = $"no ammunition for {weapon.Value.Name}";
-            return Verdict.Missing;
+            return Verdict.NoAmmunition;
         }
         return Equip(equipment, best.Value, now, out detail);
     }

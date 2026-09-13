@@ -253,6 +253,8 @@ internal sealed class FakeAutomationSurface
     public List<PluginInventoryItem> OwnedItems { get; } = [];
     bool IItemAutomation.IsAvailable => IsAvailable;
     bool IItemAutomation.IsBusy => false;
+    public PluginItemUseCompletion LastItemUseCompletion { get; set; }
+    PluginItemUseCompletion IItemAutomation.LastCompletion => LastItemUseCompletion;
     public IReadOnlyList<PluginInventoryItem> CaptureOwnedItems() => OwnedItems.ToArray();
     public PluginItemCommandResult Apply(uint objectId, uint targetObjectId)
     {
