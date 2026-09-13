@@ -479,7 +479,11 @@ In rough priority order:
 
 - **DoTs and life magic in combat** - the monster list covers war
   shapes, rings and the creature debuffs; drains and DoTs are not cast.
-- **Meta state machine.** RynthScript is the intended language; the engine
-  needs an "expression surface" that exposes the blackboard to it.
+- **Learned resistances.** RynthAi remembers each creature's appraised
+  resistances and picks the weakest element under `Auto`; the client
+  keeps the appraisal armor profile in the UI only, so the surface has
+  nothing to learn from yet.
 - **Loot rule editing in the settings window.** Rules can be removed there
   but are authored in the profile JSON.
+- **Nav markers and terrain overlays** need world rendering from the
+  host; the bot has no drawing surface.
