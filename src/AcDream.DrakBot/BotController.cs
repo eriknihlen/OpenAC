@@ -131,6 +131,54 @@ public sealed class BotController : IMetaBot
     public void AddPause(double seconds) =>
         DraftRoute = DraftRoute.Append(new Waypoint(WaypointKind.Pause, 0d, 0d) { Seconds = seconds });
 
+    /// <summary>Puts a step into the draft at <paramref name="index"/>; past the end appends.</summary>
+    public void InsertWaypoint(int index, Waypoint waypoint)
+    {
+        ArgumentNullException.ThrowIfNull(waypoint);
+        List<Waypoint> waypoints = [.. DraftRoute.Waypoints];
+        waypoints.Insert(Math.Clamp(index, 0, waypoints.Count), waypoint);
+        DraftRoute = DraftRoute with { Waypoints = waypoints };
+        SyncWalkedRoute();
+    }
+
+    /// <summary>A walk on the draft picks up the draft's edits without starting over.</summary>
+    private void SyncWalkedRoute()
+    {
+        if (Navigation.Route is { } walked && walked.Name == DraftRoute.Name)
+            Navigation.ReplaceRoute(DraftRoute);
+    }
+
+    /// <summary>The step the character would record where it stands, without adding it.</summary>
+    public bool TryMakeWaypoint(WaypointKind kind, out Waypoint waypoint)
+    {
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        waypoint = null!;
+        if (!snapshot.IsAvailable)
+            return false;
+        waypoint = kind == WaypointKind.Point
+            ? Waypoint.At(snapshot.Position)
+            : new Waypoint(kind, snapshot.Position.EastWest, snapshot.Position.NorthSouth) { Elevation = snapshot.Position.Elevation };
+        return true;
+    }
+
+    /// <summary>Sets the draft's own mode; null follows the profile's.</summary>
+    public void SetDraftMode(RouteMode? mode)
+    {
+        DraftRoute = DraftRoute with { Mode = mode };
+        SyncWalkedRoute();
+    }
+
+    /// <summary>A saved route or a VTank <c>.nav</c> by name into the draft, followed at once.</summary>
+    public bool LoadRouteByName(string name)
+    {
+        Route? route = ((IMetaBot)this).LoadRouteByName(name);
+        if (route is null)
+            return false;
+        DraftRoute = route;
+        Navigation.SetRoute(route);
+        return true;
+    }
+
     public void RemoveWaypoint(int index)
     {
         if (index < 0 || index >= DraftRoute.Waypoints.Count)
@@ -138,6 +186,7 @@ public sealed class BotController : IMetaBot
         List<Waypoint> waypoints = [.. DraftRoute.Waypoints];
         waypoints.RemoveAt(index);
         DraftRoute = DraftRoute with { Waypoints = waypoints };
+        SyncWalkedRoute();
     }
 
     public void ClearRoute()
@@ -367,6 +416,60 @@ public sealed class BotController : IMetaBot
     }
 
     bool IMetaBot.NeedsAnyBuff(Blackboard board) => Buffs.NeedsAnyBuff(board);
+
+    /// <summary>The <c>.af</c> and <c>.met</c> files in the VTank profiles folder, by file name.</summary>
+    public IReadOnlyList<string> MetaFileNames()
+    {
+        var names = new List<string>();
+        foreach (string key in _vtankProfiles.List(string.Empty))
+        {
+            if (key.EndsWith(".af", StringComparison.OrdinalIgnoreCase) || key.EndsWith(".met", StringComparison.OrdinalIgnoreCase))
+                names.Add(key.Replace('\\', '/').Split('/')[^1]);
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    /// <summary>The <c>.nav</c> files in the VTank profiles folder, by file name.</summary>
+    public IReadOnlyList<string> NavFileNames()
+    {
+        var names = new List<string>();
+        foreach (string key in _vtankProfiles.List(string.Empty))
+        {
+            if (key.EndsWith(".nav", StringComparison.OrdinalIgnoreCase))
+                names.Add(key.Replace('\\', '/').Split('/')[^1]);
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    /// <summary>Writes the loaded meta as <c>&lt;name&gt;.af</c> in the VTank profiles folder.</summary>
+    public bool SaveMeta(string name, out string message)
+    {
+        if (Meta is null)
+        {
+            message = "no meta engine";
+            return false;
+        }
+        string safe = BotStore.SanitizeName(name.EndsWith(".af", StringComparison.OrdinalIgnoreCase) ? name[..^3] : name);
+        if (safe.Length == 0)
+        {
+            message = "enter a file name";
+            return false;
+        }
+        try
+        {
+            _vtankProfiles.WriteText(safe + ".af", AfFileWriter.SaveToString(Meta.EditableRules, Meta.EmbeddedNavs));
+            Update(p => p with { Meta = p.Meta with { Name = safe } });
+            message = $"saved {safe}.af";
+            return true;
+        }
+        catch (Exception error) when (error is IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            message = $"save failed: {error.Message}";
+            return false;
+        }
+    }
 
     LoadedMeta? IMetaBot.LoadMetaByName(string name, out string path)
     {

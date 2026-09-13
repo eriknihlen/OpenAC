@@ -366,21 +366,44 @@ and ExpressionEngine, so a meta written for RynthAi or VTank runs here.
 The bot's windows are Dear ImGui (`AcDream.DrakBot.Ui`), drawn by the
 client's immediate-mode overlay (`ACDREAM_IMGUI=0` turns the overlay off; the
 bot then falls back to a small retail-look status panel). Nothing is drawn
-until the character is in the world; the dashboard then opens, and `Settings`
-and `Nav builder` open from it.
+until the character is in the world; the dashboard then opens and the
+other windows open from its launcher grid, laid out the way RynthAi's
+dashboard is.
 
 - **Dashboard** - start/stop, activity and reason, profile and route pickers,
-  the four subsystem toggles, force rebuff, player and target vitals, and the
+  the subsystem toggles (Combat, Buffs, Loot, Nav, Macro; right-click one
+  for its settings or window), force rebuff, player and target vitals, the
   current target's line-of-sight state (clear, blocked by what, strikes,
-  blacklisted) and, while walking, which heading is open.
-- **Settings** - one tab per subsystem (Recharge, Combat, Monsters, Buffs,
-  Loot, Navigation, Meta). Every widget edits the live profile; `Save` persists it under
-  the name in the box. The Combat tab carries reach (melee reach, approach
-  range, walk timeout) and the line-of-sight options (on/off, war spell
-  path, launch speeds, blacklist strikes and duration, walk checks and
-  steering look-ahead, path drawing).
-- **Nav builder** - record the current position as a waypoint, add pauses,
-  remove steps, follow the draft, save it by name.
+  blacklisted) and, while walking, which heading is open; the launcher
+  grid below opens the rest.
+- **Macro Rules** - RynthAi's meta editor: the loaded rules grouped by
+  state, the row that just fired flashing red, up/down/delete per row, a
+  two-pane editor (nested All/Any/Not conditions on the left, the action
+  or an All body on the right, with pickers for states, routes, watchdogs
+  and options), a pop-out editor for long expressions (right-click a
+  field), a Source view that round-trips the `.af` text, load/save over
+  the VTank profiles folder, and the current-state picker. Edits to a
+  meta loaded from an `.af` are written back to it.
+- **Monsters** - the monster list as a grid: toggle lights for the debuffs
+  (Fester, Broadside, Gravity Well, Imperil, Yield, Vulnerability) and the
+  war spell shape (Arc, Bolt, Ring, Streak), then name, priority, element,
+  second vulnerability, weapon and delete; add by name, from the current
+  target, or the Default rule.
+- **Settings** - a list of sections down the left (Recharge, Combat, Ranges,
+  Buffing, Looting, Navigation, Pets & Doors, Priorities), the section's
+  controls on the right. Every widget edits the live profile; `Save`
+  persists it under the name in the box. Combat carries the line-of-sight
+  options; Ranges the engage, ring and reach distances.
+- **Navigation** - the active route and what the walk is doing, Start/Stop,
+  route type and where new steps go (end, above or below the selected
+  step), buttons that record a waypoint, portal, NPC or vendor (with the
+  nearby ones listed), recall, pause or chat step, the step list with the
+  current step marked, and a load/save bar over saved routes and `.nav`
+  files. Edits to the route being walked take effect at once, resuming at
+  the nearest step.
+- **Items** - the weapon each style wields (typed, or taken from the item
+  selected in the inventory), the ammunition switch, mana stone tapping,
+  and what is wielded now with its mana.
 
 Plugins get the same facility through `IPluginHost.ImmediateUi`: register a
 draw callback and call `ImGui.*` inside it (ImGui.NET is shared from the

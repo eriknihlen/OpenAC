@@ -10,12 +10,20 @@ using ImGuiNET;
 namespace AcDream.DrakBot.Ui;
 
 /// <summary>
-/// Profile editing, one tab per subsystem. Every widget reads the live
-/// profile and writes back through the controller, so a change takes effect
-/// on the next tick; "Save" persists it under the profile's name.
+/// Profile editing laid out the way RynthAi's advanced settings are: a
+/// list of sections down the left, the chosen section's controls on the
+/// right. Every widget reads the live profile and writes back through the
+/// controller, so a change takes effect on the next tick; "Save" persists
+/// it under the profile's name. Monsters, the meta rules, routes and items
+/// have windows of their own.
 /// </summary>
 public sealed class BotSettingsWindow(BotController controller)
 {
+    private static readonly string[] Sections =
+    [
+        "Recharge", "Combat", "Ranges", "Buffing", "Looting", "Navigation", "Pets & Doors", "Priorities",
+    ];
+    private int _section;
     private static readonly string[] StyleNames = ["Melee", "Missile", "Magic"];
     private static readonly string[] HeightNames = ["High", "Medium", "Low"];
     private static readonly string[] RouteModeNames = ["Loop", "Ping-pong", "Once"];
@@ -23,9 +31,6 @@ public sealed class BotSettingsWindow(BotController controller)
 
     private bool _open;
     private string _profileName = string.Empty;
-    private string _metaName = string.Empty;
-    private int _selectedMonster = -1;
-    private string _monsterName = string.Empty;
     private string _petDevice = string.Empty;
 
     private static bool TryParseTiers(string text, out int[] tiers)
@@ -39,8 +44,6 @@ public sealed class BotSettingsWindow(BotController controller)
         }
         return tiers.Length == 8;
     }
-    private string _metaExpression = string.Empty;
-    private string _metaResult = string.Empty;
     private string _newBuff = string.Empty;
     private int _selectedBuff = -1;
     private string _priorityNames = string.Empty;
@@ -58,8 +61,8 @@ public sealed class BotSettingsWindow(BotController controller)
     {
         if (!_open)
             return;
-        ImGui.SetNextWindowSize(new Vector2(440f, 420f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("DrakBot settings", ref _open))
+        ImGui.SetNextWindowSize(new Vector2(640f, 460f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Settings##drakbot", ref _open))
         {
             ImGui.End();
             return;
@@ -76,47 +79,71 @@ public sealed class BotSettingsWindow(BotController controller)
         ImGui.SameLine();
         if (ImGui.Button("Reset"))
             controller.ResetProfile();
+        ImGui.Separator();
 
-        if (ImGui.BeginTabBar("settings-tabs"))
+        ImGui.BeginChild("sections", new Vector2(130f, 0f), ImGuiChildFlags.Borders);
+        for (int index = 0; index < Sections.Length; index++)
         {
-            if (ImGui.BeginTabItem("Recharge"))
-            {
-                DrawRecharge(profile.Vitals);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Combat"))
-            {
-                DrawCombat(profile.Combat);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Monsters"))
-            {
-                DrawMonsters(profile.Combat);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Buffs"))
-            {
-                DrawBuffs(profile.Buffs);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Loot"))
-            {
-                DrawLoot(profile.Loot);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Navigation"))
-            {
-                DrawNavigation(profile.Navigation);
-                ImGui.EndTabItem();
-            }
-            if (ImGui.BeginTabItem("Meta"))
-            {
-                DrawMeta(profile.Meta);
-                ImGui.EndTabItem();
-            }
-            ImGui.EndTabBar();
+            if (ImGui.Selectable(Sections[index], _section == index))
+                _section = index;
         }
+        ImGui.EndChild();
+        ImGui.SameLine();
+        ImGui.BeginChild("content", new Vector2(0f, 0f), ImGuiChildFlags.Borders);
+        ImGui.TextColored(new Vector4(0.4f, 0.7f, 1.0f, 1.0f), $"Settings > {Sections[_section]}");
+        ImGui.Separator();
+        ImGui.Spacing();
+        switch (Sections[_section])
+        {
+            case "Recharge":
+                DrawRecharge(profile.Vitals);
+                break;
+            case "Combat":
+                DrawCombat(profile.Combat);
+                break;
+            case "Ranges":
+                DrawRanges(profile.Combat);
+                break;
+            case "Buffing":
+                DrawBuffs(profile.Buffs);
+                break;
+            case "Looting":
+                DrawLoot(profile.Loot);
+                break;
+            case "Navigation":
+                DrawNavigation(profile.Navigation);
+                break;
+            case "Pets & Doors":
+                DrawPets(profile.Pets);
+                ImGui.Separator();
+                DrawDoors(profile.Doors);
+                break;
+            case "Priorities":
+                DrawPriorities(profile.Priorities);
+                break;
+        }
+        ImGui.EndChild();
         ImGui.End();
+    }
+
+    /// <summary>Opens the window on a named section, for the dashboard's right-click shortcuts.</summary>
+    public void Open(string section)
+    {
+        int index = Array.FindIndex(Sections, name => name.Equals(section, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+            _section = index;
+        _open = true;
+    }
+
+    private void DrawPriorities(PrioritySettings priorities)
+    {
+        ImGui.TextDisabled("Survival and buffing always come first; these lift navigation or looting above combat.");
+        bool boostNav = priorities.BoostNavigation;
+        if (ImGui.Checkbox("Walk the route before fighting", ref boostNav))
+            controller.Update(p => p with { Priorities = p.Priorities with { BoostNavigation = boostNav } });
+        bool boostLoot = priorities.BoostLooting;
+        if (ImGui.Checkbox("Loot before fighting (unless a fight is already under way)", ref boostLoot))
+            controller.Update(p => p with { Priorities = p.Priorities with { BoostLooting = boostLoot } });
     }
 
     private void SyncScratch(BotProfile profile)
@@ -200,10 +227,6 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderInt("Power %", ref power, 0, 100))
             controller.Update(p => p with { Combat = p.Combat with { Power = power / 100f } });
 
-        float engage = combat.EngageDistance;
-        if (ImGui.SliderFloat("Engage distance (m)", ref engage, 3f, 60f, "%.0f"))
-            controller.Update(p => p with { Combat = p.Combat with { EngageDistance = engage } });
-
         string element = combat.ElementKeyword;
         if (ImGui.InputText("War spell element", ref element, 32))
             controller.Update(p => p with { Combat = p.Combat with { ElementKeyword = element } });
@@ -224,19 +247,35 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Combat = p.Combat with { BackOffToMeters = backOffTo } });
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Weapons (by name; empty leaves the hands alone)");
-        string melee = combat.MeleeWeapon;
-        if (ImGui.InputText("Melee weapon", ref melee, 64))
-            controller.Update(p => p with { Combat = p.Combat with { MeleeWeapon = melee } });
-        string missile = combat.MissileWeapon;
-        if (ImGui.InputText("Missile weapon", ref missile, 64))
-            controller.Update(p => p with { Combat = p.Combat with { MissileWeapon = missile } });
-        string wand = combat.Wand;
-        if (ImGui.InputText("Wand", ref wand, 64))
-            controller.Update(p => p with { Combat = p.Combat with { Wand = wand } });
-        bool ammo = combat.KeepAmmunition;
-        if (ImGui.Checkbox("Keep the bow's ammunition wielded", ref ammo))
-            controller.Update(p => p with { Combat = p.Combat with { KeepAmmunition = ammo } });
+        ImGui.TextDisabled("Weapons are named in the Items window; the monster list is its own window.");
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Monsters (comma separated name fragments)");
+        if (ImGui.InputText("Attack first", ref _priorityNames, 256, ImGuiInputTextFlags.EnterReturnsTrue)
+            || ImGui.IsItemDeactivatedAfterEdit())
+        {
+            IReadOnlyList<string> names = SplitNames(_priorityNames);
+            controller.Update(p => p with { Combat = p.Combat with { PriorityNames = names } });
+        }
+        if (ImGui.InputText("Never attack", ref _ignoreNames, 256, ImGuiInputTextFlags.EnterReturnsTrue)
+            || ImGui.IsItemDeactivatedAfterEdit())
+        {
+            IReadOnlyList<string> names = SplitNames(_ignoreNames);
+            controller.Update(p => p with { Combat = p.Combat with { IgnoreNames = names } });
+        }
+    }
+
+    private void DrawRanges(CombatSettings combat)
+    {
+        float engage = combat.EngageDistance;
+        if (ImGui.SliderFloat("Engage distance (m)", ref engage, 3f, 60f, "%.0f"))
+            controller.Update(p => p with { Combat = p.Combat with { EngageDistance = engage } });
+        float ringRange = combat.RingRangeMeters;
+        if (ImGui.SliderFloat("Ring range (m)", ref ringRange, 0f, 20f, "%.0f"))
+            controller.Update(p => p with { Combat = p.Combat with { RingRangeMeters = ringRange } });
+        int minRing = combat.MinRingTargets;
+        if (ImGui.SliderInt("Ring at this many", ref minRing, 1, 10))
+            controller.Update(p => p with { Combat = p.Combat with { MinRingTargets = minRing } });
 
         ImGui.Spacing();
         ImGui.TextDisabled("Reach");
@@ -256,157 +295,6 @@ public sealed class BotSettingsWindow(BotController controller)
 
         ImGui.Spacing();
         DrawLineOfSight(combat.LineOfSight);
-
-        ImGui.Spacing();
-        ImGui.TextDisabled("Monsters (comma separated name fragments)");
-        if (ImGui.InputText("Attack first", ref _priorityNames, 256, ImGuiInputTextFlags.EnterReturnsTrue)
-            || ImGui.IsItemDeactivatedAfterEdit())
-        {
-            IReadOnlyList<string> names = SplitNames(_priorityNames);
-            controller.Update(p => p with { Combat = p.Combat with { PriorityNames = names } });
-        }
-        if (ImGui.InputText("Never attack", ref _ignoreNames, 256, ImGuiInputTextFlags.EnterReturnsTrue)
-            || ImGui.IsItemDeactivatedAfterEdit())
-        {
-            IReadOnlyList<string> names = SplitNames(_ignoreNames);
-            controller.Update(p => p with { Combat = p.Combat with { IgnoreNames = names } });
-        }
-    }
-
-    private static readonly string[] ElementNames = ["Auto", .. WarSpellNames.Elements];
-    private static readonly string[] ShapeNames = ["Bolt", "Arc", "Streak"];
-
-    /// <summary>The VTank-style monster list: one rule per kind of monster, a Default for the rest.</summary>
-    private void DrawMonsters(CombatSettings combat)
-    {
-        ImGui.TextDisabled("Empty list: fight every hostile with the Combat tab's element. With rules, unmatched monsters use Default or are left alone.");
-        List<MonsterRule> rules = [.. combat.Monsters];
-
-        ImGui.SetNextItemWidth(200f);
-        ImGui.InputText("##newmonster", ref _monsterName, 64);
-        ImGui.SameLine();
-        if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(_monsterName))
-        {
-            rules.Add(new MonsterRule { Name = _monsterName.Trim() });
-            _monsterName = string.Empty;
-            _selectedMonster = rules.Count - 1;
-            SetMonsters(rules);
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Add Default") && !rules.Any(r => r.IsDefault))
-        {
-            rules.Add(new MonsterRule { Name = MonsterRule.DefaultName });
-            _selectedMonster = rules.Count - 1;
-            SetMonsters(rules);
-        }
-        ImGui.SameLine();
-        ImGui.BeginDisabled(_selectedMonster < 0 || _selectedMonster >= rules.Count);
-        if (ImGui.Button("Remove"))
-        {
-            rules.RemoveAt(_selectedMonster);
-            _selectedMonster = -1;
-            SetMonsters(rules);
-        }
-        ImGui.EndDisabled();
-
-        if (ImGui.BeginTable("monsters", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY, new Vector2(-1f, 140f)))
-        {
-            ImGui.TableSetupColumn("Monster", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Pri", ImGuiTableColumnFlags.WidthFixed, 34f);
-            ImGui.TableSetupColumn("Element", ImGuiTableColumnFlags.WidthFixed, 70f);
-            ImGui.TableSetupColumn("Spell", ImGuiTableColumnFlags.WidthFixed, 90f);
-            ImGui.TableHeadersRow();
-            for (int index = 0; index < rules.Count; index++)
-            {
-                MonsterRule rule = rules[index];
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                if (ImGui.Selectable($"{rule.Name}##m{index}", _selectedMonster == index, ImGuiSelectableFlags.SpanAllColumns))
-                    _selectedMonster = index;
-                ImGui.TableSetColumnIndex(1);
-                ImGui.Text(rule.Priority == 0 ? "off" : rule.Priority.ToString());
-                ImGui.TableSetColumnIndex(2);
-                ImGui.Text(rule.Element);
-                ImGui.TableSetColumnIndex(3);
-                ImGui.Text(rule.Shape + (rule.UseRing ? "/Ring" : string.Empty));
-            }
-            ImGui.EndTable();
-        }
-
-        if (_selectedMonster >= 0 && _selectedMonster < rules.Count)
-        {
-            MonsterRule rule = rules[_selectedMonster];
-            void Set(MonsterRule changed)
-            {
-                rules[_selectedMonster] = changed;
-                SetMonsters(rules);
-            }
-
-            ImGui.Separator();
-            int priority = rule.Priority;
-            if (ImGui.SliderInt("Priority (0 = never fight)", ref priority, 0, 10))
-                Set(rule with { Priority = priority });
-            int element = Math.Max(0, Array.FindIndex(ElementNames, e => e.Equals(rule.Element, StringComparison.OrdinalIgnoreCase)));
-            if (ImGui.Combo("Element", ref element, ElementNames, ElementNames.Length))
-                Set(rule with { Element = ElementNames[element] });
-            int shape = (int)rule.Shape;
-            if (ImGui.Combo("War spell", ref shape, ShapeNames, ShapeNames.Length))
-                Set(rule with { Shape = (SpellShape)shape });
-            bool ring = rule.UseRing;
-            if (ImGui.Checkbox("Ring when they crowd in", ref ring))
-                Set(rule with { UseRing = ring });
-
-            ImGui.TextDisabled("Debuffs landed first");
-            bool imperil = rule.Imperil;
-            if (ImGui.Checkbox("Imperil", ref imperil)) Set(rule with { Imperil = imperil });
-            ImGui.SameLine();
-            bool vuln = rule.Vulnerability;
-            if (ImGui.Checkbox("Vulnerability", ref vuln)) Set(rule with { Vulnerability = vuln });
-            ImGui.SameLine();
-            bool fester = rule.Fester;
-            if (ImGui.Checkbox("Fester", ref fester)) Set(rule with { Fester = fester });
-            bool yield = rule.Yield;
-            if (ImGui.Checkbox("Yield", ref yield)) Set(rule with { Yield = yield });
-            ImGui.SameLine();
-            bool broadside = rule.Broadside;
-            if (ImGui.Checkbox("Broadside", ref broadside)) Set(rule with { Broadside = broadside });
-            ImGui.SameLine();
-            bool gravity = rule.GravityWell;
-            if (ImGui.Checkbox("Gravity Well", ref gravity)) Set(rule with { GravityWell = gravity });
-            int extra = Math.Max(0, Array.FindIndex(ElementNames, e => e.Equals(rule.ExtraVulnerability, StringComparison.OrdinalIgnoreCase)));
-            if (ImGui.Combo("Second vulnerability", ref extra, ElementNames, ElementNames.Length))
-                Set(rule with { ExtraVulnerability = extra == 0 ? string.Empty : ElementNames[extra] });
-            string weapon = rule.Weapon;
-            if (ImGui.InputText("Weapon for this monster", ref weapon, 64))
-                Set(rule with { Weapon = weapon });
-        }
-
-        ImGui.Separator();
-        float ringRange = combat.RingRangeMeters;
-        if (ImGui.SliderFloat("Ring range (m)", ref ringRange, 0f, 20f, "%.0f"))
-            controller.Update(p => p with { Combat = p.Combat with { RingRangeMeters = ringRange } });
-        int minRing = combat.MinRingTargets;
-        if (ImGui.SliderInt("Ring at this many", ref minRing, 1, 10))
-            controller.Update(p => p with { Combat = p.Combat with { MinRingTargets = minRing } });
-
-        ImGui.Separator();
-        DrawPets(controller.Profile.Pets);
-        ImGui.Separator();
-        DrawManaStones(controller.Profile.ManaStones);
-    }
-
-    private void DrawManaStones(ManaStoneSettings stones)
-    {
-        ImGui.TextDisabled("Mana stones");
-        bool enabled = stones.Enabled;
-        if (ImGui.Checkbox("Recharge worn items from mana stones", ref enabled))
-            controller.Update(p => p with { ManaStones = p.ManaStones with { Enabled = enabled } });
-        int threshold = stones.TapThresholdMana;
-        if (ImGui.SliderInt("Drain loot with at least this mana (0 = never)", ref threshold, 0, 20000))
-            controller.Update(p => p with { ManaStones = p.ManaStones with { TapThresholdMana = threshold } });
-        int keep = stones.KeepCount;
-        if (ImGui.SliderInt("Stones to keep", ref keep, 1, 50))
-            controller.Update(p => p with { ManaStones = p.ManaStones with { KeepCount = keep } });
     }
 
     private void DrawPets(PetSettings pets)
@@ -445,12 +333,6 @@ public sealed class BotSettingsWindow(BotController controller)
                 break;
             }
         }
-    }
-
-    private void SetMonsters(List<MonsterRule> rules)
-    {
-        MonsterRule[] snapshot = [.. rules];
-        controller.Update(p => p with { Combat = p.Combat with { Monsters = snapshot } });
     }
 
     private void DrawLineOfSight(LineOfSightSettings los)
@@ -671,75 +553,6 @@ public sealed class BotSettingsWindow(BotController controller)
         ImGui.TextDisabled("Edit rules in the profile JSON for now.");
     }
 
-    private void DrawMeta(MetaOptions options)
-    {
-        MetaEngine? meta = controller.Meta;
-        if (meta is null)
-        {
-            ImGui.TextDisabled("No meta engine on this host.");
-            return;
-        }
-
-        bool enabled = options.Enabled;
-        if (ImGui.Checkbox("Run the meta", ref enabled))
-            meta.Enabled = enabled;
-        ImGui.SameLine();
-        bool debug = options.Debug;
-        if (ImGui.Checkbox("Echo fired rules", ref debug))
-            meta.Debug = debug;
-
-        if (_metaName.Length == 0 && options.Name.Length > 0)
-            _metaName = options.Name;
-        ImGui.SetNextItemWidth(220f);
-        ImGui.InputText("##metaname", ref _metaName, 128);
-        ImGui.SameLine();
-        if (ImGui.Button("Load") && !string.IsNullOrWhiteSpace(_metaName))
-            meta.LoadByName(_metaName.Trim());
-        ImGui.SameLine();
-        if (ImGui.Button("Clear"))
-        {
-            meta.Clear();
-            controller.Update(p => p with { Meta = p.Meta with { Name = string.Empty } });
-        }
-        ImGui.TextDisabled("A .af or .met by name from the VTank profiles folder; the profile remembers it.");
-
-        ImGui.Separator();
-        if (meta.Rules.Count == 0)
-        {
-            ImGui.TextDisabled("No meta loaded.");
-        }
-        else
-        {
-            ImGui.Text($"'{meta.MetaName}': {meta.Rules.Count} rules, state {meta.CurrentState} for {meta.SecondsInState:0}s"
-                + (meta.StackDepth > 0 ? $", stack {meta.StackDepth}" : string.Empty)
-                + (meta.WatchdogActive ? ", watchdog armed" : string.Empty));
-            ImGui.SetNextItemWidth(220f);
-            if (ImGui.BeginCombo("State", meta.CurrentState))
-            {
-                foreach (string state in meta.StateNames())
-                {
-                    if (ImGui.Selectable(state, state.Equals(meta.CurrentState, StringComparison.OrdinalIgnoreCase)))
-                        meta.SetState(state);
-                }
-                ImGui.EndCombo();
-            }
-            if (meta.LastFired.Length > 0)
-                ImGui.TextWrapped($"last fired: {meta.LastFired}");
-            if (meta.LastError.Length > 0)
-                ImGui.TextColored(new Vector4(0.9f, 0.4f, 0.3f, 1f), $"last error: {meta.LastError}");
-        }
-
-        ImGui.Separator();
-        ImGui.TextDisabled("Try an expression");
-        ImGui.SetNextItemWidth(-60f);
-        bool submitted = ImGui.InputText("##metaexpr", ref _metaExpression, 512, ImGuiInputTextFlags.EnterReturnsTrue);
-        ImGui.SameLine();
-        if ((ImGui.Button("Eval") || submitted) && _metaExpression.Length > 0)
-            _metaResult = meta.Expressions.Evaluate(_metaExpression);
-        if (_metaResult.Length > 0)
-            ImGui.TextWrapped($"= {_metaResult}");
-    }
-
     private void DrawNavigation(NavigationSettings navigation)
     {
         bool enabled = navigation.Enabled;
@@ -767,16 +580,6 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
 
         ImGui.Spacing();
-        ImGui.TextDisabled("Priority over combat (survival and buffing always come first)");
-        bool boostNav = controller.Profile.Priorities.BoostNavigation;
-        if (ImGui.Checkbox("Walk the route before fighting", ref boostNav))
-            controller.Update(p => p with { Priorities = p.Priorities with { BoostNavigation = boostNav } });
-        ImGui.SameLine();
-        bool boostLoot = controller.Profile.Priorities.BoostLooting;
-        if (ImGui.Checkbox("Loot before fighting", ref boostLoot))
-            controller.Update(p => p with { Priorities = p.Priorities with { BoostLooting = boostLoot } });
-
-        ImGui.Spacing();
         ImGui.TextDisabled("Following (a name, or 'leader'; empty walks the route)");
         string follow = navigation.Follow;
         if (ImGui.InputText("Follow", ref follow, 64))
@@ -785,9 +588,12 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderFloat("Stop within (m)", ref followStop, 1f, 20f, "%.0f"))
             controller.Update(p => p with { Navigation = p.Navigation with { FollowStopMeters = followStop, FollowResumeMeters = Math.Max(p.Navigation.FollowResumeMeters, followStop + 1f) } });
 
-        ImGui.Spacing();
+        ImGui.TextDisabled("A mode change applies the next time a route is loaded; the Navigation window edits routes.");
+    }
+
+    private void DrawDoors(DoorSettings doors)
+    {
         ImGui.TextDisabled("Doors");
-        DoorSettings doors = controller.Profile.Doors;
         bool openDoors = doors.Enabled;
         if (ImGui.Checkbox("Open doors in the way", ref openDoors))
             controller.Update(p => p with { Doors = p.Doors with { Enabled = openDoors } });
@@ -798,7 +604,6 @@ public sealed class BotSettingsWindow(BotController controller)
         float doorRange = doors.RangeMeters;
         if (ImGui.SliderFloat("Door range (m)", ref doorRange, 1f, 10f, "%.0f"))
             controller.Update(p => p with { Doors = p.Doors with { RangeMeters = doorRange } });
-        ImGui.TextDisabled("A mode change applies the next time a route is loaded.");
     }
 
     private static IReadOnlyList<string> SplitNames(string text) =>

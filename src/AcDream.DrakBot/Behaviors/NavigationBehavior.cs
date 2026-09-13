@@ -19,6 +19,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private readonly Walker _walker = new();
     private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
+    private bool _resumeNearest;
     private bool _followMoving;
     private double _lastFollowLookupAt = double.NegativeInfinity;
     private uint _followId;
@@ -57,6 +58,25 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         _follower?.Reset();
         _actions.Cancel();
         _settleUntil = double.NegativeInfinity;
+        _resumeNearest = false;
+    }
+
+    /// <summary>
+    /// Swaps in an edited copy of the route being walked without starting
+    /// over: the walk resumes at the waypoint nearest the character.
+    /// </summary>
+    public void ReplaceRoute(Route route)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+        if (route.IsEmpty)
+        {
+            SetRoute(null);
+            return;
+        }
+        _follower = new RouteFollower(route, route.Mode ?? settings().Mode);
+        _follower.Reset();
+        _actions.Cancel();
+        _resumeNearest = true;
     }
 
     public bool WantsControl(Blackboard board, out string reason)
@@ -93,6 +113,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             return Follow(context, nav);
         if (_follower is null)
             return BehaviorStep.Done;
+        if (_resumeNearest)
+        {
+            _follower.ResumeNearest(board.Navigation.Position);
+            _resumeNearest = false;
+        }
 
         if (_actions.IsRunning)
             return RunAction(context, nav);

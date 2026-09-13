@@ -103,6 +103,36 @@ public sealed class MetaEngine
 
     public IReadOnlyList<MetaRule> Rules => _rules;
 
+    /// <summary>
+    /// The live rule list for the rules editor. Mutate it, then call
+    /// <see cref="RulesChanged"/> so the state index is rebuilt.
+    /// </summary>
+    public List<MetaRule> EditableRules => _rules;
+
+    /// <summary>The rules were edited in place: rebuild the index and re-enter the state.</summary>
+    public void RulesChanged()
+    {
+        _indexedCount = -1;
+        _settings.ForceStateReset = true;
+    }
+
+    /// <summary>Swaps the loaded rules and embedded routes for another set, keeping the name.</summary>
+    public void ReplaceRules(List<MetaRule> rules, IReadOnlyDictionary<string, List<string>> embeddedNavs)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        _rules = rules;
+        _indexedCount = -1;
+        EmbeddedNavs.Clear();
+        foreach (KeyValuePair<string, List<string>> nav in embeddedNavs)
+            EmbeddedNavs[nav.Key] = nav.Value;
+        _stateStack.Clear();
+        _watchdogActive = false;
+        if (_rules.Count > 0 && !_rules.Any(rule => rule.State.Equals(CurrentState, StringComparison.OrdinalIgnoreCase)))
+            SetState(_rules[0].State);
+        else
+            _settings.ForceStateReset = true;
+    }
+
     public string MetaName { get; private set; } = string.Empty;
 
     public Dictionary<string, List<string>> EmbeddedNavs { get; } = new(StringComparer.OrdinalIgnoreCase);

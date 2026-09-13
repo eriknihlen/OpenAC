@@ -9,9 +9,11 @@ using ImGuiNET;
 namespace AcDream.DrakBot.Ui;
 
 /// <summary>
-/// The main window: run state and activity on the left, profile and route
-/// pickers on the right, the four subsystem toggles, the player's vitals and
-/// the current target. Everything else opens from here.
+/// The main window, laid out like RynthAi's dashboard: run state and
+/// activity on the left, profile and route pickers on the right, the
+/// subsystem toggles (right-click one for its settings), the player's
+/// vitals and the current target, and a grid of buttons that open the
+/// other windows: macro rules, monsters, settings, navigation, items.
 /// </summary>
 public sealed class BotDashboard
 {
@@ -28,7 +30,10 @@ public sealed class BotDashboard
     private readonly BotController _controller;
     private readonly IAutomationSurface _surface;
     private readonly BotSettingsWindow _settings;
-    private readonly NavBuilderWindow _navBuilder;
+    private readonly NavigationWindow _navigation;
+    private readonly MetaRulesWindow _metaRules;
+    private readonly MonstersWindow _monsters;
+    private readonly ItemsWindow _items;
     private bool _open = true;
     private IReadOnlyList<string> _profileNames = [];
     private IReadOnlyList<string> _routeNames = [];
@@ -39,7 +44,10 @@ public sealed class BotDashboard
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _settings = new BotSettingsWindow(controller);
-        _navBuilder = new NavBuilderWindow(controller);
+        _navigation = new NavigationWindow(controller, surface);
+        _metaRules = new MetaRulesWindow(controller, surface);
+        _monsters = new MonstersWindow(controller, surface);
+        _items = new ItemsWindow(controller, surface);
     }
 
     public bool IsOpen
@@ -56,7 +64,10 @@ public sealed class BotDashboard
         if (!_surface.IsAvailable || !_surface.Character.IsInWorld)
             return;
         _settings.Draw();
-        _navBuilder.Draw();
+        _navigation.Draw();
+        _metaRules.Draw();
+        _monsters.Draw();
+        _items.Draw();
         if (!_open)
             return;
 
@@ -172,18 +183,39 @@ public sealed class BotDashboard
     private void DrawToggles()
     {
         BotProfile profile = _controller.Profile;
-        var size = new Vector2(84f, 26f);
+        var size = new Vector2(70f, 26f);
         if (ToggleButton("Combat", profile.Combat.Enabled, size))
             _controller.Update(p => p with { Combat = p.Combat with { Enabled = !p.Combat.Enabled } });
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _settings.Open("Combat");
+        Hint("Combat - left-click to toggle, right-click for settings");
         ImGui.SameLine();
         if (ToggleButton("Buffs", profile.Buffs.Enabled, size))
             _controller.Update(p => p with { Buffs = p.Buffs with { Enabled = !p.Buffs.Enabled } });
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _settings.Open("Buffing");
+        Hint("Buffing - left-click to toggle, right-click for settings");
         ImGui.SameLine();
         if (ToggleButton("Loot", profile.Loot.Enabled, size))
             _controller.Update(p => p with { Loot = p.Loot with { Enabled = !p.Loot.Enabled } });
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _settings.Open("Looting");
+        Hint("Looting - left-click to toggle, right-click for settings");
         ImGui.SameLine();
         if (ToggleButton("Nav", profile.Navigation.Enabled, size))
             _controller.Update(p => p with { Navigation = p.Navigation with { Enabled = !p.Navigation.Enabled } });
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _navigation.IsOpen = true;
+        Hint("Navigation - left-click to toggle, right-click for routes");
+        ImGui.SameLine();
+        if (ToggleButton("Macro", profile.Meta.Enabled, size))
+        {
+            if (_controller.Meta is { } meta)
+                meta.Enabled = !profile.Meta.Enabled;
+        }
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _metaRules.IsOpen = true;
+        Hint("Macro / meta - left-click to toggle, right-click for the rules");
 
         ImGui.Spacing();
         bool forcing = _controller.Buffs.IsForceRebuffPending;
@@ -313,14 +345,45 @@ public sealed class BotDashboard
 
     private void DrawLaunchers()
     {
-        if (ImGui.Button("Settings", new Vector2(110f, 24f)))
+        if (!ImGui.BeginTable("launchers", 3, ImGuiTableFlags.SizingStretchSame))
+            return;
+        ImGui.TableNextColumn();
+        if (Launcher("Macro Rules", _metaRules.IsOpen))
+            _metaRules.IsOpen = !_metaRules.IsOpen;
+        ImGui.TableNextColumn();
+        if (Launcher("Monsters", _monsters.IsOpen))
+            _monsters.IsOpen = !_monsters.IsOpen;
+        ImGui.TableNextColumn();
+        if (Launcher("Settings", _settings.IsOpen))
             _settings.IsOpen = !_settings.IsOpen;
-        ImGui.SameLine();
-        if (ImGui.Button("Nav builder", new Vector2(110f, 24f)))
-            _navBuilder.IsOpen = !_navBuilder.IsOpen;
-        ImGui.SameLine();
-        if (ImGui.Button("Save profile", new Vector2(110f, 24f)))
+        ImGui.TableNextColumn();
+        if (Launcher("Navigation", _navigation.IsOpen))
+            _navigation.IsOpen = !_navigation.IsOpen;
+        ImGui.TableNextColumn();
+        if (Launcher("Items", _items.IsOpen))
+            _items.IsOpen = !_items.IsOpen;
+        ImGui.TableNextColumn();
+        if (ImGui.Button("Save profile", new Vector2(-1f, 26f)))
             _controller.SaveProfile();
+        Hint($"Save the live profile as '{_controller.Profile.Name}'");
+        ImGui.EndTable();
+    }
+
+    /// <summary>A launcher button, lit while its window is open; true when clicked.</summary>
+    private static bool Launcher(string label, bool open)
+    {
+        if (open)
+            ImGui.PushStyleColor(ImGuiCol.Button, ColToggleOn);
+        bool clicked = ImGui.Button(label, new Vector2(-1f, 26f));
+        if (open)
+            ImGui.PopStyleColor();
+        return clicked;
+    }
+
+    private static void Hint(string text)
+    {
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(text);
     }
 
     private bool TryCurrentTarget(out PluginCombatTarget target, out CombatBehavior? combat)
