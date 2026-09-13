@@ -111,6 +111,15 @@ public sealed class BotDashboard
         ImGui.TextColored(ColMuted, "Reason");
         ImGui.SameLine(70f);
         ImGui.TextWrapped(engine.LastReason);
+        // Side work: the pack tidy and the salvage queue, when they have something to say.
+        string tidy = engine.Inventory.Status;
+        if (tidy.Length > 0)
+            ImGui.TextColored(ColMuted, tidy);
+        foreach (IBehavior behavior in engine.Behaviors)
+        {
+            if (behavior is SalvageBehavior { Queued: > 0 } salvage)
+                ImGui.TextColored(ColMuted, $"{salvage.Queued} to salvage");
+        }
 
         ImGui.TableSetColumnIndex(1);
         ImGui.TextColored(ColMuted, "Profile");
