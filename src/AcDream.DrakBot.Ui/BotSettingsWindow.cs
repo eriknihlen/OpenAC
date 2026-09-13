@@ -601,6 +601,16 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Inventory = p.Inventory with { AutoCram = cram } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Salvage");
+        bool salvage = controller.Profile.Salvage.Enabled;
+        if (ImGui.Checkbox("Salvage what the rules say", ref salvage))
+            controller.Update(p => p with { Salvage = p.Salvage with { Enabled = salvage } });
+        ImGui.SameLine();
+        bool combine = controller.Profile.Salvage.CombineBags;
+        if (ImGui.Checkbox("Merge partial bags", ref combine))
+            controller.Update(p => p with { Salvage = p.Salvage with { CombineBags = combine } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Rules, first match wins");
         IReadOnlyList<LootRule> rules = loot.Rules.Rules;
         if (ImGui.BeginTable("rules", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH, new Vector2(-1f, 160f)))

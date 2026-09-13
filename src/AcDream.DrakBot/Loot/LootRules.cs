@@ -6,6 +6,8 @@ public enum LootAction
 {
     Ignore = 0,
     Keep,
+    /// <summary>Picked up and handed to the salvage behavior.</summary>
+    Salvage,
 }
 
 /// <summary>

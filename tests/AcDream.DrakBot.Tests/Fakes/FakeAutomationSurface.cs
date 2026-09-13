@@ -269,6 +269,11 @@ internal sealed class FakeAutomationSurface
         Commands.Add($"merge:{sourceObjectId}>{targetObjectId}");
         return new(PluginItemCommandStatus.Started);
     }
+    public PluginItemCommandResult Salvage(uint toolObjectId, IReadOnlyList<uint> itemObjectIds)
+    {
+        Commands.Add($"salvage:{toolObjectId}:{string.Join(',', itemObjectIds)}");
+        return new(PluginItemCommandStatus.Started);
+    }
     /// <summary>Only an owned item can be used this way, as in the client.</summary>
     PluginItemCommandResult IItemAutomation.Use(uint objectId)
     {

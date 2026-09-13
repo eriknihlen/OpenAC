@@ -233,6 +233,17 @@ match. Keep, Salvage, Sell and KeepUpTo (up to the count already
 carried) pick the item up; Read leaves it. `/vt loot load <name>` from a
 meta selects a profile.
 
+## Salvage
+
+A loot rule whose action is Salvage (a `.utl` rule, or a profile rule
+with `"Action": "Salvage"`) still picks the item up; once the pickup
+lands the item is queued, and when no hostile is near and the corpses
+are done, the queued items go to the Ust in one request. With **merge
+partial bags** on, every half minute the under-full salvage bags of one
+material and workmanship band (the `.utl`'s SalvageCombine block, else
+1-6, 7-8, 9, 10) are salvaged together, which merges them. An item still
+in the pack six seconds after the request is retried up to three times.
+
 ## Pack housekeeping
 
 Two switches on the Loot tab, run beside whatever the bot is doing when

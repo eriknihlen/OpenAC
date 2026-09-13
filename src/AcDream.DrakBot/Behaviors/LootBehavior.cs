@@ -16,7 +16,8 @@ namespace AcDream.DrakBot.Behaviors;
 public sealed class LootBehavior(
     Func<LootSettings> settings,
     Func<string, VTankLootProfile?>? utlLoader = null,
-    Func<ManaStoneSettings>? manaStones = null) : IBehavior
+    Func<ManaStoneSettings>? manaStones = null,
+    Action<uint>? salvage = null) : IBehavior
 {
     private readonly HashSet<uint> _finishedCorpses = [];
     private readonly HashSet<uint> _handledItems = [];
@@ -25,6 +26,7 @@ public sealed class LootBehavior(
     private Phase _phase;
     private uint _corpseId;
     private uint _itemId;
+    private bool _salvageOnPickup;
     private long _inventoryRevisionAtPickup;
     private double _phaseStartedAt;
 
@@ -94,6 +96,8 @@ public sealed class LootBehavior(
                 {
                     if (completion.Revision != _inventoryRevisionAtPickup && !completion.IsSuccess)
                         context.Log.Warn($"pickup of {_itemId:X8} failed with {completion.WeenieError}");
+                    else if (_salvageOnPickup)
+                        salvage?.Invoke(_itemId);
                     _handledItems.Add(_itemId);
                     EnterPhase(Phase.Evaluating, board.Now);
                 }
@@ -161,7 +165,7 @@ public sealed class LootBehavior(
                 return BehaviorStep.Continue;
             }
 
-            if (decision.Action != LootAction.Keep)
+            if (decision.Action == LootAction.Ignore)
             {
                 _handledItems.Add(item.ObjectId);
                 continue;
@@ -179,6 +183,7 @@ public sealed class LootBehavior(
             }
             context.Log.Info($"looting {item.Name} ({decision.RuleName})");
             _itemId = item.ObjectId;
+            _salvageOnPickup = decision.Action == LootAction.Salvage && salvage is not null;
             EnterPhase(Phase.PickingUp, context.Board.Now);
             return BehaviorStep.Continue;
         }
@@ -266,9 +271,10 @@ public sealed class LootBehavior(
         switch (rule.Action)
         {
             case VTankLootAction.Keep:
-            case VTankLootAction.Salvage:
             case VTankLootAction.Sell:
                 return new LootDecision(LootAction.Keep, rule.Name);
+            case VTankLootAction.Salvage:
+                return new LootDecision(LootAction.Salvage, rule.Name);
             case VTankLootAction.KeepUpTo:
             {
                 int have = 0;

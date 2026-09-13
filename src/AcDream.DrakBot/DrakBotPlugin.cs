@@ -65,6 +65,21 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             surface.MovementProbe,
             clock,
             () => engine.Profile.Combat.LineOfSight);
+        VTankLootProfile? LoadUtl(string name)
+        {
+            string? text = host.VtankProfiles.ReadText(BotStore.SanitizeName(name) + ".utl");
+            return text is null ? null : VTankLootParser.LoadFromText(text);
+        }
+        LootBehavior loot = null!;
+        var salvage = new SalvageBehavior(
+            () => engine.Profile.Salvage,
+            () => loot.UtlProfile(engine.Profile.Loot)?.SalvageCombine,
+            surface.Items.CaptureOwnedItems);
+        loot = new LootBehavior(
+            () => engine.Profile.Loot,
+            LoadUtl,
+            () => engine.Profile.ManaStones,
+            salvage.Enqueue);
         IBehavior[] behaviors =
         [
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),
@@ -76,14 +91,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
                 () => engine.Profile.Doors,
                 () => engine.Profile.Navigation.Enabled && navigation.Route is not null,
                 surface.Navigation.CaptureObjects),
-            new LootBehavior(
-                () => engine.Profile.Loot,
-                name =>
-                {
-                    string? text = host.VtankProfiles.ReadText(BotStore.SanitizeName(name) + ".utl");
-                    return text is null ? null : VTankLootParser.LoadFromText(text);
-                },
-                () => engine.Profile.ManaStones),
+            loot,
+            salvage,
             navigation,
         ];
         engine = new BotEngine(surface, host.Log, behaviors, clock);
