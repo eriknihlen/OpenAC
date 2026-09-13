@@ -1,5 +1,7 @@
 using System.Numerics;
+using AcDream.DrakBot.Combat;
 using AcDream.DrakBot.Loot;
+using AcDream.DrakBot.Spells;
 using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
@@ -22,6 +24,8 @@ public sealed class BotSettingsWindow(BotController controller)
     private bool _open;
     private string _profileName = string.Empty;
     private string _metaName = string.Empty;
+    private int _selectedMonster = -1;
+    private string _monsterName = string.Empty;
     private string _metaExpression = string.Empty;
     private string _metaResult = string.Empty;
     private string _newBuff = string.Empty;
@@ -70,6 +74,11 @@ public sealed class BotSettingsWindow(BotController controller)
             if (ImGui.BeginTabItem("Combat"))
             {
                 DrawCombat(profile.Combat);
+                ImGui.EndTabItem();
+            }
+            if (ImGui.BeginTabItem("Monsters"))
+            {
+                DrawMonsters(profile.Combat);
                 ImGui.EndTabItem();
             }
             if (ImGui.BeginTabItem("Buffs"))
@@ -201,6 +210,126 @@ public sealed class BotSettingsWindow(BotController controller)
             IReadOnlyList<string> names = SplitNames(_ignoreNames);
             controller.Update(p => p with { Combat = p.Combat with { IgnoreNames = names } });
         }
+    }
+
+    private static readonly string[] ElementNames = ["Auto", .. WarSpellNames.Elements];
+    private static readonly string[] ShapeNames = ["Bolt", "Arc", "Streak"];
+
+    /// <summary>The VTank-style monster list: one rule per kind of monster, a Default for the rest.</summary>
+    private void DrawMonsters(CombatSettings combat)
+    {
+        ImGui.TextDisabled("Empty list: fight every hostile with the Combat tab's element. With rules, unmatched monsters use Default or are left alone.");
+        List<MonsterRule> rules = [.. combat.Monsters];
+
+        ImGui.SetNextItemWidth(200f);
+        ImGui.InputText("##newmonster", ref _monsterName, 64);
+        ImGui.SameLine();
+        if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(_monsterName))
+        {
+            rules.Add(new MonsterRule { Name = _monsterName.Trim() });
+            _monsterName = string.Empty;
+            _selectedMonster = rules.Count - 1;
+            SetMonsters(rules);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Add Default") && !rules.Any(r => r.IsDefault))
+        {
+            rules.Add(new MonsterRule { Name = MonsterRule.DefaultName });
+            _selectedMonster = rules.Count - 1;
+            SetMonsters(rules);
+        }
+        ImGui.SameLine();
+        ImGui.BeginDisabled(_selectedMonster < 0 || _selectedMonster >= rules.Count);
+        if (ImGui.Button("Remove"))
+        {
+            rules.RemoveAt(_selectedMonster);
+            _selectedMonster = -1;
+            SetMonsters(rules);
+        }
+        ImGui.EndDisabled();
+
+        if (ImGui.BeginTable("monsters", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY, new Vector2(-1f, 140f)))
+        {
+            ImGui.TableSetupColumn("Monster", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Pri", ImGuiTableColumnFlags.WidthFixed, 34f);
+            ImGui.TableSetupColumn("Element", ImGuiTableColumnFlags.WidthFixed, 70f);
+            ImGui.TableSetupColumn("Spell", ImGuiTableColumnFlags.WidthFixed, 90f);
+            ImGui.TableHeadersRow();
+            for (int index = 0; index < rules.Count; index++)
+            {
+                MonsterRule rule = rules[index];
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                if (ImGui.Selectable($"{rule.Name}##m{index}", _selectedMonster == index, ImGuiSelectableFlags.SpanAllColumns))
+                    _selectedMonster = index;
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text(rule.Priority == 0 ? "off" : rule.Priority.ToString());
+                ImGui.TableSetColumnIndex(2);
+                ImGui.Text(rule.Element);
+                ImGui.TableSetColumnIndex(3);
+                ImGui.Text(rule.Shape + (rule.UseRing ? "/Ring" : string.Empty));
+            }
+            ImGui.EndTable();
+        }
+
+        if (_selectedMonster >= 0 && _selectedMonster < rules.Count)
+        {
+            MonsterRule rule = rules[_selectedMonster];
+            void Set(MonsterRule changed)
+            {
+                rules[_selectedMonster] = changed;
+                SetMonsters(rules);
+            }
+
+            ImGui.Separator();
+            int priority = rule.Priority;
+            if (ImGui.SliderInt("Priority (0 = never fight)", ref priority, 0, 10))
+                Set(rule with { Priority = priority });
+            int element = Math.Max(0, Array.FindIndex(ElementNames, e => e.Equals(rule.Element, StringComparison.OrdinalIgnoreCase)));
+            if (ImGui.Combo("Element", ref element, ElementNames, ElementNames.Length))
+                Set(rule with { Element = ElementNames[element] });
+            int shape = (int)rule.Shape;
+            if (ImGui.Combo("War spell", ref shape, ShapeNames, ShapeNames.Length))
+                Set(rule with { Shape = (SpellShape)shape });
+            bool ring = rule.UseRing;
+            if (ImGui.Checkbox("Ring when they crowd in", ref ring))
+                Set(rule with { UseRing = ring });
+
+            ImGui.TextDisabled("Debuffs landed first");
+            bool imperil = rule.Imperil;
+            if (ImGui.Checkbox("Imperil", ref imperil)) Set(rule with { Imperil = imperil });
+            ImGui.SameLine();
+            bool vuln = rule.Vulnerability;
+            if (ImGui.Checkbox("Vulnerability", ref vuln)) Set(rule with { Vulnerability = vuln });
+            ImGui.SameLine();
+            bool fester = rule.Fester;
+            if (ImGui.Checkbox("Fester", ref fester)) Set(rule with { Fester = fester });
+            bool yield = rule.Yield;
+            if (ImGui.Checkbox("Yield", ref yield)) Set(rule with { Yield = yield });
+            ImGui.SameLine();
+            bool broadside = rule.Broadside;
+            if (ImGui.Checkbox("Broadside", ref broadside)) Set(rule with { Broadside = broadside });
+            ImGui.SameLine();
+            bool gravity = rule.GravityWell;
+            if (ImGui.Checkbox("Gravity Well", ref gravity)) Set(rule with { GravityWell = gravity });
+            int extra = Math.Max(0, Array.FindIndex(ElementNames, e => e.Equals(rule.ExtraVulnerability, StringComparison.OrdinalIgnoreCase)));
+            if (ImGui.Combo("Second vulnerability", ref extra, ElementNames, ElementNames.Length))
+                Set(rule with { ExtraVulnerability = extra == 0 ? string.Empty : ElementNames[extra] });
+        }
+
+        ImGui.Separator();
+        float ringRange = combat.RingRangeMeters;
+        if (ImGui.SliderFloat("Ring range (m)", ref ringRange, 0f, 20f, "%.0f"))
+            controller.Update(p => p with { Combat = p.Combat with { RingRangeMeters = ringRange } });
+        int minRing = combat.MinRingTargets;
+        if (ImGui.SliderInt("Ring at this many", ref minRing, 1, 10))
+            controller.Update(p => p with { Combat = p.Combat with { MinRingTargets = minRing } });
+    }
+
+    private void SetMonsters(List<MonsterRule> rules)
+    {
+        MonsterRule[] snapshot = [.. rules];
+        controller.Update(p => p with { Combat = p.Combat with { Monsters = snapshot } });
     }
 
     private void DrawLineOfSight(LineOfSightSettings los)

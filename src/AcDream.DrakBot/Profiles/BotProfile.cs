@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcDream.DrakBot.Combat;
 using AcDream.DrakBot.Loot;
 using AcDream.DrakBot.Navigation;
 
@@ -119,6 +120,20 @@ public sealed record CombatSettings
 
     /// <summary>Names never attacked.</summary>
     public IReadOnlyList<string> IgnoreNames { get; init; } = [];
+
+    /// <summary>
+    /// The VTank-style monster list: per kind of monster, whether to fight
+    /// it and how. Empty means every hostile is fought the same way with
+    /// the element keyword above; with rules, a monster no rule matches
+    /// falls to the rule named Default, and is left alone without one.
+    /// </summary>
+    public IReadOnlyList<MonsterRule> Monsters { get; init; } = [];
+
+    /// <summary>Rules that allow a ring cast one when this many hostiles stand within ring range.</summary>
+    public int MinRingTargets { get; init; } = 3;
+
+    /// <summary>How far a ring reaches; zero never rings.</summary>
+    public float RingRangeMeters { get; init; } = 8f;
 
     /// <summary>Return to peace mode once nothing is left to fight.</summary>
     public bool LeaveCombatWhenIdle { get; init; } = true;

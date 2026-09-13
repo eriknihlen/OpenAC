@@ -446,7 +446,7 @@ public sealed class CombatBehavior(
         CombatSettings combat,
         in PluginCombatTarget target)
     {
-        if (!spells.TryBestAttack(combat.ElementKeyword, out PluginSpellInfo spell))
+        if (!ChooseSpell(context, combat, target, out PluginSpellInfo spell))
             return BehaviorStep.Fail("no castable attack spell");
         if (casts.IsOnCooldown(spell.SpellId))
             return BehaviorStep.Continue;
@@ -455,6 +455,66 @@ public sealed class CombatBehavior(
             return BehaviorStep.Fail($"{spell.Name}: {result}");
         EnterPhase(Phase.Casting, context.Board.Now);
         return BehaviorStep.Continue;
+    }
+
+    /// <summary>
+    /// The next spell for a target under the monster list: a debuff the
+    /// rule wants that the target does not carry yet (the client tracks
+    /// what the character landed), else the rule's war spell - a ring when
+    /// enough hostiles crowd within ring range. Without a rule the
+    /// profile's element keyword picks the best direct attack as before.
+    /// </summary>
+    private bool ChooseSpell(
+        BehaviorContext context,
+        CombatSettings combat,
+        in PluginCombatTarget target,
+        out PluginSpellInfo spell)
+    {
+        MonsterRule? rule = combat.Monsters.Count > 0 ? MonsterRules.For(combat.Monsters, target.Name) : null;
+        if (rule is null)
+            return spells.TryBestAttack(combat.ElementKeyword, out spell);
+
+        string element = rule.Element.Equals("Auto", StringComparison.OrdinalIgnoreCase)
+            ? (combat.ElementKeyword.Length > 0 ? combat.ElementKeyword : "Fire")
+            : rule.Element;
+
+        IReadOnlyList<PluginTrackedEnchantment> landed = context.Surface.Enchantments.Capture(target.ObjectId);
+        foreach ((DebuffKind kind, string debuffElement) in MonsterRules.Debuffs(rule, element))
+        {
+            if (!spells.TryBestDebuff(kind, debuffElement, out PluginSpellInfo debuff))
+                continue;
+            bool present = false;
+            foreach (PluginTrackedEnchantment enchantment in landed)
+            {
+                if (enchantment.Family == debuff.Family && enchantment.SecondsRemaining > 5d)
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present)
+            {
+                spell = debuff;
+                return true;
+            }
+        }
+
+        bool ring = false;
+        if (rule.UseRing && combat.RingRangeMeters > 0f)
+        {
+            int crowd = 0;
+            foreach (PluginCombatTarget hostile in context.Board.Hostiles)
+            {
+                if (!(hostile.IsHealthKnown && hostile.HealthFraction <= 0f) && hostile.Distance <= combat.RingRangeMeters)
+                    crowd++;
+            }
+            ring = crowd >= Math.Max(1, combat.MinRingTargets);
+        }
+        if (spells.TryBestOffensive(element, rule.Shape, ring, out spell))
+            return true;
+        if (ring && spells.TryBestOffensive(element, rule.Shape, ring: false, out spell))
+            return true;
+        return spells.TryBestAttack(combat.ElementKeyword, out spell);
     }
 
     private void EnterPhase(Phase phase, double now)

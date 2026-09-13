@@ -11,9 +11,22 @@ internal sealed class FakeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation, ILootAutomation, INavigationAutomation,
       IItemAutomation, IWorldObjectAutomation, IProjectileAutomation,
-      IMovementProbeAutomation
+      IMovementProbeAutomation, IEnchantmentAutomation
 {
     public List<string> Commands { get; } = [];
+
+    // ── enchantments the character landed on others ───────────────────────
+    /// <summary>Tracked enchantments per target, as the client records the character's own casts.</summary>
+    public List<PluginTrackedEnchantment> Landed { get; } = [];
+    public IReadOnlyList<PluginTrackedEnchantment> Capture(uint targetObjectId) =>
+        Landed.Where(e => e.TargetObjectId == targetObjectId).ToArray();
+    public bool ReportCast(uint targetObjectId, uint spellId, double durationSeconds)
+    {
+        uint family = SelfBuffs.Concat(CombatSpells).Concat(AttackSpells)
+            .Where(s => s.SpellId == spellId).Select(s => s.Family).FirstOrDefault(spellId);
+        Landed.Add(new PluginTrackedEnchantment(targetObjectId, spellId, family, 1, false, durationSeconds));
+        return true;
+    }
 
     // ── availability / character ──────────────────────────────────────────
     public bool IsAvailable { get; set; } = true;
@@ -392,6 +405,7 @@ internal sealed class FakeAutomationSurface
     public INavigationAutomation Navigation => this;
     public IItemAutomation Items => this;
     public IWorldObjectAutomation Objects => this;
+    IEnchantmentAutomation IAutomationSurface.Enchantments => this;
     public IProjectileAutomation Projectiles => this;
     public IMovementProbeAutomation MovementProbe => this;
 }
@@ -414,6 +428,21 @@ internal static class Spell
         id, name, 900u + (uint)id, tier, tier * 50, tier * 10, 0f, 0u, string.Empty, false, false)
     {
         IsOffensive = true,
+        TargetMask = 0x10u,
+    };
+
+    /// <summary>An attack spell in an explicit family, so tiers of one line share it.</summary>
+    public static PluginSpellInfo AttackIn(uint id, string name, uint family, int tier) => new(
+        id, name, family, tier, tier * 50, tier * 10, 0f, 0u, string.Empty, false, false)
+    {
+        IsOffensive = true,
+        TargetMask = 0x10u,
+    };
+
+    public static PluginSpellInfo Debuff(uint id, string name, uint family, int tier) => new(
+        id, name, family, tier, tier * 50, tier * 10, 300f, 0u, string.Empty, false, false)
+    {
+        IsDebuff = true,
         TargetMask = 0x10u,
     };
 }

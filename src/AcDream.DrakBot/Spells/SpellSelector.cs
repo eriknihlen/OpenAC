@@ -1,3 +1,4 @@
+using AcDream.DrakBot.Combat;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.DrakBot.Spells;
@@ -71,6 +72,77 @@ public sealed class SpellSelector(
             }
         }
         return bestRank != int.MinValue;
+    }
+
+    /// <summary>
+    /// The best castable war (or void) spell of an element and shape. The
+    /// family is found by the name of any tier of it, so the lore-named top
+    /// tiers ("Outlander's Insolence" for Force Streak VII) are reached
+    /// through the family rather than by name.
+    /// </summary>
+    public bool TryBestOffensive(string element, SpellShape shape, bool ring, out PluginSpellInfo spell)
+    {
+        foreach (string family in WarSpellNames.Offensive(element, shape, ring))
+        {
+            if (TryBestInFamily(catalog.KnownAttackSpells, family, out spell)
+                || TryBestInFamily(catalog.KnownCombatSpells, family, out spell))
+            {
+                return true;
+            }
+        }
+        spell = default;
+        return false;
+    }
+
+    /// <summary>The best castable tier of a creature debuff for a monster rule.</summary>
+    public bool TryBestDebuff(DebuffKind kind, string element, out PluginSpellInfo spell)
+    {
+        string? family = WarSpellNames.Debuff(kind, element);
+        if (family is null)
+        {
+            spell = default;
+            return false;
+        }
+        return TryBestInFamily(catalog.KnownCombatSpells, family, out spell)
+            || TryBestInFamily(catalog.KnownAttackSpells, family, out spell);
+    }
+
+    /// <summary>
+    /// Highest castable tier in the family of <paramref name="baseName"/>:
+    /// any known tier with that base name identifies the family, and the
+    /// family's other tiers count whatever they are called.
+    /// </summary>
+    private bool TryBestInFamily(
+        IReadOnlyList<PluginSpellInfo> pool,
+        string baseName,
+        out PluginSpellInfo spell)
+    {
+        spell = default;
+        string wanted = BaseName(baseName);
+        uint family = 0u;
+        foreach (PluginSpellInfo candidate in pool)
+        {
+            if (string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+            {
+                family = candidate.Family;
+                break;
+            }
+        }
+        if (family == 0u)
+            return TryBest(pool, baseName, out spell);
+
+        int bestTier = int.MinValue;
+        foreach (PluginSpellInfo candidate in pool)
+        {
+            if (candidate.Family != family || !IsCastable(candidate.SpellId))
+                continue;
+            if (candidate.Tier > bestTier)
+            {
+                bestTier = candidate.Tier;
+                spell = candidate;
+            }
+        }
+        return bestTier != int.MinValue;
     }
 
     private bool TryBest(

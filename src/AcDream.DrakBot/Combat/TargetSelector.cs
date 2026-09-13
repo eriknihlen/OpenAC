@@ -47,6 +47,16 @@ public static class TargetSelector
                 continue;
 
             int priorityRank = PriorityRank(candidate.Name, settings.PriorityNames);
+            if (settings.Monsters.Count > 0)
+            {
+                // The monster list decides first: no rule (and no Default)
+                // or a zero priority leaves the monster alone; a higher
+                // priority ranks ahead of the name lists.
+                MonsterRule? rule = MonsterRules.For(settings.Monsters, candidate.Name);
+                if (rule is null || rule.Priority <= 0)
+                    continue;
+                priorityRank = Math.Min(priorityRank, int.MaxValue - 1) - rule.Priority * 1_000_000;
+            }
             float distance = candidate.ObjectId == currentTargetId
                 ? candidate.Distance * 0.5f
                 : candidate.Distance;

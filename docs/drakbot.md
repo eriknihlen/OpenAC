@@ -78,6 +78,24 @@ swing, one pickup), which is what lets a heal land between two swings.
 Timing comes from `IBotClock`, advanced by the host's tick delta, so timeouts
 and back-offs are deterministic in tests.
 
+## The monster list
+
+The Combat tab's element keyword fights everything the same way. The
+Monsters tab is the VTank-style list instead: one rule per kind of monster
+(a regular expression over the name, or a substring when it is not one),
+with a priority (higher first, zero never fought), an element (or Auto for
+the profile's), the war spell's shape (bolt, arc, streak) and whether to
+ring instead once the profile's minimum number of hostiles stand within
+ring range, and the debuffs to land first - imperil, the element's
+vulnerability, a second vulnerability, fester, yield, broadside, gravity
+well. A rule named `Default` covers what nothing else matches; without one
+an unmatched monster is left alone. Debuffs are cast in that order until
+the client's record of what the character landed shows them on the
+target; spells are chosen by family, so a lore-named top tier (Outlander's
+Insolence for Force Streak VII) is reached through its lower tiers. The
+tables of spell names are in `Spells/WarSpellNames.cs`; void magic stands
+in for war when only it is known.
+
 ## Line of sight, obstacle sense and approach
 
 The client's collision is the bot's one obstacle sense, for shots and for
@@ -211,8 +229,8 @@ and `Nav builder` open from it.
   the four subsystem toggles, force rebuff, player and target vitals, and the
   current target's line-of-sight state (clear, blocked by what, strikes,
   blacklisted) and, while walking, which heading is open.
-- **Settings** - one tab per subsystem (Recharge, Combat, Buffs, Loot,
-  Navigation, Meta). Every widget edits the live profile; `Save` persists it under
+- **Settings** - one tab per subsystem (Recharge, Combat, Monsters, Buffs,
+  Loot, Navigation, Meta). Every widget edits the live profile; `Save` persists it under
   the name in the box. The Combat tab carries reach (melee reach, approach
   range, walk timeout) and the line-of-sight options (on/off, war spell
   path, launch speeds, blacklist strikes and duration, walk checks and
@@ -301,8 +319,8 @@ In rough priority order:
   steps now; a closed door in the way is still only handled by the stuck
   recoveries.
 - **Missile ammo and weapon swapping** via `IEquipmentAutomation`.
-- **Debuffs, rings and DoTs** - `ISpellCatalog.KnownCombatSpells` already
-  projects them; the combat behavior only uses direct bolts.
+- **DoTs and life magic in combat** - the monster list covers war
+  shapes, rings and the creature debuffs; drains and DoTs are not cast.
 - **Fellowship helpers** (heal a fellow, follow the leader) via
   `IFellowshipAutomation`.
 - **Meta state machine.** RynthScript is the intended language; the engine
