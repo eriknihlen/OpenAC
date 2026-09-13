@@ -27,7 +27,7 @@ internal sealed class AppAutomationSurface
       IRuntimeCommunicationObserver,
       INavigationAutomation, IWorldObjectAutomation, IWorldTimeAutomation,
       ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
-      IProjectileAutomation, IMovementProbeAutomation, ISelectionAutomation, IDisposable
+      IProjectileAutomation, IMovementProbeAutomation, IDungeonAutomation, ISelectionAutomation, IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private const int MaximumPluginChatMessages = 512;
@@ -156,6 +156,7 @@ internal sealed class AppAutomationSurface
     public IRecoveryAutomation Recovery => this;
     public IProjectileAutomation Projectiles => this;
     public IMovementProbeAutomation MovementProbe => this;
+    public IDungeonAutomation Dungeon => this;
     public ISelectionAutomation Selection => this;
 
     PluginRecoveryResult IRecoveryAutomation.ClearOneBusyReference()
@@ -1306,6 +1307,62 @@ internal sealed class AppAutomationSurface
             lock (_gate)
                 return !_disposed && _projectilePhysics is not null && IsAvailable;
         }
+    }
+
+    // ── IDungeonAutomation ───────────────────────────────────────────────
+    bool IDungeonAutomation.IsAvailable
+    {
+        get
+        {
+            lock (_gate)
+                return _projectilePhysics?.DataCache is not null && IsAvailable;
+        }
+    }
+
+    /// <summary>
+    /// The landblock's environment cells as the physics world holds them:
+    /// each cell's centre (its world transform's translation) projected to
+    /// map coordinates, and its doorway neighbours from the portal records.
+    /// </summary>
+    IReadOnlyList<PluginDungeonCell> IDungeonAutomation.CaptureCells(uint landblockId)
+    {
+        PhysicsEngine? physics;
+        lock (_gate)
+            physics = _projectilePhysics;
+        AcDream.Core.World.Cells.CellGraph? graph = physics?.DataCache?.CellGraph;
+        if (graph is null || !IsAvailable)
+            return Array.Empty<PluginDungeonCell>();
+        uint prefix = landblockId > 0xFFFFu ? landblockId & 0xFFFF0000u : landblockId << 16;
+        IReadOnlyList<AcDream.Core.World.Cells.EnvCell> cells = graph.EnvCellsIn(prefix);
+        if (cells.Count == 0)
+            return Array.Empty<PluginDungeonCell>();
+        var result = new PluginDungeonCell[cells.Count];
+        for (int index = 0; index < cells.Count; index++)
+        {
+            AcDream.Core.World.Cells.EnvCell cell = cells[index];
+            System.Numerics.Vector3 origin = cell.WorldTransform.Translation;
+            var neighbors = new List<uint>(cell.Portals.Count);
+            foreach (AcDream.Core.World.Cells.CellPortal portal in cell.Portals)
+            {
+                uint other = portal.OtherCellId;
+                if ((other & 0xFFFFu) < 0x100u || (other & 0xFFFFu) > 0xFFFDu || other == cell.Id)
+                    continue;
+                if ((other & 0xFFFF0000u) == 0u)
+                    other |= prefix;
+                if (!neighbors.Contains(other))
+                    neighbors.Add(other);
+            }
+            // The same projection ProjectNavigationPosition applies to a local
+            // position, folded for an absolute one: the world origin sits
+            // 127 landblocks and 84 units in.
+            result[index] = new PluginDungeonCell(
+                cell.Id,
+                (origin.X - 127d * 192d - 84d) / 240d,
+                (origin.Y - 127d * 192d - 84d) / 240d,
+                origin.Z / 240d,
+                neighbors);
+        }
+        return result;
     }
 
     PluginWalkProbeResult IMovementProbeAutomation.ProbeWalk(in PluginWalkProbeRequest request)

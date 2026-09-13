@@ -17,6 +17,7 @@ public sealed class BotController : IMetaBot
 {
     private readonly Func<PluginNavigationSnapshot> _navigationSnapshot;
     private readonly IPluginStorage _vtankProfiles;
+    private readonly IDungeonAutomation _dungeon;
 
     public BotController(
         BotEngine engine,
@@ -24,7 +25,9 @@ public sealed class BotController : IMetaBot
         NavigationBehavior navigation,
         SelfBuffBehavior buffs,
         Func<PluginNavigationSnapshot> navigationSnapshot,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IDungeonAutomation? dungeon = null,
+        DungeonHazards? hazards = null)
     {
         Engine = engine ?? throw new ArgumentNullException(nameof(engine));
         Store = store ?? throw new ArgumentNullException(nameof(store));
@@ -32,7 +35,11 @@ public sealed class BotController : IMetaBot
         Buffs = buffs ?? throw new ArgumentNullException(nameof(buffs));
         _navigationSnapshot = navigationSnapshot ?? throw new ArgumentNullException(nameof(navigationSnapshot));
         _vtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        _dungeon = dungeon ?? NoOpAutomationSurface.Instance;
+        Hazards = hazards ?? new DungeonHazards(NoOpPluginStorage.Instance);
     }
+
+    public DungeonHazards Hazards { get; }
 
     public BotEngine Engine { get; }
 
@@ -202,6 +209,146 @@ public sealed class BotController : IMetaBot
             TargetName = targetName,
         });
         return true;
+    }
+
+    /// <summary>A UB-style jump command: <c>jump[wxzcs] [heading] [ms]</c>.</summary>
+    public bool TryJump(string verb, IReadOnlyList<string> arguments, out string message)
+    {
+        if (!Jumper.TryParse(verb, arguments, out PluginMovementIntent keys, out float heading, out int milliseconds, out message))
+            return false;
+        Engine.Jumper.Start(keys, heading, milliseconds, Engine.Clock.Now);
+        message = float.IsNaN(heading)
+            ? $"jumping ({milliseconds} ms)"
+            : $"jumping toward {heading:0} ({milliseconds} ms)";
+        return true;
+    }
+
+    // ── Dungeon planning ────────────────────────────────────────────────
+
+    /// <summary>The loaded dungeon's cell graph around the character, or null when outdoors or unavailable.</summary>
+    private Dictionary<uint, PluginDungeonCell>? DungeonGraph(out PluginNavigationSnapshot snapshot, out string problem)
+    {
+        snapshot = _navigationSnapshot();
+        problem = string.Empty;
+        if (!snapshot.IsAvailable)
+        {
+            problem = "position unknown; not in world?";
+            return null;
+        }
+        if (snapshot.Position.IsOutdoor || (snapshot.Position.CellId & 0xFFFFu) < 0x100u)
+        {
+            problem = "not in a dungeon";
+            return null;
+        }
+        if (!_dungeon.IsAvailable)
+        {
+            problem = "the host has no dungeon cell graph";
+            return null;
+        }
+        IReadOnlyList<PluginDungeonCell> cells = _dungeon.CaptureCells(snapshot.Position.CellId);
+        if (cells.Count == 0)
+        {
+            problem = "no cells loaded for this dungeon";
+            return null;
+        }
+        return DungeonPathfinder.Graph(cells);
+    }
+
+    /// <summary>
+    /// Builds a looping patrol over the dungeon's main route from where the
+    /// character stands, avoiding marked hazards, and follows it. Standing in
+    /// a hazard, the walk starts from the nearest safe cell.
+    /// </summary>
+    public bool TryStartPatrol(out string message)
+    {
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out message);
+        if (graph is null)
+            return false;
+        IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
+        uint start = graph.ContainsKey(snapshot.Position.CellId)
+            ? snapshot.Position.CellId
+            : DungeonPathfinder.NearestCell(graph, snapshot.Position);
+        if (hazards.Contains(start))
+        {
+            uint safe = DungeonPathfinder.NearestSafeCell(graph, start, hazards);
+            if (safe != 0u)
+                start = safe;
+        }
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}");
+        if (route.IsEmpty)
+        {
+            message = "nothing to patrol here";
+            return false;
+        }
+        DraftRoute = route;
+        Navigation.SetRoute(route);
+        if (!Profile.Navigation.Enabled)
+            Update(p => p with { Navigation = p.Navigation with { Enabled = true } });
+        message = $"patrolling {graph.Count} cells over {route.Waypoints.Count} steps";
+        return true;
+    }
+
+    /// <summary>Plans a route through the dungeon to a map coordinate and follows it.</summary>
+    public bool TryGoTo(double northSouth, double eastWest, out string message)
+    {
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out message);
+        if (graph is null)
+            return false;
+        IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
+        uint start = graph.ContainsKey(snapshot.Position.CellId)
+            ? snapshot.Position.CellId
+            : DungeonPathfinder.NearestCell(graph, snapshot.Position);
+        var destination = new PluginNavigationPosition(0u, eastWest, northSouth, snapshot.Position.Elevation, 0f, false);
+        uint goal = DungeonPathfinder.NearestCell(graph, destination);
+        List<uint> path = DungeonPathfinder.FindPath(graph, start, goal, hazards);
+        if (path.Count == 0)
+        {
+            message = "no walkable way there";
+            return false;
+        }
+        Route route = DungeonPathfinder.BuildRoute(graph, path, destination, "goto");
+        DraftRoute = route;
+        Navigation.SetRoute(route);
+        if (!Profile.Navigation.Enabled)
+            Update(p => p with { Navigation = p.Navigation with { Enabled = true } });
+        message = $"going there through {path.Count} cells, {route.Waypoints.Count} steps";
+        return true;
+    }
+
+    /// <summary>Marks the cell the character stands in as a hazard.</summary>
+    public bool TryMarkHazard(out string message)
+    {
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        if (!snapshot.IsAvailable || (snapshot.Position.CellId & 0xFFFFu) < 0x100u)
+        {
+            message = "not in a dungeon cell";
+            return false;
+        }
+        message = Hazards.Add(snapshot.Position.CellId)
+            ? $"cell 0x{snapshot.Position.CellId:X8} marked as a hazard"
+            : $"cell 0x{snapshot.Position.CellId:X8} was already marked";
+        return true;
+    }
+
+    public bool TryUnmarkHazard(out string message)
+    {
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        if (!snapshot.IsAvailable || (snapshot.Position.CellId & 0xFFFFu) < 0x100u)
+        {
+            message = "not in a dungeon cell";
+            return false;
+        }
+        message = Hazards.Remove(snapshot.Position.CellId)
+            ? $"cell 0x{snapshot.Position.CellId:X8} is no longer a hazard"
+            : $"cell 0x{snapshot.Position.CellId:X8} was not marked";
+        return true;
+    }
+
+    public void ClearHazards()
+    {
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        if (snapshot.IsAvailable)
+            Hazards.Clear(snapshot.Position.CellId);
     }
 
     // ── The meta's view (IMetaBot) ──────────────────────────────────────

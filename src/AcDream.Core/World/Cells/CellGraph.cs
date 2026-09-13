@@ -30,6 +30,20 @@ public sealed class CellGraph
 
     public bool Contains(uint envCellId) => _envCells.ContainsKey(envCellId);
 
+    /// <summary>The loaded environment cells of one landblock (its upper 16 bits), in id order.</summary>
+    public IReadOnlyList<EnvCell> EnvCellsIn(uint landblockPrefix)
+    {
+        uint prefix = landblockPrefix & 0xFFFF0000u;
+        var cells = new List<EnvCell>();
+        foreach (KeyValuePair<uint, EnvCell> pair in _envCells)
+        {
+            if ((pair.Key & 0xFFFF0000u) == prefix)
+                cells.Add(pair.Value);
+        }
+        cells.Sort(static (left, right) => left.Id.CompareTo(right.Id));
+        return cells;
+    }
+
     public void Add(EnvCell cell) =>
         _collisionWorld.Current.TryAddEnvCell(cell.Id, cell);
 

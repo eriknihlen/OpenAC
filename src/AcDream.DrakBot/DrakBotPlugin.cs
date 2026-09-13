@@ -1,6 +1,7 @@
 using AcDream.DrakBot.Behaviors;
 using AcDream.DrakBot.Combat;
 using AcDream.DrakBot.Meta;
+using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
 using AcDream.DrakBot.Spells;
 using AcDream.Plugin.Abstractions;
@@ -34,6 +35,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
     private IDisposable? _commandLease;
     private IDisposable? _aliasLease;
     private IDisposable? _vtLease;
+    private IDisposable? _ubLease;
     private IDisposable? _panelLease;
     private IDisposable? _drawerLease;
     private bool _enabled;
@@ -84,7 +86,9 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             navigation,
             buffs,
             () => surface.Navigation.Snapshot,
-            host.VtankProfiles);
+            host.VtankProfiles,
+            surface.Dungeon,
+            new DungeonHazards(host.Storage));
         _commands = new BotCommands(_controller, surface.Chat);
         BotCommands commands = _commands;
         _controller.CommandHandler = text =>
@@ -122,6 +126,15 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // VTank metas and habits speak /vt; the meta engine translates it.
         _vtLease = _host.Commands.Register("vt", command =>
             _controller?.Meta?.SendCommand(command.RawText));
+        // UtilityBelt metas jump with /ub jump...; anything else /ub is not ours.
+        _ubLease = _host.Commands.Register("ub", command =>
+        {
+            string[] words = command.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (words.Length > 0 && words[0].StartsWith("jump", StringComparison.OrdinalIgnoreCase))
+                _commands?.Handle(new PluginCommand("drakbot", command.Arguments, "/drakbot " + command.Arguments));
+            else
+                _host?.Automation.Chat.PostSystemMessage("DrakBot answers /ub jump only; see /drakbot");
+        });
         if (_drawWindows is not null && _host.ImmediateUi.IsAvailable)
         {
             _drawerLease = _host.ImmediateUi.Register("dashboard", _drawWindows);
@@ -156,6 +169,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _aliasLease = null;
         _vtLease?.Dispose();
         _vtLease = null;
+        _ubLease?.Dispose();
+        _ubLease = null;
         _drawerLease?.Dispose();
         _drawerLease = null;
         _panelLease?.Dispose();

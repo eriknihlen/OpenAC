@@ -53,6 +53,9 @@ public sealed class BotEngine
     /// <summary>The meta, when one is wired in. It thinks every tick, beside the behaviors.</summary>
     public Meta.MetaEngine? Meta { get; set; }
 
+    /// <summary>A jump in progress takes the character over from the behaviors until it lands.</summary>
+    public Navigation.Jumper Jumper { get; } = new();
+
     public void Start()
     {
         if (IsRunning)
@@ -77,7 +80,7 @@ public sealed class BotEngine
     public void Tick(double elapsedSeconds)
     {
         _clock.Advance(elapsedSeconds);
-        if (!IsRunning && Meta is null)
+        if (!IsRunning && Meta is null && !Jumper.IsBusy)
             return;
 
         Blackboard board = Blackboard.Capture(
@@ -89,6 +92,21 @@ public sealed class BotEngine
         // its rules only fire while it does. It may change the profile or
         // the route the behaviors are about to read.
         Meta?.Think(board, IsRunning);
+        if (Jumper.IsBusy)
+        {
+            // The jump owns the keys; whatever was running lets go first.
+            if (_active is not null && _lastContext is not null)
+            {
+                SafeInterrupt(_active, _lastContext);
+                _active = null;
+            }
+            if (Jumper.Tick(_surface.Navigation, board.Navigation, board.Now))
+            {
+                LastReason = "jumping";
+                LastBoard = board;
+                return;
+            }
+        }
         if (!IsRunning)
             return;
         var context = new BehaviorContext(_surface, _log, board);

@@ -62,7 +62,8 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
   Spells/            SpellSelector (name -> best known tier), CastTracker
   Combat/            TargetSelector, LineOfSightService
   Loot/              LootRule / LootRuleSet (own JSON format)
-  Navigation/        Route / Waypoint, NavFile (.nav), RouteFollower, Walker, RouteActionRunner
+  Navigation/        Route / Waypoint, NavFile (.nav), RouteFollower, Walker, RouteActionRunner,
+                     DungeonPathfinder (A*, patrols), DungeonHazards, Jumper
   Meta/              MetaEngine (states/rules), ExpressionEngine, MetaWorld, .af/.met parsers
   Profiles/          BotProfile (JSON), BotStore (plugin storage)
 ```
@@ -185,6 +186,36 @@ and `WalkPathProbe.cs`) and are covered by synthetic-landblock tests (walls,
 steps, ledges, cliffs, bystanders, arcs) plus installed-dat tests against a
 real dungeon's walls and ceiling.
 
+## Dungeon patrols and paths
+
+`IDungeonAutomation` hands the bot the loaded dungeon's cell graph: every
+environment cell's centre and the cells it shares a doorway with (the
+client's portal records - never what a cell can see, so no edge cuts
+through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
+
+- an edge that climbs or falls steeper than 45 degrees, centre to centre,
+  is a drop the character cannot walk and is never taken;
+- A* finds the shortest doorway-to-doorway path, routing around cells the
+  operator marked as hazards (`/drakbot hazard add` marks the cell the
+  character stands in; the marks are kept per landblock in the plugin's
+  storage);
+- a path is walked through doorway points - 30% of the way to the next
+  cell to square up on the doorway, then the doorway itself - and ends at
+  the exact destination; points within 1.5 m of the segment between their
+  neighbours are dropped, but the far end of an out-and-back spur is kept;
+- `/drakbot patrol` builds a looping patrol over the dungeon's main route
+  (the cells on a cycle or between junctions, dead-end spurs stripped, or
+  everything reachable in a small or linear dungeon): a closed walk that
+  covers every corridor once and takes loop-closing edges, so a loop is
+  walked round rather than in and out, closed back to the start. Standing
+  in a hazard, the walk starts from the nearest safe cell.
+- `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.
+
+A UtilityBelt-style jump - `/drakbot jump[w|x|z|c|s] [heading] [ms]`, also
+as `/ub jump...` so UB metas work - faces the heading, holds the jump key
+with the named movement keys for the given time, lets go, and takes the
+character over from the behaviors until it lands.
+
 ## Metas
 
 A meta is the VTank-style state machine that sits above the behaviors: a
@@ -266,6 +297,8 @@ game's own look.
 /drakbot buffs|combat|loot on|off
 /drakbot los on|off | debug on|off
 /drakbot meta load <name> | clear | on | off | state <name> | states | debug on|off | eval <expr> | status
+/drakbot patrol | goto <NS> <EW> | hazard add|remove|clear
+/drakbot jump[w|x|z|c|s] [heading] [ms]      (also /ub jump...)
 /vt <anything VTank>      (translated by the meta engine)
 ```
 

@@ -53,7 +53,21 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 case "meta":
                     MetaCommand(rest);
                     break;
+                case "patrol":
+                    Say(controller.TryStartPatrol(out string patrol) ? patrol : $"cannot patrol: {patrol}");
+                    break;
+                case "goto":
+                    GoTo(rest);
+                    break;
+                case "hazard":
+                    Hazard(rest);
+                    break;
                 default:
+                    if (verb.StartsWith("jump", StringComparison.Ordinal))
+                    {
+                        Say(controller.TryJump(verb, rest, out string jump) ? jump : $"cannot jump: {jump}");
+                        break;
+                    }
                     Help();
                     break;
             }
@@ -272,6 +286,65 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say("/drakbot style melee|missile|magic; /drakbot buffs|combat|loot on|off");
         Say("/drakbot los on|off; /drakbot los debug on|off");
         Say("/drakbot meta load <name>|clear|on|off|state <name>|states|debug on|off|eval <expr>|status");
+        Say("/drakbot patrol; /drakbot goto <NS> <EW>; /drakbot hazard add|remove|clear");
+        Say("/drakbot jump[w|x|z|c|s] [heading] [ms]   (also /ub jump...)");
+    }
+
+    private void GoTo(string[] args)
+    {
+        RequireArgument(args, 1, "goto <NS> <EW>   (e.g. 41.5N 34.2E)");
+        if (!TryCoordinate(args[0], 'N', 'S', out double northSouth) || !TryCoordinate(args[1], 'E', 'W', out double eastWest))
+        {
+            Say("usage: /drakbot goto <NS> <EW>, e.g. 41.5N 34.2E");
+            return;
+        }
+        Say(controller.TryGoTo(northSouth, eastWest, out string message) ? message : $"cannot go there: {message}");
+    }
+
+    private void Hazard(string[] args)
+    {
+        string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "add";
+        switch (sub)
+        {
+            case "add":
+                controller.TryMarkHazard(out string added);
+                Say(added);
+                break;
+            case "remove":
+                controller.TryUnmarkHazard(out string removed);
+                Say(removed);
+                break;
+            case "clear":
+                controller.ClearHazards();
+                Say("hazards cleared for this dungeon");
+                break;
+            default:
+                Say("usage: /drakbot hazard add|remove|clear   (marks the cell you stand in)");
+                break;
+        }
+    }
+
+    /// <summary>Reads a coordinate the way the game prints it: 41.5N, 34.2E, or a bare signed number.</summary>
+    private static bool TryCoordinate(string text, char positive, char negative, out double value)
+    {
+        string trimmed = text.Trim();
+        double sign = 1d;
+        if (trimmed.Length > 0 && char.ToUpperInvariant(trimmed[^1]) == char.ToUpperInvariant(negative))
+        {
+            sign = -1d;
+            trimmed = trimmed[..^1];
+        }
+        else if (trimmed.Length > 0 && char.ToUpperInvariant(trimmed[^1]) == char.ToUpperInvariant(positive))
+        {
+            trimmed = trimmed[..^1];
+        }
+        if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out double magnitude))
+        {
+            value = 0d;
+            return false;
+        }
+        value = sign * magnitude;
+        return true;
     }
 
     private void MetaCommand(string[] args)
