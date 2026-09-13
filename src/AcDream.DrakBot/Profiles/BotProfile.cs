@@ -40,6 +40,8 @@ public sealed record BotProfile
 
     public SpellTierSettings SpellTiers { get; init; } = new();
 
+    public PrioritySettings Priorities { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -361,6 +363,18 @@ public sealed record SpellTierSettings
     public IReadOnlyList<int> CombatMinimums { get; init; } = [0, 85, 135, 185, 235, 285, 335, 435];
 
     public IReadOnlyList<int> BuffMinimums { get; init; } = [0, 85, 135, 185, 235, 285, 335, 435];
+}
+
+/// <summary>
+/// User overrides of the behavior order: navigation or looting lifted
+/// above combat. Survival and buffing stay on top whatever is set, and a
+/// fight already under way is not left for a corpse.
+/// </summary>
+public sealed record PrioritySettings
+{
+    public bool BoostNavigation { get; init; }
+
+    public bool BoostLooting { get; init; }
 }
 
 /// <summary>Salvaging looted items with the Ust, and merging the bags.</summary>

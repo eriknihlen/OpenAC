@@ -66,6 +66,9 @@ public sealed class CombatBehavior(
 
     public bool IsBackingOff => _phase == Phase.BackingOff;
 
+    /// <summary>Mid-fight: a target chosen and an attack or cast under way, so a priority boost does not pull the bot off it.</summary>
+    public bool IsEngaged => _targetId != 0u && _phase is not Phase.Idle;
+
     /// <summary>The heading the approach step is currently walking, or NaN.</summary>
     public float ApproachHeadingDegrees { get; private set; } = float.NaN;
 

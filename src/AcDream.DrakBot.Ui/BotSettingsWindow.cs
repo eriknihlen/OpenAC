@@ -767,6 +767,16 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Priority over combat (survival and buffing always come first)");
+        bool boostNav = controller.Profile.Priorities.BoostNavigation;
+        if (ImGui.Checkbox("Walk the route before fighting", ref boostNav))
+            controller.Update(p => p with { Priorities = p.Priorities with { BoostNavigation = boostNav } });
+        ImGui.SameLine();
+        bool boostLoot = controller.Profile.Priorities.BoostLooting;
+        if (ImGui.Checkbox("Loot before fighting", ref boostLoot))
+            controller.Update(p => p with { Priorities = p.Priorities with { BoostLooting = boostLoot } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Following (a name, or 'leader'; empty walks the route)");
         string follow = navigation.Follow;
         if (ImGui.InputText("Follow", ref follow, 64))

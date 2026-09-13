@@ -129,9 +129,25 @@ public sealed class BotEngine
         }
 
         // A strictly higher-priority behavior may preempt the active one.
+        // The profile's boosts lift navigation or looting above combat,
+        // never above survival and buffing.
+        PrioritySettings boosts = Profile.Priorities;
+        bool engaged = false;
         foreach (IBehavior behavior in _behaviors)
         {
-            if (_active is not null && behavior.Priority >= _active.Priority)
+            if (behavior is CombatBehavior { IsEngaged: true })
+                engaged = true;
+        }
+        int Rank(IBehavior behavior) => behavior.Priority switch
+        {
+            BehaviorPriority.Navigation when boosts.BoostNavigation => (int)BehaviorPriority.Buffing + 5,
+            BehaviorPriority.Looting when boosts.BoostLooting && !engaged => (int)BehaviorPriority.Buffing + 6,
+            _ => (int)behavior.Priority,
+        };
+        int activeRank = _active is null ? int.MaxValue : Rank(_active);
+        foreach (IBehavior behavior in _behaviors.OrderBy(Rank))
+        {
+            if (_active is not null && Rank(behavior) >= activeRank)
                 break;
             if (!behavior.WantsControl(board, out string reason))
                 continue;

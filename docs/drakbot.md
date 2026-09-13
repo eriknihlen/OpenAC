@@ -57,13 +57,16 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
       vitals         Survival    heal / revitalize / mana, idle top-off, heal fellows; healing-kit fallback
       buffs          Buffing     keep configured self-buff families, weapon auras and armor spells up
       pets           Buffing     summon a combat pet from an essence when hostiles crowd in
-      combat         Combat      target selection, line of sight, approach, swing or war spell
+      manastones     Buffing     recharge worn items from stones; drain surplus loot into empty ones
+      combat         Combat      target selection, line of sight, approach, swing or war spell; fletches ammo
       loot           Looting     open corpse, appraise on demand, pick up by rule or VTank .utl
+      salvage        Salvage     salvage what was looted under a salvage rule; merge partial bags
       doors          Doors       open a closed door in the way of the walk
-      nav            Navigation  follow a route through the Walker
-  Spells/            SpellSelector (name -> best known tier), CastTracker
-  Combat/            TargetSelector, LineOfSightService
-  Loot/              LootRule / LootRuleSet (own JSON format)
+      nav            Navigation  follow a route through the Walker, or a player
+    InventoryTidy    beside the behaviors: autostack and autocram
+  Spells/            SpellSelector (name -> best known tier), SpellTierGate, CastTracker
+  Combat/            TargetSelector, LineOfSightService, WeaponReadiness, AmmoCrafter
+  Loot/              LootRule / LootRuleSet (own JSON format); Utl/ for VTank .utl
   Navigation/        Route / Waypoint, NavFile (.nav), RouteFollower, Walker, RouteActionRunner,
                      DungeonPathfinder (A*, patrols), DungeonHazards, Jumper
   Meta/              MetaEngine (states/rules), ExpressionEngine, MetaWorld, .af/.met parsers
@@ -75,6 +78,9 @@ engine asks, in order, whether anything strictly higher than the running
 behavior wants control; if so the running one is `Interrupt`ed and loses the
 tick. A running behavior otherwise keeps control while its `Execute` returns
 `Continue`. `Done` and `Failed` release control and re-arbitrate next tick.
+The Navigation tab's two boosts lift navigation or looting above combat
+(VTank's navpriorityboost / lootpriorityboost); survival and buffing stay
+on top, and a fight already under way is not left for a corpse.
 Every behavior is written so that one step is one action (one cast, one
 swing, one pickup), which is what lets a heal land between two swings.
 

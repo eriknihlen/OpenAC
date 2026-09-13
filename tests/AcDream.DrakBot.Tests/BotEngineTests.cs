@@ -76,6 +76,34 @@ public sealed class BotEngineTests
     }
 
     [Fact]
+    public void BoostsLiftNavigationAndLootingAboveCombatButNotBuffing()
+    {
+        var surface = new FakeAutomationSurface();
+        var buffs = new ScriptedBehavior("buffs", BehaviorPriority.Buffing) { Wants = false };
+        var combat = new ScriptedBehavior("combat", BehaviorPriority.Combat) { Wants = true };
+        var loot = new ScriptedBehavior("loot", BehaviorPriority.Looting) { Wants = true };
+        var nav = new ScriptedBehavior("nav", BehaviorPriority.Navigation) { Wants = true };
+        var engine = new BotEngine(surface, new FakeLogger(), [nav, loot, combat, buffs]);
+        engine.Start();
+
+        engine.Tick(0.1);
+        Assert.Equal("combat", engine.ActiveBehaviorName);
+
+        engine.Profile = engine.Profile with { Priorities = new() { BoostNavigation = true } };
+        engine.Tick(0.1);
+        Assert.Equal("nav", engine.ActiveBehaviorName);
+        Assert.Equal(1, combat.Interrupts);
+
+        engine.Profile = engine.Profile with { Priorities = new() { BoostLooting = true } };
+        engine.Tick(0.1);
+        Assert.Equal("loot", engine.ActiveBehaviorName);
+
+        buffs.Wants = true;
+        engine.Tick(0.1);
+        Assert.Equal("buffs", engine.ActiveBehaviorName);
+    }
+
+    [Fact]
     public void StopInterruptsTheActiveBehavior()
     {
         var surface = new FakeAutomationSurface();
