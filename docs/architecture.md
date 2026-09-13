@@ -44,7 +44,8 @@ is open.
 | `AcDream.UI.Abstractions` | Input actions, key chords and bindings, the input dispatcher, view models, and panel contracts shared by the game UI and plugins. | Core, Runtime |
 | `AcDream.Plugin.Abstractions` | The BCL-only contract plugins compile against: game state, events, commands, and markup panels. Plugins never reference `AcDream.App`. | BCL |
 | `AcDream.Plugins.MossTank` | A complete bundled plugin: VTank-style automation with the familiar tabbed UI. Doubles as the reference for plugin authors. | Plugin.Abstractions |
-| `AcDream.DrakBot` | DrakBot, the built-in bot: a gameplay plugin compiled into the client and hosted through `PluginSession.AddBuiltIn`. Its windows are Dear ImGui through the host's immediate-mode overlay. Clean-room; see `drakbot.md`. | Plugin.Abstractions, ImGui.NET |
+| `AcDream.DrakBot` | DrakBot, the built-in bot: a gameplay plugin compiled into the client and the headless host, hosted through `PluginSession.AddBuiltIn`. Clean-room; see `drakbot.md`. | Plugin.Abstractions |
+| `AcDream.DrakBot.Ui` | DrakBot's tool windows, Dear ImGui through the client's immediate-mode overlay. Only `AcDream.App` references it, so the headless host carries the bot without a presentation library. | DrakBot, Plugin.Abstractions, ImGui.NET |
 | `AcDream.Bake` | Offline tool that builds `acdream.pak` from the DAT files. | Content, Platform |
 | `AcDream.Cli` | Offline DAT inspector. | Core |
 | `AcDream.Launcher.Core` | Installer, verified downloader, atomic updater, self-updater, profiles, and the client process supervisor. Testable without a GUI. | Platform |

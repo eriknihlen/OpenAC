@@ -17,6 +17,9 @@ public sealed class DrakBotPluginHostingTests
         var plugin = new DrakBotPlugin();
 
         session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, plugin));
+        Assert.Empty(statuses); // nothing is enabled until the host starts
+        Assert.Null(plugin.Engine);
+        session.Start([], allowList: null);
 
         PluginSessionStatus status = Assert.Single(statuses);
         Assert.Equal(PluginSessionStatusKind.Loaded, status.Kind);
@@ -41,6 +44,7 @@ public sealed class DrakBotPluginHostingTests
         var session = new PluginSession(host);
         var plugin = new DrakBotPlugin();
         session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, plugin));
+        session.Start([], allowList: null);
         host.Commands.TryHandle("/drakbot start");
 
         session.Dispose();
@@ -67,6 +71,7 @@ public sealed class DrakBotPluginHostingTests
         using var session = new PluginSession(host);
         var plugin = new DrakBotPlugin();
         session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, plugin));
+        session.Start([], allowList: null);
 
         Assert.True(host.Commands.TryHandle("/drakbot style magic"));
         Assert.True(host.Commands.TryHandle("/drakbot profile save hunting"));

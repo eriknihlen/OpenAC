@@ -295,13 +295,6 @@
           "AcDream.Runtime": "[0.1.5, )"
         }
       },
-      "acdream.drakbot": {
-        "type": "Project",
-        "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.5, )",
-          "ImGui.NET": "[1.91.6.1, )"
-        }
-      },
       "acdream.content": {
         "type": "Project",
         "dependencies": {
@@ -325,6 +318,12 @@
         "type": "Project",
         "dependencies": {
           "AcDream.Core": "[0.1.5, )"
+        }
+      },
+      "acdream.drakbot": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Plugin.Abstractions": "[0.1.5, )"
         }
       },
       "acdream.launcher.core": {
@@ -396,12 +395,6 @@
           "DotNet.Standard.Common": "2.0.1",
           "ZLibDotNet": "0.1.1"
         }
-      },
-      "ImGui.NET": {
-        "type": "CentralTransitive",
-        "requested": "[1.91.6.1, )",
-        "resolved": "1.91.6.1",
-        "contentHash": "Ph3j8pO6UM28PPJWP+5LEJSPVPkd8ivpVS8tRyY9b0IHn1HDIrMZ2o/FdiXaYW6YhNxMHmbevw6Jcfs+IDKi0Q=="
       },
       "Microsoft.Extensions.Logging.Abstractions": {
         "type": "CentralTransitive",

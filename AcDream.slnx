@@ -3,6 +3,7 @@
     <Project Path="src/AcDream.App/AcDream.App.csproj" />
     <Project Path="src/AcDream.Bake/AcDream.Bake.csproj" />
     <Project Path="src/AcDream.DrakBot/AcDream.DrakBot.csproj" />
+    <Project Path="src/AcDream.DrakBot.Ui/AcDream.DrakBot.Ui.csproj" />
     <Project Path="src/AcDream.Cli/AcDream.Cli.csproj" />
     <Project Path="src/AcDream.Content/AcDream.Content.csproj" />
     <Project Path="src/AcDream.Core/AcDream.Core.csproj" />

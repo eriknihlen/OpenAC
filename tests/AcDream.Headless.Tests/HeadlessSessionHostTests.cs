@@ -272,7 +272,7 @@ public sealed class HeadlessSessionHostTests
                 .ToArray();
             Assert.Equal(
                 [
-                    "started", "connected", "characterList", "enteredWorld",
+                    "started", "pluginLoaded", "connected", "characterList", "enteredWorld",
                     "loginCommandFailed", "loginCommandFailed",
                 ],
                 events.Select(static item =>
@@ -414,7 +414,7 @@ public sealed class HeadlessSessionHostTests
                 .ToArray();
             Assert.Equal(
                 [
-                    "started", "connected", "characterList", "enteredWorld",
+                    "started", "pluginLoaded", "connected", "characterList", "enteredWorld",
                     "disconnected", "connected", "characterList", "enteredWorld",
                     "disconnected", "exited",
                 ],
@@ -473,7 +473,7 @@ public sealed class HeadlessSessionHostTests
                 .ToArray();
             Assert.Equal(
                 [
-                    "started", "connected", "characterList", "enteredWorld",
+                    "started", "pluginLoaded", "connected", "characterList", "enteredWorld",
                     "disconnected", "exited",
                 ],
                 eventNames);
@@ -661,7 +661,7 @@ public sealed class HeadlessSessionHostTests
                     JsonDocument.Parse(line).RootElement.Clone())
                 .ToArray();
             Assert.Equal(
-                ["started", "connected", "disconnected", "exited"],
+                ["started", "pluginLoaded", "connected", "disconnected", "exited"],
                 events.Select(static item =>
                     item.GetProperty("e").GetString()));
             Assert.DoesNotContain(
@@ -782,7 +782,7 @@ public sealed class HeadlessSessionHostTests
             Assert.True(host.Session.Runtime.Session.IsInWorld);
             Assert.False(host.Session.IsPolicyComplete);
             Assert.Equal(
-                ["started", "connected", "characterList", "enteredWorld"],
+                ["started", "pluginLoaded", "connected", "characterList", "enteredWorld"],
                 ReadStatusEventNames(statusPath));
 
             cancellation.Cancel();
@@ -792,7 +792,7 @@ public sealed class HeadlessSessionHostTests
             Assert.Equal(HeadlessExitCode.Success, result);
             Assert.True(host.Session.Runtime.Session.IsInWorld);
             Assert.Equal(
-                ["started", "connected", "characterList", "enteredWorld"],
+                ["started", "pluginLoaded", "connected", "characterList", "enteredWorld"],
                 ReadStatusEventNames(statusPath));
 
             host.Dispose();
@@ -804,7 +804,7 @@ public sealed class HeadlessSessionHostTests
             string[] eventNames = ReadStatusEventNames(statusPath);
             Assert.Equal(
                 [
-                    "started", "connected", "characterList", "enteredWorld",
+                    "started", "pluginLoaded", "connected", "characterList", "enteredWorld",
                     "disconnected", "exited",
                 ],
                 eventNames);

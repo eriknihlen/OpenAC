@@ -16,8 +16,13 @@ public sealed class HeadlessDependencyBoundaryTests
         "ImGui",
     ];
 
+    /// <summary>
+    /// The runtime, and DrakBot's engine so a headless session can run the
+    /// bot. The engine speaks the plugin contract only; its ImGui windows are
+    /// a separate assembly the headless host never references.
+    /// </summary>
     [Fact]
-    public void HeadlessAssemblyReferencesOnlyTheRuntimeProject()
+    public void HeadlessAssemblyReferencesOnlyTheRuntimeAndBotProjects()
     {
         string repositoryRoot = FindRepositoryRoot();
         string projectPath = Path.Combine(
@@ -38,13 +43,21 @@ public sealed class HeadlessDependencyBoundaryTests
                     '\\',
                     Path.DirectorySeparatorChar))))
             .ToArray();
-        string expected = Path.Combine(
-            repositoryRoot,
-            "src",
-            "AcDream.Runtime",
-            "AcDream.Runtime.csproj");
+        string[] expected =
+        [
+            Path.Combine(
+                repositoryRoot,
+                "src",
+                "AcDream.Runtime",
+                "AcDream.Runtime.csproj"),
+            Path.Combine(
+                repositoryRoot,
+                "src",
+                "AcDream.DrakBot",
+                "AcDream.DrakBot.csproj"),
+        ];
 
-        Assert.Equal([expected], actual);
+        Assert.Equal(expected, actual);
         Assert.Empty(project.Descendants("PackageReference"));
     }
 

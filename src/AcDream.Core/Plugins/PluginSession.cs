@@ -26,6 +26,7 @@ public sealed class PluginSession : IDisposable
     private readonly IRenderPackRegistry? _renderPacks;
     private readonly HashSet<PluginKind> _supportedKinds;
     private readonly List<ActivePlugin> _loaded = [];
+    private readonly List<BuiltInPlugin> _builtIns = [];
     private readonly List<WeakReference> _releasedContexts = [];
     private bool _started;
     private bool _disposed;
@@ -65,7 +66,8 @@ public sealed class PluginSession : IDisposable
     /// Hosts a plugin compiled into the client. It shares the scoped host,
     /// command, storage and UI facilities of a discovered plugin but has no
     /// assembly load context, so it lives and dies with the session. Built-ins
-    /// enable in call order and before anything <see cref="Start"/> discovers.
+    /// enable when <see cref="Start"/> runs, in call order and before anything
+    /// it discovers, so a host reports its own start before any plugin's.
     /// </summary>
     public void AddBuiltIn(BuiltInPlugin builtIn)
     {
@@ -74,7 +76,11 @@ public sealed class PluginSession : IDisposable
         if (_started)
             throw new InvalidOperationException(
                 "Built-in plugins must be added before the session starts.");
+        _builtIns.Add(builtIn);
+    }
 
+    private void EnableBuiltIn(BuiltInPlugin builtIn)
+    {
         var manifest = new PluginManifest(
             builtIn.Id,
             builtIn.DisplayName,
@@ -132,6 +138,10 @@ public sealed class PluginSession : IDisposable
         if (_started)
             throw new InvalidOperationException("The plugin session has already started.");
         _started = true;
+
+        foreach (BuiltInPlugin builtIn in _builtIns)
+            EnableBuiltIn(builtIn);
+        _builtIns.Clear();
 
         string[] roots = DistinctRoots(pluginRoots);
         string[]? requested = allowList is null

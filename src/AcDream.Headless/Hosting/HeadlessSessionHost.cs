@@ -288,13 +288,7 @@ internal sealed class HeadlessSessionHost : IDisposable
                 vtankProfiles,
                 descriptor.PluginSettings,
                 SubmitChatText,
-                [
-                    new BuiltInPlugin(
-                        DrakBotPlugin.Id,
-                        DrakBotPlugin.DisplayName,
-                        DrakBotPlugin.Version,
-                        new DrakBotPlugin()),
-                ]);
+                BuiltInsFor(descriptor.Plugins));
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -458,6 +452,29 @@ internal sealed class HeadlessSessionHost : IDisposable
             new RuntimeChatCommandFeedback(Runtime.CommunicationOwner),
             _chatCommandSurface,
             ChatChannelKind.Say);
+
+    /// <summary>
+    /// DrakBot rides along like a discovered plugin would: with no plugin
+    /// list every plugin loads, with one only the ids named do, so a launcher
+    /// probe or a session configured with <c>"plugins": []</c> runs without it.
+    /// </summary>
+    private static BuiltInPlugin[] BuiltInsFor(IReadOnlyList<string>? allowList)
+    {
+        if (allowList is not null
+            && !allowList.Contains(DrakBotPlugin.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        return
+        [
+            new BuiltInPlugin(
+                DrakBotPlugin.Id,
+                DrakBotPlugin.DisplayName,
+                DrakBotPlugin.Version,
+                new DrakBotPlugin()),
+        ];
+    }
 
     internal RuntimeSessionStartResult Start()
     {

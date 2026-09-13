@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- DrakBot's tool windows: Dear ImGui drawn through the host's overlay.
+       Kept apart from the engine so a host without a presentation layer
+       (headless) carries the bot without ImGui. -->
+  <PropertyGroup>
+    <RootNamespace>AcDream.DrakBot.Ui</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.DrakBot\AcDream.DrakBot.csproj" />
+    <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+    <PackageReference Include="ImGui.NET" />
+  </ItemGroup>
+</Project>

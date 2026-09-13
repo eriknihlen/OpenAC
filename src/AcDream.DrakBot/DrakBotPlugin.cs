@@ -2,17 +2,24 @@ using AcDream.DrakBot.Behaviors;
 using AcDream.DrakBot.Combat;
 using AcDream.DrakBot.Profiles;
 using AcDream.DrakBot.Spells;
-using AcDream.DrakBot.Ui;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.DrakBot;
 
 /// <summary>
-/// The built-in bot as the host sees it: a gameplay plugin that ticks the
-/// engine, owns the <c>/drakbot</c> command (and its <c>/bot</c> alias) and its windows. Nothing here touches
-/// client internals; every action goes through <see cref="IAutomationSurface"/>.
+/// DrakBot as the host sees it: a gameplay plugin that ticks the engine,
+/// owns the <c>/drakbot</c> command (and its <c>/bot</c> alias) and its
+/// windows. Nothing here touches client internals; every action goes
+/// through <see cref="IAutomationSurface"/>.
 /// </summary>
-public sealed class DrakBotPlugin : IAcDreamPlugin
+/// <remarks>
+/// The tool windows are Dear ImGui and live in <c>AcDream.DrakBot.Ui</c>
+/// so this assembly carries no presentation library; a graphical host
+/// passes a <see cref="DrakBotWindowsFactory"/> and a headless one passes
+/// nothing. Without windows the retail-look status panel stands in when the
+/// host has a UI at all.
+/// </remarks>
+public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDreamPlugin
 {
     public const string Id = "acdream.drakbot";
     public const string DisplayName = "DrakBot";
@@ -22,7 +29,7 @@ public sealed class DrakBotPlugin : IAcDreamPlugin
     private BotEngine? _engine;
     private BotController? _controller;
     private BotCommands? _commands;
-    private BotDashboard? _dashboard;
+    private Action? _drawWindows;
     private IDisposable? _commandLease;
     private IDisposable? _aliasLease;
     private IDisposable? _panelLease;
@@ -76,12 +83,12 @@ public sealed class DrakBotPlugin : IAcDreamPlugin
             buffs,
             () => surface.Navigation.Snapshot);
         _commands = new BotCommands(_controller, surface.Chat);
-        _dashboard = new BotDashboard(_controller, surface);
+        _drawWindows = windows?.Invoke(_controller, surface);
     }
 
     public void Enable()
     {
-        if (_host is null || _engine is null || _commands is null || _dashboard is null)
+        if (_host is null || _engine is null || _commands is null)
             throw new InvalidOperationException("Initialize must run before Enable.");
         if (_enabled)
             return;
@@ -90,9 +97,9 @@ public sealed class DrakBotPlugin : IAcDreamPlugin
         _host.Events.Tick += OnTick;
         _commandLease = _host.Commands.Register("drakbot", _commands.Handle);
         _aliasLease = _host.Commands.Register("bot", _commands.Handle);
-        if (_host.ImmediateUi.IsAvailable)
+        if (_drawWindows is not null && _host.ImmediateUi.IsAvailable)
         {
-            _drawerLease = _host.ImmediateUi.Register("dashboard", _dashboard.Draw);
+            _drawerLease = _host.ImmediateUi.Register("dashboard", _drawWindows);
         }
         else if (_host.HasUi)
         {
@@ -143,3 +150,9 @@ public sealed class DrakBotPlugin : IAcDreamPlugin
         }
     }
 }
+
+/// <summary>
+/// Builds the bot's tool windows for a graphical host and returns the
+/// per-frame draw callback the host's immediate-mode overlay calls.
+/// </summary>
+public delegate Action DrakBotWindowsFactory(BotController controller, IAutomationSurface surface);

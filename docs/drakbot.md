@@ -28,20 +28,29 @@ The bot is a gameplay plugin (`DrakBotPlugin : IAcDreamPlugin`) compiled into th
 client. `PluginSession.AddBuiltIn` gives it the same scoped host a discovered
 plugin gets - its own storage folder, `/drakbot` command lease (`/bot` is an alias), UI owner and event
 subscriptions - but no assembly load context, so it lives and dies with the
-session. `AcDream.App` and `AcDream.Headless` each register it with one line;
-delete that line and add a `plugin.json` and it becomes an external plugin
-without any code change.
+session. Built-ins enable when the session starts, before discovered plugins,
+so a host's own `started` status always precedes the bot's `pluginLoaded`.
+`AcDream.App` and `AcDream.Headless` each register it with one line; delete
+that line and add a `plugin.json` and it becomes an external plugin without
+any code change. The headless host treats it like a discovered plugin for
+the session's `plugins` list: absent, everything loads; present, the bot
+loads only when `acdream.drakbot` is named, so a launcher probe or a session
+with `"plugins": []` runs without it.
 
-`AcDream.DrakBot` references `AcDream.Plugin.Abstractions` and ImGui.NET only. It never sees the
-renderer, the wire protocol, or `GameRuntime`. Everything it does goes through
-`IAutomationSurface`, which is what makes it testable against a fake.
+`AcDream.DrakBot` references `AcDream.Plugin.Abstractions` only. It never sees
+the renderer, the wire protocol, or `GameRuntime`. Everything it does goes
+through `IAutomationSurface`, which is what makes it testable against a fake.
+The ImGui windows are a second assembly, `AcDream.DrakBot.Ui`, that only the
+graphical client references: it hands `DrakBotPlugin` a
+`DrakBotWindowsFactory`, and the headless host, which has no presentation
+layer, hands it nothing.
 
 ## Architecture
 
 ```
 DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
   BotController      the operations both /drakbot and the windows perform
-  Ui/                BotDashboard, BotSettingsWindow, NavBuilderWindow (ImGui)
+  ..DrakBot.Ui/      BotDashboard, BotSettingsWindow, NavBuilderWindow (ImGui, App only)
   BotEngine          priority arbiter; one Blackboard snapshot per tick
     Blackboard       vitals, enchantments, hostiles, corpses, position, casting
     IBehavior        WantsControl(board) / Execute(context) / Interrupt(context)
@@ -134,9 +143,9 @@ real dungeon's walls and ceiling.
 
 ## Windows
 
-The bot's windows are Dear ImGui, drawn by the client's immediate-mode
-overlay (`ACDREAM_IMGUI=0` turns the overlay off; the bot then falls back to
-a small retail-look status panel). The dashboard opens on start; `Settings`
+The bot's windows are Dear ImGui (`AcDream.DrakBot.Ui`), drawn by the
+client's immediate-mode overlay (`ACDREAM_IMGUI=0` turns the overlay off; the
+bot then falls back to a small retail-look status panel). The dashboard opens on start; `Settings`
 and `Nav builder` open from it.
 
 - **Dashboard** - start/stop, activity and reason, profile and route pickers,

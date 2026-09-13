@@ -187,7 +187,7 @@ GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
             AcDream.DrakBot.DrakBotPlugin.Id,
             AcDream.DrakBot.DrakBotPlugin.DisplayName,
             AcDream.DrakBot.DrakBotPlugin.Version,
-            new AcDream.DrakBot.DrakBotPlugin()),
+            new AcDream.DrakBot.DrakBotPlugin(AcDream.DrakBot.Ui.DrakBotWindows.Create)),
     ]);
 window.StartPluginHosting(pluginSession);
 

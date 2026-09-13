@@ -38,6 +38,7 @@
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
     <ProjectReference Include="..\AcDream.Core\AcDream.Core.csproj" />
     <ProjectReference Include="..\AcDream.DrakBot\AcDream.DrakBot.csproj" />
+    <ProjectReference Include="..\AcDream.DrakBot.Ui\AcDream.DrakBot.Ui.csproj" />
     <ProjectReference Include="..\AcDream.Core.Net\AcDream.Core.Net.csproj" />
     <ProjectReference Include="..\AcDream.Content\AcDream.Content.csproj" />
     <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
