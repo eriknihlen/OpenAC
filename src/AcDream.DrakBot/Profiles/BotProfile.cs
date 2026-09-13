@@ -89,6 +89,34 @@ public sealed record BuffSettings
         "Acid Protection Self",
         "Lightning Protection Self",
     ];
+
+    /// <summary>Cast the weapon auras below on the wielded weapon.</summary>
+    public bool BuffWeapon { get; init; }
+
+    /// <summary>Self-cast auras that land on the wielded weapon.</summary>
+    public IReadOnlyList<string> WeaponSpells { get; init; } =
+    [
+        "Blood Drinker Self",
+        "Heart Seeker Self",
+        "Defender Self",
+        "Swift Killer Self",
+    ];
+
+    /// <summary>Cast the armor spells below on every equipped piece of armor.</summary>
+    public bool BuffArmor { get; init; }
+
+    /// <summary>Spells cast on each equipped armor piece.</summary>
+    public IReadOnlyList<string> ArmorSpells { get; init; } =
+    [
+        "Impenetrability",
+        "Acid Bane",
+        "Blade Bane",
+        "Bludgeoning Bane",
+        "Flame Bane",
+        "Frost Bane",
+        "Lightning Bane",
+        "Piercing Bane",
+    ];
 }
 
 public enum CombatStyle

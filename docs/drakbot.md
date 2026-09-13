@@ -55,7 +55,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
     Blackboard       vitals, enchantments, hostiles, corpses, position, casting
     IBehavior        WantsControl(board) / Execute(context) / Interrupt(context)
       vitals         Survival    heal / revitalize / mana; healing-kit fallback
-      buffs          Buffing     keep configured self-buff families up
+      buffs          Buffing     keep configured self-buff families, weapon auras and armor spells up
       combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule
       nav            Navigation  follow a route through the Walker

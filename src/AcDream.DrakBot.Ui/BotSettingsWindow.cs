@@ -400,6 +400,18 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderInt("Rebuff with (seconds left)", ref rebuff, 5, 600))
             controller.Update(p => p with { Buffs = p.Buffs with { RebuffWhenRemainingSeconds = rebuff } });
 
+        bool weapon = buffs.BuffWeapon;
+        if (ImGui.Checkbox("Weapon auras", ref weapon))
+            controller.Update(p => p with { Buffs = p.Buffs with { BuffWeapon = weapon } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join(", ", buffs.WeaponSpells) + " on the wielded weapon");
+        ImGui.SameLine();
+        bool armor = buffs.BuffArmor;
+        if (ImGui.Checkbox("Armor banes", ref armor))
+            controller.Update(p => p with { Buffs = p.Buffs with { BuffArmor = armor } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join(", ", buffs.ArmorSpells) + " on every equipped piece of armor");
+
         ImGui.Spacing();
         ImGui.TextDisabled("Buffs to keep up, in cast order");
         if (ImGui.BeginListBox("##buffs", new Vector2(-1f, 180f)))

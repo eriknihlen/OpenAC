@@ -20,13 +20,66 @@ public sealed class SelfBuffBehaviorTests
         surface.SelfBuffs.Add(Spell.SelfBuff(10, "Strength Self VI", 100, 6));
         surface.SelfBuffs.Add(Spell.SelfBuff(11, "Endurance Self VI", 101, 6));
         surface.SelfBuffs.Add(Spell.SelfBuff(12, "Focus Self VI", 102, 6));
+        surface.SelfBuffs.Add(Spell.SelfBuff(13, "Blood Drinker Self VI", 103, 6));
+        surface.CombatSpells.Add(Spell.Debuff(14, "Impenetrability VI", 104, 6));
         var clock = new TickClock();
         var casts = new CastTracker(surface, clock);
         var behavior = new SelfBuffBehavior(
             new SpellSelector(surface, surface, casts.IsOnCooldown),
             casts,
-            () => settings);
+            () => settings,
+            surface);
         return (surface, behavior, clock);
+    }
+
+    private static PluginInventoryItem Armor(uint id, string name) => new(
+        id, 0u, name, 0u, 0u, 0x50000001u, 0u, 0x100u, 0u, 0u, 0u, 1, 0, 0, 0u, 0, 0, 0u,
+        false, 0d, 0, 0, 0, 0d, 0, 0, 0)
+    {
+        ObjectClass = PluginObjectClass.Armor,
+    };
+
+    [Fact]
+    public void WeaponAurasAndArmorSpellsFollowThePlayerBuffs()
+    {
+        var settings = new BuffSettings
+        {
+            Spells = ["Strength Self"],
+            WeaponSpells = ["Blood Drinker Self"],
+            ArmorSpells = ["Impenetrability"],
+            BuffWeapon = true,
+            BuffArmor = true,
+            RebuffWhenRemainingSeconds = 60d,
+        };
+        (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(settings);
+        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 1000d)); // strength already up
+        surface.OwnedItems.Add(Armor(0x8000_0001u, "Coat"));
+        surface.OwnedItems.Add(Armor(0x8000_0002u, "Leggings"));
+
+        // The aura first: a self-cast, judged by the registry and the landed record.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Contains("Blood Drinker", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal("cast:13", surface.Commands[^1]);
+        surface.CompleteCast(13, target: surface.ObjectId);
+        surface.ReportCast(surface.ObjectId, 13u, 1800d);
+        behavior.Execute(Context(surface, clock));
+
+        // Then Impenetrability on each piece of armor, once per piece.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
+        Assert.Contains("Impenetrability", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal("cast:14@2147483649", surface.Commands[^1]);
+        surface.CompleteCast(14, target: 0x8000_0001u);
+        surface.ReportCast(0x8000_0001u, 14u, 1800d);
+        behavior.Execute(Context(surface, clock));
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal("cast:14@2147483650", surface.Commands[^1]);
+        surface.CompleteCast(14, target: 0x8000_0002u);
+        surface.ReportCast(0x8000_0002u, 14u, 1800d);
+        behavior.Execute(Context(surface, clock));
+
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
     }
 
     private static BehaviorContext Context(FakeAutomationSurface surface, TickClock clock) =>

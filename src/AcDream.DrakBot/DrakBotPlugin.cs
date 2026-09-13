@@ -56,7 +56,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // exist until they do; the closures resolve it lazily.
         BotEngine engine = null!;
         var navigation = new NavigationBehavior(() => engine.Profile.Navigation);
-        var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs);
+        var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs, surface);
         var lineOfSight = new LineOfSightService(
             surface.Projectiles,
             surface.MovementProbe,
