@@ -402,13 +402,19 @@ game's own look.
 /mt | /ub use[i|l][p] <name> [on <name>] | use closestnpc|closestvendor|closestportal | select[p] <name>
 /mt | /ub give[p] <item> to <target> | loot[p] <name> | drop[p] <name> | equip[p] <name> | dequip[p] <name>
 /mt | /ub fellow create <name> | open | close | disband | quit | recruit <player> | send <chat> | logoff
+/ra give[p|xp|pp|r] [count] <item> to <player> | givea[p|xp|pp|r] <item> to <player> | givea stop
+/ra ig[p] <loot profile> to <player> | mexec <expression> | start | stop | clearbusy   (plus every /mt verb)
 ```
 
 `/mt` and `/ub` are the MagTools / UtilityBelt verbs metas lean on
 (RynthAi's set). A `p` suffix matches part of a name; `i`/`l` look only
 in the pack or only on the landscape; `loot` waits up to eight seconds
 for the corpse to open. Names resolve through the meta's view of the
-world, the nearest landscape match winning.
+world, the nearest landscape match winning. `/ra` adds RynthAi's give
+family: `givea...` queues every matching pack stack (`r` takes a regular
+expression, `xp`/`pp` match part of the player's name) and `ig` queues
+whatever a `.utl` profile would keep; the queue hands over one stack a
+quarter second, `givea stop` empties it.
 
 `nav add` records the character's current position as a waypoint on the
 draft route; `nav use` starts following the draft; `nav save` names it.

@@ -1,4 +1,5 @@
 using AcDream.Core.Selection;
+using AcDream.DrakBot.Loot.Utl;
 using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
@@ -34,8 +35,8 @@ public sealed class UtilityCommandsTests
         public void WriteText(string key, string content) => _texts[key] = content;
     }
 
-    private static PluginInventoryItem Item(uint id, string name, uint container, bool worn = false) => new(
-        id, 0u, name, 0u, container, 0u, 0u, worn ? 0x10u : 0u, 0u, 0u, 0u, 1, 0, 0, 0u, 0, 0, 0u,
+    private static PluginInventoryItem Item(uint id, string name, uint container, bool worn = false, int stack = 1) => new(
+        id, 0u, name, 0u, container, 0u, 0u, worn ? 0x10u : 0u, 0u, 0u, 0u, stack, 0, 0, 0u, 0, 0, 0u,
         false, 0d, 0, 0, 0, 0d, 0, 0, 0);
 
     private static (UtilityCommands Commands, FakeAutomationSurface Surface, FakeBot Bot, TickClock Clock) Build()
@@ -46,10 +47,28 @@ public sealed class UtilityCommandsTests
         var options = new MetaOptions { Enabled = true };
         var world = new MetaWorld(surface, new MemoryStorage(), new FakeLogger(), new SelectionState(), () => clock.Now);
         var meta = new MetaEngine(world, bot, clock, new FakeLogger(), () => options, change => options = change(options));
-        var commands = new UtilityCommands(world, meta, surface);
+        var commands = new UtilityCommands(
+            world,
+            meta,
+            surface,
+            name => name == "salvage" ? Utl : null,
+            verb => { surface.Commands.Add("bot:" + verb); return true; });
         meta.Utility = commands;
         return (commands, surface, bot, clock);
     }
+
+    private static readonly VTankLootProfile Utl = new()
+    {
+        Rules =
+        [
+            new VTankLootRule
+            {
+                Name = "Gems",
+                Action = VTankLootAction.Keep,
+                Conditions = [new VTankLootCondition(VTankNodeTypes.ObjectClass, "0", [((int)PluginObjectClass.Gem).ToString()])],
+            },
+        ],
+    };
 
     [Fact]
     public void OptionsAreReadSetRememberedAndRestoredUnderVTankNames()
@@ -116,6 +135,43 @@ public sealed class UtilityCommandsTests
         Assert.Equal("fellowopen:True", surface.Commands[^1]);
         Assert.True(commands.TryHandle("/mt send /tell Ulgrim, hello"));
         Assert.Equal("chat:/tell Ulgrim, hello", surface.Commands[^1]);
+    }
+
+    [Fact]
+    public void GiveAllQueuesEveryMatchingStackAndHandsThemOverOneAtATime()
+    {
+        (UtilityCommands commands, FakeAutomationSurface surface, _, TickClock clock) = Build();
+        surface.OwnedItems.Add(Item(11, "Prismatic Taper", surface.ObjectId, stack: 100));
+        surface.OwnedItems.Add(Item(12, "Prismatic Taper", surface.ObjectId, stack: 40));
+        surface.OwnedItems.Add(Item(13, "Yumi", surface.ObjectId, worn: true));
+        surface.OwnedItems.Add(Item(14, "Diamond", surface.ObjectId) with { ObjectClass = PluginObjectClass.Gem });
+        surface.WorldObjects.Add(new PluginWorldObject(0x3001u, 0u, "Drakkon's Mule", PluginObjectClass.Player, 0u, 0u, 0u));
+
+        Assert.True(commands.TryHandle("/ra givea Prismatic Taper to Drakkon's Mule"));
+        Assert.Equal(2, commands.QueuedGives);
+        commands.Tick(clock.Now);
+        Assert.Equal("give:11>12289", surface.Commands[^1]);
+        commands.Tick(clock.Now); // too soon for the next
+        Assert.Equal(1, commands.QueuedGives);
+        clock.Advance(0.3d);
+        commands.Tick(clock.Now);
+        Assert.Equal("give:12>12289", surface.Commands[^1]);
+        Assert.Equal(0, commands.QueuedGives);
+
+        // A counted give hands over the first stack at once; a partial player name works too.
+        Assert.True(commands.TryHandle("/ra givepp 1 taper to mule"));
+        Assert.Equal("give:11>12289", surface.Commands[^1]);
+
+        // A profile give keeps what the rules keep: the gem, not the tapers.
+        Assert.True(commands.TryHandle("/ra igp salvage to mule"));
+        Assert.Equal(1, commands.QueuedGives);
+        clock.Advance(0.3d);
+        commands.Tick(clock.Now);
+        Assert.Equal("give:14>12289", surface.Commands[^1]);
+
+        Assert.True(commands.TryHandle("/ra givea stop"));
+        Assert.True(commands.TryHandle("/ra start"));
+        Assert.Equal("bot:start", surface.Commands[^1]);
     }
 
     [Fact]

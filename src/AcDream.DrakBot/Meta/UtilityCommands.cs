@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using AcDream.DrakBot.Loot.Utl;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.DrakBot.Meta;
@@ -11,15 +13,30 @@ namespace AcDream.DrakBot.Meta;
 /// <c>p</c> suffix for partial name matches and <c>i</c>/<c>l</c> for
 /// inventory-only or landscape-only lookups. Names resolve through the
 /// meta's view of the world, so what a meta sees is what these act on.
+/// <c>/ra</c> adds RynthAi's own: the give family (<c>give[a][p|xp|pp|r]
+/// [count] &lt;item&gt; to &lt;player&gt;</c>, <c>ig[p] &lt;profile&gt; to
+/// &lt;player&gt;</c>, queued and handed over one stack at a time),
+/// <c>mexec</c>, and start/stop/pause.
 /// </summary>
-public sealed class UtilityCommands(MetaWorld world, MetaEngine meta, IAutomationSurface surface)
+public sealed class UtilityCommands(
+    MetaWorld world,
+    MetaEngine meta,
+    IAutomationSurface surface,
+    Func<string, VTankLootProfile?>? utlLoader = null,
+    Func<string, bool>? botCommand = null)
 {
     private const double PendingLootSeconds = 8d;
+    private const double GiveIntervalSeconds = 0.25d;
 
     private readonly Dictionary<string, string> _remembered = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<(uint ItemId, uint TargetId, int Amount)> _gives = new();
+    private double _lastGiveAt = double.NegativeInfinity;
     private string? _pendingLootName;
     private bool _pendingLootPartial;
     private double _pendingLootUntil;
+
+    /// <summary>Stacks waiting to be handed over.</summary>
+    public int QueuedGives => _gives.Count;
 
     /// <summary>Handles a <c>/mt</c> or <c>/ub</c> line; false when it is not one of these verbs.</summary>
     public bool TryHandle(string command)
@@ -28,11 +45,42 @@ public sealed class UtilityCommands(MetaWorld world, MetaEngine meta, IAutomatio
         if (parts.Length < 2)
             return false;
         string prefix = parts[0].ToLowerInvariant();
-        if (prefix is not ("/mt" or "/ub"))
+        if (prefix is not ("/mt" or "/ub" or "/ra"))
             return false;
         string verb = parts[1].ToLowerInvariant();
         switch (verb)
         {
+            case "givexp":
+                return Give(parts, GiveMatch.Exact, partialPlayer: true, all: false);
+            case "givepp":
+                return Give(parts, GiveMatch.Partial, partialPlayer: true, all: false);
+            case "giver":
+                return Give(parts, GiveMatch.Regex, partialPlayer: false, all: false);
+            case "givea":
+                return GiveAll(parts, GiveMatch.Exact, partialPlayer: false);
+            case "giveap":
+                return GiveAll(parts, GiveMatch.Partial, partialPlayer: false);
+            case "giveaxp":
+                return GiveAll(parts, GiveMatch.Exact, partialPlayer: true);
+            case "giveapp" or "gap":
+                return GiveAll(parts, GiveMatch.Partial, partialPlayer: true);
+            case "givear":
+                return GiveAll(parts, GiveMatch.Regex, partialPlayer: false);
+            case "ig":
+                return GiveProfile(parts, partialPlayer: false);
+            case "igp":
+                return GiveProfile(parts, partialPlayer: true);
+            case "mexec" when parts.Length >= 3:
+                Say(meta.Expressions.Evaluate(Rest(parts, 2)));
+                return true;
+            case "start" or "resume":
+                return botCommand?.Invoke("start") == true;
+            case "stop" or "pause":
+                return botCommand?.Invoke("stop") == true;
+            case "clearbusy" or "clearbugged":
+                surface.Combat.AbortPhysicalAttack();
+                surface.Navigation.ClearMovementIntent();
+                return true;
             case "opt":
                 return Opt(parts);
             case "combatstate":
@@ -96,9 +144,24 @@ public sealed class UtilityCommands(MetaWorld world, MetaEngine meta, IAutomatio
         }
     }
 
-    /// <summary>A <c>loot</c> asked for before the corpse opened is retried until it does, or times out.</summary>
+    /// <summary>
+    /// Hands over the next queued stack, and retries a <c>loot</c> asked for
+    /// before the corpse opened until it does or the wait runs out.
+    /// </summary>
     public void Tick(double now)
     {
+        if (_gives.Count > 0 && now - _lastGiveAt >= GiveIntervalSeconds)
+        {
+            (uint itemId, uint targetId, int amount) = _gives.Peek();
+            PluginItemCommandResult give = surface.Items.Give(itemId, targetId, (uint)Math.Max(0, amount));
+            if (give.Status != PluginItemCommandStatus.Busy)
+            {
+                _gives.Dequeue();
+                _lastGiveAt = now;
+                if (_gives.Count == 0)
+                    Say("give queue complete");
+            }
+        }
         if (_pendingLootName is null)
             return;
         uint container = surface.Loot.CurrentContainerId;
@@ -288,33 +351,164 @@ public sealed class UtilityCommands(MetaWorld world, MetaEngine meta, IAutomatio
         return true;
     }
 
-    private bool Give(string[] parts, bool partial)
+    private enum GiveMatch
+    {
+        Exact,
+        Partial,
+        Regex,
+    }
+
+    private bool Give(string[] parts, bool partial) =>
+        Give(parts, partial ? GiveMatch.Partial : GiveMatch.Exact, partialPlayer: true, all: false);
+
+    private bool GiveAll(string[] parts, GiveMatch match, bool partialPlayer)
+    {
+        if (parts.Length >= 3 && parts[2].Equals("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            int count = _gives.Count;
+            _gives.Clear();
+            Say(count > 0 ? $"give queue cancelled ({count} left)" : "give queue is empty");
+            return true;
+        }
+        return Give(parts, match, partialPlayer, all: true);
+    }
+
+    /// <summary>
+    /// <c>give [count] &lt;item&gt; to &lt;player&gt;</c>: one stack now, or with
+    /// <paramref name="all"/> every matching stack queued for the tick.
+    /// </summary>
+    private bool Give(string[] parts, GiveMatch match, bool partialPlayer, bool all)
     {
         if (parts.Length < 3)
             return false;
         string args = Rest(parts, 2);
-        int to = args.IndexOf(" to ", StringComparison.OrdinalIgnoreCase);
+        int to = args.LastIndexOf(" to ", StringComparison.OrdinalIgnoreCase);
         if (to < 0)
         {
-            Say("usage: /mt give[p] <item> to <target>");
+            Say("usage: give[a][p|xp|pp|r] [count] <item> to <player>");
             return true;
         }
-        string itemName = args[..to].Trim();
-        string targetName = args[(to + 4)..].Trim();
-        MetaObject? item = Find(itemName, inventory: true, landscape: false, partial);
-        if (item is null)
+        string itemPart = args[..to].Trim();
+        string playerPart = args[(to + 4)..].Trim();
+        if (itemPart.Length == 0 || playerPart.Length == 0)
+            return true;
+        int maxCount = all ? int.MaxValue : 1;
+        string[] tokens = itemPart.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (!all && tokens.Length == 2 && int.TryParse(tokens[0], out int count) && count > 0)
         {
-            Say($"item not found: '{itemName}'");
-            return true;
+            maxCount = count;
+            itemPart = tokens[1].Trim();
         }
-        MetaObject? target = Find(targetName, inventory: false, landscape: true, partial: true);
+        MetaObject? target = Find(playerPart, inventory: false, landscape: true, partialPlayer);
         if (target is null)
         {
-            Say($"target not found: '{targetName}'");
+            Say($"target not found: '{playerPart}'");
             return true;
         }
-        world.MoveItemExternal(unchecked((uint)item.Id), unchecked((uint)target.Id), 0);
+        Regex? pattern = null;
+        if (match == GiveMatch.Regex)
+        {
+            try
+            {
+                pattern = new Regex(itemPart, RegexOptions.IgnoreCase);
+            }
+            catch (ArgumentException)
+            {
+                Say($"invalid pattern: {itemPart}");
+                return true;
+            }
+        }
+        var matches = new List<MetaObject>();
+        foreach (MetaObject item in world.GetDirectInventory())
+        {
+            if (item.WieldedLocation != 0)
+                continue;
+            bool hit = match switch
+            {
+                GiveMatch.Exact => item.Name.Equals(itemPart, StringComparison.OrdinalIgnoreCase),
+                GiveMatch.Partial => item.Name.Contains(itemPart, StringComparison.OrdinalIgnoreCase),
+                _ => pattern!.IsMatch(item.Name),
+            };
+            if (hit)
+                matches.Add(item);
+            if (matches.Count >= maxCount)
+                break;
+        }
+        if (matches.Count == 0)
+        {
+            Say($"no items matching '{itemPart}'");
+            return true;
+        }
+        if (!all && matches.Count == 1)
+        {
+            world.MoveItemExternal(unchecked((uint)matches[0].Id), unchecked((uint)target.Id), Math.Max(1, matches[0].StackCount));
+            return true;
+        }
+        foreach (MetaObject item in matches)
+            _gives.Enqueue((unchecked((uint)item.Id), unchecked((uint)target.Id), Math.Max(1, item.StackCount)));
+        Say($"queued {matches.Count} stack(s) for {target.Name}");
         return true;
+    }
+
+    /// <summary><c>ig &lt;profile&gt; to &lt;player&gt;</c>: every pack item a <c>.utl</c> profile would keep is queued for the player.</summary>
+    private bool GiveProfile(string[] parts, bool partialPlayer)
+    {
+        if (parts.Length < 3)
+            return false;
+        string args = Rest(parts, 2);
+        int to = args.LastIndexOf(" to ", StringComparison.OrdinalIgnoreCase);
+        if (to < 0)
+        {
+            Say("usage: ig[p] <loot profile> to <player>");
+            return true;
+        }
+        string profileName = args[..to].Trim();
+        string playerPart = args[(to + 4)..].Trim();
+        VTankLootProfile? profile = utlLoader?.Invoke(profileName);
+        if (profile is null)
+        {
+            Say($"loot profile not found: {profileName}");
+            return true;
+        }
+        MetaObject? target = Find(playerPart, inventory: false, landscape: true, partialPlayer);
+        if (target is null)
+        {
+            Say($"target not found: '{playerPart}'");
+            return true;
+        }
+        var context = new UtlLootContext(surface);
+        int queued = 0;
+        foreach (PluginInventoryItem item in surface.Items.CaptureOwnedItems())
+        {
+            if (item.IsEquipped || (item.ContainerObjectId != world.GetPlayerId() && !IsInSidePack(item)))
+                continue;
+            VTankLootRule? matched = null;
+            foreach (VTankLootRule rule in profile.Rules)
+            {
+                if (rule.Enabled && UtlLootEvaluator.Match(rule, item, context))
+                {
+                    matched = rule;
+                    break;
+                }
+            }
+            if (matched is null || matched.Action is not (VTankLootAction.Keep or VTankLootAction.KeepUpTo))
+                continue;
+            _gives.Enqueue((item.ObjectId, unchecked((uint)target.Id), Math.Max(1, item.StackSize)));
+            queued++;
+        }
+        Say(queued > 0 ? $"queued {queued} stack(s) from '{profileName}' for {target.Name}" : $"nothing in the pack matches '{profileName}'");
+        return true;
+    }
+
+    private bool IsInSidePack(in PluginInventoryItem item)
+    {
+        uint player = world.GetPlayerId();
+        foreach (PluginInventoryItem pack in surface.Items.CaptureOwnedItems())
+        {
+            if (pack.ObjectId == item.ContainerObjectId)
+                return pack.ContainerObjectId == player;
+        }
+        return false;
     }
 
     private bool Loot(string[] parts, bool partial)

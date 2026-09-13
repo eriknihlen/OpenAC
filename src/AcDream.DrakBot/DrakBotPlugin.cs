@@ -38,6 +38,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
     private IDisposable? _vtLease;
     private IDisposable? _ubLease;
     private IDisposable? _mtLease;
+    private IDisposable? _raLease;
     private IDisposable? _panelLease;
     private IDisposable? _drawerLease;
     private bool _enabled;
@@ -136,7 +137,18 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             host.Log,
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
-        _controller.Meta.Utility = new UtilityCommands(world, _controller.Meta, surface);
+        _controller.Meta.Utility = new UtilityCommands(
+            world,
+            _controller.Meta,
+            surface,
+            LoadUtl,
+            verb =>
+            {
+                if (_commands is null)
+                    return false;
+                _commands.Handle(new PluginCommand("drakbot", verb, "/drakbot " + verb));
+                return true;
+            });
         _controller.ApplyProfileMeta();
         _drawWindows = windows?.Invoke(_controller, surface);
     }
@@ -159,6 +171,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // are the MagTools verbs (use, cast, opt, fellow, ...).
         _ubLease = _host.Commands.Register("ub", command => HandleUtility("/ub", command));
         _mtLease = _host.Commands.Register("mt", command => HandleUtility("/mt", command));
+        _raLease = _host.Commands.Register("ra", command => HandleUtility("/ra", command));
         if (_drawWindows is not null && _host.ImmediateUi.IsAvailable)
         {
             _drawerLease = _host.ImmediateUi.Register("dashboard", _drawWindows);
@@ -209,6 +222,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _ubLease = null;
         _mtLease?.Dispose();
         _mtLease = null;
+        _raLease?.Dispose();
+        _raLease = null;
         _drawerLease?.Dispose();
         _drawerLease = null;
         _panelLease?.Dispose();
