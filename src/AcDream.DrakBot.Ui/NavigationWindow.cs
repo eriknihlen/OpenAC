@@ -176,7 +176,43 @@ public sealed class NavigationWindow(BotController controller, IAutomationSurfac
 
         DrawPopups();
 
-        if (ImGui.BeginListBox("##steps", new Vector2(-1f, 220f)))
+        ImGui.Spacing();
+        ImGui.TextColored(ColYellow, "Dungeon patrol");
+        ImGui.SameLine();
+        ImGui.TextDisabled(controller.IsPatrolling ? "(patrolling)" : $"({controller.HazardCount} hazard cell(s) marked here)");
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.12f, 0.30f, 0.45f, 1f));
+        if (ImGui.Button(controller.IsPatrolling ? "Rebuild Patrol" : "Dungeon Patrol", new Vector2(110f, 25f)))
+        {
+            bool ok = controller.TryStartPatrol(out string message);
+            if (ok)
+                controller.Engine.Start();
+            Status(message);
+        }
+        ImGui.PopStyleColor();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A circular hunt through every cell of this dungeon, avoiding marked hazards; no route file needed.");
+        ImGui.SameLine();
+        if (ImGui.Button("Mark Hazard", new Vector2(100f, 25f)))
+        {
+            controller.TryMarkHazardAndReroute(out string message);
+            Status(message);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The cell the character stands in is lava/acid: the patrol keeps out of it. Hotspots in view are marked on sight as well.");
+        ImGui.SameLine();
+        if (ImGui.Button("Unmark", new Vector2(70f, 25f)))
+        {
+            controller.TryUnmarkHazard(out string message);
+            Status(message);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Clear Hazards", new Vector2(100f, 25f)))
+        {
+            controller.ClearHazards();
+            Status("hazards cleared for this dungeon");
+        }
+
+        if (ImGui.BeginListBox("##steps", new Vector2(-1f, 200f)))
         {
             for (int i = 0; i < draft.Waypoints.Count; i++)
             {

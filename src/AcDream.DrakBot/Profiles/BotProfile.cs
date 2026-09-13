@@ -459,6 +459,9 @@ public sealed record NavigationSettings
     /// </summary>
     public string Follow { get; init; } = string.Empty;
 
+    /// <summary>Start a dungeon patrol as soon as the character is in the world inside a dungeon.</summary>
+    public bool PatrolOnLogin { get; init; }
+
     /// <summary>Stop this close to the followed player and set off again a little beyond it.</summary>
     public float FollowStopMeters { get; init; } = 5f;
 

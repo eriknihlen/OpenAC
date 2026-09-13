@@ -138,6 +138,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             host.Log,
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
+        _controller.ObjectScan = surface.Objects.CaptureObjects;
         _controller.Meta.Utility = new UtilityCommands(
             world,
             _controller.Meta,
@@ -231,7 +232,12 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _panelLease = null;
     }
 
-    private void OnTick(double elapsedSeconds) => _engine?.Tick(elapsedSeconds);
+    private void OnTick(double elapsedSeconds)
+    {
+        _engine?.Tick(elapsedSeconds);
+        if (_engine is not null)
+            _controller?.Tick(_engine.Clock.Now);
+    }
 
     private static BotProfile? TryLoadDefault(BotStore store, IPluginLogger log)
     {

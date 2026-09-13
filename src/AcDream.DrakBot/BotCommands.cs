@@ -57,6 +57,12 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     Follow(rest);
                     break;
                 case "patrol":
+                    if (rest.Length > 0 && rest[0].Equals("stop", StringComparison.OrdinalIgnoreCase))
+                    {
+                        controller.ClearRoute();
+                        Say("patrol stopped");
+                        break;
+                    }
                     Say(controller.TryStartPatrol(out string patrol) ? patrol : $"cannot patrol: {patrol}");
                     break;
                 case "goto":
@@ -320,7 +326,7 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         switch (sub)
         {
             case "add":
-                controller.TryMarkHazard(out string added);
+                controller.TryMarkHazardAndReroute(out string added);
                 Say(added);
                 break;
             case "remove":

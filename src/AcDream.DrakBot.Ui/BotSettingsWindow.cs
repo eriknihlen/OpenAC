@@ -579,6 +579,10 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderFloat("Settle after a portal (s)", ref portalDelay, 0f, 15f, "%.1f"))
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
 
+        bool patrolOnLogin = navigation.PatrolOnLogin;
+        if (ImGui.Checkbox("Patrol on login (start a dungeon patrol when the character appears in a dungeon)", ref patrolOnLogin))
+            controller.Update(p => p with { Navigation = p.Navigation with { PatrolOnLogin = patrolOnLogin } });
+
         ImGui.Spacing();
         ImGui.TextDisabled("Following (a name, or 'leader'; empty walks the route)");
         string follow = navigation.Follow;

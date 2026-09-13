@@ -41,6 +41,116 @@ public sealed class BotController : IMetaBot
 
     public DungeonHazards Hazards { get; }
 
+    /// <summary>
+    /// Visible objects named like a hotspot (lava, acid pool, magma...)
+    /// mark their cell as a hazard when sighted, the way RynthAi's object
+    /// cache does; the patrol reroutes around a new one.
+    /// </summary>
+    private static readonly string[] HazardNames =
+    [
+        "lava", "pool of acid", "acid pool", "pool of fire", "pool of cold", "cesspool", "hot spring", "magma",
+    ];
+
+    /// <summary>The landscape scan the hazard watch reads; set by the plugin.</summary>
+    public Func<IReadOnlyList<PluginWorldObject>>? ObjectScan { get; set; }
+
+    private double _lastHazardScanAt = double.NegativeInfinity;
+    private uint _patrolLandblock;
+    private bool _patrolOnLoginDone;
+
+    /// <summary>The route being walked is a dungeon patrol built here.</summary>
+    public bool IsPatrolling => _patrolLandblock != 0u && Navigation.Route is { } route && route.Name.StartsWith("patrol ", StringComparison.Ordinal);
+
+    /// <summary>Hazard cells marked for the dungeon the character is in.</summary>
+    public int HazardCount
+    {
+        get
+        {
+            PluginNavigationSnapshot snapshot = _navigationSnapshot();
+            return snapshot.IsAvailable ? Hazards.For(snapshot.Position.CellId).Count : 0;
+        }
+    }
+
+    /// <summary>
+    /// Once a second: sight hazards among the visible objects and reroute an
+    /// active patrol around a new one; start the login patrol when asked.
+    /// </summary>
+    public void Tick(double now)
+    {
+        if (now - _lastHazardScanAt < 1d)
+            return;
+        _lastHazardScanAt = now;
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        if (!snapshot.IsAvailable)
+            return;
+        bool inDungeon = !snapshot.Position.IsOutdoor && (snapshot.Position.CellId & 0xFFFFu) >= 0x100u;
+
+        if (Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone && inDungeon)
+        {
+            _patrolOnLoginDone = true;
+            if (TryStartPatrol(out _))
+                Engine.Start();
+        }
+
+        if (!inDungeon || ObjectScan is null)
+            return;
+        bool sighted = false;
+        foreach (PluginWorldObject candidate in ObjectScan())
+        {
+            if (candidate.IsOwned || !candidate.HasPosition || candidate.Position.IsOutdoor)
+                continue;
+            uint cell = candidate.Position.CellId;
+            if ((cell & 0xFFFFu) < 0x100u || !IsHazardName(candidate.Name))
+                continue;
+            if (Hazards.Add(cell))
+                sighted = true;
+        }
+        if (sighted && IsPatrolling && _patrolLandblock == (snapshot.Position.CellId & 0xFFFF0000u))
+            RebuildPatrol();
+    }
+
+    private static bool IsHazardName(string name)
+    {
+        foreach (string pattern in HazardNames)
+        {
+            if (name.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>A new hazard mid-patrol: the same patrol again around it, resumed at the nearest step.</summary>
+    private void RebuildPatrol()
+    {
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out _);
+        if (graph is null)
+            return;
+        IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
+        uint start = graph.ContainsKey(snapshot.Position.CellId)
+            ? snapshot.Position.CellId
+            : DungeonPathfinder.NearestCell(graph, snapshot.Position);
+        if (hazards.Contains(start))
+        {
+            uint safe = DungeonPathfinder.NearestSafeCell(graph, start, hazards);
+            if (safe != 0u)
+                start = safe;
+        }
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}");
+        if (route.IsEmpty)
+            return;
+        DraftRoute = route;
+        Navigation.ReplaceRoute(route);
+    }
+
+    /// <summary>Marks a hazard and reroutes the patrol at once.</summary>
+    public bool TryMarkHazardAndReroute(out string message)
+    {
+        bool marked = TryMarkHazard(out message);
+        if (marked && IsPatrolling)
+            RebuildPatrol();
+        return marked;
+    }
+
     public BotEngine Engine { get; }
 
     public BotStore Store { get; }
@@ -331,9 +441,11 @@ public sealed class BotController : IMetaBot
         }
         DraftRoute = route;
         Navigation.SetRoute(route);
+        _patrolLandblock = snapshot.Position.CellId & 0xFFFF0000u;
         if (!Profile.Navigation.Enabled)
             Update(p => p with { Navigation = p.Navigation with { Enabled = true } });
-        message = $"patrolling {graph.Count} cells over {route.Waypoints.Count} steps";
+        message = $"patrolling {graph.Count} cells over {route.Waypoints.Count} steps"
+            + (hazards.Count > 0 ? $", {hazards.Count} hazard cell(s) avoided" : string.Empty);
         return true;
     }
 

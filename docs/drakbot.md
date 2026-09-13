@@ -299,7 +299,17 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   everything reachable in a small or linear dungeon): a closed walk that
   covers every corridor once and takes loop-closing edges, so a loop is
   walked round rather than in and out, closed back to the start. Standing
-  in a hazard, the walk starts from the nearest safe cell.
+  in a hazard, the walk starts from the nearest safe cell. The Navigation
+  window's **Dungeon Patrol** button does the same; `/drakbot patrol stop`
+  clears it.
+- hazards are also sighted: once a second the bot looks at the objects in
+  view and any named like a hotspot (lava, pool of acid, magma, cesspool,
+  hot spring, pool of fire/cold) marks its cell; a new mark during a
+  patrol rebuilds the patrol around it, resumed at the nearest step.
+  Server-side invisible hotspots are not seen this way, so the manual mark
+  stays (the Navigation window has Mark / Unmark / Clear buttons).
+- **Patrol on login** (Settings > Navigation) starts a patrol, and the bot,
+  as soon as the character appears in the world inside a dungeon.
 - `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.
 
 `/drakbot follow <name>` (or `leader`, for the fellowship's leader) walks
