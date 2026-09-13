@@ -591,6 +591,16 @@ public sealed class BotSettingsWindow(BotController controller)
             ImGui.SetTooltip("A loot profile by name from the VTank profiles folder; when set it decides instead of the rules below.");
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Pack");
+        bool stack = controller.Profile.Inventory.AutoStack;
+        if (ImGui.Checkbox("Merge partial stacks", ref stack))
+            controller.Update(p => p with { Inventory = p.Inventory with { AutoStack = stack } });
+        ImGui.SameLine();
+        bool cram = controller.Profile.Inventory.AutoCram;
+        if (ImGui.Checkbox("Move loose items into side packs", ref cram))
+            controller.Update(p => p with { Inventory = p.Inventory with { AutoCram = cram } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Rules, first match wins");
         IReadOnlyList<LootRule> rules = loot.Rules.Rules;
         if (ImGui.BeginTable("rules", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH, new Vector2(-1f, 160f)))

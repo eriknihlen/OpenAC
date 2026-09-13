@@ -233,6 +233,17 @@ match. Keep, Salvage, Sell and KeepUpTo (up to the count already
 carried) pick the item up; Read leaves it. `/vt loot load <name>` from a
 meta selects a profile.
 
+## Pack housekeeping
+
+Two switches on the Loot tab, run beside whatever the bot is doing when
+no action is pending and no corpse is open, one move per half second:
+**merge partial stacks** puts the smallest partial of an item onto the
+largest, and **move loose items into side packs** crams unworn items
+(never packs or foci) out of the main pack into the fullest side pack
+that still has two free slots, so new loot always has a slot. A move
+that has not landed ten seconds later is backed off, doubling to five
+minutes. VTank's autostack and autocram options map onto these.
+
 ## Dungeon patrols and paths
 
 `IDungeonAutomation` hands the bot the loaded dungeon's cell graph: every

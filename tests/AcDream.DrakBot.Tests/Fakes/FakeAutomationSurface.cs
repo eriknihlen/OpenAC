@@ -259,6 +259,16 @@ internal sealed class FakeAutomationSurface
         Commands.Add($"apply:{objectId}@{targetObjectId}");
         return new(PluginItemCommandStatus.Started);
     }
+    public PluginItemCommandResult MoveToContainer(uint objectId, uint containerObjectId, uint amount = 0u, int placement = 0)
+    {
+        Commands.Add($"move:{objectId}>{containerObjectId}");
+        return new(PluginItemCommandStatus.Started);
+    }
+    public PluginItemCommandResult Merge(uint sourceObjectId, uint targetObjectId, uint amount = 0u)
+    {
+        Commands.Add($"merge:{sourceObjectId}>{targetObjectId}");
+        return new(PluginItemCommandStatus.Started);
+    }
     /// <summary>Only an owned item can be used this way, as in the client.</summary>
     PluginItemCommandResult IItemAutomation.Use(uint objectId)
     {

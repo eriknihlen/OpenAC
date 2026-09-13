@@ -674,6 +674,8 @@ public sealed class MetaEngine
         ["idlepeacemode"] = "PeaceModeWhenIdle",
         ["summonpets"] = "SummonPets",
         ["opendoors"] = "OpenDoors",
+        ["autocram"] = "EnableAutocram",
+        ["autostack"] = "EnableAutostack",
         ["enablemanatapping"] = "EnableManaTapping",
         ["manatapminmana"] = "ManaTapMinMana",
         ["manastonelootcount"] = "ManaStoneKeepCount",

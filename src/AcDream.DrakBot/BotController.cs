@@ -444,6 +444,8 @@ public sealed class BotController : IMetaBot
             ["PeaceModeWhenIdle"] = (() => B(Profile.Combat.LeaveCombatWhenIdle), v => Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = ToBool(v) } })),
             ["SummonPets"] = (() => B(Profile.Pets.Enabled), v => Update(p => p with { Pets = p.Pets with { Enabled = ToBool(v) } })),
             ["OpenDoors"] = (() => B(Profile.Doors.Enabled), v => Update(p => p with { Doors = p.Doors with { Enabled = ToBool(v) } })),
+            ["EnableAutocram"] = (() => B(Profile.Inventory.AutoCram), v => Update(p => p with { Inventory = p.Inventory with { AutoCram = ToBool(v) } })),
+            ["EnableAutostack"] = (() => B(Profile.Inventory.AutoStack), v => Update(p => p with { Inventory = p.Inventory with { AutoStack = ToBool(v) } })),
             ["EnableManaTapping"] = (() => B(Profile.ManaStones.Enabled), v => Update(p => p with { ManaStones = p.ManaStones with { Enabled = ToBool(v) } })),
             ["ManaTapMinMana"] = (() => Profile.ManaStones.TapThresholdMana.ToString(), v => { if (int.TryParse(v, out int n)) Update(p => p with { ManaStones = p.ManaStones with { TapThresholdMana = n } }); }),
             ["ManaStoneKeepCount"] = (() => Profile.ManaStones.KeepCount.ToString(), v => { if (int.TryParse(v, out int n)) Update(p => p with { ManaStones = p.ManaStones with { KeepCount = n } }); }),

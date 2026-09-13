@@ -33,6 +33,7 @@ public sealed class BotEngine
         _behaviors = behaviors
             .OrderBy(static behavior => behavior.Priority)
             .ToList();
+        Inventory = new Inventory.InventoryTidy(() => Profile.Inventory);
     }
 
     public bool IsRunning { get; private set; }
@@ -55,6 +56,9 @@ public sealed class BotEngine
 
     /// <summary>A jump in progress takes the character over from the behaviors until it lands.</summary>
     public Navigation.Jumper Jumper { get; } = new();
+
+    /// <summary>Pack housekeeping, ticked beside the behaviors when the hands are free.</summary>
+    public Inventory.InventoryTidy Inventory { get; }
 
     public void Start()
     {
@@ -141,6 +145,7 @@ public sealed class BotEngine
             break;
         }
 
+        Inventory.Tick(_surface, board);
         if (_active is null)
         {
             LastReason = "nothing to do";

@@ -34,6 +34,8 @@ public sealed record BotProfile
 
     public ManaStoneSettings ManaStones { get; init; } = new();
 
+    public InventorySettings Inventory { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -343,6 +345,16 @@ public sealed record ManaStoneSettings
 
     /// <summary>Only stones whose name contains one of these are used; empty means any mana stone.</summary>
     public IReadOnlyList<string> StoneNames { get; init; } = [];
+}
+
+/// <summary>Pack housekeeping done beside whatever the bot is doing.</summary>
+public sealed record InventorySettings
+{
+    /// <summary>Move loose items out of the main pack into a side pack with room.</summary>
+    public bool AutoCram { get; init; }
+
+    /// <summary>Merge partial stacks of the same item.</summary>
+    public bool AutoStack { get; init; } = true;
 }
 
 /// <summary>Combat pets: which essences to summon from, and when.</summary>
