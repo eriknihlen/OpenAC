@@ -721,6 +721,11 @@ public sealed class MetaEngine
                 _bot.SetRoute(route with { Waypoints = route.Waypoints.Reverse().ToArray() }, enableNavigation: true);
             return true;
         }
+        if (sub is "loot" or "lootprofile" && parts.Length >= 4 && parts[2].Equals("load", StringComparison.OrdinalIgnoreCase))
+        {
+            SetOption("CurrentLootPath", string.Join(' ', parts, 3, parts.Length - 3));
+            return true;
+        }
         if (sub is "settings" or "loot" or "lootprofile")
             return true; // no counterpart; swallowed rather than sent to the server
         // Anything else is handed to the bot's own verbs as /drakbot <verb>.

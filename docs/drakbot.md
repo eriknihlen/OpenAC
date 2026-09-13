@@ -57,7 +57,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
       vitals         Survival    heal / revitalize / mana, idle top-off, heal fellows; healing-kit fallback
       buffs          Buffing     keep configured self-buff families, weapon auras and armor spells up
       combat         Combat      target selection, line of sight, approach, swing or war spell
-      loot           Looting     open corpse, appraise on demand, pick up by rule
+      loot           Looting     open corpse, appraise on demand, pick up by rule or VTank .utl
       nav            Navigation  follow a route through the Walker
   Spells/            SpellSelector (name -> best known tier), CastTracker
   Combat/            TargetSelector, LineOfSightService
@@ -185,6 +185,25 @@ The sweeps live in the client (`AcDream.App/Plugins/ProjectilePathProbe.cs`
 and `WalkPathProbe.cs`) and are covered by synthetic-landblock tests (walls,
 steps, ledges, cliffs, bystanders, arcs) plus installed-dat tests against a
 real dungeon's walls and ceiling.
+
+## VTank loot profiles
+
+The Loot tab's rules are the bot's own JSON. Name a VTank `.utl` profile
+(from the VTank profiles folder, `<data>/vtank/<name>.utl`) and it decides
+instead: the file is read and written as VTank writes it (`Loot/Utl`,
+RynthSuite's parser), and every condition kind VTank evaluates is
+evaluated here against the item record and its appraisal - name and
+string matches, long and double property tests by the game's property
+ids, spell name and count matches, damage figures, ratings, character
+level, skill and pack room. The keys Decal numbered for its own fields
+(type, icon, stack, slots, category, max damage, icon overlay, the armor
+protections, variance, ...) are answered from the item record and its
+appraisal. Colour rules pass optimistically, as they did in RynthAi.
+Rules that judge by name and class decide before an appraisal; an
+appraisal is asked for only when a rule that needs one could still
+match. Keep, Salvage, Sell and KeepUpTo (up to the count already
+carried) pick the item up; Read leaves it. `/vt loot load <name>` from a
+meta selects a profile.
 
 ## Dungeon patrols and paths
 

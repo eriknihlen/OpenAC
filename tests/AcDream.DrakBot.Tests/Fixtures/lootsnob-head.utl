@@ -1,0 +1,2186 @@
+UTL
+1
+1636
+***** Trophies *****
+
+0;1;9999;1
+6
+true
+24
+leave this disabled
+1
+
+
+0;1;9999
+6
+true
+   ** Aetheria **
+
+0;1;1
+16
+do not edit
+1
+    (T) Aetheria (5)
+
+0;1;1;12
+13
+Aetheria
+1
+18
+27704
+218103849
+    (T) Aetheria (4+)
+
+0;1;1;3
+13
+Aetheria
+1
+18
+27703
+218103849
+    (T) Aetheria (3+)
+
+0;1;1;3
+13
+Aetheria
+1
+18
+27702
+218103849
+    (T) Aetheria (All)
+
+0;1;1;9999
+23
+Coalesced Aetheria
+1
+6
+true
+    (T) Aetheria (Red only)
+
+0;1;1;12;9999
+23
+Coalesced Aetheria
+1
+18
+42636
+218103808
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Armor **
+
+0;1;1
+16
+do not edit
+1
+    (T) Rynthid Masks
+
+0;1;1;7
+12
+Rynthid
+1
+3
+2
+
+
+0;1;9999
+6
+true
+   ** Consumables **
+
+0;1;1
+16
+do not edit
+1
+    (T) Health Philtre
+
+0;1;1;9999
+19
+Health Philtre
+1
+6
+true
+    (T) Mana Philtre
+
+0;1;1;9999
+17
+Mana Philtre
+1
+6
+true
+    (T) Stamina Philtre
+
+0;1;1;9999
+20
+Stamina Philtre
+1
+6
+true
+
+
+0;1;9999
+6
+true
+    (T) Adept Healing Kit
+
+0;10;1;9999
+5
+22
+Adept Healing Kit
+1
+6
+true
+    (T) Gifted Healing Kit
+
+0;10;1;9999
+5
+23
+Gifted Healing Kit
+1
+6
+true
+    (T) Peerless Healing Kit
+
+0;10;1;9999
+5
+25
+Peerless Healing Kit
+1
+6
+true
+    (T) Renegade Herbal Kit
+
+0;1;1;9999
+24
+Renegade Herbal Kit
+1
+6
+true
+    (T) Treated Healing Kit
+
+0;10;1;9999
+5
+24
+Treated Healing Kit
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Crafting **
+
+0;1;1
+16
+do not edit
+1
+    (T) Diamond Powder
+
+0;1;1
+19
+Diamond Powder
+1
+    (T) Golem Hearts
+
+0;1;1;9999
+50
+Diamond Heart|Black Coral Heart|Burning Sands
+1
+6
+true
+    (T) Moarsmuck
+
+0;1;1;9999
+14
+Moarsmuck
+1
+6
+true
+    (T) Mote/Sliver/Nugget
+
+0;1;1;7
+34
+Mote|Pyreal Sliver|Nugget|Bar
+1
+3
+8
+    (T) Mushroom Food
+
+0;1;1;9999
+20
+Tiriun Mushroom
+1
+6
+true
+    (T) Tusker Spit
+
+0;10;1;9999
+100
+16
+Tusker Spit
+1
+6
+true
+    (T) Virindi Jewel(Purple)
+
+0;1;1;9999
+17
+Purple Jewel
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Direlands Gear Knight Invasion Area **
+
+0;1;1
+16
+do not edit
+1
+    (T) Aetherium-infused Gear
+
+0;1;1
+27
+Aetherium-infused Gear
+1
+    (T) Large Aetherium Power Core
+
+0;1;1
+31
+Large Aetherium Power Core
+1
+    (T) Aetherium Power Core
+
+0;10;1;9999
+10
+25
+Aetherium Power Core
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Freebooter **
+
+0;1;1
+16
+do not edit
+1
+    (T) Glowing Jungle Lily
+
+0;10;1;9999
+20
+24
+Glowing Jungle Lily
+1
+6
+true
+    (T) Glowing Moar Gland
+
+0;10;1;9999
+30
+23
+Glowing Moar Gland
+1
+6
+true
+    (T) Phyntos Honey
+
+0;10;1;9999
+10
+18
+Phyntos Honey
+1
+6
+true
+    (T) Phyntos Queen's Abdomen
+
+0;10;1;9999
+1
+28
+Phyntos Queen's Abdomen
+1
+6
+true
+    (T) Phyntos Stinger
+
+0;1;1;9999
+12
+Stinger
+1
+6
+true
+    (T) Rare Boss Trophy
+
+0;10;1
+1
+78
+Giant Blessed Moarsman's Severed Head|Tchk'Tain the Tender's Severed Head
+1
+
+
+0;1;9999
+6
+true
+   ** Frozen Valley **
+
+0;1;1
+16
+do not edit
+1
+    (T) Snow Tusker Blood
+
+0;10;1
+10
+16
+Snow Tusker
+1
+
+
+0;1;9999
+6
+true
+   ** Graveyard **
+
+0;1;1
+16
+do not edit
+1
+    (T) Deck of Cards
+
+0;1;7;1;9999
+3
+8
+47
+of Eyes|of Hands|Jester's Token|The Jester
+1
+6
+true
+    (T) DeathTail's Fang
+
+0;10;1
+1
+22
+Death Tail's Fang
+1
+    (T) Exhumed Bones
+
+0;1;1;9999
+18
+Exhumed Bones
+1
+6
+true
+    (T) Mhoire Oubliette Portal Glyph
+
+0;10;1;9999
+10
+34
+Mhoire Oubliette Portal Glyph
+1
+6
+true
+    (T) Ornate Bone Key
+
+0;1;1;9999
+20
+Ornate Bone Key
+1
+6
+true
+    (T) Pyre Skeleton Jaw
+
+0;10;1;9999
+8
+22
+Pyre Skeleton Jaw
+1
+6
+true
+    (T) Pyre Shroud
+
+0;1;1;9999
+16
+Pyre Shroud
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Inner Sea Gear Knight Invasion Area **
+
+0;1;1
+16
+do not edit
+1
+    (T) Core Fragment
+
+0;1;1;9999
+30
+Gear Knight Core Fragment
+1
+6
+true
+    (T) Gold Core Fragment
+
+0;1;1;9999
+33
+Gold Aetherium Core Fragment
+1
+6
+true
+    (T) Scratched Gear
+
+0;1;1;9999
+19
+Scratched Gear
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Keys **
+
+0;1;1
+16
+do not edit
+1
+    (T) Aged Legendary Key
+
+0;1;1
+23
+Aged Legendary Key
+1
+    (T) Broken Black Marrow Key
+
+0;1;1;9999;1000
+28
+Broken Black Marrow Key
+1
+6
+true
+9
+300
+23
+    (T) Mhoire Castle Treasury Key
+
+0;1;1;9999
+31
+Mhoire Castle Treasury Key
+1
+6
+true
+    (T) Mana Forge Key
+
+0;1;1;1
+19
+Mana Forge Key
+1
+24
+^((?!Shattered).)*$
+1
+    (T) Singularity Key
+
+0;1;1;9999
+28
+Virindi Singularity Key
+1
+6
+true
+    (T) Shattered Mana Forge Key
+
+0;1;1;1000;9999
+29
+Shattered Mana Forge Key
+1
+9
+350
+23
+6
+true
+    (T) Shattered Legendary Key
+
+0;1;1;1000
+28
+Shattered Legendary Key
+1
+9
+350
+23
+    (T) Sturdy Iron Key
+
+0;1;1
+20
+Sturdy Iron Key
+1
+    (T) Sturdy Steel Key
+
+0;1;1
+21
+Sturdy Steel Key
+1
+
+
+0;1;9999
+6
+true
+   ** Misc **
+
+0;1;1
+16
+do not edit
+1
+    (T) Alternate Currency
+
+0;1;1
+118
+Colosseum Coin|A'nekshay Token|Small Olthoi Venom Sac|Ornate Gear Marker|Ancient Mhoire Coin|Mutated OIthoi Gland
+1
+    (T) Ancient Trinkets
+
+0;1;1;7
+12
+Trinket
+1
+4
+11
+    (T) Coconut
+
+0;1;1;7
+12
+Coconut
+1
+4
+18
+    (T) Drudge Charms
+
+0;1;1;9999
+17
+Drudge Charm
+1
+6
+true
+    (T) Gem of Luminance
+
+0;1;1
+14
+Luminance
+1
+    (T) Housing (Cottage)
+
+0;1;1;9999
+267
+Large Armoredillo Hide|Bronze Armoredillo Spine|Rabbit Carcass|Copper Heart|Armoredillo Hide|Wood Heart|Thick Gromnie Hide|Iron Heart|Littoral Siraluun Claw|Small Mattekar Hide|Reedshark Hide|Sclavus Tongue|Swamp Stone|Shore Armoredillo Hide|Timber Siraluun Claw
+1
+6
+true
+    (T) Housing (Villa)
+
+0;1;1;9999
+209
+Large Armoredillo Hide|Peppermint Monougat Chew|White Jewel|Jungle Phyntos Wasp Wing|Crude Lockpick|Ash Gromnie Tooth|Gold Phyntos Wasp Wing|Ivory Gromnie Tooth|Carenzi Stalker Pelt|Small Armoredillo Hide
+1
+6
+true
+    (T) Housing (Mansion)
+
+0;1;1;9999
+50
+Lucky Gold Letter|Dread Mattekar Paw|Idol Gem
+1
+6
+true
+    (T) Identification Plate
+
+0;1;1
+25
+Identification Plate
+1
+    (T) Level 8 Glyphs
+
+0;1;1;9999
+13
+Glyph of
+1
+6
+true
+    (T) Level 8 Inks & Quills
+
+0;1;1
+248
+Alacritous Ink|Ink of Direction|Ink of Formation|Ink of Conveyance|Ink of Objectification|Ink of Partition|Ink of Nullification|Ink of Separation|Quill of Introspection|Quill of Benevolence|Quill of Infliction|Quill of Extraction|Parabolic Ink
+1
+    (T) Little Green Seeds
+
+0;1;1;9999
+23
+Little Green Seeds
+1
+6
+true
+    (T) Lucky Gold Letter
+
+0;1;1
+22
+Lucky Gold Letter
+1
+    (T) Mattekar Hides
+
+0;1;1
+28
+Hoary|Canescent|Swarthy
+1
+    (T) Olthoi Ichor
+
+0;1;1;9999
+17
+Olthoi Ichor
+1
+6
+true
+    (T) Pyreal/Gold/Silver Pea
+
+0;1;1
+58
+Pyreal Pea|Gold Pea|Silver Pea|Powdered Chorizite Pea
+1
+    (T) Pristine Mana Shard
+
+0;1;1
+24
+Pristine Mana Shard
+1
+    (T) Gauntlet Jewelry
+
+0;1;1
+17
+Society Band
+1
+    (T) Rare!
+
+0;1;12
+18
+23308
+218103850
+    (T) Scarlet Red Letter
+
+0;1;1
+23
+Scarlet Red Letter
+1
+    (T) Ulgrim's Scroll
+
+0;1;1
+20
+Ulgrim's Scroll
+1
+    (T) Vial of Organic Acid
+
+0;1;1;9999
+25
+Vial of Organic Acid
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Moarsman City **
+
+0;1;1
+16
+do not edit
+1
+    (T) Rare Boss Trophy
+
+0;10;1
+1
+80
+Moarsman Blight-caller's Severed Head|Tch'Keryk the Emissary's Severed Head
+1
+
+
+0;1;9999
+6
+true
+   ** Neftet **
+
+0;1;1
+16
+do not edit
+1
+    (T) Broken Stone Tablet
+
+0;10;1;9999
+15
+24
+Broken Stone Tablet
+1
+6
+true
+    (T) Engraved A'nekshay Bracers
+
+0;10;1;9999
+15
+31
+Engraved A'nekshay Bracers
+1
+6
+true
+    (T) Large Stone Tablet
+
+0;1;1
+23
+Large Stone Tablet
+1
+    (T) Prickly Pear
+
+0;10;1;9999
+15
+17
+Prickly Pear
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Quest **
+
+0;1;1
+16
+do not edit
+1
+    (T) Augmentation Gem
+
+0;1;1
+21
+Augmentation Gem
+1
+    (T) Blighted Mana Crystal
+
+0;1;1;9999
+26
+Blighted Mana Crystal
+1
+6
+true
+    (T) Clay Figurine
+
+0;1;1
+18
+Clay Figurine
+1
+    (T) Colo Mini-Boss Trophy
+
+0;10;1
+1
+126
+Stone Fists|Azaxis|Crowley's|Demon Swarm|The Master|Gladiator Diemos|Pumpkin King|Thunder Chicken|Very Mad Cow|Golden Egg
+1
+    (T) Corrupted Essence
+
+0;1;1
+22
+Corrupted Essence
+1
+    (T) Coruscating Olthoi Scent Gland
+
+0;10;1
+3
+35
+Coruscating Olthoi Scent Gland
+1
+    (T) Creature Lord Trophy
+
+0;1;1;9999
+193
+Basalt Blade|Serpent's Fang|Osseous Mace|Dark Sorcerer's Phylactery|Diamond Shield|Heavy Ursuin Coat|Skeletal Atlatl|Energy Crown|Crystal Sword|Gauntlets of Marksmanship|Robe of the Tundra
+1
+6
+true
+    (T) Crystal Shard
+
+0;1;1
+41
+Cracked Shard|Tiny Shard|Small Shard
+1
+    (T) Daimyo Mask
+
+0;1;1;7
+11
+Daimyo
+1
+3
+2
+    (T) Dire Champion Token
+
+0;1;1
+24
+Dire Champion Token
+1
+    (T) Eater Jaw
+
+0;1;1
+14
+Eater Jaw
+1
+    (T) Egg Orchard XP Trophy
+
+0;1;1;7;1;1
+32
+Spine|Carapace|Larvae Steak
+1
+3
+8
+20
+^((?!Brood).)*$
+1
+20
+^((?!Armor).)*$
+1
+    (T) Forgotten Chasm XP Trophy
+
+0;1;1;7;9999
+20
+Bandage|Jawbone
+1
+3
+8
+6
+true
+    (T) Golden Shuriken
+
+0;1;1;9999
+30
+Golden Shuriken of Tanada
+1
+6
+true
+    (T) Invitation to the Battle Burrows
+
+0;10;1;9999
+25
+37
+Invitation to the Battle Burrows
+1
+6
+true
+    (T) Olthoi Pincer
+
+0;10;1;1
+1
+11
+Pincer
+1
+20
+^((?!Brood).)*$
+1
+    (T) Path of the Blind XP Trophies
+
+0;1;1;7;1
+13
+Insignia
+1
+3
+8
+27
+^((?!Gold Tumerok).)*$
+1
+    (T) Portal Gem (Quest)
+
+0;1;1;7;9999
+201
+Dark Monolith Caverns|Drudge Fight|Gold Hill Ruins|Lair of The Homunculus|Niffis Fighting Pits|Oubliette|Resting Place|Sezzherei's Lair|Cavernous Olthoi Chasm|Dark Towers|Caul Asylum|The Orphanage
+1
+4
+11
+6
+true
+    (T) Red Veined Grub
+
+0;10;1
+20
+20
+Red Veined Grub
+1
+    (T) Rubble
+
+0;1;1;9999
+11
+Rubble
+1
+6
+true
+    (T) Ruschk Scalp
+
+0;10;1;9999
+5
+17
+Ruschk Scalp
+1
+6
+true
+    (T) Scroll of Dark Rain
+
+0;1;1;9999
+24
+Scroll of Dark Rain
+1
+6
+true
+    (T) Seed of Mornings
+
+0;10;1
+15
+28
+Delicate Desert Flowers
+1
+    (T) Shadow Fragment Shards
+
+0;1;1;9999
+38
+Dark Speck|Dark Sliver|Dark Shard
+1
+6
+true
+    (T) Tchk'Tain
+
+0;1;1
+14
+Tchk'Tain
+1
+    (T) Torn Strip of Parchment
+
+0;1;1
+28
+Torn Strip of Parchment
+1
+    (T) Tusker Tusk
+
+0;1;1;1;1;1;9999
+9
+Tusk
+1
+20
+^((?!Sharp).)*$
+1
+29
+^((?!Fledgemaster's).)*$
+1
+19
+^((?!Spit).)*$
+1
+6
+true
+    (T) Ulgrim's Contest Mug
+
+0;1;1;9999
+25
+Ulgrim's Contest Mug
+1
+6
+true
+    (T) Vissidal XP Trophy
+
+0;1;1;9999
+90
+Gold Shallows Shredder Fin|Gold Niffis Tentacle|Gold Remoran Eggs|Gold Moarsman Tooth
+1
+6
+true
+    (T) Vissidal (Flag)
+
+0;1;1;9999
+46
+Yellow Jewel|Swamp Stone|Sezzherei's Lair
+1
+6
+true
+    (T) Wasp Wings (All)
+
+0;1;1;9999
+14
+Wasp Wing
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Singularity Caul **
+
+0;1;1
+16
+do not edit
+1
+    (T) BMK Trophy
+
+0;1;1;7;9999
+185
+Antiquated Compass|Black Glass Array|Black Luster Pearl|Blood Fang Jewel|Burning Veil|Corrupted Skull|Desolate Seed|Seething Skull|Shadow Cursed Totem|Soul Chalice|Warrior's Emblem
+1
+4
+11
+6
+true
+    (T) Butterscotch Suckling
+
+0;1;1;9999
+26
+Butterscotch Suckling
+1
+6
+true
+    (T) Caul Boss Trophies
+
+0;1;1
+179
+Scroll of Raven Fury|Atakir's Blade|Gikar's Dream|Plaguefang's Hide|Puppeteer's Skull|Scourge's Hide|Snarl's Hide|Carenzi Fangs|Doll's Eye|Doomshark Hide|Nefane|Mite Leg Bone
+1
+    (T) Vial of Margul Blood
+
+0;1;1;9999
+25
+Vial of Margul Blood
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Summoning **
+
+0;1;1
+16
+do not edit
+1
+    (T) Encapsulated Spirit
+
+0;10;1
+1000
+24
+Encapsulated Spirit
+1
+    (T) Essence (150 Necromancer) 
+
+0;1;1;12;2007;9999;1
+12
+Essence
+1
+18
+29734
+218103849
+4
+35
+6
+true
+35
+Zombie|Spectre|Skeleton|Maiden
+1
+    (T) Essence (150 Naturalist)
+
+0;1;1;12;2007;9999;1
+12
+Essence
+1
+18
+29734
+218103849
+4
+35
+6
+true
+26
+Moar|Grievver|Phyntos
+1
+    (T) Essence (150 Primalist)
+
+0;1;1;12;2007;9999;1
+12
+Essence
+1
+18
+29734
+218103849
+4
+35
+6
+true
+39
+Elemental|Child|Wisp|Knight|K'nath
+1
+    (T) Essence (180 Necromancer)
+
+0;1;1;12;2007;9999;1
+12
+Essence
+1
+18
+29735
+218103849
+4
+40
+6
+true
+35
+Zombie|Spectre|Skeleton|Maiden
+1
+    (T) Essence (180 Naturalist)
+
+0;1;1;12;2007;1
+12
+Essence
+1
+18
+29735
+218103849
+4
+40
+26
+Moar|Grievver|Phyntos
+1
+    (T) Essence (180 Primalist)
+
+0;1;1;12;2007;9999;1
+12
+Essence
+1
+18
+29735
+218103849
+4
+40
+6
+true
+39
+Elemental|Child|Wisp|Knight|K'nath
+1
+    (T) Essence (200 Naturalist)
+
+0;1;1;12;2007;1;3
+12
+Essence
+1
+18
+29736
+218103849
+4
+50
+26
+Moar|Grievver|Phyntos
+1
+9
+15
+370
+    (T) Essence (200 Necromancer)
+
+0;1;1;12;2007;1;3
+12
+Essence
+1
+18
+29736
+218103849
+4
+50
+35
+Zombie|Spectre|Skeleton|Maiden
+1
+9
+15
+370
+    (T) Essence (200 Primalist)
+
+0;1;1;12;2007;1;3
+12
+Essence
+1
+18
+29736
+218103849
+4
+50
+39
+Elemental|Child|Wisp|Knight|K'nath
+1
+9
+15
+370
+
+
+0;1;9999
+6
+true
+   ** Tou-Tou **
+
+0;1;1
+16
+do not edit
+1
+    (T) Damaged Shadow Blade
+
+0;1;1;9999
+25
+Damaged Shadow Blade
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Viridian Rise **
+
+0;1;1
+16
+do not edit
+1
+    (T) Infused Amber Shard
+
+0;1;1
+24
+Infused Amber Shard
+1
+    (T) Viridian Essence
+
+0;1;1;9999
+21
+Viridian Essence
+1
+6
+true
+
+
+0;1;9999
+6
+true
+   ** Weapons **
+
+0;1;1
+16
+do not edit
+1
+    (T) Banished Weapon
+
+0;1;1
+13
+Banished
+1
+    (T) Fallen Weapon
+
+0;1;1
+11
+Fallen
+1
+    (T) Purified Mouryou Weapons
+
+0;1;1
+12
+Mouryou
+1
+
+
+0;1;1;9999
+16
+blank space
+1
+6
+true
+
+
+0;1;1;9999
+16
+blank space
+1
+6
+true
+
+
+0;1;9999;1
+6
+true
+16
+blank space
+1
+***** Melee Weapons *****
+
+0;1;1
+21
+Do not edit this
+1
+(H) 430 Insane
+
+0;1;12;7;2008
+9
+44
+159
+3
+1
+17
+109
+1.17
+1.17
+(H) 430 Awesome
+
+0;1;12;7;2008
+9
+44
+159
+3
+1
+17
+105
+1.17
+1.17
+(H) 430 Balanced
+
+0;1;12;7;2008
+9
+44
+159
+3
+1
+17
+101
+1.17
+1.17
+  (H) 430 MS Balanced
+
+0;1;12;7;2008
+9
+44
+159
+3
+1
+17
+101
+1.17
+1.17
+(L) 430 Balanced
+
+0;1;12;7;2008;9999
+9
+45
+159
+3
+1
+16
+90
+1.17
+1.17
+6
+true
+  (L) 430 MS Balanced
+
+0;1;12;7;2008;9999
+9
+45
+159
+3
+1
+16
+90
+1.17
+1.17
+6
+true
+(F) 430 Balanced
+
+0;1;12;7;2008;9999
+9
+46
+159
+3
+1
+16
+90
+1.17
+1.17
+6
+true
+  (F) 430 MS Balanced
+
+0;1;12;7;2008;9999
+9
+46
+159
+3
+1
+16
+90
+1.17
+1.17
+6
+true
+
+
+0;1;9999
+6
+true
+(H) Axe (OD +10)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+84
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +9)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+83
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +8)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+82
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +7)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+81
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +6)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+80
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +5)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+79
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +4)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+78
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +3)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+77
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +2)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+76
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+(H) Axe (OD +1)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+75
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+     (H) Axe (Max 430)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+44
+159
+15
+74
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+     (H) Axe (Max 420)
+
+0;1;12;12;2003;7;1;12;9999
+8
+3
+353
+9
+44
+159
+15
+68
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+420
+160
+6
+true
+     (H) Axe (Max 400)
+
+0;1;12;12;2003;7;1;12;9999
+8
+3
+353
+9
+44
+159
+15
+66
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+400
+160
+6
+true
+          (H) Axe (AT +9)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.31
+167772172
+6
+true
+          (H) Axe (AT +8)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+16
+1.3
+167772172
+6
+true
+          (H) Axe (AT +7)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.29
+167772172
+6
+true
+          (H) Axe (AT +6)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.28
+167772172
+6
+true
+          (H) Axe (AT +5)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.27
+167772172
+6
+true
+          (H) Axe (AT +4)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.26
+167772172
+6
+true
+          (H) Axe (AT +3)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.25
+167772172
+6
+true
+          (H) Axe (AT +2)
+
+0;1;12;12;7;1;2005;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+17
+1.23
+167772172
+6
+true
+          (H) Axe (MD +9)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.27
+29
+          (H) Axe (MD +8)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.26
+29
+          (H) Axe (MD +7)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.25
+29
+          (H) Axe (MD +6)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.24
+29
+          (H) Axe (MD +5)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.23
+29
+          (H) Axe (MD +4)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.22
+29
+          (H) Axe (MD +3)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.21
+29
+          (H) Axe (MD +2)
+
+0;1;12;12;7;1;2005
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+9
+1.2
+29
+          (H) Axe (MD +1)
+
+0;1;12;12;2003;7;1;2005
+8
+3
+353
+9
+44
+159
+15
+74
+218103842
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+10
+1.19
+29
+          (H) Axe (Mgcd +4)
+
+0;1;12;12;7;1;5;9999
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+11
+1.04
+150
+6
+true
+          (H) Axe (Mods)
+
+0;1;12;12;7;1;5;2005;2005;2003
+8
+3
+353
+9
+44
+159
+3
+1
+33
+Silifi|Lugian|War Axe|Battle
+1
+11
+1.03
+150
+16
+1.2
+167772172
+10
+1.16
+29
+15
+72
+218103842
+(L) Axe (OD +10)
+
+0;1;12;12;2003;7;1;9999
+8
+3
+353
+9
+45
+159
+15
+71
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+(L) Axe (OD >= +8)
+
+0;1;12;12;2003;7;1;9999
+8
+3
+353
+9
+45
+159
+15
+69
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+(L) Axe (OD >= +4)
+
+0;1;12;12;2003;7;1;9999
+8
+3
+353
+9
+45
+159
+15
+65
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+(L) Axe (OD >= +1)
+
+0;1;12;12;2003;7;1;9999
+8
+3
+353
+9
+45
+159
+15
+62
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+     (L) Axe (Max 430)
+
+0;1;12;12;2003;7;1
+8
+3
+353
+9
+45
+159
+15
+61
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+     (L) Axe (Max 420)
+
+0;1;12;12;2003;7;1;9999;12
+8
+3
+353
+9
+45
+159
+15
+55
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+10
+420
+160
+     (L) Axe (Max 400)
+
+0;1;12;12;2003;7;1;9999;12
+8
+3
+353
+9
+45
+159
+15
+53
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+6
+true
+10
+400
+160
+          (L) Axe (Max AT)
+
+0;1;12;12;2003;7;1;2005;9999
+8
+3
+353
+9
+45
+159
+15
+61
+218103842
+3
+1
+32
+Dolabra|Ono|Hand|War Hammer
+1
+17

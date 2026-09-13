@@ -1,5 +1,6 @@
 using AcDream.DrakBot.Behaviors;
 using AcDream.DrakBot.Combat;
+using AcDream.DrakBot.Loot.Utl;
 using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
@@ -69,7 +70,13 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),
             buffs,
             new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
-            new LootBehavior(() => engine.Profile.Loot),
+            new LootBehavior(
+                () => engine.Profile.Loot,
+                name =>
+                {
+                    string? text = host.VtankProfiles.ReadText(BotStore.SanitizeName(name) + ".utl");
+                    return text is null ? null : VTankLootParser.LoadFromText(text);
+                }),
             navigation,
         ];
         engine = new BotEngine(surface, host.Log, behaviors, clock);

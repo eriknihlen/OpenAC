@@ -1,4 +1,5 @@
 using AcDream.DrakBot.Loot;
+using AcDream.DrakBot.Loot.Utl;
 using AcDream.DrakBot.Profiles;
 using AcDream.Plugin.Abstractions;
 
@@ -8,12 +9,18 @@ namespace AcDream.DrakBot.Behaviors;
 /// Works through nearby corpses one at a time: open, look at each item,
 /// appraise the ones a rule cannot judge by name and class alone, pick up
 /// what a rule keeps. A corpse is remembered as finished whether or not it
-/// yielded anything, so the bot never loops back to an empty one.
+/// yielded anything, so the bot never loops back to an empty one. The
+/// rules are the profile's own, or a VTank <c>.utl</c> profile when the
+/// profile names one.
 /// </summary>
-public sealed class LootBehavior(Func<LootSettings> settings) : IBehavior
+public sealed class LootBehavior(
+    Func<LootSettings> settings,
+    Func<string, VTankLootProfile?>? utlLoader = null) : IBehavior
 {
     private readonly HashSet<uint> _finishedCorpses = [];
     private readonly HashSet<uint> _handledItems = [];
+    private string _utlName = string.Empty;
+    private VTankLootProfile? _utl;
     private Phase _phase;
     private uint _corpseId;
     private uint _itemId;
@@ -137,7 +144,7 @@ public sealed class LootBehavior(Func<LootSettings> settings) : IBehavior
             if (_handledItems.Contains(item.ObjectId))
                 continue;
 
-            LootDecision decision = loot.Rules.Decide(item, IsAppraised(context, item.ObjectId));
+            LootDecision decision = Decide(context, loot, item, IsAppraised(context, item.ObjectId));
             if (decision.RequiresAppraisal)
             {
                 PluginItemCommandResult identify = host.Identify(item.ObjectId);
@@ -194,6 +201,76 @@ public sealed class LootBehavior(Func<LootSettings> settings) : IBehavior
             }
         }
         return !float.IsPositiveInfinity(best);
+    }
+
+    /// <summary>The loaded <c>.utl</c> when the profile names one, reloaded when the name changes.</summary>
+    public VTankLootProfile? UtlProfile(LootSettings loot)
+    {
+        if (utlLoader is null || loot.UtlProfile.Length == 0)
+        {
+            _utl = null;
+            _utlName = string.Empty;
+            return null;
+        }
+        if (!_utlName.Equals(loot.UtlProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            _utlName = loot.UtlProfile;
+            _utl = utlLoader(loot.UtlProfile);
+        }
+        return _utl;
+    }
+
+    private LootDecision Decide(BehaviorContext context, LootSettings loot, in PluginInventoryItem item, bool isAppraised)
+    {
+        VTankLootProfile? utl = UtlProfile(loot);
+        if (utl is null)
+            return loot.Rules.Decide(item, isAppraised);
+
+        // Rules that judge by name and class alone decide unappraised; the
+        // rest wait for an appraisal, which is asked for only when some rule
+        // could use it.
+        var utlContext = new UtlLootContext(context.Surface);
+        bool wantsAppraisal = false;
+        foreach (VTankLootRule rule in utl.Rules)
+        {
+            if (!rule.Enabled)
+                continue;
+            bool needs = UtlLootEvaluator.NeedsAppraisal(rule);
+            if (needs && !isAppraised)
+            {
+                if (UtlLootEvaluator.CouldMatchAfterAppraisal(rule, item, utlContext))
+                    wantsAppraisal = true;
+                continue;
+            }
+            if (UtlLootEvaluator.Match(rule, item, utlContext))
+                return Translate(rule, item, context);
+        }
+        return wantsAppraisal && !isAppraised ? LootDecision.Appraise : LootDecision.Ignore;
+    }
+
+    private static LootDecision Translate(VTankLootRule rule, in PluginInventoryItem item, BehaviorContext context)
+    {
+        switch (rule.Action)
+        {
+            case VTankLootAction.Keep:
+            case VTankLootAction.Salvage:
+            case VTankLootAction.Sell:
+                return new LootDecision(LootAction.Keep, rule.Name);
+            case VTankLootAction.KeepUpTo:
+            {
+                int have = 0;
+                foreach (PluginInventoryItem owned in context.Surface.Items.CaptureOwnedItems())
+                {
+                    if (owned.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase))
+                        have += Math.Max(1, owned.StackSize);
+                }
+                return have < (rule.KeepCount ?? 0)
+                    ? new LootDecision(LootAction.Keep, rule.Name)
+                    : new LootDecision(LootAction.Ignore, rule.Name);
+            }
+            default:
+                return new LootDecision(LootAction.Ignore, rule.Name);
+        }
     }
 
     private static bool IsAppraised(BehaviorContext context, uint objectId)

@@ -449,6 +449,7 @@ public sealed class BotController : IMetaBot
                     ((IMetaBot)this).SetRoute(route, false);
             }),
             ["CurrentMetaPath"] = (() => Meta?.MetaName ?? string.Empty, v => Meta?.LoadByName(v)),
+            ["CurrentLootPath"] = (() => Profile.Loot.UtlProfile, v => Update(p => p with { Loot = p.Loot with { UtlProfile = v.EndsWith(".utl", StringComparison.OrdinalIgnoreCase) ? v[..^4] : v } })),
         };
     }
 }

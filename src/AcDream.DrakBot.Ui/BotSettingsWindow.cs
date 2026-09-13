@@ -517,6 +517,12 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderFloat("Step timeout (s)", ref timeout, 2f, 20f, "%.0f"))
             controller.Update(p => p with { Loot = p.Loot with { StepTimeoutSeconds = timeout } });
 
+        string utl = loot.UtlProfile;
+        if (ImGui.InputText("VTank .utl profile", ref utl, 128))
+            controller.Update(p => p with { Loot = p.Loot with { UtlProfile = utl } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A loot profile by name from the VTank profiles folder; when set it decides instead of the rules below.");
+
         ImGui.Spacing();
         ImGui.TextDisabled("Rules, first match wins");
         IReadOnlyList<LootRule> rules = loot.Rules.Rules;

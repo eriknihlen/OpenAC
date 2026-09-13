@@ -213,6 +213,10 @@ internal sealed class FakeAutomationSurface
     public List<PluginLootContainer> Corpses { get; } = [];
     public Dictionary<uint, List<PluginInventoryItem>> CorpseContents { get; } = [];
     public HashSet<uint> AppraisedObjects { get; } = [];
+    /// <summary>Appraised properties per object, served by <see cref="TryCaptureProperties"/>.</summary>
+    public Dictionary<uint, PluginItemProperties> Properties { get; } = [];
+    public bool TryCaptureProperties(uint objectId, out PluginItemProperties properties) =>
+        Properties.TryGetValue(objectId, out properties);
     public IReadOnlyList<PluginLootContainer> CaptureCorpses(float maximumDistance) =>
         Corpses.Where(c => c.Distance <= maximumDistance).ToArray();
     public IReadOnlyList<PluginInventoryItem> CaptureCurrentContents() =>

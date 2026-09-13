@@ -286,6 +286,12 @@ public sealed record LootSettings
     public double StepTimeoutSeconds { get; init; } = 6d;
 
     public LootRuleSet Rules { get; init; } = LootRuleSet.Default;
+
+    /// <summary>
+    /// A VTank <c>.utl</c> loot profile by name, from the VTank profiles
+    /// folder; when set it decides instead of <see cref="Rules"/>.
+    /// </summary>
+    public string UtlProfile { get; init; } = string.Empty;
 }
 
 /// <summary>The VTank-style meta: which one to load with the profile, and whether it runs.</summary>
