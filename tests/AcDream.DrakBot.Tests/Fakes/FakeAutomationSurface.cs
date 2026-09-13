@@ -63,6 +63,7 @@ internal sealed class FakeAutomationSurface
     public bool IsInWorld { get; set; } = true;
     public uint ObjectId { get; set; } = 0x50000001u;
     public string Name { get; set; } = "Tester";
+    public int SummoningMastery { get; set; }
     public uint CurrentHealth { get; set; } = 100;
     public uint MaxHealth { get; set; } = 100;
     public uint CurrentStamina { get; set; } = 100;
@@ -255,6 +256,14 @@ internal sealed class FakeAutomationSurface
     public PluginItemCommandResult Apply(uint objectId, uint targetObjectId)
     {
         Commands.Add($"apply:{objectId}@{targetObjectId}");
+        return new(PluginItemCommandStatus.Started);
+    }
+    /// <summary>Only an owned item can be used this way, as in the client.</summary>
+    PluginItemCommandResult IItemAutomation.Use(uint objectId)
+    {
+        if (!OwnedItems.Any(item => item.ObjectId == objectId))
+            return new(PluginItemCommandStatus.InvalidItem);
+        Commands.Add($"use:{objectId}");
         return new(PluginItemCommandStatus.Started);
     }
 

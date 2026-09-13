@@ -672,6 +672,9 @@ public sealed class MetaEngine
         ["recharge-notarg-stam"] = "TopOffStam",
         ["rebuftimeremainingseconds"] = "RebuffSecondsRemaining",
         ["idlepeacemode"] = "PeaceModeWhenIdle",
+        ["summonpets"] = "SummonPets",
+        ["petmonsterdensity"] = "PetMinMonsters",
+        ["petcustomrange"] = "CustomPetRange",
     };
 
     /// <summary>Translates a VTank <c>/vt</c> command into the bot's own terms. True when handled.</summary>

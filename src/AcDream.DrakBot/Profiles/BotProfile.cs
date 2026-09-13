@@ -28,6 +28,8 @@ public sealed record BotProfile
 
     public MetaOptions Meta { get; init; } = new();
 
+    public PetSettings Pets { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -304,6 +306,23 @@ public sealed record LootSettings
     /// folder; when set it decides instead of <see cref="Rules"/>.
     /// </summary>
     public string UtlProfile { get; init; } = string.Empty;
+}
+
+/// <summary>Combat pets: which essences to summon from, and when.</summary>
+public sealed record PetSettings
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Essence devices by name, tried in order.</summary>
+    public IReadOnlyList<string> Devices { get; init; } = [];
+
+    /// <summary>Summon once this many hostiles are within range.</summary>
+    public int MinimumHostiles { get; init; } = 1;
+
+    public float RangeMeters { get; init; } = 20f;
+
+    /// <summary>Refill an empty essence from an Encapsulated Spirit in the pack.</summary>
+    public bool RefillFromSpirits { get; init; } = true;
 }
 
 /// <summary>The VTank-style meta: which one to load with the profile, and whether it runs.</summary>

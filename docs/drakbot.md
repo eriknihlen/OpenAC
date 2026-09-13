@@ -56,6 +56,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
     IBehavior        WantsControl(board) / Execute(context) / Interrupt(context)
       vitals         Survival    heal / revitalize / mana, idle top-off, heal fellows; healing-kit fallback
       buffs          Buffing     keep configured self-buff families, weapon auras and armor spells up
+      pets           Buffing     summon a combat pet from an essence when hostiles crowd in
       combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule or VTank .utl
       nav            Navigation  follow a route through the Walker
@@ -96,6 +97,16 @@ target; spells are chosen by family, so a lore-named top tier (Outlander's
 Insolence for Force Streak VII) is reached through its lower tiers. The
 tables of spell names are in `Spells/WarSpellNames.cs`; void magic stands
 in for war when only it is known.
+
+## Combat pets
+
+The Monsters tab's pet section names the essence devices to summon from.
+When at least the configured number of hostiles is within range and no
+pet named "<character>'s ..." stands in the world, the first essence with
+charges left is used; an empty one is refilled by applying an
+Encapsulated Spirit from the pack, when that is on. Summoning must be
+trained. VTank's summonpets, petmonsterdensity and petcustomrange
+options map onto these.
 
 ## Weapons and ammunition
 

@@ -26,6 +26,7 @@ public sealed class BotSettingsWindow(BotController controller)
     private string _metaName = string.Empty;
     private int _selectedMonster = -1;
     private string _monsterName = string.Empty;
+    private string _petDevice = string.Empty;
     private string _metaExpression = string.Empty;
     private string _metaResult = string.Empty;
     private string _newBuff = string.Empty;
@@ -375,6 +376,47 @@ public sealed class BotSettingsWindow(BotController controller)
         int minRing = combat.MinRingTargets;
         if (ImGui.SliderInt("Ring at this many", ref minRing, 1, 10))
             controller.Update(p => p with { Combat = p.Combat with { MinRingTargets = minRing } });
+
+        ImGui.Separator();
+        DrawPets(controller.Profile.Pets);
+    }
+
+    private void DrawPets(PetSettings pets)
+    {
+        ImGui.TextDisabled("Combat pets");
+        bool enabled = pets.Enabled;
+        if (ImGui.Checkbox("Summon pets", ref enabled))
+            controller.Update(p => p with { Pets = p.Pets with { Enabled = enabled } });
+        ImGui.SameLine();
+        bool refill = pets.RefillFromSpirits;
+        if (ImGui.Checkbox("Refill from Encapsulated Spirits", ref refill))
+            controller.Update(p => p with { Pets = p.Pets with { RefillFromSpirits = refill } });
+        int minimum = pets.MinimumHostiles;
+        if (ImGui.SliderInt("Summon at this many hostiles", ref minimum, 1, 10))
+            controller.Update(p => p with { Pets = p.Pets with { MinimumHostiles = minimum } });
+        float range = pets.RangeMeters;
+        if (ImGui.SliderFloat("Within (m)", ref range, 3f, 40f, "%.0f"))
+            controller.Update(p => p with { Pets = p.Pets with { RangeMeters = range } });
+        ImGui.SetNextItemWidth(220f);
+        bool submitted = ImGui.InputText("##petdevice", ref _petDevice, 64, ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+        if ((ImGui.Button("Add essence") || submitted) && !string.IsNullOrWhiteSpace(_petDevice))
+        {
+            string name = _petDevice.Trim();
+            controller.Update(p => p with { Pets = p.Pets with { Devices = [.. p.Pets.Devices, name] } });
+            _petDevice = string.Empty;
+        }
+        for (int index = 0; index < pets.Devices.Count; index++)
+        {
+            ImGui.Text(pets.Devices[index]);
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"x##pet{index}"))
+            {
+                int remove = index;
+                controller.Update(p => p with { Pets = p.Pets with { Devices = p.Pets.Devices.Where((_, i) => i != remove).ToArray() } });
+                break;
+            }
+        }
     }
 
     private void SetMonsters(List<MonsterRule> rules)
