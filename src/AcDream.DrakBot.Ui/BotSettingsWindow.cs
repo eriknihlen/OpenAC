@@ -1,5 +1,6 @@
 using System.Numerics;
 using AcDream.DrakBot.Loot;
+using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
 using ImGuiNET;
@@ -20,6 +21,9 @@ public sealed class BotSettingsWindow(BotController controller)
 
     private bool _open;
     private string _profileName = string.Empty;
+    private string _metaName = string.Empty;
+    private string _metaExpression = string.Empty;
+    private string _metaResult = string.Empty;
     private string _newBuff = string.Empty;
     private int _selectedBuff = -1;
     private string _priorityNames = string.Empty;
@@ -81,6 +85,11 @@ public sealed class BotSettingsWindow(BotController controller)
             if (ImGui.BeginTabItem("Navigation"))
             {
                 DrawNavigation(profile.Navigation);
+                ImGui.EndTabItem();
+            }
+            if (ImGui.BeginTabItem("Meta"))
+            {
+                DrawMeta(profile.Meta);
                 ImGui.EndTabItem();
             }
             ImGui.EndTabBar();
@@ -364,6 +373,75 @@ public sealed class BotSettingsWindow(BotController controller)
         ImGui.EndDisabled();
         ImGui.SameLine();
         ImGui.TextDisabled("Edit rules in the profile JSON for now.");
+    }
+
+    private void DrawMeta(MetaOptions options)
+    {
+        MetaEngine? meta = controller.Meta;
+        if (meta is null)
+        {
+            ImGui.TextDisabled("No meta engine on this host.");
+            return;
+        }
+
+        bool enabled = options.Enabled;
+        if (ImGui.Checkbox("Run the meta", ref enabled))
+            meta.Enabled = enabled;
+        ImGui.SameLine();
+        bool debug = options.Debug;
+        if (ImGui.Checkbox("Echo fired rules", ref debug))
+            meta.Debug = debug;
+
+        if (_metaName.Length == 0 && options.Name.Length > 0)
+            _metaName = options.Name;
+        ImGui.SetNextItemWidth(220f);
+        ImGui.InputText("##metaname", ref _metaName, 128);
+        ImGui.SameLine();
+        if (ImGui.Button("Load") && !string.IsNullOrWhiteSpace(_metaName))
+            meta.LoadByName(_metaName.Trim());
+        ImGui.SameLine();
+        if (ImGui.Button("Clear"))
+        {
+            meta.Clear();
+            controller.Update(p => p with { Meta = p.Meta with { Name = string.Empty } });
+        }
+        ImGui.TextDisabled("A .af or .met by name from the VTank profiles folder; the profile remembers it.");
+
+        ImGui.Separator();
+        if (meta.Rules.Count == 0)
+        {
+            ImGui.TextDisabled("No meta loaded.");
+        }
+        else
+        {
+            ImGui.Text($"'{meta.MetaName}': {meta.Rules.Count} rules, state {meta.CurrentState} for {meta.SecondsInState:0}s"
+                + (meta.StackDepth > 0 ? $", stack {meta.StackDepth}" : string.Empty)
+                + (meta.WatchdogActive ? ", watchdog armed" : string.Empty));
+            ImGui.SetNextItemWidth(220f);
+            if (ImGui.BeginCombo("State", meta.CurrentState))
+            {
+                foreach (string state in meta.StateNames())
+                {
+                    if (ImGui.Selectable(state, state.Equals(meta.CurrentState, StringComparison.OrdinalIgnoreCase)))
+                        meta.SetState(state);
+                }
+                ImGui.EndCombo();
+            }
+            if (meta.LastFired.Length > 0)
+                ImGui.TextWrapped($"last fired: {meta.LastFired}");
+            if (meta.LastError.Length > 0)
+                ImGui.TextColored(new Vector4(0.9f, 0.4f, 0.3f, 1f), $"last error: {meta.LastError}");
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Try an expression");
+        ImGui.SetNextItemWidth(-60f);
+        bool submitted = ImGui.InputText("##metaexpr", ref _metaExpression, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+        if ((ImGui.Button("Eval") || submitted) && _metaExpression.Length > 0)
+            _metaResult = meta.Expressions.Evaluate(_metaExpression);
+        if (_metaResult.Length > 0)
+            ImGui.TextWrapped($"= {_metaResult}");
     }
 
     private void DrawNavigation(NavigationSettings navigation)

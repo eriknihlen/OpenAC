@@ -50,6 +50,9 @@ public sealed class BotEngine
     /// <summary>The snapshot the last tick ran against; what a status window shows.</summary>
     public Blackboard? LastBoard { get; private set; }
 
+    /// <summary>The meta, when one is wired in. It thinks every tick, beside the behaviors.</summary>
+    public Meta.MetaEngine? Meta { get; set; }
+
     public void Start()
     {
         if (IsRunning)
@@ -74,7 +77,7 @@ public sealed class BotEngine
     public void Tick(double elapsedSeconds)
     {
         _clock.Advance(elapsedSeconds);
-        if (!IsRunning)
+        if (!IsRunning && Meta is null)
             return;
 
         Blackboard board = Blackboard.Capture(
@@ -82,6 +85,12 @@ public sealed class BotEngine
             _clock,
             Profile.Combat.EngageDistance,
             Profile.Loot.ScanDistance);
+        // The meta drains chat and its timers whether or not the bot runs;
+        // its rules only fire while it does. It may change the profile or
+        // the route the behaviors are about to read.
+        Meta?.Think(board, IsRunning);
+        if (!IsRunning)
+            return;
         var context = new BehaviorContext(_surface, _log, board);
         _lastContext = context;
         LastBoard = board;

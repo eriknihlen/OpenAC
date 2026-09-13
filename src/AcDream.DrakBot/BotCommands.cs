@@ -1,4 +1,5 @@
 using System.Globalization;
+using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
 using AcDream.Plugin.Abstractions;
@@ -48,6 +49,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     break;
                 case "los":
                     LineOfSight(rest);
+                    break;
+                case "meta":
+                    MetaCommand(rest);
                     break;
                 default:
                     Help();
@@ -267,6 +271,67 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say("/drakbot nav save <name>|load <name>|list|import <file.nav>|export <file.nav>");
         Say("/drakbot style melee|missile|magic; /drakbot buffs|combat|loot on|off");
         Say("/drakbot los on|off; /drakbot los debug on|off");
+        Say("/drakbot meta load <name>|clear|on|off|state <name>|states|debug on|off|eval <expr>|status");
+    }
+
+    private void MetaCommand(string[] args)
+    {
+        MetaEngine? meta = controller.Meta;
+        if (meta is null)
+        {
+            Say("no meta engine on this host");
+            return;
+        }
+        string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
+        switch (sub)
+        {
+            case "load":
+                RequireArgument(args, 1, "meta load <name>");
+                meta.LoadByName(Rest(args, 1));
+                break;
+            case "clear":
+                meta.Clear();
+                controller.Update(p => p with { Meta = p.Meta with { Name = string.Empty } });
+                Say("meta cleared");
+                break;
+            case "on":
+            case "off":
+                meta.Enabled = sub == "on";
+                Say($"meta {sub}");
+                break;
+            case "state":
+                RequireArgument(args, 1, "meta state <name>");
+                meta.SetState(Rest(args, 1));
+                Say($"meta state -> {meta.CurrentState}");
+                break;
+            case "states":
+                IReadOnlyList<string> states = meta.StateNames();
+                Say(states.Count == 0 ? "no meta loaded" : "states: " + string.Join(", ", states));
+                break;
+            case "debug":
+                RequireArgument(args, 1, "meta debug on|off");
+                meta.Debug = args[1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                Say($"meta debug {(meta.Debug ? "on" : "off")}");
+                break;
+            case "eval":
+                RequireArgument(args, 1, "meta eval <expression>");
+                Say(meta.Expressions.Evaluate(Rest(args, 1)));
+                break;
+            case "status":
+                Say(meta.Rules.Count == 0
+                    ? $"meta: none loaded ({(meta.Enabled ? "on" : "off")})"
+                    : $"meta '{meta.MetaName}': {(meta.Enabled ? "on" : "off")}, state {meta.CurrentState} for {meta.SecondsInState:0}s, "
+                      + $"{meta.Rules.Count} rules, stack {meta.StackDepth}"
+                      + (meta.WatchdogActive ? ", watchdog armed" : string.Empty));
+                if (meta.LastFired.Length > 0)
+                    Say($"last fired: {meta.LastFired}");
+                if (meta.LastError.Length > 0)
+                    Say($"last error: {meta.LastError}");
+                break;
+            default:
+                Say("usage: /drakbot meta load <name>|clear|on|off|state <name>|states|debug on|off|eval <expr>|status");
+                break;
+        }
     }
 
     private void Say(string text) => chat.PostSystemMessage(text);

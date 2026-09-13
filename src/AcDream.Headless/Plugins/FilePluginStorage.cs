@@ -23,6 +23,12 @@ internal sealed class FilePluginStorage : IPluginStorage
             : null;
     }
 
+    public byte[]? ReadBytes(string key)
+    {
+        string path = Resolve(key);
+        return File.Exists(path) ? File.ReadAllBytes(path) : null;
+    }
+
     public IReadOnlyList<string> List(string prefix)
     {
         ArgumentNullException.ThrowIfNull(prefix);

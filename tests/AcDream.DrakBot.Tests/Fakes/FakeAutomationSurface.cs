@@ -19,6 +19,7 @@ internal sealed class FakeAutomationSurface
     public bool IsAvailable { get; set; } = true;
     public bool IsInWorld { get; set; } = true;
     public uint ObjectId { get; set; } = 0x50000001u;
+    public string Name { get; set; } = "Tester";
     public uint CurrentHealth { get; set; } = 100;
     public uint MaxHealth { get; set; } = 100;
     public uint CurrentStamina { get; set; } = 100;
@@ -90,6 +91,12 @@ internal sealed class FakeAutomationSurface
     // ── chat ──────────────────────────────────────────────────────────────
     public List<string> SystemMessages { get; } = [];
     public void PostSystemMessage(string text) => SystemMessages.Add(text);
+    /// <summary>Chat lines the game showed, served by <see cref="CaptureMessages"/> in sequence order.</summary>
+    public List<PluginChatMessage> ChatMessages { get; } = [];
+    public void Hear(string text, string sender = "") =>
+        ChatMessages.Add(new PluginChatMessage((ulong)ChatMessages.Count + 1, 0u, 0, sender, text, string.Empty));
+    public IReadOnlyList<PluginChatMessage> CaptureMessages(ulong afterSequence) =>
+        ChatMessages.Where(message => message.Sequence > afterSequence).ToArray();
     public bool Submit(string text)
     {
         Commands.Add($"chat:{text}");
@@ -217,6 +224,14 @@ internal sealed class FakeAutomationSurface
     }
     public bool TryGet(uint objectId, out PluginWorldObject value)
     {
+        foreach (PluginWorldObject candidate in WorldObjects)
+        {
+            if (candidate.ObjectId == objectId)
+            {
+                value = candidate;
+                return true;
+            }
+        }
         if (AppraisedObjects.Contains(objectId))
         {
             value = new PluginWorldObject(objectId, 0u, "item", PluginObjectClass.Misc, 0u, 0u, 0u)

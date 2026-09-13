@@ -150,6 +150,13 @@ public sealed class BotDashboard
                     ? action
                     : $"waypoint {_controller.Navigation.WaypointIndex + 1}/{route.Waypoints.Count}");
         }
+        if (_controller.Meta is { Rules.Count: > 0 } meta)
+        {
+            ImGui.TextColored(ColMuted, "Meta");
+            ImGui.TextColored(
+                meta.Enabled ? ColAccent : ColMuted,
+                $"{meta.MetaName}: {meta.CurrentState}" + (meta.Enabled ? string.Empty : " (off)"));
+        }
         ImGui.EndTable();
     }
 

@@ -1,0 +1,2116 @@
+DrakBot Expression Engine - Function and Operator Reference
+============================================================
+
+All values are strings internally. Numbers are parsed from strings as needed.
+Boolean convention: "0" and "" are false. Everything else is true.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPERATORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Operators are listed from lowest to highest precedence.
+Parentheses ( ) can be used for explicit grouping.
+
+──────────────────────────────────────────
+Logical
+──────────────────────────────────────────
+
+a || b
+    Returns "1" if either a or b is true, otherwise "0".
+    Example: getcharintprop[1] < 50 || getcharintprop[3] < 20
+
+a && b
+    Returns "1" if both a and b are true, otherwise "0".
+    Example: getcharintprop[1] > 10 && getvar[mode] == combat
+
+──────────────────────────────────────────
+Bitwise
+──────────────────────────────────────────
+
+a | b
+    Bitwise OR of two integers.
+    Example: 6 | 1   →  "7"
+
+a ^ b
+    Bitwise XOR of two integers.
+    Example: 7 ^ 3   →  "4"
+
+a & b
+    Bitwise AND of two integers.
+    Example: 7 & 3   →  "3"
+
+~a
+    Bitwise complement (NOT) of an integer. Unary, prefix.
+    Example: ~0   →  "-1"
+
+a << n
+    Shifts a left by n bits.
+    Example: 1 << 4   →  "16"
+
+a >> n
+    Shifts a right by n bits.
+    Example: 16 >> 2   →  "4"
+
+──────────────────────────────────────────
+Comparison
+──────────────────────────────────────────
+
+a == b
+    Returns "1" if a equals b.
+    If both sides parse as numbers, numeric comparison is used.
+    Otherwise, exact case-sensitive string comparison.
+    Example: getvar[state] == hunting
+    Example: getcharintprop[25] == 275
+
+a > b
+    Returns "1" if a is numerically greater than b.
+
+a < b
+    Returns "1" if a is numerically less than b.
+
+a >= b
+    Returns "1" if a is numerically greater than or equal to b.
+
+a <= b
+    Returns "1" if a is numerically less than or equal to b.
+
+a # pattern
+    Returns "1" if string a matches the regex pattern. Case-insensitive.
+    Example: getcharstringprop[1] # ^Virindi
+    Example: getvar[lastchat] # killed.*olthoi
+
+──────────────────────────────────────────
+Arithmetic
+──────────────────────────────────────────
+
+a + b
+    Adds two numbers. If either side is not a number, concatenates as strings.
+    Example: getcharintprop[1] + 100
+    Example: hello + world   →  "helloworld"
+
+a - b
+    Subtracts b from a. Numbers only.
+    Example: getcharintprop[1] - getcharintprop[3]
+
+a * b
+    Multiplies a and b. Numbers only.
+
+a / b
+    Divides a by b. Returns "0" on division by zero. Numbers only.
+
+a % b
+    Remainder of a divided by b. Returns "0" if b is zero. Numbers only.
+    Example: getcharintprop[25] % 10
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FUNCTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Function arguments are comma-separated inside brackets: funcname[arg1, arg2]
+Arguments can themselves be full expressions including other function calls.
+
+──────────────────────────────────────────
+Control Flow
+──────────────────────────────────────────
+
+iif[condition, then, else]
+    Evaluates condition. If true, evaluates and returns the then expression.
+    If false, evaluates and returns the else expression.
+    Only the chosen branch is evaluated (lazy). Side effects in the unchosen
+    branch do not occur.
+    Example: iif[getcharintprop[1] < 30, low, ok]
+    Example: iif[getvar[x] == 1, setvar[y, yes], setvar[y, no]]
+
+if[condition, then]
+    Like iif but with no else branch. Returns "" when condition is false.
+    Example: if[getcharintprop[1] < 50, setvar[warned, 1]]
+
+──────────────────────────────────────────
+Variables
+──────────────────────────────────────────
+
+SESSION VARIABLES
+Session variables persist for the lifetime of the macro session and are
+shared across all meta rules. They are cleared on relog or plugin reload.
+
+setvar[key, value]
+    Stores value into the named variable. Returns the stored value.
+    Example: setvar[count,0]
+    Example: setvar[count,getcharintprop[1]+1]
+
+getvar[key]
+    Returns the value of the named variable, or "0" if not defined.
+    Example: getvar[count]
+    Example: $count              (shorthand for getvar[count])
+
+testvar[key]
+    Returns "1" if the variable is defined, "0" otherwise.
+    Example: testvar[count]
+
+touchvar[key]
+    Sets the variable to "0" if it was not previously defined.
+    Returns "1" if it was already defined, "0" if it was just initialised.
+    Example: touchvar[count]
+
+clearvar[key]
+    Removes the variable. Returns "1" if it existed, "0" otherwise.
+    Example: clearvar[count]
+
+clearallvars[]
+    Removes all session variables. Returns "1".
+    Example: clearallvars[]
+
+
+PERSISTENT VARIABLES (pvars)
+Persistent variables survive relogging and plugin reloads. They are stored
+per-character at: C:\Games\RynthSuite\RynthAi\pvars\{CharName}.txt
+
+setpvar[key, value]
+    Stores value in the persistent variable and saves to disk.
+    Returns the stored value.
+    Example: setpvar[kills,0]
+
+getpvar[key]
+    Returns the value of the persistent variable, or "0" if not defined.
+    Example: getpvar[kills]
+
+testpvar[key]
+    Returns "1" if the persistent variable is defined, "0" otherwise.
+    Example: testpvar[kills]
+
+touchpvar[key]
+    Sets the persistent variable to "0" if not previously defined and saves.
+    Returns "1" if already defined, "0" if just initialised.
+    Example: touchpvar[kills]
+
+clearpvar[key]
+    Removes the persistent variable and saves. Returns "1" if it existed.
+    Example: clearpvar[kills]
+
+clearallpvars[]
+    Removes all persistent variables for this character and saves. Returns "1".
+    Example: clearallpvars[]
+
+
+GLOBAL VARIABLES (gvars)
+Global variables are shared across all characters. They are stored at:
+C:\Games\RynthSuite\RynthAi\gvars.txt
+
+setgvar[key, value]
+    Stores value in the global variable and saves to disk.
+    Returns the stored value.
+    Example: setgvar[serverKills,0]
+
+getgvar[key]
+    Returns the value of the global variable, or "0" if not defined.
+    Example: getgvar[serverKills]
+
+testgvar[key]
+    Returns "1" if the global variable is defined, "0" otherwise.
+    Example: testgvar[serverKills]
+
+touchgvar[key]
+    Sets the global variable to "0" if not previously defined and saves.
+    Returns "1" if already defined, "0" if just initialised.
+    Example: touchgvar[serverKills]
+
+cleargvar[key]
+    Removes the global variable and saves. Returns "1" if it existed.
+    Example: cleargvar[serverKills]
+
+clearallgvars[]
+    Removes all global variables and saves. Returns "1".
+    Example: clearallgvars[]
+
+
+──────────────────────────────────────────
+Character Properties
+──────────────────────────────────────────
+These functions read properties from the local player character.
+The property id is the SType integer for the desired property.
+Returns "0" (or "") if the property is unavailable.
+
+getfreeitemslots[container?]
+    Returns the number of free item slots in a container.
+    If no argument is given (or argument is omitted), defaults to the player's main backpack.
+    Returns -1 if the container is invalid or capacity cannot be determined.
+    Example: getfreeitemslots[]
+                 →  free item slots in the player backpack
+    Example: getfreeitemslots[wobjectgetselection[]]
+                 →  free item slots in the currently selected container
+    Example: getfreeitemslots[wobjectgetopencontainer[]]
+                 →  free item slots in the currently open container
+
+getfreecontainerslots[container?]
+    Returns the number of free sub-container slots in a container (i.e. how many more packs
+    can be placed inside it). If no argument is given, defaults to the player's main backpack.
+    Returns -1 if the container is invalid or capacity cannot be determined.
+    Example: getfreecontainerslots[]
+                 →  free pack slots on the player
+    Example: getfreecontainerslots[wobjectgetselection[]]
+                 →  free pack slots in the currently selected container
+
+getcontaineritemcount[container?]
+    Returns the number of items currently in a container.
+    If no argument is given, defaults to the player's main backpack.
+    Returns -1 if the container is invalid.
+    Example: getcontaineritemcount[]
+                 →  number of items in the player backpack
+    Example: getcontaineritemcount[wobjectgetselection[]]
+                 →  number of items in the currently selected container
+    Example: getcontaineritemcount[wobjectgetopencontainer[]]
+                 →  number of items in the currently open container
+
+getcharintprop[id]
+    Returns the integer property with the given SType id as a string.
+    Example: getcharintprop[25]    (level)
+    Example: getcharintprop[1]     (health)
+
+getchardoubleprop[id]
+    Returns a float/double property from the player character.
+    Example: getchardoubleprop[22]  (damage variance)
+
+getcharquadprop[id]
+    Returns a 64-bit integer (quad) property from the player character.
+    Returns "0" if the property is undefined or unavailable.
+    Example: getcharquadprop[273]   (total XP)
+    Example: getcharquadprop[274]   (unassigned XP)
+
+getcharboolprop[id]
+    Returns "1" or "0" for a boolean property on the player character.
+    Example: getcharboolprop[1]    (stuck)
+
+getcharstringprop[id]
+    Returns a string property from the player character.
+    Example: getcharstringprop[1]  (name)
+    Example: getcharstringprop[2]  (title)
+
+getisspellknown[spellId]
+    Returns "1" if your character knows the spell with the given ID, "0" otherwise.
+    Example: getisspellknown[2931]  (Recall Aphus Lassel)
+
+getcancastspell_hunt[spellId]
+    Returns "1" if your character knows the spell and has mana available to cast it
+    while hunting (in combat context). Returns "0" otherwise.
+    Note: mana cost per spell is not available; mana > 0 is the threshold.
+    Example: getcancastspell_hunt[2931]
+
+getcancastspell_buff[spellId]
+    Returns "1" if your character knows the spell and has mana available to cast it
+    while buffing. Returns "0" otherwise.
+    Example: getcancastspell_buff[2931]
+
+getspellexpiration[spellId]
+    Returns the number of seconds until the active enchantment with spellId expires.
+    Returns "0" if the spell is not currently active.
+    Returns "2147483647" if the spell is permanent (does not expire).
+    Example: getspellexpiration[515]  (Acid Protection Self I)
+
+getspellexpirationbyname[spellName]
+    Returns the number of seconds until an active enchantment whose name contains
+    spellName (case-insensitive) expires.
+    Returns "0" if no matching spell is active.
+    Returns "2147483647" if the spell is permanent.
+    Returns "-1" if an error occurred (no server time sync, API unavailable).
+    Example: getspellexpirationbyname[acid prot]
+
+getcharvital_base[vitalId]
+    Returns your character's base (unbuffed) maximum vital.
+    Includes base training, gear bonuses, and augmentations, but NOT spell enchantments.
+    vitalId: 1 = Health, 2 = Stamina, 3 = Mana
+    Example: getcharvital_base[1]   (base max health)
+    Example: getcharvital_base[3]   (base max mana)
+
+getcharvital_current[vitalId]
+    Returns your character's current vital value.
+    vitalId: 1 = Health, 2 = Stamina, 3 = Mana
+    Example: getcharvital_current[1]   (current health)
+    Example: getcharvital_current[2]   (current stamina)
+
+getcharvital_buffedmax[vitalId]
+    Returns your character's buffed maximum vital (base + active spell enchantments).
+    vitalId: 1 = Health, 2 = Stamina, 3 = Mana
+    Example: getcharvital_buffedmax[1]   (buffed max health)
+    Example: getcharvital_buffedmax[3]   (buffed max mana)
+
+getcharskill_traininglevel[skillId]
+    Returns your character's training level for the specified skill.
+    Returns: 0 = Unusable, 1 = Untrained, 2 = Trained, 3 = Specialized
+    skillId: STypeSkill numeric value (e.g. 23 = LockPick, 43 = Void)
+    Example: getcharskill_traininglevel[23]   (LockPick training level)
+
+getcharskill_base[skillId]
+    Returns your character's base skill level (no enchantments).
+    Includes points spent and practice points, but NOT spell buffs.
+    skillId: STypeSkill numeric value
+    Example: getcharskill_base[43]   (base Void skill)
+
+getcharskill_buffed[skillId]
+    Returns your character's buffed skill level (base + active spell enchantments).
+    skillId: STypeSkill numeric value
+    Example: getcharskill_buffed[33]   (buffed Life Magic skill)
+
+getcharattribute_base[attributeId]
+    Returns your character's base attribute level (no enchantments).
+    attributeId: 1=Strength, 2=Endurance, 3=Quickness, 4=Coordination, 5=Focus, 6=Self
+    Example: getcharattribute_base[1]   (base Strength)
+
+getcharattribute_buffed[attributeId]
+    Returns your character's buffed attribute level (base + active spell enchantments).
+    attributeId: 1=Strength, 2=Endurance, 3=Quickness, 4=Coordination, 5=Focus, 6=Self
+    Example: getcharattribute_buffed[5]   (buffed Focus)
+
+getcharburden[0]
+    Returns your character's current burden as a float percentage of max capacity.
+    Capacity = buffed Strength * 150. Matches UB output format.
+    The argument is ignored — pass 0.
+    Example: getcharburden[0]   (e.g. 3.343...)
+
+getcharburden_total[0]
+    Returns your character's raw encumbrance value (burden units, not percentage).
+    The argument is ignored — pass 0.
+    Example: getcharburden_total[0]
+
+getplayerlandcell[]
+    Returns the landcell (objCellId) your character is currently standing in, as a number.
+    Example: getplayerlandcell[]
+
+getplayerlandblock[]
+    Returns the landblock (objCellId & 0xFFFF0000) your character is in, as a number.
+    Matches UB: the full 32-bit value with the lower 16 bits zeroed.
+    Example: getplayerlandblock[]
+
+getplayercoordinates[]
+    Returns a coordinates object (pipe-delimited, full precision) for the player's current
+    position: "NS|EW|Z". NS positive=N, negative=S. EW positive=E, negative=W.
+    Z is in coordinate units (raw_z/240). Use coordinatetostring[] for display,
+    coordinategetns/ew/z[] to extract components.
+    Example: getplayercoordinates[]   →  "41.52994|34.46267|0.46669"
+
+coordinategetns[coords]
+    Extracts the north/south component (map units) from a coordinates object.
+    Positive = North, negative = South. Matches UB coordinatenorthsouth[].
+    Example: coordinategetns[getplayercoordinates[]]   →  41.53
+
+coordinategetwe[coords]
+    Extracts the east/west component (map units) from a coordinates object.
+    Positive = East, negative = West. Matches UB coordinateeastwest[].
+    Example: coordinategetwe[getplayercoordinates[]]   →  34.46
+
+coordinategetz[coords]
+    Extracts the Z component from a coordinates object. Z is already in coordinate units
+    (raw_z / 240) — no further division is applied. Matches UB coordinatez[].
+    Example: coordinategetz[getplayercoordinates[]]    →  0.47
+
+coordinatetostring[coords]
+    Formats a coordinates object as a human-readable string matching UB format:
+    "{NS}N/{S}, {EW}E/{W}, {Z}Z" with 2 decimal places. Z is divided by 240.
+    Example: coordinatetostring[getplayercoordinates[]]  →  "41.53N, 34.46E, 0.47Z"
+
+coordinateparse[string]
+    Parses a human-readable coordinate string into a coordinates object.
+    Accepts UB format: "41.53N, 34.46E, 0.47Z" (Z optional).
+    NS must have N/S suffix; EW must have E/W suffix; Z suffix is z/Z.
+    The comma in coordinate strings is treated as part of the argument — no backticks needed.
+    Example: coordinateparse[41.53N, 34.46E, 0.47Z]
+    Example: coordinateparse[41.53N, 34.46E]   (no Z — defaults to 0)
+
+coordinatedistancewithz[obj1, obj2]
+    Returns the 3D distance in game units between two coordinates objects.
+    Converts NS/EW from coordinate units to raw game units (×240), same for Z.
+    Matches UB coordinatedistancewithz[].
+    Example: coordinatedistancewithz[coordinateparse[1.2N, 3.4E], coordinateparse[5.6N, 7.8E]]
+
+coordinatedistanceflat[obj1, obj2]
+    Returns the 2D (horizontal) distance in game units between two coordinates objects, ignoring Z.
+    Converts NS/EW from coordinate units to raw game units (×240).
+    Matches UB coordinatedistanceflat[].
+    Example: coordinatedistanceflat[coordinateparse[1.2N, 3.4E], coordinateparse[5.6N, 7.8E]]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LISTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Lists are ordered collections serialized as "[item1,item2,...]" strings.
+Variables hold list values directly (e.g. myList = [a,b,c]).
+All indices are 0-based.
+
+List functions return a new list — they do NOT modify the stored variable.
+To update a variable use setvar:
+    setvar[myList, listadd[getvar[myList], `x`]]
+
+──────────────────────────────────────────
+Construction
+──────────────────────────────────────────
+
+listcreate[item1, item2, ...]
+    Creates a new list, optionally pre-populated.
+    Test in chat:  /ra mexec listcreate[1,2,3]
+    Example: listcreate[]          →  []
+    Example: listcreate[1,2,3]     →  [1,2,3]
+    Example: setvar[myList, listcreate[]]   →  stores [] in myList
+
+listfromrange[start, end]
+    Creates a list of integers from start to end (inclusive).
+    Supports both ascending and descending ranges.
+    Test in chat:  /ra mexec listfromrange[1,5]
+    Example: listfromrange[1,5]    →  [1,2,3,4,5]
+    Example: listfromrange[5,1]    →  [5,4,3,2,1]
+
+listcopy[list]
+    Returns the list unchanged (lists are values; copy is a no-op for value semantics).
+    Test in chat:  /ra mexec listcopy[listcreate[a,b,c]]
+    Example: listcopy[listcreate[a,b,c]]   →  [a,b,c]
+
+──────────────────────────────────────────
+Access
+──────────────────────────────────────────
+
+listcount[list]
+    Returns the number of items in the list.
+    Test in chat:  /ra mexec listcount[listcreate[a,b,c]]
+    Example: listcount[listcreate[a,b,c]]   →  3
+
+listgetitem[list, index]
+    Returns the item at the given 0-based index, or "" if out of range.
+    Test in chat:  /ra mexec listgetitem[listcreate[a,b,c],1]
+    Example: listgetitem[listcreate[a,b,c], 0]   →  "a"
+    Example: listgetitem[listcreate[a,b,c], 2]   →  "c"
+
+listcontains[list, item]
+    Returns "1" if item exists in the list, "0" otherwise.
+    Test in chat:  /ra mexec listcontains[listcreate[a,b,c],`b`]
+    Example: listcontains[listcreate[a,b,c], `b`]   →  1
+    Example: listcontains[listcreate[a,b,c], `x`]   →  0
+
+listindexof[list, item]
+    Returns the 0-based index of the first occurrence of item, or -1 if not found.
+    Test in chat:  /ra mexec listindexof[listcreate[a,b,c],`b`]
+    Example: listindexof[listcreate[a,b,c], `b`]   →  1
+    Example: listindexof[listcreate[a,b,c], `x`]   →  -1
+
+listlastindexof[list, item]
+    Returns the 0-based index of the last occurrence of item, or -1 if not found.
+    Test in chat:  /ra mexec listlastindexof[listcreate[a,b,a],`a`]
+    Example: listlastindexof[listcreate[a,b,a], `a`]   →  2
+    Example: listlastindexof[listcreate[a,b,c], `x`]   →  -1
+
+──────────────────────────────────────────
+Modification (returns new list)
+──────────────────────────────────────────
+
+listadd[list, item]
+    Returns a new list with item appended to the end.
+    Test in chat:  /ra mexec listadd[listcreate[a,b],`c`]
+    Example: listadd[listcreate[a,b], `c`]   →  [a,b,c]
+    Example: setvar[myList, listadd[getvar[myList], `x`]]   →  appends x to myList
+
+listinsert[list, item, index]
+    Returns a new list with item inserted at the given index.
+    Returns "0" if index is out of range (< 0 or > list length).
+    Test in chat:  /ra mexec listinsert[listcreate[a,b,c],`x`,1]
+    Example: listinsert[listcreate[a,b,c], `x`, 1]   →  [a,x,b,c]
+    Example: listinsert[listcreate[a,b,c], `x`, 0]   →  [x,a,b,c]
+
+listremove[list, item]
+    Returns a new list with the first occurrence of item removed.
+    If item is not found, returns the list unchanged.
+    Test in chat:  /ra mexec listremove[listcreate[a,b,a],`a`]
+    Example: listremove[listcreate[a,b,a], `a`]   →  [b,a]
+    Example: listremove[listcreate[a,b,c], `x`]   →  [a,b,c]
+
+listremoveat[list, index]
+    Returns a new list with the item at the given index removed.
+    Returns "0" if index is out of range.
+    Test in chat:  /ra mexec listremoveat[listcreate[a,b,c],1]
+    Example: listremoveat[listcreate[a,b,c], 1]   →  [a,c]
+    Example: listremoveat[listcreate[a,b,c], 0]   →  [b,c]
+
+listpop[list]
+listpop[list, index]
+    Returns the item at index (default: -1 = last item).
+    Returns "" if out of range or list is empty.
+    Note: returns the item value only — does not modify the stored variable.
+    Test in chat:  /ra mexec listpop[listcreate[a,b,c]]
+    Example: listpop[listcreate[a,b,c]]      →  "c"
+    Example: listpop[listcreate[a,b,c], 0]   →  "a"
+
+listclear[list]
+    Returns an empty list [].
+    Test in chat:  /ra mexec listclear[listcreate[a,b,c]]
+    Example: listclear[listcreate[a,b,c]]   →  []
+
+listreverse[list]
+    Returns a new list with items in reversed order.
+    Test in chat:  /ra mexec listreverse[listcreate[a,b,c]]
+    Example: listreverse[listcreate[a,b,c]]   →  [c,b,a]
+
+──────────────────────────────────────────
+Higher-Order Functions
+──────────────────────────────────────────
+
+These functions accept an expression template as their last argument.
+The template is a raw (unevaluated) expression — wrap it in backticks
+to prevent premature evaluation: `expr`.
+
+Loop variables available inside the template:
+
+    $0   current index (0-based)
+    $1   current item value
+    $2   accumulator (listreduce only)
+
+listfilter[list, `condition`]
+    Returns a new list containing only items where condition evaluates to truthy.
+    $0 = index, $1 = item value.
+    Example: listfilter[listfromrange[1,5], `$1 > 2`]    →  [3,4,5]
+    Example: listfilter[listfromrange[1,5], `$0 > 2`]    →  [4,5]
+
+listmap[list, `expression`]
+    Returns a new list where each item is replaced by the evaluated expression.
+    $0 = index, $1 = original item value.
+    Example: listmap[listfromrange[1,3], `$1 * 2`]   →  [2,4,6]
+
+listreduce[list, `expression`]
+    Folds the list into a single value using the expression.
+    $0 = index, $1 = current item, $2 = accumulator (starts as "0").
+    Returns "0" for an empty list.
+    Example: listreduce[listfromrange[1,5], `$2 + $1`]   →  "15"  (1+2+3+4+5)
+
+listsort[list, `comparator`]
+    Returns a new list sorted by the comparator expression.
+    $1 = left item, $2 = right item.
+    Return negative to sort left before right, 0 if equal, positive to sort right before left.
+    Example: listsort[listfromrange[3,1], `$1 - $2`]    →  [1,2,3]  (ascending)
+    Example: listsort[listfromrange[1,3], `$2 - $1`]    →  [3,2,1]  (descending)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PLUGIN OPTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Plugin options are named settings managed by RynthAi. Both the ra and ub
+prefixed variants are accepted and behave identically (ub variants exist for
+compatibility with expressions originally written for Utility Belt).
+
+raoptget[name]  /  uboptget[name]
+    Returns the current value of the named option. Returns "0" if the option
+    is not registered.
+    Example: raoptget[`Plugin.Debug`]   →  current value of Plugin.Debug
+    Example: uboptget[`Plugin.Debug`]   →  same result
+
+raoptset[name, value]  /  uboptset[name, value]
+    Sets the named option to the given value. Returns "1" on success, "0" if
+    the name is empty.
+    Example: raoptset[`Plugin.Debug`, 1]   →  "1"
+    Example: uboptset[`Plugin.Debug`, 0]   →  "1"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRING FUNCTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Backtick literals: wrap a string in backticks to pass it verbatim without
+the parser interpreting spaces or special characters as operators.
+    Example: getregexmatch[`test 123`, `\d+`]
+
+getregexmatch[text, pattern]
+    Returns the first substring of text that matches the regex pattern.
+    Returns "" if there is no match or the pattern is invalid.
+    Match is case-insensitive.
+    Example: getregexmatch[`test 123`, `\d+`]       →  "123"
+    Example: getregexmatch[`hello world`, `\w+`]    →  "hello"
+    Example: getregexmatch[`no digits here`, `\d+`] →  ""
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DYNAMIC EVALUATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions treat a string as an expression and evaluate it at runtime.
+Pass the expression as a backtick literal so it is not evaluated prematurely.
+Use \` inside a backtick string to represent a literal backtick character
+(needed when nesting backtick strings inside an outer backtick string).
+
+tostring[obj]
+    Returns obj converted to a string. Since all expression values are strings
+    internally this is effectively a no-op, but matches UB API compatibility.
+    Example: tostring[2]    →  "2"
+    Example: tostring[1+1]  →  "2"
+
+exec[text]
+    Evaluates the string text as an expression and returns the result.
+    Example: exec[`1+1`]                          →  "2"
+    Example: setvar[e, `getvar[x] + 1`]
+             exec[getvar[e]]                       →  evaluates getvar[x] + 1
+
+ifthen[value, trueexpr, falseexpr]
+    If value is truthy, evaluates the string trueexpr as an expression and
+    returns the result. Otherwise evaluates falseexpr (optional; returns ""
+    if omitted). Only the chosen branch expression string is evaluated.
+    Example: ifthen[1, `chatbox[\`true\`]`, `chatbox[\`false\`]`]
+             → writes "true" to the chatbox
+    Example: ifthen[0, `chatbox[\`true\`]`, `chatbox[\`false\`]`]
+             → writes "false" to the chatbox
+    Example: ifthen[getvar[x] == 1, `setvar[y, yes]`, `setvar[y, no]`]
+
+delayexec[delay, text]
+    Schedules text to be evaluated as an expression after delay milliseconds.
+    Returns "1" immediately. The evaluation runs on a background thread —
+    avoid using delayexec with expressions that modify shared variables
+    concurrently with the meta tick loop.
+    delay: milliseconds (1 second = 1000).
+    Example: delayexec[1000, `1+1`]    → schedules evaluation of 1+1 after 1s
+    Example: delayexec[500, `setvar[delayed, 1]`]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WORLD STATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions read live game state from the client process.
+They return "0" if the underlying engine hook is unavailable.
+
+vitae[]
+    Returns the player's current vitae penalty as an integer (0–100).
+    0 = no vitae penalty. 5 = 5% penalty. 10 = 10% penalty. Etc.
+    Reads CACQualities::GetVitaeValue() directly from client memory.
+    Test in chat:  /ra mexec vitae[]
+    Example: vitae[] > 0               →  true if any vitae penalty active
+    Example: vitae[] >= 10             →  true if vitae penalty is 10% or worse
+
+isportaling[]
+    Returns "1" while the player is in portal/teleport transit, "0" otherwise.
+    Reads CPlayerSystem::teleport_in_progress directly from client memory.
+    Test in chat:  /ra mexec isportaling[]
+    Example: isportaling[] == 1
+    Example: iif[isportaling[], in portal, not in portal]
+
+    Note: for one-shot reactions to entering/exiting portal space, use the
+    meta conditions PortalspaceEntered (269) and PortalspaceExited (270)
+    instead of polling isportaling[] in an Expression condition. The meta
+    conditions fire for exactly one tick on the 0→1 and 1→0 transitions.
+
+getworldname[]
+    Returns the name of the currently connected world/server (e.g. "ACEmulator", "Darktide").
+    Captured from the server's login announcement — works with any launcher.
+    Falls back to the RynthCore launcher context file if the hook has not fired yet.
+    Returns "" (empty string) if not yet available.
+    Test in chat:  /ra mexec getworldname[]
+    Example: getworldname[] == ACEmulator     →  true if on ACEmulator
+
+getdatetimelocal[format]
+    Returns the current local date and time formatted using a .NET format string.
+    Uses standard .NET DateTime format specifiers.
+    IMPORTANT: the format string must be wrapped in backticks if it contains colons.
+    Without backticks, the parser stops at ':' and only the first token is used.
+    Test in chat:  /ra mexec getdatetimelocal[`hh:mm:ss tt`]
+    Example: getdatetimelocal[`hh:mm:ss tt`]   →  "06:09:01 PM"
+    Example: getdatetimelocal[`yyyy-MM-dd`]     →  "2026-04-11"
+    Example: getdatetimelocal[`HH:mm`]          →  "18:09"  (24-hour)
+
+getdatetimeutc[format]
+    Returns the current UTC date and time formatted using a .NET format string.
+    Uses standard .NET DateTime format specifiers.
+    IMPORTANT: the format string must be wrapped in backticks if it contains colons.
+    Test in chat:  /ra mexec getdatetimeutc[`hh:mm:ss tt`]
+    Example: getdatetimeutc[`hh:mm:ss tt`]     →  "06:09:01 PM"
+    Example: getdatetimeutc[`yyyy-MM-dd`]       →  "2026-04-11"
+    Example: getdatetimeutc[`HH:mm`]            →  "18:09"  (24-hour)
+
+getunixtime[]
+    Returns the number of whole seconds elapsed since the Unix epoch (1970-01-01 00:00:00 UTC).
+    Useful for timestamping events, computing elapsed time, and time-based conditions.
+    Test in chat:  /ra mexec getunixtime[]
+    Example: getunixtime[]                               →  e.g. "1744329600"
+    Example: setvar[t, getunixtime[]]                    →  snapshot a timestamp
+    Example: getunixtime[] - getvar[t] > 60              →  true if 60s have elapsed
+
+getaccounthash[]
+    Returns a lowercase MD5 hex string of the current account name.
+    Returns "" (empty string) if the account name is not yet available.
+    The hash is consistent for the same account across sessions.
+    Useful for per-account save keys without embedding the real account name.
+    Test in chat:  /ra mexec getaccounthash[]
+    Example: getaccounthash[]                    →  e.g. "a87ff679..."
+    Example: setvar[acct, getaccounthash[]]      →  store for later use
+
+getcombatstate[]
+    Returns the player's current combat mode as a string.
+    Possible values: "Peace", "Melee", "Missile", "Magic"
+    Test in chat:  /ra mexec getcombatstate[]
+    Example: getcombatstate[] == Melee    →  true if in melee stance
+    Example: getcombatstate[] == Peace    →  true if in peace mode
+
+setcombatstate[state]
+    Sets the player's combat mode. Accepted values: peace, melee, missile, magic (case-insensitive).
+    Returns "1" on success, "0" if the state string is unrecognised or the hook is unavailable.
+    Test in chat:  /ra mexec setcombatstate[peace]
+    Example: setcombatstate[peace]    →  switches to peace mode
+    Example: setcombatstate[magic]    →  switches to magic/caster stance
+
+setmotion[motion, state]
+    Sets a character's wanted motion state.
+    Param #0: motion — one of: Forward, Backward, TurnRight, TurnLeft, StrafeRight, StrafeLeft, Walk
+    Param #1: state  — 1 = on, 0 = off
+    Returns "1" if successful, "0" if the motion name is invalid or the hook is unavailable.
+    Test in chat:  /ra mexec setmotion[Forward, 1]
+    Example: setmotion[Forward, 1]   →  character moves forward until turned off
+    Example: setmotion[Forward, 0]   →  stops forward motion
+
+getmotion[motion]
+    Gets a character's wanted motion state.
+    Param #0: motion — one of: Forward, Backward, TurnRight, TurnLeft, StrafeRight, StrafeLeft
+    Returns:
+        0  = motion is inactive and unwanted
+        1  = motion is wanted (set via setmotion)
+    Note: UB returns -1 (unwanted but active) and 2 (wanted and active) using client state
+    polling which is not available here. Only wanted state (0/1) is tracked.
+    Test in chat:  /ra mexec getmotion[Forward]
+    Example: getmotion[Forward] == 1    →  true if forward motion is set
+
+clearmotion[]
+    Clears all motion states (turns off Forward, Backward, TurnRight, TurnLeft,
+    StrafeRight, StrafeLeft, Walk).
+    Returns "1" always.
+    Test in chat:  /ra mexec clearmotion[]
+    Example: clearmotion[]   →  stops all character motion
+
+getbusystate[]
+    Returns the player's current UI busy state as a number.
+        0 = idle
+        >0 = a UI action is in progress (item pickup, equip, drop, stack combine, etc.)
+    Note: RynthAi tracks this via ClientUISystem busy count hooks. The value reflects the
+    net number of in-progress item operations. 0 = idle is reliable; non-zero means busy.
+    Test in chat:  /ra mexec getbusystate[]
+    Example: getbusystate[] == 0    →  true if character is idle
+
+getequippedweapontype[]
+    Returns the type of the currently equipped (wielded) weapon as a string.
+    Checks the player's inventory for items that are currently wielded.
+    Possible return values:
+        "None"    — no weapon is wielded
+        "Melee"   — a melee weapon is in hand
+        "Missile" — a missile weapon (bow, crossbow, thrown) is in hand
+        "Wand"    — a caster weapon (wand, staff, orb) is in hand
+    Test in chat:  /ra mexec getequippedweapontype[]
+    Example: getequippedweapontype[] == Wand     →  true if a caster weapon is wielded
+    Example: getequippedweapontype[] == None     →  true if no weapon is wielded
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WORLD OBJECTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions query landscape objects visible in the current cell.
+World objects are identified by their integer object ID (as a decimal string).
+"0" is returned when no matching object is found or the engine hook is unavailable.
+
+WorldObject handles
+    Most wobject* functions return or accept a WorldObject handle — a self-describing string
+    that encodes both the object's ID and name:
+        "[WorldObject] 0x80001F7B: Olthoi Slayer"
+    "0" means no object was found. Pass the handle directly to other wobject* functions.
+
+wobjectfindall[]
+    Returns a list of WorldObject handles for every object currently known to the client:
+    landscape objects, creatures, and all inventory items. Deduplicates across all sources.
+    The list may be large — prefer filtered variants (wobjectfindalllandscape*, wobjectfindallinventory*)
+    when you only need a subset.
+    Example: wobjectfindall[]
+                 →  list of all known wobject handles
+    Example: listcount[wobjectfindall[]]
+                 →  total count of all known objects
+
+wobjectfindnearestbytemplatetype[wcid]
+    Finds the nearest landscape object whose Weenie Class ID (WCID) matches the given value.
+    Returns a WorldObject handle, or "0" if not found.
+    The WCID (also called "template type") is the world object's class identifier — the same
+    value shown in AC Toolkit and used in VTank/UB loot profiles.
+    Searches all currently visible landscape objects (creatures, portals, static objects, etc.).
+    Distance is measured in meters using landblock-relative 3D coordinates.
+    Test in chat:  /ra mexec wobjectfindnearestbytemplatetype[31008]
+    Example: wobjectfindnearestbytemplatetype[31008]
+                 →  "[WorldObject] 0x80001F7B: Olthoi Slayer"
+    Example: wobjectfindnearestbytemplatetype[31008] == 0       →  true if none nearby
+    Example: setvar[t, wobjectfindnearestbytemplatetype[31008]] →  store the handle
+
+wobjectfindininventorybyname[name]
+    Returns a WorldObject handle for the first inventory item whose name matches exactly
+    (case-insensitive). Returns "0" if no match or empty name.
+    Example: wobjectfindininventorybyname[Titan Mana Charge]
+                 →  handle of the first Titan Mana Charge in inventory
+    Example: actiontryapplyitem[wobjectfindininventorybyname[Treated Healing Kit], wobjectgetplayer[]]
+                 →  use a Treated Healing Kit on yourself
+
+wobjectfindininventorybynamerx[namerx]
+    Returns a WorldObject handle for the first inventory item whose name matches the regex.
+    Pattern is case-insensitive. Returns "0" on invalid/empty pattern or no match.
+    Example: wobjectfindininventorybynamerx[.* Healing Kit]
+                 →  handle of the first Healing Kit found in inventory
+    Example: actiontryapplyitem[wobjectfindininventorybynamerx[.* Healing Kit], wobjectgetplayer[]]
+                 →  use first healing kit on yourself
+
+wobjectfindallinventorybynamerx[namerx]
+    Returns a list of WorldObject handles for all inventory items whose name matches the regex.
+    Pattern is case-insensitive. Returns "[]" on invalid/empty pattern or no matches.
+    Example: wobjectfindallinventorybynamerx[Titan Mana Charge]
+                 →  list of handles for all Titan Mana Charges
+    Example: wobjectfindallinventorybynamerx[.*Scarab.*]   →  all scarab components
+    Example: listcount[wobjectfindallinventorybynamerx[.*Arrow.*]]  →  count of arrows
+
+wobjectfindininventorybytemplatetype[wcid]
+    Returns a WorldObject handle for the first inventory item whose Weenie Class ID matches wcid.
+    Returns "0" if none found.
+    Example: wobjectfindininventorybytemplatetype[9060]   →  first Titan Mana Charge in inventory
+
+wobjectfindallinventory[]
+    Returns a list of WorldObject handles for all items in the player's inventory
+    (including items inside packs and wielded items).
+    Example: wobjectfindallinventory[]
+                 →  list of all inventory wobject handles
+    Example: listcount[wobjectfindallinventory[]]
+                 →  total item count across all inventory
+
+wobjectfindallinventorybyobjectclass[objectclass]
+    Returns a list of WorldObject handles for all inventory items matching the given ObjectClass number.
+    Uses the same class resolution as wobjectfindallbyobjectclass (bitfield + ObjectIsAttackable).
+    Example: wobjectfindallinventorybyobjectclass[16]
+                 →  list of all Mana Stones in inventory
+    Example: wobjectfindallinventorybyobjectclass[29]
+                 →  list of all Healing Kits in inventory
+    Example: listcount[wobjectfindallinventorybyobjectclass[30]]
+                 →  number of Lockpicks in inventory
+
+wobjectfindallinventorybytemplatetype[wcid]
+    Returns a list of WorldObject handles for all inventory items whose Weenie Class ID matches wcid.
+    Returns "[]" if none found or WCID is invalid.
+    Searches the direct inventory snapshot (same source as crafting/ammo logic).
+    Example: wobjectfindallinventorybytemplatetype[9060]
+                 →  list of handles for all Titan Mana Charges in inventory
+    Example: listcount[wobjectfindallinventorybytemplatetype[9060]]   →  count of matching items
+    Example: listgetitem[wobjectfindallinventorybytemplatetype[9060], 0]  →  first matching handle
+
+wobjectfindalllandscape[]
+    Returns a list of WorldObject handles for all objects currently visible on the landscape
+    (creatures, static objects, portals, NPCs, doors, etc.). Deduplicates across all sources.
+    Example: wobjectfindalllandscape[]
+                 →  list of all landscape wobject handles
+    Example: listcount[wobjectfindalllandscape[]]
+                 →  total count of landscape objects
+
+wobjectfindalllandscapebytemplatetype[wcid]
+    Returns a list of WorldObject handles for all landscape objects whose Weenie Class ID matches wcid.
+    Returns "[]" if none found or WCID is invalid.
+    Searches all currently visible landscape objects (creatures, items, portals, static objects, etc.).
+    Example: wobjectfindalllandscapebytemplatetype[9060]
+                 →  list of handles for all Titan Mana Charges on the landscape
+    Example: listcount[wobjectfindalllandscapebytemplatetype[9060]]   →  count of matching objects
+    Example: listgetitem[wobjectfindalllandscapebytemplatetype[9060], 0]  →  first matching handle
+
+wobjectfindalllandscapebynamerx[namerx]
+    Returns a list of WorldObject handles for all landscape objects whose name matches the regex.
+    Pattern is case-insensitive. Returns "[]" on invalid/empty pattern or no matches.
+    Searches all currently visible landscape objects (creatures, items, portals, static objects, etc.).
+    Example: wobjectfindalllandscapebynamerx[Crash.*]
+                 →  list of handles for all landscape objects with names starting with "Crash"
+    Example: listcount[wobjectfindalllandscapebynamerx[.*Golem.*]]   →  count of golems nearby
+
+wobjectfindallbycontainer[container]
+    Returns a list of WorldObject handles for all items directly inside the given container.
+    The container argument can be a wobject handle or a bare object ID (hex or decimal).
+    Returns "[]" if the container is invalid or has no accessible contents.
+    Example: wobjectfindallbycontainer[wobjectgetselection[]]
+                 →  list of items in the currently selected container
+    Example: wobjectfindallbycontainer[0x1234ABCD]
+                 →  list of items in the container with that ID
+
+wobjectgetname[handle]
+    Returns the name of the world object from its handle.
+    Returns "" if the handle is "0" or the object cannot be found.
+    Example: wobjectgetname[wobjectfindnearestbytemplatetype[31008]]  →  "Olthoi Slayer"
+
+wobjectgetid[handle]
+    Returns the object's ID as an unsigned decimal integer string.
+    Returns "0" if the handle is invalid.
+    Example: wobjectgetid[wobjectfindnearestbytemplatetype[31008]]    →  e.g. "2147483515"
+
+wobjectgettemplatetype[handle]
+    Returns the object's Weenie Class ID (WCID) as a decimal integer string.
+    Returns "0" if unavailable.
+    Example: wobjectgettemplatetype[wobjectfindnearestbytemplatetype[31008]]  →  "31008"
+
+wobjectgetobjectclass[handle]
+    Returns the object's ObjectClass as an integer. Matches UB wobjectgetobjectclass[].
+    Returns "0" if unavailable. Values match VTank ObjectClass enum:
+    0=Unknown, 1=MeleeWeapon, 2=Armor, 3=Clothing, 4=Jewelry, 5=Monster, 6=Food,
+    7=Money, 8=Misc, 9=MissileWeapon, 10=Container, 11=Gem, 12=SpellComponent,
+    13=Key, 14=Portal, 15=TradeNote, 16=ManaStone, 17=Plant, 24=Player, 25=Vendor,
+    26=Door, 27=Corpse, 28=Lifestone, 29=HealingKit, 30=Lockpick, 31=WandStaffOrb,
+    37=Npc, 38=Foci, 39=Salvage, 40=Ust, 41=Services, 42=Scroll, 43=CombatPet.
+    Example: wobjectgetobjectclass[wobjectgetplayer[]]   →  "24"
+    Alias: wobjectgetobjclass[] (legacy name, same behaviour)
+
+wobjectfindnearestmonster[]
+    Returns a handle to the nearest monster (attackable creature). Excludes NPCs, vendors,
+    pets, and the player. Uses ObjectIsAttackable to distinguish monsters from non-hostiles.
+    Returns "0" if no monster found.
+    Example: wobjectfindnearestmonster[]   →  "W:0x80001234:Tusker Guard"
+
+wobjectfindbyid[id]
+    Returns a WorldObject handle for the object with the given numeric ID.
+    Accepts decimal or hex (0x...) format. Searches all tracked objects (landscape,
+    creatures, inventory). Returns "0" if the ID is unknown or not currently tracked.
+    Example: wobjectfindbyid[123412]
+                 →  "[WorldObject] 0x1E224: Some Object"
+    Example: wobjectfindbyid[0x80001F7B]
+                 →  handle for the creature with that dynamic ID
+
+wobjectfindallbyobjectclass[objectclass]
+    Returns a list of WorldObject handles for all landscape objects matching the given ObjectClass number.
+    Uses the same class resolution as wobjectfindnearestbyobjectclass (bitfield + ObjectIsAttackable).
+    Example: wobjectfindallbyobjectclass[24]
+                 →  list of all players the client is aware of
+    Example: wobjectfindallbyobjectclass[5]
+                 →  list of all monsters on the landscape
+    Example: listcount[wobjectfindallbyobjectclass[5]]
+                 →  number of monsters visible
+
+wobjectfindallbytemplatetype[templatetype]
+    Returns a list of WorldObject handles for all objects (landscape + inventory) whose
+    Weenie Class ID (WCID / template type) matches the given value.
+    Example: wobjectfindallbytemplatetype[9060]
+                 →  list of all Titan Mana Charges known to the client
+    Example: listcount[wobjectfindallbytemplatetype[9060]]
+                 →  total count across landscape and inventory
+
+wobjectfindallbynamerx[namerx]
+    Returns a list of WorldObject handles for all objects (landscape + inventory) whose
+    name matches the given regex. Pattern is case-insensitive.
+    Returns "[]" on invalid/empty pattern or no matches.
+    Example: wobjectfindallbynamerx[Crash.*]
+                 →  list of all objects whose name starts with "Crash"
+    Example: wobjectfindallbynamerx[.*Mana Charge.*]
+                 →  list of all mana charges on landscape and in inventory
+    Example: listcount[wobjectfindallbynamerx[.*Arrow.*]]
+                 →  count of all arrows known to the client
+
+wobjectfindnearestbyobjectclass[objectclass]
+    Returns a handle to the nearest visible object matching the given ObjectClass number.
+    Searches all landscape objects and creatures. Excludes the current player.
+    Uses ObjectIsAttackable to distinguish Monster(5) from Npc(37), and BF_DOOR bitfield
+    to detect Door(26) among unclassified static objects.
+    Returns "0" if no matching object found.
+    Example: wobjectfindnearestbyobjectclass[25]   →  nearest Vendor
+    Example: wobjectfindnearestbyobjectclass[37]   →  nearest NPC
+    Example: wobjectfindnearestbyobjectclass[26]   →  nearest Door
+
+wobjectfindnearestbynameandobjectclass[objectclass, namerx]
+    Returns a handle to the nearest object matching both the given ObjectClass number and name
+    regex. Searches all landscape objects and creatures. Excludes the current player.
+    Pattern is case-insensitive. Returns "0" if no matching object found.
+    Example: wobjectfindnearestbynameandobjectclass[24,Crash.*]
+                 →  nearest Player whose name starts with "Crash"
+    Example: wobjectfindnearestbynameandobjectclass[25,.*Vendor.*]
+                 →  nearest Vendor whose name contains "Vendor"
+    Example: wobjectfindnearestbynameandobjectclass[26,.*Gate.*]
+                 →  nearest Door whose name contains "Gate"
+
+wobjectfindnearestdoor[]
+    Returns a handle to the nearest landscape door object. Primary detection uses the
+    PublicWeenieDesc._bitfield BF_DOOR flag (0x1000), which the server sets for all door objects.
+    This is the same mechanism Decal uses for ObjectClass.Door. Only considers static GUIDs
+    (< 0x80000000). Falls back to name-based detection ("door", "gate", "hatch", "portcullis",
+    case-insensitive) on older engine builds without GetObjectBitfield.
+    Returns "0" if no door found.
+    Example: wobjectfindnearestdoor[]   →  "W:0x7A9B3004:Door"
+
+wobjectgetisdooropen[handle]
+    Returns "1" if the door is currently open, "0" if closed or unavailable.
+    Reads CPhysicsObj::m_state directly at offset +0xA8. An open door has ETHEREAL_PS (0x4)
+    set in its physics state (passable). A closed door does not. Does not require m_pQualities.
+    Example: wobjectgetisdooropen[wobjectfindnearestdoor[]]   →  "1" (if door is open)
+
+wobjectisvalid[handle]
+    Returns "1" if the handle refers to an object that currently exists in client memory, "0" otherwise.
+    Use this to guard stale handles — e.g. after a creature dies, its handle becomes invalid.
+    Returns "0" for the null handle ("0") or any unparseable handle.
+    Example: wobjectisvalid[wobjectgetselection[]]
+                 →  "1" if something is selected and still alive/present
+
+wobjectgetselection[]
+    Returns a WorldObject handle for the currently selected/targeted object.
+    Returns "0" if nothing is selected.
+    Example: wobjectgetselection[]
+                 →  "[WorldObject] 0x80001F7B: Olthoi Slayer"
+
+wobjectgetplayer[]
+    Returns a WorldObject handle for the current player character.
+    Returns "0" if the player ID is not yet available (e.g. before login completes).
+    Example: wobjectgetplayer[]
+                 →  "[WorldObject] 0x500012AB: MyCharName"
+    Example: actiontryuseitem[wobjectgetplayer[]]   →  open the player's backpack
+    Example: wobjectgetname[wobjectgetselection[]]   →  name of selected object
+
+wobjectgetopencontainer[]
+    Returns a WorldObject handle for the currently open ground container (corpse, chest, pack, etc.).
+    Returns "0" if no container is open.
+    Example: wobjectgetopencontainer[]
+                 →  "[WorldObject] 0x7A9B3004: Arahu's Corpse"
+    Example: wobjectfindallbycontainer[wobjectgetopencontainer[]]
+                 →  list of items inside the currently open container
+
+wobjectgetphysicscoordinates[wo]
+    Returns a coordinates object for the world object's current physics position.
+    Uses the same coordinate system as getplayercoordinates[]. Returns "" if the object
+    has no physics position or is not in range.
+    Example: wobjectgetphysicscoordinates[wobjectgetplayer[]]
+                 →  same result as getplayercoordinates[]
+    Example: coordinatedistanceflat[getplayercoordinates[], wobjectgetphysicscoordinates[wobjectgetselection[]]]
+                 →  flat distance to selected object
+
+wobjectgetintprop[handle, property]
+    Returns an integer property from a world object. Returns "0" if undefined.
+    property is an AC STypeInt value, or one of the following UB extended constants:
+        218103808  (0xD000000) — TEMPLATE_TYPE: returns the object's WCID
+    Example: wobjectgetintprop[wobjectgetselection[], 218103808]
+                 →  e.g. "12752"  (WCID of the selected object)
+    Example: wobjectgetintprop[wobjectgetselection[], 12]
+                 →  stack size (STypeInt 12)
+
+wobjectgetdoubleprop[handle, property]
+    Returns a double/float property from a world object. Returns "0" if undefined.
+    property is an AC STypeFloat value, or a UB extended constant (0xA000000 prefix,
+    low 24 bits = STypeFloat index):
+        167772169  (0xA000009) — WORKMANSHIP: returns salvage workmanship value
+    Example: wobjectgetdoubleprop[wobjectgetselection[], 167772169]
+                 →  e.g. "9"  (workmanship of the selected object)
+
+wobjectgetboolprop[handle, property]
+    Returns a boolean property from a world object as "1" or "0". Returns "0" if undefined.
+    property is an AC STypeBool value.
+
+    NOTE: Inventory/equipped items have no live bool data in client memory. The engine caches
+    bool properties from server appraisal results (i.e. when the item is identified). The item
+    must have been identified at least once in the current session before this function will
+    return a non-zero value for those objects. Landscape objects (monsters, NPCs, scenery) do
+    not require identification — their bool data is always present in client memory.
+
+    Test in chat:  /ra mexec wobjectgetboolprop[wobjectgetselection[], 99]
+    Example: wobjectgetboolprop[wobjectgetselection[], 99]
+                 →  "1" if the selected object is ivoryable (STypeBool 99)
+    Example: wobjectgetboolprop[wobjectgetselection[], 11]
+                 →  "1" if the selected object is inscribable (STypeBool 11)
+
+wobjectgetstringprop[handle, property]
+    Returns a string property from a world object, or an empty string if undefined.
+    property is an AC STypeString value.
+
+    NOTE: Inventory/equipped items have no live string data in client memory. The engine caches
+    string properties from server appraisal results (i.e. when the item is identified). The item
+    must have been identified at least once in the current session before this function will
+    return a value for those objects. Landscape objects (monsters, NPCs, scenery) do not require
+    identification — their string data is always present in client memory.
+
+    Test in chat:  /ra mexec wobjectgetstringprop[wobjectgetselection[], 1]
+    Example: wobjectgetstringprop[wobjectgetselection[], 1]
+                 →  "Blue Empyrean Ring"  (STypeString 1 = NAME)
+    Example: wobjectgetstringprop[wobjectgetselection[], 8]
+                 →  inscription text, if any  (STypeString 8 = INSCRIPTION)
+
+wobjecthasdata[handle]
+    Returns "1" if appraisal data has been received from the server for this object, "0" otherwise.
+    For inventory/equipped items this means the item has been identified (RequestId) at least once
+    in the current session. For landscape objects (monsters, NPCs, scenery) this is true as soon
+    as the server sends assessment data (e.g. when you click on them or they are nearby).
+
+    Useful as a guard before wobjectgetboolprop / wobjectgetstringprop on inventory items.
+
+    Test in chat:  /ra mexec wobjecthasdata[wobjectgetselection[]]
+    Example: wobjecthasdata[wobjectgetselection[]]
+                 →  "1" if the selected object has been appraised this session
+
+wobjectrequestdata[handle]
+    Sends an identification request (0xC8 IdentifyObject) to the server for the given object.
+    Returns "1" always (fire-and-forget — does not wait for the server response).
+    The appraisal cache (wobjecthasdata, wobjectgetboolprop, wobjectgetstringprop) will be
+    populated when the server response arrives via SendNotice_SetAppraiseInfo.
+
+    Test in chat:  /ra mexec wobjectrequestdata[wobjectgetselection[]]
+    Example: wobjectrequestdata[wobjectgetselection[]]
+                 →  "1"  (request sent; use wobjecthasdata to confirm data arrived)
+
+wobjectlastidtime[handle]
+    Returns the Unix timestamp (seconds UTC) of the last time appraisal data was received from
+    the server for this object. Returns "0" if no appraisal data has been received this session.
+
+    Test in chat:  /ra mexec wobjectlastidtime[wobjectgetselection[]]
+    Example: wobjectlastidtime[wobjectgetselection[]]
+                 →  "1775993527"  (Unix seconds when the last identify response arrived)
+
+wobjectgethealth[handle]
+    Returns the current health of the given object as a value from 0 to 1, where 1 = full health.
+    Returns -1 if no health update has been received for this object yet.
+
+    The AC server only sends health updates for objects that are currently selected/targeted.
+    You must have the object targeted (or the combat system must be attacking it) before health
+    data will be available. Once received, the last known ratio is cached until the object
+    is removed from the world.
+
+    Test in chat:  /ra mexec wobjectgethealth[wobjectgetselection[]]
+    Example: wobjectgethealth[wobjectgetselection[]]
+                 →  "0.75"  (target is at 75% health)
+    Example: wobjectgethealth[wobjectgetselection[]] < 0.1
+                 →  true when target is below 10% health
+    Example: wobjectgethealth[wobjectgetselection[]] == -1
+                 →  true if no health data received yet (target not yet selected)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INVENTORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions query the player's inventory. Stack sizes are always counted —
+a stack of 50 Prismatic Tapers counts as 50, not 1.
+
+getitemcountininventorybyname[name]
+    Returns the total count of inventory items whose name exactly matches name
+    (case-insensitive). Stack sizes are included.
+    Returns "0" if no matching items are found.
+    Test in chat:  /ra mexec getitemcountininventorybyname[Prismatic Taper]
+    Example: getitemcountininventorybyname[Prismatic Taper]   →  e.g. "150"
+    Example: getitemcountininventorybyname[Prismatic Taper] > 50
+                 →  true if you have more than 50 Prismatic Tapers
+
+getitemcountininventorybynamerx[pattern]
+    Returns the total count of inventory items whose name matches the regex
+    pattern (case-insensitive). Stack sizes are included.
+    Returns "0" if no matching items are found, or if the pattern is invalid.
+    Test in chat:  /ra mexec getitemcountininventorybynamerx[Scarab]
+    Example: getitemcountininventorybynamerx[Scarab]           →  total of all scarab types
+    Example: getitemcountininventorybynamerx[^Lead Scarab$]    →  exact match via regex
+    Example: getitemcountininventorybynamerx[Elixir|Potion]    →  all elixirs and potions
+
+getinventorycountbytemplatetype[templatetype]
+    Returns the total count of inventory items whose template type (WCID) matches
+    templatetype. Stack sizes are included — a stack of 50 counts as 50, not 1.
+    Returns "0" if no matching items are found.
+    Param #0: templatetype — the WCID as a number.
+    Test in chat:  /ra mexec getinventorycountbytemplatetype[42137]
+    Example: getinventorycountbytemplatetype[42137]   →  total count of items with WCID 42137
+    Example: getinventorycountbytemplatetype[42137] > 0
+                 →  true if you have at least one item of that template type
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPELL IDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+wobjectgetspellids[handle]
+    Returns a list of ALL spell IDs from the spell book in the last server appraisal
+    (identify response) for the given object. Includes both native item spells and
+    currently active player-cast enchantments. Only populated after the player has
+    used RequestId (or the identify action) on the item this session.
+    Returns "[]" if no appraisal data is cached or the spell book is empty.
+    Each element is a decimal spell ID string. IDs >= 2147483648 (0x80000000) are
+    active enchantments encoded with the high bit set by the server.
+    Requires prior identification.
+    Test in chat:  /ra mexec wobjectgetspellids[wobjectgetselection[]]
+    Example: wobjectgetspellids[wobjectgetselection[]]
+                 →  "[2088,3560,4303,2147488055]"  (three native spells + one active enchantment)
+    Example: listcount[wobjectgetspellids[wobjectgetselection[]]] > 0
+                 →  true if the item has at least one spell
+
+wobjectgetactivespellids[handle]
+    Returns a list of spell IDs for enchantments currently active on the given object.
+
+    For the PLAYER or creatures:
+      Reads the live enchantment registry — does NOT require prior identification.
+      Returns "[]" if the object has no active enchantments or is not found.
+
+    For ITEMS (no enchantment registry in the AC client):
+      Falls back to the appraisal spell book. The server marks active (player-cast,
+      time-based) enchantments with the high bit (0x80000000) in the spell book —
+      this is the same distinction the game's own ID panel uses to show "Enchantments:".
+      The high bit is stripped before returning so the ID is usable for spell lookups.
+      Requires prior identification (see wobjectrequestdata / RequestId).
+      Returns "[]" if no appraisal data is cached or the item has no active enchantments.
+
+    Each element is a decimal spell ID string.
+    Note: active spells expire over time. Re-query each evaluation cycle for current state.
+    Test in chat:  /ra mexec wobjectgetactivespellids[wobjectgetselection[]]
+    Example: wobjectgetactivespellids[wobjectgetselection[]]
+                 →  "[2088,3560]"  (two currently active enchantments)
+    Example: listcount[wobjectgetactivespellids[wobjectgetselection[]]] == 0
+                 →  true if the target has no active enchantments
+
+wobjectgetactivespelldurations[handle]
+    Returns the remaining duration in seconds for each active enchantment on the object.
+    Parallel list to wobjectgetactivespellids — index N in durations corresponds to index N
+    in spell IDs. Uses server time for the calculation.
+    Returns "[]" if the object has no active enchantments or is not found.
+
+    For the PLAYER or creatures:
+      Returns actual remaining seconds. Returns -1 for a slot if expiry or server time
+      is unavailable (e.g. a permanent enchantment returns 1.797...E+308 = double.MaxValue).
+
+    For ITEMS:
+      The AC server does not send enchantment expiry times for items to the client —
+      the 0x2C2 UpdateEnchantment packet is only issued for body buffs, not item buffs.
+      Returns -1 for every slot. The list length still matches wobjectgetactivespellids[]
+      so index alignment holds and scripts can use listcount to test if buffs are present.
+      Use wobjectgetactivespellids to detect when a specific spell drops off an item.
+
+    Test in chat:  /ra mexec wobjectgetactivespelldurations[wobjectgetselection[]]
+    Example: wobjectgetactivespelldurations[wobjectgetselection[]]   (player)
+                 →  "[1800.5,423.1]"  (first spell ~30 min left, second ~7 min)
+    Example: wobjectgetactivespelldurations[wobjectgetselection[]]   (item)
+                 →  "[-1,-1]"  (two active enchantments, durations unknown)
+    Example: listgetitem[wobjectgetactivespelldurations[wobjectgetselection[]],0] < 60
+                 →  true if the first active spell has less than 60 seconds remaining (player only)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NAVIGATION / GEOMETRY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+getheading[handle]
+    Returns the compass heading (0–360°, clockwise, 0 = North) that the given world object is
+    currently facing, derived from its physics object's orientation quaternion.
+    Returns "0" if the object's physics data is unavailable.
+
+    Test in chat:  /ra mexec getheading[wobjectgetselection[]]
+    Example: getheading[wobjectgetselection[]]
+                 →  "299.286434956585"  (object is facing WNW)
+
+getheadingto[handle]
+    Returns the compass heading in degrees (0–360, clockwise, 0 = North) from the player's
+    current position to the given world object.
+    Returns "0" if the player pose or object position is unavailable.
+
+    Test in chat:  /ra mexec getheadingto[wobjectgetselection[]]
+    Example: getheadingto[wobjectgetselection[]]
+                 →  "285.520536351015"  (WNW of player)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MATH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+All trig functions accept angles in radians. Missing or unparseable arguments default to 0.
+All results are formatted with C# "G" (shortest-round-trip).
+
+isfalse[value]
+    Returns "1" if value is 0 (false), "0" otherwise.
+    Example: isfalse[0]   →  "1"
+    Example: isfalse[1]   →  "0"
+
+istrue[value]
+    Returns "1" if value is non-zero (true), "0" otherwise.
+    Example: istrue[1]    →  "1"
+    Example: istrue[0]    →  "0"
+
+iif[value, truevalue, falsevalue]
+    Returns truevalue if value is non-zero, falsevalue otherwise.
+    Both arguments are always evaluated. Use if[] for conditional evaluation.
+    Example: iif[1,2,3]   →  "2"  (first param is true)
+    Example: iif[0,2,3]   →  "3"  (first param is false)
+
+randint[min, max]
+    Returns a random integer in the range [min, max-1].
+    Example: randint[0,2]   →  "0" or "1" (never 2)
+
+cstr[number]
+    Converts a number to its string representation.
+    Example: cstr[2]   →  "2"
+
+cstrf[number, format]
+    Converts a number to a string using a .NET numeric format string.
+    The format argument is a literal string (e.g. N3, F2, 0.00).
+    Example: cstrf[3.14159,N3]   →  "3.142"
+
+cnumber[string]
+    Converts a string to a floating point number.
+    Example: cnumber[3.14159]   →  "3.14159"
+
+strlen[tocheck]
+    Returns the length of the string tocheck.
+    Example: strlen[test]   →  "4"
+
+getobjectinternaltype[tocheck]
+    Returns the internal type of a value as a number.
+    0 = none (empty), 1 = number, 3 = string, 7 = object (WorldObject handle)
+    Example: getobjectinternaltype[test]              →  "3"
+    Example: getobjectinternaltype[42]                →  "1"
+    Example: getobjectinternaltype[wobjectgetplayer[]] →  "7"
+    Example: getobjectinternaltype[]                  →  "0"
+
+floor[number]
+    Returns the largest integer less than or equal to number.
+    Example: floor[3.14159]   →  "3"
+
+ceiling[number]
+    Returns the smallest integer greater than or equal to number.
+    Example: ceiling[3.14159]   →  "4"
+
+round[number]
+    Returns number rounded to the nearest integer (half rounds away from zero).
+    Example: round[3.14159]   →  "3"
+    Example: round[3.5]       →  "4"
+
+abs[number]
+    Returns the absolute value of number.
+    Example: abs[-3.14159]   →  "3.14159"
+
+ord[character]
+    Returns the Unicode code point of the first character of the string as a number.
+    Returns "0" if the string is empty.
+    Example: ord[c]   →  "99"
+
+chr[number]
+    Returns the character whose Unicode code point is number, as a single-character string.
+    Returns "" if number is out of the valid Unicode range.
+    Example: chr[99]   →  "c"
+
+hexstr[d]
+    Converts a number to an uppercase hexadecimal string with "0x" prefix.
+    Input is truncated to a 64-bit integer before conversion.
+    Returns "0x0" when called with no argument.
+    Test in chat:  /ra mexec hexstr[255]
+    Example: hexstr[255]    →  "0xFF"
+    Example: hexstr[4096]   →  "0x1000"
+    Example: hexstr[0]      →  "0x0"
+
+acos[d]
+    Returns the angle (in radians) whose cosine is d. d must be in [-1, 1].
+    Returns NaN (as string) if d is out of range.
+    Test in chat:  /ra mexec acos[1]
+    Example: acos[1]    →  "0"        (cos(0) = 1)
+    Example: acos[0]    →  "1.5707963267948966"  (π/2)
+
+asin[d]
+    Returns the angle (in radians) whose sine is d. d must be in [-1, 1].
+    Test in chat:  /ra mexec asin[1]
+    Example: asin[1]    →  "1.5707963267948966"  (π/2)
+    Example: asin[0]    →  "0"
+
+atan[d]
+    Returns the angle (in radians) whose tangent is d.
+    Test in chat:  /ra mexec atan[1]
+    Example: atan[1]    →  "0.7853981633974483"  (π/4)
+    Example: atan[0]    →  "0"
+
+atan2[y, x]
+    Returns the angle (in radians) whose tangent is y/x, using the signs of both
+    arguments to determine the correct quadrant (full -π to π range).
+    Test in chat:  /ra mexec atan2[1, 1]
+    Example: atan2[1, 1]    →  "0.7853981633974483"  (π/4)
+    Example: atan2[0, 1]    →  "0"
+
+cos[d]
+    Returns the cosine of angle d (radians).
+    Test in chat:  /ra mexec cos[0]
+    Example: cos[0]    →  "1"
+    Example: cos[3.141592653589793]    →  "-1"
+
+cosh[d]
+    Returns the hyperbolic cosine of d.
+    Test in chat:  /ra mexec cosh[0]
+    Example: cosh[0]    →  "1"
+
+sin[d]
+    Returns the sine of angle d (radians).
+    Test in chat:  /ra mexec sin[0]
+    Example: sin[0]    →  "0"
+    Example: sin[1.5707963267948966]    →  "1"  (π/2)
+
+sinh[d]
+    Returns the hyperbolic sine of d.
+    Test in chat:  /ra mexec sinh[0]
+    Example: sinh[0]    →  "0"
+
+sqrt[d]
+    Returns the square root of d. Returns NaN (as string) for negative input.
+    Test in chat:  /ra mexec sqrt[4]
+    Example: sqrt[4]    →  "2"
+    Example: sqrt[2]    →  "1.4142135623730951"
+
+tan[d]
+    Returns the tangent of angle d (radians).
+    Test in chat:  /ra mexec tan[0]
+    Example: tan[0]    →  "0"
+    Example: tan[0.7853981633974483]    →  "1"  (tan(π/4))
+
+tanh[d]
+    Returns the hyperbolic tangent of d. Result is always in (-1, 1).
+    Test in chat:  /ra mexec tanh[0]
+    Example: tanh[0]    →  "0"
+    Example: tanh[1]    →  "0.7615941559557649"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STOPWATCHES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Stopwatch handles look like "SW:0", "SW:1", etc. Store them in variables with setvar[].
+Stopwatches persist for the lifetime of the plugin session.
+
+stopwatchcreate[]
+    Creates a new stopped stopwatch. Returns its handle.
+    Example: setvar[sw,stopwatchcreate[]]
+
+stopwatchstart[watch]
+    Starts the stopwatch (no-op if already running). Returns the handle.
+    Example: stopwatchstart[$sw]
+
+stopwatchstop[watch]
+    Stops the stopwatch (no-op if already stopped). Returns the handle.
+    Example: stopwatchstop[$sw]
+
+stopwatchelapsedseconds[watch]
+    Returns the total elapsed time in seconds (as a decimal number).
+    Example: stopwatchelapsedseconds[$sw]   →  "3.141"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DICTIONARIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dictionaries are string-keyed, string-valued maps. Like lists, they are stored
+internally and referenced by a handle string (e.g. "D:0", "D:1").
+Variables hold handles. Keys are case-sensitive.
+
+──────────────────────────────────────────
+Construction
+──────────────────────────────────────────
+
+dictcreate[key1, val1, key2, val2, ...]
+    Creates a new dictionary, optionally pre-populated with key-value pairs.
+    The argument list must have an even number of entries (alternating keys and values).
+    Example: dictcreate[]                      →  empty dictionary
+    Example: setvar[d, dictcreate[a, 1, b, 2]] →  {a=>1, b=>2}
+
+dictcopy[handle]
+    Returns a new independent shallow copy of the dictionary.
+    Example: setvar[d2, dictcopy[getvar[d]]]
+
+──────────────────────────────────────────
+Access
+──────────────────────────────────────────
+
+dictsize[handle]
+    Returns the number of entries as a string.
+    Example: dictsize[getvar[d]]   →  "3"
+
+dictgetitem[handle, key]
+    Returns the value for the given key, or "" if the key does not exist.
+    Example: dictgetitem[getvar[d], foo]
+
+dicthaskey[handle, key]
+    Returns "1" if the key exists in the dictionary, "0" otherwise.
+    Example: dicthaskey[getvar[d], foo]
+
+dictkeys[handle]
+    Returns a new list containing all keys in the dictionary.
+    Example: setvar[keys, dictkeys[getvar[d]]]
+
+dictvalues[handle]
+    Returns a new list containing all values in the dictionary.
+    Example: setvar[vals, dictvalues[getvar[d]]]
+
+──────────────────────────────────────────
+Mutation
+──────────────────────────────────────────
+
+dictadditem[handle, key, value]
+    Sets the value for the given key. Returns "1" if an existing key was
+    overwritten, "0" if the key was new.
+    Example: dictadditem[getvar[d], foo, 42]
+
+dictremovekey[handle, key]
+    Removes the given key from the dictionary. Returns "1" if the key existed,
+    "0" if it did not.
+    Example: dictremovekey[getvar[d], foo]
+
+dictclear[handle]
+    Removes all entries. Returns the handle (dictionary is now empty).
+    Example: dictclear[getvar[d]]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+actiontryselect[obj]
+    Attempts to select the given world object. Always returns "0".
+    The obj parameter can be a wobject handle or a bare object ID (hex or decimal).
+    Example: actiontryselect[wobjectgetselection[]]   →  re-select the current target
+    Example: actiontryselect[wobjectfindnearestbytemplatetype[31008]]
+                 →  select nearest Lifestone
+
+actiontryuseitem[obj]
+    Attempts to use the given world object. Always returns "0".
+    The obj parameter can be a wobject handle or a bare object ID (hex or decimal).
+    Example: actiontryuseitem[wobjectgetplayer[]]   →  use the player (opens backpack)
+    Example: actiontryuseitem[wobjectfindnearestbytemplatetype[31008]]
+                 →  use nearest Lifestone (recalls)
+
+actiontryapplyitem[useObj, onObj]
+    Attempts to use useObj on onObj (e.g. apply a healing kit to a target). Returns "1" if
+    the action could be dispatched, "0" if either handle is invalid or the hook is unavailable.
+    Example: actiontryapplyitem[wobjectfindininventorybynamerx[.* Healing Kit], wobjectgetplayer[]]
+                 →  use any healing kit in inventory on yourself
+
+actiontrycastbyid[spellId]
+    Attempts to cast the spell with the given ID as a hunting spell.
+    If not in magic mode, takes one step towards it (equip wand or change stance) and returns "0".
+    Returns "1" if the cast was dispatched, "0" if a prerequisite step was taken or client is busy,
+    "2" if the attempt is impossible (invalid spell ID, hook unavailable, no player).
+    Casts on the currently selected target; falls back to the player for self-cast spells.
+    Example: actiontrycastbyid[2931]   →  cast Recall Aphus Lassel
+
+actiontrycastbyidontarget[spellId, wobjectHandle]
+    Attempts to cast a spell by ID on a specific world object. Checks spell prerequisites as a
+    hunting spell. If not in magic mode, takes one step towards it (equip wand or change stance)
+    and returns "0". Returns "1" if the cast was dispatched, "0" if a prerequisite step was taken,
+    "2" if the attempt is impossible (invalid spell ID, invalid target handle, hook unavailable).
+    Example: actiontrycastbyidontarget[1,wobjectgetselection[]]
+                 →  cast Strength Other on your currently selected target
+
+actiontryequipanywand[]
+    Takes one step towards equipping a wand. Scans inventory for any WandStaffOrb.
+    Returns "1" if a wand is already wielded, "0" otherwise (and issues the equip UseObject).
+    Example: actiontryequipanywand[]   →  equip the first wand found in inventory
+
+actiontrygiveitem[give, destination]
+    Attempts to give the item (give) to the target (destination), e.g. an NPC or player.
+    Gives the full stack. Returns "1" if the action could be dispatched, "0" otherwise.
+    Example: actiontrygiveitem[wobjectfindininventorybynamerx[.* Healing Kit], wobjectgetselection[]]
+                 →  give first matching healing kit to the currently selected object
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ITEM GIVING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+actiontrygiveprofile[lootprofile, target]
+    Gives all inventory items matching Keep rules in the specified loot profile to a
+    nearby player or NPC named target.
+
+    Supports both VTank .utl profiles and native RynthAi .json profiles.
+    Profile files are loaded from:
+        C:\Games\RynthSuite\RynthAi\ItemGiver\
+    If a bare filename is given without an extension, .utl is assumed.
+    To use a JSON profile, include the .json extension explicitly.
+
+    Returns "1" if at least one item give was sent, "0" if the player was busy,
+    the target was not found in the nearby world, no items matched, or the profile
+    could not be loaded.
+
+    Param #0: lootprofile — filename (or full path) of the loot profile (.utl or .json).
+              Bare names without extension resolve as .utl from ItemGiver\.
+              Regex-escaped dots in UB examples (e.g. salvage\.utl) are just literal dots.
+    Param #1: target — exact name (case-insensitive) of the player or NPC to give to.
+
+    Known limitations (TODO):
+      - Currently gives one item per meta pulse. Full rapid-fire batch transfer not yet
+        implemented — the give retries each pulse until the item leaves inventory cache.
+      - Profile matching compatibility is incomplete; some VTank rule types may not match
+        all item types correctly (e.g. salvage ObjectClass known issue).
+      - Only .utl and .json profiles are supported; no fallback between profile directories.
+
+    Test in chat:  /ra mexec actiontrygiveprofile[salvage.utl,My Salvage Mule]
+    Example: actiontrygiveprofile[salvage.utl,My Salvage Mule]
+                 →  "1" if items were given (VTank profile)
+    Example: actiontrygiveprofile[mysalvage.json,My Salvage Mule]
+                 →  "1" if items were given (native JSON profile)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CHAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+chatbox[message]
+    Sends a message to the chatbox as if you had typed it and pressed Enter.
+    Returns the message string that was sent.
+    Example: chatbox[/fellowship quit]   →  leaves fellowship
+    Example: chatbox[Hello world]        →  says "Hello world" in general chat
+
+chatboxpaste[message]
+    Pastes a message to the chat input box without sending it. [NOT YET IMPLEMENTED — returns "0"]
+    Example: chatboxpaste[test]
+
+echo[message, color]
+    Echoes text to the local chatbox with a chat type color. Not sent to the server.
+    color is an AC chat type number (e.g. 1=General, 7=Magic, 13=Combat, 15=Help/red).
+    Returns "1" on success, "0" if unavailable.
+    Example: echo[test,15]   →  prints "test" in red (Help color)
+    Example: echo[Buff done,7]   →  prints "Buff done" in magic color
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RYNTHAI SETTINGS / META STATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+rasetmetastate[state]
+    Sets the current RynthAi meta state and triggers a state reset.
+    Returns "1".
+    Example: rasetmetastate[Hunting]   →  switches meta to the "Hunting" state
+
+ragetmetastate[]
+    Returns the current RynthAi meta state as a string.
+    Example: ragetmetastate[]   →  "Hunting"
+
+rasetsetting[setting, value]
+    Sets a RynthAi setting by name. Value is always evaluated as an expression.
+    For boolean settings, any non-zero value = true.
+    Unknown names are stored as plugin options (accessible via raoptget).
+    Returns "1".
+    Example: rasetsetting[EnableCombat,1]         →  enables combat
+    Example: rasetsetting[MonsterRange,30]        →  sets monster range to 30
+    Example: rasetsetting[HealAt,50]              →  heal when HP ≤ 50%
+
+ragetsetting[setting]
+    Gets the current value of a RynthAi setting by name as a string.
+    Unknown names fall back to plugin options; returns "" if not found.
+    Example: ragetsetting[EnableCombat]           →  "1" or "0"
+    Example: ragetsetting[MonsterRange]           →  "50"
+    Example: cnumber[ragetsetting[MonsterRange]]  →  50 (as number)
+
+Supported setting names:
+    Booleans: EnableCombat, EnableBuffing, EnableNavigation, EnableLooting,
+              EnableMeta, EnableRaycasting, EnableAutostack, EnableAutocram,
+              EnableCombineSalvage, PeaceModeWhenIdle, RebuffWhenIdle,
+              SummonPets, MineOnly, UseDispelItems, CastDispelSelf,
+              AutoFellowMgmt, UseRecklessness, UseNativeAttack
+    Integers: MonsterRange, RingRange, ApproachRange, MinRingTargets,
+              HealAt, RestamAt, GetManaAt, TopOffHP, TopOffStam, TopOffMana,
+              HealOthersAt, MeleeAttackPower, MissileAttackPower,
+              CustomPetRange, PetMinMonsters
+    Floats:   MaxMonRange, NavRingThickness, NavLineThickness
+    Strings:  CurrentNavPath, CurrentLootPath, CurrentMetaPath
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STATUS HUD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+statushud[key, value]
+    Updates an entry in the Virindi HUDs Status HUD.
+    Returns "1".
+    Example: statushud[test,my value]   →  updates key "test" to "my value"
+
+statushudcolored[key, value, color]
+    Updates an entry in the Virindi HUDs Status HUD with a color.
+    color is an RGB number (e.g. 16711680 = 0xFF0000 = pure red).
+    Returns "1".
+    Example: statushudcolored[test,my value,16711680]   →  updates key "test" to "my value" in red
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UI CONTROLS  [STUB — not yet implemented]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+uigetcontrol[windowName, controlName]
+    Gets a reference to a named control in a named meta view window.
+    Returns a UIControl handle, or "0" if not found.
+    Example: uigetcontrol[myWindow,myControl]   →  UIControl handle
+
+uisetlabel[control, label]
+    Changes the label text of a UIControl (buttons only).
+    Returns "1" on success, "0" on failure.
+    Example: uisetlabel[uigetcontrol[myWindow,myControl],new label]
+
+uisetvisible[control, visible]
+    Shows or hides a UIControl (buttons only). Pass 1 to show, 0 to hide.
+    Returns "1" on success, "0" on failure.
+    Example: uisetvisible[uigetcontrol[myWindow,myControl],0]
+
+uiviewexists[windowName]
+    Returns "1" if a meta view with the given name exists, "0" otherwise.
+    Example: uiviewexists[myWindow]   →  "1" or "0"
+
+uiviewvisible[windowName]
+    Returns "1" if a meta view with the given name is visible, "0" otherwise.
+    Example: uiviewvisible[myWindow]   →  "1" or "0"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SALVAGE (UST)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions control the in-game Unsalvageable Salvage Tool (UST) panel.
+They return "1" on success, "0" if the required hook is unavailable or
+the named item could not be found.
+
+ustopen[]
+    Finds the first inventory item named "Ust" (case-insensitive) and opens
+    it (double-click / UseObject). This brings up the salvage panel.
+    Returns "1" if the item was found and used, "0" otherwise.
+    Test in chat:  /ra mexec ustopen[]
+    Example: ustopen[]    →  "1"  (salvage panel opened)
+
+ustadd[obj]
+    Adds an item to the open salvage panel.
+    obj may be either a WorldObject handle (e.g. from wobjectgetselection[]) or
+    a plain numeric object ID (decimal or hex).
+    Returns "1" on success, "0" if the salvage panel hook is unavailable.
+    Test in chat:  /ra mexec ustadd[wobjectgetselection[]]
+    Example: ustadd[wobjectgetselection[]]   →  "1"  (selected item added to UST)
+    Example: ustadd[2147500123]              →  "1"  (item added by numeric GUID)
+
+ustsalvage[]
+    Fires the salvage action on the currently open salvage panel (equivalent to
+    clicking the Salvage button).
+    Returns "1" on success, "0" if the salvage panel hook is unavailable.
+    Test in chat:  /ra mexec ustsalvage[]
+    Example: ustsalvage[]    →  "1"  (salvage executed)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GAME TIME (DERETH CLOCK)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions read the Dereth in-game clock from the AC client process.
+The game clock is separate from real-world time — it runs at an accelerated
+rate relative to real time.
+
+Dereth calendar constants:
+    16 hours/day, 30 days/month, 12 months/year
+    Day hours: 4 (Dawnsong) to 11 (Warmtide-and-Half) — hours 4–11 are day, 12+ is night
+
+Month names (1–12):
+    Morningthaw, Solclaim, Seedsow, Leafdawning, Verdantine, Thistledown,
+    HarvestGain, Leafcull, Frostfell, Snowreap, Coldeve, Wintersebb
+
+Hour names (0–15):
+    Darktide, Darktide-and-Half, Foredawn, Foredawn-and-Half,
+    Dawnsong, Dawnsong-and-Half, Morntide, Morntide-and-Half,
+    Midsong, Midsong-and-Half, Warmtide, Warmtide-and-Half,
+    Evensong, Evensong-and-Half, Gloaming, Gloaming-and-Half
+
+getgameticks[]
+    Returns the current Dereth game clock as a raw tick count (double).
+    Ticks per hour = 476.25. This is the base value from which all other
+    game time functions are derived.
+    Test in chat:  /ra mexec getgameticks[]
+    Example: getgameticks[]    →  e.g. "13752963.25"
+
+getgameyear[]
+    Returns the current Dereth year as an integer (0-based).
+    Test in chat:  /ra mexec getgameyear[]
+    Example: getgameyear[]    →  e.g. "115"
+
+getgamemonth[]
+    Returns the current Dereth month as an integer (0–11).
+    0 = Morningthaw, 1 = Solclaim, … 11 = Wintersebb
+    Test in chat:  /ra mexec getgamemonth[]
+    Example: getgamemonth[]    →  e.g. "3"   (Leafdawning)
+
+getgamemonthname[n]
+    Returns the name of the Dereth month at index n (0-based).
+    0 = Morningthaw, 1 = Solclaim, … 11 = Wintersebb
+    Returns "" if n is out of range.
+    Test in chat:  /ra mexec getgamemonthname[0]
+    Example: getgamemonthname[0]               →  "Morningthaw"
+    Example: getgamemonthname[1]               →  "Solclaim"
+    Example: getgamemonthname[getgamemonth[]]  →  name of current month
+
+getgameday[]
+    Returns the current Dereth day of the month (0-based, 0–29).
+    Test in chat:  /ra mexec getgameday[]
+    Example: getgameday[]    →  e.g. "11"
+
+getgamehour[]
+    Returns the current Dereth hour (0–15).
+    Test in chat:  /ra mexec getgamehour[]
+    Example: getgamehour[]    →  e.g. "6"   (Morntide)
+
+getgamehourname[n]
+    Returns the name of the Dereth hour at index n (0-based).
+    0 = Darktide, 1 = Darktide-and-Half, … 15 = Gloaming-and-Half
+    Returns "" if n is out of range.
+    Test in chat:  /ra mexec getgamehourname[0]
+    Example: getgamehourname[0]              →  "Darktide"
+    Example: getgamehourname[1]              →  "Darktide-and-Half"
+    Example: getgamehourname[getgamehour[]]  →  name of current hour
+
+getisday[]
+    Returns "1" if it is currently daytime in Dereth (hours 4–11), "0" otherwise.
+    Test in chat:  /ra mexec getisday[]
+    Example: getisday[]    →  "1"   (if current hour is 4–11)
+
+getisnight[]
+    Returns "1" if it is currently nighttime in Dereth, "0" otherwise.
+    This is the logical inverse of getisday[].
+    Test in chat:  /ra mexec getisnight[]
+    Example: getisnight[]    →  "0"   (if current hour is 4–11)
+
+getminutesuntilday[]
+    Returns the number of Dereth minutes until the next dawn (hour 4).
+    Returns "0" if it is already daytime.
+    Test in chat:  /ra mexec getminutesuntilday[]
+    Example: getminutesuntilday[]    →  "0"   (if daytime)
+    Example: getminutesuntilday[]    →  e.g. "127"   (if nighttime)
+
+getminutesuntilnight[]
+    Returns the number of Dereth minutes until the next dusk (hour 12).
+    Returns "0" if it is already nighttime.
+    Test in chat:  /ra mexec getminutesuntilnight[]
+    Example: getminutesuntilnight[]    →  "0"   (if nighttime)
+    Example: getminutesuntilnight[]    →  e.g. "95"   (if daytime)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FELLOWSHIP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These functions read live fellowship state from the AC client process.
+Members are indexed 0-based (0–8 for up to 9 members).
+All functions return their "not in fellowship" default when the player
+has no active fellowship.
+
+getfellowshipname[]
+    Returns the name of the current fellowship, or "" if not in one.
+    Test in chat:  /ra mexec getfellowshipname[]
+    Example: getfellowshipname[]    →  "The Adventurers"
+
+getfellowshipcount[]
+    Returns the number of members in the current fellowship, or 0.
+    Test in chat:  /ra mexec getfellowshipcount[]
+    Example: getfellowshipcount[]    →  "4"
+
+getfellowshipleaderid[]
+    Returns the character ID of the fellowship leader as a number, or 0.
+    Test in chat:  /ra mexec getfellowshipleaderid[]
+    Example: getfellowshipleaderid[]    →  "1342177284"
+
+getfellowshiplocked[]
+    Returns "1" if the fellowship is locked, "0" otherwise.
+    Test in chat:  /ra mexec getfellowshiplocked[]
+    Example: getfellowshiplocked[]    →  "0"
+
+getfellowshipisleader[]
+    Returns "1" if the current player is the fellowship leader, "0" otherwise.
+    Test in chat:  /ra mexec getfellowshipisleader[]
+    Example: getfellowshipisleader[]    →  "1"
+
+getfellowshipisopen[]
+    Returns "1" if the fellowship is open (anyone can join), "0" otherwise.
+    Test in chat:  /ra mexec getfellowshipisopen[]
+    Example: getfellowshipisopen[]    →  "1"
+
+getfellowshipisfull[]
+    Returns "1" if the fellowship is full (9 members), "0" otherwise.
+    Returns "0" if not in a fellowship.
+    Test in chat:  /ra mexec getfellowshipisfull[]
+    Example: getfellowshipisfull[]    →  "0"
+
+getfellowshipcanrecruit[]
+    Returns "1" if the player can recruit new members — i.e. in a fellowship,
+    the fellowship is not full, and either the player is leader or it is open.
+    Test in chat:  /ra mexec getfellowshipcanrecruit[]
+    Example: getfellowshipcanrecruit[]    →  "1"
+
+getfellowid[n]
+    Returns the character ID of fellowship member at index n (0-based), or 0.
+    Test in chat:  /ra mexec getfellowid[0]
+    Example: getfellowid[0]    →  "1342177284"
+    Example: getfellowid[1]    →  "1342177285"
+
+getfellowname[n]
+    Returns the character name of fellowship member at index n (0-based), or "".
+    Test in chat:  /ra mexec getfellowname[0]
+    Example: getfellowname[0]    →  "Virindi Paradox"
+    Example: getfellowname[1]    →  "Aluvian Warrior"
+
+getfellownames[]
+    Returns a List of character names in the fellowship, sorted alphabetically.
+    Test in chat:  /ra mexec getfellownames[]
+    Example: getfellownames[]    →  [Aluvian Warrior,Virindi Paradox]
+
+getfellowids[]
+    Returns a List of character IDs in the fellowship, sorted numerically.
+    Test in chat:  /ra mexec getfellowids[]
+    Example: getfellowids[]    →  [1342177284,1342177285]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USAGE IN META RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Expressions can be used in two places in the meta system:
+
+Condition — MetaConditionType.Expression
+    The ConditionData field holds an expression. The rule fires when the
+    expression evaluates to a truthy value (anything except "" or "0").
+    Example ConditionData:  getcharintprop[1] < 50 && getvar[mode] == hunt
+
+Action — MetaActionType.ExpressionAction
+    The ActionData field holds an expression that is evaluated for its side
+    effects. The return value is discarded.
+    Example ActionData:  setvar[count, getvar[count] + 1]
+    Example ActionData:  setvar[state, iif[getcharintprop[1] < 20, low, ok]]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUEST FLAGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Quest flag data is populated by /myquests on login and can be manually refreshed.
+All key comparisons are case-insensitive.
+
+refreshquests[]
+    Issues /myquests to the server to refresh the quest flag cache.
+    Returns "1" always (does not wait for results — use isrefreshingquests[] to poll).
+    Test in chat:  /ra mexec refreshquests[]
+    Example: refreshquests[]   →  starts a background quest flag refresh
+
+isrefreshingquests[]
+    Returns "1" while /myquests is in progress, "0" once complete.
+    The refresh ends automatically 1 second after the last quest line arrives,
+    or after a 15-second global timeout.
+    Test in chat:  /ra mexec isrefreshingquests[]
+    Example: isrefreshingquests[] == 0    →  true when quest data is ready
+
+testquestflag[questflag]
+    Returns "1" if the quest flag key exists in the cached list, "0" otherwise.
+    A key that does not appear in /myquests output returns "0".
+    Test in chat:  /ra mexec testquestflag[blankaug]
+    Example: testquestflag[blankaug]   →  "1" if character is flagged for bobo
+
+getqueststatus[questflag]
+    Returns "1" if the quest flag is ready to be done again, "0" if on cooldown.
+    If the key is not found in the cache, returns "1" (not flagged = ready).
+    IsReady logic:  (CompletedOn + RepeatTime) <= UtcNow  AND  not a once-only flag.
+    Once-only flag: MaxSolves == 1 && Solves <= 1 — never ready again.
+    Test in chat:  /ra mexec getqueststatus[blankaug]
+    Example: getqueststatus[blankaug] == 1    →  ready to run blankaug again
+
+getquestktprogress[questflag]
+    Returns the current solve count (kill count) for a kill-task quest flag.
+    Returns "0" if the key is not in the cache.
+    Test in chat:  /ra mexec getquestktprogress[totalgolemmagmaexarchdead]
+    Example: getquestktprogress[totalgolemmagmaexarchdead]   →  current exarch kill count
+
+getquestktrequired[questflag]
+    Returns the maximum solves (kill count required) for a kill-task quest flag.
+    Returns "0" if the key is not in the cache.
+    Test in chat:  /ra mexec getquestktrequired[totalgolemmagmaexarchdead]
+    Example: getquestktrequired[totalgolemmagmaexarchdead]   →  exarch kills required
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPELL & COMPONENT LOOKUPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+spellname[spellid]
+    Returns the display name of a spell by its numeric ID.
+    Source: embedded SpellData.txt resource (static, no client call required).
+    Returns "Unknown Spell (<id>)" if the ID is not found.
+
+    Test in chat:  /ra mexec spellname[2]
+    Example: spellname[2]   →  "Heal Other"
+
+componentname[componentid]
+    Returns the display name of a spell component by its numeric ID.
+    Source: live client SpellComponentTable (loaded once on login via GetMagicSystem chain).
+    Returns "Unknown Component (<id>)" if not found or not yet loaded.
+
+    Test in chat:  /ra mexec componentname[1]
+    Example: componentname[1]   →  the name of component #1 (e.g. "Lead Scarab")
+
+componentdata[componentid]
+    Returns a dict handle with all known fields for the given component ID.
+    Returns an empty dict if the ID is not found.
+
+    Keys in the returned dict:
+        Id           — numeric component ID
+        Name         — display name (e.g. "Lead Scarab")
+        IconId       — icon DID
+        Type         — SpellComponentType numeric value (0=Undef,1=Power,2=Action,3=ConceptPrefix,4=ConceptSuffix)
+        GestureId    — gesture animation ID
+        GestureSpeed — gesture speed (float, the _time field)
+        BurnRate     — Component Destruction Modifier / CDM (float)
+        Word         — casting word (e.g. "Zojak")
+        SortKey      — SpellComponentCategory numeric value (0=Scarab,1=Herb,2=PowderedGem,3=AlchemicalSubstance,4=Talisman,5=Taper,6=Pea)
+
+    Test in chat:  /ra mexec dictgetitem[componentdata[1],BurnRate]
+    Example: dictgetitem[componentdata[1],Name]   →  "Lead Scarab"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NETWORKING (TODO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+netclients[tag?]
+    TODO: Not yet implemented. Requires a multi-client networking layer (TCP or named pipe
+    between RynthAi instances) which does not yet exist.
+
+    When implemented, will return a list of connected RynthAi clients sharing data over the
+    local network, optionally filtered by tag. Each entry will contain: ClientId, PlayerId,
+    Position, Name, Tags, WorldName, CurrentHealth, CurrentMana, CurrentStamina, MaxHealth,
+    MaxMana, MaxStamina, Heading — matching UB's netclients[] output format.
+
+    Param #0: tag (optional) — filter to clients with this tag
+    Returns: list of client data dictionaries
+
+    Example: netclients[]         →  list of all connected clients  (NOT YET IMPLEMENTED)
+    Example: netclients[mule]     →  clients tagged "mule"           (NOT YET IMPLEMENTED)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Increment a counter each time a rule fires:
+    setvar[kills, getvar[kills] + 1]
+
+Check if level is between 100 and 200:
+    getcharintprop[25] >= 100 && getcharintprop[25] <= 200
+
+Store current health percent in a variable:
+    setvar[hpct, getcharintprop[1] * 100 / getcharintprop[6]]
+
+Transition state based on a flag bit:
+    getcharintprop[9] & 4
+
+Check if player name matches a pattern:
+    getcharstringprop[1] # ^Sir
+
+Nested iif for a three-way branch:
+    iif[getcharintprop[1] < 20, critical, iif[getcharintprop[1] < 50, low, ok]]
+
+
+────────────────────────────────────────────────────────────────────────────
+Creature profile lookups (persistent store)
+────────────────────────────────────────────────────────────────────────────
+
+Captured passively from successful Assess Creature responses; persists across
+sessions and characters in C:\Games\RynthSuite\RynthAi\CreatureData\creatures.json.
+The "target" argument may be either a wobject handle or a creature name string.
+
+creaturehasprofile[target]
+    Returns "1" if a profile exists for this creature, "0" otherwise.
+    Example: creaturehasprofile[wobjectgetselection[]]
+
+creaturegetmaxhealth[target]
+    Returns the highest observed MaxHealth, or "0" if no profile.
+    Example: creaturegetmaxhealth[wobjectgetselection[]]
+    Example: creaturegetmaxhealth[Tusker Guard]
+
+creaturegetresist[target, type]
+    Returns the elemental resistance multiplier (1.0 = neutral, <1 = weak, >1 = strong).
+    type may be: slash, pierce, bludgeon, fire, cold, acid, electric (or short forms
+    sl/pi/bl/fi/co/ac/el; "lightning" aliases electric).
+    Example: creaturegetresist[wobjectgetselection[], pierce]
+
+creaturegetweakest[target]
+    Returns the name of the damage type with the lowest observed resist
+    (one of: slash, pierce, bludgeon, fire, cold, acid, electric).
+    Returns "" if no profile exists.
+    Example: iif[creaturegetweakest[wobjectgetselection[]] == fire, fire, slash]
+
+creaturegetarmor[target]
+    Returns the observed ArmorLevel, or "0" if no profile.
+    Example: creaturegetarmor[wobjectgetselection[]]

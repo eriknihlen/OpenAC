@@ -25,6 +25,8 @@ public sealed record BotProfile
 
     public NavigationSettings Navigation { get; init; } = new();
 
+    public MetaOptions Meta { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -212,6 +214,18 @@ public sealed record LootSettings
     public double StepTimeoutSeconds { get; init; } = 6d;
 
     public LootRuleSet Rules { get; init; } = LootRuleSet.Default;
+}
+
+/// <summary>The VTank-style meta: which one to load with the profile, and whether it runs.</summary>
+public sealed record MetaOptions
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>A meta (<c>.af</c> or <c>.met</c>) in the VTank profiles folder, loaded when the profile is; empty for none.</summary>
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>Echo every rule that fires to chat.</summary>
+    public bool Debug { get; init; }
 }
 
 public sealed record NavigationSettings

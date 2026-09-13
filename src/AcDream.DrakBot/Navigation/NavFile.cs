@@ -19,6 +19,21 @@ public static class NavFile
     private const int Linear = 2;
     private const int Once = 4;
 
+    public static bool IsKnownKind(int kind) => Enum.IsDefined(typeof(WaypointKind), kind);
+
+    /// <summary>
+    /// Trailer lines after a point's five-line prologue, per kind. The one
+    /// place this is known, so a meta's embedded route is counted the same
+    /// way it is read.
+    /// </summary>
+    public static int TrailerLineCount(WaypointKind kind) => kind switch
+    {
+        WaypointKind.Recall or WaypointKind.Pause or WaypointKind.Chat => 1,
+        WaypointKind.Vendor => 2,
+        WaypointKind.Portal or WaypointKind.Npc => 6,
+        _ => 0,
+    };
+
     /// <summary>
     /// Parses the file text. A point that cannot be read ends the route with
     /// a warning; what came before it stands.

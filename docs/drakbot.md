@@ -62,7 +62,8 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
   Spells/            SpellSelector (name -> best known tier), CastTracker
   Combat/            TargetSelector, LineOfSightService
   Loot/              LootRule / LootRuleSet (own JSON format)
-  Navigation/        Route / Waypoint, RouteFollower, Walker, StuckDetector
+  Navigation/        Route / Waypoint, NavFile (.nav), RouteFollower, Walker, RouteActionRunner
+  Meta/              MetaEngine (states/rules), ExpressionEngine, MetaWorld, .af/.met parsers
   Profiles/          BotProfile (JSON), BotStore (plugin storage)
 ```
 
@@ -155,6 +156,49 @@ and `WalkPathProbe.cs`) and are covered by synthetic-landblock tests (walls,
 steps, ledges, cliffs, bystanders, arcs) plus installed-dat tests against a
 real dungeon's walls and ceiling.
 
+## Metas
+
+A meta is the VTank-style state machine that sits above the behaviors: a
+set of states, each a list of rules `IF condition DO action`, evaluated
+every tick in the current state, first match wins, each rule firing once
+per visit to its state. It does not fight or walk itself; it flips the
+profile's switches, loads routes, changes its own state, and talks in
+chat, and the behaviors do the work. Ported from RynthSuite's MetaManager
+and ExpressionEngine, so a meta written for RynthAi or VTank runs here.
+
+- **Files.** `.af` (metaf text, what RynthScript compiles to) and `.met`
+  (VTank binary) load by name from the VTank profiles folder
+  (`<data>/vtank/<name>.af|.met`): `/drakbot meta load <name>`, the Meta
+  tab, or `/vt meta load <name>` from a rule. Embedded `NAV:` blocks travel
+  with the meta. The profile remembers the meta's name and loads it with
+  the profile.
+- **Conditions.** Never, Always, All, Any, Not, ChatMatch and ChatCapture
+  (regex over the last second of chat; capture groups fill `{1}`.. in the
+  action), MainSlotsLE, SecsInStateGE, Death, ItemCountLE/GE, MobsInDist
+  by name and by count, NoMobsInDist, NeedToBuff, BlockE, CellE,
+  IntoPortal, ExitPortal, SecsOnSpellGE/LE, BuPercentGE, DistToRteGE,
+  NavEmpty, the typed vitals, and `Expr`. Vendor and vitae conditions are
+  not carried by the plugin contract and never fire.
+- **Actions.** Chat (a `/vt` line is translated, a `/drakbot` line handled,
+  anything else sent), SetState, CallState / Return (a stack), EmbedNav
+  (an embedded route or one by name), DoAll, SetWatchdog / ClearWatchdog
+  (no progress in N meters for M seconds sends the meta to a state),
+  SetOpt / GetOpt, DoExpr, ChatExpr. VTank views are ignored with a
+  notice.
+- **Expressions.** The full VTank/UtilityBelt expression language: infix
+  operators, `funcname[args]`, `$var`, session, persistent (per character)
+  and global variables kept in the plugin's storage, lists, dicts,
+  stopwatches, coordinates, `wobject*` queries over the object table,
+  character properties, spell timers, quest flags (from `/myquests`),
+  fellowship, game time, `exec` / `delayexec`. `docs/drakbot-expressions.txt`
+  is the reference. `/drakbot meta eval <expr>` (and the Meta tab) evaluate
+  one in place. Functions that need the client's memory - creature
+  profiles, salvage panel, vitae - answer "0".
+- **`/vt` translation.** `opt set` maps VTank option names onto the
+  profile (enablecombat, enablenav, attackdistance, the recharge
+  thresholds, ...), `meta load`, `nav load`, `setmetastate`, `echo`,
+  `reverseroute`; other `/vt` verbs are tried as `/drakbot` verbs.
+
 ## Windows
 
 The bot's windows are Dear ImGui (`AcDream.DrakBot.Ui`), drawn by the
@@ -168,7 +212,7 @@ and `Nav builder` open from it.
   current target's line-of-sight state (clear, blocked by what, strikes,
   blacklisted) and, while walking, which heading is open.
 - **Settings** - one tab per subsystem (Recharge, Combat, Buffs, Loot,
-  Navigation). Every widget edits the live profile; `Save` persists it under
+  Navigation, Meta). Every widget edits the live profile; `Save` persists it under
   the name in the box. The Combat tab carries reach (melee reach, approach
   range, walk timeout) and the line-of-sight options (on/off, war spell
   path, launch speeds, blacklist strikes and duration, walk checks and
@@ -192,6 +236,8 @@ game's own look.
 /drakbot style melee | missile | magic
 /drakbot buffs|combat|loot on|off
 /drakbot los on|off | debug on|off
+/drakbot meta load <name> | clear | on | off | state <name> | states | debug on|off | eval <expr> | status
+/vt <anything VTank>      (translated by the meta engine)
 ```
 
 `nav add` records the character's current position as a waypoint on the

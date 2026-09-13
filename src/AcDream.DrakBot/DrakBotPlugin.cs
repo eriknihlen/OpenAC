@@ -1,5 +1,6 @@
 using AcDream.DrakBot.Behaviors;
 using AcDream.DrakBot.Combat;
+using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Profiles;
 using AcDream.DrakBot.Spells;
 using AcDream.Plugin.Abstractions;
@@ -32,6 +33,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
     private Action? _drawWindows;
     private IDisposable? _commandLease;
     private IDisposable? _aliasLease;
+    private IDisposable? _vtLease;
     private IDisposable? _panelLease;
     private IDisposable? _drawerLease;
     private bool _enabled;
@@ -81,8 +83,28 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             store,
             navigation,
             buffs,
-            () => surface.Navigation.Snapshot);
+            () => surface.Navigation.Snapshot,
+            host.VtankProfiles);
         _commands = new BotCommands(_controller, surface.Chat);
+        BotCommands commands = _commands;
+        _controller.CommandHandler = text =>
+        {
+            commands.Handle(new PluginCommand("drakbot", text, "/drakbot " + text));
+            return true;
+        };
+        // The meta sees the world through the automation surface and keeps
+        // its variables in the plugin's storage; it reads its own switches
+        // from the live profile.
+        BotController controller = _controller;
+        var world = new MetaWorld(surface, host.Storage, host.Log, host.Selection, () => clock.Now);
+        _controller.Meta = new MetaEngine(
+            world,
+            _controller,
+            clock,
+            host.Log,
+            () => controller.Profile.Meta,
+            change => controller.Update(p => p with { Meta = change(p.Meta) }));
+        _controller.ApplyProfileMeta();
         _drawWindows = windows?.Invoke(_controller, surface);
     }
 
@@ -97,6 +119,9 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _host.Events.Tick += OnTick;
         _commandLease = _host.Commands.Register("drakbot", _commands.Handle);
         _aliasLease = _host.Commands.Register("bot", _commands.Handle);
+        // VTank metas and habits speak /vt; the meta engine translates it.
+        _vtLease = _host.Commands.Register("vt", command =>
+            _controller?.Meta?.SendCommand(command.RawText));
         if (_drawWindows is not null && _host.ImmediateUi.IsAvailable)
         {
             _drawerLease = _host.ImmediateUi.Register("dashboard", _drawWindows);
@@ -129,6 +154,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _commandLease = null;
         _aliasLease?.Dispose();
         _aliasLease = null;
+        _vtLease?.Dispose();
+        _vtLease = null;
         _drawerLease?.Dispose();
         _drawerLease = null;
         _panelLease?.Dispose();

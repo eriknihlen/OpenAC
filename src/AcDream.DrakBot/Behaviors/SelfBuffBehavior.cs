@@ -78,6 +78,9 @@ public sealed class SelfBuffBehavior(
 
     public void Interrupt(BehaviorContext context) => casts.Clear();
 
+    /// <summary>Whether any configured buff is missing or expiring, for a meta's NeedToBuff.</summary>
+    public bool NeedsAnyBuff(Blackboard board) => TryNextDue(board, settings(), out _);
+
     /// <summary>The first configured buff that is missing or expiring and can be cast now.</summary>
     internal bool TryNextDue(Blackboard board, BuffSettings buffs, out PluginSpellInfo spell)
     {

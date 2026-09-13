@@ -63,6 +63,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public bool IsAvailable => inner.IsAvailable;
         public string? ReadText(string key) =>
             inner.ReadText(ScopedKey(key));
+        public byte[]? ReadBytes(string key) =>
+            inner.ReadBytes(ScopedKey(key));
         public IReadOnlyList<string> List(string prefix)
         {
             string scopedPrefix = ScopedKey(prefix);
