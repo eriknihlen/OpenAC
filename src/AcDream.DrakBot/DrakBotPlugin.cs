@@ -37,6 +37,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
     private IDisposable? _aliasLease;
     private IDisposable? _vtLease;
     private IDisposable? _ubLease;
+    private IDisposable? _mtLease;
     private IDisposable? _panelLease;
     private IDisposable? _drawerLease;
     private bool _enabled;
@@ -131,6 +132,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             host.Log,
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
+        _controller.Meta.Utility = new UtilityCommands(world, _controller.Meta, surface);
         _controller.ApplyProfileMeta();
         _drawWindows = windows?.Invoke(_controller, surface);
     }
@@ -149,15 +151,10 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // VTank metas and habits speak /vt; the meta engine translates it.
         _vtLease = _host.Commands.Register("vt", command =>
             _controller?.Meta?.SendCommand(command.RawText));
-        // UtilityBelt metas jump with /ub jump...; anything else /ub is not ours.
-        _ubLease = _host.Commands.Register("ub", command =>
-        {
-            string[] words = command.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (words.Length > 0 && words[0].StartsWith("jump", StringComparison.OrdinalIgnoreCase))
-                _commands?.Handle(new PluginCommand("drakbot", command.Arguments, "/drakbot " + command.Arguments));
-            else
-                _host?.Automation.Chat.PostSystemMessage("DrakBot answers /ub jump only; see /drakbot");
-        });
+        // UtilityBelt metas jump with /ub jump...; the rest of /ub and /mt
+        // are the MagTools verbs (use, cast, opt, fellow, ...).
+        _ubLease = _host.Commands.Register("ub", command => HandleUtility("/ub", command));
+        _mtLease = _host.Commands.Register("mt", command => HandleUtility("/mt", command));
         if (_drawWindows is not null && _host.ImmediateUi.IsAvailable)
         {
             _drawerLease = _host.ImmediateUi.Register("dashboard", _drawWindows);
@@ -178,6 +175,18 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _host.Log.Info("DrakBot ready; /drakbot for commands");
     }
 
+    private void HandleUtility(string prefix, PluginCommand command)
+    {
+        string[] words = command.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length > 0 && words[0].StartsWith("jump", StringComparison.OrdinalIgnoreCase))
+        {
+            _commands?.Handle(new PluginCommand("drakbot", command.Arguments, "/drakbot " + command.Arguments));
+            return;
+        }
+        if (_controller?.Meta?.Utility?.TryHandle(prefix + " " + command.Arguments) != true)
+            _host?.Automation.Chat.PostSystemMessage($"DrakBot does not know {prefix} {words.FirstOrDefault()}; see /drakbot");
+    }
+
     public void Disable()
     {
         if (!_enabled)
@@ -194,6 +203,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _vtLease = null;
         _ubLease?.Dispose();
         _ubLease = null;
+        _mtLease?.Dispose();
+        _mtLease = null;
         _drawerLease?.Dispose();
         _drawerLease = null;
         _panelLease?.Dispose();

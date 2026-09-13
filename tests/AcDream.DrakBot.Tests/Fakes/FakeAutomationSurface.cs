@@ -45,6 +45,16 @@ internal sealed class FakeAutomationSurface
     public int MemberCount => Fellows.Count;
     public IReadOnlyList<PluginFellowMember> CaptureMembers() => Fellows.ToArray();
     IFellowshipAutomation IAutomationSurface.Fellowship => this;
+    public PluginFellowshipCommandResult Recruit(uint targetObjectId)
+    {
+        Commands.Add($"recruit:{targetObjectId}");
+        return new(PluginFellowshipCommandStatus.Accepted);
+    }
+    public PluginFellowshipCommandResult SetOpen(bool isOpen)
+    {
+        Commands.Add($"fellowopen:{isOpen}");
+        return new(PluginFellowshipCommandStatus.Accepted);
+    }
 
     // ── enchantments the character landed on others ───────────────────────
     /// <summary>Tracked enchantments per target, as the client records the character's own casts.</summary>
@@ -269,6 +279,16 @@ internal sealed class FakeAutomationSurface
     public PluginItemCommandResult Merge(uint sourceObjectId, uint targetObjectId, uint amount = 0u)
     {
         Commands.Add($"merge:{sourceObjectId}>{targetObjectId}");
+        return new(PluginItemCommandStatus.Started);
+    }
+    public PluginItemCommandResult Give(uint objectId, uint targetObjectId, uint amount = 0u)
+    {
+        Commands.Add($"give:{objectId}>{targetObjectId}");
+        return new(PluginItemCommandStatus.Started);
+    }
+    public PluginItemCommandResult Drop(uint objectId, uint amount = 0u)
+    {
+        Commands.Add($"drop:{objectId}");
         return new(PluginItemCommandStatus.Started);
     }
     public PluginItemCommandResult Salvage(uint toolObjectId, IReadOnlyList<uint> itemObjectIds)

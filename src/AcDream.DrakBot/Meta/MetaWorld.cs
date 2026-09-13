@@ -77,6 +77,9 @@ public sealed class MetaWorld
     private readonly IPluginLogger _log;
     private readonly ISelectionService _selection;
     private readonly Func<double> _now;
+
+    /// <summary>The bot clock, in seconds.</summary>
+    public double Now => _now();
     private readonly Dictionary<string, QuestRecord> _quests = new(StringComparer.OrdinalIgnoreCase);
     private bool _questRefreshing;
     private bool _questGotFirst;

@@ -180,6 +180,7 @@ public sealed class MetaEngine
     {
         DrainChat();
         _world.Tick();
+        Utility?.Tick(board.Now);
         _expressions?.PumpDelayedExecs();
         _expressions?.FlushVars();
 
@@ -599,15 +600,29 @@ public sealed class MetaEngine
         }
     }
 
+    /// <summary>The MagTools / UtilityBelt verbs (<c>/mt</c>, <c>/ub</c>), when the plugin wired them.</summary>
+    public UtilityCommands? Utility { get; set; }
+
     /// <summary>A chat line from a rule: <c>/vt</c> is translated, the bot's own verbs handled, anything else submitted.</summary>
     public void SendCommand(string command)
     {
         if (command.Length == 0)
             return;
-        if (TryHandleVtCommand(command) || _bot.TryHandleCommand(command))
+        if (TryHandleVtCommand(command) || _bot.TryHandleCommand(command) || Utility?.TryHandle(command) == true)
             return;
         _world.InvokeChatParser(command);
     }
+
+    /// <summary>An option by its VTank or bot name, for <c>/mt opt get</c>.</summary>
+    public string GetOptionValue(string name)
+    {
+        string mapped = VtOptionMap.TryGetValue(name, out string? target) ? target : name;
+        if (_settings.BuildMap().TryGetValue(mapped, out (Func<string> Get, Action<string> Set) entry))
+            return entry.Get();
+        return Expressions.GetOption(name);
+    }
+
+    public void SetOptionValue(string name, string value) => SetOption(name, value);
 
     private void EmbedNav(string actionData)
     {
