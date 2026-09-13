@@ -107,7 +107,7 @@ public sealed class NavigationTests
 
         Assert.Null(detector.Observe(At(0d, 0d), 0d));
         Assert.Null(detector.Observe(At(0d, 0d), 1d));
-        Assert.Equal(StuckRecovery.Jump, detector.Observe(At(0d, 0d), 3.5d));
+        Assert.Equal(StuckRecovery.BackUp, detector.Observe(At(0d, 0d), 3.5d));
         Assert.Equal(StuckRecovery.StrafeLeft, detector.Observe(At(0d, 0d), 7d));
 
         // Real movement resets the escalation.

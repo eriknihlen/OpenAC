@@ -60,8 +60,8 @@ public sealed class BotDashboard
         if (!_open)
             return;
 
-        ImGui.SetNextWindowSize(new Vector2(380f, 0f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("DrakBot", ref _open, ImGuiWindowFlags.AlwaysAutoResize))
+        ImGui.SetNextWindowSize(new Vector2(400f, 520f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("DrakBot", ref _open))
         {
             ImGui.End();
             return;

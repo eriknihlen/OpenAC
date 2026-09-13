@@ -28,22 +28,13 @@ public sealed class CombatBehavior(
 {
     private const double SwingTimeoutSeconds = 10d;
     private const double ModeChangeTimeoutSeconds = 4d;
-    private const float ApproachTurnToleranceDegrees = 12f;
-    private const double FaceReissueSeconds = 1.5;
-    private const double RecoveryDurationSeconds = 0.6;
-
-    private readonly StuckDetector _stuck = new();
+    private readonly Walker _walker = new();
 
     private Phase _phase;
     private uint _targetId;
     private long _completionRevisionAtSwing;
     private double _phaseStartedAt;
     private bool _leftCombat = true;
-    private bool _moving;
-    private float _lastFaceHeading = float.NaN;
-    private double _lastFaceAt = double.NegativeInfinity;
-    private StuckRecovery? _recovery;
-    private double _recoveryUntil;
     private int _recoveryCount;
 
     private enum Phase
@@ -230,8 +221,7 @@ public sealed class CombatBehavior(
     {
         if (_phase is Phase.Building or Phase.AwaitingSwing)
             context.Surface.Combat.AbortPhysicalAttack();
-        StopMoving(context.Surface.Navigation);
-        _stuck.Reset();
+        _walker.Reset(context.Surface.Navigation);
         casts.Clear();
         _phase = Phase.Idle;
         ApproachHeadingDegrees = float.NaN;
@@ -389,13 +379,8 @@ public sealed class CombatBehavior(
         }
 
         // A recovery move runs its course before the walk is reconsidered.
-        if (_recovery is not null)
-        {
-            if (board.Now < _recoveryUntil)
-                return BehaviorStep.Continue;
-            _recovery = null;
-            StopMoving(nav);
-        }
+        if (_walker.ContinueRecovery(nav, board.Now))
+            return BehaviorStep.Continue;
 
         PluginNavigationPosition position = board.Navigation.Position;
         float heading = RouteFollower.HeadingTo(position, where.Position);
@@ -416,28 +401,8 @@ public sealed class CombatBehavior(
         }
         ApproachHeadingDegrees = heading;
 
-        float delta = RouteFollower.HeadingDelta(position.HeadingDegrees, heading);
-        if (Math.Abs(delta) > ApproachTurnToleranceDegrees)
-        {
-            StopMoving(nav);
-            bool stale = float.IsNaN(_lastFaceHeading)
-                || Math.Abs(RouteFollower.HeadingDelta(_lastFaceHeading, heading)) > ApproachTurnToleranceDegrees
-                || board.Now - _lastFaceAt > FaceReissueSeconds;
-            if (stale)
-            {
-                nav.FaceHeading(heading);
-                _lastFaceHeading = heading;
-                _lastFaceAt = board.Now;
-            }
-            return BehaviorStep.Continue;
-        }
-        if (!_moving)
-        {
-            nav.SetMovementIntent(new PluginMovementIntent(Forward: true, Run: true));
-            _moving = true;
-        }
         // The probes see modelled geometry; the stuck detector catches the rest.
-        StuckRecovery? stuck = _stuck.Observe(position, board.Now);
+        StuckRecovery? stuck = _walker.Toward(nav, position, heading, board.Now);
         if (stuck is { } recovery)
         {
             context.Log.Info($"approach stuck near {target.Name}; trying {recovery}");
@@ -448,10 +413,7 @@ public sealed class CombatBehavior(
 
     private BehaviorStep BeginRecovery(INavigationAutomation nav, double now, StuckRecovery recovery)
     {
-        nav.SetMovementIntent(IntentFor(recovery));
-        _moving = true;
-        _recovery = recovery;
-        _recoveryUntil = now + RecoveryDurationSeconds;
+        _walker.BeginRecovery(nav, recovery, now);
         return BehaviorStep.Continue;
     }
 
@@ -462,22 +424,7 @@ public sealed class CombatBehavior(
         _ => StuckRecovery.StrafeRight,
     };
 
-    private static PluginMovementIntent IntentFor(StuckRecovery recovery) => recovery switch
-    {
-        StuckRecovery.Jump => new PluginMovementIntent(Forward: true, Run: true, Jump: true),
-        StuckRecovery.StrafeLeft => new PluginMovementIntent(StrafeLeft: true, Run: true),
-        StuckRecovery.StrafeRight => new PluginMovementIntent(StrafeRight: true, Run: true),
-        _ => new PluginMovementIntent(Backward: true, Run: true),
-    };
-
-    private void StopMoving(INavigationAutomation nav)
-    {
-        _recovery = null;
-        if (!_moving)
-            return;
-        nav.ClearMovementIntent();
-        _moving = false;
-    }
+    private void StopMoving(INavigationAutomation nav) => _walker.Reset(nav);
 
     private static bool TryFindHostile(Blackboard board, uint targetId, out PluginCombatTarget target)
     {
@@ -515,10 +462,7 @@ public sealed class CombatBehavior(
         _phase = phase;
         _phaseStartedAt = now;
         if (phase == Phase.Approaching)
-        {
-            _stuck.Reset();
             _recoveryCount = 0;
-        }
         else
         {
             ApproachHeadingDegrees = float.NaN;

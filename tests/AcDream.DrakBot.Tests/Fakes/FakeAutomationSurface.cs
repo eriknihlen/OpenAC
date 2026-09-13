@@ -264,6 +264,8 @@ internal sealed class FakeAutomationSurface
         if (intent.Backward) parts.Add("back");
         if (intent.StrafeLeft) parts.Add("left");
         if (intent.StrafeRight) parts.Add("right");
+        if (intent.TurnLeft) parts.Add("turnleft");
+        if (intent.TurnRight) parts.Add("turnright");
         if (intent.Jump) parts.Add("jump");
         return string.Join("+", parts);
     }

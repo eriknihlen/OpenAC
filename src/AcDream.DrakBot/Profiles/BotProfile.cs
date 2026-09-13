@@ -223,6 +223,9 @@ public sealed record NavigationSettings
     /// <summary>A waypoint counts as reached inside this many meters.</summary>
     public double ArrivalDistanceMeters { get; init; } = 1.5;
 
-    /// <summary>Turn in place before walking when off by more than this.</summary>
-    public float TurnToleranceDegrees { get; init; } = 12f;
+    /// <summary>
+    /// Stop and turn in place when the waypoint is off by more than this;
+    /// smaller errors are steered out while running.
+    /// </summary>
+    public float TurnToleranceDegrees { get; init; } = Navigation.Walker.TurnInPlaceDegrees;
 }

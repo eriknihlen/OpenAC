@@ -3,9 +3,12 @@ using AcDream.Plugin.Abstractions;
 namespace AcDream.DrakBot.Navigation;
 
 /// <summary>
-/// Notices when walking stops making progress and escalates through a short
+/// Notices when walking stops making progress and cycles through a short
 /// list of recoveries. Progress is judged by distance covered over a window,
 /// not by whether the host says it is moving, because a wall makes both true.
+/// The moves are the ones a player makes when caught on a corner: back off,
+/// then sidestep either way. Jumping is not among them; it rarely frees a
+/// character and looks like a fault when it does not.
 /// </summary>
 public sealed class StuckDetector
 {
@@ -51,12 +54,11 @@ public sealed class StuckDetector
 
         _anchor = position;
         _anchorTime = now;
-        StuckRecovery recovery = (_escalation % 4) switch
+        StuckRecovery recovery = (_escalation % 3) switch
         {
-            0 => StuckRecovery.Jump,
+            0 => StuckRecovery.BackUp,
             1 => StuckRecovery.StrafeLeft,
-            2 => StuckRecovery.StrafeRight,
-            _ => StuckRecovery.BackUp,
+            _ => StuckRecovery.StrafeRight,
         };
         _escalation++;
         return recovery;
@@ -65,8 +67,7 @@ public sealed class StuckDetector
 
 public enum StuckRecovery
 {
-    Jump,
+    BackUp,
     StrafeLeft,
     StrafeRight,
-    BackUp,
 }

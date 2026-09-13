@@ -381,7 +381,7 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Navigation = p.Navigation with { ArrivalDistanceMeters = arrival } });
 
         float turn = navigation.TurnToleranceDegrees;
-        if (ImGui.SliderFloat("Turn tolerance (deg)", ref turn, 3f, 45f, "%.0f"))
+        if (ImGui.SliderFloat("Turn in place beyond (deg)", ref turn, 10f, 90f, "%.0f"))
             controller.Update(p => p with { Navigation = p.Navigation with { TurnToleranceDegrees = turn } });
         ImGui.TextDisabled("A mode change applies the next time a route is loaded.");
     }

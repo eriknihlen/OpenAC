@@ -433,17 +433,18 @@ public sealed class CombatBehaviorTests
         Place(surface, 7u, north: 10d, east: 0d);
         surface.BlockedWalkHeadings.Add(0);
 
-        // Straight north is blocked; the first fan heading is 30 degrees right.
+        // Straight north is blocked; the first fan heading is 30 degrees
+        // right, close enough to steer toward while running.
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal(["face:30"], surface.Commands);
+        Assert.Equal(["move:forward+turnright"], surface.Commands);
         Assert.Equal(30f, behavior.ApproachHeadingDegrees);
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal("move:forward", surface.Commands[^1]);
+        Assert.Equal(["move:forward+turnright"], surface.Commands); // held, not re-sent
 
-        // The obstacle is passed: back onto the direct heading.
+        // The obstacle is passed: back onto the direct heading, still running.
         surface.BlockedWalkHeadings.Clear();
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock, dt: 0.6).Result);
-        Assert.Equal(["face:30", "move:forward", "move:clear", "face:0"], surface.Commands);
+        Assert.Equal(["move:forward+turnright", "move:forward"], surface.Commands);
         Assert.Equal(0f, behavior.ApproachHeadingDegrees);
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
         Assert.Equal("move:forward", surface.Commands[^1]);

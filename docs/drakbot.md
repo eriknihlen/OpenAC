@@ -58,11 +58,11 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
       buffs          Buffing     keep configured self-buff families up
       combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule
-      nav            Navigation  follow a route, turn-then-walk, stuck recovery
+      nav            Navigation  follow a route through the Walker
   Spells/            SpellSelector (name -> best known tier), CastTracker
   Combat/            TargetSelector, LineOfSightService
   Loot/              LootRule / LootRuleSet (own JSON format)
-  Navigation/        Route / Waypoint, RouteFollower, StuckDetector
+  Navigation/        Route / Waypoint, RouteFollower, Walker, StuckDetector
   Profiles/          BotProfile (JSON), BotStore (plugin storage)
 ```
 
@@ -94,6 +94,15 @@ or "no answer":
   ledges are stepped off and dropped from within a safe fall, and a wall, a
   fence, a closed door or a cliff stops it. Creatures are ignored; they move.
 
+All walking - a route's next waypoint or a hostile to close on - goes
+through `Walker`, which drives the character the way a player does: a held
+run, steered with the turn keys while it moves (with a little hysteresis so
+the key does not chatter), and a stop to turn in place only when the
+destination is more than the profile's turn-in-place angle off. Time spent
+turning never reads as being stuck. When a run makes no progress for a few
+seconds the walker backs up, then sidesteps left, then right; it never
+jumps.
+
 Ranged styles do not fire blind, and nobody walks into a wall:
 
 - **Trajectory.** Missile style sweeps a `Missile` arc (an arrow under
@@ -112,8 +121,8 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   cached verdict re-read every tick does not stack them.
 - **Approach.** When nothing can be shot from where the bot stands, it
   walks toward the best hostile that is blocked beyond the approach range:
-  turn in place, hold a run forward, re-check the path every tick, stop when
-  it clears or the approach range is met, give up after a timeout. Melee
+  hold a run toward it, re-check the path every tick, stop when it clears
+  or the approach range is met, give up after a timeout. Melee
   uses the same step to close to within its reach before pressing the
   attack. The walk is one step like everything else: a heal interrupts it
   and the movement intent is dropped.
