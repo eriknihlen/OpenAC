@@ -70,6 +70,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),
             buffs,
             new PetBehavior(() => engine.Profile.Pets),
+            new ManaStoneBehavior(() => engine.Profile.ManaStones),
             new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
             new DoorBehavior(
                 () => engine.Profile.Doors,
@@ -81,7 +82,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
                 {
                     string? text = host.VtankProfiles.ReadText(BotStore.SanitizeName(name) + ".utl");
                     return text is null ? null : VTankLootParser.LoadFromText(text);
-                }),
+                },
+                () => engine.Profile.ManaStones),
             navigation,
         ];
         engine = new BotEngine(surface, host.Log, behaviors, clock);

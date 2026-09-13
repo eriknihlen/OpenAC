@@ -379,6 +379,22 @@ public sealed class BotSettingsWindow(BotController controller)
 
         ImGui.Separator();
         DrawPets(controller.Profile.Pets);
+        ImGui.Separator();
+        DrawManaStones(controller.Profile.ManaStones);
+    }
+
+    private void DrawManaStones(ManaStoneSettings stones)
+    {
+        ImGui.TextDisabled("Mana stones");
+        bool enabled = stones.Enabled;
+        if (ImGui.Checkbox("Recharge worn items from mana stones", ref enabled))
+            controller.Update(p => p with { ManaStones = p.ManaStones with { Enabled = enabled } });
+        int threshold = stones.TapThresholdMana;
+        if (ImGui.SliderInt("Drain loot with at least this mana (0 = never)", ref threshold, 0, 20000))
+            controller.Update(p => p with { ManaStones = p.ManaStones with { TapThresholdMana = threshold } });
+        int keep = stones.KeepCount;
+        if (ImGui.SliderInt("Stones to keep", ref keep, 1, 50))
+            controller.Update(p => p with { ManaStones = p.ManaStones with { KeepCount = keep } });
     }
 
     private void DrawPets(PetSettings pets)

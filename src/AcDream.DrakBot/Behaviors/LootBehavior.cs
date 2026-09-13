@@ -15,7 +15,8 @@ namespace AcDream.DrakBot.Behaviors;
 /// </summary>
 public sealed class LootBehavior(
     Func<LootSettings> settings,
-    Func<string, VTankLootProfile?>? utlLoader = null) : IBehavior
+    Func<string, VTankLootProfile?>? utlLoader = null,
+    Func<ManaStoneSettings>? manaStones = null) : IBehavior
 {
     private readonly HashSet<uint> _finishedCorpses = [];
     private readonly HashSet<uint> _handledItems = [];
@@ -222,6 +223,18 @@ public sealed class LootBehavior(
 
     private LootDecision Decide(BehaviorContext context, LootSettings loot, in PluginInventoryItem item, bool isAppraised)
     {
+        // Mana stones are stocked up to the keep count when the stone
+        // behavior is on, whatever the rules say about them.
+        if (item.ObjectClass == PluginObjectClass.ManaStone && manaStones?.Invoke() is { Enabled: true } stones)
+        {
+            int have = 0;
+            foreach (PluginInventoryItem owned in context.Surface.Items.CaptureOwnedItems())
+            {
+                if (owned.ObjectClass == PluginObjectClass.ManaStone)
+                    have += Math.Max(1, owned.StackSize);
+            }
+            return new LootDecision(have < stones.KeepCount ? LootAction.Keep : LootAction.Ignore, $"mana stones {have}/{stones.KeepCount}");
+        }
         VTankLootProfile? utl = UtlProfile(loot);
         if (utl is null)
             return loot.Rules.Decide(item, isAppraised);

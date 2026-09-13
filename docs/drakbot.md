@@ -109,6 +109,18 @@ Encapsulated Spirit from the pack, when that is on. Summoning must be
 trained. VTank's summonpets, petmonsterdensity and petcustomrange
 options map onto these.
 
+## Mana stones
+
+Below the pets on the Monsters tab. When on, a worn item under a quarter
+of its mana has a charged stone from the pack used on the character
+(once per five minutes at most, since the stone may not reach every
+item). When the drain threshold is above zero, an unworn item in the
+pack carrying at least that much mana - never a wand - is drained into an
+empty stone, destroying the item. The looter then keeps mana stones from
+corpses up to the keep count whatever the loot rules say. Nothing
+happens while hostiles are in range. VTank's enablemanatapping,
+manatapminmana and manastonelootcount options map onto these.
+
 ## Weapons and ammunition
 
 The Combat tab names a weapon per style (melee, missile, wand) and a

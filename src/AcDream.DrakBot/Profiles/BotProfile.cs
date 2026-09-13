@@ -32,6 +32,8 @@ public sealed record BotProfile
 
     public DoorSettings Doors { get; init; } = new();
 
+    public ManaStoneSettings ManaStones { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -320,6 +322,27 @@ public sealed record DoorSettings
 
     /// <summary>A door that will not open is picked with a lockpick from the pack.</summary>
     public bool UseLockpicks { get; init; }
+}
+
+/// <summary>
+/// Mana stones: recharge worn items from charged stones in the pack and,
+/// when tapping is on, fill empty stones from loot carrying enough mana.
+/// </summary>
+public sealed record ManaStoneSettings
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>
+    /// An unworn item with at least this much mana is drained into an empty
+    /// stone; zero never drains anything and only charged stones are used.
+    /// </summary>
+    public int TapThresholdMana { get; init; } = 2500;
+
+    /// <summary>Stones kept in the pack; corpses' stones past this are left. Applied by the looter.</summary>
+    public int KeepCount { get; init; } = 5;
+
+    /// <summary>Only stones whose name contains one of these are used; empty means any mana stone.</summary>
+    public IReadOnlyList<string> StoneNames { get; init; } = [];
 }
 
 /// <summary>Combat pets: which essences to summon from, and when.</summary>
