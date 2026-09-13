@@ -2,7 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/AcDream.App/AcDream.App.csproj" />
     <Project Path="src/AcDream.Bake/AcDream.Bake.csproj" />
-    <Project Path="src/AcDream.Bot/AcDream.Bot.csproj" />
+    <Project Path="src/AcDream.DrakBot/AcDream.DrakBot.csproj" />
     <Project Path="src/AcDream.Cli/AcDream.Cli.csproj" />
     <Project Path="src/AcDream.Content/AcDream.Content.csproj" />
     <Project Path="src/AcDream.Core/AcDream.Core.csproj" />
@@ -28,7 +28,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/AcDream.App.Tests/AcDream.App.Tests.csproj" />
     <Project Path="tests/AcDream.Bake.Tests/AcDream.Bake.Tests.csproj" />
-    <Project Path="tests/AcDream.Bot.Tests/AcDream.Bot.Tests.csproj" />
+    <Project Path="tests/AcDream.DrakBot.Tests/AcDream.DrakBot.Tests.csproj" />
     <Project Path="tests/AcDream.Cli.Tests/AcDream.Cli.Tests.csproj" />
     <Project Path="tests/AcDream.Content.Tests/AcDream.Content.Tests.csproj" />
     <Project Path="tests/AcDream.Core.Tests.Fixtures.HelloPlugin/AcDream.Core.Tests.Fixtures.HelloPlugin.csproj" />

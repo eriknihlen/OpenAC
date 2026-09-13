@@ -184,10 +184,10 @@ GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     renderPackRegistry,
     [
         new AcDream.Core.Plugins.BuiltInPlugin(
-            AcDream.Bot.BotPlugin.Id,
-            AcDream.Bot.BotPlugin.DisplayName,
-            AcDream.Bot.BotPlugin.Version,
-            new AcDream.Bot.BotPlugin()),
+            AcDream.DrakBot.DrakBotPlugin.Id,
+            AcDream.DrakBot.DrakBotPlugin.DisplayName,
+            AcDream.DrakBot.DrakBotPlugin.Version,
+            new AcDream.DrakBot.DrakBotPlugin()),
     ]);
 window.StartPluginHosting(pluginSession);
 

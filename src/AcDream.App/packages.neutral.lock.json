@@ -451,7 +451,7 @@
         "resolved": "0.1.1",
         "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
       },
-      "acdream.bot": {
+      "acdream.drakbot": {
         "type": "Project",
         "dependencies": {
           "AcDream.Plugin.Abstractions": "[0.1.0, )",

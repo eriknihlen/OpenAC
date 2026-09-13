@@ -1,4 +1,4 @@
-using AcDream.Bot;
+using AcDream.DrakBot;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
@@ -290,10 +290,10 @@ internal sealed class HeadlessSessionHost : IDisposable
                 SubmitChatText,
                 [
                     new BuiltInPlugin(
-                        BotPlugin.Id,
-                        BotPlugin.DisplayName,
-                        BotPlugin.Version,
-                        new BotPlugin()),
+                        DrakBotPlugin.Id,
+                        DrakBotPlugin.DisplayName,
+                        DrakBotPlugin.Version,
+                        new DrakBotPlugin()),
                 ]);
             var liveSession = new LiveSessionHost(
                 runtime.Session,

@@ -58,7 +58,7 @@ breaks. Today it does the following:
   allegiance panels, radar, dialogs, and floating windows.
 - A headless host that runs the same game runtime without a window, for bots
   and automated testing, on Windows and Linux.
-- Plugins, and a built-in clean-room bot (`/bot`) for buffing, fighting, looting and walking routes.
+- Plugins, and DrakBot, a built-in clean-room bot (`/drakbot`) for buffing, fighting, looting and walking routes.
 
 **Found a bug or missing feature?** Please report it in
 [Discord](https://discord.gg/mBWtvgmuF) or open a
@@ -144,9 +144,9 @@ and is not expected to;** most of the real work lives on another branch and
 lands when it is ready.
 **This fork ships its own bot instead of MossTank.** Upstream OpenAC bundles
 MossTank, a plugin written from decompiled VirindiTank; it is removed here
-rather than redistributed - see `NOTICE.md`. In its place `src/AcDream.Bot` is
-a clean-room bot compiled into the client and driven with `/bot`; see
-[docs/bot.md](docs/bot.md). Plugins still load from the config directory's
+rather than redistributed - see `NOTICE.md`. In its place `src/AcDream.DrakBot` is
+DrakBot, a clean-room bot compiled into the client and driven with `/drakbot`; see
+[docs/drakbot.md](docs/drakbot.md). Plugins still load from the config directory's
 `plugins/` folder as before.
 
 **Custom shader packs** are an experiment. The render packs under `samples/`
