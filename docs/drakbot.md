@@ -450,8 +450,12 @@ loop/ping-pong/once); a hand-built one follows the profile's.
   teleport, settle. The object is looked for again every 1.5 s until it is
   in the object table, since the world around a fresh arrival fills in over
   a moment.
-- **NPC / Vendor** - walk to the point, use the named object, move on after
-  a moment.
+- **NPC** - walk to the point, use the named object, move on after a
+  moment.
+- **Vendor** - walk to the point, open the shop, and sell every unworn
+  pack item the loot rules mark Sell (a `.utl` Sell rule, or a profile
+  rule with `"Action": "Sell"`), one every half second; move on when
+  nothing is left, or after eight seconds if the shop never opens.
 
 A teleport is recognised three ways: the character passed through portal
 space, jumped more than 50 m, or changed landblock (a short-hop dungeon

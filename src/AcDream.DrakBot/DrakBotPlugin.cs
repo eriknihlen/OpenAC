@@ -86,6 +86,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             LoadUtl,
             () => engine.Profile.ManaStones,
             salvage.Enqueue);
+        navigation.ItemsToSell = () => loot.ItemsToSell(surface, engine.Profile.Loot);
         IBehavior[] behaviors =
         [
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),

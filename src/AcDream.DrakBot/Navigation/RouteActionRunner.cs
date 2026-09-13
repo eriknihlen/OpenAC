@@ -26,6 +26,8 @@ public sealed class RouteActionRunner
     public const double RecallRetrySeconds = 4d;
     public const double PortalRetrySeconds = 1.5;
     public const double UseSettleSeconds = 1.5;
+    public const double SellIntervalSeconds = 0.5;
+    public const double VendorOpenTimeoutSeconds = 8d;
     public const double TimeoutSeconds = 60d;
     public const double TeleportJumpMeters = 50d;
     public const double SearchRadiusMeters = 250d;
@@ -47,6 +49,15 @@ public sealed class RouteActionRunner
     private bool _sawPortalSpace;
     private PluginNavigationPosition _origin;
     private uint _originLandblock;
+    private double _lastSoldAt = double.NegativeInfinity;
+    private int _sold;
+
+    /// <summary>
+    /// What to sell once a vendor step has the shop open: the ids of pack
+    /// items the loot rules mark for sale, asked for again after each sale.
+    /// Null, or an empty answer, moves on once the shop is open.
+    /// </summary>
+    public Func<IReadOnlyList<uint>>? ItemsToSell { get; set; }
 
     public bool IsRunning => _phase != Phase.Idle;
 
@@ -70,6 +81,8 @@ public sealed class RouteActionRunner
         _origin = navigation.Position;
         _originLandblock = navigation.Position.CellId >> 16;
         TargetObjectId = 0u;
+        _sold = 0;
+        _lastSoldAt = double.NegativeInfinity;
         Status = $"{waypoint}: settling";
     }
 
@@ -199,6 +212,8 @@ public sealed class RouteActionRunner
                     _phaseStartedAt = now;
                     return RouteActionStatus.Running;
                 }
+                if (waypoint.Kind == WaypointKind.Vendor && ItemsToSell is not null)
+                    return SellAtVendor(surface, waypoint, now, log);
                 // Give the use a moment to land (the dialogue or vendor window opens), then move on.
                 if (now - _phaseStartedAt < UseSettleSeconds)
                     return RouteActionStatus.Running;
@@ -209,6 +224,50 @@ public sealed class RouteActionRunner
                 Cancel();
                 return RouteActionStatus.Done;
         }
+    }
+
+    /// <summary>
+    /// With the shop open, sells what the loot rules mark for sale one item
+    /// every half second, the way VTank's vendor step does, and moves on
+    /// when nothing is left; a shop that never opens is left after a while.
+    /// </summary>
+    private RouteActionStatus SellAtVendor(IAutomationSurface surface, Waypoint waypoint, double now, IPluginLogger log)
+    {
+        IItemAutomation items = surface.Items;
+        if (items.ActiveVendorObjectId == 0u)
+        {
+            if (now - _phaseStartedAt < VendorOpenTimeoutSeconds)
+            {
+                Status = $"{waypoint}: waiting for the shop";
+                return RouteActionStatus.Running;
+            }
+            log.Warn($"{waypoint}: the shop did not open; moving on");
+            Cancel();
+            return RouteActionStatus.Done;
+        }
+        if (now - _lastSoldAt < SellIntervalSeconds || items.IsBusy)
+            return RouteActionStatus.Running;
+        IReadOnlyList<uint> toSell = ItemsToSell!();
+        if (toSell.Count == 0)
+        {
+            if (_sold > 0)
+                log.Info($"{waypoint}: sold {_sold} item(s)");
+            Cancel();
+            return RouteActionStatus.Done;
+        }
+        PluginItemCommandResult sale = items.Sell(toSell[0]);
+        _lastSoldAt = now;
+        if (sale.Status == PluginItemCommandStatus.Busy)
+            return RouteActionStatus.Running;
+        if (!sale.Accepted)
+        {
+            log.Warn($"{waypoint}: sale refused: {sale.Status} {sale.Notice}; moving on");
+            Cancel();
+            return RouteActionStatus.Done;
+        }
+        _sold++;
+        Status = $"{waypoint}: selling ({_sold})";
+        return RouteActionStatus.Running;
     }
 
     private bool TeleportSeen(in PluginNavigationSnapshot navigation, out string how)

@@ -150,6 +150,52 @@ public sealed class RouteActionTests
     }
 
     [Fact]
+    public void VendorStepSellsWhatTheRulesMarkOnceTheShopIsOpen()
+    {
+        var surface = new FakeAutomationSurface();
+        var runner = new RouteActionRunner();
+        var log = new FakeLogger();
+        surface.WorldObjects.Add(Landscape(0x7000_0009u, "Ulgrim the Unpleasant", 0d, 0d));
+        var pack = new List<uint> { 21u, 22u };
+        runner.ItemsToSell = () => pack.ToArray();
+        runner.Begin(new Waypoint(WaypointKind.Vendor, 0d, 0d) { TargetName = "Ulgrim" }, Snapshot(surface), now: 0d);
+
+        runner.Tick(surface, Snapshot(surface), 0.7d, 0d, log, out _);
+        runner.Tick(surface, Snapshot(surface), 0.8d, 0d, log, out _);
+        Assert.Equal(["useobject:1879048201"], surface.Commands);
+        // The shop is not open yet: wait.
+        Assert.Equal(RouteActionStatus.Running, runner.Tick(surface, Snapshot(surface), 2.5d, 0d, log, out _));
+        Assert.Contains("waiting", runner.Status);
+
+        surface.ActiveVendorObjectId = 0x7000_0009u;
+        Assert.Equal(RouteActionStatus.Running, runner.Tick(surface, Snapshot(surface), 3d, 0d, log, out _));
+        Assert.Equal("sell:21", surface.Commands[^1]);
+        pack.Remove(21u);
+        Assert.Equal(RouteActionStatus.Running, runner.Tick(surface, Snapshot(surface), 3.2d, 0d, log, out _)); // too soon
+        Assert.Equal(2, surface.Commands.Count);
+        Assert.Equal(RouteActionStatus.Running, runner.Tick(surface, Snapshot(surface), 3.6d, 0d, log, out _));
+        Assert.Equal("sell:22", surface.Commands[^1]);
+        pack.Remove(22u);
+        Assert.Equal(RouteActionStatus.Done, runner.Tick(surface, Snapshot(surface), 4.2d, 0d, log, out _));
+        Assert.Contains(log.Lines, line => line.Contains("sold 2"));
+    }
+
+    [Fact]
+    public void AVendorThatNeverOpensIsLeftBehind()
+    {
+        var surface = new FakeAutomationSurface();
+        var runner = new RouteActionRunner { ItemsToSell = () => [1u] };
+        var log = new FakeLogger();
+        surface.WorldObjects.Add(Landscape(0x7000_0009u, "Ulgrim the Unpleasant", 0d, 0d));
+        runner.Begin(new Waypoint(WaypointKind.Vendor, 0d, 0d) { TargetName = "Ulgrim" }, Snapshot(surface), now: 0d);
+        runner.Tick(surface, Snapshot(surface), 0.7d, 0d, log, out _);
+        runner.Tick(surface, Snapshot(surface), 0.8d, 0d, log, out _);
+        Assert.Equal(RouteActionStatus.Running, runner.Tick(surface, Snapshot(surface), 5d, 0d, log, out _));
+        Assert.Equal(RouteActionStatus.Done, runner.Tick(surface, Snapshot(surface), 9.5d, 0d, log, out _));
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("sell", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NavigationBehaviorWalksToThePortalThenUsesItAndCarriesOn()
     {
         var surface = new FakeAutomationSurface();

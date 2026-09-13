@@ -8,6 +8,8 @@ public enum LootAction
     Keep,
     /// <summary>Picked up and handed to the salvage behavior.</summary>
     Salvage,
+    /// <summary>Picked up and sold at the next vendor step.</summary>
+    Sell,
 }
 
 /// <summary>

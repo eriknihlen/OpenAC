@@ -38,6 +38,13 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// <summary>What the route is doing at an action step, for the dashboard.</summary>
     public string ActionStatus => _actions.Status;
 
+    /// <summary>What a vendor step sells: see <see cref="RouteActionRunner.ItemsToSell"/>.</summary>
+    public Func<IReadOnlyList<uint>>? ItemsToSell
+    {
+        get => _actions.ItemsToSell;
+        set => _actions.ItemsToSell = value;
+    }
+
     /// <summary>Following a player rather than a route.</summary>
     public bool IsFollowing => settings().Follow.Length > 0;
 

@@ -289,6 +289,13 @@ internal sealed class FakeAutomationSurface
         Commands.Add($"merge:{sourceObjectId}>{targetObjectId}");
         return new(PluginItemCommandStatus.Started);
     }
+    public uint ActiveVendorObjectId { get; set; }
+    public PluginItemCommandResult Sell(uint objectId, uint amount = 0u)
+    {
+        Commands.Add($"sell:{objectId}");
+        OwnedItems.RemoveAll(item => item.ObjectId == objectId);
+        return new(PluginItemCommandStatus.Started);
+    }
     public PluginItemCommandResult Give(uint objectId, uint targetObjectId, uint amount = 0u)
     {
         Commands.Add($"give:{objectId}>{targetObjectId}");

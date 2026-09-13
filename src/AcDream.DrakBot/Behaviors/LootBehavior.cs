@@ -209,6 +209,39 @@ public sealed class LootBehavior(
         return !float.IsPositiveInfinity(best);
     }
 
+    /// <summary>
+    /// The unworn pack items the rules mark for sale, for a vendor step:
+    /// a <c>.utl</c> Sell rule or a profile rule with the Sell action;
+    /// never a container, and never a full salvage bag unless a rule says.
+    /// </summary>
+    public IReadOnlyList<uint> ItemsToSell(IAutomationSurface surface, LootSettings loot)
+    {
+        var ids = new List<uint>();
+        VTankLootProfile? utl = UtlProfile(loot);
+        UtlLootContext? utlContext = utl is null ? null : new UtlLootContext(surface);
+        foreach (PluginInventoryItem item in surface.Items.CaptureOwnedItems())
+        {
+            if (item.IsEquipped || item.ObjectClass is PluginObjectClass.Container or PluginObjectClass.Foci)
+                continue;
+            if (utl is not null)
+            {
+                foreach (VTankLootRule rule in utl.Rules)
+                {
+                    if (!rule.Enabled || !UtlLootEvaluator.Match(rule, item, utlContext!))
+                        continue;
+                    if (rule.Action == VTankLootAction.Sell)
+                        ids.Add(item.ObjectId);
+                    break;
+                }
+            }
+            else if (loot.Rules.Decide(item, isAppraised: true).Action == LootAction.Sell)
+            {
+                ids.Add(item.ObjectId);
+            }
+        }
+        return ids;
+    }
+
     /// <summary>The loaded <c>.utl</c> when the profile names one, reloaded when the name changes.</summary>
     public VTankLootProfile? UtlProfile(LootSettings loot)
     {
@@ -271,8 +304,9 @@ public sealed class LootBehavior(
         switch (rule.Action)
         {
             case VTankLootAction.Keep:
-            case VTankLootAction.Sell:
                 return new LootDecision(LootAction.Keep, rule.Name);
+            case VTankLootAction.Sell:
+                return new LootDecision(LootAction.Sell, rule.Name);
             case VTankLootAction.Salvage:
                 return new LootDecision(LootAction.Salvage, rule.Name);
             case VTankLootAction.KeepUpTo:
