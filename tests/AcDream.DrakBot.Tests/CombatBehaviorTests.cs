@@ -434,17 +434,18 @@ public sealed class CombatBehaviorTests
         surface.BlockedWalkHeadings.Add(0);
 
         // Straight north is blocked; the first fan heading is 30 degrees
-        // right, close enough to steer toward while running.
+        // right, past the turn-in-place angle, so the walker faces it first.
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal(["move:forward+turnright"], surface.Commands);
+        Assert.Equal(["face:30"], surface.Commands);
         Assert.Equal(30f, behavior.ApproachHeadingDegrees);
+        // The fake turns instantly, so the next tick runs.
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal(["move:forward+turnright"], surface.Commands); // held, not re-sent
+        Assert.Equal("move:forward", surface.Commands[^1]);
 
-        // The obstacle is passed: back onto the direct heading, still running.
+        // The obstacle is passed: back onto the direct heading.
         surface.BlockedWalkHeadings.Clear();
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock, dt: 0.6).Result);
-        Assert.Equal(["move:forward+turnright", "move:forward"], surface.Commands);
+        Assert.Equal(["face:30", "move:forward", "move:clear", "face:0"], surface.Commands);
         Assert.Equal(0f, behavior.ApproachHeadingDegrees);
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
         Assert.Equal("move:forward", surface.Commands[^1]);

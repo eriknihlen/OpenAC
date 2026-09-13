@@ -57,6 +57,25 @@ public sealed class WalkerTests
     }
 
     [Fact]
+    public void TheRunResumesOnlyOnceTheTurnIsWellUnderWay()
+    {
+        var surface = new FakeAutomationSurface();
+        var walker = new Walker();
+
+        // 30 degrees off: stop and face. Then, the turn only part way (15 left),
+        // still under the enter angle but over the resume angle: keep turning.
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 0f), 30f, now: 0d));
+        Assert.Equal(["face:30"], surface.Commands);
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 15f), 30f, now: 0.1d));
+        Assert.Equal(["face:30"], surface.Commands);
+        Assert.False(walker.IsMoving);
+
+        // Under the resume angle: run, steering out the last of it.
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 22f), 30f, now: 0.2d));
+        Assert.Equal("move:forward+turnright", surface.Commands[^1]);
+    }
+
+    [Fact]
     public void TimeSpentTurningDoesNotCountAsStalled()
     {
         var surface = new FakeAutomationSurface();

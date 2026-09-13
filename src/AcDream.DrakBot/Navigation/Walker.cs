@@ -5,17 +5,23 @@ namespace AcDream.DrakBot.Navigation;
 /// <summary>
 /// Drives the character toward a heading one tick at a time, the way a
 /// player does: a held run forward, steered with the turn keys while it
-/// moves. Only a large heading error stops the run for a turn in place.
-/// Both the route follower and the combat approach walk through this, so
-/// they stall, recover and release the keys the same way.
+/// moves. Only a large heading error stops the run for a turn in place,
+/// and the run resumes once the error is back under a lower bar, so the
+/// gate does not flap on the threshold. Both the route follower and the
+/// combat approach walk through this, so they stall, recover and release
+/// the keys the same way. The angles are the ones RynthSuite's navigation
+/// engine settled on in play.
 /// </summary>
 public sealed class Walker
 {
     /// <summary>A heading error past this stops the run and turns in place.</summary>
-    public const float TurnInPlaceDegrees = 40f;
+    public const float TurnInPlaceDegrees = 20f;
+
+    /// <summary>The run resumes once a turn in place has the error under this.</summary>
+    public const float ResumeRunDegrees = 10f;
 
     /// <summary>Steering starts outside this error and stops inside <see cref="SteerReleaseDegrees"/>.</summary>
-    public const float SteerEngageDegrees = 6f;
+    public const float SteerEngageDegrees = 4f;
     public const float SteerReleaseDegrees = 2f;
 
     public const double RecoveryDurationSeconds = 0.6;
@@ -24,6 +30,7 @@ public sealed class Walker
     private readonly StuckDetector _stuck = new();
     private PluginMovementIntent? _intent;
     private int _steer;
+    private bool _turning;
     private float _lastFaceHeading = float.NaN;
     private double _lastFaceAt = double.NegativeInfinity;
     private StuckRecovery? _recovery;
@@ -46,10 +53,12 @@ public sealed class Walker
         float turnInPlaceDegrees = TurnInPlaceDegrees)
     {
         float delta = RouteFollower.HeadingDelta(position.HeadingDegrees, heading);
-        if (Math.Abs(delta) > turnInPlaceDegrees)
+        float resumeDegrees = ResumeRunFor(turnInPlaceDegrees);
+        if (_turning ? Math.Abs(delta) > resumeDegrees : Math.Abs(delta) > turnInPlaceDegrees)
         {
             // Turning in place is not walking: the stall window restarts
             // when the run does, so a slow turn never reads as stuck.
+            _turning = true;
             Stop(nav);
             _stuck.Reset();
             bool stale = float.IsNaN(_lastFaceHeading)
@@ -63,6 +72,7 @@ public sealed class Walker
             }
             return null;
         }
+        _turning = false;
 
         // Hysteresis keeps the turn key from chattering around the heading.
         if (_steer == 0 && Math.Abs(delta) > SteerEngageDegrees)
@@ -114,10 +124,15 @@ public sealed class Walker
     public void Reset(INavigationAutomation nav)
     {
         Stop(nav);
+        _turning = false;
         _stuck.Reset();
         _lastFaceHeading = float.NaN;
         _lastFaceAt = double.NegativeInfinity;
     }
+
+    /// <summary>The resume bar for a turn-in-place bar: half of it, at least a degree under it.</summary>
+    public static float ResumeRunFor(float turnInPlaceDegrees) =>
+        Math.Max(1f, Math.Min(turnInPlaceDegrees - 1f, turnInPlaceDegrees * (ResumeRunDegrees / TurnInPlaceDegrees)));
 
     private void Send(INavigationAutomation nav, in PluginMovementIntent intent)
     {

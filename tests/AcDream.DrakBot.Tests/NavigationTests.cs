@@ -101,6 +101,40 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void PassingCloseByAWaypointCountsAsReachingIt()
+    {
+        var follower = new RouteFollower(
+            new Route { Waypoints = [new Waypoint(WaypointKind.Point, 0d, 0d), new Waypoint(WaypointKind.Point, 0d, 0.1d)] },
+            RouteMode.Once);
+        follower.Reset();
+
+        // Sweep past the first point 2 m to its east (arrival is 1 m): the
+        // closest approach is inside 2.5 arrivals and the distance then grows.
+        Assert.NotEqual(NavigationAction.Hold, follower.Advance(At(0.01d, -0.02d, heading: 0f), 0d, 1d, 45f).Action);
+        Assert.NotEqual(NavigationAction.Hold, follower.Advance(At(0.01d, 0d, heading: 0f), 0.5d, 1d, 45f).Action);
+        Assert.Equal(0, follower.CurrentIndex);
+        Assert.Equal(NavigationAction.Hold, follower.Advance(At(0.01d, 0.01d, heading: 0f), 1d, 1d, 45f).Action);
+        Assert.Equal(1, follower.CurrentIndex);
+    }
+
+    [Fact]
+    public void TheAimPointBlendsTowardTheNextWaypointInsideTheLookahead()
+    {
+        var follower = new RouteFollower(
+            new Route { Waypoints = [new Waypoint(WaypointKind.Point, 0d, 0d), new Waypoint(WaypointKind.Point, 0.1d, 0d)] },
+            RouteMode.Once);
+        follower.Reset();
+
+        // 2 m south of the first point with a 4 m lookahead: half way blended
+        // toward the second point, which lies east, so the heading swings right of north.
+        NavigationStep step = follower.Advance(At(0d, -2d / 240d, heading: 0f), 0d, 1d, 45f, lookaheadMeters: 4d);
+        Assert.InRange(step.HeadingDegrees, 60f, 90f);
+
+        // Without lookahead the aim is straight north.
+        Assert.Equal(0f, follower.Advance(At(0d, -2d / 240d, heading: 0f), 0d, 1d, 45f).HeadingDegrees, 0.01f);
+    }
+
+    [Fact]
     public void StuckDetectorEscalatesOnlyWithoutProgress()
     {
         var detector = new StuckDetector();

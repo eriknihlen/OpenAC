@@ -58,7 +58,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             board.Navigation.Position,
             board.Now,
             nav.ArrivalDistanceMeters,
-            nav.TurnToleranceDegrees);
+            nav.TurnToleranceDegrees,
+            nav.LookaheadMeters);
 
         switch (step.Action)
         {

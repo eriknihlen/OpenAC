@@ -98,10 +98,15 @@ All walking - a route's next waypoint or a hostile to close on - goes
 through `Walker`, which drives the character the way a player does: a held
 run, steered with the turn keys while it moves (with a little hysteresis so
 the key does not chatter), and a stop to turn in place only when the
-destination is more than the profile's turn-in-place angle off. Time spent
-turning never reads as being stuck. When a run makes no progress for a few
-seconds the walker backs up, then sidesteps left, then right; it never
-jumps.
+destination is more than the profile's turn-in-place angle off (20 by
+default; the run resumes at half that, so the gate does not flap). Time
+spent turning never reads as being stuck. When a run makes no progress for
+a few seconds the walker backs up, then sidesteps left, then right; it
+never jumps. The route follower adds two habits that stop a runner circling
+a waypoint: passing within 2.5 arrival distances of a point and then
+drawing away counts as reaching it, and inside the corner lookahead the aim
+point blends toward the next point so corners are cut. The angles and
+distances are the ones RynthSuite's navigation engine settled on in play.
 
 Ranged styles do not fire blind, and nobody walks into a wall:
 

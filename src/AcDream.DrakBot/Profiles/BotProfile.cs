@@ -225,7 +225,14 @@ public sealed record NavigationSettings
 
     /// <summary>
     /// Stop and turn in place when the waypoint is off by more than this;
-    /// smaller errors are steered out while running.
+    /// smaller errors are steered out while running. The run resumes at
+    /// half this angle.
     /// </summary>
     public float TurnToleranceDegrees { get; init; } = Navigation.Walker.TurnInPlaceDegrees;
+
+    /// <summary>
+    /// Inside this many meters of a waypoint the aim point blends toward
+    /// the next one so corners are cut smoothly; zero aims straight at each.
+    /// </summary>
+    public double LookaheadMeters { get; init; } = 4d;
 }

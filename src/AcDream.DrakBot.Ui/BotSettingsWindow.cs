@@ -383,6 +383,10 @@ public sealed class BotSettingsWindow(BotController controller)
         float turn = navigation.TurnToleranceDegrees;
         if (ImGui.SliderFloat("Turn in place beyond (deg)", ref turn, 10f, 90f, "%.0f"))
             controller.Update(p => p with { Navigation = p.Navigation with { TurnToleranceDegrees = turn } });
+
+        float lookahead = (float)navigation.LookaheadMeters;
+        if (ImGui.SliderFloat("Corner lookahead (m)", ref lookahead, 0f, 10f, "%.1f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { LookaheadMeters = lookahead } });
         ImGui.TextDisabled("A mode change applies the next time a route is loaded.");
     }
 

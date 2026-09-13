@@ -2,12 +2,26 @@ using AcDream.Plugin.Abstractions;
 
 namespace AcDream.DrakBot.Navigation;
 
-/// <summary>Pure route-walking arithmetic: which waypoint is next and how to reach it.</summary>
+/// <summary>
+/// Pure route-walking arithmetic: which waypoint is next and how to reach
+/// it. Two habits from RynthSuite's navigation engine keep a runner from
+/// circling: a waypoint counts as passed once the character was near it and
+/// the distance starts growing again (the closest approach), and near a
+/// waypoint the aim point blends toward the next one so a corner is cut
+/// rather than squared.
+/// </summary>
 public sealed class RouteFollower
 {
+    /// <summary>The closest approach counts inside this many arrival distances.</summary>
+    public const double SweepMultiplier = 2.5;
+
+    /// <summary>The distance must grow by this much past the closest approach.</summary>
+    public const double SweepGrowthMeters = 0.3;
+
     private int _index;
     private int _direction = 1;
     private double _pauseUntil = double.NegativeInfinity;
+    private double _closest = double.PositiveInfinity;
 
     public RouteFollower(Route route, RouteMode mode)
     {
@@ -57,7 +71,8 @@ public sealed class RouteFollower
         in PluginNavigationPosition position,
         double now,
         double arrivalDistanceMeters,
-        float turnToleranceDegrees)
+        float turnToleranceDegrees,
+        double lookaheadMeters = 0d)
     {
         Waypoint? waypoint = Current;
         if (waypoint is null)
@@ -76,10 +91,24 @@ public sealed class RouteFollower
 
         PluginNavigationPosition target = waypoint.ToPosition();
         double distance = position.HorizontalDistanceMeters(target);
-        if (distance <= arrivalDistanceMeters)
+        if (distance <= arrivalDistanceMeters
+            || (_closest < arrivalDistanceMeters * SweepMultiplier && distance > _closest + SweepGrowthMeters))
         {
             Step();
             return Current is null ? NavigationStep.Finished : NavigationStep.Hold;
+        }
+        _closest = Math.Min(_closest, distance);
+
+        // Cut the corner: inside the lookahead, aim between this waypoint
+        // and the next travel point in proportion to how close this one is.
+        if (lookaheadMeters > 0d && distance < lookaheadMeters && TryPeekNext(out Waypoint? next))
+        {
+            double t = 1d - distance / lookaheadMeters;
+            target = target with
+            {
+                EastWest = target.EastWest + (next.EastWest - target.EastWest) * t,
+                NorthSouth = target.NorthSouth + (next.NorthSouth - target.NorthSouth) * t,
+            };
         }
 
         float heading = HeadingTo(position, target);
@@ -94,6 +123,7 @@ public sealed class RouteFollower
         _index = 0;
         _direction = 1;
         _pauseUntil = double.NegativeInfinity;
+        _closest = double.PositiveInfinity;
         IsFinished = Route.IsEmpty;
     }
 
@@ -116,8 +146,37 @@ public sealed class RouteFollower
         }
     }
 
+    /// <summary>The next waypoint the cursor would step to, when it is a travel point.</summary>
+    private bool TryPeekNext(out Waypoint next)
+    {
+        int count = Route.Waypoints.Count;
+        int index;
+        switch (Mode)
+        {
+            case RouteMode.Once:
+                index = _index + 1 < count ? _index + 1 : -1;
+                break;
+            case RouteMode.PingPong:
+                // At either end the cursor bounces, so the next point is the one behind.
+                bool bounces = _index + _direction < 0 || _index + _direction >= count;
+                index = count <= 1 ? -1 : _index + (bounces ? -_direction : _direction);
+                break;
+            default:
+                index = (_index + 1) % count;
+                break;
+        }
+        if (index < 0 || index == _index || Route.Waypoints[index].Kind != WaypointKind.Point)
+        {
+            next = null!;
+            return false;
+        }
+        next = Route.Waypoints[index];
+        return true;
+    }
+
     private void Step()
     {
+        _closest = double.PositiveInfinity;
         int count = Route.Waypoints.Count;
         switch (Mode)
         {
