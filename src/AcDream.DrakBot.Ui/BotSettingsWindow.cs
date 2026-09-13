@@ -709,6 +709,20 @@ public sealed class BotSettingsWindow(BotController controller)
         float portalDelay = (float)navigation.PostPortalDelaySeconds;
         if (ImGui.SliderFloat("Settle after a portal (s)", ref portalDelay, 0f, 15f, "%.1f"))
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Doors");
+        DoorSettings doors = controller.Profile.Doors;
+        bool openDoors = doors.Enabled;
+        if (ImGui.Checkbox("Open doors in the way", ref openDoors))
+            controller.Update(p => p with { Doors = p.Doors with { Enabled = openDoors } });
+        ImGui.SameLine();
+        bool lockpicks = doors.UseLockpicks;
+        if (ImGui.Checkbox("Pick locked ones", ref lockpicks))
+            controller.Update(p => p with { Doors = p.Doors with { UseLockpicks = lockpicks } });
+        float doorRange = doors.RangeMeters;
+        if (ImGui.SliderFloat("Door range (m)", ref doorRange, 1f, 10f, "%.0f"))
+            controller.Update(p => p with { Doors = p.Doors with { RangeMeters = doorRange } });
         ImGui.TextDisabled("A mode change applies the next time a route is loaded.");
     }
 

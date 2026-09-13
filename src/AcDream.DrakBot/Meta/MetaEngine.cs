@@ -673,6 +673,8 @@ public sealed class MetaEngine
         ["rebuftimeremainingseconds"] = "RebuffSecondsRemaining",
         ["idlepeacemode"] = "PeaceModeWhenIdle",
         ["summonpets"] = "SummonPets",
+        ["opendoors"] = "OpenDoors",
+        ["dooropenrange"] = "OpenDoorRange",
         ["petmonsterdensity"] = "PetMinMonsters",
         ["petcustomrange"] = "CustomPetRange",
     };

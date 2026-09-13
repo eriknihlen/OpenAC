@@ -59,6 +59,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
       pets           Buffing     summon a combat pet from an essence when hostiles crowd in
       combat         Combat      target selection, line of sight, approach, swing or war spell
       loot           Looting     open corpse, appraise on demand, pick up by rule or VTank .utl
+      doors          Doors       open a closed door in the way of the walk
       nav            Navigation  follow a route through the Walker
   Spells/            SpellSelector (name -> best known tier), CastTracker
   Combat/            TargetSelector, LineOfSightService
@@ -245,6 +246,12 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   in a hazard, the walk starts from the nearest safe cell.
 - `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.
 
+While a route is followed, a closed door within the Navigation tab's
+door range is opened before the walk goes on - used, watched, picked
+with a lockpick from the pack when that is allowed, and given up on
+after three tries for a while; a door just opened is not re-targeted
+for a minute. VTank's opendoors and dooropenrange options map onto it.
+
 A UtilityBelt-style jump - `/drakbot jump[w|x|z|c|s] [heading] [ms]`, also
 as `/ub jump...` so UB metas work - faces the heading, holds the jump key
 with the named movement keys for the given time, lets go, and takes the
@@ -391,9 +398,6 @@ the approach step. `DrakBotPluginHostingTests` runs the real
 
 In rough priority order:
 
-- **Doors on routes.** Portals, NPCs, recalls and chat lines are route
-  steps now; a closed door in the way is still only handled by the stuck
-  recoveries.
 - **DoTs and life magic in combat** - the monster list covers war
   shapes, rings and the creature debuffs; drains and DoTs are not cast.
 - **Following the fellowship leader** via `IFellowshipAutomation`

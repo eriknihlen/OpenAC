@@ -13,6 +13,8 @@ public enum BehaviorPriority
     Buffing = 10,
     Combat = 20,
     Looting = 30,
+    /// <summary>A closed door in the way of the walk, opened before the walk continues.</summary>
+    Doors = 35,
     Navigation = 40,
 }
 

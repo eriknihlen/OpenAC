@@ -443,6 +443,8 @@ public sealed class BotController : IMetaBot
             ["MinRingTargets"] = (() => F(Profile.Combat.MinRingTargets), v => { if (TryF(v, out double n)) Update(p => p with { Combat = p.Combat with { MinRingTargets = (int)n } }); }),
             ["PeaceModeWhenIdle"] = (() => B(Profile.Combat.LeaveCombatWhenIdle), v => Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = ToBool(v) } })),
             ["SummonPets"] = (() => B(Profile.Pets.Enabled), v => Update(p => p with { Pets = p.Pets with { Enabled = ToBool(v) } })),
+            ["OpenDoors"] = (() => B(Profile.Doors.Enabled), v => Update(p => p with { Doors = p.Doors with { Enabled = ToBool(v) } })),
+            ["OpenDoorRange"] = (() => F(Profile.Doors.RangeMeters), v => { if (TryF(v, out double n)) Update(p => p with { Doors = p.Doors with { RangeMeters = (float)n } }); }),
             ["PetMinMonsters"] = (() => F(Profile.Pets.MinimumHostiles), v => { if (TryF(v, out double n)) Update(p => p with { Pets = p.Pets with { MinimumHostiles = (int)n } }); }),
             ["CustomPetRange"] = (() => F(Profile.Pets.RangeMeters), v => { if (TryF(v, out double n)) Update(p => p with { Pets = p.Pets with { RangeMeters = (float)n } }); }),
             ["CurrentNavPath"] = (() => Navigation.Route?.Name ?? string.Empty, v =>

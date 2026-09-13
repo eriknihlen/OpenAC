@@ -71,6 +71,10 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             buffs,
             new PetBehavior(() => engine.Profile.Pets),
             new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
+            new DoorBehavior(
+                () => engine.Profile.Doors,
+                () => engine.Profile.Navigation.Enabled && navigation.Route is not null,
+                surface.Navigation.CaptureObjects),
             new LootBehavior(
                 () => engine.Profile.Loot,
                 name =>

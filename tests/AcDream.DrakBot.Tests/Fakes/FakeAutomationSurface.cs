@@ -311,8 +311,12 @@ internal sealed class FakeAutomationSurface
     public float? FacedHeading { get; private set; }
     /// <summary>World positions served by <see cref="TryGetObject"/>.</summary>
     public Dictionary<uint, PluginNavigationPosition> ObjectPositions { get; } = [];
+    /// <summary>Whole navigation objects (doors and the like) served by <see cref="TryGetObject"/> first.</summary>
+    public Dictionary<uint, PluginNavigationObject> NavObjects { get; } = [];
     public bool TryGetObject(uint objectId, out PluginNavigationObject value)
     {
+        if (NavObjects.TryGetValue(objectId, out value))
+            return true;
         if (ObjectPositions.TryGetValue(objectId, out PluginNavigationPosition position))
         {
             value = new PluginNavigationObject(objectId, $"0x{objectId:X8}", position);

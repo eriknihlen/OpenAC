@@ -30,6 +30,8 @@ public sealed record BotProfile
 
     public PetSettings Pets { get; init; } = new();
 
+    public DoorSettings Doors { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -306,6 +308,18 @@ public sealed record LootSettings
     /// folder; when set it decides instead of <see cref="Rules"/>.
     /// </summary>
     public string UtlProfile { get; init; } = string.Empty;
+}
+
+/// <summary>Doors met while walking a route.</summary>
+public sealed record DoorSettings
+{
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>A closed door this close is opened before the walk goes on.</summary>
+    public float RangeMeters { get; init; } = 4f;
+
+    /// <summary>A door that will not open is picked with a lockpick from the pack.</summary>
+    public bool UseLockpicks { get; init; }
 }
 
 /// <summary>Combat pets: which essences to summon from, and when.</summary>
