@@ -128,6 +128,36 @@ public sealed class MonsterRuleTests
     }
 
     [Fact]
+    public void ACasterStepsBackFromAHostileOnTopOfItBeforeTheNextCast()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Magic,
+            BackOffWhenWithinMeters = 2.5f,
+            BackOffToMeters = 6f,
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.Hostiles.Add(Hostile(7, "Drudge", 1.5f));
+        // The drudge stands due north; backing off runs south.
+        surface.ObjectPositions[7u] = surface.Position with { NorthSouth = surface.Position.NorthSouth + 1.5d / 240d };
+
+        Step(behavior, surface, clock);
+        Assert.True(behavior.IsBackingOff);
+        Assert.Equal("face:180", surface.Commands[^1]);
+        Step(behavior, surface, clock);
+        Assert.Equal("move:forward", surface.Commands[^1]);
+
+        // Far enough: the walk stops and the cast follows.
+        surface.Hostiles[0] = surface.Hostiles[0] with { Distance = 7f };
+        Step(behavior, surface, clock);
+        Assert.Equal("move:clear", surface.Commands[^1]);
+        Assert.False(behavior.IsBackingOff);
+        Step(behavior, surface, clock);
+        Assert.StartsWith("cast:", surface.Commands[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AMissingWeaponFailsTheStepInsteadOfSwingingBareHanded()
     {
         var settings = new CombatSettings { Style = CombatStyle.Melee, MeleeWeapon = "Spadone", LineOfSight = new LineOfSightSettings { Enabled = false } };

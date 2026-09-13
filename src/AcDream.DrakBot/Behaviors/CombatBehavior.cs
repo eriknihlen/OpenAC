@@ -46,6 +46,7 @@ public sealed class CombatBehavior(
         AwaitingSwing,
         Casting,
         Approaching,
+        BackingOff,
     }
 
     /// <summary>What the idle step decided to do with the ranked hostiles.</summary>
@@ -61,6 +62,8 @@ public sealed class CombatBehavior(
     public uint CurrentTargetId => _targetId;
 
     public bool IsApproaching => _phase == Phase.Approaching;
+
+    public bool IsBackingOff => _phase == Phase.BackingOff;
 
     /// <summary>The heading the approach step is currently walking, or NaN.</summary>
     public float ApproachHeadingDegrees { get; private set; } = float.NaN;
@@ -80,7 +83,12 @@ public sealed class CombatBehavior(
         }
         if (_phase != Phase.Idle)
         {
-            reason = _phase == Phase.Approaching ? "finishing approach" : "finishing swing";
+            reason = _phase switch
+            {
+                Phase.Approaching => "finishing approach",
+                Phase.BackingOff => "backing off",
+                _ => "finishing swing",
+            };
             return true;
         }
         if (combat.LeaveCombatWhenIdle && !_leftCombat && board.Combat.Mode != PluginCombatMode.Peace)
@@ -99,6 +107,8 @@ public sealed class CombatBehavior(
 
         if (_phase == Phase.Approaching)
             return StepApproach(context, combat);
+        if (_phase == Phase.BackingOff)
+            return StepBackOff(context, combat);
 
         if (_phase != Phase.Idle && board.Now - _phaseStartedAt > SwingTimeoutSeconds)
         {
@@ -182,6 +192,18 @@ public sealed class CombatBehavior(
 
         if (board.IsActionPending)
             return BehaviorStep.Continue;
+
+        // A ranged style with something on top of it steps back before the next shot.
+        if (combat.Style != CombatStyle.Melee
+            && combat.BackOffWhenWithinMeters > 0f
+            && board.Navigation.IsAvailable
+            && TryNearestHostile(board, out PluginCombatTarget close)
+            && close.Distance <= combat.BackOffWhenWithinMeters)
+        {
+            context.Log.Info($"backing off from {close.Name} at {close.Distance:0.0}m");
+            EnterPhase(Phase.BackingOff, board.Now);
+            return StepBackOff(context, combat);
+        }
 
         if (engagement.Approach)
         {
@@ -423,6 +445,63 @@ public sealed class CombatBehavior(
             return BeginRecovery(nav, board.Now, recovery);
         }
         return BehaviorStep.Continue;
+    }
+
+    /// <summary>
+    /// Walks directly away from the nearest hostile until it is at the
+    /// back-off distance, the time runs out, or nothing is near any more.
+    /// Uses the same walker as the approach, so a wall behind is handled by
+    /// the stuck recoveries and the timeout.
+    /// </summary>
+    private BehaviorStep StepBackOff(BehaviorContext context, CombatSettings combat)
+    {
+        Blackboard board = context.Board;
+        INavigationAutomation nav = context.Surface.Navigation;
+        if (!board.Navigation.IsAvailable
+            || !TryNearestHostile(board, out PluginCombatTarget close)
+            || close.Distance >= combat.BackOffToMeters
+            || board.Now - _phaseStartedAt > combat.BackOffTimeoutSeconds)
+        {
+            StopMoving(nav);
+            EnterPhase(Phase.Idle, board.Now);
+            return BehaviorStep.Done;
+        }
+        if (_walker.ContinueRecovery(nav, board.Now))
+            return BehaviorStep.Continue;
+        if (!nav.TryGetObject(close.ObjectId, out PluginNavigationObject where))
+        {
+            StopMoving(nav);
+            EnterPhase(Phase.Idle, board.Now);
+            return BehaviorStep.Done;
+        }
+        PluginNavigationPosition position = board.Navigation.Position;
+        float away = (RouteFollower.HeadingTo(position, where.Position) + 180f) % 360f;
+        if (lineOfSight.ChecksWalking
+            && lineOfSight.TryFindWalkHeading(close.ObjectId, away, combat.BackOffToMeters, out WalkVerdict walk))
+        {
+            away = walk.HeadingDegrees;
+        }
+        StuckRecovery? stuck = _walker.Toward(nav, position, away, board.Now);
+        if (stuck is { } recovery)
+            _walker.BeginRecovery(nav, recovery, board.Now);
+        return BehaviorStep.Continue;
+    }
+
+    private static bool TryNearestHostile(Blackboard board, out PluginCombatTarget nearest)
+    {
+        nearest = default;
+        float best = float.PositiveInfinity;
+        foreach (PluginCombatTarget hostile in board.Hostiles)
+        {
+            if (hostile.IsHealthKnown && hostile.HealthFraction <= 0f)
+                continue;
+            if (hostile.Distance < best)
+            {
+                best = hostile.Distance;
+                nearest = hostile;
+            }
+        }
+        return !float.IsPositiveInfinity(best);
     }
 
     private BehaviorStep BeginRecovery(INavigationAutomation nav, double now, StuckRecovery recovery)

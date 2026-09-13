@@ -179,6 +179,18 @@ public sealed record CombatSettings
     /// <summary>Rules that allow a ring cast one when this many hostiles stand within ring range.</summary>
     public int MinRingTargets { get; init; } = 3;
 
+    /// <summary>
+    /// With a ranged style, walk away from a hostile that gets this close
+    /// before the next shot; zero never backs off.
+    /// </summary>
+    public float BackOffWhenWithinMeters { get; init; }
+
+    /// <summary>Back off until the nearest hostile is this far.</summary>
+    public float BackOffToMeters { get; init; } = 6f;
+
+    /// <summary>Give up backing off after this long and fight where the character stands.</summary>
+    public double BackOffTimeoutSeconds { get; init; } = 4d;
+
     /// <summary>The weapon to wield for the melee style, by name; empty leaves the hands alone.</summary>
     public string MeleeWeapon { get; init; } = string.Empty;
 

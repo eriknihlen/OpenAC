@@ -202,6 +202,15 @@ public sealed class BotSettingsWindow(BotController controller)
             controller.Update(p => p with { Combat = p.Combat with { LeaveCombatWhenIdle = peace } });
 
         ImGui.Spacing();
+        ImGui.TextDisabled("Backing off (ranged styles)");
+        float backOffWhen = combat.BackOffWhenWithinMeters;
+        if (ImGui.SliderFloat("Step back when a hostile is within (m; 0 = never)", ref backOffWhen, 0f, 8f, "%.1f"))
+            controller.Update(p => p with { Combat = p.Combat with { BackOffWhenWithinMeters = backOffWhen } });
+        float backOffTo = combat.BackOffToMeters;
+        if (ImGui.SliderFloat("Back off to (m)", ref backOffTo, 2f, 20f, "%.0f"))
+            controller.Update(p => p with { Combat = p.Combat with { BackOffToMeters = backOffTo } });
+
+        ImGui.Spacing();
         ImGui.TextDisabled("Weapons (by name; empty leaves the hands alone)");
         string melee = combat.MeleeWeapon;
         if (ImGui.InputText("Melee weapon", ref melee, 64))

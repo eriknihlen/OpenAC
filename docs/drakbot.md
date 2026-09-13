@@ -176,6 +176,10 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   whatever the probes did not model. Strikes are kept per sense: an open
   walk forgives walk strikes, an open shot forgives shot strikes, and the
   blacklist counts both.
+- **Backing off.** With a ranged style and a back-off distance set, a
+  hostile that gets that close is walked away from - straight away from
+  it, steering round what is behind - until it is at the back-off range
+  or the timeout passes, and then the next shot goes out.
 - **Fail open.** No projectile collision on the host, a spent collision
   budget or an error all count as "no answer" and the shot goes ahead.
 - **Diagnostics.** The Combat tab's "Draw the swept path" asks the client to
@@ -376,8 +380,6 @@ the approach step. `DrakBotPluginHostingTests` runs the real
 
 In rough priority order:
 
-- **Backing off.** The bot walks toward targets it cannot reach or shoot
-  but never retreats from a melee monster while casting.
 - **Doors on routes.** Portals, NPCs, recalls and chat lines are route
   steps now; a closed door in the way is still only handled by the stuck
   recoveries.
