@@ -8,12 +8,21 @@ namespace AcDream.DrakBot.Behaviors;
 /// Walks the loaded route whenever nothing more important wants the
 /// character. The <see cref="Walker"/> does the driving: a held run steered
 /// toward the waypoint, a turn in place for a sharp corner, and the stuck
-/// recoveries; every key is released the moment control is taken away.
+/// recoveries; every key is released the moment control is taken away. The
+/// steps that act in place (chat, recall, portal, NPC) run through the
+/// <see cref="RouteActionRunner"/>. A teleport the route did not ask for -
+/// a portal walked into, a recall cast by hand - is noticed too, and the
+/// walk settles before it carries on.
 /// </summary>
 public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBehavior
 {
     private readonly Walker _walker = new();
+    private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
+    private bool _wasInPortalSpace;
+    private PluginNavigationPosition _lastPosition;
+    private bool _hasLastPosition;
+    private double _settleUntil = double.NegativeInfinity;
 
     public string Name => "nav";
 
@@ -23,13 +32,18 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
 
     public int WaypointIndex => _follower?.CurrentIndex ?? -1;
 
+    /// <summary>What the route is doing at an action step, for the dashboard.</summary>
+    public string ActionStatus => _actions.Status;
+
     /// <summary>Replaces the route; an empty route clears navigation.</summary>
     public void SetRoute(Route? route)
     {
         _follower = route is null || route.IsEmpty
             ? null
-            : new RouteFollower(route, settings().Mode);
+            : new RouteFollower(route, route.Mode ?? settings().Mode);
         _follower?.Reset();
+        _actions.Cancel();
+        _settleUntil = double.NegativeInfinity;
     }
 
     public bool WantsControl(Blackboard board, out string reason)
@@ -37,9 +51,15 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         reason = string.Empty;
         if (!settings().Enabled || _follower is null || _follower.IsFinished)
             return false;
-        if (!board.Navigation.IsAvailable || board.Navigation.IsPortalSpace)
+        if (!board.Navigation.IsAvailable)
             return false;
-        reason = $"waypoint {_follower.CurrentIndex + 1}/{_follower.Route.Waypoints.Count}";
+        // Nothing else should take over mid-teleport: the route is still
+        // responsible for noticing the arrival.
+        if (board.Navigation.IsPortalSpace && !_actions.IsRunning)
+            return false;
+        reason = _actions.IsRunning && _actions.Status.Length > 0
+            ? _actions.Status
+            : $"waypoint {_follower.CurrentIndex + 1}/{_follower.Route.Waypoints.Count}";
         return true;
     }
 
@@ -50,6 +70,19 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         NavigationSettings nav = settings();
         if (_follower is null)
             return BehaviorStep.Done;
+
+        if (_actions.IsRunning)
+            return RunAction(context, nav);
+
+        if (NoticeTeleport(board, host, nav, context.Log))
+            return BehaviorStep.Continue;
+        if (board.Now < _settleUntil)
+            return BehaviorStep.Continue;
+        if (board.Navigation.IsPortalSpace)
+        {
+            _walker.Reset(host);
+            return BehaviorStep.Continue;
+        }
 
         if (_walker.ContinueRecovery(host, board.Now))
             return BehaviorStep.Continue;
@@ -71,6 +104,12 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 _walker.Reset(host);
                 return BehaviorStep.Continue;
 
+            case NavigationAction.Act:
+                _walker.Reset(host);
+                _actions.Begin(_follower.Current!, board.Navigation, board.Now);
+                context.Log.Info($"nav: {_follower.Current}");
+                return RunAction(context, nav);
+
             default:
                 StuckRecovery? recovery = _walker.Toward(
                     host, board.Navigation.Position, step.HeadingDegrees, board.Now, nav.TurnToleranceDegrees);
@@ -83,6 +122,82 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         }
     }
 
-    public void Interrupt(BehaviorContext context) =>
+    public void Interrupt(BehaviorContext context)
+    {
         _walker.Reset(context.Surface.Navigation);
+        // An action mid-flight is abandoned; the step runs again from the
+        // start when the route gets control back.
+        _actions.Cancel();
+    }
+
+    private BehaviorStep RunAction(BehaviorContext context, NavigationSettings nav)
+    {
+        Blackboard board = context.Board;
+        RouteActionStatus status = _actions.Tick(
+            context.Surface,
+            board.Navigation,
+            board.Now,
+            nav.PostPortalDelaySeconds,
+            context.Log,
+            out string failure);
+        switch (status)
+        {
+            case RouteActionStatus.Running:
+                return BehaviorStep.Continue;
+            case RouteActionStatus.Failed:
+                context.Log.Warn($"nav: {failure}; skipping the step");
+                _follower!.Complete();
+                ForgetPosition();
+                return BehaviorStep.Continue;
+            default:
+                _follower!.Complete();
+                ForgetPosition();
+                return BehaviorStep.Continue;
+        }
+    }
+
+    /// <summary>
+    /// Watches for a teleport the route did not fire itself: portal space
+    /// entered and left, or a jump of more than the action runner's
+    /// teleport distance between two ticks. Either way the walk stops and
+    /// settles for the post-portal delay before the route carries on from
+    /// its current step.
+    /// </summary>
+    private bool NoticeTeleport(Blackboard board, INavigationAutomation host, NavigationSettings nav, IPluginLogger log)
+    {
+        PluginNavigationSnapshot navigation = board.Navigation;
+        bool teleported = false;
+        string how = string.Empty;
+        if (navigation.IsPortalSpace)
+        {
+            _wasInPortalSpace = true;
+        }
+        else if (_wasInPortalSpace)
+        {
+            _wasInPortalSpace = false;
+            teleported = true;
+            how = "left portal space";
+        }
+        else if (_hasLastPosition
+            && navigation.Position.HorizontalDistanceMeters(_lastPosition) > RouteActionRunner.TeleportJumpMeters)
+        {
+            teleported = true;
+            how = "position jumped";
+        }
+        _lastPosition = navigation.Position;
+        _hasLastPosition = !navigation.IsPortalSpace;
+        if (!teleported)
+            return false;
+        log.Info($"nav: teleport noticed ({how}); settling {nav.PostPortalDelaySeconds:0.#}s");
+        _walker.Reset(host);
+        _settleUntil = board.Now + nav.PostPortalDelaySeconds;
+        return true;
+    }
+
+    /// <summary>After an action's own teleport the last position is stale; do not read it as a second jump.</summary>
+    private void ForgetPosition()
+    {
+        _hasLastPosition = false;
+        _wasInPortalSpace = false;
+    }
 }

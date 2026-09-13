@@ -96,4 +96,12 @@ public interface IWorldObjectAutomation
 
     PluginItemCommandResult Identify(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Uses a world object the way a click does: a portal is entered, a
+    /// door opened, an NPC or vendor addressed, a lifestone bound. The
+    /// client walks to it first when it is out of reach.
+    /// </summary>
+    PluginItemCommandResult Use(uint objectId) =>
+        new(PluginItemCommandStatus.Unavailable);
 }

@@ -64,9 +64,10 @@ public sealed class NavigationTests
         {
             Waypoints =
             [
+                // An L, so no point lies on the line to the one after it.
                 new Waypoint(WaypointKind.Point, 0d, 0d),
                 new Waypoint(WaypointKind.Point, 0.01d, 0d),
-                new Waypoint(WaypointKind.Point, 0.02d, 0d),
+                new Waypoint(WaypointKind.Point, 0.01d, 0.01d),
             ],
         };
 
@@ -132,6 +133,31 @@ public sealed class NavigationTests
 
         // Without lookahead the aim is straight north.
         Assert.Equal(0f, follower.Advance(At(0d, -2d / 240d, heading: 0f), 0d, 1d, 45f).HeadingDegrees, 0.01f);
+    }
+
+    [Fact]
+    public void PointsAlreadyReachedOrOnTheLineToTheNextAreSkippedAfterAnAdvance()
+    {
+        var route = new Route
+        {
+            Waypoints =
+            [
+                new Waypoint(WaypointKind.Point, 0d, 0d),
+                new Waypoint(WaypointKind.Point, 0.001d, 0d),   // 0.24 m on: inside arrival
+                new Waypoint(WaypointKind.Point, 0.02d, 0.001d), // nearly on the line to the next
+                new Waypoint(WaypointKind.Point, 0.1d, 0d),
+                new Waypoint(WaypointKind.Point, 0.1d, 0.1d),  // a corner: kept
+            ],
+        };
+        var follower = new RouteFollower(route, RouteMode.Once);
+        follower.Reset();
+
+        // Reaching the first point advances, and the skip runs on the next look.
+        Assert.Equal(NavigationAction.Hold, follower.Advance(At(0d, 0d), 0d, 1d, 45f).Action);
+        Assert.Equal(1, follower.CurrentIndex);
+        NavigationStep step = follower.Advance(At(0d, 0d), 0.1d, 1d, 45f);
+        Assert.Equal(3, follower.CurrentIndex);
+        Assert.NotEqual(NavigationAction.Hold, step.Action);
     }
 
     [Fact]

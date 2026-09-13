@@ -144,16 +144,54 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 break;
             case "load":
                 RequireArgument(args, 1, "nav load <name>");
-                Say(controller.LoadRoute(args[1])
-                    ? $"route '{args[1]}' loaded ({controller.DraftRoute.Waypoints.Count} waypoints)"
-                    : $"no route named '{args[1]}'");
+                if (!controller.LoadRoute(args[1], out string? loadWarning))
+                {
+                    Say($"no route named '{args[1]}'");
+                    break;
+                }
+                if (loadWarning is not null)
+                    Say($"route '{args[1]}': {loadWarning}");
+                Say($"route '{args[1]}' loaded ({controller.DraftRoute.Waypoints.Count} waypoints)");
                 break;
             case "list":
                 IReadOnlyList<string> names = controller.Store.RouteNames();
                 Say(names.Count == 0 ? "no saved routes" : "routes: " + string.Join(", ", names));
                 break;
+            case "import":
+                RequireArgument(args, 1, "nav import <file.nav>");
+                Route imported = controller.ImportNavFile(Rest(args, 1), out string? importWarning);
+                if (importWarning is not null)
+                    Say($"import: {importWarning}");
+                Say($"following '{imported.Name}' ({imported.Waypoints.Count} steps, {imported.Mode?.ToString().ToLowerInvariant() ?? "profile"} mode); nav save <name> keeps it");
+                break;
+            case "export":
+                RequireArgument(args, 1, "nav export <file.nav>");
+                controller.ExportNavFile(Rest(args, 1));
+                Say($"route written to {Rest(args, 1)}");
+                break;
+            case "chat":
+                RequireArgument(args, 1, "nav chat <text>");
+                controller.AddChat(Rest(args, 1));
+                Say("chat step added");
+                break;
+            case "recall":
+                RequireArgument(args, 1, "nav recall <spell id>");
+                controller.AddRecall(uint.Parse(args[1], CultureInfo.InvariantCulture));
+                Say($"recall step added (spell {args[1]})");
+                break;
+            case "portal":
+            case "npc":
+                RequireArgument(args, 1, $"nav {sub} <name>");
+                WaypointKind kind = sub == "portal" ? WaypointKind.Portal : WaypointKind.Npc;
+                if (!controller.TryAddUse(kind, Rest(args, 1), out _))
+                {
+                    Say("position unknown; not in world?");
+                    break;
+                }
+                Say($"{sub} step '{Rest(args, 1)}' added; stand where the route should use it");
+                break;
             default:
-                Say("usage: /drakbot nav add|pause <s>|clear|use|save <name>|load <name>|list");
+                Say("usage: /drakbot nav add|pause <s>|chat <text>|recall <spell>|portal <name>|npc <name>|clear|use|save <name>|load <name>|list|import <file>|export <file>");
                 break;
         }
     }
@@ -225,7 +263,8 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
     {
         Say("/drakbot start|stop|status|rebuff");
         Say("/drakbot profile list|load <name>|save [name]|reset");
-        Say("/drakbot nav add|pause <s>|clear|use|save <name>|load <name>|list");
+        Say("/drakbot nav add|pause <s>|chat <text>|recall <spell>|portal <name>|npc <name>|clear|use");
+        Say("/drakbot nav save <name>|load <name>|list|import <file.nav>|export <file.nav>");
         Say("/drakbot style melee|missile|magic; /drakbot buffs|combat|loot on|off");
         Say("/drakbot los on|off; /drakbot los debug on|off");
     }
@@ -237,6 +276,10 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         if (args.Length <= index)
             throw new ArgumentException("usage: /drakbot " + usage);
     }
+
+    /// <summary>The arguments from <paramref name="index"/> on, joined back into the text the user typed.</summary>
+    private static string Rest(string[] args, int index) =>
+        string.Join(' ', args.Skip(index));
 
     private static string FormatCoordinate(double value, char positive, char negative) =>
         $"{Math.Abs(value).ToString("0.0", CultureInfo.InvariantCulture)}{(value >= 0d ? positive : negative)}";

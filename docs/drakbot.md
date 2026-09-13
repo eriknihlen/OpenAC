@@ -187,7 +187,8 @@ game's own look.
 ```
 /drakbot start | stop | status | rebuff
 /drakbot profile list | load <name> | save [name] | reset
-/drakbot nav add | pause <seconds> | clear | use | save <name> | load <name> | list
+/drakbot nav add | pause <seconds> | chat <text> | recall <spell id> | portal <name> | npc <name>
+/drakbot nav clear | use | save <name> | load <name> | list | import <file.nav> | export <file.nav>
 /drakbot style melee | missile | magic
 /drakbot buffs|combat|loot on|off
 /drakbot los on|off | debug on|off
@@ -198,6 +199,38 @@ draft route; `nav use` starts following the draft; `nav save` names it.
 Profiles and routes are JSON under the plugin's storage folder
 (`<config>/plugins/acdream.drakbot/profiles/*.json` and `routes/*.json`) and can
 be edited by hand. `BotProfile` in `Profiles/BotProfile.cs` is the schema.
+
+### Route steps
+
+A route is the VTank set of steps, numbered the way a `.nav` file numbers
+them, so a route recorded with VTank or RynthSuite walks here unchanged:
+`nav import <file.nav>` reads one (and `nav save` keeps it as JSON), a
+`.nav` dropped into the routes folder loads by name, `nav export` writes one
+back. A route carries its own mode (`.nav` circular/linear/once map to
+loop/ping-pong/once); a hand-built one follows the profile's.
+
+- **Point** - walk there. A run of points already inside the arrival
+  distance, or a point lying within 2 m of the straight line to the farther
+  point after it, is skipped when the cursor lands on it, so a dense
+  path-finder route or an over-recorded corridor does not stall the walk.
+- **Pause** - stand for the seconds given.
+- **Chat** - submit the line; a slash command runs, anything else is said.
+- **Recall** - self-cast the spell, again every 4 s until the teleport
+  shows, then stand for the profile's post-portal settle.
+- **Portal** - find the named portal (the recorded position picks between
+  same-named ones, else the nearest within 250 m), use it once, wait for the
+  teleport, settle. The object is looked for again every 1.5 s until it is
+  in the object table, since the world around a fresh arrival fills in over
+  a moment.
+- **NPC / Vendor** - walk to the point, use the named object, move on after
+  a moment.
+
+A teleport is recognised three ways: the character passed through portal
+space, jumped more than 50 m, or changed landblock (a short-hop dungeon
+portal moves less than 50 m). A teleporting step gives up after 60 s and
+the route moves on. A teleport the route did not ask for - a portal walked
+into, a recall cast by hand - is noticed the same way; the walk stops,
+settles, and carries on from the current step.
 
 ## Testing
 
@@ -218,9 +251,9 @@ In rough priority order:
 
 - **Backing off.** The bot walks toward targets it cannot reach or shoot
   but never retreats from a melee monster while casting.
-- **Routes with doors and portals.** `WaypointKind` has `Point` and `Pause`;
-  `Portal`/`UseObject`/`Chat` steps are the next additions and the follower is
-  shaped to take them.
+- **Doors on routes.** Portals, NPCs, recalls and chat lines are route
+  steps now; a closed door in the way is still only handled by the stuck
+  recoveries.
 - **Missile ammo and weapon swapping** via `IEquipmentAutomation`.
 - **Debuffs, rings and DoTs** - `ISpellCatalog.KnownCombatSpells` already
   projects them; the combat behavior only uses direct bolts.

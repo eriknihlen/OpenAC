@@ -387,6 +387,10 @@ public sealed class BotSettingsWindow(BotController controller)
         float lookahead = (float)navigation.LookaheadMeters;
         if (ImGui.SliderFloat("Corner lookahead (m)", ref lookahead, 0f, 10f, "%.1f"))
             controller.Update(p => p with { Navigation = p.Navigation with { LookaheadMeters = lookahead } });
+
+        float portalDelay = (float)navigation.PostPortalDelaySeconds;
+        if (ImGui.SliderFloat("Settle after a portal (s)", ref portalDelay, 0f, 15f, "%.1f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
         ImGui.TextDisabled("A mode change applies the next time a route is loaded.");
     }
 

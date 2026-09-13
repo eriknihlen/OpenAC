@@ -90,6 +90,11 @@ internal sealed class FakeAutomationSurface
     // ── chat ──────────────────────────────────────────────────────────────
     public List<string> SystemMessages { get; } = [];
     public void PostSystemMessage(string text) => SystemMessages.Add(text);
+    public bool Submit(string text)
+    {
+        Commands.Add($"chat:{text}");
+        return true;
+    }
 
     // ── combat ────────────────────────────────────────────────────────────
     public PluginCombatSnapshot CombatSnapshot { get; set; } = new(
@@ -201,6 +206,15 @@ internal sealed class FakeAutomationSurface
 
     // ── world objects ─────────────────────────────────────────────────────
     bool IWorldObjectAutomation.IsAvailable => IsAvailable;
+    /// <summary>Landscape objects served by <see cref="CaptureObjects"/> (portals, NPCs, vendors).</summary>
+    public List<PluginWorldObject> WorldObjects { get; } = [];
+    public IReadOnlyList<PluginWorldObject> CaptureObjects() => WorldObjects.ToArray();
+    public PluginItemCommandStatus NextUseStatus { get; set; } = PluginItemCommandStatus.Started;
+    PluginItemCommandResult IWorldObjectAutomation.Use(uint objectId)
+    {
+        Commands.Add($"useobject:{objectId}");
+        return new(NextUseStatus);
+    }
     public bool TryGet(uint objectId, out PluginWorldObject value)
     {
         if (AppraisedObjects.Contains(objectId))
@@ -218,8 +232,9 @@ internal sealed class FakeAutomationSurface
     // ── navigation ────────────────────────────────────────────────────────
     public PluginNavigationPosition Position { get; set; } = new(0x00010100u, 0d, 0d, 0d, 0f, true);
     public bool NavigationAvailable { get; set; } = true;
+    public bool IsPortalSpace { get; set; }
     PluginNavigationSnapshot INavigationAutomation.Snapshot => new(
-        NavigationAvailable, false, ObjectId, Position, IsMoving, false);
+        NavigationAvailable, IsPortalSpace, ObjectId, Position, IsMoving, false);
     public bool IsMoving { get; set; }
     public PluginMovementIntent? Intent { get; private set; }
     public float? FacedHeading { get; private set; }

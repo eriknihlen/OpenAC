@@ -30,10 +30,22 @@ public sealed class BotStore(IPluginStorage storage)
         storage.WriteText(ProfileKey(profile.Name), profile.ToJson());
     }
 
-    public Route? LoadRoute(string name)
+    /// <summary>
+    /// A route by name: the JSON form first, else a VTank <c>.nav</c> file
+    /// of that name dropped into the routes folder.
+    /// </summary>
+    public Route? LoadRoute(string name) => LoadRoute(name, out _);
+
+    public Route? LoadRoute(string name, out string? warning)
     {
+        warning = null;
         string? json = storage.ReadText(RouteKey(name));
-        return json is null ? null : Route.FromJson(json) with { Name = name };
+        if (json is not null)
+            return Route.FromJson(json) with { Name = name };
+        string? nav = storage.ReadText(NavKey(name));
+        if (nav is null)
+            return null;
+        return NavFile.Parse(name, nav.ReplaceLineEndings("\n").Split('\n'), out warning);
     }
 
     public void SaveRoute(Route route)
@@ -56,6 +68,8 @@ public sealed class BotStore(IPluginStorage storage)
 
     private static string RouteKey(string name) => RoutePrefix + SanitizeName(name) + ".json";
 
+    private static string NavKey(string name) => RoutePrefix + SanitizeName(name) + ".nav";
+
     private IReadOnlyList<string> Names(string prefix)
     {
         if (!storage.IsAvailable)
@@ -63,6 +77,7 @@ public sealed class BotStore(IPluginStorage storage)
         return storage.List(prefix.TrimEnd('/'))
             .Select(static key => Path.GetFileNameWithoutExtension(key))
             .Where(static name => !string.IsNullOrEmpty(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }

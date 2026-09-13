@@ -18,10 +18,15 @@ public sealed class RouteFollower
     /// <summary>The distance must grow by this much past the closest approach.</summary>
     public const double SweepGrowthMeters = 0.3;
 
+    /// <summary>A point this close to the straight line toward the one after it is skipped.</summary>
+    public const double CollinearMeters = 2d;
+
     private int _index;
     private int _direction = 1;
     private double _pauseUntil = double.NegativeInfinity;
     private double _closest = double.PositiveInfinity;
+    private bool _arrived;
+    private bool _skipPending;
 
     public RouteFollower(Route route, RouteMode mode)
     {
@@ -89,11 +94,31 @@ public sealed class RouteFollower
             return Current is null ? NavigationStep.Finished : NavigationStep.Hold;
         }
 
+        // Steps that act in place, and travel steps once reached, hand over
+        // to the action runner until Complete is called.
+        if (!waypoint.IsTravel || _arrived)
+            return NavigationStep.Act;
+
+        // Right after the cursor moved, skip the points that need no walking.
+        if (_skipPending && waypoint.Kind == WaypointKind.Point && SkipAhead(position, arrivalDistanceMeters))
+        {
+            waypoint = Current;
+            if (waypoint is null)
+                return NavigationStep.Finished;
+            if (!waypoint.IsTravel)
+                return NavigationStep.Act;
+        }
+
         PluginNavigationPosition target = waypoint.ToPosition();
         double distance = position.HorizontalDistanceMeters(target);
         if (distance <= arrivalDistanceMeters
             || (_closest < arrivalDistanceMeters * SweepMultiplier && distance > _closest + SweepGrowthMeters))
         {
+            if (waypoint.Kind != WaypointKind.Point)
+            {
+                _arrived = true;
+                return NavigationStep.Act;
+            }
             Step();
             return Current is null ? NavigationStep.Finished : NavigationStep.Hold;
         }
@@ -118,13 +143,73 @@ public sealed class RouteFollower
             : NavigationStep.Walk(heading, distance);
     }
 
+    /// <summary>An action step finished (or was given up on): move to the next step.</summary>
+    public void Complete() => Step();
+
     public void Reset()
     {
         _index = 0;
         _direction = 1;
         _pauseUntil = double.NegativeInfinity;
         _closest = double.PositiveInfinity;
+        _arrived = false;
+        _skipPending = false;
         IsFinished = Route.IsEmpty;
+    }
+
+    /// <summary>
+    /// Skips travel points that need no walking: a run of points already
+    /// inside the arrival distance (dense routes from a path finder leave the
+    /// character inside every consecutive one, and no movement would ever
+    /// go out), and a point lying within <see cref="CollinearMeters"/> of the
+    /// straight line to the farther point after it (a recorded corridor with
+    /// too many points). Returns true when the cursor moved.
+    /// </summary>
+    private bool SkipAhead(in PluginNavigationPosition position, double arrivalDistanceMeters)
+    {
+        _skipPending = false;
+        bool moved = false;
+        int budget = Route.Waypoints.Count;
+        while (budget-- > 0 && Current is { Kind: WaypointKind.Point } current)
+        {
+            PluginNavigationPosition target = current.ToPosition();
+            bool skip = position.HorizontalDistanceMeters(target) < arrivalDistanceMeters;
+            if (!skip && TryPeekNext(out Waypoint next))
+            {
+                PluginNavigationPosition after = next.ToPosition();
+                double toCurrent = position.HorizontalDistanceMeters(target);
+                double toNext = position.HorizontalDistanceMeters(after);
+                skip = toNext > toCurrent
+                    && CrossTrackMeters(position, after, target) < CollinearMeters;
+            }
+            if (!skip)
+                break;
+            int before = _index;
+            Step();
+            moved = true;
+            if (IsFinished || _index == before)
+                break;
+        }
+        // Step re-arms the skip; the skipping is done for this advance.
+        _skipPending = false;
+        return moved;
+    }
+
+    /// <summary>Distance from <paramref name="point"/> to the line through <paramref name="from"/> and <paramref name="to"/>.</summary>
+    private static double CrossTrackMeters(
+        in PluginNavigationPosition from,
+        in PluginNavigationPosition to,
+        in PluginNavigationPosition point)
+    {
+        double lineEast = to.EastWest - from.EastWest;
+        double lineNorth = to.NorthSouth - from.NorthSouth;
+        double length = Math.Sqrt(lineEast * lineEast + lineNorth * lineNorth);
+        if (length <= 0d)
+            return point.HorizontalDistanceMeters(from);
+        double pointEast = point.EastWest - from.EastWest;
+        double pointNorth = point.NorthSouth - from.NorthSouth;
+        double cross = Math.Abs(lineEast * pointNorth - lineNorth * pointEast) / length;
+        return cross * 240d;
     }
 
     /// <summary>Restart from the waypoint nearest to <paramref name="position"/>.</summary>
@@ -177,6 +262,9 @@ public sealed class RouteFollower
     private void Step()
     {
         _closest = double.PositiveInfinity;
+        _arrived = false;
+        _pauseUntil = double.NegativeInfinity;
+        _skipPending = true;
         int count = Route.Waypoints.Count;
         switch (Mode)
         {
@@ -209,6 +297,8 @@ public enum NavigationAction
     Turn,
     Walk,
     Finished,
+    /// <summary>The current step acts in place; run it and call <see cref="RouteFollower.Complete"/>.</summary>
+    Act,
 }
 
 public readonly record struct NavigationStep(
@@ -219,6 +309,8 @@ public readonly record struct NavigationStep(
     public static NavigationStep Hold { get; } = new(NavigationAction.Hold, 0f, 0d);
 
     public static NavigationStep Finished { get; } = new(NavigationAction.Finished, 0f, 0d);
+
+    public static NavigationStep Act { get; } = new(NavigationAction.Act, 0f, 0d);
 
     public static NavigationStep Turn(float heading, double distance) =>
         new(NavigationAction.Turn, heading, distance);

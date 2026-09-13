@@ -235,4 +235,10 @@ public sealed record NavigationSettings
     /// the next one so corners are cut smoothly; zero aims straight at each.
     /// </summary>
     public double LookaheadMeters { get; init; } = 4d;
+
+    /// <summary>
+    /// How long to stand still after a portal or recall lands before the
+    /// route carries on, so the world around the new spot has arrived.
+    /// </summary>
+    public double PostPortalDelaySeconds { get; init; } = 4d;
 }

@@ -2727,6 +2727,26 @@ internal sealed class AppAutomationSurface
             : new(PluginItemCommandStatus.Refused);
     }
 
+    PluginItemCommandResult IWorldObjectAutomation.Use(uint objectId)
+    {
+        GameRuntime? runtime;
+        Func<uint, bool>? use;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            use = _useItem;
+        }
+        if (runtime is null || use is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        if (objectId == 0u || runtime.InventoryOwner.Objects.Get(objectId) is null)
+            return new(PluginItemCommandStatus.InvalidTarget);
+        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return new(PluginItemCommandStatus.Busy);
+        return use(objectId)
+            ? new(PluginItemCommandStatus.Started)
+            : new(PluginItemCommandStatus.Refused);
+    }
+
     public PluginItemCommandResult Identify(uint objectId)
     {
         GameRuntime? runtime;

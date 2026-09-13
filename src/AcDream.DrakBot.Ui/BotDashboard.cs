@@ -143,9 +143,12 @@ public sealed class BotDashboard
         }
         if (route is not null)
         {
+            string action = _controller.Navigation.ActionStatus;
             ImGui.TextColored(
                 ColMuted,
-                $"waypoint {_controller.Navigation.WaypointIndex + 1}/{route.Waypoints.Count}");
+                action.Length > 0
+                    ? action
+                    : $"waypoint {_controller.Navigation.WaypointIndex + 1}/{route.Waypoints.Count}");
         }
         ImGui.EndTable();
     }

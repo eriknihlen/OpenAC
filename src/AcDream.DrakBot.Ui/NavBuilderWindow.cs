@@ -59,16 +59,21 @@ public sealed class NavBuilderWindow(BotController controller)
                 if (ImGui.Selectable($"{index + 1}##wp{index}", _selected == index, ImGuiSelectableFlags.SpanAllColumns))
                     _selected = index;
                 ImGui.TableSetColumnIndex(1);
-                ImGui.Text(waypoint.Kind == WaypointKind.Pause ? "Pause" : "Point");
+                ImGui.Text(waypoint.Kind.ToString());
                 if (current)
                 {
                     ImGui.SameLine();
                     ImGui.TextColored(new Vector4(0.15f, 0.85f, 0.90f, 1f), "<-");
                 }
                 ImGui.TableSetColumnIndex(2);
-                ImGui.Text(waypoint.Kind == WaypointKind.Pause
-                    ? $"{waypoint.Seconds:0.#} s"
-                    : $"{Coordinate(waypoint.NorthSouth, 'N', 'S')}, {Coordinate(waypoint.EastWest, 'E', 'W')}");
+                ImGui.Text(waypoint.Kind switch
+                {
+                    WaypointKind.Pause => $"{waypoint.Seconds:0.#} s",
+                    WaypointKind.Chat => waypoint.Text,
+                    WaypointKind.Recall => $"spell {waypoint.SpellId}",
+                    WaypointKind.Portal or WaypointKind.Npc or WaypointKind.Vendor => waypoint.TargetName,
+                    _ => $"{Coordinate(waypoint.NorthSouth, 'N', 'S')}, {Coordinate(waypoint.EastWest, 'E', 'W')}",
+                });
             }
             ImGui.EndTable();
         }
@@ -101,6 +106,7 @@ public sealed class NavBuilderWindow(BotController controller)
             controller.SaveRoute(_routeName.Trim());
         ImGui.EndDisabled();
         ImGui.TextDisabled($"draft: {draft.Waypoints.Count} steps" + (draft.Name == "draft" ? string.Empty : $" (from '{draft.Name}')"));
+        ImGui.TextDisabled("/drakbot nav import <file.nav> loads a VTank route; nav chat, recall, portal and npc add action steps.");
         ImGui.End();
     }
 
