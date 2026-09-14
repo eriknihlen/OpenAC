@@ -422,6 +422,9 @@ public static class DungeonPathfinder
     /// neighbours - between them, not merely on the line through them, so
     /// the far end of an out-and-back spur survives - until none are left.
     /// </summary>
+    /// <summary>A point this much above or below the line between its neighbours is a landing, not a detail.</summary>
+    private const double ElevationToleranceMeters = 0.5d;
+
     private static void Simplify(List<Waypoint> waypoints, double thresholdMeters = 1.5d)
     {
         bool changed = true;
@@ -454,7 +457,14 @@ public static class DungeonPathfinder
         if (t <= 0d || t >= 1d)
             return false;
         double crossTrack = Math.Abs(pointEast * lineNorth - pointNorth * lineEast) / Math.Sqrt(lengthSquared) * 240d;
-        return crossTrack < thresholdMeters;
+        if (crossTrack >= thresholdMeters)
+            return false;
+        // On the map the point may sit on the line and still not be on the
+        // way: the middle doorway of a ramp is level with neither end, and
+        // dropping it sends the walk from one floor to the next through the
+        // wall. The height along the line must match too.
+        double expectedElevation = from.Elevation + (to.Elevation - from.Elevation) * t;
+        return Math.Abs(point.Elevation - expectedElevation) * 240d < ElevationToleranceMeters;
     }
 
     private static double Heuristic(in PluginDungeonCell from, in PluginDungeonCell to) =>

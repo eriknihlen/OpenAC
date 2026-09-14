@@ -40,6 +40,8 @@ public sealed class Walker
     private int _turnStalls;
     private StuckRecovery? _recovery;
     private double _recoveryUntil;
+    private float _detourHeading = float.NaN;
+    private double _detourUntil;
 
     /// <summary>Whether the character is being driven somewhere (a turn in place is not moving).</summary>
     public bool IsMoving => _intent is { } intent && (intent.Forward || intent.Backward || intent.StrafeLeft || intent.StrafeRight);
@@ -49,7 +51,47 @@ public sealed class Walker
     /// <summary>One word on the walker's state, for the log.</summary>
     public string State => _recovery is { } recovery
         ? $"recovering:{recovery}"
+        : IsDetouring ? $"detour:{_detourHeading:0}"
         : _turning ? "turning" : _intent is null ? "stopped" : _steer < 0 ? "run+left" : _steer > 0 ? "run+right" : "run";
+
+    /// <summary>Whether a detour heading is being walked instead of the target.</summary>
+    public bool IsDetouring => !float.IsNaN(_detourHeading);
+
+    /// <summary>
+    /// Walks <paramref name="heading"/> for <paramref name="seconds"/>
+    /// instead of the target: a way round a wall the target is behind. The
+    /// caller keeps calling <see cref="ContinueDetour"/> until it ends.
+    /// </summary>
+    public void BeginDetour(float heading, double now, double seconds)
+    {
+        _detourHeading = heading;
+        _detourUntil = now + seconds;
+        _stuck.Reset();
+    }
+
+    /// <summary>True while the detour runs (and walks it); false once it is over, with the keys released.</summary>
+    public bool ContinueDetour(INavigationAutomation nav, in PluginNavigationPosition position, double now)
+    {
+        if (!IsDetouring)
+            return false;
+        if (now >= _detourUntil)
+        {
+            _detourHeading = float.NaN;
+            Stop(nav);
+            _stuck.Reset();
+            return false;
+        }
+        StuckRecovery? stalled = Toward(nav, position, _detourHeading, now);
+        if (stalled is not null)
+        {
+            // The detour itself hit something: give it up now.
+            _detourHeading = float.NaN;
+            Stop(nav);
+            _stuck.Reset();
+            return false;
+        }
+        return true;
+    }
 
     /// <summary>
     /// Walks toward <paramref name="heading"/>. Returns a recovery to run
@@ -174,6 +216,7 @@ public sealed class Walker
     public void Reset(INavigationAutomation nav)
     {
         Stop(nav);
+        _detourHeading = float.NaN;
         _turning = false;
         _reasserted = false;
         _turnStalls = 0;

@@ -34,7 +34,17 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// </summary>
     public Func<PluginNavigationPosition, int, Route?>? Rejoin { get; set; }
 
+    /// <summary>The walker's one-word state, for the log and the tests.</summary>
+    public string WalkerState => _walker.State;
+
     private const double RejoinIntervalSeconds = 5d;
+
+    /// <summary>A detour walks its heading this long (a few metres at a run) before the route is aimed at again.</summary>
+    public const double DetourSeconds = 1.5d;
+    private static readonly float[] DetourOffsets = [30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f, 150f, -150f];
+    private const float DetourProbeMeters = 6f;
+    private const float DetourClearMeters = 3f;
+    private int _detours;
     private int _loggedIndex = -1;
     private double _lastTraceAt = double.NegativeInfinity;
     private bool _followMoving;
@@ -171,6 +181,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
 
         if (_walker.ContinueRecovery(host, board.Now))
             return BehaviorStep.Continue;
+        if (_walker.ContinueDetour(host, board.Navigation.Position, board.Now))
+            return BehaviorStep.Continue;
 
         NavigationStep step = _follower.Advance(
             board.Navigation.Position,
@@ -219,9 +231,25 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                     context.Log.Info($"nav: stuck near step {_follower.CurrentIndex + 1} ({step.DistanceMeters:0.0}m to go, heading {step.HeadingDegrees:0}); trying {move} at {BotEngine.Describe(board.Navigation.Position)}");
                     context.Log.Info($"nav: {CompassProbe(context.Surface, step.HeadingDegrees)}");
                     // A wall square in the way is not something a recovery
-                    // move gets around; the route is rejoined by a path.
-                    if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
-                        return BehaviorStep.Continue;
+                    // move gets around: the route is rejoined by a path, or,
+                    // when the path already ends in this cell (a ramp that
+                    // does not start where the straight line meets the wall),
+                    // the first open heading of a fan round the target is
+                    // walked for a moment before aiming again. A step or two
+                    // sideways usually finds the ramp's foot; the plain
+                    // recoveries are the fallback when nothing is open.
+                    if (!DirectlyWalkable(context.Surface, step))
+                    {
+                        if (TryRejoin(context))
+                            return BehaviorStep.Continue;
+                        if (TryDetour(context.Surface, step.HeadingDegrees, out float detour))
+                        {
+                            _detours++;
+                            context.Log.Info($"nav: detour {_detours} along heading {detour:0} for {DetourSeconds:0.0}s");
+                            _walker.BeginDetour(detour, board.Now, DetourSeconds);
+                            return BehaviorStep.Continue;
+                        }
+                    }
                     _walker.BeginRecovery(host, move, board.Now);
                 }
                 return BehaviorStep.Continue;
@@ -294,6 +322,35 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// eight compass points, from the host's collision probe: which way
     /// the wall actually is when a walk stalls.
     /// </summary>
+    /// <summary>
+    /// The first open heading of a fan round the target heading, nearest
+    /// the target first: open means the body can go a few metres that way.
+    /// </summary>
+    private static bool TryDetour(IAutomationSurface surface, float targetHeading, out float heading)
+    {
+        heading = float.NaN;
+        IMovementProbeAutomation probe = surface.MovementProbe;
+        if (!probe.IsAvailable)
+            return false;
+        foreach (float offset in DetourOffsets)
+        {
+            float candidate = AcDream.DrakBot.Combat.LineOfSightService.NormalizeHeading(targetHeading + offset);
+            PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(candidate, DetourProbeMeters)
+            {
+                StepDistance = 0.5f,
+                MaximumCollisionChecks = 24,
+            });
+            bool open = result.Status == PluginWalkProbeStatus.Clear
+                || (result.Status == PluginWalkProbeStatus.Blocked && result.ClearDistanceMeters >= DetourClearMeters);
+            if (open)
+            {
+                heading = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>Whether the body can walk straight to the step: unknown counts as yes.</summary>
     private static bool DirectlyWalkable(IAutomationSurface surface, in NavigationStep step)
     {

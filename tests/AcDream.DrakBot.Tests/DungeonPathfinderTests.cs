@@ -67,6 +67,36 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void ARampsMiddleDoorwayIsKeptEvenThoughItLiesOnTheLineOnTheMap()
+    {
+        // Three cells due north of one another: the floor, a landing only 1 m up, then the room 6 m up
+        // (the climb is all in the second half). On the map every doorway between them is on one straight line.
+        Dictionary<uint, PluginDungeonCell> ramp = DungeonPathfinder.Graph(
+        [
+            Cell(0x100, 0d, 0d, 0d, 0x101),
+            Cell(0x101, 0d, 20d, 1d, 0x100, 0x102),
+            Cell(0x102, 0d, 40d, 6d, 0x101),
+        ]);
+        var top = new PluginNavigationPosition(0u, 0d, 40d / 240d, 6d / 240d, 0f, false);
+
+        Route route = DungeonPathfinder.BuildRoute(ramp, [Block | 0x100, Block | 0x101, Block | 0x102], top);
+
+        // The flat version of the same walk collapses to the destination alone;
+        // the ramp keeps its doorways, because a walk from 0 m straight to 6 m
+        // goes through the floor.
+        Assert.True(route.Waypoints.Count >= 2, $"{route.Waypoints.Count} steps");
+        Assert.Contains(route.Waypoints, w => w.Elevation * 240d > 1.5d && w.Elevation * 240d < 5d);
+        Dictionary<uint, PluginDungeonCell> flat = DungeonPathfinder.Graph(
+        [
+            Cell(0x100, 0d, 0d, 0d, 0x101),
+            Cell(0x101, 0d, 20d, 0d, 0x100, 0x102),
+            Cell(0x102, 0d, 40d, 0d, 0x101),
+        ]);
+        Route straight = DungeonPathfinder.BuildRoute(flat, [Block | 0x100, Block | 0x101, Block | 0x102], top with { Elevation = 0d });
+        Assert.True(straight.Waypoints.Count < route.Waypoints.Count);
+    }
+
+    [Fact]
     public void ARouteGoesThroughDoorwayPointsAndEndsAtTheDestination()
     {
         Dictionary<uint, PluginDungeonCell> graph = Loop();

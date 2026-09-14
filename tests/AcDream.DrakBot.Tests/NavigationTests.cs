@@ -248,6 +248,45 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void AStallAgainstAWallWithNoPathRoundItDetoursAlongTheFirstOpenHeading()
+    {
+        var surface = new FakeAutomationSurface();
+        var clock = new TickClock();
+        var settings = new NavigationSettings();
+        var behavior = new NavigationBehavior(() => settings);
+        behavior.SetRoute(new Route { Name = "ramp", Waypoints = [new Waypoint(WaypointKind.Point, 0d, 20d / 240d)] });
+        surface.Position = At(0d, 0d, heading: 0f);
+        // The wall is dead ahead and thirty degrees either side; sixty degrees right is open. No lead-in to be had.
+        surface.BlockedWalkHeadings.UnionWith([0, 30, 330]);
+        surface.WalkBlockedByEnvironment = true;
+        behavior.Rejoin = (_, _) => null;
+
+        BehaviorContext Context() => new(surface, new FakeLogger(), Blackboard.Capture(surface, clock, 25f, 15f));
+
+        behavior.Execute(Context());
+        clock.Advance(0.1d);
+        behavior.Execute(Context());
+        Assert.Equal("move:forward", surface.Commands[^1]);
+        // No progress for a stall window: the keys are pressed again; another window: a stall.
+        clock.Advance(3.2d);
+        behavior.Execute(Context());
+        clock.Advance(0.1d);
+        behavior.Execute(Context());
+        clock.Advance(3.2d);
+        behavior.Execute(Context());
+
+        Assert.StartsWith("detour:60", behavior.WalkerState);
+        // The detour walks its heading: a turn first, since sixty degrees is past the turn-in-place angle.
+        clock.Advance(0.1d);
+        behavior.Execute(Context());
+        Assert.Equal("move:turnright", surface.Commands[^1]);
+        // And ends after its time, the keys released, the route aimed at again.
+        clock.Advance(NavigationBehavior.DetourSeconds + 0.1d);
+        behavior.Execute(Context());
+        Assert.False(behavior.WalkerState.StartsWith("detour", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NavigationBehaviorIsQuietWithoutARouteOrInPortalSpace()
     {
         var surface = new FakeAutomationSurface();

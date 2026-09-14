@@ -345,8 +345,16 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   the dungeon path through the doorways from the character's cell to the
   step's cell - and splices it in (`DungeonPathfinder.Rejoin`): a loop is
   rotated so the lap continues from that step and wraps through the ones
-  before it. At most once every five seconds; outside a dungeon the stuck
-  recoveries stand alone.
+  before it. At most once every five seconds. When no lead-in helps (the
+  path already ends in this cell: a ramp that does not start where the
+  straight line meets the wall) the walk detours instead - the first open
+  heading of a fan round the target (30, 60, 90, 120, 150 degrees either
+  side, nearest first), walked for a second and a half before the route
+  is aimed at again; the plain back-up and strafe recoveries are the
+  fallback when nothing is open. Route points are simplified with height
+  in mind: a point on the line on the map but off it in height (a ramp's
+  landing) is kept, or the walk would go from one floor to the next
+  through the wall.
 - hazards are also sighted: once a second the bot looks at the objects in
   view and any named like a hotspot (lava, pool of acid, magma, cesspool,
   hot spring, pool of fire/cold) marks its cell; a new mark during a
