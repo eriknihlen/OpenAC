@@ -39,6 +39,9 @@ public static class TargetSelector
         {
             if (candidate.Distance > settings.EngageDistance)
                 continue;
+            if (settings.MaxHeightDifferenceMeters > 0f
+                && Math.Abs(candidate.HeightDifferenceMeters) > settings.MaxHeightDifferenceMeters)
+                continue;
             if (IsIgnored(candidate.Name, settings.IgnoreNames))
                 continue;
             if (candidate.IsHealthKnown && candidate.HealthFraction <= 0f)

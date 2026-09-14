@@ -195,7 +195,10 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   higher).
 - **Aim heights.** The configured attack height is tried first, then the
   other two. A missile attack uses whichever height was clear.
-- **Choosing a target.** Hostiles are ranked as before; the first one with a
+- **Choosing a target.** Hostiles are ranked as before (distance is the
+  straight line, height included; one more than *Ignore above/below*
+  metres up or down - the floor overhead in a stacked dungeon - is not a
+  hostile at all); the first one with a
   clear path wins. A blocked target is never walked to: it earns a strike
   and is passed over, whatever its distance; after N strikes in a row it
   is blacklisted for a while and drops out of selection until the

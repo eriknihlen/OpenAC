@@ -270,6 +270,11 @@ public sealed class BotSettingsWindow(BotController controller)
         float engage = combat.EngageDistance;
         if (ImGui.SliderFloat("Engage distance (m)", ref engage, 3f, 60f, "%.0f"))
             controller.Update(p => p with { Combat = p.Combat with { EngageDistance = engage } });
+        float maxHeight = combat.MaxHeightDifferenceMeters;
+        if (ImGui.SliderFloat("Ignore above/below (m)", ref maxHeight, 0f, 15f, "%.1f"))
+            controller.Update(p => p with { Combat = p.Combat with { MaxHeightDifferenceMeters = maxHeight } });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A hostile more than this far above or below the character is left alone: the floor overhead, the pit below. 0 fights at any height.");
         float ringRange = combat.RingRangeMeters;
         if (ImGui.SliderFloat("Ring range (m)", ref ringRange, 0f, 20f, "%.0f"))
             controller.Update(p => p with { Combat = p.Combat with { RingRangeMeters = ringRange } });

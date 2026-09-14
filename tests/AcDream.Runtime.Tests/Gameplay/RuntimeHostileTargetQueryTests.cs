@@ -159,7 +159,7 @@ public sealed class RuntimeHostileTargetQueryTests
         Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
         Assert.True(runtime.EntityObjects.Entities.TryGetActive(0x50000010u, out RuntimeEntityRecord record));
         var body = new PhysicsBody();
-        body.SnapToCell(0x01010001u, new Vector3(12f, 10f, 0f), new Vector3(12f, 10f, 0f));
+        body.SnapToCell(0x01010001u, new Vector3(12f, 10f, 5f), new Vector3(12f, 10f, 5f));
         record.SetPhysicsBody(body);
 
         IReadOnlyList<RuntimeHostileTargetSnapshot> targets =
@@ -168,6 +168,13 @@ public sealed class RuntimeHostileTargetQueryTests
         RuntimeHostileTargetSnapshot target = Assert.Single(targets);
         Assert.Equal(2f, target.Distance, 3);
         Assert.Equal(90f, target.RelativeAngleDegrees, 1);
+        Assert.Equal(0f, target.HeightDifference, 3);
+
+        // The floor above: 6 m up, the straight line says so and the height is reported.
+        body.SnapToCell(0x01010001u, new Vector3(10f, 10f, 11f), new Vector3(10f, 10f, 11f));
+        target = Assert.Single(RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f));
+        Assert.Equal(6f, target.Distance, 3);
+        Assert.Equal(6f, target.HeightDifference, 3);
     }
 
     [Fact]

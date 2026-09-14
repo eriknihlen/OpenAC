@@ -25,6 +25,9 @@ public readonly record struct RuntimeHostileTargetSnapshot(
     public long HealthRevision { get; init; }
     public double SecondsSinceHealthUpdate { get; init; } =
         double.PositiveInfinity;
+
+    /// <summary>How far above (positive) or below the player the target stands, in metres.</summary>
+    public float HeightDifference { get; init; }
 }
 
 public static class RuntimeHostileTargetQuery
@@ -80,9 +83,11 @@ public static class RuntimeHostileTargetQuery
             if (hasHealth && health <= 0f)
                 continue;
 
-            Vector2 delta = new(
-                targetWorld.X - playerWorld.X,
-                targetWorld.Y - playerWorld.Y);
+            // The straight-line distance, height included: a monster on
+            // the floor above is not two metres away because it is
+            // overhead. The height itself is reported too, so a caller
+            // can leave other floors alone altogether.
+            Vector3 delta = targetWorld - playerWorld;
             float distanceSquared = delta.LengthSquared();
             if (distanceSquared > maximumDistanceSquared)
                 continue;
@@ -116,6 +121,7 @@ public static class RuntimeHostileTargetQuery
                 Incarnation = record.Incarnation,
                 HealthRevision = healthRevision,
                 SecondsSinceHealthUpdate = healthAge,
+                HeightDifference = delta.Z,
             });
         }
 

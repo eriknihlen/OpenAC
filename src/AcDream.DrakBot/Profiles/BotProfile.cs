@@ -168,6 +168,13 @@ public sealed record CombatSettings
     /// <summary>Hostiles farther than this are left alone.</summary>
     public float EngageDistance { get; init; } = 25f;
 
+    /// <summary>
+    /// Hostiles more than this far above or below the character are left
+    /// alone: the floor overhead in a stacked dungeon, the pit below. A
+    /// ramp or a stair is well inside it.
+    /// </summary>
+    public float MaxHeightDifferenceMeters { get; init; } = 3.5f;
+
     /// <summary>Restrict war spells to one element by name; empty means any.</summary>
     public string ElementKeyword { get; init; } = string.Empty;
 

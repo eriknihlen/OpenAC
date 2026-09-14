@@ -40,6 +40,13 @@ public readonly record struct PluginCombatTarget(
 
     public double SecondsSinceHealthUpdate { get; init; } =
         double.PositiveInfinity;
+
+    /// <summary>
+    /// How far above (positive) or below the character the target stands,
+    /// in metres. <see cref="Distance"/> is the straight line, height
+    /// included; this tells a dungeon floor apart from the one overhead.
+    /// </summary>
+    public float HeightDifferenceMeters { get; init; }
 }
 
 public readonly record struct PluginCombatSnapshot(

@@ -71,6 +71,26 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void TargetSelectorLeavesTheFloorOverheadAlone()
+    {
+        var settings = new CombatSettings { MaxHeightDifferenceMeters = 3.5f };
+        PluginCombatTarget[] hostiles =
+        [
+            Hostile(1, "Upstairs", 4f) with { HeightDifferenceMeters = 6f },
+            Hostile(2, "Downstairs", 5f) with { HeightDifferenceMeters = -5f },
+            Hostile(3, "Up the ramp", 6f) with { HeightDifferenceMeters = 2f },
+        ];
+
+        Assert.True(TargetSelector.TrySelect(hostiles, settings, 0u, out PluginCombatTarget target));
+        Assert.Equal(3u, target.ObjectId);
+
+        // Zero fights at any height.
+        settings = settings with { MaxHeightDifferenceMeters = 0f };
+        Assert.True(TargetSelector.TrySelect(hostiles, settings, 0u, out target));
+        Assert.Equal(1u, target.ObjectId);
+    }
+
+    [Fact]
     public void TargetSelectorSticksWithTheCurrentTargetWhenRangesAreClose()
     {
         var settings = new CombatSettings();

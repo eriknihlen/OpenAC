@@ -3472,6 +3472,7 @@ internal sealed class AppAutomationSurface
                 Incarnation = target.Incarnation,
                 HealthRevision = target.HealthRevision,
                 SecondsSinceHealthUpdate = target.SecondsSinceHealthUpdate,
+                HeightDifferenceMeters = target.HeightDifference,
             };
         }
         return projected;
