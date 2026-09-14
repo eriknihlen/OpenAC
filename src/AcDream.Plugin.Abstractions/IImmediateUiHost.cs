@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace AcDream.Plugin.Abstractions;
 
 /// <summary>
@@ -33,6 +35,30 @@ public interface IImmediateUiHost
         screenX = 0f;
         screenY = 0f;
         return false;
+    }
+
+    /// <summary>
+    /// Whether the host draws geometry in the world itself: rings and
+    /// strips placed on the ground and depth-tested against walls, floors
+    /// and creatures, where the overlay sits over everything. False on
+    /// hosts without a world renderer.
+    /// </summary>
+    bool WorldGeometryAvailable => false;
+
+    /// <summary>
+    /// A ring on the ground at a map position: a flat band
+    /// <paramref name="thicknessMeters"/> wide at <paramref name="radiusMeters"/>,
+    /// with a wall <paramref name="heightMeters"/> tall standing on it so the
+    /// ring reads at a grazing angle. Drawn once, in the next frame's world
+    /// pass: submit again every frame it should show. Colour RGBA, 0..1.
+    /// </summary>
+    void AddWorldRing(in PluginNavigationPosition center, float radiusMeters, float thicknessMeters, float heightMeters, Vector4 color)
+    {
+    }
+
+    /// <summary>A flat strip along the ground from one map position to another, drawn like <see cref="AddWorldRing"/>.</summary>
+    void AddWorldLine(in PluginNavigationPosition from, in PluginNavigationPosition to, float thicknessMeters, Vector4 color)
+    {
     }
 }
 

@@ -185,6 +185,7 @@ public sealed class WorldSceneRendererTests
                 "flat:entities",
                 "passes:disable-clip",
                 "particles:global",
+                "markers",
                 "flat:weather",
                 "diagnostics:draw",
                 "alpha:end",
@@ -227,6 +228,7 @@ public sealed class WorldSceneRendererTests
                 "visibility:mark",
                 "passes:disable-clip",
                 "particles:skipped",
+                "markers",
                 "diagnostics:draw",
                 "alpha:end",
                 "visibility:complete",
@@ -1188,6 +1190,8 @@ public sealed class WorldSceneRendererTests
                 IReadOnlyDictionary<uint, WorldEntity>? AnimatedById)> entries,
             uint? playerLandblockId,
             HashSet<uint> animatedEntityIds) => calls.Add("flat:entities");
+
+        public void DrawWorldMarkers(in WorldCameraFrame camera) => calls.Add("markers");
 
         public void DrawPostWorldParticles(
             LoadedCell? clipRoot,

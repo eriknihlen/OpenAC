@@ -368,6 +368,22 @@
           "compiled": true
         }
       ]
+    },
+    {
+      "name": "world_marker",
+      "vulkanReady": true,
+      "stages": [
+        {
+          "stage": "vert",
+          "sourceSha256": "ee667c7d7d31e5e600dac65c82cc87601d4500192c785e8e97ce6d59d974726d",
+          "compiled": true
+        },
+        {
+          "stage": "frag",
+          "sourceSha256": "41eee2c39fa60e8a06713806d7956f66d574a802d4963a7d08f7d61dbac79af7",
+          "compiled": true
+        }
+      ]
     }
   ]
 }

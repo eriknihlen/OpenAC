@@ -7,17 +7,27 @@ using ImGuiNET;
 namespace AcDream.DrakBot.Ui;
 
 /// <summary>
-/// Draws the route over the world, the way RynthAi's nav marker renderer
-/// does in its ImGui form: a ring on the ground at every travel point
-/// within range (red for the step being walked, cyan otherwise), the
-/// step number above it, and a line from each point to the next, thicker
-/// close by and thinner far off. Everything goes through the host's
-/// projection into a full-screen, input-less overlay window.
+/// Draws the route in the world, the way RynthAi's nav marker renderer
+/// does: a ring on the ground at every travel point within range (red for
+/// the step being walked, cyan otherwise, amber for an NPC or vendor stop)
+/// and a strip from each point to the next. On a host that draws world
+/// geometry the markers are real geometry in the scene - behind walls,
+/// under the character, hidden by what stands in front - as RynthAi's
+/// Nav3D rings are; otherwise they fall back to the host's projection into
+/// a full-screen, input-less overlay window, with the step numbers.
 /// </summary>
 public sealed class NavMarkerOverlay(BotController controller, IAutomationSurface surface, IImmediateUiHost ui)
 {
     private const int RingSegments = 24;
     private const double DrawRangeMeters = 150d;
+    /// <summary>World-geometry sizes per unit of the profile's line thickness, and the ring's standing wall.</summary>
+    private const float BandMetersPerUnit = 0.05f;
+    private const float StripMetersPerUnit = 0.04f;
+    private const float RingWallMeters = 0.35f;
+    private static readonly Vector4 WorldRing = new(0.15f, 0.85f, 0.90f, 0.85f);
+    private static readonly Vector4 WorldActive = new(1f, 0.27f, 0.27f, 0.95f);
+    private static readonly Vector4 WorldAction = new(1f, 0.85f, 0.2f, 0.85f);
+    private static readonly Vector4 WorldLine = new(0.1f, 0.55f, 1f, 0.7f);
     private static readonly uint ColorLine = ImGui.ColorConvertFloat4ToU32(new Vector4(0.15f, 0.85f, 0.90f, 0.7f));
     private static readonly uint ColorRing = ImGui.ColorConvertFloat4ToU32(new Vector4(0.15f, 0.85f, 0.90f, 0.95f));
     private static readonly uint ColorActive = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.25f, 0.25f, 1f));
@@ -36,8 +46,13 @@ public sealed class NavMarkerOverlay(BotController controller, IAutomationSurfac
         if (route is null || route.IsEmpty)
             return;
         PluginNavigationSnapshot snapshot = surface.Navigation.Snapshot;
-        if (!snapshot.IsAvailable)
+        if (!snapshot.IsAvailable || snapshot.IsPortalSpace)
             return;
+        if (ui.WorldGeometryAvailable)
+        {
+            SubmitWorld(route, nav, snapshot);
+            return;
+        }
 
         Vector2 display = ImGui.GetIO().DisplaySize;
         if (display.X <= 0f || display.Y <= 0f)
@@ -58,6 +73,52 @@ public sealed class NavMarkerOverlay(BotController controller, IAutomationSurfac
         ImGui.End();
         ImGui.PopStyleVar(2);
         ImGui.PopStyleColor();
+    }
+
+    /// <summary>The route as geometry in the world: rings at the travel points in range, strips between consecutive ones.</summary>
+    private void SubmitWorld(Route route, NavigationSettings nav, in PluginNavigationSnapshot snapshot)
+    {
+        int active = ReferenceEquals(route, controller.Navigation.Route) ? controller.Navigation.WaypointIndex : -1;
+        PluginNavigationPosition player = snapshot.Position;
+        float ringRadius = Math.Max(0.25f, nav.MarkerRingMeters);
+        float units = Math.Max(0.5f, nav.MarkerLineThickness);
+        float band = units * BandMetersPerUnit;
+        float strip = units * StripMetersPerUnit;
+        double heightOffset = nav.MarkerHeightOffset / 240d;
+
+        int lastIndex = -1;
+        PluginNavigationPosition last = default;
+        PluginNavigationPosition first = default;
+        int firstIndex = -1;
+        int loopStart = Math.Clamp(route.LoopStart, 0, Math.Max(0, route.Waypoints.Count - 1));
+        for (int index = 0; index < route.Waypoints.Count; index++)
+        {
+            Waypoint waypoint = route.Waypoints[index];
+            if (!waypoint.Kind.HasPosition())
+                continue;
+            PluginNavigationPosition at = waypoint.ToPosition();
+            if (at.HorizontalDistanceMeters(player) > DrawRangeMeters)
+            {
+                lastIndex = -1;
+                continue;
+            }
+            at = at with { Elevation = at.Elevation + heightOffset };
+            bool isActive = index == active;
+            Vector4 color = isActive ? WorldActive : waypoint.Kind == WaypointKind.Point ? WorldRing : WorldAction;
+            ui.AddWorldRing(at, ringRadius, isActive ? band * 1.3f : band, isActive ? RingWallMeters * 1.3f : RingWallMeters, color);
+            if (lastIndex == index - 1)
+                ui.AddWorldLine(last, at, strip, WorldLine);
+            if (index == loopStart)
+            {
+                first = at;
+                firstIndex = index;
+            }
+            lastIndex = index;
+            last = at;
+        }
+        // A loop closes back on the step it starts from.
+        if (route.Mode == RouteMode.Loop && firstIndex >= 0 && lastIndex == route.Waypoints.Count - 1 && lastIndex != firstIndex)
+            ui.AddWorldLine(last, first, strip, WorldLine);
     }
 
     private void DrawRoute(Route route, NavigationSettings nav, in PluginNavigationSnapshot snapshot)

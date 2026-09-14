@@ -107,6 +107,23 @@ internal sealed class ImGuiDrawerRegistry(bool enabled) : IImmediateUiHost
         return float.IsFinite(screenX) && float.IsFinite(screenY);
     }
 
+    /// <summary>The world geometry plugins submitted; the world pass drains it each frame.</summary>
+    internal WorldMarkerQueue WorldMarkers { get; } = new();
+
+    public bool WorldGeometryAvailable => _available && WorldMarkers.HasRenderer;
+
+    public void AddWorldRing(in PluginNavigationPosition center, float radiusMeters, float thicknessMeters, float heightMeters, Vector4 color)
+    {
+        if (_available)
+            WorldMarkers.AddRing(center, radiusMeters, thicknessMeters, heightMeters, color);
+    }
+
+    public void AddWorldLine(in PluginNavigationPosition from, in PluginNavigationPosition to, float thicknessMeters, Vector4 color)
+    {
+        if (_available)
+            WorldMarkers.AddLine(from, to, thicknessMeters, color);
+    }
+
     /// <summary>Runs every live drawer. One that throws is logged and removed.</summary>
     internal void DrawAll(Action<string, Exception> onFailure)
     {

@@ -291,6 +291,7 @@ internal sealed class WorldSceneRenderer : IPreparedWorldSceneFramePhase
                 clipRoot,
                 pviewResult?.ClipAssembly,
                 in camera);
+            _passes.DrawWorldMarkers(in camera);
 
             if (clipRoot is null && drawSkyThisFrame)
             {

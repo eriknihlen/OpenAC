@@ -458,14 +458,19 @@ dashboard is.
   clear` does the same from chat. Everything at or above the level also
   goes to the client's log file (`<data>/logs/client-<date>.log`, rolled
   daily, 14 kept), so a session can be read back afterwards.
-- **Route markers over the world** - the route being walked (or the draft)
+- **Route markers in the world** - the route being walked (or the draft)
   is drawn on the ground: a cyan ring at every travel point within 150 m,
-  amber for NPC and vendor steps, red for the step being walked, the step
-  number above the near ones, and a line from each point to the next.
-  Settings > Navigation turns them off and sets the ring radius, line
-  thickness and a height offset. The host projects map positions through
-  its own camera (`IImmediateUiHost.TryProjectToScreen`), so the markers
-  sit where the client draws the ground.
+  amber for NPC and vendor steps, red for the step being walked, and a
+  strip from each point to the next (a loop closes back on its start).
+  They are geometry in the scene, as RynthAi's Nav3D rings are: a flat
+  band with a short wall standing on it, drawn after the world with its
+  depth, so a wall hides them, the character stands on them and the UI
+  sits over them (`IImmediateUiHost.AddWorldRing` / `AddWorldLine`; the
+  client's `WorldMarkerRenderer` draws what was queued in the next frame's
+  world pass). Settings > Navigation turns them off and sets the ring
+  radius, the band width and a height offset. On a host without world
+  geometry the markers fall back to lines projected onto the overlay
+  (`TryProjectToScreen`), with the step numbers.
 
 Plugins get the same facility through `IPluginHost.ImmediateUi`: register a
 draw callback and call `ImGui.*` inside it (ImGui.NET is shared from the

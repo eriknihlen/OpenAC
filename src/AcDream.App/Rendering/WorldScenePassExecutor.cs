@@ -43,6 +43,9 @@ internal interface IWorldScenePassExecutor
         DayGroupData? activeDayGroup,
         float dayFraction);
 
+    /// <summary>The rings and strips plugins placed in the world, after the scene and its particles.</summary>
+    void DrawWorldMarkers(in WorldCameraFrame camera);
+
     void DisableClipDistances();
 
     void AbortFrame();
@@ -60,6 +63,7 @@ internal sealed class WorldScenePassExecutor : IWorldScenePassExecutor
     private readonly SkyRenderer? _sky;
     private readonly ParticleSystem? _particles;
     private readonly ParticleRenderer? _particleRenderer;
+    private readonly WorldMarkerRenderer? _worldMarkers;
     private readonly HashSet<uint> _visibleParticleOwners = [];
     private readonly HashSet<uint> _noExcludedParticleOwners = [];
 
@@ -73,7 +77,8 @@ internal sealed class WorldScenePassExecutor : IWorldScenePassExecutor
         TerrainDrawDiagnosticsController terrainDiagnostics,
         SkyRenderer? sky,
         ParticleSystem? particles,
-        ParticleRenderer? particleRenderer)
+        ParticleRenderer? particleRenderer,
+        WorldMarkerRenderer? worldMarkers = null)
     {
         _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _frameGlState = frameGlState
@@ -88,7 +93,11 @@ internal sealed class WorldScenePassExecutor : IWorldScenePassExecutor
         _sky = sky;
         _particles = particles;
         _particleRenderer = particleRenderer;
+        _worldMarkers = worldMarkers;
     }
+
+    public void DrawWorldMarkers(in WorldCameraFrame camera) =>
+        _worldMarkers?.Draw(in camera);
 
     public void BeginFrame()
     {

@@ -133,6 +133,20 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             return false;
         }
 
+        public bool WorldGeometryAvailable => !_disposed && inner.WorldGeometryAvailable;
+
+        public void AddWorldRing(in PluginNavigationPosition center, float radiusMeters, float thicknessMeters, float heightMeters, System.Numerics.Vector4 color)
+        {
+            if (!_disposed)
+                inner.AddWorldRing(center, radiusMeters, thicknessMeters, heightMeters, color);
+        }
+
+        public void AddWorldLine(in PluginNavigationPosition from, in PluginNavigationPosition to, float thicknessMeters, System.Numerics.Vector4 color)
+        {
+            if (!_disposed)
+                inner.AddWorldLine(from, to, thicknessMeters, color);
+        }
+
         public IDisposable Register(string name, Action draw)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

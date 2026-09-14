@@ -441,6 +441,23 @@ internal sealed class FrameRootCompositionPhase
                 d.PlayerController,
                 d.DebugVmRenderFacts,
                 debugVmConsumerActive: false);
+            // Plugins' world markers: geometry in the scene, drawn after the
+            // particles with the world's depth.
+            WorldMarkerRenderer? worldMarkers = null;
+            try
+            {
+                worldMarkers = new WorldMarkerRenderer(
+                    host.GpuDevice,
+                    worldPassScope,
+                    host.GpuFrameLifetime,
+                    d.ImmediateUi.WorldMarkers,
+                    d.WorldOrigin);
+                bindings.Adopt("world markers", worldMarkers);
+            }
+            catch (Exception error) when (error is FileNotFoundException or InvalidOperationException)
+            {
+                d.Log($"world markers: unavailable ({error.Message})");
+            }
             var worldScenePasses = new WorldScenePassExecutor(
                 worldPassSurface,
                 worldFrameGlState,
@@ -451,7 +468,8 @@ internal sealed class FrameRootCompositionPhase
                 terrainDrawDiagnostics,
                 live.SkyRenderer,
                 content.ParticleSystem,
-                live.ParticleRenderer);
+                live.ParticleRenderer,
+                worldMarkers);
             // The retained scene is the walk's production object source. The
             // old dispatcher/selection observer remains detached.
             live.DrawDispatcher!.SetCurrentRenderSceneObserver(null);
