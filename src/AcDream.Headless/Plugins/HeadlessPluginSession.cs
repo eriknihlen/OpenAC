@@ -1,3 +1,4 @@
+using System.Reflection;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Diagnostics;
 using AcDream.Plugin.Abstractions;
@@ -44,7 +45,8 @@ internal sealed class HeadlessPluginSession : IDisposable
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<string, bool>? submitChatText = null,
+        PluginHostVersion? hostVersion = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -66,7 +68,12 @@ internal sealed class HeadlessPluginSession : IDisposable
             host,
             status => Report(statusWriter, sessionId, status),
             renderPacks: null,
-            supportedKinds: [PluginKind.Gameplay]);
+            supportedKinds: [PluginKind.Gameplay],
+            hostKind: PluginHostKind.Headless,
+            hostVersion: hostVersion ?? PluginHostVersion.FromInformationalVersion(
+                typeof(HeadlessPluginSession).Assembly
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                    ?.InformationalVersion));
         return new HeadlessPluginSession(
             host,
             plugins,

@@ -1,3 +1,4 @@
+using System.Reflection;
 using AcDream.Core.Plugins;
 using AcDream.Platform;
 using AcDream.Plugin.Abstractions;
@@ -40,7 +41,8 @@ internal sealed class GraphicalPluginSession : IDisposable
         string sessionId,
         IPluginHost host,
         SessionStatusWriter statusWriter,
-        IRenderPackRegistry? renderPacks = null)
+        IRenderPackRegistry? renderPacks = null,
+        PluginHostVersion? hostVersion = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -53,7 +55,12 @@ internal sealed class GraphicalPluginSession : IDisposable
             renderPacks,
             renderPacks is null
                 ? [PluginKind.Gameplay]
-                : [PluginKind.Gameplay, PluginKind.RenderPack]);
+                : [PluginKind.Gameplay, PluginKind.RenderPack],
+            PluginHostKind.Graphical,
+            hostVersion ?? PluginHostVersion.FromInformationalVersion(
+                typeof(GraphicalPluginSession).Assembly
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                    ?.InformationalVersion));
         return new GraphicalPluginSession(
             plugins,
             [

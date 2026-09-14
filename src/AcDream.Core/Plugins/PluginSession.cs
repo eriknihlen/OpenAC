@@ -19,12 +19,24 @@ public sealed class PluginHostKindException : Exception
     public PluginHostKindException(string message) : base(message) { }
 }
 
+public sealed class PluginHostCompatibilityException : Exception
+{
+    public PluginHostCompatibilityException(string message) : base(message) { }
+}
+
+public sealed class PluginDuplicateIdException : Exception
+{
+    public PluginDuplicateIdException(string message) : base(message) { }
+}
+
 public sealed class PluginSession : IDisposable
 {
     private readonly IPluginHost _host;
     private readonly Action<PluginSessionStatus>? _report;
     private readonly IRenderPackRegistry? _renderPacks;
     private readonly HashSet<PluginKind> _supportedKinds;
+    private readonly PluginHostKind? _hostKind;
+    private readonly PluginHostVersion? _hostVersion;
     private readonly List<ActivePlugin> _loaded = [];
     private readonly List<WeakReference> _releasedContexts = [];
     private bool _started;
@@ -34,11 +46,15 @@ public sealed class PluginSession : IDisposable
         IPluginHost host,
         Action<PluginSessionStatus>? report = null,
         IRenderPackRegistry? renderPacks = null,
-        IEnumerable<PluginKind>? supportedKinds = null)
+        IEnumerable<PluginKind>? supportedKinds = null,
+        PluginHostKind? hostKind = null,
+        PluginHostVersion? hostVersion = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _report = report;
         _renderPacks = renderPacks;
+        _hostKind = hostKind;
+        _hostVersion = hostVersion;
         _supportedKinds = new HashSet<PluginKind>(
             supportedKinds
                 ?? (renderPacks is null
@@ -146,6 +162,22 @@ public sealed class PluginSession : IDisposable
                     }
                     continue;
                 }
+                string? incompatibility = _hostKind is { } hostKind
+                    ? PluginHostCompatibility.Evaluate(result.Manifest, hostKind, _hostVersion)
+                    : null;
+                if (incompatibility is not null)
+                {
+                    if (requestedSet is not null)
+                    {
+                        AddOrdered(discoveredOrder, id);
+                        AddError(
+                            errors,
+                            id,
+                            new PluginHostCompatibilityException(
+                                $"plugin '{id}' {incompatibility}."));
+                    }
+                    continue;
+                }
                 AddOrdered(discoveredOrder, id);
                 if (!candidates.TryGetValue(id, out List<PluginDiscoveryResult>? list))
                 {
@@ -226,6 +258,14 @@ public sealed class PluginSession : IDisposable
     {
         if (candidates.TryGetValue(id, out List<PluginDiscoveryResult>? available))
         {
+            if (available.Count > 1)
+            {
+                AddError(
+                    errors,
+                    id,
+                    new PluginDuplicateIdException(DescribeDuplicate(id, available)));
+                available = [];
+            }
             foreach (PluginDiscoveryResult candidate in available)
             {
                 var scope = new ScopedPluginHost(
@@ -433,6 +473,11 @@ public sealed class PluginSession : IDisposable
             .Distinct(comparer)
             .ToArray();
     }
+
+    private static string DescribeDuplicate(string id, List<PluginDiscoveryResult> available) =>
+        $"plugin '{id}' is declared in more than one plugin folder: "
+        + string.Join(", ", available.Select(static candidate => candidate.PluginDirectory))
+        + ".";
 
     private static void AddOrdered(List<string> ordered, string id)
     {

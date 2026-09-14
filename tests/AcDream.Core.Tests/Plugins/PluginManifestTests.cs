@@ -105,4 +105,137 @@ public class PluginManifestTests
 
         Assert.Equal(expected, error.Message);
     }
+
+    [Fact]
+    public void Parse_HostFields_AreRead()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "minHostVersion": "0.1.5",
+          "maxHostVersion": "0.2.0",
+          "skipHostVersions": ["0.1.7"],
+          "hosts": ["headless"]
+        }
+        """;
+
+        PluginManifest manifest = PluginManifest.Parse(json);
+
+        Assert.Equal(new PluginHostVersion(0, 1, 5), manifest.MinHostVersion);
+        Assert.Equal(new PluginHostVersion(0, 2, 0), manifest.MaxHostVersion);
+        Assert.Equal([new PluginHostVersion(0, 1, 7)], manifest.SkipHostVersions);
+        Assert.Equal([PluginHostKind.Headless], manifest.Hosts);
+    }
+
+    [Fact]
+    public void Parse_HostFieldsAbsent_DefaultToAnyVersionBothHosts()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1
+        }
+        """;
+
+        PluginManifest manifest = PluginManifest.Parse(json);
+
+        Assert.Null(manifest.MinHostVersion);
+        Assert.Null(manifest.MaxHostVersion);
+        Assert.Empty(manifest.SkipHostVersions);
+        Assert.Equal(
+            [PluginHostKind.Graphical, PluginHostKind.Headless],
+            manifest.Hosts);
+    }
+
+    [Theory]
+    [InlineData("v1.0.0")]
+    [InlineData("1.0")]
+    [InlineData("1.0.0-beta")]
+    [InlineData("01.0.0")]
+    public void Parse_MalformedHostVersion_Throws(string version)
+    {
+        string json = $$"""
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "minHostVersion": "{{version}}"
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal($"malformed minHostVersion: {version}", error.Message);
+    }
+
+    [Fact]
+    public void Parse_MinAboveMax_Throws()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "minHostVersion": "0.2.0",
+          "maxHostVersion": "0.1.5"
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("minHostVersion (0.2.0) is greater than maxHostVersion (0.1.5)", error.Message);
+    }
+
+    [Fact]
+    public void Parse_EmptyHosts_Throws()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "hosts": []
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("hosts must contain at least one entry", error.Message);
+    }
+
+    [Fact]
+    public void Parse_UnknownHost_Throws()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "hosts": ["mobile"]
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("unknown host: mobile", error.Message);
+    }
 }

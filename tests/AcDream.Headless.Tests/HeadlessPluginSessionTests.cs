@@ -495,6 +495,43 @@ public sealed class HeadlessPluginSessionTests
         Assert.Equal(before + 1, session.Runtime.Chat.Count);
     }
 
+    [Fact]
+    public void GraphicalOnlyPluginRequestedOnHeadlessHostReportsPluginFailed()
+    {
+        using var temporary = new TemporaryDirectory();
+        const string graphicalOnlyId = "acdream.test.graphical-only";
+        string pluginDirectory = Path.Combine(temporary.Path, "graphical-only");
+        Directory.CreateDirectory(pluginDirectory);
+        File.WriteAllText(
+            Path.Combine(pluginDirectory, "plugin.json"),
+            JsonSerializer.Serialize(new
+            {
+                id = graphicalOnlyId,
+                displayName = "Graphical only",
+                version = "1.0.0",
+                entryDll = "deliberately-missing.dll",
+                apiVersion = 1,
+                hosts = new[] { "graphical" },
+            }));
+        string statusPath = Path.Combine(temporary.Path, "status.jsonl");
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([graphicalOnlyId], statusPath),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        _ = session.Start();
+
+        Assert.Equal(0, session.Plugins.LoadedCount);
+        JsonElement failed = ReadStatuses(statusPath)
+            .Single(static item =>
+                item.GetProperty("e").GetString() == "pluginFailed");
+        string error = failed.GetProperty("error").GetString()!;
+        Assert.Contains("runs only on the graphical host", error);
+    }
+
     private static HeadlessSessionDescriptor Descriptor(
         List<string> plugins,
         string statusPath,

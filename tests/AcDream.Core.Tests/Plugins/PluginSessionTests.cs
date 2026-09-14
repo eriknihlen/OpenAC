@@ -284,6 +284,202 @@ public sealed class PluginSessionTests
         Assert.Empty(plugins.CaptureLoadContextWeakReferences());
     }
 
+    [Fact]
+    public void RequestedPluginBelowMinHostVersionFailsBeforeLoading()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixtureWithHostFields(
+            temporary.Path, "fixture", "acdream.test.toonew", minHostVersion: "9.0.0");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Headless,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], ["acdream.test.toonew"]);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("requires OpenAC 9.0.0 or newer", status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void RequestedPluginAboveMaxHostVersionFailsBeforeLoading()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixtureWithHostFields(
+            temporary.Path, "fixture", "acdream.test.tooold", maxHostVersion: "0.1.0");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Headless,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], ["acdream.test.tooold"]);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("supports OpenAC up to 0.1.0", status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void RequestedPluginOnSkippedHostVersionFailsBeforeLoading()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixtureWithHostFields(
+            temporary.Path,
+            "fixture",
+            "acdream.test.skipped",
+            skipHostVersions: ["0.1.7"]);
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Headless,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], ["acdream.test.skipped"]);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("is marked broken on OpenAC 0.1.7", status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void UnrequestedIncompatiblePluginIsSkippedSilently()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixtureWithHostFields(
+            temporary.Path, "fixture", "acdream.test.toonew", minHostVersion: "9.0.0");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Headless,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], allowList: null);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        Assert.Empty(statuses);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void HostKindMismatchRequestedPluginFailsWithReason()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixtureWithHostFields(
+            temporary.Path, "fixture", "acdream.test.headless-only", hosts: ["headless"]);
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Graphical,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], ["acdream.test.headless-only"]);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("runs only on the headless host", status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void DuplicateIdAcrossRootsFailsAndLoadsNeither()
+    {
+        using var first = new TemporaryDirectory();
+        using var second = new TemporaryDirectory();
+        InstallFixture(first.Path, "fixture", "acdream.test.dup");
+        InstallFixture(second.Path, "fixture", "acdream.test.dup");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(new StubHost(), statuses.Add);
+
+        plugins.Start([first.Path, second.Path], allowList: null);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("more than one plugin folder", status.Error);
+        Assert.Contains(Path.Combine(first.Path, "fixture"), status.Error);
+        Assert.Contains(Path.Combine(second.Path, "fixture"), status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void DuplicateIdWithinRootFailsAndLoadsNeither()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixture(temporary.Path, "alpha", "acdream.test.dup");
+        InstallFixture(temporary.Path, "beta", "acdream.test.dup");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(new StubHost(), statuses.Add);
+
+        plugins.Start([temporary.Path], allowList: null);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("more than one plugin folder", status.Error);
+        Assert.Contains(Path.Combine(temporary.Path, "alpha"), status.Error);
+        Assert.Contains(Path.Combine(temporary.Path, "beta"), status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
+    [Fact]
+    public void IncompatibleSecondCopyIsNotCountedAsDuplicate()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixture(temporary.Path, "alpha", "acdream.test.mixed");
+        InstallFixtureWithHostFields(
+            temporary.Path, "beta", "acdream.test.mixed", minHostVersion: "9.0.0");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(
+            new StubHost(),
+            statuses.Add,
+            hostKind: PluginHostKind.Headless,
+            hostVersion: new PluginHostVersion(0, 1, 7));
+
+        plugins.Start([temporary.Path], allowList: null);
+
+        Assert.Equal(1, plugins.LoadedCount);
+        Assert.Equal(["acdream.test.mixed"], plugins.LoadedPluginIds);
+        Assert.All(
+            statuses,
+            status => Assert.Equal(PluginSessionStatusKind.Loaded, status.Kind));
+        ReleaseAndCollect(plugins);
+    }
+
+    [Fact]
+    public void DuplicateIdInAllowListFailsAndLoadsNoCopy()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixture(temporary.Path, "alpha", "acdream.test.dup-listed");
+        InstallFixture(temporary.Path, "beta", "acdream.test.dup-listed");
+        var statuses = new List<PluginSessionStatus>();
+        using var plugins = new PluginSession(new StubHost(), statuses.Add);
+
+        plugins.Start([temporary.Path], ["acdream.test.dup-listed"]);
+
+        Assert.Equal(0, plugins.LoadedCount);
+        PluginSessionStatus status = Assert.Single(statuses);
+        Assert.Equal(PluginSessionStatusKind.Failed, status.Kind);
+        Assert.Contains("more than one plugin folder", status.Error);
+        Assert.Contains(Path.Combine(temporary.Path, "alpha"), status.Error);
+        Assert.Contains(Path.Combine(temporary.Path, "beta"), status.Error);
+        Assert.Empty(plugins.CaptureLoadContextWeakReferences());
+    }
+
     private static void ReleaseAndCollect(PluginSession plugins)
     {
         IReadOnlyList<WeakReference> contexts =
@@ -350,6 +546,37 @@ public sealed class PluginSessionTests
                 apiVersion = 1,
                 kinds = kinds?.Select(static kind => kind.ToString()),
             }));
+
+    private static void InstallFixtureWithHostFields(
+        string root,
+        string folder,
+        string id,
+        string? minHostVersion = null,
+        string? maxHostVersion = null,
+        IReadOnlyList<string>? skipHostVersions = null,
+        IReadOnlyList<string>? hosts = null)
+    {
+        string source = FixturePluginPath();
+        Assert.True(File.Exists(source), $"fixture DLL not found: {source}");
+        string pluginDirectory = Path.Combine(root, folder);
+        Directory.CreateDirectory(pluginDirectory);
+        string fileName = Path.GetFileName(source);
+        File.Copy(source, Path.Combine(pluginDirectory, fileName));
+        File.WriteAllText(
+            Path.Combine(pluginDirectory, "plugin.json"),
+            JsonSerializer.Serialize(new
+            {
+                id,
+                displayName = id,
+                version = "1.0.0",
+                entryDll = fileName,
+                apiVersion = 1,
+                minHostVersion,
+                maxHostVersion,
+                skipHostVersions,
+                hosts,
+            }));
+    }
 
     private sealed class RecordingRenderPackRegistry : IRenderPackRegistry
     {
