@@ -217,6 +217,12 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   stack them. Combat only claims control for a hostile it can actually
   fight - one it can shoot, or one it can walk to - so a blocked or
   too-distant monster in view does not pre-empt navigation every tick.
+- **A refused swing.** When the host will not start an attack on the
+  chosen target (`Refused`: not attackable just then, the character
+  mid-something the flags do not show), the target is held and tried
+  again 0.3 s later rather than dropped for the next one - which the host
+  refused the same way, fifteen targets in a third of a second. Three
+  refusals in a row blacklist the target for the blacklist period.
 - **Approach.** Melee only: a hostile out of reach is walked up to when it
   is within the walk-up range (*Walk up to* under Ranges, `ApproachRange`
   in a meta); one farther away is left alone until it comes closer or the

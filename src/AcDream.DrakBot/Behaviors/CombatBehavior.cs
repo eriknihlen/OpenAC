@@ -43,6 +43,13 @@ public sealed class CombatBehavior(
     private IPluginLogger? _log;
     private bool _leftCombat = true;
     private int _recoveryCount;
+    private uint _refusedTargetId;
+    private int _refusals;
+    private double _holdUntil = double.NegativeInfinity;
+
+    /// <summary>A refused attack is tried again on the same target after this long, this many times, before the target is struck.</summary>
+    public const double RefusalHoldSeconds = 0.3d;
+    public const int RefusalsBeforeStrike = 3;
 
     private enum Phase
     {
@@ -229,7 +236,7 @@ public sealed class CombatBehavior(
         _targetId = target.ObjectId;
         _leftCombat = false;
 
-        if (board.IsActionPending)
+        if (board.IsActionPending || board.Now < _holdUntil)
             return BehaviorStep.Continue;
 
         // A ranged style with something on top of it steps back before the next shot.
@@ -289,7 +296,30 @@ public sealed class CombatBehavior(
         if (begin.Status == PluginCombatCommandStatus.Busy)
             return BehaviorStep.Continue;
         if (!begin.Accepted)
-            return BehaviorStep.Fail($"attack refused: {begin.Status} {begin.Notice}");
+        {
+            // The host would not start the swing (the target not attackable
+            // just now, the character mid-something the flags do not show).
+            // Failing here dropped the target and picked the next, which was
+            // refused the same way: fifteen targets in a third of a second.
+            // Hold the target a moment and try again; a target refused three
+            // times over is blacklisted and passed over.
+            if (_refusedTargetId != target.ObjectId)
+            {
+                _refusedTargetId = target.ObjectId;
+                _refusals = 0;
+            }
+            if (++_refusals < RefusalsBeforeStrike)
+            {
+                _holdUntil = board.Now + RefusalHoldSeconds;
+                context.Log.Debug($"combat: attack on {target.Name} refused ({begin.Status} {begin.Notice}); trying again in {RefusalHoldSeconds:0.0}s");
+                return BehaviorStep.Continue;
+            }
+            _refusals = 0;
+            _targetId = 0u;
+            lineOfSight.Blacklist(target.ObjectId);
+            return BehaviorStep.Fail($"attack refused {RefusalsBeforeStrike} times: {begin.Status} {begin.Notice}; leaving {target.Name} alone for {combat.LineOfSight.BlacklistSeconds:0}s");
+        }
+        _refusals = 0;
         context.Log.Debug($"combat: swing at {target.Name} ({engagement.Height}, power {combat.Power:P0}, {target.Distance:0.0}m)");
         EnterPhase(Phase.Building, board.Now);
         return BehaviorStep.Continue;

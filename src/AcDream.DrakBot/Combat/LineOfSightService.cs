@@ -398,6 +398,25 @@ public sealed class LineOfSightService(
     }
 
     /// <summary>
+    /// Puts a target on the blacklist outright, for the blacklist period:
+    /// a host that refuses to swing at it three times over is not going to
+    /// change its mind on the fourth, and three refusals are a third of a
+    /// second, not three timeouts.
+    /// </summary>
+    public void Blacklist(uint targetId)
+    {
+        if (targetId == 0u)
+            return;
+        _strikePending.Remove(targetId);
+        _walkStrikePending.Remove(targetId);
+        LineOfSightSettings options = settings();
+        _strikes.TryGetValue(targetId, out Strikes strikes);
+        strikes.Unreachable = Math.Max(strikes.Unreachable, Math.Max(1, options.BlacklistStrikes));
+        strikes.BlacklistedUntil = clock.Now + Math.Max(0d, options.BlacklistSeconds);
+        _strikes[targetId] = strikes;
+    }
+
+    /// <summary>
     /// A walk toward the target ran out of time without reaching it: a strike
     /// of its own, whatever the sweeps said, so a monster on the far side of
     /// a wall (or one the character cannot get at) is left alone for a while

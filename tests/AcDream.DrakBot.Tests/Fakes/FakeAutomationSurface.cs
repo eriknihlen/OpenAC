@@ -198,9 +198,13 @@ internal sealed class FakeAutomationSurface
         CombatSnapshot = CombatSnapshot with { Mode = mode };
         return new(PluginCombatCommandStatus.ModeChangeSent);
     }
+    /// <summary>Targets the host refuses to swing at (BeginPhysicalAttack answers Refused).</summary>
+    public HashSet<uint> RefusedAttackTargets { get; } = [];
     public PluginCombatCommandResult BeginPhysicalAttack(uint targetObjectId, PluginAttackHeight height, float power)
     {
         Commands.Add($"attack:{targetObjectId}:{height}:{power}");
+        if (RefusedAttackTargets.Contains(targetObjectId))
+            return new(PluginCombatCommandStatus.Refused, "not attackable");
         CombatSnapshot = CombatSnapshot with
         {
             SelectedObjectId = targetObjectId,

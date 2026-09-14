@@ -429,6 +429,37 @@ public sealed class CombatBehaviorTests
     // ── walking as an obstacle sense ─────────────────────────────────────
 
     [Fact]
+    public void ARefusedAttackIsTriedAgainOnTheSameTargetBeforeItIsStruck()
+    {
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 2f));
+        surface.Hostiles.Add(Hostile(8, "Other drudge", 2.2f));
+        surface.RefusedAttackTargets.Add(7u);
+
+        // Refused: the target is held, not dropped for the next one.
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(7u, behavior.CurrentTargetId);
+        Assert.Equal(1, surface.Commands.Count(command => command.StartsWith("attack:", StringComparison.Ordinal)));
+        // Inside the hold nothing is tried.
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(1, surface.Commands.Count(command => command.StartsWith("attack:", StringComparison.Ordinal)));
+        // After it, again; the third refusal is a strike and the target is let go.
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock, dt: 0.4).Result);
+        BehaviorStep step = Step(behavior, surface, clock, dt: 0.4);
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.StartsWith("attack refused 3 times", step.Reason);
+        Assert.Equal(3, surface.Commands.Count(command => command.StartsWith("attack:7:", StringComparison.Ordinal)));
+        Assert.True(behavior.LineOfSight.IsBlacklisted(7u));
+
+        // The other one swings fine.
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(8u, behavior.CurrentTargetId);
+        Assert.Contains(surface.Commands, command => command.StartsWith("attack:8:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AMeleeTargetBehindAWallIsNeverWalkedAtAndIsBlacklistedBySweeps()
     {
         var settings = new CombatSettings
