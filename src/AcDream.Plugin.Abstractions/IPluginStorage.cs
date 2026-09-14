@@ -11,6 +11,13 @@ public interface IPluginStorage
     void WriteText(string key, string content) =>
         throw new NotSupportedException("Plugin storage is unavailable.");
     bool Delete(string key) => false;
+
+    /// <summary>
+    /// The folder on disk behind this storage, for telling the player where
+    /// their files are or opening it for them; null when the storage is not
+    /// a folder (a test double, an unavailable host).
+    /// </summary>
+    string? Directory => null;
 }
 
 public sealed class NoOpPluginStorage : IPluginStorage

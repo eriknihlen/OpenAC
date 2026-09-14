@@ -495,7 +495,12 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.InputText("VTank .utl profile", ref utl, 128))
             controller.Update(p => p with { Loot = p.Loot with { UtlProfile = utl } });
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("A loot profile by name from the VTank profiles folder; when set it decides instead of the rules below.");
+            ImGui.SetTooltip("A loot profile by name (no extension) from the bot's loot folder, or the client's vtank folder; when set it decides instead of the rules below.");
+        ImGui.SameLine();
+        if (ImGui.Button("Open folder##loot"))
+            controller.Files.TryOpen(BotFiles.LootFolder, out _);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Drop .utl files here:\n{controller.Files.PathOf(BotFiles.LootFolder) ?? "(no file storage on this host)"}");
 
         ImGui.Spacing();
         ImGui.TextDisabled("Pack");

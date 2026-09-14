@@ -263,6 +263,11 @@ public sealed class NavigationWindow(BotController controller, IAutomationSurfac
                 ImGui.TextDisabled("no saved routes or .nav files");
             ImGui.EndCombo();
         }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Saved routes and .nav files from:\n{controller.Files.PathOf(BotFiles.RoutesFolder) ?? "(no file storage on this host)"}");
+        ImGui.SameLine();
+        if (ImGui.Button("Open folder##routes"))
+            controller.Files.TryOpen(BotFiles.RoutesFolder, out _);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100f);
         ImGui.InputTextWithHint("##routename", "name", ref _routeName, 64);

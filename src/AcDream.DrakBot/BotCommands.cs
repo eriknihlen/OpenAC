@@ -33,6 +33,10 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 case "log":
                     LogCommand(rest);
                     break;
+                case "folder":
+                case "files":
+                    Folder(rest);
+                    break;
                 case "profile":
                     Profile(rest);
                     break;
@@ -290,6 +294,33 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say($"line of sight {(debug ? "drawing " : string.Empty)}{(enabled.Value ? "on" : "off")}");
     }
 
+    /// <summary>/drakbot folder [profiles|routes|loot|metas|logs]: says where the bot's files are and opens the folder.</summary>
+    private void Folder(string[] args)
+    {
+        BotFiles files = controller.Files;
+        if (files.Directory is not { } root)
+        {
+            Say("this host keeps no files on disk");
+            return;
+        }
+        string? sub = args.Length > 0
+            ? args[0].ToLowerInvariant() switch
+            {
+                "profiles" or "profile" => BotFiles.ProfilesFolder,
+                "routes" or "route" or "nav" or "navs" => BotFiles.RoutesFolder,
+                "loot" or "utl" => BotFiles.LootFolder,
+                "metas" or "meta" => BotFiles.MetasFolder,
+                "logs" or "log" => BotFiles.LogsFolder,
+                _ => null,
+            }
+            : null;
+        Say($"DrakBot files: {root}");
+        Say("  profiles/ (bot profiles)  routes/ (routes, .nav)  loot/ (.utl)  metas/ (.af, .met)  logs/ (dumps)");
+        if (files.VtankDirectory is { } vtank)
+            Say($"  also read: {vtank} (the client's shared VTank folder)");
+        Say(files.TryOpen(sub, out string opened) ? $"opened {opened}" : $"could not open {opened}");
+    }
+
     private void LogCommand(string[] args)
     {
         BotLog log = controller.Log;
@@ -306,8 +337,8 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
             case "dump":
             {
                 string text = log.Dump();
-                controller.Store.WriteText("drakbot-log.txt", text);
-                Say($"log dumped: {log.Snapshot().Count} lines to drakbot-log.txt in the plugin folder");
+                string where = controller.Files.WriteLogDump(text);
+                Say($"log dumped: {log.Snapshot().Count} lines to {where}");
                 break;
             }
             case "clear":

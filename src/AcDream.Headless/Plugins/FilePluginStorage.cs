@@ -15,6 +15,8 @@ internal sealed class FilePluginStorage : IPluginStorage
 
     public bool IsAvailable => true;
 
+    public string? Directory => _root;
+
     public string? ReadText(string key)
     {
         string path = Resolve(key);
@@ -33,9 +35,9 @@ internal sealed class FilePluginStorage : IPluginStorage
     {
         ArgumentNullException.ThrowIfNull(prefix);
         string directory = prefix.Length == 0 ? _root : Resolve(prefix);
-        if (!Directory.Exists(directory))
+        if (!System.IO.Directory.Exists(directory))
             return Array.Empty<string>();
-        return Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        return System.IO.Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(_root, path)
                 .Replace(Path.DirectorySeparatorChar, '/'))
             .OrderBy(static key => key, StringComparer.OrdinalIgnoreCase)
@@ -47,7 +49,7 @@ internal sealed class FilePluginStorage : IPluginStorage
         ArgumentNullException.ThrowIfNull(content);
         string path = Resolve(key);
         string directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
+        System.IO.Directory.CreateDirectory(directory);
         string temporary = Path.Combine(
             directory,
             $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");

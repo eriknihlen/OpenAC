@@ -1,3 +1,4 @@
+using AcDream.DrakBot.Profiles;
 using System.Numerics;
 using ImGuiNET;
 
@@ -65,10 +66,10 @@ public sealed class LogWindow(BotController controller)
         }
         ImGui.SameLine();
         if (ImGui.Button("Dump"))
-        {
-            controller.Store.WriteText("drakbot-log.txt", log.Dump());
-            Status("written to drakbot-log.txt in the plugin folder");
-        }
+            Status($"written to {controller.Files.WriteLogDump(log.Dump())}");
+        ImGui.SameLine();
+        if (ImGui.Button("Open folder"))
+            controller.Files.TryOpen(BotFiles.LogsFolder, out _);
         ImGui.SameLine();
         if (ImGui.Button("Clear"))
             log.Clear();

@@ -76,9 +76,10 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             surface.MovementProbe,
             clock,
             () => engine.Profile.Combat.LineOfSight);
+        var files = new BotFiles(host.Storage, host.VtankProfiles);
         VTankLootProfile? LoadUtl(string name)
         {
-            string? text = host.VtankProfiles.ReadText(BotStore.SanitizeName(name) + ".utl");
+            string? text = files.ReadUtl(name);
             return text is null ? null : VTankLootParser.LoadFromText(text);
         }
         LootBehavior loot = null!;

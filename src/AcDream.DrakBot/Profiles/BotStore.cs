@@ -14,6 +14,9 @@ public sealed class BotStore(IPluginStorage storage)
 
     public bool IsAvailable => storage.IsAvailable;
 
+    /// <summary>The storage underneath, for the file layer that shares it.</summary>
+    public IPluginStorage Storage => storage;
+
     /// <summary>A loose file in the plugin's folder: a log dump, an export.</summary>
     public void WriteText(string fileName, string content)
     {

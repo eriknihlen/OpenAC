@@ -61,6 +61,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         string pluginId) : IPluginStorage
     {
         public bool IsAvailable => inner.IsAvailable;
+        public string? Directory =>
+            inner.Directory is { } root ? Path.Combine(root, pluginId) : null;
         public string? ReadText(string key) =>
             inner.ReadText(ScopedKey(key));
         public byte[]? ReadBytes(string key) =>

@@ -260,7 +260,8 @@ real dungeon's walls and ceiling.
 ## VTank loot profiles
 
 The Loot tab's rules are the bot's own JSON. Name a VTank `.utl` profile
-(from the VTank profiles folder, `<data>/vtank/<name>.utl`) and it decides
+(from the bot's `loot/` folder, see *Files*; the client's shared `vtank`
+folder is the fallback) and it decides
 instead: the file is read and written as VTank writes it (`Loot/Utl`,
 RynthSuite's parser), and every condition kind VTank evaluates is
 evaluated here against the item record and its appraisal - name and
@@ -377,8 +378,9 @@ chat, and the behaviors do the work. Ported from RynthSuite's MetaManager
 and ExpressionEngine, so a meta written for RynthAi or VTank runs here.
 
 - **Files.** `.af` (metaf text, what RynthScript compiles to) and `.met`
-  (VTank binary) load by name from the VTank profiles folder
-  (`<data>/vtank/<name>.af|.met`): `/drakbot meta load <name>`, the Meta
+  (VTank binary) load by name from the bot's `metas/` folder (see
+  *Files*; the client's shared `vtank` folder is the fallback):
+  `/drakbot meta load <name>`, the Meta
   tab, or `/vt meta load <name>` from a rule. Embedded `NAV:` blocks travel
   with the meta. The profile remembers the meta's name and loads it with
   the profile.
@@ -441,7 +443,7 @@ dashboard is.
   or an All body on the right, with pickers for states, routes, watchdogs
   and options), a pop-out editor for long expressions (right-click a
   field), a Source view that round-trips the `.af` text, load/save over
-  the VTank profiles folder, and the current-state picker. Edits to a
+  the bot's `metas/` folder, and the current-state picker. Edits to a
   meta loaded from an `.af` are written back to it.
 - **Monsters** - the monster list as a grid: toggle lights for the debuffs
   (Fester, Broadside, Gravity Well, Imperil, Yield, Vulnerability) and the
@@ -468,8 +470,9 @@ dashboard is.
   (Debug: heading errors, walker state, loot decisions, every step of a
   planned route with its cells and doorways, meta rules fired, commands)
   and, at Trace, everything every tick. A level picker, text filter,
-  pause/follow, Copy to the clipboard and Dump to `drakbot-log.txt` in the
-  plugin folder; `/drakbot log quiet|info|debug|trace | tail [n] | dump |
+  pause/follow, Copy to the clipboard, Dump to `logs/drakbot-log.txt` in
+  the bot's folder and an Open folder button;
+  `/drakbot log quiet|info|debug|trace | tail [n] | dump |
   clear` does the same from chat. Everything at or above the level also
   goes to the client's log file (`<data>/logs/client-<date>.log`, rolled
   daily, 14 kept), so a session can be read back afterwards.
@@ -497,6 +500,8 @@ game's own look.
 
 ```
 /drakbot start | stop | status | rebuff
+/drakbot folder [profiles|routes|loot|metas|logs]     (where the bot's files are; opens it)
+/drakbot log quiet|info|debug|trace | tail [n] | dump | clear
 /drakbot profile list | load <name> | save [name] | reset
 /drakbot nav add | pause <seconds> | chat <text> | recall <spell id> | portal <name> | npc <name>
 /drakbot nav clear | use | save <name> | load <name> | list | import <file.nav> | export <file.nav>
@@ -529,9 +534,8 @@ quarter second, `givea stop` empties it.
 
 `nav add` records the character's current position as a waypoint on the
 draft route; `nav use` starts following the draft; `nav save` names it.
-Profiles and routes are JSON under the plugin's storage folder
-(`<config>/plugins/acdream.drakbot/profiles/*.json` and `routes/*.json`) and can
-be edited by hand. `BotProfile` in `Profiles/BotProfile.cs` is the schema.
+Profiles and routes are JSON in the bot's folder (see *Files*) and can be
+edited by hand. `BotProfile` in `Profiles/BotProfile.cs` is the schema.
 Every change made in a window, by a command or by a meta is saved under
 the profile's own name a second after the last change (a dragged slider is
 one write) and on shutdown; the profile in use is recorded
@@ -539,6 +543,37 @@ one write) and on shutdown; the profile in use is recorded
 with the route it names (`Navigation.RouteName`, set whenever a route is
 loaded by name) and its meta. **Save Profile** is only needed to save
 under another name.
+
+## Files
+
+Everything the bot reads or writes is in one folder, laid out by kind, so a
+player never has to know the client's conventions: **Open folder** buttons
+sit beside the loot profile field (Settings > Looting), the route picker
+(Navigation) and the log's Dump button, and `/drakbot folder
+[profiles|routes|loot|metas|logs]` says where it is and opens it.
+`BotFiles` in `Profiles/BotFiles.cs` is the layer.
+
+```
+<config>/plugins/acdream.drakbot/        Windows: %AppData%\acdream\plugins\acdream.drakbot
+  profiles/   name.json                  bot profiles (auto-saved; last-profile.txt names the one in use)
+  routes/     name.json, name.nav        bot routes, and VTank .nav routes dropped in
+  loot/       name.utl                   VTank loot profiles
+  metas/      name.af, name.met          VTank metas (saved metas are written here as .af)
+  hazards/    XXXX.json                  marked hazard cells, per landblock
+  meta/       gvars.txt, pvars/*.txt     meta variables
+  logs/       drakbot-log.txt            log dumps
+```
+
+The folders are created on start so an empty install shows where things
+go. Names are file names without the extension: a loot profile saved by
+VTank as `--+Buffy_Aeshnidae.utl` is `--+Buffy_Aeshnidae` in the profile
+field. VTank-format files a player already has in the client's shared
+folder (`<data>/vtank`, Windows `%LocalAppData%\acdream\vtank`: its root,
+or its `metas` and `navs` subfolders, since VTank kept everything flat and
+RynthAi sorted them) are still found, as a fallback, and listed in the
+pickers; a file of the same name in the bot's folder wins, and anything
+the bot saves goes to its own folder. `.usd` files are VTank's settings
+and are not read.
 
 ### Route steps
 

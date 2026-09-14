@@ -38,11 +38,16 @@ public sealed class BotController : IMetaBot
         Buffs = buffs ?? throw new ArgumentNullException(nameof(buffs));
         _navigationSnapshot = navigationSnapshot ?? throw new ArgumentNullException(nameof(navigationSnapshot));
         _vtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        Files = new BotFiles(store.Storage, _vtankProfiles);
+        Files.EnsureLayout();
         _dungeon = dungeon ?? NoOpAutomationSurface.Instance;
         Hazards = hazards ?? new DungeonHazards(NoOpPluginStorage.Instance);
     }
 
     public DungeonHazards Hazards { get; }
+
+    /// <summary>The bot's files on disk: the folder layout, the VTank-format files, the log dump.</summary>
+    public BotFiles Files { get; }
 
     /// <summary>The bot's log ring; also what the engine and behaviors write to.</summary>
     public BotLog Log { get; }
@@ -678,46 +683,16 @@ public sealed class BotController : IMetaBot
 
     bool IMetaBot.NeedsAnyBuff(Blackboard board) => Buffs.NeedsAnyBuff(board);
 
-    /// <summary>The <c>.af</c> and <c>.met</c> files in the VTank profiles folder, by file name.</summary>
-    public IReadOnlyList<string> MetaFileNames()
-    {
-        var names = new List<string>();
-        foreach (string key in _vtankProfiles.List(string.Empty))
-        {
-            if (key.EndsWith(".af", StringComparison.OrdinalIgnoreCase) || key.EndsWith(".met", StringComparison.OrdinalIgnoreCase))
-                names.Add(key.Replace('\\', '/').Split('/')[^1]);
-        }
-        names.Sort(StringComparer.OrdinalIgnoreCase);
-        return names;
-    }
+    /// <summary>The <c>.af</c> and <c>.met</c> metas on offer (the bot's metas folder, then the client's vtank folder), by file name.</summary>
+    public IReadOnlyList<string> MetaFileNames() => Files.MetaFileNames();
 
-    /// <summary>The <c>.utl</c> loot profiles in the VTank profiles folder, by file name.</summary>
-    public IReadOnlyList<string> UtlFileNames()
-    {
-        var names = new List<string>();
-        foreach (string key in _vtankProfiles.List(string.Empty))
-        {
-            if (key.EndsWith(".utl", StringComparison.OrdinalIgnoreCase))
-                names.Add(key.Replace('\\', '/').Split('/')[^1]);
-        }
-        names.Sort(StringComparer.OrdinalIgnoreCase);
-        return names;
-    }
+    /// <summary>The <c>.utl</c> loot profiles on offer, by file name.</summary>
+    public IReadOnlyList<string> UtlFileNames() => Files.UtlFileNames();
 
-    /// <summary>The <c>.nav</c> files in the VTank profiles folder, by file name.</summary>
-    public IReadOnlyList<string> NavFileNames()
-    {
-        var names = new List<string>();
-        foreach (string key in _vtankProfiles.List(string.Empty))
-        {
-            if (key.EndsWith(".nav", StringComparison.OrdinalIgnoreCase))
-                names.Add(key.Replace('\\', '/').Split('/')[^1]);
-        }
-        names.Sort(StringComparer.OrdinalIgnoreCase);
-        return names;
-    }
+    /// <summary>The VTank <c>.nav</c> routes on offer, by file name.</summary>
+    public IReadOnlyList<string> NavFileNames() => Files.NavFileNames();
 
-    /// <summary>Writes the loaded meta as <c>&lt;name&gt;.af</c> in the VTank profiles folder.</summary>
+    /// <summary>Writes the loaded meta as <c>metas/&lt;name&gt;.af</c> in the bot's folder.</summary>
     public bool SaveMeta(string name, out string message)
     {
         if (Meta is null)
@@ -733,7 +708,7 @@ public sealed class BotController : IMetaBot
         }
         try
         {
-            _vtankProfiles.WriteText(safe + ".af", AfFileWriter.SaveToString(Meta.EditableRules, Meta.EmbeddedNavs));
+            Files.WriteMeta(safe, AfFileWriter.SaveToString(Meta.EditableRules, Meta.EmbeddedNavs));
             Update(p => p with { Meta = p.Meta with { Name = safe } });
             message = $"saved {safe}.af";
             return true;
@@ -747,17 +722,9 @@ public sealed class BotController : IMetaBot
 
     LoadedMeta? IMetaBot.LoadMetaByName(string name, out string path)
     {
-        string safe = BotStore.SanitizeName(name);
-        path = safe + ".af";
-        string? text = _vtankProfiles.ReadText(path);
-        if (text is not null)
-            return AfFileParser.LoadFromText(text);
-        path = safe + ".met";
-        byte[]? bytes = _vtankProfiles.ReadBytes(path);
-        if (bytes is not null)
-            return MetFileParser.LoadFromBytes(bytes);
-        path = string.Empty;
-        return null;
+        if (!Files.TryReadMeta(name, out string? text, out byte[]? bytes, out path))
+            return null;
+        return text is not null ? AfFileParser.LoadFromText(text) : MetFileParser.LoadFromBytes(bytes!);
     }
 
     Route? IMetaBot.LoadRouteByName(string name)
@@ -765,7 +732,7 @@ public sealed class BotController : IMetaBot
         Route? route = Store.LoadRoute(name, out _);
         if (route is not null)
             return route;
-        string? nav = _vtankProfiles.ReadText(BotStore.SanitizeName(name) + ".nav");
+        string? nav = Files.ReadNav(name);
         return nav is null ? null : NavFile.Parse(name, nav.ReplaceLineEndings("\n").Split('\n'), out _);
     }
 
