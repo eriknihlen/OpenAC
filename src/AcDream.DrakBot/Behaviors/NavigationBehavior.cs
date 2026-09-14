@@ -193,6 +193,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 if (recovery is { } move)
                 {
                     context.Log.Info($"nav: stuck near step {_follower.CurrentIndex + 1} ({step.DistanceMeters:0.0}m to go, heading {step.HeadingDegrees:0}); trying {move} at {BotEngine.Describe(board.Navigation.Position)}");
+                    context.Log.Info($"nav: {CompassProbe(context.Surface, step.HeadingDegrees)}");
                     _walker.BeginRecovery(host, move, board.Now);
                 }
                 return BehaviorStep.Continue;
@@ -258,6 +259,35 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             ? found.ObjectId
             : 0u;
         return _followId;
+    }
+
+    /// <summary>
+    /// How far the character could walk toward the target heading and the
+    /// eight compass points, from the host's collision probe: which way
+    /// the wall actually is when a walk stalls.
+    /// </summary>
+    private static string CompassProbe(IAutomationSurface surface, float targetHeading)
+    {
+        IMovementProbeAutomation probe = surface.MovementProbe;
+        if (!probe.IsAvailable)
+            return "probe: unavailable";
+        var text = new System.Text.StringBuilder("probe:");
+        (string Name, float Heading)[] directions =
+        [
+            ("target", targetHeading), ("N", 0f), ("NE", 45f), ("E", 90f), ("SE", 135f), ("S", 180f), ("SW", 225f), ("W", 270f), ("NW", 315f),
+        ];
+        foreach ((string name, float heading) in directions)
+        {
+            PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(heading, 8f) { StepDistance = 0.5f, MaximumCollisionChecks = 16 });
+            text.Append(' ').Append(name).Append(name == "target" ? $"({heading:0})" : string.Empty).Append('=')
+                .Append(result.Status == PluginWalkProbeStatus.Clear ? "open" : $"{result.ClearDistanceMeters:0.0}m");
+            if (result.BlockingObjectId != 0u)
+            {
+                string blocker = surface.Objects.TryGet(result.BlockingObjectId, out PluginWorldObject value) ? value.Name : $"0x{result.BlockingObjectId:X8}";
+                text.Append('[').Append(blocker).Append(']');
+            }
+        }
+        return text.ToString();
     }
 
     private static string Describe(Waypoint waypoint) => waypoint.Kind switch

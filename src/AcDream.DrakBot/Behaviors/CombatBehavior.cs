@@ -262,6 +262,23 @@ public sealed class CombatBehavior(
         return BehaviorStep.Continue;
     }
 
+    /// <summary>Whether walking at the target runs into the target itself (and not a wall or another creature first).</summary>
+    private static bool TouchesTarget(BehaviorContext context, in PluginCombatTarget target)
+    {
+        IMovementProbeAutomation probe = context.Surface.MovementProbe;
+        if (!probe.IsAvailable || !context.Surface.Navigation.TryGetObject(target.ObjectId, out PluginNavigationObject body))
+            return false;
+        float heading = RouteFollower.HeadingTo(context.Board.Navigation.Position, body.Position);
+        PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(heading, target.Distance + 1f)
+        {
+            StepDistance = 0.5f,
+            MaximumCollisionChecks = 24,
+            TargetObjectId = target.ObjectId,
+        });
+        return result.Status == PluginWalkProbeStatus.Clear
+            || (result.Status == PluginWalkProbeStatus.Blocked && result.BlockingObjectId == target.ObjectId);
+    }
+
     /// <summary>
     /// Makes ammunition from bundles in the pack when the quiver is empty;
     /// in peace mode, one combine at a time, then the swap gate wields it.
@@ -330,7 +347,8 @@ public sealed class CombatBehavior(
         {
             if (combat.Style == CombatStyle.Melee)
             {
-                if (candidate.Distance <= combat.MeleeRangeMeters)
+                if (candidate.Distance <= combat.MeleeRangeMeters
+                    || (candidate.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(context, candidate)))
                 {
                     engagement = new Engagement(candidate, preferred, Approach: false);
                     return true;
@@ -419,6 +437,15 @@ public sealed class CombatBehavior(
         if (combat.Style == CombatStyle.Melee)
         {
             arrived = target.Distance <= combat.MeleeRangeMeters;
+            // A big monster keeps the character at its own radius, beyond
+            // the reach setting, while already touching it: when the walk
+            // probe says the body bumps the target before anything else,
+            // that is close enough to swing.
+            if (!arrived && target.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(context, target))
+            {
+                context.Log.Debug($"combat: {target.Name} at {target.Distance:0.0}m is body to body; swinging from here");
+                arrived = true;
+            }
         }
         else
         {

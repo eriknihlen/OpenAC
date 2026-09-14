@@ -332,6 +332,7 @@ public sealed class CombatBehaviorTests
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(9, "Noble", 5f));
         Place(surface, 9u, north: 5d, east: 0d);
+        surface.BlockedWalkHeadings.Add(0); // a wall due north, between the character and the Noble
 
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -344,6 +345,24 @@ public sealed class CombatBehaviorTests
         // Left alone: the only thing combat still wants is to drop out of melee mode.
         Assert.True(behavior.WantsControl(Blackboard.Capture(surface, clock, 25f, 15f), out string reason));
         Assert.Equal("leaving combat", reason);
+    }
+
+    [Fact]
+    public void ABigMonsterTheBodyBumpsIntoIsSwungAtBeyondTheReachSetting()
+    {
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 2.5f });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Noble", 4f));
+        Place(surface, 9u, north: 4d, east: 0d);
+        // The walk north runs straight into the Noble itself.
+        surface.BlockedWalkHeadings.Add(0);
+        surface.WalkBlockingObjectId = 9u;
+
+        // Body to body: no walk, straight to the swing.
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal("attack:9:Medium:1", surface.Commands[^1]);
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("move:", StringComparison.Ordinal));
     }
 
     [Fact]

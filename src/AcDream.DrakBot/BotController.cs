@@ -160,13 +160,15 @@ public sealed class BotController : IMetaBot
     {
         if (!Log.Debugs())
             return;
-        if (graph.Count <= 200)
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        IEnumerable<PluginDungeonCell> cells = graph.Count <= 200
+            ? graph.Values
+            : graph.Values.Where(cell => cell.CellId == snapshot.Position.CellId
+                || (graph.TryGetValue(snapshot.Position.CellId, out PluginDungeonCell here) && here.Neighbors.Contains(cell.CellId)));
+        foreach (PluginDungeonCell cell in cells)
         {
-            foreach (PluginDungeonCell cell in graph.Values)
-            {
-                Log.Debug($"  cell 0x{cell.CellId:X8} at {BotEngine.Describe(cell.Position)} -> {string.Join(", ", cell.Neighbors.Select(n => $"0x{n & 0xFFFFu:X4}"))}"
-                    + (cell.Doorways.Count > 0 ? $" doorways {string.Join(", ", cell.Doorways.Select(d => $"0x{d.OtherCellId & 0xFFFFu:X4}@{Math.Abs(d.NorthSouth):0.00}{(d.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(d.EastWest):0.00}{(d.EastWest >= 0 ? 'E' : 'W')}"))}" : " (no doorway positions)"));
-            }
+            Log.Debug($"  cell 0x{cell.CellId:X8}{(cell.CellId == snapshot.Position.CellId ? " (here)" : string.Empty)} at {BotEngine.Describe(cell.Position)} -> {string.Join(", ", cell.Neighbors.Select(n => $"0x{n & 0xFFFFu:X4}"))}"
+                + (cell.Doorways.Count > 0 ? $" doorways {string.Join(", ", cell.Doorways.Select(d => $"0x{d.OtherCellId & 0xFFFFu:X4}@{Math.Abs(d.NorthSouth):0.00}{(d.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(d.EastWest):0.00}{(d.EastWest >= 0 ? 'E' : 'W')} z{d.Elevation * 240d:0.0}"))}" : " (no doorway positions)"));
         }
         for (int index = 0; index < route.Waypoints.Count; index++)
         {
