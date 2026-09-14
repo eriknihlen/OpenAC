@@ -158,6 +158,22 @@ For a single local session, `run` also accepts `--user` and `--password`. Add
 more session entries for a multi-session process. Built-in policies:
 `idle`, `lifecycle-smoke`, `observer-movement`, `portal-route-smoke`.
 
+DrakBot loads as a built-in plugin and sees the same automation surface it
+has in the client (`process.content` must be set for the dungeon cells the
+patrol needs). A session's `pluginSettings` picks its profile and can start
+the login patrol; `/drakbot ...` works from the console (`--console`, or a
+terminal on stdin):
+
+```json
+"plugins": ["acdream.drakbot"],
+"pluginSettings": {
+  "acdream.drakbot": { "profile": "hunting", "patrolOnLogin": "true" }
+}
+```
+
+Profiles live where the client keeps them, `<config dir>/plugins/acdream.drakbot`,
+so one saved in the client is available headless.
+
 ## Run the launcher from source
 
 ```bash
