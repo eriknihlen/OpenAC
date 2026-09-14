@@ -87,6 +87,16 @@ swing, one pickup), which is what lets a heal land between two swings.
 Timing comes from `IBotClock`, advanced by the host's tick delta, so timeouts
 and back-offs are deterministic in tests.
 
+Every behavior waits while the host is mid-action (`Blackboard.IsActionPending`:
+the client's busy count, a combat request or a server reply in flight). The
+busy count is raised when an action is sent and lowered by the server's
+reply; a reply that never comes (a door use cut short by a fight) would
+leave the character busy for good - the bot standing in peace mode while
+monsters circle - so the engine watches it: busy for ten seconds straight
+and it clears one busy reference through `IRecoveryAutomation`
+(`BotEngine.BusyStuckSeconds`, logged as a warning), and another every ten
+seconds while it stays stuck, what `/ub clearbusy` does by hand.
+
 ## The monster list
 
 The Combat tab's element keyword fights everything the same way. The

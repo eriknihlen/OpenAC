@@ -112,6 +112,31 @@ public sealed class EngineIntegrationTests
     }
 
     [Fact]
+    public void ABusyCountThatNeverClearsIsClearedAfterTheWindow()
+    {
+        var profile = new BotProfile
+        {
+            Buffs = new BuffSettings { Enabled = false },
+            Loot = new LootSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, BotEngine engine) = Build(profile);
+        surface.Hostiles.Add(new PluginCombatTarget(9, "Tusker", 0u, 2f, 0f, true, 1f));
+        // A use went out and its reply never came: the host says busy, and combat waits on it.
+        surface.IsCasting = true;
+
+        for (int tick = 0; tick < 5; tick++)
+            engine.Tick(1d);
+        Assert.Equal(0, surface.BusyClears);
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("attack:", StringComparison.Ordinal));
+
+        engine.Tick(BotEngine.BusyStuckSeconds);
+        Assert.Equal(1, surface.BusyClears);
+        // Freed: the fight goes on.
+        engine.Tick(0.1d);
+        Assert.Contains("mode:Melee", surface.Commands);
+    }
+
+    [Fact]
     public void LowHealthInterruptsAnApproachStopsTheWalkAndHeals()
     {
         var profile = new BotProfile

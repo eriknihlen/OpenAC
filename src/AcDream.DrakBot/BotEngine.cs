@@ -136,6 +136,7 @@ public sealed class BotEngine
             LastReason = "not in world";
             return;
         }
+        WatchBusy(board);
         if (board.Now - _lastHeartbeatAt >= 2d && _log.Debugs())
         {
             _lastHeartbeatAt = board.Now;
@@ -210,6 +211,40 @@ public sealed class BotEngine
                 _active = null;
                 return;
         }
+    }
+
+    /// <summary>
+    /// The client's busy count is raised when an action is sent and lowered
+    /// by the server's reply; a reply that never comes (a door use cut
+    /// short by a fight, in the log) leaves the character busy for good,
+    /// and every behavior waits on it - the bot stands in peace mode while
+    /// monsters circle. Nothing the bot does takes this long, so after the
+    /// window one reference is cleared, and another every window while it
+    /// stays stuck, the way /ub clearbusy would by hand.
+    /// </summary>
+    public const double BusyStuckSeconds = 10d;
+    private double _busySince = double.NaN;
+    private double _lastBusyClearAt = double.NegativeInfinity;
+
+    private void WatchBusy(in Blackboard board)
+    {
+        if (!board.IsCasting)
+        {
+            _busySince = double.NaN;
+            return;
+        }
+        if (double.IsNaN(_busySince))
+        {
+            _busySince = board.Now;
+            return;
+        }
+        if (board.Now - _busySince < BusyStuckSeconds || board.Now - _lastBusyClearAt < BusyStuckSeconds)
+            return;
+        _lastBusyClearAt = board.Now;
+        PluginRecoveryResult result = _surface.Recovery.ClearOneBusyReference();
+        _log.Warn(result.Accepted
+            ? $"engine: busy for {board.Now - _busySince:0}s with nothing to wait for; cleared one busy reference ({result.PreviousCount} -> {result.CurrentCount})"
+            : $"engine: busy for {board.Now - _busySince:0}s and the host would not clear it: {result.Message}");
     }
 
     /// <summary>A position as the game prints it, with the cell, for log lines.</summary>

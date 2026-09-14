@@ -11,9 +11,20 @@ internal sealed class FakeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands,
       IPluginChat, ICombatAutomation, ILootAutomation, INavigationAutomation,
       IItemAutomation, IWorldObjectAutomation, IProjectileAutomation,
-      IMovementProbeAutomation, IEnchantmentAutomation, IFellowshipAutomation, IEquipmentAutomation
+      IMovementProbeAutomation, IEnchantmentAutomation, IFellowshipAutomation, IEquipmentAutomation,
+      IRecoveryAutomation
 {
     public List<string> Commands { get; } = [];
+
+    // ── recovery ──────────────────────────────────────────────────────────
+    public int BusyClears { get; private set; }
+    public PluginRecoveryResult ClearOneBusyReference()
+    {
+        BusyClears++;
+        Commands.Add("clearbusy");
+        IsCasting = false;
+        return new PluginRecoveryResult(true, PreviousCount: 1, CurrentCount: 0);
+    }
 
     // ── equipment ─────────────────────────────────────────────────────────
     public List<PluginEquipmentItem> Equipment { get; } = [];
@@ -508,6 +519,7 @@ internal sealed class FakeAutomationSurface
     IEnchantmentAutomation IAutomationSurface.Enchantments => this;
     public IProjectileAutomation Projectiles => this;
     public IMovementProbeAutomation MovementProbe => this;
+    public IRecoveryAutomation Recovery => this;
 }
 
 internal sealed class FakeLogger : IPluginLogger
