@@ -142,12 +142,11 @@ Full credit to Virindi for the original; MossTank exists because that design
 was right. **What ships here is a proof of concept. It is not working yet
 and is not expected to;** most of the real work lives on another branch and
 lands when it is ready.
-**This fork ships its own bot instead of MossTank.** Upstream OpenAC bundles
-MossTank, a plugin written from decompiled VirindiTank; it is removed here
-rather than redistributed - see `NOTICE.md`. In its place `src/AcDream.DrakBot` is
-DrakBot, a clean-room bot compiled into the client and driven with `/drakbot`; see
-[docs/drakbot.md](docs/drakbot.md). Plugins still load from the config directory's
-`plugins/` folder as before.
+**DrakBot** (`src/AcDream.DrakBot`) is a second bundled bot, written from
+scratch against the plugin contract: VTank-style metas, monster lists and
+loot profiles, dungeon patrols, a Dear ImGui dashboard, driven with
+`/drakbot`. See [docs/drakbot.md](docs/drakbot.md). Plugins still load from
+the config directory's `plugins/` folder as before.
 
 **Custom shader packs** are an experiment. The render packs under `samples/`
 are plugins that swap in their own shader stages (an atmospheric tier, a
