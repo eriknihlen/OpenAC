@@ -279,6 +279,7 @@ public sealed class MetaEngine
                 rule.HasFired = true;
                 rule.LastFiredAt = board.Now;
                 LastFired = $"{rule.State}: {Describe(rule)}";
+                _log.Debug($"meta: fired {LastFired}");
                 LastFiredAt = board.Now;
                 if (Debug)
                     _world.WriteToChat($"[Meta] {LastFired}", 1);

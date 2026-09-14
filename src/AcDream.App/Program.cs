@@ -14,9 +14,17 @@ ApplicationPathSet applicationPaths = graphicalPlatform.Paths;
 IReadOnlyList<string> migratedConfigurationFiles =
     GraphicalLegacyConfigurationMigrator.Migrate(applicationPaths);
 
+// The console goes to whoever launched the client; the file keeps every
+// session's log (plugins included) where it can be read afterwards.
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
+    .WriteTo.File(
+        Path.Combine(applicationPaths.LogsDirectory, "client-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        shared: true,
+        outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 foreach (string migratedConfigurationFile in migratedConfigurationFiles)
 {

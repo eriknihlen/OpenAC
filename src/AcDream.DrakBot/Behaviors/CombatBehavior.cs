@@ -191,6 +191,8 @@ public sealed class CombatBehavior(
             return BehaviorStep.Done;
         }
         PluginCombatTarget target = engagement.Target;
+        if (target.ObjectId != _targetId)
+            context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
         _targetId = target.ObjectId;
         _leftCombat = false;
 
@@ -255,6 +257,7 @@ public sealed class CombatBehavior(
             return BehaviorStep.Continue;
         if (!begin.Accepted)
             return BehaviorStep.Fail($"attack refused: {begin.Status} {begin.Notice}");
+        context.Log.Debug($"combat: swing at {target.Name} ({engagement.Height}, power {combat.Power:P0}, {target.Distance:0.0}m)");
         EnterPhase(Phase.Building, board.Now);
         return BehaviorStep.Continue;
     }
@@ -580,6 +583,7 @@ public sealed class CombatBehavior(
         PluginCastRequestResult result = casts.Request(spell.SpellId, target.ObjectId);
         if (result != PluginCastRequestResult.Sent)
             return BehaviorStep.Fail($"{spell.Name}: {result}");
+        context.Log.Debug($"combat: cast {spell.Name} ({spell.SpellId}) at {target.Name} {target.Distance:0.0}m");
         EnterPhase(Phase.Casting, context.Board.Now);
         return BehaviorStep.Continue;
     }

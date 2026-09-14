@@ -14,6 +14,13 @@ public sealed class BotStore(IPluginStorage storage)
 
     public bool IsAvailable => storage.IsAvailable;
 
+    /// <summary>A loose file in the plugin's folder: a log dump, an export.</summary>
+    public void WriteText(string fileName, string content)
+    {
+        if (storage.IsAvailable)
+            storage.WriteText(SanitizeName(Path.GetFileNameWithoutExtension(fileName)) + Path.GetExtension(fileName), content);
+    }
+
     public IReadOnlyList<string> ProfileNames() => Names(ProfilePrefix);
 
     public IReadOnlyList<string> RouteNames() => Names(RoutePrefix);

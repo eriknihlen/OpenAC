@@ -20,6 +20,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
     private bool _resumeNearest;
+    private int _loggedIndex = -1;
+    private double _lastTraceAt = double.NegativeInfinity;
     private bool _followMoving;
     private double _lastFollowLookupAt = double.NegativeInfinity;
     private uint _followId;
@@ -124,6 +126,19 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         {
             _follower.ResumeNearest(board.Navigation.Position);
             _resumeNearest = false;
+            context.Log.Info($"nav: joined '{_follower.Route.Name}' at step {_follower.CurrentIndex + 1}/{_follower.Route.Waypoints.Count}");
+        }
+        if (_follower.CurrentIndex != _loggedIndex)
+        {
+            _loggedIndex = _follower.CurrentIndex;
+            Waypoint? current = _follower.Current;
+            if (current is not null)
+            {
+                string where = current.IsTravel
+                    ? $"{Describe(current)} {current.ToPosition().HorizontalDistanceMeters(board.Navigation.Position):0.0}m away"
+                    : Describe(current);
+                context.Log.Info($"nav: step {_loggedIndex + 1}/{_follower.Route.Waypoints.Count} {current.Kind} {where}; at {BotEngine.Describe(board.Navigation.Position)}");
+            }
         }
 
         if (_actions.IsRunning)
@@ -168,9 +183,16 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             default:
                 StuckRecovery? recovery = _walker.Toward(
                     host, board.Navigation.Position, step.HeadingDegrees, board.Now, nav.TurnToleranceDegrees);
+                if (board.Now - _lastTraceAt >= 0.5d && context.Log.Debugs())
+                {
+                    _lastTraceAt = board.Now;
+                    float error = RouteFollower.HeadingDelta(board.Navigation.Position.HeadingDegrees, step.HeadingDegrees);
+                    context.Log.Debug($"nav: step {_follower.CurrentIndex + 1} {step.DistanceMeters:0.0}m heading {step.HeadingDegrees:0} (error {error:+0;-0}) walker {_walker.State}"
+                        + $" at {BotEngine.Describe(board.Navigation.Position)}{(board.Navigation.IsMoving ? string.Empty : " host:not-moving")}");
+                }
                 if (recovery is { } move)
                 {
-                    context.Log.Info($"nav stuck near waypoint {_follower.CurrentIndex + 1}; trying {move}");
+                    context.Log.Info($"nav: stuck near step {_follower.CurrentIndex + 1} ({step.DistanceMeters:0.0}m to go, heading {step.HeadingDegrees:0}); trying {move} at {BotEngine.Describe(board.Navigation.Position)}");
                     _walker.BeginRecovery(host, move, board.Now);
                 }
                 return BehaviorStep.Continue;
@@ -237,6 +259,15 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             : 0u;
         return _followId;
     }
+
+    private static string Describe(Waypoint waypoint) => waypoint.Kind switch
+    {
+        WaypointKind.Pause => $"{waypoint.Seconds:0.#}s",
+        WaypointKind.Chat => waypoint.Text,
+        WaypointKind.Recall => $"spell {waypoint.SpellId}",
+        WaypointKind.Portal or WaypointKind.Npc or WaypointKind.Vendor => $"'{waypoint.TargetName}'",
+        _ => $"{Math.Abs(waypoint.NorthSouth):0.00}{(waypoint.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(waypoint.EastWest):0.00}{(waypoint.EastWest >= 0 ? 'E' : 'W')} z{waypoint.Elevation * 240d:0.0}",
+    };
 
     public void Interrupt(BehaviorContext context)
     {

@@ -33,6 +33,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
     private BotController? _controller;
     private BotCommands? _commands;
     private Action? _drawWindows;
+    private BotLog? _log;
     private IDisposable? _commandLease;
     private IDisposable? _aliasLease;
     private IDisposable? _vtLease;
@@ -54,6 +55,10 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
 
         IAutomationSurface surface = host.Automation;
         var clock = new TickClock();
+        // Everything the bot says goes through its own log: a ring for the
+        // Log window and dumps, and on to the host's log (the client's file).
+        var log = new BotLog(host.Log, () => clock.Now);
+        _log = log;
         var cooldowns = new CastCooldowns(clock);
         BotEngine engine = null!;
         var spells = new SpellSelector(
@@ -102,11 +107,11 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             salvage,
             navigation,
         ];
-        engine = new BotEngine(surface, host.Log, behaviors, clock);
+        engine = new BotEngine(surface, log, behaviors, clock);
         _engine = engine;
 
         var store = new BotStore(host.Storage);
-        BotProfile? saved = store.IsAvailable ? TryLoadDefault(store, host.Log) : null;
+        BotProfile? saved = store.IsAvailable ? TryLoadDefault(store, log) : null;
         if (saved is not null)
             _engine.Profile = saved;
 
@@ -118,7 +123,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             () => surface.Navigation.Snapshot,
             host.VtankProfiles,
             surface.Dungeon,
-            new DungeonHazards(host.Storage));
+            new DungeonHazards(host.Storage),
+            log);
         _commands = new BotCommands(_controller, surface.Chat);
         BotCommands commands = _commands;
         _controller.CommandHandler = text =>
@@ -130,12 +136,12 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // its variables in the plugin's storage; it reads its own switches
         // from the live profile.
         BotController controller = _controller;
-        var world = new MetaWorld(surface, host.Storage, host.Log, host.Selection, () => clock.Now);
+        var world = new MetaWorld(surface, host.Storage, log, host.Selection, () => clock.Now);
         _controller.Meta = new MetaEngine(
             world,
             _controller,
             clock,
-            host.Log,
+            log,
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
         _controller.ObjectScan = surface.Objects.CaptureObjects;

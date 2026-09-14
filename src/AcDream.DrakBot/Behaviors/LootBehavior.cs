@@ -119,6 +119,7 @@ public sealed class LootBehavior(
             EnterPhase(Phase.Evaluating, board.Now);
             return BehaviorStep.Continue;
         }
+        context.Log.Info($"loot: opening {corpse.Name} 0x{corpse.ObjectId:X8} at {corpse.Distance:0.0}m");
         PluginItemCommandResult open = host.Open(_corpseId);
         if (open.Status == PluginItemCommandStatus.Busy)
             return BehaviorStep.Continue;
@@ -150,6 +151,7 @@ public sealed class LootBehavior(
                 continue;
 
             LootDecision decision = Decide(context, loot, item, IsAppraised(context, item.ObjectId));
+            context.Log.Debug($"loot: {item.Name} 0x{item.ObjectId:X8} ({item.ObjectClass}, value {item.Value}) -> {(decision.RequiresAppraisal ? "appraise" : decision.Action)}{(decision.RuleName.Length > 0 && !decision.RequiresAppraisal ? $" by '{decision.RuleName}'" : string.Empty)}");
             if (decision.RequiresAppraisal)
             {
                 PluginItemCommandResult identify = host.Identify(item.ObjectId);

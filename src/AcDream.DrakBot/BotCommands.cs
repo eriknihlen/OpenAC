@@ -14,6 +14,7 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         string[] words = command.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string verb = words.Length > 0 ? words[0].ToLowerInvariant() : "status";
         string[] rest = words.Length > 1 ? words[1..] : [];
+        controller.Log.Debug($"command: {command.RawText}");
         try
         {
             switch (verb)
@@ -28,6 +29,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     break;
                 case "status":
                     Status();
+                    break;
+                case "log":
+                    LogCommand(rest);
                     break;
                 case "profile":
                     Profile(rest);
@@ -286,6 +290,44 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say($"line of sight {(debug ? "drawing " : string.Empty)}{(enabled.Value ? "on" : "off")}");
     }
 
+    private void LogCommand(string[] args)
+    {
+        BotLog log = controller.Log;
+        string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
+        switch (sub)
+        {
+            case "quiet":
+            case "info":
+            case "debug":
+            case "trace":
+                log.Level = Enum.Parse<BotLogLevel>(sub, ignoreCase: true);
+                Say($"log level {log.Level}");
+                break;
+            case "dump":
+            {
+                string text = log.Dump();
+                controller.Store.WriteText("drakbot-log.txt", text);
+                Say($"log dumped: {log.Snapshot().Count} lines to drakbot-log.txt in the plugin folder");
+                break;
+            }
+            case "clear":
+                log.Clear();
+                Say("log cleared");
+                break;
+            case "tail":
+            {
+                int count = args.Length > 1 && int.TryParse(args[1], out int n) ? n : 10;
+                IReadOnlyList<BotLogEntry> entries = log.Snapshot();
+                for (int index = Math.Max(0, entries.Count - count); index < entries.Count; index++)
+                    Say($"{entries[index].At:HH:mm:ss} {entries[index].Prefix} {entries[index].Text}");
+                break;
+            }
+            default:
+                Say($"log level {log.Level}, {log.Snapshot().Count} lines kept; /drakbot log quiet|info|debug|trace | tail [n] | dump | clear");
+                break;
+        }
+    }
+
     private void Help()
     {
         Say("/drakbot start|stop|status|rebuff");
@@ -297,6 +339,7 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say("/drakbot meta load <name>|clear|on|off|state <name>|states|debug on|off|eval <expr>|status");
         Say("/drakbot patrol; /drakbot goto <NS> <EW>; /drakbot hazard add|remove|clear");
         Say("/drakbot follow <name>|leader|off");
+        Say("/drakbot log quiet|info|debug|trace | tail [n] | dump | clear");
         Say("/drakbot jump[w|x|z|c|s] [heading] [ms]   (also /ub jump...)");
     }
 

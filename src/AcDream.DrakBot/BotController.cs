@@ -27,8 +27,10 @@ public sealed class BotController : IMetaBot
         Func<PluginNavigationSnapshot> navigationSnapshot,
         IPluginStorage? vtankProfiles = null,
         IDungeonAutomation? dungeon = null,
-        DungeonHazards? hazards = null)
+        DungeonHazards? hazards = null,
+        BotLog? log = null)
     {
+        Log = log ?? new BotLog(NoOpPluginLogger.Instance);
         Engine = engine ?? throw new ArgumentNullException(nameof(engine));
         Store = store ?? throw new ArgumentNullException(nameof(store));
         Navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
@@ -40,6 +42,9 @@ public sealed class BotController : IMetaBot
     }
 
     public DungeonHazards Hazards { get; }
+
+    /// <summary>The bot's log ring; also what the engine and behaviors write to.</summary>
+    public BotLog Log { get; }
 
     /// <summary>
     /// Visible objects named like a hotspot (lava, acid pool, magma...)
@@ -103,7 +108,10 @@ public sealed class BotController : IMetaBot
             if ((cell & 0xFFFFu) < 0x100u || !IsHazardName(candidate.Name))
                 continue;
             if (Hazards.Add(cell))
+            {
                 sighted = true;
+                Log.Info($"hazard: '{candidate.Name}' sighted in cell 0x{cell:X8}; marked");
+            }
         }
         if (sighted && IsPatrolling && _patrolLandblock == (snapshot.Position.CellId & 0xFFFF0000u))
             RebuildPatrol();
@@ -137,9 +145,34 @@ public sealed class BotController : IMetaBot
         }
         Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}");
         if (route.IsEmpty)
+        {
+            Log.Warn("patrol: nothing left to walk after the new hazard");
             return;
+        }
+        Log.Info($"patrol: rebuilt around {hazards.Count} hazard cell(s): {route.Waypoints.Count} steps");
+        LogRoute(route, graph);
         DraftRoute = route;
         Navigation.ReplaceRoute(route);
+    }
+
+    /// <summary>Every step of a planned route, with the cells it came from, at debug.</summary>
+    private void LogRoute(Route route, Dictionary<uint, PluginDungeonCell> graph)
+    {
+        if (!Log.Debugs())
+            return;
+        if (graph.Count <= 200)
+        {
+            foreach (PluginDungeonCell cell in graph.Values)
+            {
+                Log.Debug($"  cell 0x{cell.CellId:X8} at {BotEngine.Describe(cell.Position)} -> {string.Join(", ", cell.Neighbors.Select(n => $"0x{n & 0xFFFFu:X4}"))}"
+                    + (cell.Doorways.Count > 0 ? $" doorways {string.Join(", ", cell.Doorways.Select(d => $"0x{d.OtherCellId & 0xFFFFu:X4}@{Math.Abs(d.NorthSouth):0.00}{(d.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(d.EastWest):0.00}{(d.EastWest >= 0 ? 'E' : 'W')}"))}" : " (no doorway positions)"));
+            }
+        }
+        for (int index = 0; index < route.Waypoints.Count; index++)
+        {
+            Waypoint waypoint = route.Waypoints[index];
+            Log.Debug($"  step {index + 1}{(index == route.LoopStart && route.LoopStart > 0 ? " (loop start)" : string.Empty)}: {waypoint.Kind} {Math.Abs(waypoint.NorthSouth):0.00}{(waypoint.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(waypoint.EastWest):0.00}{(waypoint.EastWest >= 0 ? 'E' : 'W')} z{waypoint.Elevation * 240d:0.0}");
+        }
     }
 
     /// <summary>Marks a hazard and reroutes the patrol at once.</summary>
@@ -283,7 +316,11 @@ public sealed class BotController : IMetaBot
     {
         Route? route = ((IMetaBot)this).LoadRouteByName(name);
         if (route is null)
+        {
+            Log.Warn($"route: '{name}' not found");
             return false;
+        }
+        Log.Info($"route: loaded '{name}' ({route.Waypoints.Count} steps, {route.Mode?.ToString() ?? "profile mode"})");
         DraftRoute = route;
         Navigation.SetRoute(route, joinNearest: true);
         return true;
@@ -306,7 +343,11 @@ public sealed class BotController : IMetaBot
     }
 
     /// <summary>Starts following the draft route.</summary>
-    public void UseDraftRoute() => Navigation.SetRoute(DraftRoute);
+    public void UseDraftRoute()
+    {
+        Log.Info($"route: following '{DraftRoute.Name}' ({DraftRoute.Waypoints.Count} steps)");
+        Navigation.SetRoute(DraftRoute);
+    }
 
     public void SaveRoute(string name)
     {
@@ -322,6 +363,7 @@ public sealed class BotController : IMetaBot
         Route? route = Store.LoadRoute(name, out warning);
         if (route is null)
             return false;
+        Log.Info($"route: loaded '{name}' ({route.Waypoints.Count} steps, {route.Mode?.ToString() ?? "profile mode"})");
         DraftRoute = route;
         Navigation.SetRoute(route, joinNearest: true);
         return true;
@@ -387,6 +429,16 @@ public sealed class BotController : IMetaBot
     /// <summary>The loaded dungeon's cell graph around the character, or null when outdoors or unavailable.</summary>
     private Dictionary<uint, PluginDungeonCell>? DungeonGraph(out PluginNavigationSnapshot snapshot, out string problem)
     {
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraphCore(out snapshot, out problem);
+        if (graph is null)
+            Log.Warn($"dungeon: {problem} (at {(snapshot.IsAvailable ? BotEngine.Describe(snapshot.Position) : "unknown")})");
+        else if (!graph.ContainsKey(snapshot.Position.CellId))
+            Log.Warn($"dungeon: the character's cell 0x{snapshot.Position.CellId:X8} is not among the {graph.Count} cells reported; using the nearest");
+        return graph;
+    }
+
+    private Dictionary<uint, PluginDungeonCell>? DungeonGraphCore(out PluginNavigationSnapshot snapshot, out string problem)
+    {
         snapshot = _navigationSnapshot();
         problem = string.Empty;
         if (!snapshot.IsAvailable)
@@ -437,8 +489,12 @@ public sealed class BotController : IMetaBot
         if (route.IsEmpty)
         {
             message = "nothing to patrol here";
+            Log.Warn($"patrol: nothing to walk from cell 0x{start:X8} ({graph.Count} cells, {hazards.Count} hazards)");
             return false;
         }
+        Log.Info($"patrol: built from {BotEngine.Describe(snapshot.Position)} start cell 0x{start:X8}"
+            + $"{(start != snapshot.Position.CellId ? " (moved off a hazard/unknown cell)" : string.Empty)}: {graph.Count} cells, {hazards.Count} hazards, {route.Waypoints.Count} steps, loop from step {route.LoopStart + 1}");
+        LogRoute(route, graph);
         DraftRoute = route;
         Navigation.SetRoute(route);
         _patrolLandblock = snapshot.Position.CellId & 0xFFFF0000u;
@@ -468,6 +524,8 @@ public sealed class BotController : IMetaBot
             return false;
         }
         Route route = DungeonPathfinder.BuildRoute(graph, path, destination, "goto");
+        Log.Info($"goto: {BotEngine.Describe(snapshot.Position)} -> {Math.Abs(northSouth):0.00}{(northSouth >= 0 ? 'N' : 'S')} {Math.Abs(eastWest):0.00}{(eastWest >= 0 ? 'E' : 'W')}: {path.Count} cells, {route.Waypoints.Count} steps");
+        LogRoute(route, graph);
         DraftRoute = route;
         Navigation.SetRoute(route);
         if (!Profile.Navigation.Enabled)

@@ -19,6 +19,8 @@ public sealed class BotEngine
     private readonly List<IBehavior> _behaviors;
     private IBehavior? _active;
     private BehaviorContext? _lastContext;
+    private double _lastHeartbeatAt = double.NegativeInfinity;
+    private bool _wasInWorld;
 
     public BotEngine(
         IAutomationSurface surface,
@@ -117,6 +119,13 @@ public sealed class BotEngine
         _lastContext = context;
         LastBoard = board;
 
+        if (board.IsInWorld != _wasInWorld)
+        {
+            _wasInWorld = board.IsInWorld;
+            _log.Info(board.IsInWorld
+                ? $"engine: in world at {Describe(board.Navigation.Position)}"
+                : "engine: left the world");
+        }
         if (!board.IsInWorld)
         {
             if (_active is not null)
@@ -126,6 +135,13 @@ public sealed class BotEngine
             }
             LastReason = "not in world";
             return;
+        }
+        if (board.Now - _lastHeartbeatAt >= 2d && _log.Debugs())
+        {
+            _lastHeartbeatAt = board.Now;
+            _log.Debug($"engine: {ActiveBehaviorName} ({LastReason}) at {Describe(board.Navigation.Position)}"
+                + $" hp {board.Vitals.Health}/{board.Vitals.MaxHealth} hostiles {board.Hostiles.Count} corpses {board.Corpses.Count}"
+                + $" mode {board.Combat.Mode}{(board.IsCasting ? " casting" : string.Empty)}{(board.LootBusy ? " loot-busy" : string.Empty)}");
         }
 
         // A strictly higher-priority behavior may preempt the active one.
@@ -153,6 +169,7 @@ public sealed class BotEngine
                 continue;
             if (!ReferenceEquals(behavior, _active))
             {
+                _log.Info($"engine: {(_active is null ? "idle" : _active.Name)} -> {behavior.Name} ({reason})");
                 if (_active is not null)
                     SafeInterrupt(_active, context);
                 _active = behavior;
@@ -189,10 +206,15 @@ public sealed class BotEngine
                 _active = null;
                 return;
             default:
+                _log.Debug($"engine: {_active.Name} done");
                 _active = null;
                 return;
         }
     }
+
+    /// <summary>A position as the game prints it, with the cell, for log lines.</summary>
+    public static string Describe(in PluginNavigationPosition position) =>
+        $"{Math.Abs(position.NorthSouth):0.00}{(position.NorthSouth >= 0 ? 'N' : 'S')} {Math.Abs(position.EastWest):0.00}{(position.EastWest >= 0 ? 'E' : 'W')} z{position.Elevation * 240d:0.0} h{position.HeadingDegrees:0} cell 0x{position.CellId:X8}";
 
     private void SafeInterrupt(IBehavior behavior, BehaviorContext context)
     {

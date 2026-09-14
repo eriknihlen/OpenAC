@@ -40,6 +40,11 @@ public sealed class Walker
 
     public StuckRecovery? Recovery => _recovery;
 
+    /// <summary>One word on the walker's state, for the log.</summary>
+    public string State => _recovery is { } recovery
+        ? $"recovering:{recovery}"
+        : _turning ? "turning" : _intent is null ? "stopped" : _steer < 0 ? "run+left" : _steer > 0 ? "run+right" : "run";
+
     /// <summary>
     /// Walks toward <paramref name="heading"/>. Returns a recovery to run
     /// when the walk has stalled; the caller logs it and hands it to

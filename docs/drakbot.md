@@ -423,6 +423,16 @@ dashboard is.
 - **Items** - the weapon each style wields (typed, or taken from the item
   selected in the inventory), the ammunition switch, mana stone tapping,
   and what is wielded now with its mana.
+- **Log** - the bot's own log ring (4000 lines): what it decided (Info:
+  behavior changes, targets, steps, casts, corpses, patrol builds), why
+  (Debug: heading errors, walker state, loot decisions, every step of a
+  planned route with its cells and doorways, meta rules fired, commands)
+  and, at Trace, everything every tick. A level picker, text filter,
+  pause/follow, Copy to the clipboard and Dump to `drakbot-log.txt` in the
+  plugin folder; `/drakbot log quiet|info|debug|trace | tail [n] | dump |
+  clear` does the same from chat. Everything at or above the level also
+  goes to the client's log file (`<data>/logs/client-<date>.log`, rolled
+  daily, 14 kept), so a session can be read back afterwards.
 - **Route markers over the world** - the route being walked (or the draft)
   is drawn on the ground: a cyan ring at every travel point within 150 m,
   amber for NPC and vendor steps, red for the step being walked, the step

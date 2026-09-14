@@ -34,6 +34,7 @@ public sealed class BotDashboard
     private readonly MetaRulesWindow _metaRules;
     private readonly MonstersWindow _monsters;
     private readonly ItemsWindow _items;
+    private readonly LogWindow _log;
     private bool _open = true;
     private string _patrolMessage = string.Empty;
     private double _patrolMessageAt = double.NegativeInfinity;
@@ -50,6 +51,7 @@ public sealed class BotDashboard
         _metaRules = new MetaRulesWindow(controller, surface);
         _monsters = new MonstersWindow(controller, surface);
         _items = new ItemsWindow(controller, surface);
+        _log = new LogWindow(controller);
     }
 
     public bool IsOpen
@@ -70,6 +72,7 @@ public sealed class BotDashboard
         _metaRules.Draw();
         _monsters.Draw();
         _items.Draw();
+        _log.Draw();
         if (!_open)
             return;
 
@@ -388,6 +391,9 @@ public sealed class BotDashboard
         ImGui.TableNextColumn();
         if (Launcher("Items", _items.IsOpen))
             _items.IsOpen = !_items.IsOpen;
+        ImGui.TableNextColumn();
+        if (Launcher("Log", _log.IsOpen))
+            _log.IsOpen = !_log.IsOpen;
         ImGui.TableNextColumn();
         if (ImGui.Button("Save profile", new Vector2(-1f, 26f)))
             _controller.SaveProfile();
