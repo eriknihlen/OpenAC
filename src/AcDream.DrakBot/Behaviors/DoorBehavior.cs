@@ -17,6 +17,8 @@ public sealed class DoorBehavior(
     Func<IReadOnlyList<PluginNavigationObject>> scan) : IBehavior
 {
     private const double ActionTimeoutSeconds = 3d;
+    /// <summary>A use with no reply this long has lost its reply; the busy count it raised is let go.</summary>
+    private const double UseReplyTimeoutSeconds = 4d;
     private const double CooldownSeconds = 5d;
     private const double OpenedSkipSeconds = 60d;
     private const double ScanIntervalSeconds = 0.5d;
@@ -105,6 +107,17 @@ public sealed class DoorBehavior(
             _openedAt[_doorId] = now;
             _phase = Phase.Idle;
             return BehaviorStep.Done;
+        }
+        if (board.IsActionPending && now - _actionAt > UseReplyTimeoutSeconds && _phase is Phase.Opening or Phase.RetryOpen or Phase.Unlocking)
+        {
+            // The use went out and nothing came back: the client's busy count
+            // is still up from it. Clearing it here, now, beats the engine's
+            // ten-second watchdog three times over on a door that will not
+            // answer.
+            PluginRecoveryResult cleared = surface.Recovery.ClearOneBusyReference();
+            context.Log.Warn($"door 0x{_doorId:X8}: no reply to the use after {UseReplyTimeoutSeconds:0}s; {(cleared.Accepted ? "cleared the busy count" : "could not clear the busy count")}");
+            _actionAt = now - ActionTimeoutSeconds;
+            return BehaviorStep.Continue;
         }
         if (board.IsActionPending || now - _actionAt < ActionTimeoutSeconds)
             return BehaviorStep.Continue;

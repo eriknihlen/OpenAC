@@ -355,6 +355,21 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void AnOpenWalkToAMonsterSevenMetresOffIsAnApproachNotASwing()
+    {
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 2.5f, ApproachRangeMeters = 10f });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Soldier", 7f));
+        Place(surface, 9u, north: 7d, east: 0d);
+        // Nothing between: the body could walk the whole way, so it is not touching anything.
+
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.True(behavior.IsApproaching);
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("attack:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void MeleeWalksUpToAFarTargetThenSwings()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =

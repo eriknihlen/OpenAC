@@ -343,7 +343,12 @@ public sealed class CombatBehavior(
         return BehaviorStep.Continue;
     }
 
-    /// <summary>Whether walking at the target runs into the target itself (and not a wall or another creature first).</summary>
+    /// <summary>
+    /// Whether the body is up against the target: a walk toward it stops
+    /// on the target itself before anything else. A walk that goes the
+    /// whole way unhindered means the character can get closer, which is
+    /// what the approach is for - it is not touching.
+    /// </summary>
     private bool TouchesTarget(Blackboard board, in PluginCombatTarget target)
     {
         IMovementProbeAutomation probe = surface.MovementProbe;
@@ -356,9 +361,13 @@ public sealed class CombatBehavior(
             MaximumCollisionChecks = 24,
             TargetObjectId = target.ObjectId,
         });
-        return result.Status == PluginWalkProbeStatus.Clear
-            || (result.Status == PluginWalkProbeStatus.Blocked && result.BlockingObjectId == target.ObjectId);
+        return result.Status == PluginWalkProbeStatus.Blocked
+            && result.BlockingObjectId == target.ObjectId
+            && result.ClearDistanceMeters <= combatReachSlack;
     }
+
+    /// <summary>How far a walk may go before bumping the target and still count as touching it.</summary>
+    private const float combatReachSlack = 1.5f;
 
     /// <summary>
     /// Makes ammunition from bundles in the pack when the quiver is empty;
