@@ -88,7 +88,9 @@ public sealed class HeadlessSessionHostTests
                     "/tell Bob, secret",
                     "/f group",
                     "@admin raw",
-                    "/vt start",
+                    // A slash verb no plugin owns goes to the wire as talk;
+                    // /vt is the built-in bot's now and is handled here.
+                    "/nobodys start",
                 ],
                 loginCommandDelayMs: 0),
             credential,
@@ -593,8 +595,7 @@ public sealed class HeadlessSessionHostTests
                     credentialReference: "probe-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedPaths();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -639,7 +640,7 @@ public sealed class HeadlessSessionHostTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+                IsolatedPaths(),
                 new System.IO.StringReader(
                     "probe-password" + Environment.NewLine),
                 diagnostics,
@@ -702,8 +703,7 @@ public sealed class HeadlessSessionHostTests
                     "play-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedPaths();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -751,8 +751,7 @@ public sealed class HeadlessSessionHostTests
                         statusFile: statusPath),
                 ],
             };
-            HeadlessPathSet paths = HeadlessPathSet.Resolve(
-                new HeadlessPathOverrides());
+            HeadlessPathSet paths = IsolatedPaths();
             using var diagnostics = new StringWriter();
             var operations = new FixtureSessionOperations();
             using var host = new HeadlessProcessHost(
@@ -847,8 +846,7 @@ public sealed class HeadlessSessionHostTests
             Version = 1,
             Sessions = [Descriptor()],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedPaths();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -888,8 +886,7 @@ public sealed class HeadlessSessionHostTests
                 }),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedPaths();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -2536,6 +2533,20 @@ public sealed class HeadlessSessionHostTests
             throw new NotSupportedException();
         public void DisposeSession(WorldSession session) =>
             throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Config, data and cache under a fresh temp folder, so the plugins a
+    /// developer happens to have installed on the machine never load into
+    /// a host test: only the built-in bot rides along here.
+    /// </summary>
+    private static HeadlessPathSet IsolatedPaths()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"acdream-headless-test-{Guid.NewGuid():N}");
+        return HeadlessPathSet.Resolve(new HeadlessPathOverrides(
+            Path.Combine(root, "config"),
+            Path.Combine(root, "data"),
+            Path.Combine(root, "cache")));
     }
 
     private static HeadlessSessionDescriptor Descriptor(

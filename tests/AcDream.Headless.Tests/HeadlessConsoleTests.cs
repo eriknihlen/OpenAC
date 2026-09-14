@@ -618,6 +618,8 @@ public sealed class HeadlessConsoleTests
     private static HeadlessSessionDescriptor Descriptor() => new()
     {
         Id = "console-bot",
+        // The console tests register their own verbs; no plugin rides along.
+        Plugins = [],
         Endpoint = new HeadlessEndpointDescriptor
         {
             Host = "127.0.0.1",
