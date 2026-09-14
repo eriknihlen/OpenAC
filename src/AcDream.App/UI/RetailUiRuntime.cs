@@ -384,6 +384,7 @@ public sealed class RetailUiRuntime : IDisposable
     private CreditsUiController? _creditsController;
     private CharacterCreationUiMountCoordinator? _characterCreationMount;
     private PluginSidePanel? _pluginSidePanel;
+    private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
     private ResourceShutdownTransaction? _shutdown;
@@ -452,6 +453,7 @@ public sealed class RetailUiRuntime : IDisposable
         MountBookPanel();
         MountCharacter();
         MountPlugins();
+        _pluginsMounted = true;
         MountInventory();
         MountExternalContainer();
         MountVendor();
@@ -713,6 +715,11 @@ public sealed class RetailUiRuntime : IDisposable
         _characterCreationMount?.Tick();
         CharacterCreationController?.Tick();
         DialogFactory?.Tick();
+        // Windows a plugin registered after the UI came up (a server-fed panel
+        // arrives once the character is in the world). Same path as the first
+        // mount; each registration is drained once.
+        if (_pluginsMounted && _bindings.Plugins is { HasUndrained: true })
+            MountPlugins();
         Host.Tick(deltaSeconds);
         TooltipPresenter?.Tick();
         _automation?.Tick(deltaSeconds);

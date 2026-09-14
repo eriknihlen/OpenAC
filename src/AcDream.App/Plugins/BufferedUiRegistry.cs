@@ -219,6 +219,29 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
 
     internal void FailMount(Pending pending) => Remove(pending.RegistrationId);
 
+    /// <summary>
+    /// Whether a registration is waiting to be mounted. Plugins may register a
+    /// window at any time - one driven by a server feed only knows its windows
+    /// once the character is in the world - so the runtime polls this each tick
+    /// and drains again, instead of mounting only what was registered before the
+    /// UI came up.
+    /// </summary>
+    internal bool HasUndrained
+    {
+        get
+        {
+            lock (_gate)
+            {
+                foreach (Registration registration in _registrations.Values)
+                {
+                    if (!registration.Drained)
+                        return true;
+                }
+                return false;
+            }
+        }
+    }
+
     internal int RegistrationCount
     {
         get
