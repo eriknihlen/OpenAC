@@ -441,8 +441,10 @@ public sealed class CombatBehavior(
         {
             StopMoving(nav);
             EnterPhase(Phase.Idle, board.Now);
-            lineOfSight.ReportBlocked(target.ObjectId);
-            return BehaviorStep.Fail($"could not reach {target.Name}");
+            bool blacklisted = lineOfSight.ReportUnreachable(target.ObjectId);
+            if (blacklisted)
+                context.Log.Info($"combat: {target.Name} 0x{target.ObjectId:X8} blacklisted for {combat.LineOfSight.BlacklistSeconds:0}s after {combat.LineOfSight.BlacklistStrikes} failed approaches");
+            return BehaviorStep.Fail($"could not reach {target.Name} at {target.Distance:0.0}m{(blacklisted ? "; leaving it alone" : string.Empty)}");
         }
         if (!nav.TryGetObject(target.ObjectId, out PluginNavigationObject where))
         {

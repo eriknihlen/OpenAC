@@ -318,9 +318,32 @@ public sealed class CombatBehaviorTests
         BehaviorStep step = Step(behavior, surface, clock, dt: 3.5);
 
         Assert.Equal(StepResult.Failed, step.Result);
-        Assert.Equal("could not reach Tusker", step.Reason);
+        Assert.StartsWith("could not reach Tusker", step.Reason);
         Assert.Equal("move:clear", surface.Commands[^1]);
         Assert.Equal(1, behavior.LineOfSight.StrikesFor(9u));
+    }
+
+    [Fact]
+    public void AMeleeTargetThatCannotBeReachedIsBlacklistedAfterThreeApproaches()
+    {
+        // A melee walk makes no line-of-sight sweeps, so the timeout itself has to count.
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 2.5f, ApproachTimeoutSeconds = 3d });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Noble", 5f));
+        Place(surface, 9u, north: 5d, east: 0d);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+            BehaviorStep step = Step(behavior, surface, clock, dt: 3.5);
+            Assert.Equal(StepResult.Failed, step.Result);
+            Assert.Equal(attempt + 1, behavior.LineOfSight.StrikesFor(9u));
+        }
+        Assert.True(behavior.LineOfSight.IsBlacklisted(9u));
+        // Left alone: the only thing combat still wants is to drop out of melee mode.
+        Assert.True(behavior.WantsControl(Blackboard.Capture(surface, clock, 25f, 15f), out string reason));
+        Assert.Equal("leaving combat", reason);
     }
 
     [Fact]

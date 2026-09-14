@@ -95,8 +95,10 @@ public sealed class LineOfSightService(
         /// <summary>Strikes from blocked shots and from blocked walks; either sense forgives only its own.</summary>
         public int Shots;
         public int Walks;
+        /// <summary>Walks that ran out of time; an open heading does not forgive these, only reaching the target would.</summary>
+        public int Unreachable;
         public double BlacklistedUntil;
-        public readonly int Count => Shots + Walks;
+        public readonly int Count => Shots + Walks + Unreachable;
     }
 
     /// <summary>Whether the style shoots something the sweep can model.</summary>
@@ -367,6 +369,32 @@ public sealed class LineOfSightService(
             strikes.Shots++;
         if (walk)
             strikes.Walks++;
+        if (strikes.Count >= Math.Max(1, options.BlacklistStrikes))
+        {
+            strikes.BlacklistedUntil = clock.Now + Math.Max(0d, options.BlacklistSeconds);
+            _strikes[targetId] = strikes;
+            return true;
+        }
+        _strikes[targetId] = strikes;
+        return false;
+    }
+
+    /// <summary>
+    /// A walk toward the target ran out of time without reaching it: a strike
+    /// of its own, whatever the sweeps said, so a monster on the far side of
+    /// a wall (or one the character cannot get at) is left alone for a while
+    /// instead of being walked at again the moment the walk gives up.
+    /// Returns true when the target has just been blacklisted.
+    /// </summary>
+    public bool ReportUnreachable(uint targetId)
+    {
+        if (targetId == 0u)
+            return false;
+        _strikePending.Remove(targetId);
+        _walkStrikePending.Remove(targetId);
+        LineOfSightSettings options = settings();
+        _strikes.TryGetValue(targetId, out Strikes strikes);
+        strikes.Unreachable++;
         if (strikes.Count >= Math.Max(1, options.BlacklistStrikes))
         {
             strikes.BlacklistedUntil = clock.Now + Math.Max(0d, options.BlacklistSeconds);
