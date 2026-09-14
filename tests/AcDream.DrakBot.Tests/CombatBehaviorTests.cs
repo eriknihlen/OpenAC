@@ -209,7 +209,7 @@ public sealed class CombatBehaviorTests
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
 
         Assert.Equal("attack:9:Low:1", surface.Commands[^1]);
-        Assert.Equal(["9:Missile:Medium", "9:Missile:High", "9:Missile:Low"], surface.PathQueries);
+        Assert.Equal(["9:Missile:Medium", "9:Missile:High", "9:Missile:Low"], surface.PathQueries.Where(query => query.Contains(":Missile:", StringComparison.Ordinal)));
         Assert.True(behavior.LineOfSight.TryGetLast(9u, out LineOfSightVerdict verdict));
         Assert.True(verdict.IsClear);
         Assert.Equal(PluginAttackHeight.Low, verdict.Height);
@@ -365,7 +365,8 @@ public sealed class CombatBehaviorTests
 
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
         Assert.Equal(["move:forward"], surface.Commands);
-        Assert.Empty(surface.PathQueries);
+        // A melee walk sweeps no shot; only the sight check looks along a straight line.
+        Assert.All(surface.PathQueries, query => Assert.Contains(":Straight:", query));
 
         MoveHostile(surface, 7u, 2f);
         Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
@@ -427,6 +428,45 @@ public sealed class CombatBehaviorTests
     }
 
     // ── walking as an obstacle sense ─────────────────────────────────────
+
+    [Fact]
+    public void AHostileTheWorldHidesIsNotATargetAtAllUntilItComesIntoView()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Melee,
+            MeleeRangeMeters = 1.5f,
+            ApproachRangeMeters = 10f,
+            LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Upstairs", 5f));
+        Place(surface, 9u, north: 5d, east: 0d);
+        surface.PathBlockedByEnvironment = true;
+        surface.BlockPath(9u);
+
+        // Hidden: nothing to fight, no walk, and no strike to wait out.
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("move:", StringComparison.Ordinal) || command.StartsWith("attack:", StringComparison.Ordinal));
+        Assert.Equal(0, behavior.LineOfSight.StrikesFor(9u));
+        Assert.False(behavior.LineOfSight.IsBlacklisted(9u));
+
+        // It comes round the corner: the next look sees it and the walk begins.
+        surface.ClearPath(9u);
+        clock.Advance(0.6d);
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Upstairs at 5.0m", reason);
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.True(behavior.IsApproaching);
+
+        // A creature in the way is not a wall: the hostile behind it is still a target.
+        surface.PathBlockedByEnvironment = false;
+        surface.BlockPath(9u);
+        clock.Advance(0.6d);
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out _));
+    }
 
     [Fact]
     public void ARefusedAttackIsTriedAgainOnTheSameTargetBeforeItIsStruck()

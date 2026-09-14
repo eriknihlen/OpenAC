@@ -408,6 +408,16 @@ public sealed class CombatBehavior(
         Engagement? approach = null;
         foreach (PluginCombatTarget candidate in ranked)
         {
+            // Out of sight is out of mind: a hostile the world hides - the
+            // floor above, the far side of a wall - is not a candidate at
+            // all, for any style, and needs no strike to be passed over.
+            // One in reach is fought regardless: nothing hides a monster
+            // two metres away that the body is touching.
+            if (candidate.Distance > combat.MeleeRangeMeters && lineOfSight.See(candidate.ObjectId) == Sight.Hidden)
+            {
+                blocked++;
+                continue;
+            }
             if (combat.Style == CombatStyle.Melee)
             {
                 if (candidate.Distance <= combat.MeleeRangeMeters

@@ -27,6 +27,20 @@ public readonly record struct LineOfSightVerdict(
 
     /// <summary>Whether an attack should go ahead: a clear path, or no answer to go on.</summary>
     public bool IsUsable => State is LineOfSightState.Clear or LineOfSightState.Unavailable;
+
+    /// <summary>Blocked by the world itself - a wall, a pillar, a floor - rather than by a creature standing in the way.</summary>
+    public bool ByEnvironment { get; init; }
+}
+
+/// <summary>Whether a hostile can be seen from where the character stands.</summary>
+public enum Sight
+{
+    /// <summary>A straight line reaches it at some height, or only a creature is in the way.</summary>
+    Seen,
+    /// <summary>The world is between: a wall, a floor, a pillar at every height. Not a hostile to fight or walk at.</summary>
+    Hidden,
+    /// <summary>No probe to ask.</summary>
+    Unknown,
 }
 
 /// <summary>What the last walk probe toward one target said.</summary>
@@ -162,6 +176,15 @@ public sealed class LineOfSightService(
         if (!projectiles.IsAvailable)
             return Remember(targetId, Unavailable(kind, height, now));
 
+        LineOfSightVerdict verdict = Probe(targetId, kind, height, options, now);
+        if (verdict.State == LineOfSightState.Blocked)
+            _strikePending.Add(targetId);
+        return Remember(targetId, verdict);
+    }
+
+    /// <summary>One sweep, cached; the caller decides whether a blocked answer is a strike.</summary>
+    private LineOfSightVerdict Probe(uint targetId, PluginProjectilePathKind kind, PluginAttackHeight height, LineOfSightSettings options, double now)
+    {
         Prune(now, options.CacheSeconds);
         PluginProjectilePathResult result = projectiles.EvaluatePath(
             new PluginProjectilePathRequest(targetId, kind, height)
@@ -185,13 +208,56 @@ public sealed class LineOfSightService(
             _ => LineOfSightState.Unavailable,
         };
         var verdict = new LineOfSightVerdict(
-            state, kind, height, result.Status, result.BlockingObjectId, now, FromCache: false);
-        entry = new Entry { Verdict = verdict, Samples = result.DebugSamples };
-        _cache[key] = entry;
-        if (state == LineOfSightState.Blocked)
-            _strikePending.Add(targetId);
+            state, kind, height, result.Status, result.BlockingObjectId, now, FromCache: false)
+        {
+            ByEnvironment = state == LineOfSightState.Blocked
+                && (result.BlockingObjectId == 0u || string.Equals(result.Notice, "environment", StringComparison.OrdinalIgnoreCase)),
+        };
+        var entry = new Entry { Verdict = verdict, Samples = result.DebugSamples };
+        _cache[(targetId, kind, height)] = entry;
         ShowSamples(options, entry);
-        return Remember(targetId, verdict);
+        return verdict;
+    }
+
+    /// <summary>
+    /// Whether the character can see a hostile: a straight, flat sweep to
+    /// it at the middle height, then the high and the low, cached like a
+    /// shot. Hidden when the world blocks every one - the monster on the
+    /// floor above, behind the wall, round the corner - and such a monster
+    /// is simply not a hostile to fight or walk at, with no strike and no
+    /// blacklist to wait out: it is looked at again each cache period and
+    /// fought the moment it comes into view. A creature in the way is not
+    /// a wall; the approach goes round it. Unknown without a probe, or
+    /// with the line-of-sight check turned off.
+    /// </summary>
+    public Sight See(uint targetId)
+    {
+        LineOfSightSettings options = settings();
+        if (targetId == 0u || !options.Enabled || !projectiles.IsAvailable)
+            return Sight.Unknown;
+        double now = clock.Now;
+        foreach (PluginAttackHeight height in Heights)
+        {
+            LineOfSightVerdict verdict = Cached(targetId, PluginProjectilePathKind.Straight, height, options, now)
+                ?? Probe(targetId, PluginProjectilePathKind.Straight, height, options, now);
+            if (verdict.State == LineOfSightState.Clear)
+                return Sight.Seen;
+            if (verdict.State == LineOfSightState.Blocked && !verdict.ByEnvironment)
+                return Sight.Seen;
+            if (verdict.State == LineOfSightState.Unavailable)
+                return Sight.Unknown;
+        }
+        return Sight.Hidden;
+    }
+
+    private LineOfSightVerdict? Cached(uint targetId, PluginProjectilePathKind kind, PluginAttackHeight height, LineOfSightSettings options, double now)
+    {
+        if (_cache.TryGetValue((targetId, kind, height), out Entry? entry) && now - entry.Verdict.EvaluatedAt <= options.CacheSeconds)
+        {
+            ShowSamples(options, entry);
+            return entry.Verdict with { FromCache = true };
+        }
+        return null;
     }
 
     /// <summary>

@@ -205,10 +205,18 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   higher).
 - **Aim heights.** The configured attack height is tried first, then the
   other two. A missile attack uses whichever height was clear.
+- **Seeing it first.** Before anything else, and for every style, a
+  hostile out of reach is looked at: a straight, flat sweep to it at the
+  middle height, then the high and the low, cached like a shot. When the
+  world blocks all three - the floor above, the far side of a wall, round
+  a corner - it is *hidden*: not a candidate, no strike, no blacklist to
+  wait out; it is looked at again each cache period and fought the moment
+  it comes into view. A creature in the way is not a wall; the approach
+  goes round it. The strikes and the blacklist below are for what can be
+  seen but not shot or reached, and for the host refusing to swing.
 - **Choosing a target.** Hostiles are ranked as before (distance is the
   straight line, height included; one more than *Ignore above/below*
-  metres up or down - the floor overhead in a stacked dungeon - is not a
-  hostile at all); the first one with a
+  metres up or down is not a hostile at all); the first one with a
   clear path wins. A blocked target is never walked to: it earns a strike
   and is passed over, whatever its distance; after N strikes in a row it
   is blacklisted for a while and drops out of selection until the

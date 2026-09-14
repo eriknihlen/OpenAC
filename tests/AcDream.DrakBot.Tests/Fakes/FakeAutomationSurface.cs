@@ -435,6 +435,8 @@ internal sealed class FakeAutomationSurface
     public Dictionary<(uint Target, PluginAttackHeight Height), PluginProjectilePathStatus> PathStatuses { get; } = [];
     public PluginProjectilePathStatus DefaultPathStatus { get; set; } = PluginProjectilePathStatus.Clear;
     public uint BlockingObjectId { get; set; } = 0x7000_0001u;
+    /// <summary>Blocked paths are the world (no object, notice "environment") rather than a creature in the way.</summary>
+    public bool PathBlockedByEnvironment { get; set; }
     /// <summary>Every sweep asked for, as "target:kind:height"; queries are not commands.</summary>
     public List<string> PathQueries { get; } = [];
     public int PathEvaluations => PathQueries.Count;
@@ -467,10 +469,12 @@ internal sealed class FakeAutomationSurface
             (request.TargetObjectId, request.TargetHeight), out PluginProjectilePathStatus scripted)
             ? scripted
             : DefaultPathStatus;
+        bool wall = status == PluginProjectilePathStatus.Blocked && PathBlockedByEnvironment;
         var result = new PluginProjectilePathResult(
             status,
             CollisionChecks: 4,
-            BlockingObjectId: status == PluginProjectilePathStatus.Blocked ? BlockingObjectId : 0u);
+            BlockingObjectId: status == PluginProjectilePathStatus.Blocked && !wall ? BlockingObjectId : 0u,
+            Notice: wall ? "environment" : null);
         if (request.CaptureDiagnostics)
         {
             result = result with
