@@ -1327,15 +1327,30 @@ internal sealed class AppAutomationSurface
     IReadOnlyList<PluginDungeonCell> IDungeonAutomation.CaptureCells(uint landblockId)
     {
         PhysicsEngine? physics;
+        GameRuntime? runtime;
         lock (_gate)
+        {
             physics = _projectilePhysics;
+            runtime = _runtime;
+        }
         AcDream.Core.World.Cells.CellGraph? graph = physics?.DataCache?.CellGraph;
-        if (graph is null || !IsAvailable)
+        if (graph is null || runtime is null || !IsAvailable)
             return Array.Empty<PluginDungeonCell>();
         uint prefix = landblockId > 0xFFFFu ? landblockId & 0xFFFF0000u : landblockId << 16;
         IReadOnlyList<AcDream.Core.World.Cells.EnvCell> cells = graph.EnvCellsIn(prefix);
         if (cells.Count == 0)
             return Array.Empty<PluginDungeonCell>();
+        // Cell transforms live in the render frame, centred on the world
+        // frame's landblock: render X = (block - centre) * 192 + local. Map
+        // coordinates want (block - 127) * 192 + local - 84, so the centre
+        // block's offset is added back before the map origin comes off.
+        uint frameCentre = runtime.EntityObjects?.Physics.WorldFrameCenterLandblockId ?? 0u;
+        if (frameCentre == 0u)
+            return Array.Empty<PluginDungeonCell>();
+        double centreX = (frameCentre >> 24) & 0xFFu;
+        double centreY = (frameCentre >> 16) & 0xFFu;
+        double offsetX = (centreX - 127d) * 192d - 84d;
+        double offsetY = (centreY - 127d) * 192d - 84d;
         var result = new PluginDungeonCell[cells.Count];
         for (int index = 0; index < cells.Count; index++)
         {
@@ -1369,18 +1384,15 @@ internal sealed class AppAutomationSurface
                         cell.WorldTransform);
                     doorways.Add(new PluginDungeonDoorway(
                         other,
-                        (world.X - 127d * 192d - 84d) / 240d,
-                        (world.Y - 127d * 192d - 84d) / 240d,
+                        (world.X + offsetX) / 240d,
+                        (world.Y + offsetY) / 240d,
                         world.Z / 240d));
                 }
             }
-            // The same projection ProjectNavigationPosition applies to a local
-            // position, folded for an absolute one: the world origin sits
-            // 127 landblocks and 84 units in.
             result[index] = new PluginDungeonCell(
                 cell.Id,
-                (origin.X - 127d * 192d - 84d) / 240d,
-                (origin.Y - 127d * 192d - 84d) / 240d,
+                (origin.X + offsetX) / 240d,
+                (origin.Y + offsetY) / 240d,
                 origin.Z / 240d,
                 neighbors)
             {
