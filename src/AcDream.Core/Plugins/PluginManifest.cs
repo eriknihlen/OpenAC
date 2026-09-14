@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace AcDream.Core.Plugins;
@@ -58,6 +59,7 @@ public sealed record PluginManifest(
         PluginManifestDto? dto;
         try
         {
+            RejectDuplicateProperties(json);
             dto = JsonSerializer.Deserialize<PluginManifestDto>(json, JsonOptions);
         }
         catch (JsonException ex)
@@ -176,6 +178,29 @@ public sealed record PluginManifest(
                 hosts.Add(host);
         }
         return hosts;
+    }
+
+    private static void RejectDuplicateProperties(string json)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json));
+        var scopes = new Stack<HashSet<string>>();
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                    scopes.Push(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    break;
+                case JsonTokenType.EndObject:
+                    scopes.Pop();
+                    break;
+                case JsonTokenType.PropertyName:
+                    string name = reader.GetString()!;
+                    if (!scopes.Peek().Add(name))
+                        throw new PluginManifestException($"duplicate property: {name}");
+                    break;
+            }
+        }
     }
 
     private static void Require(string? value, string jsonFieldName)

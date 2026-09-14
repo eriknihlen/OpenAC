@@ -16,6 +16,8 @@ any code.
 | `skipHostVersions` | optional | Exact client versions with a known breakage. |
 | `hosts` | optional; absent = both | Non-empty array of `graphical`, `headless`. |
 
+A property name must be unique, case-insensitively, within every object in the document, including objects nested inside arrays; a repeat fails to parse.
+
 A host version is compared on its version core: `0.1.7+3a71d75` and `0.2.0-beta.1` compare as
 `0.1.7` and `0.2.0`. `<Version>` in `Directory.Build.props` is bumped only at release, so a build
 from `main` reports the last release number: a plugin needing unreleased abstractions sets

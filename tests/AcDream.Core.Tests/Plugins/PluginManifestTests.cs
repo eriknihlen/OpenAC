@@ -238,4 +238,84 @@ public class PluginManifestTests
 
         Assert.Equal("unknown host: mobile", error.Message);
     }
+
+    [Fact]
+    public void Parse_DuplicateTopLevelKey_Throws()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "id": "y",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("duplicate property: id", error.Message);
+    }
+
+    [Fact]
+    public void Parse_CaseVariantDuplicateKey_Throws()
+    {
+        const string json = """
+        {
+          "Id": "x",
+          "id": "y",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("duplicate property: id", error.Message);
+    }
+
+    [Fact]
+    public void Parse_DuplicateKeyInNestedObject_Throws()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "extra": { "name": "a", "name": "b" }
+        }
+        """;
+
+        PluginManifestException error = Assert.Throws<PluginManifestException>(
+            () => PluginManifest.Parse(json));
+
+        Assert.Equal("duplicate property: name", error.Message);
+    }
+
+    [Fact]
+    public void Parse_SameKeyInSiblingObjects_IsAllowed()
+    {
+        const string json = """
+        {
+          "id": "x",
+          "displayName": "X",
+          "version": "1.0.0",
+          "entryDll": "x.dll",
+          "apiVersion": 1,
+          "a": { "name": "a" },
+          "b": { "name": "b" }
+        }
+        """;
+
+        var manifest = PluginManifest.Parse(json);
+
+        Assert.Equal("x", manifest.Id);
+    }
 }
