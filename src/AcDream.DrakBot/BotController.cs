@@ -67,6 +67,7 @@ public sealed class BotController : IMetaBot
 
     private double _lastHazardScanAt = double.NegativeInfinity;
     private double _loginPatrolFirstTryAt = double.NaN;
+    private bool _loginPatrolWaitTold;
     /// <summary>How long the login patrol keeps asking for the dungeon before it stops trying.</summary>
     public const double LoginPatrolGiveUpSeconds = 120d;
 
@@ -101,11 +102,26 @@ public sealed class BotController : IMetaBot
             return;
         _lastHazardScanAt = now;
         PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        bool loginPatrolPending = Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone;
         if (!snapshot.IsAvailable)
+        {
+            if (loginPatrolPending && !_loginPatrolWaitTold)
+            {
+                _loginPatrolWaitTold = true;
+                Log.Info("patrol: waiting for the character's position before starting on login");
+            }
             return;
+        }
         bool inDungeon = !snapshot.Position.IsOutdoor && (snapshot.Position.CellId & 0xFFFFu) >= 0x100u;
+        if (loginPatrolPending && !inDungeon)
+        {
+            // Outdoors there is nothing to patrol; said once, then the
+            // setting waits for the next login inside a dungeon.
+            _patrolOnLoginDone = true;
+            Log.Info($"patrol: not started on login; the character is outdoors in 0x{snapshot.Position.CellId:X8}");
+        }
 
-        if (Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone && inDungeon)
+        if (loginPatrolPending && inDungeon)
         {
             // The dungeon's cells stream in some seconds after the character
             // does; a try that finds none is not the answer, so this keeps
