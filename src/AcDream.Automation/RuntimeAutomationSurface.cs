@@ -12,15 +12,18 @@ using AcDream.Core.World;
 using AcDream.Core.CharGen;
 using AcDream.Content;
 using AcDream.Plugin.Abstractions;
-using AcDream.App.Runtime;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Automation;
 
-internal sealed class AppAutomationSurface
+/// <summary>
+/// The automation surface a plugin sees, built over the game runtime alone so
+/// the graphical client and the headless host offer plugins the same thing.
+/// </summary>
+public sealed class RuntimeAutomationSurface
     : IAutomationSurface, ICharacterInfo, ISpellCatalog, IMagicCommands, IPluginChat,
       ICombatAutomation, IEquipmentAutomation, IItemAutomation,
       ILootAutomation, IFellowshipAutomation, IEnchantmentAutomation,
@@ -68,7 +71,7 @@ internal sealed class AppAutomationSurface
     private IReadOnlyList<PluginProjectileDebugSample> _projectileDebugSamples =
         Array.Empty<PluginProjectileDebugSample>();
     private long _projectileDebugSamplesExpireAt;
-    private CurrentGameRuntimeAdapter? _sessionCommands;
+    private AutomationSessionCommands? _sessionCommands;
     private IDisposable? _communicationSubscription;
     private readonly List<PluginChatMessage> _chatMessages = [];
     private ulong _pluginChatSequence;
@@ -90,17 +93,18 @@ internal sealed class AppAutomationSurface
     private static readonly string[] AttributeNames =
         ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
 
-    public AppAutomationSurface()
+    public RuntimeAutomationSurface()
         : this(events: null)
     {
     }
 
-    internal AppAutomationSurface(
+    public RuntimeAutomationSurface(
         IEvents? events,
         LocalPluginPeerRegistry? peers = null,
-        IReadOnlyList<string>? peerTags = null)
+        IReadOnlyList<string>? peerTags = null,
+        PluginCommandRegistry? pluginCommands = null)
     {
-        _pluginCommands = new PluginCommandRegistry((verb, error) =>
+        _pluginCommands = pluginCommands ?? new PluginCommandRegistry((verb, error) =>
             Console.WriteLine(
                 $"[PluginCommand:{verb}] {error.GetBaseException().Message}"));
         _events = events;
@@ -117,9 +121,9 @@ internal sealed class AppAutomationSurface
             _events.Tick += OnPeerTick;
     }
 
-    internal IPluginCommandRegistry PluginCommands => _pluginCommands;
+    public IPluginCommandRegistry PluginCommands => _pluginCommands;
 
-    internal bool TryHandlePluginCommand(string commandLine) =>
+    public bool TryHandlePluginCommand(string commandLine) =>
         _pluginCommands.TryHandle(commandLine);
 
     public bool IsAvailable
@@ -359,7 +363,7 @@ internal sealed class AppAutomationSurface
             _magicCatalog = catalog;
     }
 
-    public void BindSessionCommands(CurrentGameRuntimeAdapter commands)
+    public void BindSessionCommands(AutomationSessionCommands commands)
     {
         ArgumentNullException.ThrowIfNull(commands);
         lock (_gate)
@@ -1110,7 +1114,7 @@ internal sealed class AppAutomationSurface
 
     public bool Submit(string text)
     {
-        CurrentGameRuntimeAdapter? commands;
+        AutomationSessionCommands? commands;
         lock (_gate)
             commands = _sessionCommands;
         return commands?.SubmitChatText(text) == true;
@@ -1643,12 +1647,12 @@ internal sealed class AppAutomationSurface
     public PluginNavigationCommandStatus SetMovementIntent(
         in PluginMovementIntent intent)
     {
-        CurrentGameRuntimeAdapter? commands;
+        AutomationSessionCommands? commands;
         lock (_gate)
             commands = _sessionCommands;
         if (commands is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.SetIntent(
+        RuntimeCommandResult result = commands.Commands.Movement.SetIntent(
             commands.Generation,
             new MovementInput(
                 intent.Forward,
@@ -1667,12 +1671,12 @@ internal sealed class AppAutomationSurface
 
     public PluginNavigationCommandStatus ClearMovementIntent()
     {
-        CurrentGameRuntimeAdapter? commands;
+        AutomationSessionCommands? commands;
         lock (_gate)
             commands = _sessionCommands;
         if (commands is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
-        RuntimeCommandResult result = commands.MovementCommands.ClearIntent(
+        RuntimeCommandResult result = commands.Commands.Movement.ClearIntent(
             commands.Generation);
         return result.Status == RuntimeCommandStatus.Accepted
             ? PluginNavigationCommandStatus.Accepted
@@ -1681,13 +1685,13 @@ internal sealed class AppAutomationSurface
 
     public PluginNavigationCommandStatus FaceHeading(float headingDegrees)
     {
-        CurrentGameRuntimeAdapter? commands;
+        AutomationSessionCommands? commands;
         lock (_gate)
             commands = _sessionCommands;
         if (commands is null || !IsAvailable)
             return PluginNavigationCommandStatus.Unavailable;
         RuntimeCommandResult result =
-            commands.MovementCommands.TurnToHeading(
+            commands.Commands.Movement.TurnToHeading(
                 commands.Generation,
                 headingDegrees);
         return result.Status == RuntimeCommandStatus.Accepted
@@ -3193,40 +3197,40 @@ internal sealed class AppAutomationSurface
     public PluginFellowshipCommandResult Create(
         string name,
         bool shareExperience) => InvokeFellowship(commands =>
-            commands.FellowshipCommands.Create(
+            commands.Commands.Fellowship.Create(
                 commands.Generation,
                 name,
                 shareExperience));
 
     public PluginFellowshipCommandResult Recruit(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Recruit(
+        InvokeFellowship(commands => commands.Commands.Fellowship.Recruit(
             commands.Generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult Dismiss(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Dismiss(
+        InvokeFellowship(commands => commands.Commands.Fellowship.Dismiss(
             commands.Generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult Quit(bool disband) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.Quit(
+        InvokeFellowship(commands => commands.Commands.Fellowship.Quit(
             commands.Generation,
             disband));
 
     public PluginFellowshipCommandResult AssignLeader(uint targetObjectId) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.AssignLeader(
+        InvokeFellowship(commands => commands.Commands.Fellowship.AssignLeader(
             commands.Generation,
             targetObjectId));
 
     public PluginFellowshipCommandResult SetOpen(bool isOpen) =>
-        InvokeFellowship(commands => commands.FellowshipCommands.SetOpen(
+        InvokeFellowship(commands => commands.Commands.Fellowship.SetOpen(
             commands.Generation,
             isOpen));
 
     private PluginFellowshipCommandResult InvokeFellowship(
-        Func<CurrentGameRuntimeAdapter, RuntimeCommandResult> invoke)
+        Func<AutomationSessionCommands, RuntimeCommandResult> invoke)
     {
-        CurrentGameRuntimeAdapter? commands;
+        AutomationSessionCommands? commands;
         lock (_gate)
             commands = _sessionCommands;
         if (commands is null || !IsAvailable)

@@ -1,13 +1,13 @@
 using System.Text;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.Headless.Plugins;
+namespace AcDream.Automation;
 
-internal sealed class FilePluginStorage : IPluginStorage
+public sealed class FilePluginStorage : IPluginStorage
 {
     private readonly string _root;
 
-    internal FilePluginStorage(string root)
+    public FilePluginStorage(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         _root = Path.GetFullPath(root);

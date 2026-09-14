@@ -5,6 +5,7 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.UI.Layout;
 

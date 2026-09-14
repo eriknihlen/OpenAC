@@ -84,15 +84,61 @@ public sealed class DrakBotPluginHostingTests
         Assert.Contains(host.Storage.Text.Keys, key => key.EndsWith("hunting.json", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void SessionSettingsLoadTheNamedProfileAndSetPatrolOnLogin()
+    {
+        var host = new StubHost();
+        using (var session = new PluginSession(host))
+        {
+            var plugin = new DrakBotPlugin();
+            session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, plugin));
+            session.Start([], allowList: null);
+            Assert.True(host.Commands.TryHandle("/drakbot style magic"));
+            Assert.True(host.Commands.TryHandle("/drakbot profile save hunting"));
+            Assert.True(host.Commands.TryHandle("/drakbot profile reset"));
+        }
+
+        host.SessionSettings[DrakBotPlugin.ProfileSetting] = "hunting";
+        host.SessionSettings[DrakBotPlugin.PatrolOnLoginSetting] = "true";
+        using var next = new PluginSession(host);
+        var bot = new DrakBotPlugin();
+        next.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, bot));
+        next.Start([], allowList: null);
+
+        Assert.Equal("hunting", bot.Engine!.Profile.Name);
+        Assert.Equal(Profiles.CombatStyle.Magic, bot.Engine.Profile.Combat.Style);
+        Assert.True(bot.Engine.Profile.Navigation.PatrolOnLogin);
+    }
+
+    [Fact]
+    public void SessionSettingsNamingAMissingProfileLeaveTheBotOnItsOwn()
+    {
+        var host = new StubHost();
+        host.SessionSettings[DrakBotPlugin.ProfileSetting] = "nowhere";
+        host.SessionSettings[DrakBotPlugin.PatrolOnLoginSetting] = "sometimes";
+        using var session = new PluginSession(host);
+        var plugin = new DrakBotPlugin();
+        session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, plugin));
+        session.Start([], allowList: null);
+
+        Assert.Equal(Profiles.BotProfile.Default.Name, plugin.Engine!.Profile.Name);
+        Assert.False(plugin.Engine.Profile.Navigation.PatrolOnLogin);
+        Assert.Contains(host.Log.Lines, w => w.StartsWith("warn:", StringComparison.Ordinal) && w.Contains("nowhere", StringComparison.Ordinal));
+        Assert.Contains(host.Log.Lines, w => w.StartsWith("warn:", StringComparison.Ordinal) && w.Contains("sometimes", StringComparison.Ordinal));
+    }
+
     private sealed class StubHost : IPluginHost
     {
         public FakeAutomationSurface Surface { get; } = new();
         public MemoryStorage Storage { get; } = new();
         public PluginCommandRegistry Commands { get; } = new();
         public WorldEvents Events { get; } = new();
+        public Dictionary<string, string> SessionSettings { get; } = new(StringComparer.Ordinal);
+        public FakeLogger Log { get; } = new();
 
         public bool HasUi => false;
-        public IPluginLogger Log { get; } = new FakeLogger();
+        IPluginLogger IPluginHost.Log => Log;
+        IReadOnlyDictionary<string, string> IPluginHost.SessionSettings => SessionSettings;
         public IGameState State => new WorldGameState();
         IEvents IPluginHost.Events => Events;
         public ISelectionService Selection { get; } = new SelectionState();

@@ -11,6 +11,7 @@ using AcDream.Core.Selection;
 using AcDream.Core.World;
 using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.Interaction;
 

@@ -1,3 +1,4 @@
+using AcDream.Automation;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 
@@ -19,7 +20,7 @@ internal sealed class HeadlessPluginHost
     private readonly object _eventGate = new();
     private readonly List<Subscription> _subscriptions = [];
     private Subscription[] _liveSnapshot = [];
-    private readonly HeadlessAutomationSurface _automation;
+    private readonly RuntimeAutomationSurface _automation;
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>
         _sessionSettingsByPlugin;
     private readonly object _tickGate = new();
@@ -39,20 +40,30 @@ internal sealed class HeadlessPluginHost
         internal bool Active { get; set; } = true;
     }
 
+    /// <param name="automation">
+    /// Builds the automation surface over this host's events (the surface
+    /// ticks its peer heartbeat from them); null gets a surface with no
+    /// peer heartbeat, which is what a test session wants.
+    /// </param>
     internal HeadlessPluginHost(
         GameRuntime runtime,
         IPluginLogger logger,
         IPluginCommandRegistry? commands = null,
         IPluginStorage? vtankProfiles = null,
         IReadOnlyDictionary<string, Dictionary<string, string>>? sessionSettings = null,
-        Func<string, bool>? submitChatText = null)
+        Func<IEvents, RuntimeAutomationSurface>? automation = null,
+        IPluginStorage? storage = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Log = logger ?? throw new ArgumentNullException(nameof(logger));
         Commands = commands ?? NoOpPluginCommandRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        Storage = storage ?? NoOpPluginStorage.Instance;
         _sessionSettingsByPlugin = CopySessionSettings(sessionSettings);
-        _automation = new HeadlessAutomationSurface(runtime, submitChatText);
+        _automation = automation?.Invoke(this)
+            ?? new RuntimeAutomationSurface(
+                events: null,
+                pluginCommands: commands as AcDream.Core.Plugins.PluginCommandRegistry);
         _eventSubscription = runtime.Subscribe(this);
     }
 
@@ -78,10 +89,14 @@ internal sealed class HeadlessPluginHost
     public IPluginLogger Log { get; }
     public IPluginCommandRegistry Commands { get; }
     public IPluginStorage VtankProfiles { get; }
+    public IPluginStorage Storage { get; }
     public IGameState State => this;
     public IEvents Events => this;
     public ISelectionService Selection => _runtime.ActionOwner.Selection;
     public IAutomationSurface Automation => _automation;
+
+    /// <summary>The surface itself, for the session host to bind the runtime into.</summary>
+    internal RuntimeAutomationSurface Surface => _automation;
 
     public IUiRegistry Ui => NoOpUiRegistry.Instance;
 
@@ -262,6 +277,7 @@ internal sealed class HeadlessPluginHost
         lock (_tickGate)
             _tick = null;
         _eventSubscription.Dispose();
+        _automation.Dispose();
     }
 
     public void OnEntity(in RuntimeEntityDelta delta)

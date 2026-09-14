@@ -1,18 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- The automation surface plugins talk to, shared by the graphical client
+       and the headless host: everything IAutomationSurface needs from the
+       runtime, with no renderer, window or retained-UI dependency. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <RootNamespace>AcDream.Runtime</RootNamespace>
+    <RootNamespace>AcDream.Automation</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="AcDream.Runtime.Tests" />
     <InternalsVisibleTo Include="AcDream.App" />
-    <InternalsVisibleTo Include="AcDream.Automation" />
     <InternalsVisibleTo Include="AcDream.App.Tests" />
-    <InternalsVisibleTo Include="AcDream.Core.Tests" />
     <InternalsVisibleTo Include="acdream-headless" />
     <InternalsVisibleTo Include="AcDream.Headless.Tests" />
   </ItemGroup>
@@ -22,5 +22,6 @@
     <ProjectReference Include="..\AcDream.Content\AcDream.Content.csproj" />
     <ProjectReference Include="..\AcDream.Platform\AcDream.Platform.csproj" />
     <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+    <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
   </ItemGroup>
 </Project>

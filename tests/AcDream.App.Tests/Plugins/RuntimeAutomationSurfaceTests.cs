@@ -7,15 +7,16 @@ using AcDream.Core.Spells;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Gameplay;
 using System.Numerics;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.Plugins;
 
-public sealed class AppAutomationSurfaceTests
+public sealed class RuntimeAutomationSurfaceTests
 {
     [Fact]
     public void ProjectileDebugSamplesAreDetachedValidatedAndClearedOnUnbind()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         PluginProjectileDebugSample[] source =
         [
             new(new Vector3(1f, 2f, 3f), true, 0.4f),
@@ -37,7 +38,7 @@ public sealed class AppAutomationSurfaceTests
     [Fact]
     public void SelectionAutomationUsesTheBoundCanonicalActionRoute()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var actions = new List<PluginSelectionAction>();
         surface.BindSelectionActions(action =>
         {
@@ -78,14 +79,14 @@ public sealed class AppAutomationSurfaceTests
             PublicWeenieBitfield = publicFlags,
         };
 
-        Assert.Equal(expected, AppAutomationSurface.ClassifyObject(item));
+        Assert.Equal(expected, RuntimeAutomationSurface.ClassifyObject(item));
     }
 
     [Fact]
     public void NavigationProjectionUsesVtankMapCoordinatesAndCompassHeading()
     {
         PluginNavigationPosition center =
-            AppAutomationSurface.ProjectNavigationPosition(new Position(
+            RuntimeAutomationSurface.ProjectNavigationPosition(new Position(
                 0x7F7F0001u,
                 new Vector3(84f, 84f, 240f),
                 Quaternion.Identity));
@@ -97,7 +98,7 @@ public sealed class AppAutomationSurfaceTests
         Assert.True(center.IsOutdoor);
 
         PluginNavigationPosition nextBlock =
-            AppAutomationSurface.ProjectNavigationPosition(new Position(
+            RuntimeAutomationSurface.ProjectNavigationPosition(new Position(
                 0x80800041u,
                 new Vector3(84f, 84f, 0f),
                 Quaternion.Identity));
@@ -112,7 +113,7 @@ public sealed class AppAutomationSurfaceTests
     {
         using var first = GameRuntimeTestFactory.Create();
         using var second = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(
             first,
             first.CharacterOwner,
@@ -150,7 +151,7 @@ public sealed class AppAutomationSurfaceTests
     public void PostSystemMessage_RoutesToChatLog_NeverSpewBox()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         surface.PostSystemMessage("MossTank: buffs applied.");
@@ -167,7 +168,7 @@ public sealed class AppAutomationSurfaceTests
     public void InventoryCompletionProjectsTheCanonicalRequestReceipt()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         const uint itemId = 0x50000123u;
@@ -197,7 +198,7 @@ public sealed class AppAutomationSurfaceTests
     public void RecoveryClearsExactlyOneCanonicalBusyReference()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
         runtime.InventoryOwner.Transactions.IncrementBusyCount();
         runtime.InventoryOwner.Transactions.IncrementBusyCount();
@@ -222,7 +223,7 @@ public sealed class AppAutomationSurfaceTests
         using var runtime = GameRuntimeTestFactory.Create(spellCast: operations);
         runtime.CharacterOwner.InstallSpellMetadata(SpellTable.Create([DurationSpell()]));
         runtime.CharacterOwner.Spellbook.OnSpellLearned(42u);
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
 
         Assert.True(surface.Enchantments.ReportCast(100u, 42u, 30d));
@@ -296,7 +297,7 @@ public sealed class AppAutomationSurfaceTests
     public void ProjectWorldObject_FillsIconIdFromTheClientObject()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var item = new ClientObject
         {
             ObjectId = 0x50000456u,
@@ -304,13 +305,13 @@ public sealed class AppAutomationSurfaceTests
             IconId = 0x06000165u,
         };
 
-        System.Reflection.MethodInfo method = typeof(AppAutomationSurface)
+        System.Reflection.MethodInfo method = typeof(RuntimeAutomationSurface)
             .GetMethod(
                 "ProjectWorldObject",
                 System.Reflection.BindingFlags.NonPublic
                     | System.Reflection.BindingFlags.Instance)
             ?? throw new InvalidOperationException(
-                "AppAutomationSurface.ProjectWorldObject was not found by reflection.");
+                "RuntimeAutomationSurface.ProjectWorldObject was not found by reflection.");
         var result = (PluginWorldObject)method.Invoke(
             surface,
             [runtime, null, item, 0u])!;
@@ -322,7 +323,7 @@ public sealed class AppAutomationSurfaceTests
     [Fact]
     public void FaceHeading_IsUnavailableOnAnUnboundSurface()
     {
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
 
         Assert.Equal(
             PluginNavigationCommandStatus.Unavailable,
@@ -330,9 +331,8 @@ public sealed class AppAutomationSurfaceTests
     }
 
     /// <summary>
-    /// The inert surface every host without a live local player falls back
-    /// to — including <c>HeadlessAutomationSurface</c>, which has no
-    /// navigation surface of its own — must refuse rather than pretend.
+    /// The inert surface a host without a live local player falls back to
+    /// must refuse rather than pretend.
     /// </summary>
     [Fact]
     public void FaceHeading_IsUnavailableOnTheNoOpSurface()
@@ -349,7 +349,7 @@ public sealed class AppAutomationSurfaceTests
     public void FaceHeading_IsImplementedByTheGraphicalSurface()
     {
         System.Reflection.InterfaceMapping map =
-            typeof(AppAutomationSurface).GetInterfaceMap(
+            typeof(RuntimeAutomationSurface).GetInterfaceMap(
                 typeof(INavigationAutomation));
         int index = Array.FindIndex(
             map.InterfaceMethods,
@@ -358,7 +358,7 @@ public sealed class AppAutomationSurfaceTests
 
         Assert.True(index >= 0, "INavigationAutomation.FaceHeading not found.");
         Assert.Equal(
-            typeof(AppAutomationSurface),
+            typeof(RuntimeAutomationSurface),
             map.TargetMethods[index].DeclaringType);
     }
 
@@ -366,7 +366,7 @@ public sealed class AppAutomationSurfaceTests
     public void OwnedItemProjectionCarriesTheSingularNameForAStack()
     {
         using var runtime = GameRuntimeTestFactory.Create();
-        using var surface = new AppAutomationSurface();
+        using var surface = new RuntimeAutomationSurface();
         var stack = new ClientObject
         {
             ObjectId = 0x50000777u,

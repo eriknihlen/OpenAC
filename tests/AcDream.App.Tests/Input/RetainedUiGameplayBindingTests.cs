@@ -1,6 +1,7 @@
 using AcDream.App.Input;
 using AcDream.App.Rendering;
 using AcDream.App.UI;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.Input;
 

@@ -3,6 +3,7 @@ using AcDream.App.Diagnostics;
 using AcDream.App.UI;
 using AcDream.Runtime;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Input;
 

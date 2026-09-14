@@ -2,7 +2,7 @@ using System.Numerics;
 using AcDream.Core.Physics;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Automation;
 
 /// <summary>
 /// One end of a projectile-path query: the physics identity the shadow

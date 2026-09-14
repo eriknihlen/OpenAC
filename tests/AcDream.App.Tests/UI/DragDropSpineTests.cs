@@ -1,5 +1,6 @@
 using AcDream.App.UI;
 using Xunit;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI;
 

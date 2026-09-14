@@ -387,6 +387,7 @@
       "acdream.app": {
         "type": "Project",
         "dependencies": {
+          "AcDream.Automation": "[0.1.7, )",
           "AcDream.Content": "[0.1.7, )",
           "AcDream.Core": "[0.1.7, )",
           "AcDream.Core.Net": "[0.1.7, )",
@@ -413,6 +414,17 @@
           "Silk.NET.Windowing": "[2.23.0, )",
           "SixLabors.ImageSharp": "[3.1.12, )",
           "StbTrueTypeSharp": "[1.26.12, )"
+        }
+      },
+      "acdream.automation": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Content": "[0.1.7, )",
+          "AcDream.Core": "[0.1.7, )",
+          "AcDream.Core.Net": "[0.1.7, )",
+          "AcDream.Platform": "[0.1.7, )",
+          "AcDream.Plugin.Abstractions": "[0.1.7, )",
+          "AcDream.Runtime": "[0.1.7, )"
         }
       },
       "acdream.content": {

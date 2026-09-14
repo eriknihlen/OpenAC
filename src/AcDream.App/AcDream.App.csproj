@@ -37,6 +37,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
+    <ProjectReference Include="..\AcDream.Automation\AcDream.Automation.csproj" />
     <ProjectReference Include="..\AcDream.Core\AcDream.Core.csproj" />
     <ProjectReference Include="..\AcDream.DrakBot\AcDream.DrakBot.csproj" />
     <ProjectReference Include="..\AcDream.DrakBot.Ui\AcDream.DrakBot.Ui.csproj" />

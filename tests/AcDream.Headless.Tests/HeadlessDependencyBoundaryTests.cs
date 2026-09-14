@@ -17,12 +17,14 @@ public sealed class HeadlessDependencyBoundaryTests
     ];
 
     /// <summary>
-    /// The runtime, and DrakBot's engine so a headless session can run the
-    /// bot. The engine speaks the plugin contract only; its ImGui windows are
-    /// a separate assembly the headless host never references.
+    /// The runtime, the automation surface plugins talk to (shared with the
+    /// graphical client, built over the runtime alone), and DrakBot's engine
+    /// so a headless session can run the bot. The engine speaks the plugin
+    /// contract only; its ImGui windows are a separate assembly the headless
+    /// host never references.
     /// </summary>
     [Fact]
-    public void HeadlessAssemblyReferencesOnlyTheRuntimeAndBotProjects()
+    public void HeadlessAssemblyReferencesOnlyTheRuntimeAutomationAndBotProjects()
     {
         string repositoryRoot = FindRepositoryRoot();
         string projectPath = Path.Combine(
@@ -50,6 +52,11 @@ public sealed class HeadlessDependencyBoundaryTests
                 "src",
                 "AcDream.Runtime",
                 "AcDream.Runtime.csproj"),
+            Path.Combine(
+                repositoryRoot,
+                "src",
+                "AcDream.Automation",
+                "AcDream.Automation.csproj"),
             Path.Combine(
                 repositoryRoot,
                 "src",

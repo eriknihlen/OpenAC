@@ -172,6 +172,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             return;
         _enabled = true;
 
+        ApplySessionSettings(_host.SessionSettings);
         _host.Events.Tick += OnTick;
         _commandLease = _host.Commands.Register("drakbot", _commands.Handle);
         _aliasLease = _host.Commands.Register("bot", _commands.Handle);
@@ -201,6 +202,50 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
                 new BotPanel(_engine));
         }
         _host.Log.Info("DrakBot ready; /drakbot for commands");
+    }
+
+    /// <summary>Key in a host's per-session settings: the profile to load on enable.</summary>
+    public const string ProfileSetting = "profile";
+
+    /// <summary>Key in a host's per-session settings: "true"/"false", overrides the profile's patrol-on-login switch for this session.</summary>
+    public const string PatrolOnLoginSetting = "patrolOnLogin";
+
+    /// <summary>
+    /// A host's per-session settings for the bot (the headless
+    /// configuration's <c>pluginSettings["acdream.drakbot"]</c>). The
+    /// profile is loaded like <c>/drakbot profile load</c>; the patrol
+    /// switch is set on the live profile without being written back, so a
+    /// session's override does not become the saved profile's answer.
+    /// </summary>
+    private void ApplySessionSettings(IReadOnlyDictionary<string, string> settings)
+    {
+        if (settings.Count == 0 || _controller is null || _engine is null || _log is null)
+            return;
+        if (settings.TryGetValue(ProfileSetting, out string? profile)
+            && !string.IsNullOrWhiteSpace(profile))
+        {
+            string name = profile.Trim();
+            if (_controller.LoadProfile(name))
+                _log.Info($"session settings: profile '{name}' loaded");
+            else
+                _log.Warn($"session settings: there is no profile '{name}'");
+        }
+        if (settings.TryGetValue(PatrolOnLoginSetting, out string? patrol)
+            && !string.IsNullOrWhiteSpace(patrol))
+        {
+            if (bool.TryParse(patrol.Trim(), out bool patrolOnLogin))
+            {
+                _engine.Profile = _engine.Profile with
+                {
+                    Navigation = _engine.Profile.Navigation with { PatrolOnLogin = patrolOnLogin },
+                };
+                _log.Info($"session settings: patrol on login {(patrolOnLogin ? "on" : "off")}");
+            }
+            else
+            {
+                _log.Warn($"session settings: patrolOnLogin wants true or false, not '{patrol}'");
+            }
+        }
     }
 
     private void HandleUtility(string prefix, PluginCommand command)

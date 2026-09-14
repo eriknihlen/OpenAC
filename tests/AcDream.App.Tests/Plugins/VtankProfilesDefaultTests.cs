@@ -1,4 +1,5 @@
 using AcDream.App.Plugins;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.Plugins;
 

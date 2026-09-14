@@ -26,6 +26,7 @@ using AcDream.Runtime.Session;
 using AcDream.Runtime.World;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.Runtime;
 

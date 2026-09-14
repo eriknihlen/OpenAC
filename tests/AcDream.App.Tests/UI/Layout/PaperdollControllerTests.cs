@@ -4,6 +4,7 @@ using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
 using AcDream.Core.Selection;
 using Xunit;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI.Layout;
 

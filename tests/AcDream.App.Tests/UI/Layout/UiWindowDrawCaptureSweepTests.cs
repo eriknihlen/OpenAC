@@ -13,6 +13,7 @@ using AcDream.Core.Selection;
 using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Chat;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI.Layout;
 

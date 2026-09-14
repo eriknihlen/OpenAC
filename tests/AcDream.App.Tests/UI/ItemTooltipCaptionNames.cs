@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI;
 

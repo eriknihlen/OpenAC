@@ -1,9 +1,9 @@
 using System.Text.Json;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Automation;
 
-internal sealed class LocalPluginPeerRegistry : IDisposable
+public sealed class LocalPluginPeerRegistry : IDisposable
 {
     internal static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(15);
     private const long MaximumDocumentBytes = 64 * 1024;

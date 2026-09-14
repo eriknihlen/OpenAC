@@ -1,5 +1,6 @@
 using AcDream.Core.Combat;
 using AcDream.Runtime.Gameplay;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.UI;
 

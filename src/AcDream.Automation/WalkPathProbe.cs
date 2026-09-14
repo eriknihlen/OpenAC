@@ -3,7 +3,7 @@ using System.Numerics;
 using AcDream.Core.Physics;
 using AcDream.Plugin.Abstractions;
 
-namespace AcDream.App.Plugins;
+namespace AcDream.Automation;
 
 /// <summary>
 /// The body that is asked to walk: the local entity id the shadow registry

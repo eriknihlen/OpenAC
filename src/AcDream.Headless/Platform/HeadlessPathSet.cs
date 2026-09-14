@@ -14,6 +14,14 @@ internal sealed record HeadlessPathSet(
     internal string VtankProfilesDirectory =>
         Path.Combine(DataDirectory, "vtank");
 
+    /// <summary>Per-plugin storage; the same place the graphical client keeps it.</summary>
+    internal string PluginStorageDirectory =>
+        Path.Combine(ConfigDirectory, "plugins");
+
+    /// <summary>Where clients on this machine tell each other they are online.</summary>
+    internal string PluginPeersDirectory =>
+        Path.Combine(DataDirectory, "plugin-peers");
+
     internal static HeadlessPathSet Resolve(
         HeadlessPathOverrides overrides,
         IHeadlessPlatformEnvironment? platform = null)

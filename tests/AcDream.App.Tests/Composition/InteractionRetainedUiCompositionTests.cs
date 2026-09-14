@@ -20,6 +20,7 @@ using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions.Panels.Chat;
 using AcDream.UI.Abstractions.Panels.Settings;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.Composition;
 

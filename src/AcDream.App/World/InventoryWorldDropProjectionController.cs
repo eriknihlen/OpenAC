@@ -3,6 +3,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.World;
 

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AcDream.App/AcDream.App.csproj" />
+    <Project Path="src/AcDream.Automation/AcDream.Automation.csproj" />
     <Project Path="src/AcDream.Bake/AcDream.Bake.csproj" />
     <Project Path="src/AcDream.DrakBot/AcDream.DrakBot.csproj" />
     <Project Path="src/AcDream.DrakBot.Ui/AcDream.DrakBot.Ui.csproj" />

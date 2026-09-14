@@ -7,6 +7,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
 using Xunit;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI.Layout;
 

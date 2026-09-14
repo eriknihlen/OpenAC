@@ -6,6 +6,7 @@ using AcDream.App.Rendering;
 using AcDream.Core.Items;
 using AcDream.Core.Properties;
 using AcDream.Core.Selection;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.UI.Layout;
 

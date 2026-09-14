@@ -2,7 +2,7 @@ using System;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Automation.Items;
 
 internal sealed class AutoWieldController : IDisposable
 {

@@ -3,6 +3,7 @@ using AcDream.App.UI.Layout;
 using AcDream.App.World;
 using AcDream.Core.Items;
 using AcDream.Core.Selection;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI.Layout;
 

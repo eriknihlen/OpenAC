@@ -9,6 +9,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Player;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Types;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI.Layout;
 
