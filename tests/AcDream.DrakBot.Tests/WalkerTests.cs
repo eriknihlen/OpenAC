@@ -97,6 +97,32 @@ public sealed class WalkerTests
     }
 
     [Fact]
+    public void ATurnTheHostIgnoresIsPressedAgainThenCountsAsAStall()
+    {
+        var surface = new FakeAutomationSurface();
+        var walker = new Walker();
+
+        // Turn in place toward 120, but the heading never moves.
+        Assert.Null(walker.Toward(surface, At(0d, 0d), 120f, now: 0d));
+        Assert.Equal(["move:turnright"], surface.Commands);
+        Assert.Null(walker.Toward(surface, At(0d, 0d), 120f, now: 1d));
+        Assert.Equal(["move:turnright"], surface.Commands);
+        // After the turn-stall window the key is let go and pressed again...
+        Assert.Null(walker.Toward(surface, At(0d, 0d), 120f, now: 2.1d));
+        Assert.Equal(["move:turnright", "move:clear", "move:turnright"], surface.Commands);
+        // ...and a second dead window is a stall for the caller to act on.
+        Assert.Null(walker.Toward(surface, At(0d, 0d), 120f, now: 3d));
+        Assert.Equal(StuckRecovery.BackUp, walker.Toward(surface, At(0d, 0d), 120f, now: 4.2d));
+
+        // A turn that is making progress is left alone.
+        var moving = new Walker();
+        Assert.Null(moving.Toward(surface, At(0d, 0d), 120f, now: 0d));
+        Assert.Null(moving.Toward(surface, At(0d, 0d, heading: 40f), 120f, now: 2.1d));
+        Assert.Null(moving.Toward(surface, At(0d, 0d, heading: 80f), 120f, now: 4.2d));
+        Assert.Equal("move:turnright", surface.Commands[^1]);
+    }
+
+    [Fact]
     public void RecoveriesRunTheirCourseThenReleaseTheKeysAndNeverJump()
     {
         var surface = new FakeAutomationSurface();

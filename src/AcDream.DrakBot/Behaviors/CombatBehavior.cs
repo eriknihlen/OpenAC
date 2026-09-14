@@ -36,6 +36,7 @@ public sealed class CombatBehavior(
     private uint _targetId;
     private long _completionRevisionAtSwing;
     private double _phaseStartedAt;
+    private double _lastApproachTraceAt = double.NegativeInfinity;
     private bool _leftCombat = true;
     private int _recoveryCount;
 
@@ -505,6 +506,13 @@ public sealed class CombatBehavior(
 
         // The probes see modelled geometry; the stuck detector catches the rest.
         StuckRecovery? stuck = _walker.Toward(nav, position, heading, board.Now);
+        if (board.Now - _lastApproachTraceAt >= 0.5d && context.Log.Debugs())
+        {
+            _lastApproachTraceAt = board.Now;
+            float error = RouteFollower.HeadingDelta(position.HeadingDegrees, heading);
+            context.Log.Debug($"combat: approach {target.Name} {target.Distance:0.0}m heading {heading:0} (error {error:+0;-0}) walker {_walker.State}"
+                + $" at {BotEngine.Describe(position)}{(board.Navigation.IsMoving ? string.Empty : " host:not-moving")}");
+        }
         if (stuck is { } recovery)
         {
             context.Log.Info($"approach stuck near {target.Name}; trying {recovery}");

@@ -86,6 +86,20 @@ public sealed class DispatcherMovementInputSourceTests
         Assert.True(source.Capture().Forward);
     }
 
+    [Fact]
+    public void DevToolsKeyboardCaptureDoesNotSilenceCommandInput()
+    {
+        using var movement = new RuntimeLocalPlayerMovementState();
+        var capture = new FakeCapture { DevToolsWantCaptureKeyboard = true };
+        var source = new DispatcherMovementInputSource(movement, capture);
+        movement.SetCommandInput(new MovementInput(Forward: true, Run: true));
+
+        MovementInput captured = source.Capture();
+
+        Assert.True(captured.Forward);
+        Assert.True(captured.IsPersistentCommand);
+    }
+
     [Theory]
     [InlineData(InputAction.MovementBackup)]
     [InlineData(InputAction.MovementStop)]

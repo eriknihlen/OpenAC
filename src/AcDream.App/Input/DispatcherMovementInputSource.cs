@@ -45,11 +45,14 @@ internal sealed class DispatcherMovementInputSource : IMovementInputSource
         if (_movement.CommandInterpreterDisabled)
             return default;
 
-        if (_capture?.DevToolsWantCaptureKeyboard == true)
-            return default;
-
+        // A plugin's movement intent is not typed: an overlay window that
+        // has the keyboard (a bot panel the player just clicked) must not
+        // freeze the character it is driving.
         if (_movement.HasCommandInput)
             return _movement.CommandInput with { IsPersistentCommand = true };
+
+        if (_capture?.DevToolsWantCaptureKeyboard == true)
+            return default;
 
         if (_dispatcher is not { } dispatcher)
             return default;

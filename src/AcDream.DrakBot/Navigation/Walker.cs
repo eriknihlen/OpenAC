@@ -26,11 +26,18 @@ public sealed class Walker
 
     public const double RecoveryDurationSeconds = 0.6;
 
+    /// <summary>A turn in place that has not moved the heading this long has the keys pressed again, then counts as a stall.</summary>
+    public const double TurnStallSeconds = 2d;
+    private const float TurnProgressDegrees = 5f;
+
     private readonly StuckDetector _stuck = new();
     private PluginMovementIntent? _intent;
     private int _steer;
     private bool _turning;
     private bool _reasserted;
+    private double _turnStartedAt;
+    private float _turnStartHeading;
+    private int _turnStalls;
     private StuckRecovery? _recovery;
     private double _recoveryUntil;
 
@@ -65,10 +72,33 @@ public sealed class Walker
             // turn keys do it, not a face-heading command: that is an
             // autonomous move the runtime owns, and a run started before
             // it lands can be swallowed when it does.
-            _turning = true;
+            if (!_turning)
+            {
+                _turning = true;
+                _turnStalls = 0;
+                BeginTurnWatch(position.HeadingDegrees, now);
+            }
             _steer = 0;
             _stuck.Reset();
-            Send(nav, new PluginMovementIntent(TurnLeft: delta < 0f, TurnRight: delta > 0f, Run: true));
+            var turn = new PluginMovementIntent(TurnLeft: delta < 0f, TurnRight: delta > 0f, Run: true);
+            Send(nav, turn);
+            // A turn key the host is not honouring would spin here forever,
+            // with the stall window held at zero. When the heading has not
+            // moved for a while the keys are pressed again; a second dead
+            // wait is a stall, so the caller sees it and tries a move.
+            if (now - _turnStartedAt >= TurnStallSeconds
+                && Math.Abs(RouteFollower.HeadingDelta(_turnStartHeading, position.HeadingDegrees)) < TurnProgressDegrees)
+            {
+                BeginTurnWatch(position.HeadingDegrees, now);
+                if (++_turnStalls == 1)
+                {
+                    nav.ClearMovementIntent();
+                    nav.SetMovementIntent(turn);
+                    return null;
+                }
+                _turnStalls = 0;
+                return StuckRecovery.BackUp;
+            }
             return null;
         }
         if (_turning)
@@ -146,7 +176,14 @@ public sealed class Walker
         Stop(nav);
         _turning = false;
         _reasserted = false;
+        _turnStalls = 0;
         _stuck.Reset();
+    }
+
+    private void BeginTurnWatch(float heading, double now)
+    {
+        _turnStartedAt = now;
+        _turnStartHeading = heading;
     }
 
     /// <summary>The resume bar for a turn-in-place bar: half of it, at least a degree under it.</summary>
