@@ -15,6 +15,24 @@ public readonly record struct PluginDungeonCell(
 {
     public PluginNavigationPosition Position =>
         new(CellId, EastWest, NorthSouth, Elevation, 0f, IsOutdoor: false);
+
+    /// <summary>
+    /// The doorways out of this cell, where each opening actually is (its
+    /// polygon's centre at floor level). Empty when the host knows only
+    /// the adjacency, in which case a walk has to aim between cell origins.
+    /// </summary>
+    public IReadOnlyList<PluginDungeonDoorway> Doorways { get; init; } = Array.Empty<PluginDungeonDoorway>();
+}
+
+/// <summary>One opening between two cells, in map coordinates at floor level.</summary>
+public readonly record struct PluginDungeonDoorway(
+    uint OtherCellId,
+    double EastWest,
+    double NorthSouth,
+    double Elevation)
+{
+    public PluginNavigationPosition Position =>
+        new(0u, EastWest, NorthSouth, Elevation, 0f, IsOutdoor: false);
 }
 
 /// <summary>The loaded dungeon's cell graph, for a plugin that plans its own way through it.</summary>

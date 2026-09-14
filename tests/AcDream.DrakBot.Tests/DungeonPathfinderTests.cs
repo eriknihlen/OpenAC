@@ -101,6 +101,70 @@ public sealed class DungeonPathfinderTests
         Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d > 49d);
     }
 
+    /// <summary>A ring of twelve rooms with a two-room spur off each of three of them.</summary>
+    private static Dictionary<uint, PluginDungeonCell> RingWithSpurs()
+    {
+        var cells = new List<PluginDungeonCell>();
+        for (uint index = 0; index < 12; index++)
+        {
+            double angle = index * Math.PI * 2d / 12d;
+            uint previous = (index + 11) % 12;
+            uint next = (index + 1) % 12;
+            var neighbors = new List<uint> { 0x100 + previous, 0x100 + next };
+            if (index % 4 == 0)
+                neighbors.Add(0x200 + index);
+            cells.Add(Cell(0x100 + index, Math.Cos(angle) * 60d, Math.Sin(angle) * 60d, 0d, neighbors.ToArray()));
+            if (index % 4 == 0)
+            {
+                cells.Add(Cell(0x200 + index, Math.Cos(angle) * 80d, Math.Sin(angle) * 80d, 0d, 0x100 + index, 0x300 + index));
+                cells.Add(Cell(0x300 + index, Math.Cos(angle) * 100d, Math.Sin(angle) * 100d, 0d, 0x200 + index));
+            }
+        }
+        return DungeonPathfinder.Graph(cells);
+    }
+
+    [Fact]
+    public void APatrolStartedInASpurLeadsInAlongTheDoorwaysAndLoopsWithoutThem()
+    {
+        // Standing at the far end of the spur off room 0 (at 100 m east): the way in runs 0x300 -> 0x200 -> 0x100, then the ring.
+        Route patrol = DungeonPathfinder.BuildPatrolRoute(RingWithSpurs(), Block | 0x300);
+        Assert.True(patrol.LoopStart > 0);
+        Assert.True(patrol.LoopStart < patrol.Waypoints.Count);
+        // The lead-in comes in along the spur: every lead-in step lies east of the ring.
+        for (int index = 0; index < patrol.LoopStart; index++)
+            Assert.InRange(patrol.Waypoints[index].EastWest * 240d, 60d, 100d);
+        // The ring proper never goes back out a spur.
+        for (int index = patrol.LoopStart; index < patrol.Waypoints.Count; index++)
+            Assert.InRange(Math.Sqrt(Math.Pow(patrol.Waypoints[index].EastWest * 240d, 2) + Math.Pow(patrol.Waypoints[index].NorthSouth * 240d, 2)), 0d, 61d);
+
+        // Following it: after the last step the cursor returns to the loop start, not the lead-in.
+        var follower = new RouteFollower(patrol, RouteMode.Loop);
+        follower.Reset();
+        for (int step = 0; step < patrol.Waypoints.Count - 1; step++)
+            follower.Complete();
+        Assert.Equal(patrol.Waypoints.Count - 1, follower.CurrentIndex);
+        follower.Complete();
+        Assert.Equal(patrol.LoopStart, follower.CurrentIndex);
+    }
+
+    [Fact]
+    public void ARouteGoesThroughTheDoorwaysThemselvesWhenTheHostKnowsThem()
+    {
+        // Two rooms whose model anchors sit off in a corner; the doorway between them is at (10 E, 8 N).
+        PluginDungeonCell a = Cell(0x100, 0d, 0d, 0d, 0x101) with
+        {
+            Doorways = [new PluginDungeonDoorway(Block | 0x101, 10d / 240d, 8d / 240d, 0d)],
+        };
+        PluginDungeonCell b = Cell(0x101, 20d, 20d, 0d, 0x100);
+        Dictionary<uint, PluginDungeonCell> graph = DungeonPathfinder.Graph([a, b]);
+        var destination = new PluginNavigationPosition(0u, 20d / 240d, 20d / 240d, 0d, 0f, false);
+
+        Route route = DungeonPathfinder.BuildRoute(graph, [Block | 0x100, Block | 0x101], destination);
+        Assert.Equal(2, route.Waypoints.Count);
+        Assert.Equal(10d, route.Waypoints[0].EastWest * 240d, 3);
+        Assert.Equal(8d, route.Waypoints[0].NorthSouth * 240d, 3);
+    }
+
     [Fact]
     public void ALargeLoopWithSpursPatrolsOnlyTheLoop()
     {

@@ -290,16 +290,24 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   operator marked as hazards (`/drakbot hazard add` marks the cell the
   character stands in; the marks are kept per landblock in the plugin's
   storage);
-- a path is walked through doorway points - 30% of the way to the next
-  cell to square up on the doorway, then the doorway itself - and ends at
-  the exact destination; points within 1.5 m of the segment between their
-  neighbours are dropped, but the far end of an out-and-back spur is kept;
+- a path is walked through the doorways themselves - the host reports
+  each opening's polygon centre at floor level (`PluginDungeonCell.Doorways`),
+  since a cell's origin is its model anchor rather than a point between its
+  doors; a host that knows only the adjacency gets 30% and 50% of the way
+  between origins instead - and ends at the exact destination; points
+  within 1.5 m of the segment between their neighbours are dropped, but the
+  far end of an out-and-back spur is kept;
 - `/drakbot patrol` builds a looping patrol over the dungeon's main route
   (the cells on a cycle or between junctions, dead-end spurs stripped, or
   everything reachable in a small or linear dungeon): a closed walk that
   covers every corridor once and takes loop-closing edges, so a loop is
   walked round rather than in and out, closed back to the start. Standing
-  in a hazard, the walk starts from the nearest safe cell. The Navigation
+  off the main route (a dead-end spur, the entrance corridor), the route
+  begins with a one-time lead-in along the doorways to the loop
+  (`Route.LoopStart`), and the loop comes back to its own start, not the
+  lead-in. A loaded loop or ping-pong route is joined at its nearest step,
+  as VTank joins a circular route. Standing in a hazard, the walk starts
+  from the nearest safe cell. The Navigation
   window's **Dungeon Patrol** button does the same; `/drakbot patrol stop`
   clears it.
 - hazards are also sighted: once a second the bot looks at the objects in

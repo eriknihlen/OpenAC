@@ -247,7 +247,7 @@ public sealed class RouteFollower
                 index = count <= 1 ? -1 : _index + (bounces ? -_direction : _direction);
                 break;
             default:
-                index = (_index + 1) % count;
+                index = _index + 1 < count ? _index + 1 : LoopStart;
                 break;
         }
         if (index < 0 || index == _index || Route.Waypoints[index].Kind != WaypointKind.Point)
@@ -285,10 +285,13 @@ public sealed class RouteFollower
                 _index += _direction;
                 break;
             default:
-                _index = (_index + 1) % count;
+                _index = _index + 1 < count ? _index + 1 : LoopStart;
                 break;
         }
     }
+
+    /// <summary>The step a loop comes back to, kept inside the route.</summary>
+    private int LoopStart => Math.Clamp(Route.LoopStart, 0, Math.Max(0, Route.Waypoints.Count - 1));
 }
 
 public enum NavigationAction

@@ -111,6 +111,13 @@ public sealed record Route
 
     public IReadOnlyList<Waypoint> Waypoints { get; init; } = [];
 
+    /// <summary>
+    /// Where a looping route continues after its last step: steps before
+    /// this are a one-time lead-in (the way from where the character stood
+    /// to the loop proper) and are not walked again.
+    /// </summary>
+    public int LoopStart { get; init; }
+
     public bool IsEmpty => Waypoints.Count == 0;
 
     public Route Append(Waypoint waypoint) =>

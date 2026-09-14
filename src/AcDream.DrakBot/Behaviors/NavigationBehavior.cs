@@ -52,13 +52,16 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// <summary>Replaces the route; an empty route clears navigation.</summary>
     public void SetRoute(Route? route)
     {
+        RouteMode mode = route?.Mode ?? settings().Mode;
         _follower = route is null || route.IsEmpty
             ? null
-            : new RouteFollower(route, route.Mode ?? settings().Mode);
+            : new RouteFollower(route, mode);
         _follower?.Reset();
         _actions.Cancel();
         _settleUntil = double.NegativeInfinity;
-        _resumeNearest = false;
+        // A loop is joined at its nearest step, as VTank joins a circular
+        // route; a once route (a path somewhere) starts at its first.
+        _resumeNearest = _follower is not null && mode != RouteMode.Once && route!.LoopStart == 0;
     }
 
     /// <summary>

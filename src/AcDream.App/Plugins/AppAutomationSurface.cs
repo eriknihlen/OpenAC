@@ -1342,6 +1342,7 @@ internal sealed class AppAutomationSurface
             AcDream.Core.World.Cells.EnvCell cell = cells[index];
             System.Numerics.Vector3 origin = cell.WorldTransform.Translation;
             var neighbors = new List<uint>(cell.Portals.Count);
+            var doorways = new List<PluginDungeonDoorway>(cell.Portals.Count);
             foreach (AcDream.Core.World.Cells.CellPortal portal in cell.Portals)
             {
                 uint other = portal.OtherCellId;
@@ -1351,6 +1352,27 @@ internal sealed class AppAutomationSurface
                     other |= prefix;
                 if (!neighbors.Contains(other))
                     neighbors.Add(other);
+                // The opening itself: the portal polygon's centre, at the
+                // polygon's floor, in the world.
+                if (portal.PolygonLocal.Count >= 3)
+                {
+                    System.Numerics.Vector3 sum = System.Numerics.Vector3.Zero;
+                    float floor = float.PositiveInfinity;
+                    foreach (System.Numerics.Vector3 vertex in portal.PolygonLocal)
+                    {
+                        sum += vertex;
+                        floor = Math.Min(floor, vertex.Z);
+                    }
+                    System.Numerics.Vector3 centre = sum / portal.PolygonLocal.Count;
+                    System.Numerics.Vector3 world = System.Numerics.Vector3.Transform(
+                        new System.Numerics.Vector3(centre.X, centre.Y, floor),
+                        cell.WorldTransform);
+                    doorways.Add(new PluginDungeonDoorway(
+                        other,
+                        (world.X - 127d * 192d - 84d) / 240d,
+                        (world.Y - 127d * 192d - 84d) / 240d,
+                        world.Z / 240d));
+                }
             }
             // The same projection ProjectNavigationPosition applies to a local
             // position, folded for an absolute one: the world origin sits
@@ -1360,7 +1382,10 @@ internal sealed class AppAutomationSurface
                 (origin.X - 127d * 192d - 84d) / 240d,
                 (origin.Y - 127d * 192d - 84d) / 240d,
                 origin.Z / 240d,
-                neighbors);
+                neighbors)
+            {
+                Doorways = doorways,
+            };
         }
         return result;
     }

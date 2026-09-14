@@ -246,13 +246,31 @@ public static class DungeonPathfinder
             }
         }
 
+        // Standing off the main route (a dead-end spur, the entrance corridor):
+        // a one-time lead-in along the doorways to where the loop begins, so
+        // the first step is never across a wall.
+        int loopStart = 0;
+        if (walkStart != start && graph.ContainsKey(start))
+        {
+            List<uint> leadIn = FindPath(graph, start, walkStart, hazards);
+            for (int index = 0; index + 1 < leadIn.Count; index++)
+            {
+                if (graph.TryGetValue(leadIn[index], out PluginDungeonCell from) && graph.TryGetValue(leadIn[index + 1], out PluginDungeonCell to))
+                    AddDoorwayPoints(waypoints, from, to);
+            }
+            Simplify(waypoints);
+            loopStart = waypoints.Count;
+        }
+
+        var loop = new List<Waypoint>();
         for (int index = 0; index + 1 < walk.Count; index++)
         {
             if (graph.TryGetValue(walk[index], out PluginDungeonCell from) && graph.TryGetValue(walk[index + 1], out PluginDungeonCell to))
-                AddDoorwayPoints(waypoints, from, to);
+                AddDoorwayPoints(loop, from, to);
         }
-        Simplify(waypoints);
-        return new Route { Name = name, Mode = RouteMode.Loop, Waypoints = waypoints };
+        Simplify(loop);
+        waypoints.AddRange(loop);
+        return new Route { Name = name, Mode = RouteMode.Loop, Waypoints = waypoints, LoopStart = loopStart };
     }
 
     /// <summary>
@@ -291,8 +309,6 @@ public static class DungeonPathfinder
             var leaves = new List<uint>();
             foreach (uint id in pruned)
             {
-                if (id == start)
-                    continue;
                 PluginDungeonCell cell = graph[id];
                 int degree = 0;
                 foreach (uint next in cell.Neighbors)
@@ -313,14 +329,38 @@ public static class DungeonPathfinder
             : pruned;
     }
 
-    // A point 30% of the way squares the character up on the doorway; the midpoint is the doorway.
+    /// <summary>
+    /// The way from one cell into the next: through the opening itself when
+    /// the host says where it is - a cell's origin is its model anchor, not
+    /// a point on the floor between its doors - else 30% and 50% of the way
+    /// between the two origins.
+    /// </summary>
     private static void AddDoorwayPoints(List<Waypoint> waypoints, in PluginDungeonCell from, in PluginDungeonCell to)
     {
+        if (TryDoorway(from, to, out PluginDungeonDoorway doorway) || TryDoorway(to, from, out doorway))
+        {
+            waypoints.Add(new Waypoint(WaypointKind.Point, doorway.EastWest, doorway.NorthSouth) { Elevation = doorway.Elevation });
+            return;
+        }
         double east = to.EastWest - from.EastWest;
         double north = to.NorthSouth - from.NorthSouth;
         double up = to.Elevation - from.Elevation;
         waypoints.Add(new Waypoint(WaypointKind.Point, from.EastWest + east * 0.3d, from.NorthSouth + north * 0.3d) { Elevation = from.Elevation + up * 0.3d });
         waypoints.Add(new Waypoint(WaypointKind.Point, from.EastWest + east * 0.5d, from.NorthSouth + north * 0.5d) { Elevation = from.Elevation + up * 0.5d });
+    }
+
+    private static bool TryDoorway(in PluginDungeonCell cell, in PluginDungeonCell other, out PluginDungeonDoorway doorway)
+    {
+        foreach (PluginDungeonDoorway candidate in cell.Doorways)
+        {
+            if (candidate.OtherCellId == other.CellId)
+            {
+                doorway = candidate;
+                return true;
+            }
+        }
+        doorway = default;
+        return false;
     }
 
     /// <summary>
