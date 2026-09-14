@@ -427,6 +427,10 @@ public sealed class HeadlessSessionIsolationTests
                             HeadlessCredentialProviderKind.StandardInput,
                         Reference = $"{id}-credential",
                     },
+                    // The stress measures the host's own turn; thirty
+                    // built-in bots reading the world every 15ms is the
+                    // bot's cost, not the host's.
+                    Plugins = [],
                 },
                 credential,
                 new HeadlessDiagnosticWriter(TextWriter.Null),
