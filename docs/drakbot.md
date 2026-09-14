@@ -436,7 +436,8 @@ dashboard is.
   segmented health bar and the player's HP/ST/MN rows; and the launcher
   grid: Macro Rules, Monsters, Settings, Navigation, Items, Log, Dungeon
   Patrol, Save Profile. Minimised, only the combat panel and a small
-  ON/OFF button remain. The target's line-of-sight detail lives in the Log.
+  ON/OFF button remain; lock, collapse and opacity are saved with the
+  profile (`DashboardSettings`) so the window comes back as it was left. The target's line-of-sight detail lives in the Log.
   The icons are [Phosphor](https://phosphoricons.com) glyphs (MIT,
   `assets/fonts/`): the client merges the Phosphor font into the overlay's
   UI font at the web font's code points (U+E000-U+F8FF), so any plugin

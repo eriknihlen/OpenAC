@@ -33,9 +33,14 @@ public sealed class BotDashboard
     private readonly LogWindow _log;
 
     private bool _open = true;
-    private bool _minimized;
-    private bool _locked;
-    private float _bgOpacity = 0.95f;
+    // Lock, collapse and opacity live in the profile (DashboardSettings), so
+    // the window comes back the way it was left.
+    private bool _minimized => _controller.Profile.Dashboard.Minimized;
+    private bool _locked => _controller.Profile.Dashboard.Locked;
+    private float _bgOpacity => Math.Clamp(_controller.Profile.Dashboard.Opacity, 0.1f, 1f);
+
+    private void Dashboard(Func<DashboardSettings, DashboardSettings> change) =>
+        _controller.Update(p => p with { Dashboard = change(p.Dashboard) });
     private Vector2 _expandedSize = new(430f, 452f);
     private bool _wasMinimized;
     private IReadOnlyList<string> _profileNames = [];
@@ -163,18 +168,18 @@ public sealed class BotDashboard
         ImGui.SameLine(width - 130);
         ImGui.SetCursorPosY(startY + 2);
         if (ImGui.SmallButton(_locked ? PhosphorIcons.Lock : PhosphorIcons.LockOpen))
-            _locked = !_locked;
+            Dashboard(d => d with { Locked = !d.Locked });
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(_locked ? "Unlock Window" : "Lock Window");
         ImGui.SameLine();
         if (ImGui.SmallButton(PhosphorIcons.Minus))
-            _bgOpacity = Math.Max(0.1f, _bgOpacity - 0.1f);
+            Dashboard(d => d with { Opacity = Math.Max(0.1f, d.Opacity - 0.1f) });
         ImGui.SameLine();
         if (ImGui.SmallButton(PhosphorIcons.Plus))
-            _bgOpacity = Math.Min(1.0f, _bgOpacity + 0.1f);
+            Dashboard(d => d with { Opacity = Math.Min(1.0f, d.Opacity + 0.1f) });
         ImGui.SameLine();
         if (ImGui.SmallButton(_minimized ? PhosphorIcons.ArrowsOutLineVertical : PhosphorIcons.ArrowsInLineVertical))
-            _minimized = !_minimized;
+            Dashboard(d => d with { Minimized = !d.Minimized });
         ImGui.SameLine();
         if (ImGui.SmallButton(PhosphorIcons.X))
             _open = false;

@@ -42,6 +42,8 @@ public sealed record BotProfile
 
     public PrioritySettings Priorities { get; init; } = new();
 
+    public DashboardSettings Dashboard { get; init; } = new();
+
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
@@ -382,6 +384,16 @@ public sealed record PrioritySettings
     public bool BoostNavigation { get; init; }
 
     public bool BoostLooting { get; init; }
+}
+
+/// <summary>How the dashboard was left: locked in place, collapsed, its background's opacity. Saved with the profile like everything else.</summary>
+public sealed record DashboardSettings
+{
+    public bool Locked { get; init; }
+
+    public bool Minimized { get; init; }
+
+    public float Opacity { get; init; } = 0.95f;
 }
 
 /// <summary>Salvaging looted items with the Ust, and merging the bags.</summary>
