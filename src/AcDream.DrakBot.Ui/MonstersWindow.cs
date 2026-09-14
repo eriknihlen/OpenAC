@@ -202,7 +202,7 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
             }
 
             ImGui.TableNextColumn();
-            if (ImGui.SmallButton("X"))
+            if (ImGui.SmallButton(PhosphorIcons.X))
                 deleteIndex = i;
             ImGui.PopID();
         }

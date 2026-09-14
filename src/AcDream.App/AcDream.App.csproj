@@ -65,6 +65,10 @@
                       LogicalName="AcDream.App.Rendering.Icons.acdream-client-48.png" />
     <EmbeddedResource Include="..\..\assets\icons\acdream-client-256.png"
                       LogicalName="AcDream.App.Rendering.Icons.acdream-client-256.png" />
+    <!-- Phosphor Icons (MIT, assets/fonts/Phosphor.LICENSE): merged into the overlay's UI font
+         so plugins draw icons as text at the web font's code points. -->
+    <EmbeddedResource Include="..\..\assets\fonts\Phosphor.ttf"
+                      LogicalName="AcDream.App.Rendering.Fonts.Phosphor.ttf" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AcDream.Plugins.MossTank\AcDream.Plugins.MossTank.csproj">

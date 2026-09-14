@@ -162,21 +162,21 @@ public sealed class BotDashboard
         ImGui.TextColored(ColTextMute, Version);
         ImGui.SameLine(width - 130);
         ImGui.SetCursorPosY(startY + 2);
-        if (ImGui.SmallButton(_locked ? "Unlk" : "Lock"))
+        if (ImGui.SmallButton(_locked ? PhosphorIcons.Lock : PhosphorIcons.LockOpen))
             _locked = !_locked;
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(_locked ? "Unlock Window" : "Lock Window");
         ImGui.SameLine();
-        if (ImGui.SmallButton("-"))
+        if (ImGui.SmallButton(PhosphorIcons.Minus))
             _bgOpacity = Math.Max(0.1f, _bgOpacity - 0.1f);
         ImGui.SameLine();
-        if (ImGui.SmallButton("+"))
+        if (ImGui.SmallButton(PhosphorIcons.Plus))
             _bgOpacity = Math.Min(1.0f, _bgOpacity + 0.1f);
         ImGui.SameLine();
-        if (ImGui.SmallButton(_minimized ? "^" : "_"))
+        if (ImGui.SmallButton(_minimized ? PhosphorIcons.ArrowsOutLineVertical : PhosphorIcons.ArrowsInLineVertical))
             _minimized = !_minimized;
         ImGui.SameLine();
-        if (ImGui.SmallButton("X"))
+        if (ImGui.SmallButton(PhosphorIcons.X))
             _open = false;
         ImGui.Dummy(new Vector2(0, 2));
         if (_minimized)
@@ -325,35 +325,35 @@ public sealed class BotDashboard
         Vector2 togglePos = ImGui.GetCursorScreenPos() + new Vector2(2, _minimized ? 6 : 28);
 
         // Left-click toggles; right-click opens the matching settings or window.
-        if (SquareToggle("sword", profile.Combat.Enabled, togglePos, "CombatTgl"))
+        if (SquareToggle(PhosphorIcons.Sword, profile.Combat.Enabled, togglePos, "CombatTgl"))
             _controller.Update(p => p with { Combat = p.Combat with { Enabled = !p.Combat.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _settings.Open("Combat");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Combat - left-click to toggle, right-click for settings");
 
-        if (SquareToggle("buff", profile.Buffs.Enabled, togglePos + new Vector2(34, 0), "BuffTgl"))
+        if (SquareToggle(PhosphorIcons.Sparkle, profile.Buffs.Enabled, togglePos + new Vector2(34, 0), "BuffTgl"))
             _controller.Update(p => p with { Buffs = p.Buffs with { Enabled = !p.Buffs.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _settings.Open("Buffing");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Buffing - left-click to toggle, right-click for settings");
 
-        if (SquareToggle("shoe", profile.Navigation.Enabled, togglePos + new Vector2(0, 34), "NavTgl"))
+        if (SquareToggle(PhosphorIcons.SneakerMove, profile.Navigation.Enabled, togglePos + new Vector2(0, 34), "NavTgl"))
             _controller.Update(p => p with { Navigation = p.Navigation with { Enabled = !p.Navigation.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _navigation.IsOpen = true;
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Navigation - left-click to toggle, right-click for routes");
 
-        if (SquareToggle("bag", profile.Loot.Enabled, togglePos + new Vector2(34, 34), "LootTgl"))
+        if (SquareToggle(PhosphorIcons.Bag, profile.Loot.Enabled, togglePos + new Vector2(34, 34), "LootTgl"))
             _controller.Update(p => p with { Loot = p.Loot with { Enabled = !p.Loot.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _settings.Open("Looting");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Looting - left-click to toggle, right-click for settings");
 
-        if (WideToggle("MACRO", "gear", profile.Meta.Enabled, togglePos + new Vector2(0, 68), "MetaTgl", 64f, 20f) && _controller.Meta is { } metaEngine)
+        if (WideToggle("MACRO", PhosphorIcons.Code, profile.Meta.Enabled, togglePos + new Vector2(0, 68), "MetaTgl", 64f, 20f) && _controller.Meta is { } metaEngine)
             metaEngine.Enabled = !profile.Meta.Enabled;
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _metaRules.IsOpen = true;
@@ -398,9 +398,9 @@ public sealed class BotDashboard
         ImGui.Dummy(new Vector2(0, 2));
         ImGui.TextColored(ColTextMute, "PLAYER VITALS");
         ICharacterInfo character = _surface.Character;
-        VitalRow("heart", "HP", Ratio(character.CurrentHealth, character.MaxHealth), ColHp, FormatVital(character.CurrentHealth, character.MaxHealth));
-        VitalRow("run", "ST", Ratio(character.CurrentStamina, character.MaxStamina), ColGreen, FormatVital(character.CurrentStamina, character.MaxStamina));
-        VitalRow("drop", "MN", Ratio(character.CurrentMana, character.MaxMana), ColMana, FormatVital(character.CurrentMana, character.MaxMana));
+        VitalRow(PhosphorIcons.Heart, "HP", Ratio(character.CurrentHealth, character.MaxHealth), ColHp, FormatVital(character.CurrentHealth, character.MaxHealth));
+        VitalRow(PhosphorIcons.PersonSimpleRun, "ST", Ratio(character.CurrentStamina, character.MaxStamina), ColGreen, FormatVital(character.CurrentStamina, character.MaxStamina));
+        VitalRow(PhosphorIcons.Drop, "MN", Ratio(character.CurrentMana, character.MaxMana), ColMana, FormatVital(character.CurrentMana, character.MaxMana));
         ImGui.EndTable();
     }
 
@@ -412,28 +412,28 @@ public sealed class BotDashboard
             return;
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
-        if (GridButton("Macro Rules", "gear", _metaRules.IsOpen))
+        if (GridButton("Macro Rules", PhosphorIcons.ListChecks, _metaRules.IsOpen))
             _metaRules.IsOpen = !_metaRules.IsOpen;
         ImGui.TableNextColumn();
-        if (GridButton("Monsters", "target", _monsters.IsOpen))
+        if (GridButton("Monsters", PhosphorIcons.Skull, _monsters.IsOpen))
             _monsters.IsOpen = !_monsters.IsOpen;
         ImGui.TableNextColumn();
-        if (GridButton("Settings", "wrench", _settings.IsOpen))
+        if (GridButton("Settings", PhosphorIcons.Gear, _settings.IsOpen))
             _settings.IsOpen = !_settings.IsOpen;
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
-        if (GridButton("Navigation", "map", _navigation.IsOpen))
+        if (GridButton("Navigation", PhosphorIcons.MapTrifold, _navigation.IsOpen))
             _navigation.IsOpen = !_navigation.IsOpen;
         ImGui.TableNextColumn();
-        if (GridButton("Items", "shield", _items.IsOpen))
+        if (GridButton("Items", PhosphorIcons.Backpack, _items.IsOpen))
             _items.IsOpen = !_items.IsOpen;
         ImGui.TableNextColumn();
-        if (GridButton("Log", "code", _log.IsOpen))
+        if (GridButton("Log", PhosphorIcons.TerminalWindow, _log.IsOpen))
             _log.IsOpen = !_log.IsOpen;
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
         bool patrolling = _controller.IsPatrolling;
-        if (GridButton(patrolling ? "Stop Patrol" : "Dungeon Patrol", "map", patrolling))
+        if (GridButton(patrolling ? "Stop Patrol" : "Dungeon Patrol", PhosphorIcons.Footprints, patrolling))
         {
             if (patrolling)
             {
@@ -449,7 +449,7 @@ public sealed class BotDashboard
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(patrolling ? "Stop the dungeon patrol" : "Patrol this dungeon: a circular hunt through every cell, avoiding marked hazards; starts the bot");
         ImGui.TableNextColumn();
-        if (GridButton("Save Profile", "wrench", false))
+        if (GridButton("Save Profile", PhosphorIcons.FloppyDisk, false))
             _controller.SaveProfile();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip($"Save the live profile as '{_controller.Profile.Name}'");

@@ -6,8 +6,8 @@ namespace AcDream.DrakBot.Ui;
 /// <summary>
 /// The dashboard's palette and drawing primitives, as RynthAi draws them:
 /// the launcher grid button with its line icon, the square and wide
-/// toggles, the segmented target bar, the vital rows, and the icons
-/// themselves (a handful of shapes on the draw list, no textures).
+/// toggles, the segmented target bar, the vital rows; the icons are
+/// Phosphor glyphs from the UI font (<see cref="PhosphorIcons"/>).
 /// </summary>
 public static class DashboardDrawing
 {
@@ -140,86 +140,16 @@ public static class DashboardDrawing
         return new Vector4(0f, 1f, g, 1f);
     }
 
-    public static void DrawIcon(string type, Vector2 pos, Vector4 color, float s)
+    /// <summary>
+    /// An icon from <see cref="PhosphorIcons"/> at a size of its own, in
+    /// a colour: the glyph font is merged into the UI font, so this is a
+    /// text draw. The glyph is centred in a box <paramref name="s"/> wide.
+    /// </summary>
+    public static void DrawIcon(string glyph, Vector2 pos, Vector4 color, float s)
     {
         ImDrawListPtr dl = ImGui.GetWindowDrawList();
-        uint col = ImGui.ColorConvertFloat4ToU32(color);
-        switch (type)
-        {
-            case "gear":
-                dl.AddCircle(pos + new Vector2(s / 2, s / 2), s / 3.5f, col, 12, 1.5f);
-                for (int i = 0; i < 8; i++)
-                {
-                    float a = i * (MathF.PI * 2f / 8f);
-                    dl.AddLine(pos + new Vector2(s / 2 + MathF.Cos(a) * s / 3, s / 2 + MathF.Sin(a) * s / 3), pos + new Vector2(s / 2 + MathF.Cos(a) * s / 2, s / 2 + MathF.Sin(a) * s / 2), col, 2f);
-                }
-                break;
-            case "target":
-                dl.AddCircle(pos + new Vector2(s / 2, s / 2), s / 2.5f, col, 12, 1.5f);
-                dl.AddLine(pos + new Vector2(s / 2, 0), pos + new Vector2(s / 2, s), col, 1.5f);
-                dl.AddLine(pos + new Vector2(0, s / 2), pos + new Vector2(s, s / 2), col, 1.5f);
-                break;
-            case "wrench":
-                dl.AddCircle(pos + new Vector2(s * 0.3f, s * 0.3f), s * 0.25f, col, 8, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.4f, s * 0.4f), pos + new Vector2(s * 0.9f, s * 0.9f), col, 2f);
-                break;
-            case "map":
-                dl.AddRect(pos, pos + new Vector2(s, s), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s / 2, 2), pos + new Vector2(s / 2, s - 2), col, 1.5f);
-                dl.AddLine(pos + new Vector2(2, s / 2), pos + new Vector2(s - 2, s / 2), col, 1.5f);
-                break;
-            case "bag":
-                dl.AddRectFilled(pos + new Vector2(2, s / 3), pos + new Vector2(s - 2, s), col, 2f);
-                dl.AddCircle(pos + new Vector2(s / 2, s / 4), s / 5, col, 8, 1.5f);
-                break;
-            case "shield":
-                dl.AddLine(pos + new Vector2(s * 0.2f, 0), pos + new Vector2(s * 0.8f, 0), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.8f, 0), pos + new Vector2(s * 0.8f, s * 0.6f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.8f, s * 0.6f), pos + new Vector2(s * 0.5f, s), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s), pos + new Vector2(s * 0.2f, s * 0.6f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.2f, s * 0.6f), pos + new Vector2(s * 0.2f, 0), col, 1.5f);
-                break;
-            case "code":
-                dl.AddLine(pos + new Vector2(s * 0.3f, 2), pos + new Vector2(0, s / 2), col, 1.5f);
-                dl.AddLine(pos + new Vector2(0, s / 2), pos + new Vector2(s * 0.3f, s - 2), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.7f, 2), pos + new Vector2(s, s / 2), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s, s / 2), pos + new Vector2(s * 0.7f, s - 2), col, 1.5f);
-                break;
-            case "heart":
-                dl.AddCircleFilled(pos + new Vector2(s * 0.3f, s * 0.3f), s * 0.25f, col);
-                dl.AddCircleFilled(pos + new Vector2(s * 0.7f, s * 0.3f), s * 0.25f, col);
-                dl.AddTriangleFilled(pos + new Vector2(s * 0.05f, s * 0.4f), pos + new Vector2(s * 0.95f, s * 0.4f), pos + new Vector2(s * 0.5f, s * 0.9f), col);
-                break;
-            case "run":
-                dl.AddCircle(pos + new Vector2(s * 0.5f, s * 0.2f), s * 0.15f, col, 8, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.35f), pos + new Vector2(s * 0.5f, s * 0.65f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.65f), pos + new Vector2(s * 0.2f, s * 0.9f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.65f), pos + new Vector2(s * 0.8f, s * 0.9f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.2f, s * 0.4f), pos + new Vector2(s * 0.8f, s * 0.4f), col, 1.5f);
-                break;
-            case "drop":
-                dl.AddCircleFilled(pos + new Vector2(s * 0.5f, s * 0.7f), s * 0.25f, col);
-                dl.AddTriangleFilled(pos + new Vector2(s * 0.25f, s * 0.65f), pos + new Vector2(s * 0.75f, s * 0.65f), pos + new Vector2(s * 0.5f, s * 0.1f), col);
-                break;
-            case "sword":
-                dl.AddLine(pos + new Vector2(s * 0.3f, s * 0.7f), pos + new Vector2(s * 0.9f, s * 0.1f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.2f, s * 0.6f), pos + new Vector2(s * 0.4f, s * 0.8f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.1f, s * 0.9f), pos + new Vector2(s * 0.3f, s * 0.7f), col, 2f);
-                break;
-            case "shoe":
-                dl.AddLine(pos + new Vector2(s * 0.3f, s * 0.2f), pos + new Vector2(s * 0.3f, s * 0.8f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.3f, s * 0.8f), pos + new Vector2(s * 0.8f, s * 0.8f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.8f, s * 0.8f), pos + new Vector2(s * 0.8f, s * 0.6f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.8f, s * 0.6f), pos + new Vector2(s * 0.5f, s * 0.5f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.5f), pos + new Vector2(s * 0.5f, s * 0.2f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.2f), pos + new Vector2(s * 0.3f, s * 0.2f), col, 2f);
-                break;
-            case "buff":
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.2f), pos + new Vector2(s * 0.5f, s * 0.8f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.2f, s * 0.5f), pos + new Vector2(s * 0.8f, s * 0.5f), col, 2f);
-                dl.AddLine(pos + new Vector2(s * 0.3f, s * 0.3f), pos + new Vector2(s * 0.5f, s * 0.1f), col, 1.5f);
-                dl.AddLine(pos + new Vector2(s * 0.5f, s * 0.1f), pos + new Vector2(s * 0.7f, s * 0.3f), col, 1.5f);
-                break;
-        }
+        ImFontPtr font = ImGui.GetFont();
+        Vector2 size = font.CalcTextSizeA(s, float.MaxValue, 0f, glyph);
+        dl.AddText(font, s, pos + new Vector2((s - size.X) / 2f, (s - size.Y) / 2f), ImGui.ColorConvertFloat4ToU32(color), glyph);
     }
 }

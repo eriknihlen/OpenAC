@@ -411,6 +411,12 @@ dashboard is.
   grid: Macro Rules, Monsters, Settings, Navigation, Items, Log, Dungeon
   Patrol, Save Profile. Minimised, only the combat panel and a small
   ON/OFF button remain. The target's line-of-sight detail lives in the Log.
+  The icons are [Phosphor](https://phosphoricons.com) glyphs (MIT,
+  `assets/fonts/`): the client merges the Phosphor font into the overlay's
+  UI font at the web font's code points (U+E000-U+F8FF), so any plugin
+  draws an icon as text; `PhosphorIcons` in `AcDream.DrakBot.Ui` names
+  the ones the windows use and `DashboardDrawing.DrawIcon` draws one at
+  its own size and colour.
 - **Macro Rules** - RynthAi's meta editor: the loaded rules grouped by
   state, the row that just fired flashing red, up/down/delete per row, a
   two-pane editor (nested All/Any/Not conditions on the left, the action

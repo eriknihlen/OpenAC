@@ -533,7 +533,7 @@ public sealed class MetaRulesWindow(BotController controller, IAutomationSurface
                 ImGui.SameLine(ImGui.GetWindowWidth() - 35f);
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.8f, 0.1f, 0.1f, 1f));
                 ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1f, 0.2f, 0.2f, 1f));
-                bool delete = ImGui.Button("X");
+                bool delete = ImGui.Button(PhosphorIcons.X);
                 ImGui.PopStyleColor(2);
                 ImGui.SetCursorPos(new Vector2(x, y));
                 DrawConditionNode(child, $"node_{i}");
@@ -641,7 +641,7 @@ public sealed class MetaRulesWindow(BotController controller, IAutomationSurface
             for (int i = 0; i < rule.ActionChildren.Count; i++)
             {
                 ImGui.PushID($"act_{i}");
-                if (ImGui.Button("X"))
+                if (ImGui.Button(PhosphorIcons.X))
                 {
                     rule.ActionChildren.RemoveAt(i);
                     i--;

@@ -219,7 +219,7 @@ public sealed class NavigationWindow(BotController controller, IAutomationSurfac
                 Waypoint waypoint = draft.Waypoints[i];
                 ImGui.PushID(i);
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.8f, 0.2f, 0.2f, 1f));
-                if (ImGui.Button("X", new Vector2(20f, 20f)))
+                if (ImGui.Button(PhosphorIcons.X, new Vector2(20f, 20f)))
                 {
                     controller.RemoveWaypoint(i);
                     if (_selected == i)

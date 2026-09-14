@@ -24,6 +24,8 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
     private readonly ImGuiInputBridge _input;
     private readonly nint _iniPath;
     private readonly nint _fontData;
+    private readonly nint _iconFontData;
+    private readonly nint _iconGlyphRanges;
     private bool _frameOpen;
     private bool _disposed;
 
@@ -57,6 +59,7 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
         }
 
         _fontData = LoadFont(io);
+        (_iconFontData, _iconGlyphRanges) = MergeIconFont(io, _log);
         ApplyTheme();
 
         _renderer = new ImGuiRenderer(device);
@@ -128,6 +131,10 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
         ImGui.DestroyContext(_context);
         if (_fontData != nint.Zero)
             Marshal.FreeHGlobal(_fontData);
+        if (_iconFontData != nint.Zero)
+            Marshal.FreeHGlobal(_iconFontData);
+        if (_iconGlyphRanges != nint.Zero)
+            Marshal.FreeHGlobal(_iconGlyphRanges);
         if (_iniPath != nint.Zero)
             Marshal.FreeCoTaskMem(_iniPath);
     }
@@ -155,6 +162,65 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
             config.Destroy();
         }
         return data;
+    }
+
+    /// <summary>The first code point of the Phosphor icon glyphs merged into the UI font.</summary>
+    public const ushort IconRangeStart = 0xE000;
+
+    /// <summary>The last code point of the Phosphor icon glyphs merged into the UI font.</summary>
+    public const ushort IconRangeEnd = 0xF8FF;
+
+    private const string IconFontResource = "AcDream.App.Rendering.Fonts.Phosphor.ttf";
+
+    /// <summary>
+    /// Merges the Phosphor icon font into the UI font at the web font's
+    /// code points (the private use area), so a plugin draws an icon by
+    /// writing its character. Without the resource the UI font stands
+    /// alone and those characters draw as nothing.
+    /// </summary>
+    private static (nint Data, nint Ranges) MergeIconFont(ImGuiIOPtr io, Action<string> log)
+    {
+        byte[]? ttf;
+        try
+        {
+            using Stream? stream = typeof(ImGuiOverlay).Assembly.GetManifestResourceStream(IconFontResource);
+            if (stream is null)
+            {
+                log($"icon font: embedded resource missing - {IconFontResource}");
+                return (nint.Zero, nint.Zero);
+            }
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            ttf = buffer.ToArray();
+        }
+        catch (Exception error)
+        {
+            log($"icon font: could not read {IconFontResource} - {error.Message}");
+            return (nint.Zero, nint.Zero);
+        }
+
+        nint data = Marshal.AllocHGlobal(ttf.Length);
+        Marshal.Copy(ttf, 0, data, ttf.Length);
+        // The ranges must outlive the atlas build, which happens after this returns.
+        nint ranges = Marshal.AllocHGlobal(sizeof(ushort) * 3);
+        Marshal.WriteInt16(ranges, 0, unchecked((short)IconRangeStart));
+        Marshal.WriteInt16(ranges, 2, unchecked((short)IconRangeEnd));
+        Marshal.WriteInt16(ranges, 4, 0);
+        ImFontConfigPtr config = ImGuiNative.ImFontConfig_ImFontConfig();
+        try
+        {
+            config.MergeMode = true;
+            config.FontDataOwnedByAtlas = false;
+            config.PixelSnapH = true;
+            // Icons sit on a fixed advance so a column of them lines up.
+            config.GlyphMinAdvanceX = 16f;
+            io.Fonts.AddFontFromMemoryTTF(data, ttf.Length, 16f, config, ranges);
+        }
+        finally
+        {
+            config.Destroy();
+        }
+        return (data, ranges);
     }
 
     private static byte[]? TryLoadSystemUiFont()
