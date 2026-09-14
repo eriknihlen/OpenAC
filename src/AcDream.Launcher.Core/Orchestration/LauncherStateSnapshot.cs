@@ -18,7 +18,15 @@ public sealed record LauncherAccountSnapshot(
     string AccountName,
     IReadOnlyList<LauncherCharacterSnapshot> Characters,
     bool HasRunningActivity,
-    string ActivityStatus);
+    string ActivityStatus)
+{
+    /// <summary>The main window's row for this account, as last left (see <see cref="Profiles.AccountProfile.Selected"/>).</summary>
+    public bool Selected { get; init; }
+
+    public string? SelectedCharacter { get; init; }
+
+    public bool Headless { get; init; }
+}
 
 public sealed record LauncherServerSnapshot(
     string Name,

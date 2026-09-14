@@ -1092,6 +1092,16 @@ public sealed partial class LauncherWindowViewModelTests
             IReadOnlyList<string> loginCommands) =>
             SettingsUpdate = (launchMode, plugins, loginCommands);
 
+        public (string Server, string Account, bool Selected, string? Character, bool Headless)? SelectionUpdate { get; private set; }
+
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            bool selected,
+            string? selectedCharacter,
+            bool headless) =>
+            SelectionUpdate = (serverName, accountName, selected, selectedCharacter, headless);
+
         public void RemoveCharacter(
             string serverName,
             string accountName,

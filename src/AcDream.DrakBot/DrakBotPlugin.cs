@@ -111,7 +111,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _engine = engine;
 
         var store = new BotStore(host.Storage);
-        BotProfile? saved = store.IsAvailable ? TryLoadDefault(store, log) : null;
+        BotProfile? saved = store.IsAvailable ? TryLoadLast(store, log) : null;
         if (saved is not null)
             _engine.Profile = saved;
 
@@ -145,6 +145,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
         _controller.ObjectScan = surface.Objects.CaptureObjects;
+        _controller.ApplyProfileMeta();
+        _controller.ApplyProfileRoute();
         _controller.Meta.Utility = new UtilityCommands(
             world,
             _controller.Meta,
@@ -218,6 +220,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             return;
         _enabled = false;
         _engine?.Stop();
+        _controller?.FlushProfile();
         if (_host is not null)
             _host.Events.Tick -= OnTick;
         _commandLease?.Dispose();
@@ -245,15 +248,17 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             _controller?.Tick(_engine.Clock.Now);
     }
 
-    private static BotProfile? TryLoadDefault(BotStore store, IPluginLogger log)
+    /// <summary>The profile in use last time, else the default one.</summary>
+    private static BotProfile? TryLoadLast(BotStore store, IPluginLogger log)
     {
+        string name = store.LastProfileName ?? BotProfile.Default.Name;
         try
         {
-            return store.LoadProfile(BotProfile.Default.Name);
+            return store.LoadProfile(name) ?? (name == BotProfile.Default.Name ? null : store.LoadProfile(BotProfile.Default.Name));
         }
         catch (Exception error)
         {
-            log.Warn($"could not read the default bot profile: {error.Message}");
+            log.Warn($"could not read the bot profile '{name}': {error.Message}");
             return null;
         }
     }

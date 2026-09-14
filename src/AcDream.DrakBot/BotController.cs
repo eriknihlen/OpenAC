@@ -61,6 +61,10 @@ public sealed class BotController : IMetaBot
     public Func<IReadOnlyList<PluginWorldObject>>? ObjectScan { get; set; }
 
     private double _lastHazardScanAt = double.NegativeInfinity;
+
+    /// <summary>A changed profile is written this long after the last change, so a dragged slider is one write.</summary>
+    public const double AutoSaveDelaySeconds = 1d;
+    private double _profileDirtyAt = double.NaN;
     private uint _patrolLandblock;
     private bool _patrolOnLoginDone;
 
@@ -83,6 +87,8 @@ public sealed class BotController : IMetaBot
     /// </summary>
     public void Tick(double now)
     {
+        if (!double.IsNaN(_profileDirtyAt) && now - _profileDirtyAt >= AutoSaveDelaySeconds)
+            FlushProfile();
         if (now - _lastHazardScanAt < 1d)
             return;
         _lastHazardScanAt = now;
@@ -245,22 +251,72 @@ public sealed class BotController : IMetaBot
             Engine.Start();
     }
 
+    /// <summary>
+    /// Changes the live profile. Every change is saved under the profile's
+    /// own name a moment later - there is no separate "save" to remember,
+    /// as with RynthAi - and the profile in use is what the bot starts
+    /// with next time.
+    /// </summary>
     public void Update(Func<BotProfile, BotProfile> change)
     {
         ArgumentNullException.ThrowIfNull(change);
-        Engine.Profile = change(Engine.Profile);
+        BotProfile changed = change(Engine.Profile);
+        if (ReferenceEquals(changed, Engine.Profile) || changed == Engine.Profile)
+            return;
+        Engine.Profile = changed;
+        if (double.IsNaN(_profileDirtyAt))
+            _profileDirtyAt = Engine.Clock.Now;
+    }
+
+    /// <summary>Writes a pending change now: on shutdown, before a profile switch.</summary>
+    public void FlushProfile()
+    {
+        if (double.IsNaN(_profileDirtyAt))
+            return;
+        _profileDirtyAt = double.NaN;
+        if (!Store.IsAvailable)
+            return;
+        try
+        {
+            Store.SaveProfile(Engine.Profile);
+            Store.LastProfileName = Engine.Profile.Name;
+        }
+        catch (Exception error)
+        {
+            Log.Warn($"profile: could not save '{Engine.Profile.Name}': {error.Message}");
+        }
     }
 
     // ── Profiles ────────────────────────────────────────────────────────
 
     public bool LoadProfile(string name)
     {
+        FlushProfile();
         BotProfile? loaded = Store.LoadProfile(name);
         if (loaded is null)
             return false;
         Engine.Profile = loaded;
+        if (Store.IsAvailable)
+            Store.LastProfileName = name;
         ApplyProfileMeta();
+        ApplyProfileRoute();
         return true;
+    }
+
+    /// <summary>Loads the route the profile names, when it differs from the one being walked.</summary>
+    public void ApplyProfileRoute()
+    {
+        string name = Profile.Navigation.RouteName;
+        if (name.Length == 0 || name.Equals(Navigation.Route?.Name, StringComparison.OrdinalIgnoreCase))
+            return;
+        Route? route = ((IMetaBot)this).LoadRouteByName(name);
+        if (route is null)
+        {
+            Log.Warn($"route: '{name}' from the profile not found");
+            return;
+        }
+        DraftRoute = route;
+        Navigation.SetRoute(route, joinNearest: true);
     }
 
     /// <summary>Loads the meta the profile names, when it differs from the one loaded.</summary>
@@ -277,6 +333,9 @@ public sealed class BotController : IMetaBot
         BotProfile profile = Engine.Profile with { Name = name ?? Engine.Profile.Name };
         Store.SaveProfile(profile);
         Engine.Profile = profile;
+        _profileDirtyAt = double.NaN;
+        if (Store.IsAvailable)
+            Store.LastProfileName = profile.Name;
     }
 
     public void ResetProfile() => Engine.Profile = BotProfile.Default;
@@ -346,7 +405,15 @@ public sealed class BotController : IMetaBot
         Log.Info($"route: loaded '{name}' ({route.Waypoints.Count} steps, {route.Mode?.ToString() ?? "profile mode"})");
         DraftRoute = route;
         Navigation.SetRoute(route, joinNearest: true);
+        RememberRoute(name);
         return true;
+    }
+
+    /// <summary>A route loaded by name is the profile's route from now on.</summary>
+    private void RememberRoute(string name)
+    {
+        if (!name.Equals(Profile.Navigation.RouteName, StringComparison.Ordinal))
+            Update(p => p with { Navigation = p.Navigation with { RouteName = name } });
     }
 
     public void RemoveWaypoint(int index)
@@ -769,7 +836,10 @@ public sealed class BotController : IMetaBot
             {
                 Route? route = ((IMetaBot)this).LoadRouteByName(v);
                 if (route is not null)
+                {
                     ((IMetaBot)this).SetRoute(route, false);
+                    RememberRoute(v);
+                }
             }),
             ["CurrentMetaPath"] = (() => Meta?.MetaName ?? string.Empty, v => Meta?.LoadByName(v)),
             ["CurrentLootPath"] = (() => Profile.Loot.UtlProfile, v => Update(p => p with { Loot = p.Loot with { UtlProfile = v.EndsWith(".utl", StringComparison.OrdinalIgnoreCase) ? v[..^4] : v } })),

@@ -104,4 +104,42 @@ public sealed class PatrolControllerTests
         Assert.True(controller.Engine.IsRunning);
         Assert.True(controller.IsPatrolling);
     }
+
+    [Fact]
+    public void AChangedSettingIsSavedAMomentLaterUnderTheProfileInUse()
+    {
+        var storage = new MemoryStorage();
+        var surface = new FakeAutomationSurface();
+        var clock = new TickClock();
+        var store = new BotStore(storage);
+        var navigation = new NavigationBehavior(() => new NavigationSettings());
+        var engine = new BotEngine(surface, new FakeLogger(), [navigation], clock);
+        var controller = new BotController(
+            engine, store, navigation,
+            new SelfBuffBehavior(new SpellSelector(surface, surface), new CastTracker(surface, clock), () => engine.Profile.Buffs, surface),
+            () => surface.Navigation.Snapshot);
+        controller.SaveProfile("mine");
+        Assert.Equal("mine", store.LastProfileName);
+
+        clock.Advance(1d);
+        controller.Update(p => p with { Combat = p.Combat with { EngageDistance = 9f } });
+        controller.Tick(clock.Now);
+        // Not yet: a dragged slider is one write, not a hundred.
+        Assert.NotEqual(9f, store.LoadProfile("mine")!.Combat.EngageDistance);
+        clock.Advance(BotController.AutoSaveDelaySeconds + 0.1d);
+        controller.Tick(clock.Now);
+        Assert.Equal(9f, store.LoadProfile("mine")!.Combat.EngageDistance);
+
+        // A change that changes nothing writes nothing; shutdown writes what is pending.
+        controller.Update(p => p);
+        controller.Update(p => p with { Combat = p.Combat with { EngageDistance = 11f } });
+        controller.FlushProfile();
+        Assert.Equal(11f, store.LoadProfile("mine")!.Combat.EngageDistance);
+
+        // A route loaded by name is the profile's route, and comes back with it.
+        store.SaveRoute(new Route { Name = "hall", Waypoints = [new Waypoint(WaypointKind.Point, 0d, 0.1d)] });
+        Assert.True(controller.LoadRouteByName("hall"));
+        controller.FlushProfile();
+        Assert.Equal("hall", store.LoadProfile("mine")!.Navigation.RouteName);
+    }
 }

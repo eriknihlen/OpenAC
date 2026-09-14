@@ -503,6 +503,13 @@ draft route; `nav use` starts following the draft; `nav save` names it.
 Profiles and routes are JSON under the plugin's storage folder
 (`<config>/plugins/acdream.drakbot/profiles/*.json` and `routes/*.json`) and can
 be edited by hand. `BotProfile` in `Profiles/BotProfile.cs` is the schema.
+Every change made in a window, by a command or by a meta is saved under
+the profile's own name a second after the last change (a dragged slider is
+one write) and on shutdown; the profile in use is recorded
+(`last-profile.txt`) and is the one the bot starts with next time, along
+with the route it names (`Navigation.RouteName`, set whenever a route is
+loaded by name) and its meta. **Save Profile** is only needed to save
+under another name.
 
 ### Route steps
 

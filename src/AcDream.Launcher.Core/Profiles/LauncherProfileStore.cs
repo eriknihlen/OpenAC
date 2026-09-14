@@ -283,6 +283,21 @@ public sealed class LauncherProfileStore
         }
     }
 
+    /// <summary>The main window's row choices for an account, remembered between runs.</summary>
+    public void EditAccountSelection(
+        string serverName,
+        string account,
+        bool selected,
+        string? selectedCharacter,
+        bool headless)
+    {
+        ServerProfile server = FindServerOrThrow(serverName);
+        AccountProfile profile = FindAccountOrThrow(server, account);
+        profile.Selected = selected;
+        profile.SelectedCharacter = string.IsNullOrWhiteSpace(selectedCharacter) ? null : selectedCharacter;
+        profile.Headless = headless;
+    }
+
     public void RemoveAccount(string serverName, string account)
     {
         ServerProfile server = FindServerOrThrow(serverName);

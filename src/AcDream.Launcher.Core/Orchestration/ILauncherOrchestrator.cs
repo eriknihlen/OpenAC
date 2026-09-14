@@ -75,6 +75,14 @@ public interface ILauncherOrchestrator : IDisposable
         string accountName,
         string characterName);
 
+    /// <summary>Remembers the main window's row choices for an account: ticked, character, headless.</summary>
+    void UpdateAccountSelection(
+        string serverName,
+        string accountName,
+        bool selected,
+        string? selectedCharacter,
+        bool headless);
+
     Task<LauncherSessionSnapshot> LaunchAsync(
         string serverName,
         string accountName,

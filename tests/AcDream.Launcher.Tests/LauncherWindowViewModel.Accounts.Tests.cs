@@ -140,6 +140,40 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.Contains("Started 1 of 2", vm.OperationStatus);
     }
     [Fact]
+    public void ARowChangeIsSavedAtOnceAndARowComesBackTheWayItWasLeft()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+        Assert.Null(core.SelectionUpdate);
+
+        row.IsChecked = true;
+        Assert.Equal((row.ServerName, row.AccountName, true, null, false), core.SelectionUpdate);
+        row.SelectedCharacter = "A character";
+        Assert.Equal((row.ServerName, row.AccountName, true, "A character", false), core.SelectionUpdate);
+        row.SelectedLaunchMode = "Headless";
+        Assert.Equal((row.ServerName, row.AccountName, true, "A character", true), core.SelectionUpdate);
+
+        // A launcher started with the choices on file shows them, without writing them back.
+        using var remembered = new FakeLauncherOrchestrator
+        {
+            ServersOverride = [new LauncherServerSnapshot("One", "localhost", 9000,
+                [new LauncherAccountSnapshot("One", "Alice",
+                    [new LauncherCharacterSnapshot("One", "Alice", "A character", "123", LaunchMode.Gui, [], [], false, "Ready")], false, "Ready")
+                {
+                    Selected = true, SelectedCharacter = "A character", Headless = true,
+                }])],
+            Session = FakeLauncherOrchestrator.CreateSession(LauncherActivityState.Exited),
+        };
+        using var again = CreateInitialized(remembered);
+        var restored = again.Accounts[0].Servers[0];
+        Assert.True(restored.IsChecked);
+        Assert.Equal("A character", restored.SelectedCharacter);
+        Assert.Equal("Headless", restored.SelectedLaunchMode);
+        Assert.Null(remembered.SelectionUpdate);
+    }
+
+    [Fact]
     public void RosterRefreshKeepsChosenCharacterWhenSelectorTemporarilyClearsBinding()
     {
         using var core = BatchOrchestrator();

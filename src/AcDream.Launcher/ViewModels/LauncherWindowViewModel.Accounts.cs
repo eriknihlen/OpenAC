@@ -36,7 +36,7 @@ public sealed partial class LauncherWindowViewModel
             if (row is null)
             {
                 row = new LauncherAccountServerRowViewModel(account.AccountName, server.Name,
-                    GetRowDisabledReason, NotifyAccountCommands, item => LaunchRowsAsync([item]),
+                    GetRowDisabledReason, OnRowChanged, item => LaunchRowsAsync([item]),
                     StopSessionAsync, OpenRowOptions, () => CanInteract);
                 group.Servers.Add(row);
             }
@@ -121,6 +121,20 @@ public sealed partial class LauncherWindowViewModel
     }
 
     private void OpenRowOptions(LauncherAccountServerRowViewModel row) => OpenAccountRowOptions(row);
+
+    /// <summary>A row the user changed is saved at once, so the launcher opens the way it was left.</summary>
+    private void OnRowChanged(LauncherAccountServerRowViewModel row)
+    {
+        try
+        {
+            _orchestrator.UpdateAccountSelection(row.ServerName, row.AccountName, row.IsChecked, row.CharacterName, row.IsHeadless);
+        }
+        catch (Exception ex)
+        {
+            LastError = SafeDisplayError(ex, secret: null);
+        }
+        NotifyAccountCommands();
+    }
 
     private void NotifyAccountCommands()
     {

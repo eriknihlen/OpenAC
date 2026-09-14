@@ -431,6 +431,9 @@ public sealed record NavigationSettings
 
     public RouteMode Mode { get; init; } = RouteMode.Loop;
 
+    /// <summary>The saved route (or VTank <c>.nav</c>) loaded with the profile, by name; empty for none.</summary>
+    public string RouteName { get; init; } = string.Empty;
+
     /// <summary>A waypoint counts as reached inside this many meters.</summary>
     public double ArrivalDistanceMeters { get; init; } = 1.5;
 

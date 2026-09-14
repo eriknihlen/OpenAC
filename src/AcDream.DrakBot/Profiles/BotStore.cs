@@ -23,6 +23,23 @@ public sealed class BotStore(IPluginStorage storage)
 
     public IReadOnlyList<string> ProfileNames() => Names(ProfilePrefix);
 
+    /// <summary>The profile in use when the bot last ran, so it comes back with the same one; null when never recorded.</summary>
+    public string? LastProfileName
+    {
+        get
+        {
+            string? name = storage.ReadText(LastProfileKey)?.Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        set
+        {
+            if (storage.IsAvailable)
+                storage.WriteText(LastProfileKey, value ?? string.Empty);
+        }
+    }
+
+    private const string LastProfileKey = "last-profile.txt";
+
     public IReadOnlyList<string> RouteNames() => Names(RoutePrefix);
 
     public BotProfile? LoadProfile(string name)

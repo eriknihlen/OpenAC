@@ -367,6 +367,15 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             _profileStore.RemoveCharacter(serverName, accountName, characterName);
         });
 
+    public void UpdateAccountSelection(
+        string serverName,
+        string accountName,
+        bool selected,
+        string? selectedCharacter,
+        bool headless) =>
+        MutateProfiles(() =>
+            _profileStore.EditAccountSelection(serverName, accountName, selected, selectedCharacter, headless));
+
     public Task<LauncherSessionSnapshot> LaunchAsync(
         string serverName,
         string accountName,
@@ -1083,7 +1092,12 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             account.Account,
             characters,
             active is not null,
-            active?.Status ?? "Idle");
+            active?.Status ?? "Idle")
+        {
+            Selected = account.Selected,
+            SelectedCharacter = account.SelectedCharacter,
+            Headless = account.Headless,
+        };
     }
 
     private static string ReadStartupFailure(ManagedActivity activity)

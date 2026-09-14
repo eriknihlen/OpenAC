@@ -581,6 +581,15 @@ public sealed class MainWindowViewTests
         {
         }
 
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            bool selected,
+            string? selectedCharacter,
+            bool headless)
+        {
+        }
+
         public void RemoveCharacter(string serverName, string accountName, string characterName)
         {
         }
