@@ -603,6 +603,19 @@ public sealed class BotController : IMetaBot
         return names;
     }
 
+    /// <summary>The <c>.utl</c> loot profiles in the VTank profiles folder, by file name.</summary>
+    public IReadOnlyList<string> UtlFileNames()
+    {
+        var names = new List<string>();
+        foreach (string key in _vtankProfiles.List(string.Empty))
+        {
+            if (key.EndsWith(".utl", StringComparison.OrdinalIgnoreCase))
+                names.Add(key.Replace('\\', '/').Split('/')[^1]);
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
     /// <summary>The <c>.nav</c> files in the VTank profiles folder, by file name.</summary>
     public IReadOnlyList<string> NavFileNames()
     {

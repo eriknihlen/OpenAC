@@ -388,13 +388,17 @@ until the character is in the world; the dashboard then opens and the
 other windows open from its launcher grid, laid out the way RynthAi's
 dashboard is.
 
-- **Dashboard** - start/stop, activity and reason, profile and route pickers,
-  the subsystem toggles (Combat, Buffs, Loot, Nav, Macro; right-click one
-  for its settings or window), force rebuff, a Patrol / Stop patrol
-  button for the dungeon the character is in, player and target vitals, the
-  current target's line-of-sight state (clear, blocked by what, strikes,
-  blacklisted) and, while walking, which heading is open; the launcher
-  grid below opens the rest.
+- **Dashboard** - RynthAi's dashboard, drawn the same way: a title bar
+  with Lock, opacity -/+, minimise and close; RUNNING/STOPPED with its
+  light, the meta state and the bot's activity (hover for the reason) on
+  the left, the Profile / Nav / Loot / Meta pickers on the right; the
+  combat panel with the square toggles (combat, buffing, navigation,
+  looting - left-click toggles, right-click opens the settings or window),
+  the MACRO toggle and FR (force rebuff) beside the target's name and
+  segmented health bar and the player's HP/ST/MN rows; and the launcher
+  grid: Macro Rules, Monsters, Settings, Navigation, Items, Log, Dungeon
+  Patrol, Save Profile. Minimised, only the combat panel and a small
+  ON/OFF button remain. The target's line-of-sight detail lives in the Log.
 - **Macro Rules** - RynthAi's meta editor: the loaded rules grouped by
   state, the row that just fired flashing red, up/down/delete per row, a
   two-pane editor (nested All/Any/Not conditions on the left, the action

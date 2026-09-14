@@ -1,31 +1,27 @@
 using System.Numerics;
 using AcDream.DrakBot.Behaviors;
-using AcDream.DrakBot.Combat;
+using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
 using AcDream.DrakBot.Profiles;
 using AcDream.Plugin.Abstractions;
 using ImGuiNET;
+using static AcDream.DrakBot.Ui.DashboardDrawing;
 
 namespace AcDream.DrakBot.Ui;
 
 /// <summary>
-/// The main window, laid out like RynthAi's dashboard: run state and
-/// activity on the left, profile and route pickers on the right, the
-/// subsystem toggles (right-click one for its settings), the player's
-/// vitals and the current target, and a grid of buttons that open the
-/// other windows: macro rules, monsters, settings, navigation, items.
+/// The main window, laid out as RynthAi's dashboard: a title bar with
+/// lock, opacity, minimise and close; RUNNING/STOPPED with its status
+/// light, the meta state and the bot's activity on the left, the profile,
+/// nav, loot and meta pickers on the right; the combat panel with the
+/// square toggles (combat, buffing, navigation, looting), the MACRO
+/// toggle and force-rebuff beside the target's segmented health bar and
+/// the player's vitals; and the launcher grid underneath. Minimised, only
+/// the combat panel with a small Running/Stopped button remains.
 /// </summary>
 public sealed class BotDashboard
 {
-    private static readonly Vector4 ColMuted = new(0.55f, 0.63f, 0.71f, 1f);
-    private static readonly Vector4 ColAccent = new(0.15f, 0.85f, 0.90f, 1f);
-    private static readonly Vector4 ColRunning = new(0.20f, 0.65f, 0.30f, 1f);
-    private static readonly Vector4 ColStopped = new(0.55f, 0.20f, 0.20f, 1f);
-    private static readonly Vector4 ColHealth = new(0.80f, 0.20f, 0.22f, 1f);
-    private static readonly Vector4 ColStamina = new(0.25f, 0.70f, 0.30f, 1f);
-    private static readonly Vector4 ColMana = new(0.25f, 0.45f, 0.90f, 1f);
-    private static readonly Vector4 ColToggleOn = new(0.13f, 0.40f, 0.55f, 1f);
-    private static readonly Vector4 ColToggleOff = new(0.10f, 0.13f, 0.17f, 1f);
+    private const string Version = "v0.1";
 
     private readonly BotController _controller;
     private readonly IAutomationSurface _surface;
@@ -35,12 +31,21 @@ public sealed class BotDashboard
     private readonly MonstersWindow _monsters;
     private readonly ItemsWindow _items;
     private readonly LogWindow _log;
+
     private bool _open = true;
-    private string _patrolMessage = string.Empty;
-    private double _patrolMessageAt = double.NegativeInfinity;
+    private bool _minimized;
+    private bool _locked;
+    private float _bgOpacity = 0.95f;
+    private Vector2 _expandedSize = new(430f, 452f);
+    private bool _wasMinimized;
     private IReadOnlyList<string> _profileNames = [];
     private IReadOnlyList<string> _routeNames = [];
+    private IReadOnlyList<string> _navFiles = [];
+    private IReadOnlyList<string> _lootFiles = [];
+    private IReadOnlyList<string> _metaFiles = [];
     private double _namesRefreshedAt = double.NegativeInfinity;
+    private string _patrolMessage = string.Empty;
+    private double _patrolMessageAt = double.NegativeInfinity;
 
     public BotDashboard(BotController controller, IAutomationSurface surface)
     {
@@ -76,353 +81,402 @@ public sealed class BotDashboard
         if (!_open)
             return;
 
-        ImGui.SetNextWindowSize(new Vector2(400f, 520f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("DrakBot", ref _open))
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10, 10));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 8.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 6.0f);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.06f, 0.08f, _bgOpacity));
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse;
+        if (_minimized)
         {
-            ImGui.End();
-            return;
+            flags |= ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoResize;
+            _wasMinimized = true;
+        }
+        else if (_locked)
+        {
+            flags |= ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove;
         }
 
-        RefreshNames();
-        DrawHeader();
-        ImGui.Separator();
-        DrawToggles();
-        ImGui.Separator();
-        DrawVitals();
-        ImGui.Separator();
-        DrawLaunchers();
+        ImGui.SetNextWindowSizeConstraints(new Vector2(400, 0), new Vector2(1200, 2000));
+        if (!_minimized && !_locked)
+        {
+            if (_wasMinimized)
+            {
+                ImGui.SetNextWindowSize(_expandedSize, ImGuiCond.Always);
+                _wasMinimized = false;
+            }
+            else
+            {
+                ImGui.SetNextWindowSize(_expandedSize, ImGuiCond.FirstUseEver);
+            }
+        }
+        else if (_minimized)
+        {
+            ImGui.SetNextWindowCollapsed(false, ImGuiCond.Always);
+        }
+
+        if (ImGui.Begin("DrakBot Dashboard##Main", flags))
+        {
+            if (!_minimized && !_locked)
+                _expandedSize = ImGui.GetWindowSize();
+            RefreshNames();
+            DrawHeader();
+            ImGui.PushStyleColor(ImGuiCol.ChildBg, ColPanelBg);
+            ImGui.PushStyleColor(ImGuiCol.Border, ColBtnBord);
+            ImGui.PushStyleVar(ImGuiStyleVar.ChildBorderSize, 1.0f);
+            if (ImGui.BeginChild("CombatPanel", new Vector2(-1, 200), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+            {
+                DrawCombatPanel();
+                ImGui.Dummy(new Vector2(0, 2));
+            }
+            ImGui.EndChild();
+            ImGui.PopStyleVar();
+            ImGui.PopStyleColor(2);
+            if (!_minimized)
+            {
+                ImGui.Spacing();
+                ImGui.Spacing();
+                DrawLauncherGrid();
+                if (_patrolMessage.Length > 0 && ImGui.GetTime() - _patrolMessageAt < 5d)
+                    ImGui.TextColored(ColTextMute, _patrolMessage);
+            }
+        }
         ImGui.End();
+        ImGui.PopStyleColor(1);
+        ImGui.PopStyleVar(3);
     }
 
-    private void RefreshNames()
-    {
-        double now = ImGui.GetTime();
-        if (now - _namesRefreshedAt < 2d)
-            return;
-        _namesRefreshedAt = now;
-        _profileNames = _controller.Store.ProfileNames();
-        _routeNames = _controller.Store.RouteNames();
-    }
+    // ── header ───────────────────────────────────────────────────────────
 
     private void DrawHeader()
     {
         BotEngine engine = _controller.Engine;
-        if (!ImGui.BeginTable("header", 2))
+        float width = ImGui.GetContentRegionAvail().X;
+        float startY = ImGui.GetCursorPosY();
+        ImGui.SetWindowFontScale(1.4f);
+        ImGui.TextColored(ColTeal, "D");
+        ImGui.SameLine(0, 2);
+        ImGui.TextColored(new Vector4(1, 1, 1, 1), "RAKBOT DASHBOARD");
+        ImGui.SetWindowFontScale(1.0f);
+        ImGui.SameLine();
+        ImGui.SetCursorPosY(startY + 5);
+        ImGui.TextColored(ColTextMute, Version);
+        ImGui.SameLine(width - 130);
+        ImGui.SetCursorPosY(startY + 2);
+        if (ImGui.SmallButton(_locked ? "Unlk" : "Lock"))
+            _locked = !_locked;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(_locked ? "Unlock Window" : "Lock Window");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-"))
+            _bgOpacity = Math.Max(0.1f, _bgOpacity - 0.1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+"))
+            _bgOpacity = Math.Min(1.0f, _bgOpacity + 0.1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton(_minimized ? "^" : "_"))
+            _minimized = !_minimized;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("X"))
+            _open = false;
+        ImGui.Dummy(new Vector2(0, 2));
+        if (_minimized)
             return;
-        ImGui.TableSetupColumn("left", ImGuiTableColumnFlags.WidthFixed, 150f);
-        ImGui.TableSetupColumn("right", ImGuiTableColumnFlags.WidthStretch);
+        if (!ImGui.BeginTable("HeaderGrid", 2))
+            return;
+        ImGui.TableSetupColumn("Left", ImGuiTableColumnFlags.WidthFixed, width * 0.40f);
+        ImGui.TableSetupColumn("Right", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableNextRow();
 
-        ImGui.TableSetColumnIndex(0);
-        ImGui.PushStyleColor(ImGuiCol.Button, engine.IsRunning ? ColRunning : ColStopped);
-        if (ImGui.Button(engine.IsRunning ? "RUNNING" : "STOPPED", new Vector2(140f, 30f)))
+        // Left column: the run button, its light, the meta state and the activity.
+        ImGui.TableNextColumn();
+        bool running = engine.IsRunning;
+        PushRunColors(running);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 4.0f);
+        ImGui.SetWindowFontScale(1.2f);
+        Vector2 pos = ImGui.GetCursorScreenPos();
+        if (ImGui.Button(running ? "RUNNING##ToggleMacro" : "STOPPED##ToggleMacro", new Vector2(120, 28)))
             _controller.Toggle();
-        ImGui.PopStyleColor();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Start / stop DrakBot");
-        ImGui.Spacing();
-        ImGui.TextColored(ColMuted, "Activity");
-        ImGui.SameLine(70f);
-        ImGui.TextColored(ColAccent, engine.IsRunning ? engine.ActiveBehaviorName : "idle");
-        ImGui.TextColored(ColMuted, "Reason");
-        ImGui.SameLine(70f);
-        ImGui.TextWrapped(engine.LastReason);
-        // Side work: the pack tidy and the salvage queue, when they have something to say.
-        string tidy = engine.Inventory.Status;
-        if (tidy.Length > 0)
-            ImGui.TextColored(ColMuted, tidy);
-        foreach (IBehavior behavior in engine.Behaviors)
-        {
-            if (behavior is SalvageBehavior { Queued: > 0 } salvage)
-                ImGui.TextColored(ColMuted, $"{salvage.Queued} to salvage");
-        }
+            ImGui.SetTooltip("Click to Start / Stop the bot");
+        ImGui.SetWindowFontScale(1.0f);
+        ImGui.PopStyleVar();
+        ImGui.PopStyleColor(3);
+        ImDrawListPtr dl = ImGui.GetWindowDrawList();
+        uint circleColor = ImGui.ColorConvertFloat4ToU32(running ? ColGreen : ColTextMute);
+        Vector2 circlePos = pos + new Vector2(138, 14);
+        dl.AddCircleFilled(circlePos, 5, circleColor);
+        if (running)
+            dl.AddCircle(circlePos, 8, circleColor, 12, 1.5f);
 
-        ImGui.TableSetColumnIndex(1);
-        ImGui.TextColored(ColMuted, "Profile");
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo("##profile", _controller.Profile.Name))
+        ImGui.Spacing();
+        ImGui.TextColored(ColTextMute, "Meta State:");
+        ImGui.SameLine(0, 8);
+        MetaEngine? meta = _controller.Meta;
+        ImGui.TextColored(ColAmber, meta is { Rules.Count: > 0 } ? meta.CurrentState : "None");
+        ImGui.TextColored(ColTextMute, "Bot Activity:");
+        ImGui.SameLine(0, 8);
+        string activity = running ? engine.ActiveBehaviorName : "Idle";
+        ImGui.TextColored(ColAmber, activity == "idle" ? "Idle" : activity);
+        if (ImGui.IsItemHovered() && engine.LastReason.Length > 0)
+            ImGui.SetTooltip(engine.LastReason);
+
+        // Right column: the file pickers.
+        ImGui.TableNextColumn();
+        ImGui.TextColored(ColTextMute, "Profile:");
+        ImGui.SameLine(60);
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##ProfCombo", Truncate(_controller.Profile.Name, 16)))
         {
-            foreach (string name in _profileNames)
+            foreach (string profile in _profileNames)
             {
-                if (ImGui.Selectable(name, name == _controller.Profile.Name))
-                    _controller.LoadProfile(name);
+                if (ImGui.Selectable(profile, profile == _controller.Profile.Name))
+                    _controller.LoadProfile(profile);
             }
             if (_profileNames.Count == 0)
                 ImGui.TextDisabled("no saved profiles");
             ImGui.EndCombo();
         }
 
-        ImGui.TextColored(ColMuted, "Route");
+        ImGui.TextColored(ColTextMute, "Nav:");
+        ImGui.SameLine(60);
+        ImGui.SetNextItemWidth(-1);
         Route? route = _controller.Navigation.Route;
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo("##route", route?.Name ?? "none"))
+        if (ImGui.BeginCombo("##NavCombo", Truncate(route?.Name ?? "None", 16)))
         {
-            if (ImGui.Selectable("none", route is null))
+            if (ImGui.Selectable("None", route is null))
                 _controller.Navigation.SetRoute(null);
             foreach (string name in _routeNames)
             {
                 if (ImGui.Selectable(name, name == route?.Name))
-                    _controller.LoadRoute(name);
+                    _controller.LoadRouteByName(name);
+            }
+            foreach (string file in _navFiles)
+            {
+                string name = file[..^4];
+                if (ImGui.Selectable(file, name == route?.Name))
+                    _controller.LoadRouteByName(name);
             }
             ImGui.EndCombo();
         }
-        if (route is not null)
+
+        ImGui.TextColored(ColTextMute, "Loot:");
+        ImGui.SameLine(60);
+        ImGui.SetNextItemWidth(-1);
+        string loot = _controller.Profile.Loot.UtlProfile;
+        if (ImGui.BeginCombo("##LootCombo", Truncate(loot.Length == 0 ? "None" : loot, 16)))
         {
-            string action = _controller.Navigation.ActionStatus;
-            ImGui.TextColored(
-                ColMuted,
-                action.Length > 0
-                    ? action
-                    : $"waypoint {_controller.Navigation.WaypointIndex + 1}/{route.Waypoints.Count}");
+            if (ImGui.Selectable("None", loot.Length == 0))
+                _controller.Update(p => p with { Loot = p.Loot with { UtlProfile = string.Empty } });
+            foreach (string file in _lootFiles)
+            {
+                string name = file[..^4];
+                if (ImGui.Selectable(file, name.Equals(loot, StringComparison.OrdinalIgnoreCase)))
+                    _controller.Update(p => p with { Loot = p.Loot with { UtlProfile = name } });
+            }
+            ImGui.EndCombo();
         }
-        if (_controller.Meta is { Rules.Count: > 0 } meta)
+
+        ImGui.TextColored(ColTextMute, "Meta:");
+        ImGui.SameLine(60);
+        ImGui.SetNextItemWidth(-1);
+        string metaName = meta is { MetaName.Length: > 0 } ? meta.MetaName : "None";
+        if (ImGui.BeginCombo("##MetaCombo", Truncate(metaName, 16)))
         {
-            ImGui.TextColored(ColMuted, "Meta");
-            ImGui.TextColored(
-                meta.Enabled ? ColAccent : ColMuted,
-                $"{meta.MetaName}: {meta.CurrentState}" + (meta.Enabled ? string.Empty : " (off)"));
+            if (ImGui.Selectable("None", metaName == "None") && meta is not null)
+            {
+                meta.Clear();
+                _controller.Update(p => p with { Meta = p.Meta with { Name = string.Empty } });
+            }
+            foreach (string file in _metaFiles)
+            {
+                string name = file[..file.LastIndexOf('.')];
+                if (ImGui.Selectable(file, name.Equals(metaName, StringComparison.OrdinalIgnoreCase)) && meta is not null)
+                    meta.LoadByName(name);
+            }
+            ImGui.EndCombo();
         }
         ImGui.EndTable();
+        ImGui.Spacing();
     }
 
-    private void DrawToggles()
+    // ── combat panel ─────────────────────────────────────────────────────
+
+    private void DrawCombatPanel()
     {
+        if (!ImGui.BeginTable("CombatInnerTable", 2, ImGuiTableFlags.None))
+            return;
+        ImGui.TableSetupColumn("Toggles", ImGuiTableColumnFlags.WidthFixed, 68);
+        ImGui.TableSetupColumn("Vitals", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
         BotProfile profile = _controller.Profile;
-        var size = new Vector2(70f, 26f);
-        if (ToggleButton("Combat", profile.Combat.Enabled, size))
+        bool running = _controller.Engine.IsRunning;
+        if (_minimized)
+        {
+            PushRunColors(running);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
+            if (ImGui.Button(running ? "ON##MinMacro" : "OFF##MinMacro", new Vector2(64, 20)))
+                _controller.Toggle();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(running ? "Bot Running - Click to Stop" : "Bot Stopped - Click to Start");
+            ImGui.PopStyleVar();
+            ImGui.PopStyleColor(3);
+        }
+        Vector2 togglePos = ImGui.GetCursorScreenPos() + new Vector2(2, _minimized ? 6 : 28);
+
+        // Left-click toggles; right-click opens the matching settings or window.
+        if (SquareToggle("sword", profile.Combat.Enabled, togglePos, "CombatTgl"))
             _controller.Update(p => p with { Combat = p.Combat with { Enabled = !p.Combat.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _settings.Open("Combat");
-        Hint("Combat - left-click to toggle, right-click for settings");
-        ImGui.SameLine();
-        if (ToggleButton("Buffs", profile.Buffs.Enabled, size))
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Combat - left-click to toggle, right-click for settings");
+
+        if (SquareToggle("buff", profile.Buffs.Enabled, togglePos + new Vector2(34, 0), "BuffTgl"))
             _controller.Update(p => p with { Buffs = p.Buffs with { Enabled = !p.Buffs.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _settings.Open("Buffing");
-        Hint("Buffing - left-click to toggle, right-click for settings");
-        ImGui.SameLine();
-        if (ToggleButton("Loot", profile.Loot.Enabled, size))
-            _controller.Update(p => p with { Loot = p.Loot with { Enabled = !p.Loot.Enabled } });
-        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
-            _settings.Open("Looting");
-        Hint("Looting - left-click to toggle, right-click for settings");
-        ImGui.SameLine();
-        if (ToggleButton("Nav", profile.Navigation.Enabled, size))
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Buffing - left-click to toggle, right-click for settings");
+
+        if (SquareToggle("shoe", profile.Navigation.Enabled, togglePos + new Vector2(0, 34), "NavTgl"))
             _controller.Update(p => p with { Navigation = p.Navigation with { Enabled = !p.Navigation.Enabled } });
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _navigation.IsOpen = true;
-        Hint("Navigation - left-click to toggle, right-click for routes");
-        ImGui.SameLine();
-        if (ToggleButton("Macro", profile.Meta.Enabled, size))
-        {
-            if (_controller.Meta is { } meta)
-                meta.Enabled = !profile.Meta.Enabled;
-        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Navigation - left-click to toggle, right-click for routes");
+
+        if (SquareToggle("bag", profile.Loot.Enabled, togglePos + new Vector2(34, 34), "LootTgl"))
+            _controller.Update(p => p with { Loot = p.Loot with { Enabled = !p.Loot.Enabled } });
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            _settings.Open("Looting");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Looting - left-click to toggle, right-click for settings");
+
+        if (WideToggle("MACRO", "gear", profile.Meta.Enabled, togglePos + new Vector2(0, 68), "MetaTgl", 64f, 20f) && _controller.Meta is { } metaEngine)
+            metaEngine.Enabled = !profile.Meta.Enabled;
         if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             _metaRules.IsOpen = true;
-        Hint("Macro / meta - left-click to toggle, right-click for the rules");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Macro / Meta - left-click to toggle, right-click for rules");
 
-        ImGui.Spacing();
+        // FR (force rebuff) below the MACRO toggle.
+        Vector2 frPos = togglePos + new Vector2(0, 92);
+        ImGui.SetCursorScreenPos(frPos);
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.28f, 0.20f, 0.04f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.46f, 0.33f, 0.06f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.20f, 0.14f, 0.03f, 1.00f));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
         bool forcing = _controller.Buffs.IsForceRebuffPending;
-        if (ImGui.Button(forcing ? "Rebuffing..." : "Rebuff all", new Vector2(120f, 22f)) && !forcing)
+        if (ImGui.Button(forcing ? "FR..##ForceRebuff" : "FR##ForceRebuff", new Vector2(64, 16)) && !forcing)
             _controller.Buffs.ForceRebuff();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Recast every configured buff now");
+            ImGui.SetTooltip("Force-recast all buffs.");
+        ImGui.PopStyleVar();
+        ImGui.PopStyleColor(3);
+
+        // Right column: the target, then the player's vitals.
+        ImGui.TableNextColumn();
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 4);
+        bool hasTarget = TryCurrentTarget(out PluginCombatTarget target);
+        string targetLabel = hasTarget ? target.Name : "NO TARGET";
+        string targetHealth = !hasTarget ? "0" : target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "--";
+        float targetPct = hasTarget && target.IsHealthKnown ? target.HealthFraction : 0f;
+        ImGui.TextColored(ColTextDim, Truncate(targetLabel, 32).ToUpperInvariant());
         ImGui.SameLine();
+        float valueWidth = ImGui.CalcTextSize(targetHealth).X;
+        float lineX = ImGui.GetCursorPosX();
+        float regionWidth = ImGui.GetContentRegionAvail().X;
+        ImGui.SetCursorPosX(lineX + Math.Max(0, regionWidth - valueWidth));
+        ImGui.TextColored(new Vector4(1, 1, 1, 1), targetHealth);
+        SegmentedBar(targetPct, ImGui.GetContentRegionAvail().X - 4);
+        if (hasTarget)
+        {
+            float barWidth = ImGui.GetContentRegionAvail().X - 4;
+            CompactVitalBar("DIST", 1f, ColBarBg, $"{target.Distance:0.0}m", barWidth);
+        }
+        ImGui.Dummy(new Vector2(0, 2));
+        ImGui.TextColored(ColTextMute, "PLAYER VITALS");
+        ICharacterInfo character = _surface.Character;
+        VitalRow("heart", "HP", Ratio(character.CurrentHealth, character.MaxHealth), ColHp, FormatVital(character.CurrentHealth, character.MaxHealth));
+        VitalRow("run", "ST", Ratio(character.CurrentStamina, character.MaxStamina), ColGreen, FormatVital(character.CurrentStamina, character.MaxStamina));
+        VitalRow("drop", "MN", Ratio(character.CurrentMana, character.MaxMana), ColMana, FormatVital(character.CurrentMana, character.MaxMana));
+        ImGui.EndTable();
+    }
+
+    // ── launcher grid ────────────────────────────────────────────────────
+
+    private void DrawLauncherGrid()
+    {
+        if (!ImGui.BeginTable("LauncherGridTable", 3, ImGuiTableFlags.SizingStretchSame))
+            return;
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        if (GridButton("Macro Rules", "gear", _metaRules.IsOpen))
+            _metaRules.IsOpen = !_metaRules.IsOpen;
+        ImGui.TableNextColumn();
+        if (GridButton("Monsters", "target", _monsters.IsOpen))
+            _monsters.IsOpen = !_monsters.IsOpen;
+        ImGui.TableNextColumn();
+        if (GridButton("Settings", "wrench", _settings.IsOpen))
+            _settings.IsOpen = !_settings.IsOpen;
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        if (GridButton("Navigation", "map", _navigation.IsOpen))
+            _navigation.IsOpen = !_navigation.IsOpen;
+        ImGui.TableNextColumn();
+        if (GridButton("Items", "shield", _items.IsOpen))
+            _items.IsOpen = !_items.IsOpen;
+        ImGui.TableNextColumn();
+        if (GridButton("Log", "code", _log.IsOpen))
+            _log.IsOpen = !_log.IsOpen;
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
         bool patrolling = _controller.IsPatrolling;
-        ImGui.PushStyleColor(ImGuiCol.Button, patrolling ? ColToggleOn : new Vector4(0.12f, 0.30f, 0.45f, 1f));
-        if (ImGui.Button(patrolling ? "Stop patrol" : "Patrol", new Vector2(120f, 22f)))
+        if (GridButton(patrolling ? "Stop Patrol" : "Dungeon Patrol", "map", patrolling))
         {
             if (patrolling)
             {
                 _controller.ClearRoute();
                 _patrolMessage = "patrol stopped";
             }
-            else
+            else if (_controller.TryStartPatrol(out _patrolMessage))
             {
-                if (_controller.TryStartPatrol(out _patrolMessage))
-                    _controller.Engine.Start();
+                _controller.Engine.Start();
             }
             _patrolMessageAt = ImGui.GetTime();
         }
-        ImGui.PopStyleColor();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(patrolling
-                ? "Stop the dungeon patrol"
-                : "Patrol this dungeon: a circular hunt through every cell, avoiding marked hazards; starts the bot");
-        ImGui.SameLine();
-        ImGui.TextColored(ColMuted, $"style: {profile.Combat.Style}");
-        if (_patrolMessage.Length > 0 && ImGui.GetTime() - _patrolMessageAt < 5d)
-            ImGui.TextColored(ColMuted, _patrolMessage);
-    }
-
-    private void DrawVitals()
-    {
-        ICharacterInfo character = _surface.Character;
-        ImGui.TextColored(ColMuted, "PLAYER");
-        VitalBar("HP", character.CurrentHealth, character.MaxHealth, ColHealth);
-        VitalBar("ST", character.CurrentStamina, character.MaxStamina, ColStamina);
-        VitalBar("MN", character.CurrentMana, character.MaxMana, ColMana);
-
-        ImGui.Spacing();
-        ImGui.TextColored(ColMuted, "TARGET");
-        if (TryCurrentTarget(out PluginCombatTarget target, out CombatBehavior? combat))
-        {
-            ImGui.Text($"{target.Name}  ({target.Distance:0.0} m)");
-            float fraction = target.IsHealthKnown ? target.HealthFraction : 0f;
-            ImGui.PushStyleColor(ImGuiCol.PlotHistogram, ColHealth);
-            ImGui.ProgressBar(fraction, new Vector2(-1f, 14f), target.IsHealthKnown ? $"{fraction:P0}" : "?");
-            ImGui.PopStyleColor();
-            DrawLineOfSight(target.ObjectId, combat);
-        }
-        else
-        {
-            ImGui.TextDisabled("none");
-        }
-    }
-
-    private void DrawLineOfSight(uint targetId, CombatBehavior? combat)
-    {
-        ImGui.TextColored(ColMuted, "LoS");
-        ImGui.SameLine(36f);
-        if (combat is null)
-        {
-            ImGui.TextDisabled("n/a");
-            return;
-        }
-        LineOfSightService los = combat.LineOfSight;
-        if (!los.IsEnabled)
-        {
-            ImGui.TextDisabled("off");
-            return;
-        }
-        if (los.IsBlacklisted(targetId))
-        {
-            ImGui.TextColored(ColHealth, $"blacklisted {los.BlacklistSecondsRemaining(targetId):0}s");
-            return;
-        }
-        if (_controller.Profile.Combat.Style == CombatStyle.Melee)
-        {
-            DrawWalk(targetId, combat, los);
-            return;
-        }
-        if (!los.TryGetLast(targetId, out LineOfSightVerdict verdict))
-        {
-            ImGui.TextDisabled("not checked");
-            return;
-        }
-        string state = verdict.State switch
-        {
-            LineOfSightState.Clear => $"clear ({verdict.Kind}, {verdict.Height})",
-            LineOfSightState.Blocked => verdict.BlockingObjectId == 0u
-                ? $"blocked ({verdict.Kind})"
-                : $"blocked by 0x{verdict.BlockingObjectId:X8} ({verdict.Kind})",
-            _ => $"unknown ({verdict.Status})",
-        };
-        Vector4 color = verdict.State switch
-        {
-            LineOfSightState.Clear => ColStamina,
-            LineOfSightState.Blocked => ColHealth,
-            _ => ColMuted,
-        };
-        ImGui.TextColored(color, state);
-        int strikes = los.StrikesFor(targetId);
-        if (strikes > 0)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(ColMuted, $"strike {strikes}/{_controller.Profile.Combat.LineOfSight.BlacklistStrikes}");
-        }
-        if (combat.IsApproaching)
-        {
-            ImGui.TextColored(ColMuted, "Walk");
-            ImGui.SameLine(36f);
-            DrawWalk(targetId, combat, los);
-        }
-    }
-
-    /// <summary>The walk verdict: which heading is open, or that none is.</summary>
-    private void DrawWalk(uint targetId, CombatBehavior combat, LineOfSightService los)
-    {
-        if (!los.ChecksWalking)
-        {
-            ImGui.TextDisabled(combat.IsApproaching ? "closing in (unchecked)" : "n/a");
-            return;
-        }
-        if (!los.TryGetLastWalk(targetId, out WalkVerdict walk))
-        {
-            ImGui.TextDisabled(combat.IsApproaching ? "closing in" : "not checked");
-            return;
-        }
-        string text = walk.State switch
-        {
-            LineOfSightState.Clear => float.IsNaN(combat.ApproachHeadingDegrees)
-                ? "path open"
-                : $"walking {combat.ApproachHeadingDegrees:0}\u00b0",
-            LineOfSightState.Blocked => walk.BlockingObjectId == 0u
-                ? "no open heading"
-                : $"no open heading (0x{walk.BlockingObjectId:X8})",
-            _ => "unknown",
-        };
-        ImGui.TextColored(walk.State == LineOfSightState.Blocked ? ColHealth : ColStamina, text);
-        int strikes = los.StrikesFor(targetId);
-        if (strikes > 0)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(ColMuted, $"strike {strikes}/{_controller.Profile.Combat.LineOfSight.BlacklistStrikes}");
-        }
-    }
-
-    private void DrawLaunchers()
-    {
-        if (!ImGui.BeginTable("launchers", 3, ImGuiTableFlags.SizingStretchSame))
-            return;
+            ImGui.SetTooltip(patrolling ? "Stop the dungeon patrol" : "Patrol this dungeon: a circular hunt through every cell, avoiding marked hazards; starts the bot");
         ImGui.TableNextColumn();
-        if (Launcher("Macro Rules", _metaRules.IsOpen))
-            _metaRules.IsOpen = !_metaRules.IsOpen;
-        ImGui.TableNextColumn();
-        if (Launcher("Monsters", _monsters.IsOpen))
-            _monsters.IsOpen = !_monsters.IsOpen;
-        ImGui.TableNextColumn();
-        if (Launcher("Settings", _settings.IsOpen))
-            _settings.IsOpen = !_settings.IsOpen;
-        ImGui.TableNextColumn();
-        if (Launcher("Navigation", _navigation.IsOpen))
-            _navigation.IsOpen = !_navigation.IsOpen;
-        ImGui.TableNextColumn();
-        if (Launcher("Items", _items.IsOpen))
-            _items.IsOpen = !_items.IsOpen;
-        ImGui.TableNextColumn();
-        if (Launcher("Log", _log.IsOpen))
-            _log.IsOpen = !_log.IsOpen;
-        ImGui.TableNextColumn();
-        if (ImGui.Button("Save profile", new Vector2(-1f, 26f)))
+        if (GridButton("Save Profile", "wrench", false))
             _controller.SaveProfile();
-        Hint($"Save the live profile as '{_controller.Profile.Name}'");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Save the live profile as '{_controller.Profile.Name}'");
+        ImGui.TableNextColumn();
         ImGui.EndTable();
     }
 
-    /// <summary>A launcher button, lit while its window is open; true when clicked.</summary>
-    private static bool Launcher(string label, bool open)
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    private void RefreshNames()
     {
-        if (open)
-            ImGui.PushStyleColor(ImGuiCol.Button, ColToggleOn);
-        bool clicked = ImGui.Button(label, new Vector2(-1f, 26f));
-        if (open)
-            ImGui.PopStyleColor();
-        return clicked;
+        double now = ImGui.GetTime();
+        if (now - _namesRefreshedAt < 3d)
+            return;
+        _namesRefreshedAt = now;
+        _profileNames = _controller.Store.ProfileNames();
+        _routeNames = _controller.Store.RouteNames();
+        _navFiles = _controller.NavFileNames();
+        _lootFiles = _controller.UtlFileNames();
+        _metaFiles = _controller.MetaFileNames();
     }
 
-    private static void Hint(string text)
-    {
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(text);
-    }
-
-    private bool TryCurrentTarget(out PluginCombatTarget target, out CombatBehavior? combat)
+    private bool TryCurrentTarget(out PluginCombatTarget target)
     {
         target = default;
         Blackboard? board = _controller.Engine.LastBoard;
-        combat = _controller.Engine.Behaviors.OfType<CombatBehavior>().FirstOrDefault();
+        CombatBehavior? combat = _controller.Engine.Behaviors.OfType<CombatBehavior>().FirstOrDefault();
         if (board is null)
             return false;
         uint targetId = combat?.CurrentTargetId ?? 0u;
@@ -439,22 +493,18 @@ public sealed class BotDashboard
         return false;
     }
 
-    private static void VitalBar(string label, uint current, uint max, Vector4 color)
+    private static void PushRunColors(bool running)
     {
-        float fraction = max == 0u ? 0f : Math.Clamp((float)current / max, 0f, 1f);
-        ImGui.TextColored(ColMuted, label);
-        ImGui.SameLine(36f);
-        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, color);
-        ImGui.ProgressBar(fraction, new Vector2(-1f, 14f), $"{current}/{max}");
-        ImGui.PopStyleColor();
+        ImGui.PushStyleColor(ImGuiCol.Button, running ? new Vector4(0.10f, 0.35f, 0.15f, 1f) : new Vector4(0.25f, 0.12f, 0.12f, 1f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, running ? new Vector4(0.15f, 0.50f, 0.22f, 1f) : new Vector4(0.40f, 0.18f, 0.18f, 1f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, running ? new Vector4(0.08f, 0.28f, 0.12f, 1f) : new Vector4(0.20f, 0.10f, 0.10f, 1f));
     }
 
-    private static bool ToggleButton(string label, bool on, Vector2 size)
-    {
-        ImGui.PushStyleColor(ImGuiCol.Button, on ? ColToggleOn : ColToggleOff);
-        ImGui.PushStyleColor(ImGuiCol.Text, on ? new Vector4(1f, 1f, 1f, 1f) : ColMuted);
-        bool clicked = ImGui.Button(label, size);
-        ImGui.PopStyleColor(2);
-        return clicked;
-    }
+    private static float Ratio(uint value, uint maximum) => maximum == 0u ? 0f : Math.Clamp((float)value / maximum, 0f, 1f);
+
+    private static string FormatVital(uint value, uint maximum) =>
+        maximum == 0u ? (value == 0u ? "--/--" : $"{value}/--") : $"{value}/{maximum}";
+
+    private static string Truncate(string? value, int max) =>
+        string.IsNullOrEmpty(value) ? string.Empty : value.Length > max ? value[..(max - 1)] + "..." : value;
 }
