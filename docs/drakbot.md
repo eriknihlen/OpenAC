@@ -382,7 +382,8 @@ dashboard is.
 
 - **Dashboard** - start/stop, activity and reason, profile and route pickers,
   the subsystem toggles (Combat, Buffs, Loot, Nav, Macro; right-click one
-  for its settings or window), force rebuff, player and target vitals, the
+  for its settings or window), force rebuff, a Patrol / Stop patrol
+  button for the dungeon the character is in, player and target vitals, the
   current target's line-of-sight state (clear, blocked by what, strikes,
   blacklisted) and, while walking, which heading is open; the launcher
   grid below opens the rest.

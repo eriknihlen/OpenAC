@@ -35,6 +35,8 @@ public sealed class BotDashboard
     private readonly MonstersWindow _monsters;
     private readonly ItemsWindow _items;
     private bool _open = true;
+    private string _patrolMessage = string.Empty;
+    private double _patrolMessageAt = double.NegativeInfinity;
     private IReadOnlyList<string> _profileNames = [];
     private IReadOnlyList<string> _routeNames = [];
     private double _namesRefreshedAt = double.NegativeInfinity;
@@ -224,7 +226,31 @@ public sealed class BotDashboard
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Recast every configured buff now");
         ImGui.SameLine();
+        bool patrolling = _controller.IsPatrolling;
+        ImGui.PushStyleColor(ImGuiCol.Button, patrolling ? ColToggleOn : new Vector4(0.12f, 0.30f, 0.45f, 1f));
+        if (ImGui.Button(patrolling ? "Stop patrol" : "Patrol", new Vector2(120f, 22f)))
+        {
+            if (patrolling)
+            {
+                _controller.ClearRoute();
+                _patrolMessage = "patrol stopped";
+            }
+            else
+            {
+                if (_controller.TryStartPatrol(out _patrolMessage))
+                    _controller.Engine.Start();
+            }
+            _patrolMessageAt = ImGui.GetTime();
+        }
+        ImGui.PopStyleColor();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(patrolling
+                ? "Stop the dungeon patrol"
+                : "Patrol this dungeon: a circular hunt through every cell, avoiding marked hazards; starts the bot");
+        ImGui.SameLine();
         ImGui.TextColored(ColMuted, $"style: {profile.Combat.Style}");
+        if (_patrolMessage.Length > 0 && ImGui.GetTime() - _patrolMessageAt < 5d)
+            ImGui.TextColored(ColMuted, _patrolMessage);
     }
 
     private void DrawVitals()
