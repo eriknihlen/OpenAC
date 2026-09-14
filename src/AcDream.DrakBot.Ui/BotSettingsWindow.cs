@@ -285,10 +285,10 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("A melee target farther than this is walked up to first.");
         float approachRange = combat.ApproachRangeMeters;
-        if (ImGui.SliderFloat("Approach to (m)", ref approachRange, 1f, 25f, "%.0f"))
+        if (ImGui.SliderFloat("Walk up to (m)", ref approachRange, 1f, 25f, "%.0f"))
             controller.Update(p => p with { Combat = p.Combat with { ApproachRangeMeters = approachRange } });
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("A ranged target with no line of sight is walked toward until it is this close or the path clears.");
+            ImGui.SetTooltip("A melee target out of reach is walked up to only when it is this close; farther ones are left alone.\nA ranged target with no line of sight is never walked to.");
         int approachTimeout = (int)Math.Round(combat.ApproachTimeoutSeconds);
         if (ImGui.SliderInt("Give up walking after (s)", ref approachTimeout, 3, 60))
             controller.Update(p => p with { Combat = p.Combat with { ApproachTimeoutSeconds = approachTimeout } });

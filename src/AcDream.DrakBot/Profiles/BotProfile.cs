@@ -225,9 +225,9 @@ public sealed record CombatSettings
     public float MeleeRangeMeters { get; init; } = 2.5f;
 
     /// <summary>
-    /// A ranged target with no line of sight is walked toward until it is
-    /// this close or the path clears; inside this range a blocked target
-    /// earns blacklist strikes instead.
+    /// A melee target out of reach is walked up to only when it is this
+    /// close; a farther one is left alone until it comes nearer. A ranged
+    /// target with no line of sight is never walked to.
     /// </summary>
     public float ApproachRangeMeters { get; init; } = 6f;
 

@@ -26,7 +26,7 @@ public sealed class EngineIntegrationTests
         [
             new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals),
             new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs),
-            new CombatBehavior(spells, Casts(), lineOfSight, () => engine.Profile.Combat),
+            new CombatBehavior(surface, spells, Casts(), lineOfSight, () => engine.Profile.Combat),
             new LootBehavior(() => engine.Profile.Loot),
             new NavigationBehavior(() => engine.Profile.Navigation),
         ];
@@ -117,13 +117,12 @@ public sealed class EngineIntegrationTests
         var profile = new BotProfile
         {
             Buffs = new BuffSettings { Enabled = false },
-            Combat = new CombatSettings { Style = CombatStyle.Magic },
+            Combat = new CombatSettings { Style = CombatStyle.Melee, ApproachRangeMeters = 20f },
             Loot = new LootSettings { Enabled = false },
         };
         (FakeAutomationSurface surface, BotEngine engine) = Build(profile);
-        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Magic };
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(new PluginCombatTarget(9, "Tusker", 0u, 15f, 0f, true, 1f));
-        surface.BlockPath(9u);
         surface.ObjectPositions[9u] = surface.Position with { NorthSouth = 15d / 240d };
 
         engine.Tick(0.1);

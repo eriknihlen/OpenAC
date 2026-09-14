@@ -19,6 +19,7 @@ public sealed class CombatBehaviorTests
         var clock = new TickClock();
         var casts = new CastTracker(surface, clock);
         var behavior = new CombatBehavior(
+            surface,
             new SpellSelector(surface, surface, casts.IsOnCooldown),
             casts,
             new LineOfSightService(surface, surface, clock, () => settings.LineOfSight),
@@ -245,7 +246,7 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
-    public void EveryTargetBlockedBeyondApproachRangeWalksTowardTheBestUntilThePathClears()
+    public void ABlockedRangedTargetIsStruckAndNeverWalkedToWhateverItsDistance()
     {
         var settings = new CombatSettings
         {
@@ -258,61 +259,28 @@ public sealed class CombatBehaviorTests
         surface.BlockPath(9u);
         Place(surface, 9u, north: 0d, east: 15d);
 
-        // Turn first: the target is due east and the character faces north.
-        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.True(behavior.IsApproaching);
-        Assert.Equal(["move:turnright"], surface.Commands);
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.False(behavior.IsApproaching);
+        Assert.Empty(surface.Commands);
+        Assert.Equal(1, behavior.LineOfSight.StrikesFor(9u));
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+
+        // The path opens: shoot from here.
+        surface.ClearPath(9u);
+        clock.Advance(0.6d);
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
         Assert.Equal("Tusker at 15.0m", reason);
-
-        // Facing it now: walk.
-        surface.Position = surface.Position with { HeadingDegrees = 90f };
-        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal("move:forward", surface.Commands[^1]);
-        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal(3, surface.Commands.Count);
-        Assert.Equal(0, behavior.LineOfSight.StrikesFor(9u));
-
-        // The path opens while still 12 m out: stop and shoot.
-        surface.ClearPath(9u);
-        MoveHostile(surface, 9u, 12f);
-        Assert.Equal(StepResult.Done, Step(behavior, surface, clock, dt: 0.6).Result);
-        Assert.Equal("move:clear", surface.Commands[^1]);
-        Assert.False(behavior.IsApproaching);
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
         Assert.Equal("cast:300@9", surface.Commands[^1]);
-    }
-
-    [Fact]
-    public void ApproachStopsAtTheApproachRangeAndTheTargetIsThenStruck()
-    {
-        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Missile, ApproachRangeMeters = 5f });
-        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Missile };
-        surface.Hostiles.Add(Hostile(9, "Tusker", 15f));
-        surface.BlockPath(9u);
-        Place(surface, 9u, north: 15d, east: 0d);
-
-        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
-        Assert.Equal(["move:forward"], surface.Commands);
-
-        MoveHostile(surface, 9u, 4.5f);
-        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
-        Assert.Equal("move:clear", surface.Commands[^1]);
-        // Now inside the range: no walk, one strike, nothing to shoot.
-        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
-        Assert.Equal(1, behavior.LineOfSight.StrikesFor(9u));
-        Assert.DoesNotContain("attack:9:Medium:1", surface.Commands);
     }
 
     [Fact]
     public void AnApproachThatGoesNowhereTimesOutWithAStrike()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Magic, ApproachTimeoutSeconds = 3d });
-        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Magic };
+            Build(new CombatSettings { Style = CombatStyle.Melee, ApproachRangeMeters = 20f, ApproachTimeoutSeconds = 3d });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(9, "Tusker", 15f));
-        surface.BlockPath(9u);
         Place(surface, 9u, north: 15d, east: 0d);
 
         Step(behavior, surface, clock);
@@ -370,7 +338,7 @@ public sealed class CombatBehaviorTests
     public void MeleeWalksUpToAFarTargetThenSwings()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 2.5f });
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 2.5f, ApproachRangeMeters = 10f });
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(7, "Drudge", 8f));
         Place(surface, 7u, north: 8d, east: 0d);
@@ -390,7 +358,7 @@ public sealed class CombatBehaviorTests
     public void InterruptWhileApproachingStopsWalking()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Melee });
+            Build(new CombatSettings { Style = CombatStyle.Melee, ApproachRangeMeters = 10f });
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(7, "Drudge", 8f));
         Place(surface, 7u, north: 8d, east: 0d);
@@ -408,7 +376,7 @@ public sealed class CombatBehaviorTests
     public void ATargetThatVanishesMidApproachEndsTheWalk()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Melee });
+            Build(new CombatSettings { Style = CombatStyle.Melee, ApproachRangeMeters = 10f });
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(7, "Drudge", 8f));
         Place(surface, 7u, north: 8d, east: 0d);
@@ -444,7 +412,7 @@ public sealed class CombatBehaviorTests
     public void AMeleeTargetNoHeadingReachesIsStruckAndAReachableOneWalkedTo()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
-            Build(new CombatSettings { Style = CombatStyle.Melee });
+            Build(new CombatSettings { Style = CombatStyle.Melee, ApproachRangeMeters = 10f });
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
         surface.Hostiles.Add(Hostile(1, "Behind the fence", 6f));
         surface.Hostiles.Add(Hostile(2, "In the open", 8f));
@@ -468,6 +436,7 @@ public sealed class CombatBehaviorTests
         var settings = new CombatSettings
         {
             Style = CombatStyle.Melee,
+            ApproachRangeMeters = 12f,
             LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d },
         };
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
@@ -502,6 +471,7 @@ public sealed class CombatBehaviorTests
         var settings = new CombatSettings
         {
             Style = CombatStyle.Melee,
+            ApproachRangeMeters = 12f,
             LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d, BlacklistStrikes = 10 },
         };
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
@@ -529,6 +499,33 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void AMeleeTargetBeyondTheWalkRangeIsLeftAloneWithoutAStrike()
+    {
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 1.5f, ApproachRangeMeters = 6f, LeaveCombatWhenIdle = false });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 9f));
+        surface.Hostiles.Add(Hostile(8, "Nearer drudge", 5f));
+        Place(surface, 7u, north: 9d, east: 0d);
+        Place(surface, 8u, north: -5d, east: 0d);
+
+        // The nearer one, inside the walk range, is walked to; the far one is not a target at all.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Nearer drudge at 5.0m", reason);
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(8u, behavior.CurrentTargetId);
+        Assert.True(behavior.IsApproaching);
+        Assert.Equal(0, behavior.LineOfSight.StrikesFor(7u));
+
+        // With only the far one left, combat has nothing to do until it comes closer.
+        surface.Hostiles.RemoveAt(1);
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        MoveHostile(surface, 7u, 5.5f);
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out _));
+    }
+
+    [Fact]
     public void ARangedTargetBlockedBeyondRangeIsNotWalkedToWhenNoHeadingIsOpen()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
@@ -543,7 +540,7 @@ public sealed class CombatBehaviorTests
 
         Assert.Empty(surface.Commands);
         Assert.False(behavior.IsApproaching);
-        // One strike for the shot and one for the walk.
-        Assert.Equal(2, behavior.LineOfSight.StrikesFor(9u));
+        // One strike for the shot; the walk is never tried.
+        Assert.Equal(1, behavior.LineOfSight.StrikesFor(9u));
     }
 }

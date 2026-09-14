@@ -182,6 +182,7 @@ public sealed class MonsterRuleTests
         var clock = new TickClock();
         var casts = new CastTracker(surface, clock);
         var behavior = new CombatBehavior(
+            surface,
             new SpellSelector(surface, surface, casts.IsOnCooldown),
             casts,
             new LineOfSightService(surface, surface, clock, () => settings.LineOfSight),

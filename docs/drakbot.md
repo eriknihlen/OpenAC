@@ -196,21 +196,24 @@ Ranged styles do not fire blind, and nobody walks into a wall:
 - **Aim heights.** The configured attack height is tried first, then the
   other two. A missile attack uses whichever height was clear.
 - **Choosing a target.** Hostiles are ranked as before; the first one with a
-  clear path wins. A blocked target inside the approach range earns a
-  strike and is passed over; after N strikes in a row it is blacklisted for
-  a while and drops out of selection until the blacklist lapses or a later
-  sweep finds it clear. Strikes are counted once per fresh sweep, so a
-  cached verdict re-read every tick does not stack them.
-- **Approach.** When nothing can be shot from where the bot stands, it
-  walks toward the best hostile that is blocked beyond the approach range:
-  hold a run toward it, re-check the path every tick, stop when it clears
-  or the approach range is met, give up after a timeout. Melee
-  uses the same step to close to within its reach before pressing the
-  attack. The walk is one step like everything else: a heal interrupts it
-  and the movement intent is dropped.
-- **Walking with eyes open.** Before a hostile is chosen as something to
-  walk to - melee out of reach, or ranged and blocked beyond the approach
-  range - the service walks the body toward it; if the direct heading is
+  clear path wins. A blocked target is never walked to: it earns a strike
+  and is passed over, whatever its distance; after N strikes in a row it
+  is blacklisted for a while and drops out of selection until the
+  blacklist lapses or a later sweep finds it clear. Strikes are counted
+  once per fresh sweep, so a cached verdict re-read every tick does not
+  stack them. Combat only claims control for a hostile it can actually
+  fight - one it can shoot, or one it can walk to - so a blocked or
+  too-distant monster in view does not pre-empt navigation every tick.
+- **Approach.** Melee only: a hostile out of reach is walked up to when it
+  is within the walk-up range (*Walk up to* under Ranges, `ApproachRange`
+  in a meta); one farther away is left alone until it comes closer or the
+  route brings the bot to it, so a monster seen down a long hall does not
+  drag the bot off its route. The walk holds a run toward the target,
+  re-checks the way every tick, stops within reach and gives up after a
+  timeout (three timeouts blacklist the target). The walk is one step like
+  everything else: a heal interrupts it and the movement intent is dropped.
+- **Walking with eyes open.** Before a melee hostile is chosen as
+  something to walk to, the service walks the body toward it; if the direct heading is
   blocked it tries a fan of headings (30, 60 and 90 degrees to either side)
   out to the steering look-ahead. A hostile no heading reaches earns a
   strike and is passed over, so a monster behind a fence is blacklisted the

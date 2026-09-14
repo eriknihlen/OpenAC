@@ -21,6 +21,7 @@ namespace AcDream.DrakBot.Behaviors;
 /// arbiter can put vitals or buffs in between.
 /// </summary>
 public sealed class CombatBehavior(
+    IAutomationSurface surface,
     SpellSelector spells,
     CastTracker casts,
     LineOfSightService lineOfSight,
@@ -37,6 +38,7 @@ public sealed class CombatBehavior(
     private long _completionRevisionAtSwing;
     private double _phaseStartedAt;
     private double _lastApproachTraceAt = double.NegativeInfinity;
+    private (double At, Engagement Engagement)? _chosen;
     private bool _leftCombat = true;
     private int _recoveryCount;
 
@@ -81,7 +83,21 @@ public sealed class CombatBehavior(
         CombatSettings combat = settings();
         if (!combat.Enabled)
             return false;
-        if (TargetSelector.TrySelect(board.Hostiles, combat, _targetId, out PluginCombatTarget target, lineOfSight.IsBlacklisted))
+        // Only a hostile that can actually be fought - shot from here, or
+        // walked to - is a reason to take over. Claiming control for one
+        // that is blocked or too far to walk to, then finding nothing to do,
+        // would pre-empt navigation every tick and the walk would never
+        // resume. The choice is kept for Execute on the same tick.
+        if (_phase == Phase.Idle)
+        {
+            if (TryChooseEngagement(board, combat, out Engagement engagement, out _))
+            {
+                _chosen = (board.Now, engagement);
+                reason = $"{engagement.Target.Name} at {engagement.Target.Distance:0.0}m";
+                return true;
+            }
+        }
+        else if (TargetSelector.TrySelect(board.Hostiles, combat, _targetId, out PluginCombatTarget target, lineOfSight.IsBlacklisted))
         {
             reason = $"{target.Name} at {target.Distance:0.0}m";
             return true;
@@ -172,7 +188,20 @@ public sealed class CombatBehavior(
         }
 
         // Idle: pick a target or stand down.
-        if (!TryChooseEngagement(context, combat, out Engagement engagement, out int blocked))
+        Engagement engagement;
+        int blocked = 0;
+        bool chosen;
+        if (_chosen is { } kept && kept.At == board.Now)
+        {
+            engagement = kept.Engagement;
+            chosen = true;
+        }
+        else
+        {
+            chosen = TryChooseEngagement(board, combat, out engagement, out blocked);
+        }
+        _chosen = null;
+        if (!chosen)
         {
             _targetId = 0u;
             // Hostiles are there but none can be shot from here and none
@@ -264,12 +293,12 @@ public sealed class CombatBehavior(
     }
 
     /// <summary>Whether walking at the target runs into the target itself (and not a wall or another creature first).</summary>
-    private static bool TouchesTarget(BehaviorContext context, in PluginCombatTarget target)
+    private bool TouchesTarget(Blackboard board, in PluginCombatTarget target)
     {
-        IMovementProbeAutomation probe = context.Surface.MovementProbe;
-        if (!probe.IsAvailable || !context.Surface.Navigation.TryGetObject(target.ObjectId, out PluginNavigationObject body))
+        IMovementProbeAutomation probe = surface.MovementProbe;
+        if (!probe.IsAvailable || !surface.Navigation.TryGetObject(target.ObjectId, out PluginNavigationObject body))
             return false;
-        float heading = RouteFollower.HeadingTo(context.Board.Navigation.Position, body.Position);
+        float heading = RouteFollower.HeadingTo(board.Navigation.Position, body.Position);
         PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(heading, target.Distance + 1f)
         {
             StepDistance = 0.5f,
@@ -320,19 +349,19 @@ public sealed class CombatBehavior(
 
     /// <summary>
     /// Walks the ranked hostiles: the first one that can be attacked from
-    /// here wins. A melee target out of reach, or a ranged target blocked
-    /// beyond the approach range, is remembered as something to walk toward
-    /// if nothing better turns up - provided the body can actually walk
-    /// that way; one it cannot earns a strike, as does a ranged target
-    /// blocked inside the approach range, and is passed over.
+    /// here wins. A melee target out of reach but inside the approach range
+    /// is remembered as something to walk toward if nothing better turns
+    /// up - provided the body can actually walk that way; one it cannot
+    /// earns a strike and is passed over, and one beyond the approach range
+    /// is simply left alone. A ranged target with no line of sight is
+    /// never walked to: it earns a strike and is passed over.
     /// </summary>
     private bool TryChooseEngagement(
-        BehaviorContext context,
+        Blackboard board,
         CombatSettings combat,
         out Engagement engagement,
         out int blocked)
     {
-        Blackboard board = context.Board;
         engagement = default;
         blocked = 0;
         IReadOnlyList<PluginCombatTarget> ranked = TargetSelector.Rank(
@@ -349,12 +378,14 @@ public sealed class CombatBehavior(
             if (combat.Style == CombatStyle.Melee)
             {
                 if (candidate.Distance <= combat.MeleeRangeMeters
-                    || (candidate.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(context, candidate)))
+                    || (candidate.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(board, candidate)))
                 {
                     engagement = new Engagement(candidate, preferred, Approach: false);
                     return true;
                 }
-                if (approach is null && !CanWalkToward(context, candidate))
+                if (candidate.Distance > combat.ApproachRangeMeters)
+                    continue;
+                if (approach is null && !CanWalkToward(board, candidate))
                 {
                     blocked++;
                     lineOfSight.ReportBlocked(candidate.ObjectId);
@@ -376,12 +407,6 @@ public sealed class CombatBehavior(
                 return true;
             }
             blocked++;
-            if (candidate.Distance > combat.ApproachRangeMeters
-                && (approach is not null || CanWalkToward(context, candidate)))
-            {
-                approach ??= new Engagement(candidate, preferred, Approach: true);
-                continue;
-            }
             lineOfSight.ReportBlocked(candidate.ObjectId);
         }
         if (approach is { } walk)
@@ -397,13 +422,13 @@ public sealed class CombatBehavior(
     /// one of the steering fan, is open. True when walking is not checked
     /// or the hostile's position is unknown (the walk itself will tell).
     /// </summary>
-    private bool CanWalkToward(BehaviorContext context, in PluginCombatTarget candidate)
+    private bool CanWalkToward(Blackboard board, in PluginCombatTarget candidate)
     {
-        if (!lineOfSight.ChecksWalking || !context.Board.Navigation.IsAvailable)
+        if (!lineOfSight.ChecksWalking || !board.Navigation.IsAvailable)
             return true;
-        if (!context.Surface.Navigation.TryGetObject(candidate.ObjectId, out PluginNavigationObject where))
+        if (!surface.Navigation.TryGetObject(candidate.ObjectId, out PluginNavigationObject where))
             return true;
-        float heading = RouteFollower.HeadingTo(context.Board.Navigation.Position, where.Position);
+        float heading = RouteFollower.HeadingTo(board.Navigation.Position, where.Position);
         return lineOfSight.TryFindWalkHeading(
             candidate.ObjectId, heading, WalkDistance(candidate.Distance), out _);
     }
@@ -442,7 +467,7 @@ public sealed class CombatBehavior(
             // the reach setting, while already touching it: when the walk
             // probe says the body bumps the target before anything else,
             // that is close enough to swing.
-            if (!arrived && target.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(context, target))
+            if (!arrived && target.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(board, target))
             {
                 context.Log.Debug($"combat: {target.Name} at {target.Distance:0.0}m is body to body; swinging from here");
                 arrived = true;
