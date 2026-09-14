@@ -5,6 +5,8 @@ using AcDream.App.Input;
 using AcDream.App.Interaction;
 using AcDream.App.Net;
 using AcDream.App.Plugins;
+using AcDream.Automation;
+using AcDream.Automation.Items;
 using AcDream.App.Rendering;
 using AcDream.App.Settings;
 using AcDream.App.Spells;
@@ -75,7 +77,7 @@ internal sealed record InteractionRetainedUiDependencies(
     Func<AcDream.App.Rendering.Packs.RenderPackDiagnosticsSnapshot>?
         RenderPackDiagnostics = null,
     string? ScreenshotsDirectory = null,
-    AppAutomationSurface? Automation = null,
+    RuntimeAutomationSurface? Automation = null,
     Func<GameplayInputFrameController?>? GameplayInputFrame = null)
 {
     public RuntimeActionState Actions => Runtime.ActionOwner;

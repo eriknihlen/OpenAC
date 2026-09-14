@@ -196,17 +196,6 @@
         "resolved": "0.1.1",
         "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
       },
-      "acdream.automation": {
-        "type": "Project",
-        "dependencies": {
-          "AcDream.Content": "[0.1.7, )",
-          "AcDream.Core": "[0.1.7, )",
-          "AcDream.Core.Net": "[0.1.7, )",
-          "AcDream.Platform": "[0.1.7, )",
-          "AcDream.Plugin.Abstractions": "[0.1.7, )",
-          "AcDream.Runtime": "[0.1.7, )"
-        }
-      },
       "acdream.content": {
         "type": "Project",
         "dependencies": {
@@ -230,12 +219,6 @@
         "type": "Project",
         "dependencies": {
           "AcDream.Core": "[0.1.7, )"
-        }
-      },
-      "acdream.drakbot": {
-        "type": "Project",
-        "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.7, )"
         }
       },
       "acdream.platform": {

@@ -5,6 +5,7 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Combat;
 

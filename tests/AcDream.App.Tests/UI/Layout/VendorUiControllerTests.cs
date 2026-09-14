@@ -7,6 +7,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Runtime.Gameplay;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI.Layout;
 

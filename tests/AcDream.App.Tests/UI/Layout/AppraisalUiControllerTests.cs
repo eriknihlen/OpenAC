@@ -9,6 +9,8 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI.Layout;
 

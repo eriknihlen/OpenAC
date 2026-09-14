@@ -2,6 +2,7 @@ using AcDream.App;
 using AcDream.App.Configuration;
 using AcDream.App.Credentials;
 using AcDream.App.Plugins;
+using AcDream.Automation;
 using AcDream.App.Platform;
 using AcDream.App.Rendering;
 using AcDream.Platform;
@@ -153,9 +154,9 @@ using IDisposable atmosphericPackRegistration = renderPackRegistry.Register(
             "Rendering",
             "Shaders",
             "spv")));
-using var automation = new AcDream.App.Plugins.AppAutomationSurface(
+using var automation = new AcDream.Automation.RuntimeAutomationSurface(
     worldEvents,
-    new AcDream.App.Plugins.LocalPluginPeerRegistry(Path.Combine(
+    new AcDream.Automation.LocalPluginPeerRegistry(Path.Combine(
         applicationPaths.DataDirectory,
         "plugin-peers")),
     runtimeOptions.PluginTags);

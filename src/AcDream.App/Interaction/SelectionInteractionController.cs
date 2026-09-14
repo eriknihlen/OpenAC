@@ -6,6 +6,7 @@ using AcDream.Core.Selection;
 using AcDream.Core.Ui;
 using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Interaction;
 

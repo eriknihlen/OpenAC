@@ -4,6 +4,7 @@ using AcDream.App.UI;
 using AcDream.App.UI.Testing;
 using AcDream.Core.Items;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI;
 

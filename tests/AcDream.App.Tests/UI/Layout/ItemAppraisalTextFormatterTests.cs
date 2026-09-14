@@ -6,6 +6,7 @@ using AcDream.Core.Player;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Spells;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI.Layout;
 

@@ -4,6 +4,7 @@ using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Ui;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI.Layout;
 

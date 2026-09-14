@@ -10,6 +10,7 @@ using DatReaderWriter.Types;
 using Xunit.Abstractions;
 using DatEnvCell = DatReaderWriter.DBObjs.EnvCell;
 using DatEnvironment = DatReaderWriter.DBObjs.Environment;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.Plugins;
 

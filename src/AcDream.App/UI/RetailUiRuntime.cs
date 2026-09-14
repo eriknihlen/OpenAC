@@ -28,6 +28,8 @@ using AcDream.UI.Abstractions.Input;
 using AcDream.Plugin.Abstractions;
 using DatReaderWriter;
 using Silk.NET.Input;
+using AcDream.Automation.Items;
+using AcDream.Automation;
 
 namespace AcDream.App.UI;
 

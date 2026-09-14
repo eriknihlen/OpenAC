@@ -11,6 +11,7 @@ using AcDream.Core.World;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Physics;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.Interaction;
 

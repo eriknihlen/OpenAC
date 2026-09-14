@@ -19,6 +19,7 @@ using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using AcDream.UI.Abstractions.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Rendering;
 
@@ -263,7 +264,7 @@ public sealed class GameWindow :
     private AcDream.App.World.LiveEntityRuntime? _liveEntities;
     private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
 
-    private readonly AcDream.App.Plugins.AppAutomationSurface? _automation;
+    private readonly AcDream.Automation.RuntimeAutomationSurface? _automation;
     private readonly GameRuntime _runtime;
     private readonly IDisposable _runtimeHostLease;
     private RuntimeCommunicationState _runtimeCommunication =>
@@ -317,7 +318,7 @@ public sealed class GameWindow :
     private readonly AcDream.App.Combat.CombatFeedbackSlot
         _combatFeedback = new();
     private RuntimeCombatAttackState? _combatAttackController;
-    private AcDream.App.UI.ItemInteractionController? _itemInteractionController;
+    private AcDream.Automation.Items.ItemInteractionController? _itemInteractionController;
     private AcDream.App.World.ExternalContainerLifecycleController? _externalContainerLifecycle;
     private AcDream.App.Spells.MagicRuntime? _magicRuntime;
     private MagicCatalog? _magicCatalog;
@@ -457,7 +458,7 @@ public sealed class GameWindow :
         WorldEvents worldEvents,
         AcDream.App.Plugins.BufferedUiRegistry? uiRegistry,
         GraphicalHostPlatformServices platformServices,
-        AcDream.App.Plugins.AppAutomationSurface? automation = null,
+        AcDream.Automation.RuntimeAutomationSurface? automation = null,
         AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null)
     {
         _options = options ?? throw new System.ArgumentNullException(nameof(options));
@@ -733,28 +734,10 @@ public sealed class GameWindow :
 
         if (_automation is null)
             return;
-        _automation.BindSpeciesNameResolver(
-            AcDream.App.UI.Layout.CreatureDisplayNameResolver.Load(value).Resolve);
-        _automation.BindPaletteColorResolver(
-            new AcDream.Content.CharGen.ChargenAppearanceCatalog(value));
-        if (!value.TryGet<DatReaderWriter.DBObjs.SkillTable>(0x0E000004u, out var skillTable)
-            || skillTable is null)
-        {
-            Console.Error.WriteLine(
-                "plugin automation: retail SkillTable 0x0E000004 missing; "
-                + "plugins will see unnamed skills");
-            return;
-        }
-
-        var names = new Dictionary<uint, string>(skillTable.Skills.Count);
-        var icons = new Dictionary<uint, uint>(skillTable.Skills.Count);
-        foreach (var entry in skillTable.Skills)
-        {
-            names[(uint)entry.Key] = entry.Value.Name;
-            icons[(uint)entry.Key] = entry.Value.IconId;
-        }
-        _automation.BindSkillNames(names);
-        _automation.BindSkillIcons(icons);
+        AcDream.Automation.AutomationContentBindings.BindDats(
+            _automation,
+            value,
+            Console.Error.WriteLine);
     }
 
     void IGameWindowContentEffectsAudioPublication.PublishPreparedAssetSource(
@@ -1101,7 +1084,15 @@ public sealed class GameWindow :
         _playerModeAutoEntry = result.PlayerModeAutoEntry;
         _localPlayerTeleport = result.LocalTeleport;
         _liveSessionHost = result.SessionHost;
-        _automation?.BindSessionCommands(result.GameRuntime);
+        if (_automation is not null)
+        {
+            AcDream.App.Runtime.CurrentGameRuntimeAdapter adapter = result.GameRuntime;
+            _automation.BindSessionCommands(
+                new AcDream.Automation.AutomationSessionCommands(
+                    adapter,
+                    () => adapter.Generation,
+                    adapter.SubmitChatText));
+        }
         _gameplayInputActions = result.GameplayActions;
         _sessionPlayerBindings = result.RuntimeBindings;
     }

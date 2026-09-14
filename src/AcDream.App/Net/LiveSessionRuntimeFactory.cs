@@ -33,6 +33,7 @@ using AcDream.UI.Abstractions.Panels.Chat;
 using AcDream.UI.Abstractions.Panels.Vitals;
 using DatReaderWriter;
 using DatReaderWriter.DBObjs;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Net;
 

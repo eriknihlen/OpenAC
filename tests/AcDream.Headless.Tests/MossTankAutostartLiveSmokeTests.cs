@@ -3,6 +3,7 @@ using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
+using AcDream.Automation;
 using AcDream.Headless.Plugins;
 using AcDream.Runtime;
 

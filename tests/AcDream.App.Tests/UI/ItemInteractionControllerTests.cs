@@ -3,6 +3,7 @@ using AcDream.Core.Chat;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Runtime.Gameplay;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Tests.UI;
 

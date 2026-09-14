@@ -1,5 +1,6 @@
 using AcDream.App.Plugins;
 using AcDream.Plugin.Abstractions;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.Plugins;
 

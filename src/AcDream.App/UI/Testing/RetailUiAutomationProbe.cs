@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using AcDream.Core.Items;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.UI.Testing;
 

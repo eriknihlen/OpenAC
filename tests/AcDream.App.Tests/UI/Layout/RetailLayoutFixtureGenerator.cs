@@ -4,6 +4,7 @@ using AcDream.App.UI.Layout;
 using DatReaderWriter;
 using DatReaderWriter.Options;
 using EnumIDMap = DatReaderWriter.DBObjs.EnumIDMap;
+using AcDream.Automation;
 
 namespace AcDream.App.Tests.UI.Layout;
 

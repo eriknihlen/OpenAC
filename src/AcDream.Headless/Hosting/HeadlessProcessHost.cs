@@ -61,7 +61,7 @@ internal sealed class HeadlessProcessHost : IDisposable
             Path.Combine(AppContext.BaseDirectory, "plugins"),
             paths.PluginsDirectory,
         ];
-        var vtankProfiles = new AcDream.Headless.Plugins.FilePluginStorage(
+        var vtankProfiles = new AcDream.Automation.FilePluginStorage(
             paths.VtankProfilesDirectory);
         HeadlessProcessContentOwner? content = null;
         HeadlessProcessResourceSampler? resources = null;

@@ -1,8 +1,8 @@
 using AcDream.Core.Items;
 
-namespace AcDream.App.UI;
+namespace AcDream.Automation.Items;
 
-internal static class ItemEquipRules
+public static class ItemEquipRules
 {
     public const EquipMask AutoWearMask =
         EquipMask.HeadWear

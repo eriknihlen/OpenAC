@@ -25,6 +25,7 @@ using AcDream.Runtime.Session;
 using AcDream.UI.Abstractions.Input;
 using DatReaderWriter;
 using Silk.NET.Input;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.Rendering;
 

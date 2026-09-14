@@ -1,5 +1,6 @@
 using AcDream.App.UI.Layout;
 using AcDream.Core.Items;
+using AcDream.Automation.Items;
 
 namespace AcDream.App.UI;
 

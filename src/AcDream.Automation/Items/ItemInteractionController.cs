@@ -4,7 +4,7 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Runtime.Gameplay;
 
-namespace AcDream.App.UI;
+namespace AcDream.Automation.Items;
 
 public enum ItemPrimaryClickResult
 {
@@ -1290,20 +1290,15 @@ public sealed class ItemInteractionController : IDisposable
         return true;
     }
 
-    public bool DropToWorld(ItemDragPayload payload)
-        => PlaceIn3D(payload, targetGuid: 0u);
-
     public bool PlaceSelectedIn3D(uint itemGuid, uint targetGuid)
         => PlaceIn3D(itemGuid, ItemDragSource.Inventory, targetGuid);
 
-    public bool PlaceIn3D(ItemDragPayload payload, uint targetGuid)
-    {
-        ArgumentNullException.ThrowIfNull(payload);
-
-        return PlaceIn3D(payload.ObjId, payload.SourceKind, targetGuid);
-    }
-
-    private bool PlaceIn3D(
+    /// <summary>
+    /// Drops or gives an item lifted from <paramref name="sourceKind"/>: a
+    /// target of 0 is the ground. The graphical client's drag payload
+    /// overloads sit next to that payload type.
+    /// </summary>
+    public bool PlaceIn3D(
         uint itemGuid,
         ItemDragSource sourceKind,
         uint targetGuid)
