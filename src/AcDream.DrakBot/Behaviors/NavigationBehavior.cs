@@ -50,7 +50,13 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     public bool IsFollowing => settings().Follow.Length > 0;
 
     /// <summary>Replaces the route; an empty route clears navigation.</summary>
-    public void SetRoute(Route? route)
+    /// <summary>
+    /// Follows a route from its first step, or with <paramref name="joinNearest"/>
+    /// from the step nearest the character - how VTank joins a loaded
+    /// circular route; a route planned from where the character stands
+    /// starts at its first step, which is already the nearest safe one.
+    /// </summary>
+    public void SetRoute(Route? route, bool joinNearest = false)
     {
         RouteMode mode = route?.Mode ?? settings().Mode;
         _follower = route is null || route.IsEmpty
@@ -59,9 +65,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
         _follower?.Reset();
         _actions.Cancel();
         _settleUntil = double.NegativeInfinity;
-        // A loop is joined at its nearest step, as VTank joins a circular
-        // route; a once route (a path somewhere) starts at its first.
-        _resumeNearest = _follower is not null && mode != RouteMode.Once && route!.LoopStart == 0;
+        _resumeNearest = joinNearest && _follower is not null && mode != RouteMode.Once;
     }
 
     /// <summary>

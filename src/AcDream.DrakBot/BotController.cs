@@ -285,7 +285,7 @@ public sealed class BotController : IMetaBot
         if (route is null)
             return false;
         DraftRoute = route;
-        Navigation.SetRoute(route);
+        Navigation.SetRoute(route, joinNearest: true);
         return true;
     }
 
@@ -323,7 +323,7 @@ public sealed class BotController : IMetaBot
         if (route is null)
             return false;
         DraftRoute = route;
-        Navigation.SetRoute(route);
+        Navigation.SetRoute(route, joinNearest: true);
         return true;
     }
 
@@ -336,7 +336,7 @@ public sealed class BotController : IMetaBot
         string name = Path.GetFileNameWithoutExtension(path);
         Route route = NavFile.Parse(name, File.ReadAllLines(path), out warning);
         DraftRoute = route;
-        Navigation.SetRoute(route);
+        Navigation.SetRoute(route, joinNearest: true);
         return route;
     }
 
@@ -522,7 +522,8 @@ public sealed class BotController : IMetaBot
     {
         if (route is not null)
             DraftRoute = route;
-        Navigation.SetRoute(route);
+        // A meta's route is a loaded one: joined at the nearest step.
+        Navigation.SetRoute(route, joinNearest: true);
         if (enableNavigation && !Profile.Navigation.Enabled)
             Update(p => p with { Navigation = p.Navigation with { Enabled = true } });
     }

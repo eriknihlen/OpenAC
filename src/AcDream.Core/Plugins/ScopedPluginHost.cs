@@ -124,6 +124,15 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
         public bool IsAvailable => !_disposed && inner.IsAvailable;
 
+        public bool TryProjectToScreen(in PluginNavigationPosition position, out float screenX, out float screenY)
+        {
+            if (!_disposed)
+                return inner.TryProjectToScreen(position, out screenX, out screenY);
+            screenX = 0f;
+            screenY = 0f;
+            return false;
+        }
+
         public IDisposable Register(string name, Action draw)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

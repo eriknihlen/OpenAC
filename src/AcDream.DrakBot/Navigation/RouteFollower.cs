@@ -222,7 +222,10 @@ public sealed class RouteFollower
             Waypoint waypoint = Route.Waypoints[index];
             if (waypoint.Kind != WaypointKind.Point)
                 continue;
-            double distance = position.HorizontalDistanceMeters(waypoint.ToPosition());
+            // Height counts three times over, so a step on the floor above is
+            // not "nearest" through the ceiling.
+            double distance = position.HorizontalDistanceMeters(waypoint.ToPosition())
+                + Math.Abs(waypoint.Elevation - position.Elevation) * 240d * 3d;
             if (distance < best)
             {
                 best = distance;

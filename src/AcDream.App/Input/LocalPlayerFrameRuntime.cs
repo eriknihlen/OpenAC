@@ -63,13 +63,16 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
         _session = session ?? throw new ArgumentNullException(nameof(session));
     }
 
+    // The overlay holding the keyboard (a plugin window with focus) only
+    // takes the movement keys away - DispatcherMovementInputSource yields
+    // nothing while it does - it must not stop the player advancing, or the
+    // character stands frozen on screen while a bot's commands carry on.
     public bool CanPresentPlayer =>
         !_camera.IsFlyMode
         && _mode.IsPlayerMode
         && _controller.Controller is not null
         && _chase.Legacy is not null
-        && _input.IsAvailable
-        && !_capture.DevToolsWantCaptureKeyboard;
+        && _input.IsAvailable;
 
     public PlayerMovementController? Controller => _controller.Controller;
 
