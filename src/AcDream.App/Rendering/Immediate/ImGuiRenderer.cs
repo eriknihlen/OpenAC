@@ -193,7 +193,7 @@ internal sealed unsafe class ImGuiRenderer : IDisposable
             _device.ReleaseTextureSlot(_fontSlot);
             _fontSlot = GpuTextureSlot.Unassigned;
         }
-        _fontSampler?.Dispose();
+        // Samplers belong to the device; the slot's release is the teardown.
         _fontSampler = null;
         _fontTexture?.Dispose();
         _fontTexture = null;
