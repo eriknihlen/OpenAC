@@ -39,6 +39,8 @@ public sealed class CombatBehavior(
     private double _phaseStartedAt;
     private double _lastApproachTraceAt = double.NegativeInfinity;
     private (double At, Engagement Engagement)? _chosen;
+    /// <summary>The log of the last Execute, for the selection that runs inside WantsControl.</summary>
+    private IPluginLogger? _log;
     private bool _leftCombat = true;
     private int _recoveryCount;
 
@@ -125,6 +127,7 @@ public sealed class CombatBehavior(
         Blackboard board = context.Board;
         CombatSettings combat = settings();
         ICombatAutomation host = context.Surface.Combat;
+        _log = context.Log;
 
         if (_phase == Phase.Approaching)
             return StepApproach(context, combat);
@@ -222,7 +225,7 @@ public sealed class CombatBehavior(
         }
         PluginCombatTarget target = engagement.Target;
         if (target.ObjectId != _targetId)
-            context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
+            context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m dz {target.HeightDifferenceMeters:+0.0;-0.0} ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
         _targetId = target.ObjectId;
         _leftCombat = false;
 
@@ -388,7 +391,8 @@ public sealed class CombatBehavior(
                 if (approach is null && !CanWalkToward(board, candidate))
                 {
                     blocked++;
-                    lineOfSight.ReportBlocked(candidate.ObjectId);
+                    if (lineOfSight.ReportBlocked(candidate.ObjectId))
+                        _log?.Info($"combat: {candidate.Name} 0x{candidate.ObjectId:X8} at {candidate.Distance:0.0}m (dz {candidate.HeightDifferenceMeters:+0.0;-0.0}) walled off; blacklisted for {combat.LineOfSight.BlacklistSeconds:0}s");
                     continue;
                 }
                 approach ??= new Engagement(candidate, preferred, Approach: true);
@@ -418,9 +422,16 @@ public sealed class CombatBehavior(
     }
 
     /// <summary>
-    /// Whether the body can start toward a hostile: the direct heading, or
-    /// one of the steering fan, is open. True when walking is not checked
-    /// or the hostile's position is unknown (the walk itself will tell).
+    /// Whether the body can start toward a hostile. The direct walk must
+    /// be open, or blocked only by the hostile itself or by something
+    /// standing in the way (another creature, a door) that the steering fan
+    /// can go round. A direct walk the world itself blocks - a wall, the
+    /// floor of the room above, a door frame - is not a hostile to walk
+    /// at: it earns a strike and is passed over, and the fan is not
+    /// consulted, because something is always open sideways and that is
+    /// what made the character run back and forth under a monster on the
+    /// floor overhead. True when walking is not checked or the hostile's
+    /// position is unknown (the walk itself will tell).
     /// </summary>
     private bool CanWalkToward(Blackboard board, in PluginCombatTarget candidate)
     {
@@ -429,8 +440,22 @@ public sealed class CombatBehavior(
         if (!surface.Navigation.TryGetObject(candidate.ObjectId, out PluginNavigationObject where))
             return true;
         float heading = RouteFollower.HeadingTo(board.Navigation.Position, where.Position);
-        return lineOfSight.TryFindWalkHeading(
-            candidate.ObjectId, heading, WalkDistance(candidate.Distance), out _);
+        float distance = WalkDistance(candidate.Distance);
+        WalkVerdict direct = lineOfSight.EvaluateWalk(candidate.ObjectId, heading, distance);
+        if (direct.IsUsable || direct.BlockingObjectId == candidate.ObjectId)
+        {
+            if (direct.IsClear)
+                lineOfSight.ReportWalkClear(candidate.ObjectId);
+            return true;
+        }
+        if (direct.State == LineOfSightState.Blacklisted)
+            return false;
+        if (direct.ByEnvironment)
+        {
+            lineOfSight.ReportWalkWalledOff(candidate.ObjectId, direct);
+            return false;
+        }
+        return lineOfSight.TryFindWalkHeading(candidate.ObjectId, heading, distance, out _);
     }
 
     /// <summary>How far to probe toward a hostile: up to its body, not through it.</summary>

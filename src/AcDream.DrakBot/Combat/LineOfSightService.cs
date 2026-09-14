@@ -40,6 +40,9 @@ public readonly record struct WalkVerdict(
 {
     public bool IsClear => State == LineOfSightState.Clear;
 
+    /// <summary>Blocked by the world itself - a wall, a floor, a door frame - rather than by a creature or an object standing in the way.</summary>
+    public bool ByEnvironment { get; init; }
+
     public bool IsUsable => State is LineOfSightState.Clear or LineOfSightState.Unavailable;
 }
 
@@ -263,7 +266,11 @@ public sealed class LineOfSightService(
             PluginWalkProbeStatus.Blocked => LineOfSightState.Blocked,
             _ => LineOfSightState.Unavailable,
         };
-        var verdict = new WalkVerdict(state, heading, result.ClearDistanceMeters, result.BlockingObjectId, now, false);
+        var verdict = new WalkVerdict(state, heading, result.ClearDistanceMeters, result.BlockingObjectId, now, false)
+        {
+            ByEnvironment = state == LineOfSightState.Blocked
+                && (result.BlockingObjectId == 0u || string.Equals(result.Notice, "environment", StringComparison.OrdinalIgnoreCase)),
+        };
         entry = new WalkEntry { Verdict = verdict, DistanceMeters = distanceMeters, Samples = result.DebugSamples };
         _walkCache[key] = entry;
         ShowSamples(options, entry.Samples);
@@ -311,6 +318,17 @@ public sealed class LineOfSightService(
         if (anyFresh && targetId != 0u)
             _walkStrikePending.Add(targetId);
         return false;
+    }
+
+    /// <summary>
+    /// The direct walk to a target is blocked by the world: arms a walk
+    /// strike for the next <see cref="ReportBlocked"/> when the verdict is
+    /// fresh, so a wall counts once per sweep, like a blocked shot.
+    /// </summary>
+    public void ReportWalkWalledOff(uint targetId, in WalkVerdict verdict)
+    {
+        if (targetId != 0u && !verdict.FromCache)
+            _walkStrikePending.Add(targetId);
     }
 
     /// <summary>A walk toward the target is open: its walk strikes are forgiven.</summary>

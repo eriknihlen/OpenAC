@@ -487,6 +487,8 @@ internal sealed class FakeAutomationSurface
     public HashSet<int> BlockedWalkHeadings { get; } = [];
     public PluginWalkProbeStatus DefaultWalkStatus { get; set; } = PluginWalkProbeStatus.Clear;
     public uint WalkBlockingObjectId { get; set; } = 0x7000_0002u;
+    /// <summary>Blocked headings are walls (no object, notice "environment") rather than a creature in the way.</summary>
+    public bool WalkBlockedByEnvironment { get; set; }
     /// <summary>Every walk asked for, as "heading:distance:target"; queries are not commands.</summary>
     public List<string> WalkQueries { get; } = [];
 
@@ -499,11 +501,13 @@ internal sealed class FakeAutomationSurface
         PluginWalkProbeStatus status = BlockedWalkHeadings.Contains(heading)
             ? PluginWalkProbeStatus.Blocked
             : DefaultWalkStatus;
+        bool wall = status == PluginWalkProbeStatus.Blocked && WalkBlockedByEnvironment;
         return new PluginWalkProbeResult(
             status,
             status == PluginWalkProbeStatus.Clear ? request.DistanceMeters : request.DistanceMeters * 0.25f,
             CollisionChecks: 3,
-            BlockingObjectId: status == PluginWalkProbeStatus.Blocked ? WalkBlockingObjectId : 0u);
+            BlockingObjectId: status == PluginWalkProbeStatus.Blocked && !wall ? WalkBlockingObjectId : 0u,
+            Notice: wall ? "environment" : null);
     }
 
     // ── surface ───────────────────────────────────────────────────────────

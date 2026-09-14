@@ -226,11 +226,16 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   timeout (three timeouts blacklist the target). The walk is one step like
   everything else: a heal interrupts it and the movement intent is dropped.
 - **Walking with eyes open.** Before a melee hostile is chosen as
-  something to walk to, the service walks the body toward it; if the direct heading is
-  blocked it tries a fan of headings (30, 60 and 90 degrees to either side)
-  out to the steering look-ahead. A hostile no heading reaches earns a
-  strike and is passed over, so a monster behind a fence is blacklisted the
-  same way one behind a pillar is for a caster. While walking, the direct
+  something to walk to, the service walks the body straight toward it. A
+  direct walk the world itself blocks - a wall, the floor of the room
+  above, a door frame (the probe says "environment") - makes it no target:
+  a strike per fresh sweep and passed over, blacklisted after three, so a
+  monster on the floor overhead or behind a wall is left alone in a couple
+  of seconds instead of being run at sideways; the steering fan is not
+  consulted for it, because something is always open sideways. Only a
+  direct walk blocked by something *in* the way - another creature, a
+  door - is approached, along the first open heading of the fan (30, 60
+  and 90 degrees to either side) out to the steering look-ahead. While walking, the direct
   heading is re-probed every tick; the bot steers along the first open fan
   heading and comes back to the direct one when it clears. When nothing in
   the fan is open it tries the navigation recoveries one at a time (back

@@ -429,6 +429,42 @@ public sealed class CombatBehaviorTests
     // ── walking as an obstacle sense ─────────────────────────────────────
 
     [Fact]
+    public void AMeleeTargetBehindAWallIsNeverWalkedAtAndIsBlacklistedBySweeps()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Melee,
+            LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d, BlacklistStrikes = 3, BlacklistSeconds = 30d },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        // The monster on the floor above: five metres away on the map, the
+        // direct walk stopped by the world, and every fan heading open.
+        surface.Hostiles.Add(Hostile(9, "Upstairs", 5f));
+        Place(surface, 9u, north: 5d, east: 0d);
+        surface.BlockedWalkHeadings.Add(0);
+        surface.WalkBlockedByEnvironment = true;
+
+        // Not a target: no walk, one strike per fresh sweep.
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.DoesNotContain(surface.Commands, command => command.StartsWith("move:", StringComparison.Ordinal));
+        Assert.Equal(1, behavior.LineOfSight.StrikesFor(9u));
+        Step(behavior, surface, clock, dt: 0.6);
+        Assert.Equal(2, behavior.LineOfSight.StrikesFor(9u));
+        Step(behavior, surface, clock, dt: 0.6);
+        Assert.True(behavior.LineOfSight.IsBlacklisted(9u));
+
+        // Something standing in the way (a creature) is different: the fan goes round it.
+        surface.WalkBlockedByEnvironment = false;
+        surface.Hostiles.Add(Hostile(10, "Behind a drudge", 6f));
+        Place(surface, 10u, north: 6d, east: 0d);
+        clock.Advance(0.6d);
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Behind a drudge at 6.0m", reason);
+    }
+
+    [Fact]
     public void AMeleeTargetNoHeadingReachesIsStruckAndAReachableOneWalkedTo()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
