@@ -144,10 +144,16 @@ public sealed class PluginSession : IDisposable
         _builtIns.Clear();
 
         string[] roots = DistinctRoots(pluginRoots);
+        // An id on the list that a built-in already answers to is satisfied;
+        // it is not looked for among the roots as well (and reported missing).
+        var builtInIds = new HashSet<string>(
+            _loaded.Select(static active => active.Loaded.Manifest.Id),
+            StringComparer.OrdinalIgnoreCase);
         string[]? requested = allowList is null
             ? null
             : allowList
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(id => !builtInIds.Contains(id))
                 .ToArray();
         if (requested is { Length: 0 })
             return;
