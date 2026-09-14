@@ -1,3 +1,5 @@
+using AcDream.Automation;
+using AcDream.Automation.Items;
 using AcDream.DrakBot;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
@@ -153,6 +155,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
+    private readonly ItemInteractionController _items;
     private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
@@ -189,7 +192,9 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimePlacementProjectionSink? placementSinkOverride = null,
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IPluginStorage? pluginStorage = null,
+        string? pluginPeerDirectory = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -277,6 +282,18 @@ internal sealed class HeadlessSessionHost : IDisposable
                     or SubmitOutcome.UnknownCommand
                     or SubmitOutcome.Dropped);
             }
+            // The real automation surface, the one the graphical client
+            // gives plugins, over this session's runtime. Without a peer
+            // directory (a test session) it neither publishes a heartbeat
+            // nor reads anyone else's.
+            RuntimeAutomationSurface Automation(IEvents events) =>
+                new(
+                    pluginPeerDirectory is null ? null : events,
+                    pluginPeerDirectory is null
+                        ? null
+                        : new LocalPluginPeerRegistry(pluginPeerDirectory),
+                    peerTags: null,
+                    pluginCommands);
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -287,8 +304,41 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginCommands,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText,
-                BuiltInsFor(descriptor.Plugins));
+                Automation,
+                BuiltInsFor(descriptor.Plugins),
+                pluginStorage);
+            RuntimeAutomationSurface automation = pluginSession.Host.Surface;
+            automation.Bind(
+                runtime,
+                runtime.CharacterOwner,
+                runtime.ActionOwner.SpellCast);
+            if (runtime.EntityObjects is { } entityObjects)
+                automation.BindProjectileCollision(entityObjects.Physics.Engine);
+            if (contentLease is { } automationContent)
+            {
+                automation.BindMagicCatalog(automationContent.MagicCatalog);
+                AutomationContentBindings.BindDats(
+                    automation,
+                    automationContent.Dats,
+                    warning => diagnostics.Message(descriptor.Id, warning));
+            }
+            automation.BindSessionCommands(
+                new AutomationSessionCommands(
+                    commands,
+                    () => runtime.Generation,
+                    SubmitChatText));
+            automation.BindGhostDeletion(
+                guid => _entities?.DeleteClientGhost(guid) ?? false);
+            // Selection cycling (previous selection, previous/next player)
+            // is the graphical client's selection interaction controller;
+            // the headless host has no equivalent, so
+            // ISelectionAutomation.Execute stays unavailable here.
+            var items = HeadlessItemInteraction.Create(
+                runtime,
+                commands,
+                () => _currentSession,
+                contentLease?.MagicCatalog);
+            HeadlessItemInteraction.Bind(automation, items);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -393,6 +443,7 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
+            _items = items;
         }
         catch
         {
@@ -411,6 +462,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal DirectGameRuntimeCommandAdapter Commands { get; }
     internal HeadlessCharacterOptionsSeeder? OptionsSeeder => _optionsSeeder;
     internal HeadlessPluginSession Plugins => _pluginSession;
+    internal RuntimeAutomationSurface Automation => _pluginSession.Host.Surface;
     internal AcDream.Core.Plugins.PluginCommandRegistry PluginCommands =>
         _pluginCommands;
     internal string SessionId => _descriptor.Id;
@@ -622,22 +674,26 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 5:
-                    _hostLease.Dispose();
+                    _items.Dispose();
                     _disposeStage++;
                     break;
                 case 6:
-                    _credential.Dispose();
+                    _hostLease.Dispose();
                     _disposeStage++;
                     break;
                 case 7:
-                    Runtime.Dispose();
+                    _credential.Dispose();
                     _disposeStage++;
                     break;
                 case 8:
-                    _contentLease?.Dispose();
+                    Runtime.Dispose();
                     _disposeStage++;
                     break;
                 case 9:
+                    _contentLease?.Dispose();
+                    _disposeStage++;
+                    break;
+                case 10:
                     _diagnostics.Message(
                         _descriptor.Id,
                         "disposed",
