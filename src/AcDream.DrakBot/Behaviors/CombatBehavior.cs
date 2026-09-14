@@ -511,7 +511,7 @@ public sealed class CombatBehavior(
             _lastApproachTraceAt = board.Now;
             float error = RouteFollower.HeadingDelta(position.HeadingDegrees, heading);
             context.Log.Debug($"combat: approach {target.Name} {target.Distance:0.0}m heading {heading:0} (error {error:+0;-0}) walker {_walker.State}"
-                + $" at {BotEngine.Describe(position)}{(board.Navigation.IsMoving ? string.Empty : " host:not-moving")}");
+                + $" at {BotEngine.Describe(position)} target at {BotEngine.Describe(where.Position)}{(board.Navigation.IsMoving ? string.Empty : " host:not-moving")}");
         }
         if (stuck is { } recovery)
         {

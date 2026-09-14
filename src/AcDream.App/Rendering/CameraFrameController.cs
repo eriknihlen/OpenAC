@@ -39,21 +39,25 @@ internal sealed class CameraFrameController : ICameraFramePhase
 
     public void Tick(UpdateFrameTiming timing)
     {
-        if (_capture.DevToolsWantCaptureKeyboard || !_input.IsAvailable)
-            return;
+        // An overlay window with the keyboard takes the camera keys, not the
+        // camera: the chase still follows the character (a bot walking it
+        // while its panel has focus) and only the adjustments go quiet.
+        bool keysAvailable = !_capture.DevToolsWantCaptureKeyboard && _input.IsAvailable;
 
         if (_camera.IsFlyMode)
         {
-            FlyCameraInput input = _input.CaptureFly();
+            if (!keysAvailable)
+                return;
+            FlyCameraInput fly = _input.CaptureFly();
             _camera.Fly.Update(
                 timing.SimulationDeltaSeconds,
-                input.Forward,
-                input.Left,
-                input.Backward,
-                input.Right,
-                input.Up,
-                input.Down,
-                input.Boost);
+                fly.Forward,
+                fly.Left,
+                fly.Backward,
+                fly.Right,
+                fly.Up,
+                fly.Down,
+                fly.Boost);
             return;
         }
 
@@ -63,9 +67,11 @@ internal sealed class CameraFrameController : ICameraFramePhase
         if (!_player.CanPresentPlayer || controller is null || legacy is null)
             return;
 
+        ChaseCameraAdjustmentInput input = keysAvailable
+            ? _input.CaptureChaseAdjustment()
+            : default;
         if (CameraDiagnostics.UseRetailChaseCamera && retail is not null)
         {
-            ChaseCameraAdjustmentInput input = _input.CaptureChaseAdjustment();
             float adjustment = CameraDiagnostics.CameraAdjustmentSpeed
                 * timing.SimulationDeltaSecondsSingle;
             if (input.ZoomIn)
@@ -86,7 +92,6 @@ internal sealed class CameraFrameController : ICameraFramePhase
         }
         else
         {
-            ChaseCameraAdjustmentInput input = _input.CaptureChaseAdjustment();
             float adjustment = CameraDiagnostics.CameraAdjustmentSpeed
                 * timing.SimulationDeltaSecondsSingle;
             if (input.ZoomIn)

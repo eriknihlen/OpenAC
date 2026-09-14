@@ -42,17 +42,10 @@ public static class RuntimeHostileTargetQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord playerRecord)
-            || playerRecord.Snapshot.Position is not { } playerPosition)
+            || !TryGetPlayerWorld(runtime, playerRecord, out Vector3 playerWorld, out float playerHeading))
         {
             return Array.Empty<RuntimeHostileTargetSnapshot>();
         }
-
-        Vector3 playerWorld = AbsolutePosition(playerPosition);
-        float playerHeading = MoveToMath.GetHeading(new Quaternion(
-            playerPosition.RotationX,
-            playerPosition.RotationY,
-            playerPosition.RotationZ,
-            playerPosition.RotationW));
         float maximumDistanceSquared = maximumDistance * maximumDistance;
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         ClientObject? player = objects.Get(playerGuid);
@@ -62,7 +55,7 @@ public static class RuntimeHostileTargetQuery
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
             if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
+                || !TryGetWorld(record, out Vector3 targetWorld)
                 || (record.FinalPhysicsState
                     & (PhysicsStateFlags.Hidden
                         | PhysicsStateFlags.NoDraw)) != 0)
@@ -87,7 +80,6 @@ public static class RuntimeHostileTargetQuery
             if (hasHealth && health <= 0f)
                 continue;
 
-            Vector3 targetWorld = AbsolutePosition(position);
             Vector2 delta = new(
                 targetWorld.X - playerWorld.X,
                 targetWorld.Y - playerWorld.Y);
@@ -140,12 +132,10 @@ public static class RuntimeHostileTargetQuery
             || !runtime.EntityObjects.Entities.TryGetActive(
                 playerGuid,
                 out RuntimeEntityRecord playerRecord)
-            || playerRecord.Snapshot.Position is not { } playerPosition)
+            || !TryGetPlayerWorld(runtime, playerRecord, out Vector3 playerWorld, out _))
         {
             return null;
         }
-
-        Vector3 playerWorld = AbsolutePosition(playerPosition);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
         ClientObject? player = objects.Get(playerGuid);
         uint? closest = null;
@@ -154,7 +144,7 @@ public static class RuntimeHostileTargetQuery
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
             if (record.ServerGuid == playerGuid
-                || record.Snapshot.Position is not { } position
+                || !TryGetWorld(record, out Vector3 targetWorld)
                 || (record.FinalPhysicsState
                     & (PhysicsStateFlags.Hidden
                         | PhysicsStateFlags.NoDraw)) != 0)
@@ -178,7 +168,7 @@ public static class RuntimeHostileTargetQuery
 
             float distanceSquared = Vector3.DistanceSquared(
                 playerWorld,
-                AbsolutePosition(position));
+                targetWorld);
             if (distanceSquared >= closestDistanceSquared)
                 continue;
             closestDistanceSquared = distanceSquared;
@@ -215,6 +205,73 @@ public static class RuntimeHostileTargetQuery
             playerGuid,
             objects.Get(playerGuid),
             objects.Get(objectId));
+    }
+
+    /// <summary>
+    /// Where the local player is, in absolute Dereth metres, with its
+    /// heading: the movement controller's simulated position when it has
+    /// one (the body the player sees), else the server's last word.
+    /// </summary>
+    private static bool TryGetPlayerWorld(
+        GameRuntime runtime,
+        RuntimeEntityRecord playerRecord,
+        out Vector3 world,
+        out float headingDegrees)
+    {
+        RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
+        if (movement.HasController && movement.Position.ObjCellId != 0u)
+        {
+            world = AbsolutePosition(movement.Position);
+            headingDegrees = MoveToMath.GetHeading(movement.Position.Frame.Orientation);
+            return true;
+        }
+        if (playerRecord.Snapshot.Position is { } position)
+        {
+            world = AbsolutePosition(position);
+            headingDegrees = MoveToMath.GetHeading(new Quaternion(
+                position.RotationX,
+                position.RotationY,
+                position.RotationZ,
+                position.RotationW));
+            return true;
+        }
+        world = default;
+        headingDegrees = 0f;
+        return false;
+    }
+
+    /// <summary>
+    /// Where an entity is, in absolute Dereth metres: its simulated physics
+    /// body when it has one, else the server's last position. A monster
+    /// walking at the player is metres from where the server last said it
+    /// was; the body is what the player sees and swings at, so distance
+    /// and bearing come from the same place.
+    /// </summary>
+    private static bool TryGetWorld(RuntimeEntityRecord record, out Vector3 world)
+    {
+        if (record.PhysicsBody?.CellPosition is { ObjCellId: not 0u } body)
+        {
+            world = AbsolutePosition(body);
+            return true;
+        }
+        if (record.Snapshot.Position is { } position)
+        {
+            world = AbsolutePosition(position);
+            return true;
+        }
+        world = default;
+        return false;
+    }
+
+    private static Vector3 AbsolutePosition(Position position)
+    {
+        int landblockX = (int)((position.ObjCellId >> 24) & 0xFFu);
+        int landblockY = (int)((position.ObjCellId >> 16) & 0xFFu);
+        Vector3 local = position.Frame.Origin;
+        return new Vector3(
+            local.X + landblockX * 192f,
+            local.Y + landblockY * 192f,
+            local.Z);
     }
 
     private static Vector3 AbsolutePosition(

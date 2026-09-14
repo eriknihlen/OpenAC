@@ -1,3 +1,4 @@
+using System.Numerics;
 using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
@@ -146,6 +147,27 @@ public sealed class RuntimeHostileTargetQueryTests
             RuntimeHostileTargetQuery.IsHostile(
                 runtime,
                 0x50000017u));
+    }
+
+    [Fact]
+    public void Capture_MeasuresFromTheSimulatedBodyWhenAHostileHasOne()
+    {
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        // The server last said 20 m north; the body has since walked to 2 m east.
+        Add(runtime, 0x50000010u, 0x01010001u, 10f, 30f, Hostile(0x50000010u));
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(0x50000010u, out RuntimeEntityRecord record));
+        var body = new PhysicsBody();
+        body.SnapToCell(0x01010001u, new Vector3(12f, 10f, 0f), new Vector3(12f, 10f, 0f));
+        record.SetPhysicsBody(body);
+
+        IReadOnlyList<RuntimeHostileTargetSnapshot> targets =
+            RuntimeHostileTargetQuery.Capture(runtime, maximumDistance: 50f);
+
+        RuntimeHostileTargetSnapshot target = Assert.Single(targets);
+        Assert.Equal(2f, target.Distance, 3);
+        Assert.Equal(90f, target.RelativeAngleDegrees, 1);
     }
 
     [Fact]
