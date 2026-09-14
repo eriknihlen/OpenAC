@@ -387,20 +387,21 @@
       "acdream.app": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.5, )",
-          "AcDream.Core": "[0.1.5, )",
-          "AcDream.Core.Net": "[0.1.5, )",
-          "AcDream.DrakBot": "[0.1.5, )",
-          "AcDream.DrakBot.Ui": "[0.1.5, )",
-          "AcDream.Platform": "[0.1.5, )",
-          "AcDream.Runtime": "[0.1.5, )",
-          "AcDream.UI.Abstractions": "[0.1.5, )",
+          "AcDream.Content": "[0.1.7, )",
+          "AcDream.Core": "[0.1.7, )",
+          "AcDream.Core.Net": "[0.1.7, )",
+          "AcDream.DrakBot": "[0.1.7, )",
+          "AcDream.DrakBot.Ui": "[0.1.7, )",
+          "AcDream.Platform": "[0.1.7, )",
+          "AcDream.Runtime": "[0.1.7, )",
+          "AcDream.UI.Abstractions": "[0.1.7, )",
           "Arch": "[2.1.0, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "Chorizite.Core": "[0.0.18, )",
           "ImGui.NET": "[1.91.6.1, )",
           "Serilog": "[4.0.2, )",
           "Serilog.Sinks.Console": "[6.0.0, )",
+          "Serilog.Sinks.File": "[6.0.0, )",
           "Silk.NET.Input": "[2.23.0, )",
           "Silk.NET.OpenAL": "[2.23.0, )",
           "Silk.NET.OpenAL.Extensions.Creative": "[2.23.0, )",
@@ -417,7 +418,7 @@
       "acdream.content": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.5, )",
+          "AcDream.Core": "[0.1.7, )",
           "BCnEncoder.Net.ImageSharp": "[1.1.2, )",
           "SixLabors.ImageSharp": "[3.1.12, )"
         }
@@ -425,7 +426,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.5, )",
+          "AcDream.Plugin.Abstractions": "[0.1.7, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.Core": "[0.0.18, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
@@ -436,27 +437,27 @@
       "acdream.core.net": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.5, )"
+          "AcDream.Core": "[0.1.7, )"
         }
       },
       "acdream.drakbot": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.5, )"
+          "AcDream.Plugin.Abstractions": "[0.1.7, )"
         }
       },
       "acdream.drakbot.ui": {
         "type": "Project",
         "dependencies": {
-          "AcDream.DrakBot": "[0.1.5, )",
-          "AcDream.Plugin.Abstractions": "[0.1.5, )",
+          "AcDream.DrakBot": "[0.1.7, )",
+          "AcDream.Plugin.Abstractions": "[0.1.7, )",
           "ImGui.NET": "[1.91.6.1, )"
         }
       },
       "acdream.launcher.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Platform": "[0.1.5, )"
+          "AcDream.Platform": "[0.1.7, )"
         }
       },
       "acdream.platform": {
@@ -465,21 +466,27 @@
       "acdream.plugin.abstractions": {
         "type": "Project"
       },
+      "acdream.plugins.mosstank": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.Plugin.Abstractions": "[0.1.7, )"
+        }
+      },
       "acdream.runtime": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Content": "[0.1.5, )",
-          "AcDream.Core": "[0.1.5, )",
-          "AcDream.Core.Net": "[0.1.5, )",
-          "AcDream.Platform": "[0.1.5, )",
-          "AcDream.Plugin.Abstractions": "[0.1.5, )"
+          "AcDream.Content": "[0.1.7, )",
+          "AcDream.Core": "[0.1.7, )",
+          "AcDream.Core.Net": "[0.1.7, )",
+          "AcDream.Platform": "[0.1.7, )",
+          "AcDream.Plugin.Abstractions": "[0.1.7, )"
         }
       },
       "acdream.ui.abstractions": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.5, )",
-          "AcDream.Runtime": "[0.1.5, )",
+          "AcDream.Core": "[0.1.7, )",
+          "AcDream.Runtime": "[0.1.7, )",
           "Silk.NET.Input": "[2.23.0, )"
         }
       },
@@ -570,6 +577,15 @@
         "requested": "[6.0.0, )",
         "resolved": "6.0.0",
         "contentHash": "fQGWqVMClCP2yEyTXPIinSr5c+CBGUvBybPxjAGcf7ctDhadFhrQw03Mv8rJ07/wR5PDfFjewf2LimvXCDzpbA==",
+        "dependencies": {
+          "Serilog": "4.0.0"
+        }
+      },
+      "Serilog.Sinks.File": {
+        "type": "CentralTransitive",
+        "requested": "[6.0.0, )",
+        "resolved": "6.0.0",
+        "contentHash": "lxjg89Y8gJMmFxVkbZ+qDgjl+T4yC5F7WSLTvA+5q0R04tfKVLRL/EHpYoJ/MEQd2EeCKDuylBIVnAYMotmh2A==",
         "dependencies": {
           "Serilog": "4.0.0"
         }
