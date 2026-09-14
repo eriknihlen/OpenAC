@@ -144,7 +144,8 @@ public sealed class MonsterRuleTests
 
         Step(behavior, surface, clock);
         Assert.True(behavior.IsBackingOff);
-        Assert.Equal("face:180", surface.Commands[^1]);
+        Assert.StartsWith("move:turn", surface.Commands[^1]);
+        surface.Position = surface.Position with { HeadingDegrees = 180f };
         Step(behavior, surface, clock);
         Assert.Equal("move:forward", surface.Commands[^1]);
 

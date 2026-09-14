@@ -339,7 +339,7 @@ public static class DungeonPathfinder
     {
         if (TryDoorway(from, to, out PluginDungeonDoorway doorway) || TryDoorway(to, from, out doorway))
         {
-            waypoints.Add(new Waypoint(WaypointKind.Point, doorway.EastWest, doorway.NorthSouth) { Elevation = doorway.Elevation });
+            waypoints.Add(new Waypoint(WaypointKind.Point, doorway.EastWest, doorway.NorthSouth) { Elevation = doorway.Elevation, Precise = true });
             return;
         }
         double east = to.EastWest - from.EastWest;

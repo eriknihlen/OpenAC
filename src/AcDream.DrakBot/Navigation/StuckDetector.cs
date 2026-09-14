@@ -21,10 +21,14 @@ public sealed class StuckDetector
 
     public int Escalation => _escalation;
 
+    /// <summary>The last observation saw the character cover the minimum: it is going somewhere.</summary>
+    public bool Progressed { get; private set; }
+
     public void Reset()
     {
         _anchorTime = double.NegativeInfinity;
         _escalation = 0;
+        Progressed = false;
     }
 
     /// <summary>
@@ -41,7 +45,8 @@ public sealed class StuckDetector
         }
 
         double moved = position.HorizontalDistanceMeters(_anchor);
-        if (moved >= MinimumProgressMeters)
+        Progressed = moved >= MinimumProgressMeters;
+        if (Progressed)
         {
             _anchor = position;
             _anchorTime = now;

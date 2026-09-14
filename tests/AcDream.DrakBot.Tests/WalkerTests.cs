@@ -46,14 +46,14 @@ public sealed class WalkerTests
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 0f), 0f, now: 0d));
         Assert.Equal(["move:forward"], surface.Commands);
 
-        // The waypoint is now 90 degrees away: release the keys and face it.
+        // The waypoint is now 90 degrees away: let go of the run and turn in place with the key.
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 0f), 90f, now: 0.1d));
-        Assert.Equal(["move:forward", "move:clear", "face:90"], surface.Commands);
+        Assert.Equal(["move:forward", "move:turnright"], surface.Commands);
         Assert.False(walker.IsMoving);
 
-        // The fake turns instantly; the next tick runs again with no steering.
+        // Facing it: the keys are released and the run starts again from a clean slate.
         Assert.Null(walker.Toward(surface, surface.Position with { HeadingDegrees = 90f }, 90f, now: 0.2d));
-        Assert.Equal("move:forward", surface.Commands[^1]);
+        Assert.Equal(["move:forward", "move:turnright", "move:clear", "move:forward"], surface.Commands);
     }
 
     [Fact]
@@ -62,12 +62,12 @@ public sealed class WalkerTests
         var surface = new FakeAutomationSurface();
         var walker = new Walker();
 
-        // 30 degrees off: stop and face. Then, the turn only part way (15 left),
+        // 30 degrees off: turn in place. Then, the turn only part way (15 left),
         // still under the enter angle but over the resume angle: keep turning.
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 0f), 30f, now: 0d));
-        Assert.Equal(["face:30"], surface.Commands);
+        Assert.Equal(["move:turnright"], surface.Commands);
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 15f), 30f, now: 0.1d));
-        Assert.Equal(["face:30"], surface.Commands);
+        Assert.Equal(["move:turnright"], surface.Commands);
         Assert.False(walker.IsMoving);
 
         // Under the resume angle: run, steering out the last of it.
@@ -87,8 +87,13 @@ public sealed class WalkerTests
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 4d));
         // Running again: the window restarts here, so nothing is stuck yet...
         Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 4.5d));
-        // ...until a full window passes without progress, and the first move is to back up.
-        Assert.Equal(StuckRecovery.BackUp, walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 7.5d));
+        // ...until a full window passes without progress: the keys are pressed afresh first...
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 7.5d));
+        Assert.Equal(["move:clear", "move:forward"], surface.Commands[^2..]);
+        // ...and only a second window without progress backs up.
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 8d));
+        Assert.Null(walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 9d));
+        Assert.Equal(StuckRecovery.BackUp, walker.Toward(surface, At(0d, 0d, heading: 120f), 120f, now: 11.1d));
     }
 
     [Fact]
@@ -111,18 +116,19 @@ public sealed class WalkerTests
     }
 
     [Fact]
-    public void ResetReleasesTheKeysAndForgetsTheLastFace()
+    public void ResetReleasesTheKeys()
     {
         var surface = new FakeAutomationSurface();
         var walker = new Walker();
 
         walker.Toward(surface, At(0d, 0d), 90f, now: 0d);
-        Assert.Equal(["face:90"], surface.Commands);
+        Assert.Equal(["move:turnright"], surface.Commands);
         walker.Reset(surface);
+        Assert.Equal("move:clear", surface.Commands[^1]);
         Assert.False(walker.IsMoving);
 
-        // The same heading is faced again after a reset, not treated as already asked for.
+        // The turn is asked for again after a reset, not treated as already held.
         walker.Toward(surface, At(0d, 0d, heading: 0f), 90f, now: 0.1d);
-        Assert.Equal(["face:90", "face:90"], surface.Commands);
+        Assert.Equal("move:turnright", surface.Commands[^1]);
     }
 }

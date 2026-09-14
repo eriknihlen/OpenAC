@@ -95,9 +95,10 @@ public sealed class EngineIntegrationTests
         surface.CompleteCast(10);
         surface.Enchantments.Add(new PluginActiveEnchantment(10, 100, 6, 1800d));
         engine.Tick(0.1); // buffs done
-        engine.Tick(0.1); // nav faces north
+        engine.Tick(0.1); // nav turns north
         Assert.Equal("nav", engine.ActiveBehaviorName);
-        Assert.Equal("face:0", surface.Commands[^1]);
+        Assert.StartsWith("move:turn", surface.Commands[^1]);
+        surface.Position = surface.Position with { HeadingDegrees = 0f };
         engine.Tick(0.1);
         Assert.Equal("move:forward", surface.Commands[^1]);
 

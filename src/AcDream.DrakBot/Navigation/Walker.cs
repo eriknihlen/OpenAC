@@ -25,18 +25,17 @@ public sealed class Walker
     public const float SteerReleaseDegrees = 2f;
 
     public const double RecoveryDurationSeconds = 0.6;
-    private const double FaceReissueSeconds = 1.5;
 
     private readonly StuckDetector _stuck = new();
     private PluginMovementIntent? _intent;
     private int _steer;
     private bool _turning;
-    private float _lastFaceHeading = float.NaN;
-    private double _lastFaceAt = double.NegativeInfinity;
+    private bool _reasserted;
     private StuckRecovery? _recovery;
     private double _recoveryUntil;
 
-    public bool IsMoving => _intent is not null;
+    /// <summary>Whether the character is being driven somewhere (a turn in place is not moving).</summary>
+    public bool IsMoving => _intent is { } intent && (intent.Forward || intent.Backward || intent.StrafeLeft || intent.StrafeRight);
 
     public StuckRecovery? Recovery => _recovery;
 
@@ -62,22 +61,23 @@ public sealed class Walker
         if (_turning ? Math.Abs(delta) > resumeDegrees : Math.Abs(delta) > turnInPlaceDegrees)
         {
             // Turning in place is not walking: the stall window restarts
-            // when the run does, so a slow turn never reads as stuck.
+            // when the run does, so a slow turn never reads as stuck. The
+            // turn keys do it, not a face-heading command: that is an
+            // autonomous move the runtime owns, and a run started before
+            // it lands can be swallowed when it does.
             _turning = true;
-            Stop(nav);
+            _steer = 0;
             _stuck.Reset();
-            bool stale = float.IsNaN(_lastFaceHeading)
-                || Math.Abs(RouteFollower.HeadingDelta(_lastFaceHeading, heading)) > turnInPlaceDegrees
-                || now - _lastFaceAt > FaceReissueSeconds;
-            if (stale)
-            {
-                nav.FaceHeading(heading);
-                _lastFaceHeading = heading;
-                _lastFaceAt = now;
-            }
+            Send(nav, new PluginMovementIntent(TurnLeft: delta < 0f, TurnRight: delta > 0f, Run: true));
             return null;
         }
-        _turning = false;
+        if (_turning)
+        {
+            // The run starts from a clean slate, so the runtime sees a fresh
+            // forward edge rather than a held key.
+            _turning = false;
+            Stop(nav);
+        }
 
         // Hysteresis keeps the turn key from chattering around the heading.
         if (_steer == 0 && Math.Abs(delta) > SteerEngageDegrees)
@@ -89,7 +89,22 @@ public sealed class Walker
             Run: true,
             TurnLeft: _steer < 0,
             TurnRight: _steer > 0));
-        return _stuck.Observe(position, now);
+        StuckRecovery? stalled = _stuck.Observe(position, now);
+        if (stalled is not null && !_reasserted)
+        {
+            // The first stall is answered by letting go and pressing the
+            // keys again: a run the runtime dropped comes back that way,
+            // and only a run that really is against something escalates.
+            _reasserted = true;
+            PluginMovementIntent intent = _intent!.Value;
+            nav.ClearMovementIntent();
+            nav.SetMovementIntent(intent);
+            _stuck.Reset();
+            return null;
+        }
+        if (_stuck.Progressed)
+            _reasserted = false;
+        return stalled;
     }
 
     /// <summary>
@@ -130,9 +145,8 @@ public sealed class Walker
     {
         Stop(nav);
         _turning = false;
+        _reasserted = false;
         _stuck.Reset();
-        _lastFaceHeading = float.NaN;
-        _lastFaceAt = double.NegativeInfinity;
     }
 
     /// <summary>The resume bar for a turn-in-place bar: half of it, at least a degree under it.</summary>

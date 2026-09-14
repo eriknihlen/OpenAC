@@ -75,6 +75,13 @@ public sealed record Waypoint(
     /// <summary>True for the step kinds the walker travels to; false for the ones that act in place.</summary>
     public bool IsTravel => Kind is WaypointKind.Point or WaypointKind.Vendor or WaypointKind.Npc;
 
+    /// <summary>
+    /// A point that must be passed through, not near: a doorway. The walk
+    /// aims at it exactly (no corner cutting toward the next step) and
+    /// arrives within a metre, so a door frame is never clipped.
+    /// </summary>
+    public bool Precise { get; init; }
+
     public bool HasTargetPosition => TargetEastWest != 0d || TargetNorthSouth != 0d;
 
     public static Waypoint At(in PluginNavigationPosition position) =>

@@ -191,7 +191,8 @@ public sealed class NavigationTests
         Assert.Equal("waypoint 1/1", reason);
 
         behavior.Execute(Context());
-        Assert.Equal(["face:0"], surface.Commands);
+        Assert.Equal(["move:turnright"], surface.Commands);
+        surface.Position = surface.Position with { HeadingDegrees = 0f };
 
         // The fake turns instantly, so the next step walks.
         behavior.Execute(Context());

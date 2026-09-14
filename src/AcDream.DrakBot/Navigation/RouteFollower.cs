@@ -21,6 +21,9 @@ public sealed class RouteFollower
     /// <summary>A point this close to the straight line toward the one after it is skipped.</summary>
     public const double CollinearMeters = 2d;
 
+    /// <summary>A precise step (a doorway) counts as reached this close, whatever the profile's arrival distance.</summary>
+    public const double PreciseArrivalMeters = 1.0;
+
     private int _index;
     private int _direction = 1;
     private double _pauseUntil = double.NegativeInfinity;
@@ -111,6 +114,11 @@ public sealed class RouteFollower
 
         PluginNavigationPosition target = waypoint.ToPosition();
         double distance = position.HorizontalDistanceMeters(target);
+        if (waypoint.Precise)
+        {
+            arrivalDistanceMeters = Math.Min(arrivalDistanceMeters, PreciseArrivalMeters);
+            lookaheadMeters = 0d;
+        }
         if (distance <= arrivalDistanceMeters
             || (_closest < arrivalDistanceMeters * SweepMultiplier && distance > _closest + SweepGrowthMeters))
         {
