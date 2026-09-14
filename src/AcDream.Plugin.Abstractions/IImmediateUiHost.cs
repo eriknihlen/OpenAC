@@ -20,6 +20,20 @@ public interface IImmediateUiHost
     /// throws is logged and dropped for the rest of the session.
     /// </summary>
     IDisposable Register(string name, Action draw) => NoOpImmediateUiHost.Lease;
+
+    /// <summary>
+    /// Where a map position lands on the overlay this frame, in the pixels
+    /// <c>ImGui.GetIO().DisplaySize</c> spans, so a drawer can mark the
+    /// world (route rings, paths). False when the point is behind the
+    /// camera or the host has no camera to project with. Only meaningful
+    /// from inside a registered draw callback.
+    /// </summary>
+    bool TryProjectToScreen(in PluginNavigationPosition position, out float screenX, out float screenY)
+    {
+        screenX = 0f;
+        screenY = 0f;
+        return false;
+    }
 }
 
 public sealed class NoOpImmediateUiHost : IImmediateUiHost

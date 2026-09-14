@@ -95,6 +95,7 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
         if (_disposed || !_frameOpen)
             return;
         _frameOpen = false;
+        _drawers.BeginWorldFrame();
         _drawers.DrawAll((name, error) =>
             _log($"immediate ui: drawer '{name}' threw and was removed: {error}"));
         ImGui.Render();

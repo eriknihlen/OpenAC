@@ -362,6 +362,8 @@ internal sealed class FrameRootCompositionPhase
             var worldFrameCamera = new RuntimeWorldFrameCameraSource(
                 host.CameraController,
                 session.LocalTeleport.ApplyViewPlane);
+            // Plugins drawing over the world project through the same camera.
+            d.ImmediateUi.BindWorld(worldFrameCamera, d.WorldOrigin);
             var worldFrameRoots = new RuntimeWorldFrameRootSource(
                 d.PhysicsEngine,
                 d.CellVisibility,

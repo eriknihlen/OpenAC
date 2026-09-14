@@ -415,6 +415,14 @@ dashboard is.
 - **Items** - the weapon each style wields (typed, or taken from the item
   selected in the inventory), the ammunition switch, mana stone tapping,
   and what is wielded now with its mana.
+- **Route markers over the world** - the route being walked (or the draft)
+  is drawn on the ground: a cyan ring at every travel point within 150 m,
+  amber for NPC and vendor steps, red for the step being walked, the step
+  number above the near ones, and a line from each point to the next.
+  Settings > Navigation turns them off and sets the ring radius, line
+  thickness and a height offset. The host projects map positions through
+  its own camera (`IImmediateUiHost.TryProjectToScreen`), so the markers
+  sit where the client draws the ground.
 
 Plugins get the same facility through `IPluginHost.ImmediateUi`: register a
 draw callback and call `ImGui.*` inside it (ImGui.NET is shared from the
@@ -523,5 +531,6 @@ In rough priority order:
   nothing to learn from yet.
 - **Loot rule editing in the settings window.** Rules can be removed there
   but are authored in the profile JSON.
-- **Nav markers and terrain overlays** need world rendering from the
-  host; the bot has no drawing surface.
+- **Terrain passability overlays and the radar wall renderer** - the
+  route markers are drawn now; those two need cell surface data the
+  contract does not carry.

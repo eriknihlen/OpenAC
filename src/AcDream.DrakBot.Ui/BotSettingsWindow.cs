@@ -579,6 +579,22 @@ public sealed class BotSettingsWindow(BotController controller)
         if (ImGui.SliderFloat("Settle after a portal (s)", ref portalDelay, 0f, 15f, "%.1f"))
             controller.Update(p => p with { Navigation = p.Navigation with { PostPortalDelaySeconds = portalDelay } });
 
+        ImGui.Spacing();
+        ImGui.TextDisabled("Markers drawn over the world");
+        bool markers = navigation.ShowMarkers;
+        if (ImGui.Checkbox("Show route markers", ref markers))
+            controller.Update(p => p with { Navigation = p.Navigation with { ShowMarkers = markers } });
+        float ring = navigation.MarkerRingMeters;
+        if (ImGui.SliderFloat("Ring radius (m)", ref ring, 0.25f, 5f, "%.2f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { MarkerRingMeters = ring } });
+        float thickness = navigation.MarkerLineThickness;
+        if (ImGui.SliderFloat("Line thickness", ref thickness, 1f, 8f, "%.0f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { MarkerLineThickness = thickness } });
+        float height = navigation.MarkerHeightOffset;
+        if (ImGui.SliderFloat("Height offset (m)", ref height, -3f, 3f, "%.2f"))
+            controller.Update(p => p with { Navigation = p.Navigation with { MarkerHeightOffset = height } });
+
+        ImGui.Spacing();
         bool patrolOnLogin = navigation.PatrolOnLogin;
         if (ImGui.Checkbox("Patrol on login (start a dungeon patrol when the character appears in a dungeon)", ref patrolOnLogin))
             controller.Update(p => p with { Navigation = p.Navigation with { PatrolOnLogin = patrolOnLogin } });

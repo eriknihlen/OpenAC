@@ -152,7 +152,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
                 return true;
             });
         _controller.ApplyProfileMeta();
-        _drawWindows = windows?.Invoke(_controller, surface);
+        _drawWindows = windows?.Invoke(_controller, surface, host.ImmediateUi);
     }
 
     public void Enable()
@@ -257,4 +257,4 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
 /// Builds the bot's tool windows for a graphical host and returns the
 /// per-frame draw callback the host's immediate-mode overlay calls.
 /// </summary>
-public delegate Action DrakBotWindowsFactory(BotController controller, IAutomationSurface surface);
+public delegate Action DrakBotWindowsFactory(BotController controller, IAutomationSurface surface, IImmediateUiHost ui);
