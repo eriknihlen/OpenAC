@@ -127,7 +127,28 @@ public sealed class RuntimeLiveEntitySessionController
         }
     }
 
-    private void OnDeleted(DeleteObject.Parsed delete)
+    private void OnDeleted(DeleteObject.Parsed delete) =>
+        _ = TryDelete(delete);
+
+    /// <summary>
+    /// Deletes an object the server has stopped talking about but never
+    /// deleted for us (a ghost), exactly as a server delete of its current
+    /// incarnation would; the local player is never a ghost.
+    /// </summary>
+    public bool DeleteClientGhost(uint serverGuid)
+    {
+        if (serverGuid == 0u
+            || serverGuid == _runtime.PlayerIdentity.ServerGuid
+            || !Entities.Entities.TryGetActive(
+                serverGuid,
+                out RuntimeEntityRecord record))
+        {
+            return false;
+        }
+        return TryDelete(new DeleteObject.Parsed(serverGuid, record.Generation));
+    }
+
+    private bool TryDelete(DeleteObject.Parsed delete)
     {
         if (delete.Guid == _runtime.PlayerIdentity.ServerGuid
             || !Entities.TryAcceptDelete(
@@ -136,7 +157,7 @@ public sealed class RuntimeLiveEntitySessionController
                 removeRetainedObject: true,
                 out RuntimeEntityDeleteAcceptance acceptance))
         {
-            return;
+            return false;
         }
 
         Entities.CompleteAcceptedDelete(acceptance);
@@ -146,6 +167,7 @@ public sealed class RuntimeLiveEntitySessionController
             if (failure is not null)
                 throw failure;
         }
+        return true;
     }
 
     private void OnPickedUp(PickupEvent.Parsed pickup) =>
