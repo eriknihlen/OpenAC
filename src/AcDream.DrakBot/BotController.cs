@@ -66,6 +66,9 @@ public sealed class BotController : IMetaBot
     public Func<IReadOnlyList<PluginWorldObject>>? ObjectScan { get; set; }
 
     private double _lastHazardScanAt = double.NegativeInfinity;
+    private double _loginPatrolFirstTryAt = double.NaN;
+    /// <summary>How long the login patrol keeps asking for the dungeon before it stops trying.</summary>
+    public const double LoginPatrolGiveUpSeconds = 120d;
 
     /// <summary>A changed profile is written this long after the last change, so a dragged slider is one write.</summary>
     public const double AutoSaveDelaySeconds = 1d;
@@ -104,9 +107,30 @@ public sealed class BotController : IMetaBot
 
         if (Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone && inDungeon)
         {
-            _patrolOnLoginDone = true;
-            if (TryStartPatrol(out _))
+            // The dungeon's cells stream in some seconds after the character
+            // does; a try that finds none is not the answer, so this keeps
+            // asking once a second until the patrol is built (and gives up
+            // quietly if the bot has been started by hand meanwhile).
+            if (Engine.IsRunning)
+            {
+                _patrolOnLoginDone = true;
+            }
+            else if (TryStartPatrol(out string message, quiet: true))
+            {
+                _patrolOnLoginDone = true;
+                Log.Info($"patrol: started on login after {now - _loginPatrolFirstTryAt:0}s");
                 Engine.Start();
+            }
+            else if (double.IsNaN(_loginPatrolFirstTryAt))
+            {
+                _loginPatrolFirstTryAt = now;
+                Log.Info($"patrol: waiting to start on login ({message})");
+            }
+            else if (now - _loginPatrolFirstTryAt > LoginPatrolGiveUpSeconds)
+            {
+                _patrolOnLoginDone = true;
+                Log.Warn($"patrol: not started on login after {LoginPatrolGiveUpSeconds:0}s ({message}); use Dungeon Patrol when ready");
+            }
         }
 
         if (!inDungeon || ObjectScan is null)
@@ -565,9 +589,14 @@ public sealed class BotController : IMetaBot
     /// character stands, avoiding marked hazards, and follows it. Standing in
     /// a hazard, the walk starts from the nearest safe cell.
     /// </summary>
-    public bool TryStartPatrol(out string message)
+    public bool TryStartPatrol(out string message) => TryStartPatrol(out message, quiet: false);
+
+    /// <param name="quiet">No warning when the dungeon is not there yet: the login patrol asks every second.</param>
+    private bool TryStartPatrol(out string message, bool quiet)
     {
-        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out message);
+        Dictionary<uint, PluginDungeonCell>? graph = quiet
+            ? DungeonGraphCore(out PluginNavigationSnapshot snapshot, out message)
+            : DungeonGraph(out snapshot, out message);
         if (graph is null)
             return false;
         IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);

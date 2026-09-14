@@ -31,12 +31,15 @@ public sealed class PatrolControllerTests
     private static PluginDungeonCell Cell(uint low, double eastMeters, double northMeters, params uint[] neighbors) =>
         new(Block | low, eastMeters / 240d, northMeters / 240d, 0d, neighbors.Select(n => Block | n).ToArray());
 
-    private static (BotController Controller, FakeAutomationSurface Surface, TickClock Clock) Build()
+    private static (BotController Controller, FakeAutomationSurface Surface, TickClock Clock) Build() =>
+        Build(out _);
+
+    private static (BotController Controller, FakeAutomationSurface Surface, TickClock Clock) Build(out FakeDungeon dungeon)
     {
         var surface = new FakeAutomationSurface();
         var clock = new TickClock();
         // A square loop of four rooms and a spur off room 2.
-        var dungeon = new FakeDungeon();
+        dungeon = new FakeDungeon();
         dungeon.Cells.AddRange(
         [
             Cell(0x100, 0d, 0d, 0x101, 0x103),
@@ -103,6 +106,32 @@ public sealed class PatrolControllerTests
         controller.Tick(clock.Now);
         Assert.True(controller.Engine.IsRunning);
         Assert.True(controller.IsPatrolling);
+    }
+
+    [Fact]
+    public void PatrolOnLoginKeepsAskingUntilTheDungeonHasStreamedIn()
+    {
+        (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build(out FakeDungeon dungeon);
+        controller.Update(p => p with { Navigation = p.Navigation with { PatrolOnLogin = true } });
+        // In the dungeon, but its cells have not arrived yet: nothing to build from.
+        var cells = dungeon.Cells.ToArray();
+        dungeon.Cells.Clear();
+        for (int second = 0; second < 5; second++)
+        {
+            clock.Advance(1.1d);
+            controller.Tick(clock.Now);
+        }
+        Assert.False(controller.Engine.IsRunning);
+        Assert.Contains(controller.Log.Snapshot(), line => line.Text.Contains("waiting to start on login", StringComparison.Ordinal));
+        Assert.DoesNotContain(controller.Log.Snapshot(), line => line.Level == BotLogLevel.Quiet && line.Text.Contains("no cells", StringComparison.Ordinal));
+
+        // The cells stream in: the next ask builds the patrol and starts the bot.
+        dungeon.Cells.AddRange(cells);
+        clock.Advance(1.1d);
+        controller.Tick(clock.Now);
+        Assert.True(controller.Engine.IsRunning);
+        Assert.True(controller.IsPatrolling);
+        Assert.Contains(controller.Log.Snapshot(), line => line.Text.Contains("started on login after", StringComparison.Ordinal));
     }
 
     [Fact]
