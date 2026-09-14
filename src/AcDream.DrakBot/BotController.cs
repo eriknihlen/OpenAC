@@ -34,6 +34,7 @@ public sealed class BotController : IMetaBot
         Engine = engine ?? throw new ArgumentNullException(nameof(engine));
         Store = store ?? throw new ArgumentNullException(nameof(store));
         Navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
+        Navigation.Rejoin = RejoinRoute;
         Buffs = buffs ?? throw new ArgumentNullException(nameof(buffs));
         _navigationSnapshot = navigationSnapshot ?? throw new ArgumentNullException(nameof(navigationSnapshot));
         _vtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
@@ -125,6 +126,26 @@ public sealed class BotController : IMetaBot
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// The route being walked, rejoined from where the character stands by
+    /// a path through the dungeon's doorways; null outside a dungeon or
+    /// when no path helps. Also what patrol resumes by after a fight
+    /// dragged the character into another room.
+    /// </summary>
+    private Route? RejoinRoute(PluginNavigationPosition position, int index)
+    {
+        Route? route = Navigation.Route;
+        if (route is null)
+            return null;
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraphCore(out _, out _);
+        if (graph is null)
+            return null;
+        Route? rejoined = DungeonPathfinder.Rejoin(graph, route, index, position, Hazards.For(position.CellId));
+        if (rejoined is not null && route.Name == DraftRoute?.Name)
+            DraftRoute = rejoined;
+        return rejoined;
     }
 
     /// <summary>A new hazard mid-patrol: the same patrol again around it, resumed at the nearest step.</summary>

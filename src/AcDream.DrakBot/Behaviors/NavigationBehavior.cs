@@ -20,6 +20,21 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
     private bool _resumeNearest;
+    private bool _rejoinPending;
+    private double _lastRejoinAt = double.NegativeInfinity;
+
+    /// <summary>
+    /// How to get back onto the route from wherever the character stands:
+    /// given the position and the index of the step being walked to,
+    /// the same route with a lead-in spliced in (a dungeon path through
+    /// the doorways), or null when there is no better way than straight
+    /// at it. Asked after an interruption left the character somewhere
+    /// the step cannot be walked to directly, and on a stall against a
+    /// wall.
+    /// </summary>
+    public Func<PluginNavigationPosition, int, Route?>? Rejoin { get; set; }
+
+    private const double RejoinIntervalSeconds = 5d;
     private int _loggedIndex = -1;
     private double _lastTraceAt = double.NegativeInfinity;
     private bool _followMoving;
@@ -181,6 +196,15 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 return RunAction(context, nav);
 
             default:
+                if (_rejoinPending)
+                {
+                    // Back from a fight or a heal, possibly dragged into
+                    // another room: if the step is not straight ahead any
+                    // more, path back to it instead of walking at the wall.
+                    _rejoinPending = false;
+                    if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
+                        return BehaviorStep.Continue;
+                }
                 StuckRecovery? recovery = _walker.Toward(
                     host, board.Navigation.Position, step.HeadingDegrees, board.Now, nav.TurnToleranceDegrees);
                 if (board.Now - _lastTraceAt >= 0.5d && context.Log.Debugs())
@@ -194,6 +218,10 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 {
                     context.Log.Info($"nav: stuck near step {_follower.CurrentIndex + 1} ({step.DistanceMeters:0.0}m to go, heading {step.HeadingDegrees:0}); trying {move} at {BotEngine.Describe(board.Navigation.Position)}");
                     context.Log.Info($"nav: {CompassProbe(context.Surface, step.HeadingDegrees)}");
+                    // A wall square in the way is not something a recovery
+                    // move gets around; the route is rejoined by a path.
+                    if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
+                        return BehaviorStep.Continue;
                     _walker.BeginRecovery(host, move, board.Now);
                 }
                 return BehaviorStep.Continue;
@@ -266,6 +294,36 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// eight compass points, from the host's collision probe: which way
     /// the wall actually is when a walk stalls.
     /// </summary>
+    /// <summary>Whether the body can walk straight to the step: unknown counts as yes.</summary>
+    private static bool DirectlyWalkable(IAutomationSurface surface, in NavigationStep step)
+    {
+        IMovementProbeAutomation probe = surface.MovementProbe;
+        if (!probe.IsAvailable || step.DistanceMeters <= 1.5d)
+            return true;
+        PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(step.HeadingDegrees, (float)step.DistanceMeters)
+        {
+            StepDistance = 0.5f,
+            MaximumCollisionChecks = 64,
+        });
+        return result.Status != PluginWalkProbeStatus.Blocked
+            || result.ClearDistanceMeters >= step.DistanceMeters - 1.5f;
+    }
+
+    private bool TryRejoin(BehaviorContext context)
+    {
+        if (Rejoin is null || _follower is null || context.Board.Now - _lastRejoinAt < RejoinIntervalSeconds)
+            return false;
+        _lastRejoinAt = context.Board.Now;
+        int index = _follower.CurrentIndex;
+        Route? route = Rejoin(context.Board.Navigation.Position, index);
+        if (route is null)
+            return false;
+        context.Log.Info($"nav: step {index + 1} is walled off from {BotEngine.Describe(context.Board.Navigation.Position)}; rejoining '{route.Name}' by a {route.LoopStart}-step lead-in");
+        _walker.Reset(context.Surface.Navigation);
+        SetRoute(route);
+        return true;
+    }
+
     private static string CompassProbe(IAutomationSurface surface, float targetHeading)
     {
         IMovementProbeAutomation probe = surface.MovementProbe;
@@ -303,6 +361,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     {
         _walker.Reset(context.Surface.Navigation);
         _followMoving = false;
+        _rejoinPending = _follower is not null;
         // An action mid-flight is abandoned; the step runs again from the
         // start when the route gets control back.
         _actions.Cancel();

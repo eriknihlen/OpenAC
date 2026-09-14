@@ -169,6 +169,60 @@ public static class DungeonPathfinder
     }
 
     /// <summary>
+    /// The same route, rejoined from where the character stands: a lead-in
+    /// along the doorways from the character's cell to the cell of the
+    /// step it was walking to, then the route from that step on. A loop
+    /// is rotated so the lap continues from that step and wraps through
+    /// the steps before it; the old lead-in is dropped. Null when the
+    /// character is already in the step's cell (nothing to route around)
+    /// or no path exists.
+    /// </summary>
+    public static Route? Rejoin(
+        Dictionary<uint, PluginDungeonCell> graph,
+        Route route,
+        int index,
+        in PluginNavigationPosition position,
+        IReadOnlySet<uint>? hazards = null)
+    {
+        if (route.IsEmpty || index < 0 || index >= route.Waypoints.Count)
+            return null;
+        Waypoint target = route.Waypoints[index];
+        uint start = graph.ContainsKey(position.CellId) ? position.CellId : NearestCell(graph, position);
+        uint goal = NearestCell(graph, target.ToPosition());
+        if (start == 0u || goal == 0u || start == goal)
+            return null;
+        List<uint> path = FindPath(graph, start, goal, hazards);
+        if (path.Count < 2)
+            return null;
+
+        var waypoints = new List<Waypoint>();
+        for (int step = 0; step + 1 < path.Count; step++)
+        {
+            if (graph.TryGetValue(path[step], out PluginDungeonCell from) && graph.TryGetValue(path[step + 1], out PluginDungeonCell to))
+                AddDoorwayPoints(waypoints, from, to);
+        }
+        Simplify(waypoints);
+        // A lead-in that ends on the step itself would have it twice.
+        if (waypoints.Count > 0 && waypoints[^1].ToPosition().HorizontalDistanceMeters(target.ToPosition()) < 1d)
+            waypoints.RemoveAt(waypoints.Count - 1);
+        int leadIn = waypoints.Count;
+
+        RouteMode mode = route.Mode ?? RouteMode.Once;
+        if (mode == RouteMode.Loop)
+        {
+            int loopStart = Math.Clamp(route.LoopStart, 0, route.Waypoints.Count - 1);
+            for (int step = index; step < route.Waypoints.Count; step++)
+                waypoints.Add(route.Waypoints[step]);
+            for (int step = loopStart; step < index; step++)
+                waypoints.Add(route.Waypoints[step]);
+            return route with { Waypoints = waypoints, LoopStart = leadIn };
+        }
+        for (int step = index; step < route.Waypoints.Count; step++)
+            waypoints.Add(route.Waypoints[step]);
+        return route with { Waypoints = waypoints, LoopStart = 0 };
+    }
+
+    /// <summary>
     /// A looping patrol over the dungeon's main route from the start cell:
     /// every corridor once, loops walked round, dead ends and bridges
     /// re-trodden only by the shortest way back, closed back to the start.

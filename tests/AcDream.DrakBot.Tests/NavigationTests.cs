@@ -204,6 +204,50 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void AfterAnInterruptionAWalledOffStepIsRejoinedByALeadIn()
+    {
+        var surface = new FakeAutomationSurface();
+        var clock = new TickClock();
+        var settings = new NavigationSettings();
+        var behavior = new NavigationBehavior(() => settings);
+        var route = new Route { Name = "hall", Waypoints = [new Waypoint(WaypointKind.Point, 0d, 20d / 240d)] };
+        behavior.SetRoute(route);
+        surface.Position = At(0d, 0d, heading: 0f);
+        int asked = -1;
+        behavior.Rejoin = (position, index) =>
+        {
+            asked = index;
+            return route with
+            {
+                Waypoints = [new Waypoint(WaypointKind.Point, 5d / 240d, 0d), route.Waypoints[0]],
+            };
+        };
+
+        BehaviorContext Context() => new(surface, new FakeLogger(), Blackboard.Capture(surface, clock, 25f, 15f));
+
+        // Straight ahead and open: no rejoin.
+        behavior.Execute(Context());
+        Assert.Equal("move:forward", surface.Commands[^1]);
+        Assert.Equal(-1, asked);
+
+        // A fight, then the way north is a wall: the route is rejoined and the lead-in walked first (due east).
+        behavior.Interrupt(Context());
+        surface.BlockedWalkHeadings.Add(0);
+        behavior.Execute(Context());
+        Assert.Equal(0, asked);
+        Assert.Equal(2, behavior.Route!.Waypoints.Count);
+        behavior.Execute(Context());
+        Assert.Equal("move:turnright", surface.Commands[^1]);
+
+        // Interrupted again with the step in the open: left alone.
+        surface.BlockedWalkHeadings.Clear();
+        asked = -1;
+        behavior.Interrupt(Context());
+        behavior.Execute(Context());
+        Assert.Equal(-1, asked);
+    }
+
+    [Fact]
     public void NavigationBehaviorIsQuietWithoutARouteOrInPortalSpace()
     {
         var surface = new FakeAutomationSurface();

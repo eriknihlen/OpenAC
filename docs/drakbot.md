@@ -313,6 +313,15 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   from the nearest safe cell. The Navigation
   window's **Dungeon Patrol** button does the same; `/drakbot patrol stop`
   clears it.
+- a route is rejoined by a path, not a straight line: when navigation gets
+  control back after a fight or a heal and the walk probe says the step it
+  was heading for is walled off (the fight dragged the character into
+  another room), or when it stalls against a wall, it asks for a lead-in -
+  the dungeon path through the doorways from the character's cell to the
+  step's cell - and splices it in (`DungeonPathfinder.Rejoin`): a loop is
+  rotated so the lap continues from that step and wraps through the ones
+  before it. At most once every five seconds; outside a dungeon the stuck
+  recoveries stand alone.
 - hazards are also sighted: once a second the bot looks at the objects in
   view and any named like a hotspot (lava, pool of acid, magma, cesspool,
   hot spring, pool of fire/cold) marks its cell; a new mark during a

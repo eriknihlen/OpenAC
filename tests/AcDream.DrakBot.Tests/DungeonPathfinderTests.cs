@@ -148,6 +148,35 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void RejoiningAPatrolFromAnotherRoomLeadsInByTheDoorwaysAndRotatesTheLoop()
+    {
+        Dictionary<uint, PluginDungeonCell> graph = RingWithSpurs();
+        Route patrol = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x100);
+        Assert.Equal(0, patrol.LoopStart);
+        // Walking to step 4 of the ring, a fight dragged the character out to the end of the spur off ring cell 4.
+        int index = 3;
+        PluginDungeonCell spurEnd = graph[Block | 0x304];
+        var position = new PluginNavigationPosition(spurEnd.CellId, spurEnd.EastWest, spurEnd.NorthSouth, spurEnd.Elevation, 0f, IsOutdoor: false);
+
+        Route? rejoined = DungeonPathfinder.Rejoin(graph, patrol, index, position);
+
+        Assert.NotNull(rejoined);
+        // The lead-in comes back in along the spur: its first doorway is out beyond the ring...
+        Assert.True(rejoined.LoopStart >= 2);
+        Assert.True(Math.Sqrt(Math.Pow(rejoined.Waypoints[0].EastWest * 240d, 2) + Math.Pow(rejoined.Waypoints[0].NorthSouth * 240d, 2)) > 61d);
+        // ...then the loop continues from the step that was being walked to, and wraps through the ones before it.
+        Assert.Equal(patrol.Waypoints.Count, rejoined.Waypoints.Count - rejoined.LoopStart);
+        Assert.Equal(patrol.Waypoints[index], rejoined.Waypoints[rejoined.LoopStart]);
+        Assert.Equal(patrol.Waypoints[index - 1], rejoined.Waypoints[^1]);
+        Assert.Equal(RouteMode.Loop, rejoined.Mode);
+
+        // Already in the step's cell: nothing to route around.
+        PluginDungeonCell stepCell = graph[DungeonPathfinder.NearestCell(graph, patrol.Waypoints[index].ToPosition())];
+        var inRoom = new PluginNavigationPosition(stepCell.CellId, stepCell.EastWest, stepCell.NorthSouth, 0d, 0f, IsOutdoor: false);
+        Assert.Null(DungeonPathfinder.Rejoin(graph, patrol, index, inRoom));
+    }
+
+    [Fact]
     public void ARouteGoesThroughTheDoorwaysThemselvesWhenTheHostKnowsThem()
     {
         // Two rooms whose model anchors sit off in a corner; the doorway between them is at (10 E, 8 N).
