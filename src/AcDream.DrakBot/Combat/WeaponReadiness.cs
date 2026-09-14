@@ -35,6 +35,20 @@ public sealed class WeaponReadiness
         NoAmmunition,
     }
 
+    private static bool IsOfStyle(in PluginEquipmentItem item, bool missile) => missile
+        ? item.CombatUse == CombatUseMissile || (item.ItemType & ItemTypeMissileWeapon) != 0u
+        : item.CombatUse is CombatUseMelee or CombatUseTwoHanded;
+
+    private static PluginEquipmentItem? FirstOwned(IReadOnlyList<PluginEquipmentItem> owned, Func<PluginEquipmentItem, bool> match)
+    {
+        foreach (PluginEquipmentItem item in owned)
+        {
+            if (match(item))
+                return item;
+        }
+        return null;
+    }
+
     /// <summary>The missile weapon in hand at the last check, for the fletcher.</summary>
     public string MissileWeaponName { get; private set; } = string.Empty;
 
@@ -68,11 +82,29 @@ public sealed class WeaponReadiness
                 return Equip(equipment, weapon.Value, now, out detail);
         }
 
+        // With no weapon named, the missile style still needs a bow in hand:
+        // the server puts the character in the mode the weapon allows, so a
+        // missile style with nothing wielded asks for missile mode for ever
+        // and never gets it. The first missile weapon in the pack is
+        // wielded; none at all is Missing. (Melee is fine bare-handed, and
+        // a host reporting no items at all is not saying there are none.)
+        if (wanted.Length == 0 && combat.Style == CombatStyle.Missile && owned.Count > 0
+            && FirstEquipped(owned, item => IsOfStyle(item, missile: true)) is null)
+        {
+            PluginEquipmentItem? spare = FirstOwned(owned, item => !item.IsEquipped && IsOfStyle(item, missile: true));
+            if (spare is null)
+            {
+                detail = "no missile weapon wielded or in the pack";
+                return Verdict.Missing;
+            }
+            return Equip(equipment, spare.Value, now, out detail);
+        }
+
         if (combat.Style != CombatStyle.Missile || !combat.KeepAmmunition)
             return Verdict.Ready;
 
         // The bow in hand decides the ammunition, whether the profile named it or not.
-        weapon ??= FirstEquipped(owned, item => item.CombatUse == CombatUseMissile || (item.ItemType & ItemTypeMissileWeapon) != 0u);
+        weapon ??= FirstEquipped(owned, item => IsOfStyle(item, missile: true));
         if (weapon is null)
             return Verdict.Ready;
         uint ammoType = weapon.Value.AmmoType;

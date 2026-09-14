@@ -46,7 +46,10 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
         _context = ImGui.CreateContext();
         ImGui.SetCurrentContext(_context);
         ImGuiIOPtr io = ImGui.GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        // No keyboard navigation of the overlay: the game owns the keys, and
+        // a focused tool window must not swallow the Enter that opens chat.
+        // The overlay takes the keyboard only while a text field is being
+        // typed into (see WantCaptureKeyboard).
         io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         if (iniPath is not null)
         {
@@ -78,7 +81,13 @@ internal sealed unsafe class ImGuiOverlay : IDevToolsFrameLifecycle, IExternalIn
 
     public bool WantCaptureMouse => !_disposed && ImGui.GetIO().WantCaptureMouse;
 
-    public bool WantCaptureKeyboard => !_disposed && ImGui.GetIO().WantCaptureKeyboard;
+    /// <summary>
+    /// Only while a text field in a tool window is being typed into. A
+    /// window that merely has focus does not hold the keyboard: the player
+    /// clicked a bot panel a moment ago and still expects Enter to open
+    /// chat and the movement keys to move.
+    /// </summary>
+    public bool WantCaptureKeyboard => !_disposed && ImGui.GetIO().WantTextInput;
 
     public void BeginFrame(float deltaSeconds, int viewportWidth, int viewportHeight)
     {

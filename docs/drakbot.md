@@ -435,6 +435,11 @@ and ExpressionEngine, so a meta written for RynthAi or VTank runs here.
 
 ## Windows
 
+The tool windows never hold the keyboard for having focus: the client's
+overlay hands the keys to the game unless a text field in a window is
+being typed into, so Enter still opens chat and the movement keys still
+move with a bot panel in front. Mouse clicks on a window are the window's.
+
 The bot's windows are Dear ImGui (`AcDream.DrakBot.Ui`), drawn by the
 client's immediate-mode overlay (`ACDREAM_IMGUI=0` turns the overlay off; the
 bot then falls back to a small retail-look status panel). Nothing is drawn

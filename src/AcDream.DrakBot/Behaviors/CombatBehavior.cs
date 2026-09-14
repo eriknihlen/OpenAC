@@ -39,6 +39,7 @@ public sealed class CombatBehavior(
     private double _phaseStartedAt;
     private double _lastApproachTraceAt = double.NegativeInfinity;
     private (double At, Engagement Engagement)? _chosen;
+    private bool _modeMismatchTold;
     /// <summary>The log of the last Execute, for the selection that runs inside WantsControl.</summary>
     private IPluginLogger? _log;
     private bool _leftCombat = true;
@@ -152,17 +153,34 @@ public sealed class CombatBehavior(
         switch (_phase)
         {
             case Phase.ChangingMode:
-                if (board.Combat.Mode == DesiredMode(combat.Style))
+            {
+                PluginCombatMode wanted = DesiredMode(combat.Style);
+                if (board.Combat.Mode == wanted)
                 {
+                    EnterPhase(Phase.Idle, board.Now);
+                    return BehaviorStep.Continue;
+                }
+                // The server answers a physical mode with the one the weapon
+                // in hand allows: melee asked for with a bow wielded comes
+                // back missile. That is still a fight - both swing through
+                // the same request - so it is taken, with a word about it.
+                if (IsPhysical(wanted) && IsPhysical(board.Combat.Mode))
+                {
+                    if (!_modeMismatchTold)
+                    {
+                        _modeMismatchTold = true;
+                        context.Log.Warn($"combat: asked for {wanted} but the weapon in hand puts the character in {board.Combat.Mode}; fighting in {board.Combat.Mode} (set the style's weapon, or the style, to match)");
+                    }
                     EnterPhase(Phase.Idle, board.Now);
                     return BehaviorStep.Continue;
                 }
                 if (board.Now - _phaseStartedAt > ModeChangeTimeoutSeconds)
                 {
                     EnterPhase(Phase.Idle, board.Now);
-                    return BehaviorStep.Fail("combat mode change was not confirmed");
+                    return BehaviorStep.Fail($"combat mode change to {wanted} was not confirmed; the client is in {board.Combat.Mode} (is the right weapon wielded?)");
                 }
                 return BehaviorStep.Continue;
+            }
 
             case Phase.Building:
                 if (!board.Combat.RequestInProgress)
@@ -276,7 +294,7 @@ public sealed class CombatBehavior(
         }
 
         PluginCombatMode desired = DesiredMode(combat.Style);
-        if (board.Combat.Mode != desired)
+        if (board.Combat.Mode != desired && !(IsPhysical(desired) && IsPhysical(board.Combat.Mode)))
         {
             PluginCombatCommandResult mode = host.EnterMode(desired);
             if (!mode.Accepted)
@@ -786,6 +804,8 @@ public sealed class CombatBehavior(
             ApproachHeadingDegrees = float.NaN;
         }
     }
+
+    private static bool IsPhysical(PluginCombatMode mode) => mode is PluginCombatMode.Melee or PluginCombatMode.Missile;
 
     private static PluginCombatMode DesiredMode(CombatStyle style) => style switch
     {

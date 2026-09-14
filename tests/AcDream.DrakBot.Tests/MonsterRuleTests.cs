@@ -79,6 +79,63 @@ public sealed class MonsterRuleTests
         Assert.False(selector.TryBestOffensive("Cold", SpellShape.Bolt, ring: false, out _));
     }
 
+    [Fact]
+    public void MissileStyleWithNoBowNamedWieldsTheOneInThePackAndIsMissingWithoutOne()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Missile,
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Peace };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 6f));
+        surface.Equipment.Add(Gear(1, "Spadone", 1, 0u, equipped: true));
+
+        // Sword in hand, nothing to shoot with: the bot says so instead of asking for missile mode for ever.
+        BehaviorStep step = Step(behavior, surface, clock);
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("no missile weapon", step.Reason);
+        Assert.DoesNotContain("mode:Missile", surface.Commands);
+
+        // A bow in the pack is wielded first, then arrows, then the fight.
+        surface.Equipment.Add(Gear(2, "Shou-jen Yumi", 2, 1u, equipped: false));
+        surface.Equipment.Add(Gear(3, "Deadly Broad Arrow", 3, 1u, equipped: false, stack: 250));
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:2", surface.Commands);
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:3", surface.Commands);
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("mode:Missile", surface.Commands);
+    }
+
+    [Fact]
+    public void AMeleeAskFromABowInHandComesBackMissileAndTheFightGoesOn()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Melee,
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Peace };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 2f));
+        surface.Equipment.Add(Gear(2, "Shou-jen Yumi", 2, 1u, equipped: true));
+
+        // Melee asked for; the server, seeing the bow, answers missile.
+        Step(behavior, surface, clock);
+        Assert.Contains("mode:Melee", surface.Commands);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Missile };
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        // Taken as it is: the next step swings, and no second mode change is asked for.
+        Step(behavior, surface, clock);
+        Assert.Contains(surface.Commands, c => c.StartsWith("attack", StringComparison.Ordinal));
+        Assert.Equal(1, surface.Commands.Count(c => c == "mode:Melee"));
+    }
+
     private static PluginEquipmentItem Gear(uint id, string name, byte combatUse, uint ammoType, bool equipped, int stack = 1) =>
         new(id, name, combatUse == 2 ? 0x100u : 0u, 0x1000u, equipped ? 0x1000u : 0u, 0x50000001u, 0u, combatUse, 0, 0, 0, 0d)
         {
