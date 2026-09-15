@@ -45,6 +45,9 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private const float DetourProbeMeters = 6f;
     private const float DetourClearMeters = 3f;
     private int _detours;
+    /// <summary>The step the detours were for, and how many it may have before it is skipped: a waypoint on the floor above with no ramp from here is not reached by walking at the wall all day.</summary>
+    private int _detourStep = -1;
+    private const int MaxDetoursPerStep = 6;
     private int _loggedIndex = -1;
     private double _lastTraceAt = double.NegativeInfinity;
     private bool _followMoving;
@@ -242,6 +245,24 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                     {
                         if (TryRejoin(context))
                             return BehaviorStep.Continue;
+                        if (_detourStep != _follower.CurrentIndex)
+                        {
+                            _detourStep = _follower.CurrentIndex;
+                            _detours = 0;
+                        }
+                        if (_detours >= MaxDetoursPerStep)
+                        {
+                            // Sideways and back again this many times: the
+                            // step is not reachable from here by any short
+                            // way round, so it is given up and the next one
+                            // aimed for; the route's shape carries the walk
+                            // on, and the skipped point comes round again.
+                            context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} not reached after {_detours} detours from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
+                            _detours = 0;
+                            _walker.Reset(host);
+                            _follower.Skip();
+                            return BehaviorStep.Continue;
+                        }
                         if (TryDetour(context.Surface, step.HeadingDegrees, out float detour))
                         {
                             _detours++;

@@ -287,6 +287,44 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void AStepDetouredSixTimesWithoutBeingReachedIsSkipped()
+    {
+        // The step is on the floor above with no ramp from here: sideways and
+        // back, over and over, is not a way to spend the night.
+        var surface = new FakeAutomationSurface();
+        var clock = new TickClock();
+        var settings = new NavigationSettings();
+        var behavior = new NavigationBehavior(() => settings);
+        behavior.SetRoute(new Route
+        {
+            Name = "floors",
+            Waypoints = [new Waypoint(WaypointKind.Point, 0d, 20d / 240d), new Waypoint(WaypointKind.Point, 20d / 240d, 0d)],
+        });
+        surface.Position = At(0d, 0d, heading: 0f);
+        surface.BlockedWalkHeadings.UnionWith([0, 30, 330]);
+        surface.WalkBlockedByEnvironment = true;
+        behavior.Rejoin = (_, _) => null;
+        var log = new FakeLogger();
+        BehaviorContext Context() => new(surface, log, Blackboard.Capture(surface, clock, 25f, 15f));
+
+        for (int round = 0; round < 40 && behavior.WaypointIndex == 0; round++)
+        {
+            // A stall window, a re-press, another window: a stall; then the detour runs its course.
+            clock.Advance(3.2d);
+            behavior.Execute(Context());
+            clock.Advance(0.1d);
+            behavior.Execute(Context());
+            clock.Advance(3.2d);
+            behavior.Execute(Context());
+            clock.Advance(NavigationBehavior.DetourSeconds + 0.1d);
+            behavior.Execute(Context());
+        }
+        Assert.Equal(1, behavior.WaypointIndex);
+        Assert.Equal(6, log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal)));
+        Assert.Contains(log.Lines, line => line.Contains("skipping it", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NavigationBehaviorIsQuietWithoutARouteOrInPortalSpace()
     {
         var surface = new FakeAutomationSurface();

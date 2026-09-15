@@ -270,6 +270,9 @@ public sealed class RouteFollower
         return true;
     }
 
+    /// <summary>Gives up on the current waypoint and moves the cursor on, as a step reached would.</summary>
+    public void Skip() => Step();
+
     private void Step()
     {
         _closest = double.PositiveInfinity;

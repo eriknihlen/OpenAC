@@ -386,7 +386,10 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   heading of a fan round the target (30, 60, 90, 120, 150 degrees either
   side, nearest first), walked for a second and a half before the route
   is aimed at again; the plain back-up and strafe recoveries are the
-  fallback when nothing is open. Route points are simplified with height
+  fallback when nothing is open. A step detoured six times without being
+  reached is given up and the next one aimed for - a point on the floor
+  above with no ramp from here is not reached by walking at the wall all
+  night - and it comes round again on the next lap. Route points are simplified with height
   in mind: a point on the line on the map but off it in height (a ramp's
   landing) is kept, or the walk would go from one floor to the next
   through the wall.
