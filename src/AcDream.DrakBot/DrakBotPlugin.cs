@@ -146,6 +146,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             () => controller.Profile.Meta,
             change => controller.Update(p => p with { Meta = change(p.Meta) }));
         _controller.ObjectScan = surface.Objects.CaptureObjects;
+        _controller.ChatAfter = surface.Chat.CaptureMessages;
         _controller.ApplyProfileMeta();
         _controller.ApplyProfileRoute();
         _controller.Meta.Utility = new UtilityCommands(

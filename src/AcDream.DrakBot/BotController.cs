@@ -103,6 +103,7 @@ public sealed class BotController : IMetaBot
             return;
         _lastHazardScanAt = now;
         DrainCommandFile();
+        LogChat();
         PluginNavigationSnapshot snapshot = _navigationSnapshot();
         bool loginPatrolPending = Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone;
         if (!snapshot.IsAvailable)
@@ -285,6 +286,30 @@ public sealed class BotController : IMetaBot
     /// a developer with the log open - without a chat box.
     /// </summary>
     public const string CommandFileName = "commands.txt";
+
+    /// <summary>
+    /// What the server said, at debug level: a door that is locked, a
+    /// swing the server refused, a spell that fizzled all arrive as chat,
+    /// and a log without them is a mystery with half the clues missing.
+    /// </summary>
+    private ulong _chatSequence;
+    public Func<ulong, IReadOnlyList<PluginChatMessage>>? ChatAfter { get; set; }
+
+    private void LogChat()
+    {
+        if (ChatAfter is null)
+            return;
+        IReadOnlyList<PluginChatMessage> messages = ChatAfter(_chatSequence);
+        foreach (PluginChatMessage message in messages)
+        {
+            if (message.Sequence > _chatSequence)
+                _chatSequence = message.Sequence;
+            if (!Log.Debugs())
+                continue;
+            string who = string.IsNullOrEmpty(message.Sender) ? string.Empty : $"{message.Sender}: ";
+            Log.Debug($"chat[{message.Kind}]: {who}{message.Text}");
+        }
+    }
 
     private void DrainCommandFile()
     {
