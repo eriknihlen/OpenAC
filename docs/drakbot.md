@@ -231,6 +231,12 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   The strikes and the blacklist below are for what can be seen but not
   shot or reached, for the host refusing to swing, and for a swing the
   server never finishes.
+- **The server's reach.** *Melee range* is where the bot starts a swing;
+  the server itself swings from about two metres and walks the character
+  in for a farther one. Hemmed in - a swarm, a doorway - that walk never
+  comes, so a swing still unanswered after three seconds with the target
+  beyond two metres is abandoned and the bot walks in to two metres
+  itself before swinging again.
 - **Choosing a target.** Hostiles are ranked as before (distance is the
   straight line, height included; one more than *Ignore above/below*
   metres up or down is not a hostile at all); the first one with a

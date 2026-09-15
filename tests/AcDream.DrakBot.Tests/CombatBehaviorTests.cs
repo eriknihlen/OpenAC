@@ -295,6 +295,39 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void ASwingTheServerDoesNotTakeBecomesAWalkInToItsOwnReach()
+    {
+        // Reach set generously: the swing goes out at three metres. The
+        // server would walk the character in for it, but hemmed in it never
+        // does, so after a moment the bot walks in itself and swings again.
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, MeleeRangeMeters = 3.5f, LineOfSight = new LineOfSightSettings { Enabled = false } });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Noble", 3f));
+        Place(surface, 9u, north: 3d, east: 0d);
+
+        Step(behavior, surface, clock);
+        Assert.Contains(surface.Commands, c => c.StartsWith("attack:9", StringComparison.Ordinal));
+        Step(behavior, surface, clock); // released; the server is now to answer
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock, dt: 1d).Result);
+
+        // Nothing back after three seconds and still three metres off: closing in.
+        Step(behavior, surface, clock, dt: 2.5d);
+        Assert.True(behavior.IsApproaching);
+        Assert.Contains("abort", surface.Commands);
+        Assert.Contains(surface.Commands, c => c.StartsWith("move:", StringComparison.Ordinal));
+
+        // Within the server's reach: the walk ends and the next step swings again.
+        surface.Hostiles[0] = Hostile(9, "Noble", 1.8f);
+        Place(surface, 9u, north: 1.8d, east: 0d);
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.False(behavior.IsApproaching);
+        int swings = surface.Commands.Count(c => c.StartsWith("attack:9", StringComparison.Ordinal));
+        Step(behavior, surface, clock);
+        Assert.Equal(swings + 1, surface.Commands.Count(c => c.StartsWith("attack:9", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void AnApproachThatGoesNowhereTimesOutWithAStrike()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =

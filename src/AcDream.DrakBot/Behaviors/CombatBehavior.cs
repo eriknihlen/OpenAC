@@ -28,6 +28,20 @@ public sealed class CombatBehavior(
     Func<CombatSettings> settings) : IBehavior
 {
     private const double SwingTimeoutSeconds = 10d;
+
+    /// <summary>
+    /// How far the server swings from without moving the character. A
+    /// swing asked for from farther out is the server's to walk in for,
+    /// and when the character is hemmed in - a swarm, a doorway - that
+    /// walk never comes and neither does the swing. So a swing that has
+    /// not completed after <see cref="CloseInAfterSeconds"/> with the
+    /// target still beyond this is abandoned and the bot walks in itself,
+    /// to this distance, before swinging again.
+    /// </summary>
+    private const float ServerReachMeters = 2f;
+    private const double CloseInAfterSeconds = 3d;
+    /// <summary>The target the bot is walking in on after a swing the server did not take; zero when none.</summary>
+    private uint _closeInOn;
     private const double ModeChangeTimeoutSeconds = 4d;
     private readonly Walker _walker = new();
     private readonly WeaponReadiness _weapons = new();
@@ -151,6 +165,20 @@ public sealed class CombatBehavior(
         if (_phase == Phase.BackingOff)
             return StepBackOff(context, combat);
 
+        if (_phase is Phase.Building or Phase.AwaitingSwing
+            && combat.Style == CombatStyle.Melee
+            && _closeInOn != _targetId
+            && board.Now - _phaseStartedAt > CloseInAfterSeconds
+            && TryFindHostile(board, _targetId, out PluginCombatTarget farTarget)
+            && farTarget.Distance > ServerReachMeters
+            && board.Navigation.IsAvailable)
+        {
+            host.AbortPhysicalAttack();
+            _closeInOn = _targetId;
+            context.Log.Info($"combat: the server has not swung at {farTarget.Name} {farTarget.Distance:0.0}m away; closing in to {ServerReachMeters:0.0}m");
+            EnterPhase(Phase.Approaching, board.Now);
+            return StepApproach(context, combat);
+        }
         if (_phase != Phase.Idle && board.Now - _phaseStartedAt > SwingTimeoutSeconds)
         {
             host.AbortPhysicalAttack();
@@ -214,6 +242,7 @@ public sealed class CombatBehavior(
                 if (board.Combat.CompletionRevision != _completionRevisionAtSwing
                     || (!board.Combat.RequestInProgress && !board.Combat.ServerResponsePending))
                 {
+                    _closeInOn = 0u;
                     EnterPhase(Phase.Idle, board.Now);
                     return BehaviorStep.Done;
                 }
@@ -266,6 +295,8 @@ public sealed class CombatBehavior(
         PluginCombatTarget target = engagement.Target;
         if (target.ObjectId != _targetId)
             context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m dz {target.HeightDifferenceMeters:+0.0;-0.0} ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
+        if (target.ObjectId != _targetId)
+            _closeInOn = 0u;
         _targetId = target.ObjectId;
         _leftCombat = false;
 
@@ -488,8 +519,10 @@ public sealed class CombatBehavior(
             }
             if (combat.Style == CombatStyle.Melee)
             {
-                if (candidate.Distance <= combat.MeleeRangeMeters
-                    || (candidate.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(board, candidate)))
+                bool closingIn = candidate.ObjectId == _closeInOn && candidate.Distance > ServerReachMeters;
+                if (!closingIn
+                    && (candidate.Distance <= combat.MeleeRangeMeters
+                        || (candidate.Distance <= combat.MeleeRangeMeters * 3f && TouchesTarget(board, candidate))))
                 {
                     engagement = new Engagement(candidate, preferred, Approach: false);
                     return true;
@@ -593,7 +626,13 @@ public sealed class CombatBehavior(
         }
 
         bool arrived;
-        if (combat.Style == CombatStyle.Melee)
+        if (combat.Style == CombatStyle.Melee && target.ObjectId == _closeInOn)
+        {
+            // Walking in after a swing the server did not take: only the
+            // server's own reach will do, whatever the reach setting says.
+            arrived = target.Distance <= ServerReachMeters;
+        }
+        else if (combat.Style == CombatStyle.Melee)
         {
             arrived = target.Distance <= combat.MeleeRangeMeters;
             // A big monster keeps the character at its own radius, beyond
