@@ -83,10 +83,33 @@ internal sealed class HeadlessGameplayOperations
         return GetSelectedOrClosestTarget(runtime) is not null;
     }
 
+    /// <summary>
+    /// The stop goes out with the attack, not a frame after it. The server
+    /// charges a target out of reach with a move-to of its own; a stop
+    /// arriving after the attack packet cancels that charge ("Action
+    /// cancelled!") and the swing with it, which is what every headless
+    /// swing at more than arm's length did. The graphical client sends the
+    /// stop here too.
+    /// </summary>
     public void PrepareAttackRequest()
     {
-        _ = RequireRuntime().MovementOwner.PrepareForAttackRequest();
+        GameRuntime runtime = RequireRuntime();
+        if (!runtime.MovementOwner.PrepareForAttackRequest()
+            || runtime.MovementOwner.Controller is not { } controller)
+        {
+            return;
+        }
+        WorldSession? session;
+        lock (_gate)
+            session = _session;
+        _attackOutbound.TrySendMovement(
+            session,
+            controller,
+            controller.CaptureMovementResult(mouseLookEvent: false));
     }
+
+    private readonly LocalPlayerOutboundController _attackOutbound =
+        new(static (_, _, _, _, _, _) => { });
 
     public bool SendAttack(AttackHeight height, float power)
     {
