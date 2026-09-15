@@ -118,7 +118,8 @@ internal sealed class RemoteStatusBuilder
         json.WriteString("generatedAtUtc", DateTimeOffset.UtcNow);
         json.WriteNumber("clientCount", 1);
         json.WritePropertyName("capabilities");
-        _capabilities.Write(json);
+        // The renderer binds after the plugins start, so video is answered live rather than at start-up.
+        (_capabilities with { Video = _services.Frames?.IsAvailable == true }).Write(json);
         json.WritePropertyName("clients");
         json.WriteStartArray();
         json.WriteStartObject();

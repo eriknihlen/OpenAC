@@ -124,7 +124,7 @@ internal sealed class RemoteFrameCapture : IRemoteFrameSource
     {
         try
         {
-            // The capture comes out bottom row first; the image is filled top down.
+            // The capture is the presented frame as is, top row first.
             using var image = new Image<Rgba32>(width, height);
             int stride = width * 4;
             image.ProcessPixelRows(accessor =>
@@ -132,7 +132,7 @@ internal sealed class RemoteFrameCapture : IRemoteFrameSource
                 for (int y = 0; y < height; y++)
                 {
                     Span<byte> row = System.Runtime.InteropServices.MemoryMarshal.AsBytes(accessor.GetRowSpan(y));
-                    rgba.AsSpan((height - 1 - y) * stride, stride).CopyTo(row);
+                    rgba.AsSpan(y * stride, stride).CopyTo(row);
                 }
             });
             var encoded = new Dictionary<(int Quality, int Width), byte[]>();
