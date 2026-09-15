@@ -111,7 +111,9 @@ public sealed class UiRoot : UiElement
         || PopupHit(MouseX, MouseY) is not null
         || HitTestTopDown(MouseX, MouseY).element is not null;
 
-    public bool WantsKeyboard => KeyboardFocus is not null;
+    /// <summary>Only a text entry takes the keyboard from the game: a selectable
+    /// transcript holds a selection, not the player's movement and chat keys.</summary>
+    public bool WantsKeyboard => KeyboardFocus is { IsEditControl: true };
 
     private bool _uiLocked;
     public bool UiLocked

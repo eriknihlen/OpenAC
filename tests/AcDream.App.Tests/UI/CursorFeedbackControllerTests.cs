@@ -314,6 +314,19 @@ public sealed class CursorFeedbackControllerTests
     }
 
     [Fact]
+    public void UpdateFromRoot_HoveringSelectableText_ShowsTheTextCursor()
+    {
+        // A transcript is not an edit box, but text can be selected in it.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(new UiText { Left = 10, Top = 10, Width = 200, Height = 100, Selectable = true });
+        root.OnMouseMove(20, 20);
+
+        var feedback = new CursorFeedbackController().Update(root);
+
+        Assert.Equal(CursorFeedbackKind.Text, feedback.Kind);
+    }
+
+    [Fact]
     public void UpdateFromRoot_HoveringAnItemSlot_ShowsFoundCursor_InCombatMode()
     {
         var root = new UiRoot { Width = 800, Height = 600 };

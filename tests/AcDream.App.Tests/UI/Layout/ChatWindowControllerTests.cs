@@ -728,6 +728,27 @@ public class ChatWindowControllerTests
     }
 
     [Fact]
+    public void ClickingTheTranscript_KeepsTheSelectionFocus_ButNotTheGamesKeyboard()
+    {
+        // The transcript is most of the window; a click on it used to hand it
+        // the keyboard as if it were the entry box, and from then on Enter, Tab
+        // and every movement key were swallowed until something else was clicked.
+        var (controller, _, root, _) = MountedChat();
+        var transcript = controller.Transcript;
+        var at = transcript.ScreenPosition;
+
+        root.OnMouseDown(UiMouseButton.Left, (int)at.X + 20, (int)at.Y + 10);
+        root.OnMouseUp(UiMouseButton.Left, (int)at.X + 20, (int)at.Y + 10);
+
+        Assert.Same(transcript, root.KeyboardFocus);
+        Assert.False(root.WantsKeyboard);
+
+        controller.EnterChatMode();
+        Assert.Same(controller.Input, root.KeyboardFocus);
+        Assert.True(root.WantsKeyboard);
+    }
+
+    [Fact]
     public void RestoringNormalGeometryWhileMaximizedDoesNotRestorePreviousCharactersPosition()
     {
         var (controller, handle, _, toggle) = MountedChat();
