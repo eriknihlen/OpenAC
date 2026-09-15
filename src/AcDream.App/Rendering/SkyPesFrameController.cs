@@ -27,6 +27,8 @@ internal sealed class SkyPesFrameController
     private readonly List<SkyPesKey> _stopScratch = [];
     private readonly Action<string>? _diagnostic;
 
+    internal Func<bool>? DisableMostWeatherEffects { get; set; }
+
     public SkyPesFrameController(
         PhysicsScriptRunner scripts,
         ParticleHookSink particles,
@@ -62,7 +64,8 @@ internal sealed class SkyPesFrameController
             {
                 SkyObjectData skyObject = dayGroup.SkyObjects[index];
                 if (ResolveScriptId(skyObject) == 0
-                    || !skyObject.IsVisible(dayFraction))
+                    || !skyObject.IsVisible(dayFraction)
+                    || IsWeatherSuppressed(skyObject))
                 {
                     continue;
                 }
@@ -84,7 +87,9 @@ internal sealed class SkyPesFrameController
         {
             SkyObjectData skyObject = dayGroup.SkyObjects[index];
             uint scriptId = ResolveScriptId(skyObject);
-            if (scriptId == 0 || !skyObject.IsVisible(dayFraction))
+            if (scriptId == 0
+                || !skyObject.IsVisible(dayFraction)
+                || IsWeatherSuppressed(skyObject))
                 continue;
 
             var key = new SkyPesKey(
@@ -157,6 +162,9 @@ internal sealed class SkyPesFrameController
             set.Remove(key);
         }
     }
+
+    private bool IsWeatherSuppressed(SkyObjectData skyObject) =>
+        skyObject.IsWeather && (DisableMostWeatherEffects?.Invoke() ?? false);
 
     private uint ResolveScriptId(SkyObjectData skyObject)
     {

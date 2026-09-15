@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.Linq;
 using AcDream.App.Audio;
+using AcDream.App.Input;
 using AcDream.App.Net;
 using AcDream.App.Rendering;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Streaming;
 using AcDream.App.UI;
+using AcDream.Core.Rendering;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.UI.Abstractions.Settings;
@@ -222,6 +224,7 @@ internal sealed class RuntimeSettingsStartupTargets : IRuntimeSettingsStartupTar
         (float sfx, float ambient) = ComputeEffectiveCategoryVolumes(audio);
         engine.SfxVolume = sfx;
         engine.AmbientVolume = ambient;
+        engine.InterfaceVolume = ComputeEffectiveInterfaceVolume(audio);
     }
 
     internal static (float Sfx, float Ambient) ComputeEffectiveCategoryVolumes(AudioSettings audio)
@@ -230,6 +233,12 @@ internal sealed class RuntimeSettingsStartupTargets : IRuntimeSettingsStartupTar
         float sfx = audio.SfxEnabled ? audio.Sfx : 0f;
         float ambient = audio.AmbientEnabled ? audio.Ambient : 0f;
         return (sfx, ambient);
+    }
+
+    internal static float ComputeEffectiveInterfaceVolume(AudioSettings audio)
+    {
+        ArgumentNullException.ThrowIfNull(audio);
+        return audio.InterfaceEnabled ? audio.InterfaceVolume : 0f;
     }
 }
 
@@ -327,6 +336,11 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
     private readonly Action<string> _log;
     private readonly OpenAlAudioEngine? _audio;
     private readonly CameraController? _cameras;
+    private readonly ChaseCameraInputState? _chase;
+
+    // The slider's default (0.55) keeps the chase camera's long-standing mouse-look
+    // rate (0.15); other slider positions scale it proportionally.
+    internal const float ChaseSensitivityPerSliderUnit = 0.15f / 0.55f;
 
     public RuntimeSettingsTargets(
         IRuntimeDisplayWindowTarget displayWindow,
@@ -341,7 +355,8 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         OpenAlAudioEngine? audio = null,
         CameraController? cameras = null,
         WbMeshAdapter? meshes = null,
-        TextureCache? textures = null)
+        TextureCache? textures = null,
+        ChaseCameraInputState? chase = null)
         : this(
             displayWindow,
             new RuntimeQualityApplicationTarget(
@@ -363,7 +378,8 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
             {
                 meshes?.SetUnownedContentRetained(retained);
                 textures?.SetUnownedContentRetained(retained);
-            })
+            },
+            chase: chase)
     {
     }
 
@@ -378,7 +394,8 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         IRuntimeChatOpacityTarget? chatOpacity = null,
         OpenAlAudioEngine? audio = null,
         CameraController? cameras = null,
-        Action<bool>? contentRetention = null)
+        Action<bool>? contentRetention = null,
+        ChaseCameraInputState? chase = null)
     {
         _contentRetention = contentRetention;
         _displayWindow = displayWindow
@@ -390,6 +407,7 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         _log = log ?? Console.WriteLine;
         _audio = audio;
         _cameras = cameras;
+        _chase = chase;
     }
 
     public RuntimeDisplayApplyResult ApplyDisplayWindowState(DisplaySettings display)
@@ -429,4 +447,22 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
 
     public void SetChatOpacity(float defaultOpacity, float activeOpacity) =>
         _chatOpacity.Apply(defaultOpacity, activeOpacity);
+
+    public void ApplyCameraTurning(CameraTurningSettings cameraTurning)
+    {
+        ArgumentNullException.ThrowIfNull(cameraTurning);
+        CameraDiagnostics.TranslationStiffness = cameraTurning.Stiffness;
+        CameraDiagnostics.RotationStiffness = cameraTurning.Stiffness;
+        CameraDiagnostics.CameraAdjustmentSpeed = cameraTurning.AdjustmentSpeed;
+        if (_chase is null)
+            return;
+        _chase.Sensitivity = cameraTurning.MouseLookSensitivity * ChaseSensitivityPerSliderUnit;
+        _chase.InvertMouseLookYAxis = cameraTurning.InvertMouseLookYAxis;
+    }
+
+    public void SetAudioFocusMuted(bool muted)
+    {
+        if (_audio is not null)
+            _audio.FocusMuted = muted;
+    }
 }

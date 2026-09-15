@@ -170,7 +170,8 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         Func<string?>? selectedTargetName = null,
         Func<uint>? selectedTargetGuid = null,
         Func<string, string?>? chatStrings = null,
-        Func<uint, UiDatFont?>? resolveFont = null)
+        Func<uint, UiDatFont?>? resolveFont = null,
+        Func<bool>? stayInChatMode = null)
     {
         ArgumentNullException.ThrowIfNull(windowFilters);
 
@@ -249,6 +250,7 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
             c._activeChannel,
             c._tellTarget,
             c._tellTargetGuid);
+        c.Input.StayFocusedAfterSubmit = stayInChatMode;
 
         if (c.Input.LayoutPolicy is { } inputPolicy)
         {

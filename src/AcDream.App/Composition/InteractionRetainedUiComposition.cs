@@ -350,6 +350,8 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 session.CurrentSession?.SendGiveObject(target, item, amount),
             dragOnPlayerOpensSecureTrade: () =>
                 d.Character.Options.DragItemOnPlayerOpensSecureTrade,
+            mainPackPreferred: () =>
+                d.Character.Options.GetOptionBit(CharacterOptionId.MainPackPreferred),
             toast: d.Toast,
             readyForInventoryRequest: () => session.IsInWorld,
             playerOnGround: () =>
@@ -462,6 +464,26 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 d.Communication.AddText(text, RetailLogTextType.ClientLocal),
         };
 
+    /// <summary>The chat-audience banned-word patterns; empty when the table is unavailable.</summary>
+    private static IReadOnlyList<string> LoadFilterLanguagePatterns(
+        IDatReaderWriter dats,
+        object datLock)
+    {
+        const uint TabooTableId = 0x0E00001Eu;
+        const uint ChatAudienceId = 1u;
+        lock (datLock)
+        {
+            DatReaderWriter.DBObjs.TabooTable? table =
+                dats.Get<DatReaderWriter.DBObjs.TabooTable>(TabooTableId);
+            if (table is null
+                || !table.AudienceToBannedPatterns.TryGetValue(
+                    ChatAudienceId,
+                    out DatReaderWriter.Types.TabooTableEntry? entry))
+                return Array.Empty<string>();
+            return entry.BannedPatterns.Select(static p => p.ToString()).ToArray();
+        }
+    }
+
     public RetainedUiComposition CreateRetainedUi(
         InteractionRetainedUiDependencies d,
         InteractionUiLateBindings late,
@@ -501,6 +523,11 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     d.Actions.Combat.CurrentMode);
             var cursorManager = new RetailCursorManager(d.Dats, d.DatLock);
             checkpoint(InteractionRetainedUiCompositionPoint.CursorAssetsCreated);
+
+            d.Communication.FilterLanguagePatterns =
+                LoadFilterLanguagePatterns(d.Dats, d.DatLock);
+            d.Communication.FilterLanguageSource = () =>
+                d.Character.Options.GetOptionBit(CharacterOptionId.FilterLanguage);
 
             var characterTitleResolver = new CharacterTitleResolver(d.Dats);
             var characterUiStrings = new DatStringResolver(d.Dats);

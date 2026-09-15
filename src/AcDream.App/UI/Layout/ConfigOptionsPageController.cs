@@ -799,13 +799,13 @@ public static class ConfigOptionsPageController
             toggleApply: value => bindings.SaveAudio(bindings.LoadAudio() with { InterfaceEnabled = value }),
             sliderRead: () => bindings.LoadAudio().InterfaceVolume,
             sliderApply: value => bindings.SaveAudio(bindings.LoadAudio() with { InterfaceVolume = value }),
-            storeOnly: true);
+            storeOnly: false); // LIVE
 
         BuildToggleRow(
             listBox, "ID_Sound_NoFocusNoSound", defaultValue: true, page, resolveString,
             read: () => bindings.LoadAudio().PlaySoundOnlyWhenActive,
             apply: value => bindings.SaveAudio(bindings.LoadAudio() with { PlaySoundOnlyWhenActive = value }),
-            storeOnly: true);
+            storeOnly: false); // LIVE
 
         BindMixerRows(listBox, page, bindings.AudioMixer);
 
@@ -915,7 +915,7 @@ public static class ConfigOptionsPageController
             min: 0.285714298f, max: 1f, defaultValue: 0.45f, page, resolveString,
             read: () => bindings.LoadCameraTurning().Stiffness,
             apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { Stiffness = value }),
-            storeOnly: true,
+            storeOnly: false, // LIVE
             rangeLowKey: "ID_Graphics_Value_Soft", rangeHighKey: "ID_Graphics_Value_Hard");
 
         BuildSliderRow(
@@ -923,7 +923,7 @@ public static class ConfigOptionsPageController
             min: 5f, max: 80f, defaultValue: 40.0f, page, resolveString,
             read: () => bindings.LoadCameraTurning().AdjustmentSpeed,
             apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { AdjustmentSpeed = value }),
-            storeOnly: true,
+            storeOnly: false, // LIVE
             rangeLowKey: "ID_Graphics_Value_Slow", rangeHighKey: "ID_Graphics_Value_Fast");
 
         BuildSliderRow(
@@ -1256,13 +1256,13 @@ public static class ConfigOptionsPageController
             min: 0.00999999978f, max: 1f, defaultValue: 0.55f, page, resolveString,
             read: () => bindings.LoadCameraTurning().MouseLookSensitivity,
             apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { MouseLookSensitivity = value }),
-            storeOnly: true);
+            storeOnly: false); // LIVE
 
         BuildToggleRow(
             listBox, "ID_Input_InvertMouseLookYAxis", defaultValue: false, page, resolveString,
             read: () => bindings.LoadCameraTurning().InvertMouseLookYAxis,
             apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { InvertMouseLookYAxis = value }),
-            storeOnly: true);
+            storeOnly: false); // LIVE
 
         BuildToggleRow(
             listBox, "ID_Input_UseMouseTurning", defaultValue: false, page, resolveString,

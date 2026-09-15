@@ -353,6 +353,60 @@ public sealed class ChatLogTests
     }
 
     [Fact]
+    public void OnLocalSpeech_FilterLanguageOn_CensorsMatchingWords()
+    {
+        var log = new ChatLog
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+        log.OnLocalSpeech("Alice", "a zork b", 0xAAu, isRanged: false, logTextType: 0x02u);
+
+        Assert.Equal("a **** b", log.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void OnLocalSpeech_FilterLanguageOff_LeavesTextUntouched()
+    {
+        var log = new ChatLog
+        {
+            FilterLanguageSource = () => false,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+        log.OnLocalSpeech("Alice", "a zork b", 0xAAu, isRanged: false, logTextType: 0x02u);
+
+        Assert.Equal("a zork b", log.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void OnTellReceived_FilterLanguageOn_CensorsMatchingWords()
+    {
+        var log = new ChatLog
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+        log.OnTellReceived("Alice", "a zork b", 0xAAu, logTextType: 0x03u);
+
+        Assert.Equal("a **** b", log.Snapshot()[0].Text);
+        Assert.Equal("Alice", log.Snapshot()[0].Sender);
+    }
+
+    [Fact]
+    public void OnChannelBroadcast_FilterLanguageOn_CensorsMatchingWords()
+    {
+        var log = new ChatLog
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+        log.OnChannelBroadcast(channelId: 42, sender: "Alice", text: "a zork b");
+
+        Assert.Equal("a **** b", log.Snapshot()[0].Text);
+        Assert.Equal("Alice", log.Snapshot()[0].Sender);
+    }
+
+    [Fact]
     public void FormatTimestampPrefix_UsesLiteralColons_RegardlessOfCurrentCulture()
     {
         CultureInfo original = Thread.CurrentThread.CurrentCulture;

@@ -50,6 +50,8 @@ public sealed class ItemInteractionControllerTests
         public uint SelectedObject;
         public bool NonCombatMode;
         public bool DragOnPlayerOpensSecureTrade = true;
+        public bool MainPackPreferred;
+        public uint OpenBackpackContainerId = Player;
         public uint GroundObject;
         public long Now = 1_000;
 
@@ -97,6 +99,8 @@ public sealed class ItemInteractionControllerTests
                     Puts.Add((item, container, placement)),
                 sendGive: (target, item, amount) => Gives.Add((target, item, amount)),
                 dragOnPlayerOpensSecureTrade: () => DragOnPlayerOpensSecureTrade,
+                mainPackPreferred: () => MainPackPreferred,
+                backpackContainerId: () => OpenBackpackContainerId,
                 systemMessage: SystemMessages.Add,
                 sendSplitToContainer: (item, container, placement, amount) =>
                     SplitPuts.Add((item, container, placement, amount)),
@@ -1939,6 +1943,34 @@ public sealed class ItemInteractionControllerTests
 
         Assert.Equal(0, h.Controller.BusyCount);
         Assert.True(h.Controller.CanMakeInventoryRequest);
+    }
+
+    [Fact]
+    public void MainPackPreferredSendsPickupsToTheRootPackInsteadOfTheOpenSidePack()
+    {
+        var h = new Harness();
+        const uint sidePack = 0x50000A19u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint intoSidePack = 0x70000A19u;
+        Assert.True(h.Controller.PlaceWorldItemInBackpack(intoSidePack));
+        Assert.Equal(new[] { (intoSidePack, sidePack, 0) }, h.BackpackPlacements);
+        h.Objects.ApplyConfirmedServerMove(intoSidePack, sidePack, 0u, 0);
+
+        h.MainPackPreferred = true;
+        const uint intoRoot = 0x70000A1Au;
+        Assert.True(h.Controller.PlaceWorldItemInBackpack(intoRoot));
+        Assert.Equal(
+            new[] { (intoSidePack, sidePack, 0), (intoRoot, Player, 0) },
+            h.BackpackPlacements);
     }
 
     [Fact]

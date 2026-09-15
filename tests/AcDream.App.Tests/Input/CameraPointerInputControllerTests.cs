@@ -7,6 +7,7 @@ using Silk.NET.Input;
 
 namespace AcDream.App.Tests.Input;
 
+[Collection(AcDream.App.Tests.Rendering.CameraDiagnosticsCollection.Name)]
 public sealed class CameraPointerInputControllerTests
 {
     [Theory]
@@ -205,6 +206,47 @@ public sealed class CameraPointerInputControllerTests
         {
             CameraDiagnostics.UseRetailChaseCamera = savedRetail;
         }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RmbOrbitInvertMouseLookYAxisFlipsPitch(bool retailCamera)
+    {
+        bool savedRetail = CameraDiagnostics.UseRetailChaseCamera;
+        try
+        {
+            CameraDiagnostics.UseRetailChaseCamera = retailCamera;
+            float normal = PitchChangeAfterRmbOrbit(retailCamera, invert: false, dy: 10f);
+            float inverted = PitchChangeAfterRmbOrbit(retailCamera, invert: true, dy: 10f);
+
+            Assert.True(normal > 0f);
+            Assert.Equal(-normal, inverted, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = savedRetail;
+        }
+    }
+
+    private static float PitchChangeAfterRmbOrbit(bool retailCamera, bool invert, float dy)
+    {
+        var surface = new RawSurface();
+        var fixture = Create([surface]);
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        fixture.Mode.IsPlayerMode = true;
+        fixture.Chase.Legacy = legacy;
+        fixture.Chase.Retail = retail;
+        fixture.Chase.RmbOrbitHeld = true;
+        fixture.Chase.InvertMouseLookYAxis = invert;
+        fixture.Camera.EnterChaseMode(legacy, retail);
+        fixture.Owner.AttachRaw();
+        float before = retailCamera ? retail.Pitch : legacy.Pitch;
+
+        surface.Raise(new Vector2(0f, dy));
+
+        return (retailCamera ? retail.Pitch : legacy.Pitch) - before;
     }
 
     private static Fixture Create(IReadOnlyList<RawSurface> surfaces)

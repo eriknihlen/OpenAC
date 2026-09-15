@@ -54,6 +54,7 @@ public sealed class ItemInteractionController : IDisposable
     private readonly Func<uint> _selectedObjectId;
     private readonly StackSplitQuantityState? _stackSplitQuantity;
     private readonly Func<bool> _dragOnPlayerOpensSecureTrade;
+    private readonly Func<bool> _mainPackPreferred;
     private readonly Action<string>? _systemMessage;
     private readonly Action<string, RetailLogTextType>? _interfaceText;
     private readonly AutoWieldController _autoWield;
@@ -97,6 +98,7 @@ public sealed class ItemInteractionController : IDisposable
         Action<uint, uint, int>? sendPutItemInContainer = null,
         Action<uint, uint, uint>? sendGive = null,
         Func<bool>? dragOnPlayerOpensSecureTrade = null,
+        Func<bool>? mainPackPreferred = null,
         Action<string>? systemMessage = null,
         Action<uint, uint, uint, uint>? sendSplitToContainer = null,
         Action<uint>? requestExternalContainer = null,
@@ -137,6 +139,7 @@ public sealed class ItemInteractionController : IDisposable
         _selectedObjectId = selectedObjectId ?? (() => 0u);
         _stackSplitQuantity = stackSplitQuantity;
         _dragOnPlayerOpensSecureTrade = dragOnPlayerOpensSecureTrade ?? (() => true);
+        _mainPackPreferred = mainPackPreferred ?? (() => false);
         _systemMessage = systemMessage;
         _interfaceText = interfaceText;
         _requestUse = requestUse;
@@ -872,7 +875,7 @@ public sealed class ItemInteractionController : IDisposable
             return false;
 
         uint root = _playerGuid();
-        uint target = mainPack ? root : _backpackContainerId();
+        uint target = mainPack || _mainPackPreferred() ? root : _backpackContainerId();
         if (target == 0u)
             target = root;
         const int placement = 0;

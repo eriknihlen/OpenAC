@@ -81,6 +81,18 @@ public sealed class RuntimeCommunicationState : IDisposable
         set => Chat.DisplayTimestampsSource = value;
     }
 
+    public Func<bool>? FilterLanguageSource
+    {
+        get => Chat.FilterLanguageSource;
+        set => Chat.FilterLanguageSource = value;
+    }
+
+    public IReadOnlyList<string>? FilterLanguagePatterns
+    {
+        get => Chat.FilterLanguagePatterns;
+        set => Chat.FilterLanguagePatterns = value;
+    }
+
     public ChatCommandTargetState CommandTargets { get; }
     public TurbineChatState TurbineChat { get; }
     public FriendsState Friends { get; }

@@ -356,7 +356,8 @@ internal sealed class SessionPlayerCompositionPhase
             log: d.Log,
             audio: content.Audio?.Engine,
             meshes: foundation.MeshAdapter,
-            textures: foundation.TextureCache);
+            textures: foundation.TextureCache,
+            chase: d.ChaseCameraInput);
         bindings.Adopt(
             "runtime settings targets",
             d.Settings.BindRuntimeTargetsOwned(settingsTargets));

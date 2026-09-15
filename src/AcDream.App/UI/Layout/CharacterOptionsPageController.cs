@@ -42,42 +42,42 @@ public static class CharacterOptionsPageController
         new("ID_CharacterOption_UIBehavior_Section", new RowSpec[]
         {
             new(CharacterOptionId.ViewCombatTarget, "ViewCombatTarget", Live), // Group C
-            new(CharacterOptionId.SalvageMultiple, "SalvageMultiple", StoreOnly), // Group D
-            new(CharacterOptionId.MainPackPreferred, "MainPackPreferred", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.SalvageMultiple, "SalvageMultiple", Live), // Group D
+            new(CharacterOptionId.MainPackPreferred, "MainPackPreferred", Live), // Group B, bound (ItemInteractionController.cs:878)
         }),
         new("ID_CharacterOption_UIDisplay_Section", new RowSpec[]
         {
             new(CharacterOptionId.VividTargetingIndicator, "VividTargetingIndicator", Live), // Group C
-            new(CharacterOptionId.ShowTooltips, "ShowTooltips", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.ShowTooltips, "ShowTooltips", Live), // Group B, bound
             new(CharacterOptionId.CoordinatesOnRadar, "CoordinatesOnRadar", Live), // Group C
             new(CharacterOptionId.SideBySideVitals, "SideBySideVitals", Live),
-            new(CharacterOptionId.SpellDuration, "SpellDuration", StoreOnly), // Group B, unbound
-            new(CharacterOptionId.DisableMostWeatherEffects, "DisableMostWeatherEffects", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.SpellDuration, "SpellDuration", Live), // Group B, bound (EffectsUiController.cs)
+            new(CharacterOptionId.DisableMostWeatherEffects, "DisableMostWeatherEffects", Live), // Group B, bound (SkyRenderer.cs)
             new(CharacterOptionId.DisableDistanceFog, "DisableDistanceFog", Live), // Group B, bound (GameWindow.cs:657)
-            new(CharacterOptionId.PersistentAtDay, "PersistentAtDay", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.PersistentAtDay, "PersistentAtDay", Live), // Group B, bound
             new(CharacterOptionId.DisableHouseRestrictionEffects, "DisableHouseRestrictionEffects", StoreOnly), // Group D
-            new(CharacterOptionId.UseCraftSuccessDialog, "UseCraftSuccessDialog", StoreOnly), // Group A
-            new(CharacterOptionId.ConfirmVolatileRareUse, "ConfirmVolatileRareUse", StoreOnly), // Group A
+            new(CharacterOptionId.UseCraftSuccessDialog, "UseCraftSuccessDialog", Live), // Group A
+            new(CharacterOptionId.ConfirmVolatileRareUse, "ConfirmVolatileRareUse", Live), // Group A
             new(CharacterOptionId.DisplayTimeStamps, "DisplayTimeStamps", Live), // Group B, bound (GameWindow.cs:664)
-            new(CharacterOptionId.FilterLanguage, "FilterLanguage", StoreOnly), // Group B, unbound
-            new(CharacterOptionId.ShowHelm, "ShowHelm", StoreOnly), // Group A
-            new(CharacterOptionId.ShowCloak, "ShowCloak", StoreOnly), // Group A
+            new(CharacterOptionId.FilterLanguage, "FilterLanguage", Live), // Group B, bound (InteractionRetainedUiComposition.cs)
+            new(CharacterOptionId.ShowHelm, "ShowHelm", Live), // Group A
+            new(CharacterOptionId.ShowCloak, "ShowCloak", Live), // Group A
         }),
         new("ID_CharacterOption_Grouping_Section", new RowSpec[]
         {
-            new(CharacterOptionId.IgnoreAllegianceRequests, "IgnoreAllegianceRequests", StoreOnly),
-            new(CharacterOptionId.IgnoreFellowshipRequests, "IgnoreFellowshipRequests", StoreOnly),
+            new(CharacterOptionId.IgnoreAllegianceRequests, "IgnoreAllegianceRequests", Live),
+            new(CharacterOptionId.IgnoreFellowshipRequests, "IgnoreFellowshipRequests", Live),
             new(CharacterOptionId.DisplayAllegianceLogonNotifications, "DisplayAllegianceLogonNotifications", StoreOnly),
             new(CharacterOptionId.FellowshipShareXP, "FellowshipShareXP", Live),
-            new(CharacterOptionId.FellowshipShareLoot, "FellowshipShareLoot", StoreOnly),
-            new(CharacterOptionId.FellowshipAutoAcceptRequests, "FellowshipAutoAcceptRequests", StoreOnly),
+            new(CharacterOptionId.FellowshipShareLoot, "FellowshipShareLoot", Live),
+            new(CharacterOptionId.FellowshipAutoAcceptRequests, "FellowshipAutoAcceptRequests", Live),
         }),
         new("ID_CharacterOption_OtherPlayers_Section", new RowSpec[]
         {
-            new(CharacterOptionId.AcceptLootPermits, "AcceptLootPermits", StoreOnly), // Group A (see ambiguity note)
+            new(CharacterOptionId.AcceptLootPermits, "AcceptLootPermits", Live), // Group A (see ambiguity note)
             new(CharacterOptionId.UseDeception, "UseDeception", StoreOnly), // Group A
-            new(CharacterOptionId.AllowGive, "AllowGive", StoreOnly), // Group A
-            new(CharacterOptionId.IgnoreTradeRequests, "IgnoreTradeRequests", StoreOnly), // Group A
+            new(CharacterOptionId.AllowGive, "AllowGive", Live), // Group A
+            new(CharacterOptionId.IgnoreTradeRequests, "IgnoreTradeRequests", Live), // Group A
             new(CharacterOptionId.DragItemOnPlayerOpensSecureTrade, "DragItemOnPlayerOpensSecureTrade", Live),
             new(CharacterOptionId.DisplayDateOfBirth, "DisplayDateOfBirth", StoreOnly), // Group A
             new(CharacterOptionId.DisplayAge, "DisplayAge", StoreOnly), // Group A
@@ -92,13 +92,13 @@ public static class CharacterOptionsPageController
             new(CharacterOptionId.AdvancedCombatUI, "AdvancedCombatUI", StoreOnly), // Group B, unbound
             new(CharacterOptionId.AutoTarget, "AutoTarget", Live), // Group C
             new(CharacterOptionId.AutoRepeatAttack, "AutoRepeatAttack", Live), // Group C
-            new(CharacterOptionId.UseChargeAttack, "UseChargeAttack", StoreOnly), // Group A
-            new(CharacterOptionId.LeadMissileTargets, "LeadMissileTargets", StoreOnly), // Group A
-            new(CharacterOptionId.UseFastMissiles, "UseFastMissiles", StoreOnly), // Group A
+            new(CharacterOptionId.UseChargeAttack, "UseChargeAttack", Live), // Group A
+            new(CharacterOptionId.LeadMissileTargets, "LeadMissileTargets", Live), // Group A
+            new(CharacterOptionId.UseFastMissiles, "UseFastMissiles", Live), // Group A
         }),
         new("ID_CharacterOption_Chat_Section", new RowSpec[]
         {
-            new(CharacterOptionId.StayInChatMode, "StayInChatMode", StoreOnly), // Group B, unbound
+            new(CharacterOptionId.StayInChatMode, "StayInChatMode", Live), // Group B, keeps chat entry focused after Submit
             new(CharacterOptionId.ListenToAllegianceChat, "HearAllegianceChat", Live), // TurbineChatMembershipGate.cs:107-110
             new(CharacterOptionId.ListenToGeneralChat, "HearGeneralChat", Live), // TurbineChatMembershipGate.cs:111-114
             new(CharacterOptionId.ListenToTradeChat, "HearTradeChat", Live), // TurbineChatMembershipGate.cs:115-118

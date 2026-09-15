@@ -186,6 +186,44 @@ public sealed class MouseLookControllerTests
         Assert.False(harness.Chase.RmbOrbitHeld);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void InvertMouseLookYAxisFlipsPitchForMouseLook(bool retailCamera)
+    {
+        bool previousRetailCamera = CameraDiagnostics.UseRetailChaseCamera;
+        CameraDiagnostics.UseRetailChaseCamera = retailCamera;
+        try
+        {
+            float normal = PitchChangeAfterMouseLook(retailCamera, invert: false, dy: 10f);
+            float inverted = PitchChangeAfterMouseLook(retailCamera, invert: true, dy: 10f);
+
+            Assert.True(normal > 0f);
+            Assert.Equal(-normal, inverted, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = previousRetailCamera;
+        }
+    }
+
+    private static float PitchChangeAfterMouseLook(bool retailCamera, bool invert, float dy)
+    {
+        Harness harness = CreateActiveHarness();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        harness.Chase.Legacy = legacy;
+        harness.Chase.Retail = retailCamera ? retail : null;
+        harness.Chase.InvertMouseLookYAxis = invert;
+        float before = retailCamera ? retail.Pitch : legacy.Pitch;
+
+        harness.Clock.NowSeconds += 0.01f;
+        harness.Owner.QueueRawDelta(0f, dy);
+        harness.Owner.Tick();
+
+        return (retailCamera ? retail.Pitch : legacy.Pitch) - before;
+    }
+
     private static Harness CreateActiveHarness()
     {
         Harness harness = CreateHarness();

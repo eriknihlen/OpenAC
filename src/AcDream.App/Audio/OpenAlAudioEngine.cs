@@ -46,12 +46,32 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
         set
         {
             _muted = value;
-            if (_available && _al is not null)
-                _al.SetListenerProperty(ListenerFloat.Gain, value ? 0f : 1f);
+            ApplyListenerGain();
         }
     }
+
+    private bool _focusMuted;
+
+    /// <summary>Silenced by "No Sound When Window Not Focused", independent of the manual mute toggle.</summary>
+    public bool FocusMuted
+    {
+        get => _focusMuted;
+        set
+        {
+            _focusMuted = value;
+            ApplyListenerGain();
+        }
+    }
+
+    private void ApplyListenerGain()
+    {
+        if (_available && _al is not null)
+            _al.SetListenerProperty(ListenerFloat.Gain, (_muted || _focusMuted) ? 0f : 1f);
+    }
+
     public float SfxVolume    { get; set; } = 1f;
     public float AmbientVolume{ get; set; } = 0.8f;
+    public float InterfaceVolume { get; set; } = 1f;
     public bool  IsAvailable => _available;
 
     /// <summary>
@@ -208,6 +228,8 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
 
     private float EffectMaster => MasterVolume * SfxVolume;
 
+    private float InterfaceMaster => MasterVolume * InterfaceVolume;
+
     public bool Play3DWave(
         uint ownerId,
         uint waveId,
@@ -361,7 +383,7 @@ public sealed unsafe class OpenAlAudioEngine : IAudioEngine, IWorldAudioQuiescen
     {
         if (!_available || _al is null) return false;
 
-        if (!RetailSoundMixer.TryGetAttenuation(0f, volume, EffectMaster, out int decibels))
+        if (!RetailSoundMixer.TryGetAttenuation(0f, volume, InterfaceMaster, out int decibels))
             return false;
 
         uint buffer = EnsureBuffer(waveId, wave);

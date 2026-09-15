@@ -80,6 +80,7 @@ internal sealed class ChaseCameraInputState : IChaseCameraSource
     public ChaseCamera? Legacy { get; set; }
     public RetailChaseCamera? Retail { get; set; }
     public float Sensitivity { get; set; } = 0.15f;
+    public bool InvertMouseLookYAxis { get; set; }
     public bool RmbOrbitHeld { get; set; }
 }
 
@@ -179,10 +180,11 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
                 ? retail.FilterMouseDelta(rawX, rawY, weight: 0.5f, nowSec: nowSeconds)
                 : (rawX, rawY);
         _state.ApplyDelta(filteredX, _chase.Sensitivity);
+        float pitchDelta = _chase.InvertMouseLookYAxis ? -filteredY : filteredY;
         if (_chase.Retail is { } retailCamera)
-            retailCamera.AdjustPitch(filteredY * 0.0666666701f * _chase.Sensitivity);
+            retailCamera.AdjustPitch(pitchDelta * 0.0666666701f * _chase.Sensitivity);
         else
-            _chase.Legacy?.AdjustPitch(filteredY * 0.003f * _chase.Sensitivity);
+            _chase.Legacy?.AdjustPitch(pitchDelta * 0.003f * _chase.Sensitivity);
     }
 
     public void EndAndRestoreCursor()

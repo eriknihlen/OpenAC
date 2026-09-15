@@ -1,15 +1,18 @@
 using AcDream.App.Diagnostics;
+using AcDream.App.Input;
 using AcDream.App.Net;
 using AcDream.App.Rendering;
 using AcDream.App.Settings;
 using AcDream.Core.Audio;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Rendering;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.UI.Abstractions.Settings;
 
 namespace AcDream.App.Tests.Settings;
 
+[Collection(AcDream.App.Tests.Rendering.CameraDiagnosticsCollection.Name)]
 public sealed partial class RuntimeSettingsControllerTests
 {
     [Theory]
@@ -558,6 +561,53 @@ public sealed partial class RuntimeSettingsControllerTests
     }
 
     [Fact]
+    public void RuntimeTarget_ApplyCameraTurning_WritesCameraDiagnosticsAndChaseSensitivity()
+    {
+        float previousTranslation = CameraDiagnostics.TranslationStiffness;
+        float previousRotation = CameraDiagnostics.RotationStiffness;
+        float previousSpeed = CameraDiagnostics.CameraAdjustmentSpeed;
+        try
+        {
+            var chase = new ChaseCameraInputState();
+            var target = new RuntimeSettingsTargets(
+                new InspectingDisplayWindowTarget(static _ => { }),
+                new RecordingQualityApplicationTarget([]),
+                new RecordingUiLockTarget([]),
+                NullCommandBus.Instance,
+                static _ => { },
+                chase: chase);
+
+            target.ApplyCameraTurning(new CameraTurningSettings(
+                Stiffness: 0.8f,
+                AdjustmentSpeed: 60f,
+                MouseLookSensitivity: 0.7f,
+                AlignToSlope: true,
+                InvertMouseLookYAxis: true));
+
+            Assert.Equal(0.8f, CameraDiagnostics.TranslationStiffness);
+            Assert.Equal(0.8f, CameraDiagnostics.RotationStiffness);
+            Assert.Equal(60f, CameraDiagnostics.CameraAdjustmentSpeed);
+            Assert.Equal(0.7f * RuntimeSettingsTargets.ChaseSensitivityPerSliderUnit, chase.Sensitivity, precision: 5);
+            Assert.True(chase.InvertMouseLookYAxis);
+
+            target.ApplyCameraTurning(new CameraTurningSettings(
+                Stiffness: 0.8f,
+                AdjustmentSpeed: 60f,
+                MouseLookSensitivity: 0.7f,
+                AlignToSlope: false,
+                InvertMouseLookYAxis: false));
+
+            Assert.False(chase.InvertMouseLookYAxis);
+        }
+        finally
+        {
+            CameraDiagnostics.TranslationStiffness = previousTranslation;
+            CameraDiagnostics.RotationStiffness = previousRotation;
+            CameraDiagnostics.CameraAdjustmentSpeed = previousSpeed;
+        }
+    }
+
+    [Fact]
     public void ConcreteRuntimeTargetAppliesEveryQualityDimensionInOrder()
     {
         var events = new List<string>();
@@ -724,6 +774,60 @@ public sealed partial class RuntimeSettingsControllerTests
         Assert.Equal(["save-audio"], events);
         Assert.Empty(targets.AudioCalls);
         Assert.Equal(before, controller.Audio);
+    }
+
+    [Fact]
+    public void BindRuntimeTargets_AppliesTheStoredCameraTurningImmediately()
+    {
+        var storage = new FakeStorage
+        {
+            CameraTurningValue = CameraTurningSettings.Default with { Stiffness = 0.8f },
+        };
+        var events = new List<string>();
+        var controller = CreateController(storage, events);
+        var targets = new FakeRuntimeTargets(events);
+
+        controller.BindRuntimeTargets(targets);
+
+        Assert.Equal(0.8f, Assert.Single(targets.CameraTurningCalls).Stiffness);
+    }
+
+    [Fact]
+    public void SaveCameraTurningPersistsThenPushesLiveApplyCameraTurningWithTheSavedSnapshot()
+    {
+        var events = new List<string>();
+        var controller = CreateController(events: events);
+        var targets = new FakeRuntimeTargets(events) { RecordCameraTurning = true };
+        controller.BindRuntimeTargets(targets);
+        events.Clear();
+
+        CameraTurningSettings updated = CameraTurningSettings.Default with { AdjustmentSpeed = 60f };
+        controller.SaveCameraTurning(updated);
+
+        Assert.Equal(["save-camera-turning", "target-camera-turning"], events);
+        Assert.Equal(updated, targets.CameraTurningCalls[^1]);
+    }
+
+    [Fact]
+    public void SetWindowFocused_MutesAudioOnlyWhenPlaySoundOnlyWhenActiveIsOn()
+    {
+        var storage = new FakeStorage { AudioValue = AudioSettings.Default with { PlaySoundOnlyWhenActive = false } };
+        var controller = CreateController(storage);
+        var targets = new FakeRuntimeTargets(new List<string>());
+        controller.BindRuntimeTargets(targets);
+
+        // Option off: losing focus never mutes.
+        controller.SetWindowFocused(false);
+        Assert.False(targets.AudioFocusMutedCalls[^1]);
+
+        controller.SetWindowFocused(true);
+        controller.SaveAudio(controller.Audio with { PlaySoundOnlyWhenActive = true });
+
+        controller.SetWindowFocused(false);
+        Assert.True(targets.AudioFocusMutedCalls[^1]);
+
+        controller.SetWindowFocused(true);
+        Assert.False(targets.AudioFocusMutedCalls[^1]);
     }
 
     [Theory]
@@ -1439,6 +1543,30 @@ public sealed partial class RuntimeSettingsControllerTests
         {
             ChatOpacityCalls.Add((defaultOpacity, activeOpacity));
             events.Add($"target-chat-opacity:{defaultOpacity}:{activeOpacity}");
+        }
+
+        /// <summary>Only the camera-turning tests care about this event; bind-time calls would otherwise pollute every other exact-sequence test.</summary>
+        public bool RecordCameraTurning { get; init; }
+
+        public List<CameraTurningSettings> CameraTurningCalls { get; } = [];
+
+        public void ApplyCameraTurning(CameraTurningSettings cameraTurning)
+        {
+            CameraTurningCalls.Add(cameraTurning);
+            if (RecordCameraTurning)
+                events.Add("target-camera-turning");
+        }
+
+        /// <summary>Only the focus-mute tests care about this event, for the same reason.</summary>
+        public bool RecordAudioFocusMuted { get; init; }
+
+        public List<bool> AudioFocusMutedCalls { get; } = [];
+
+        public void SetAudioFocusMuted(bool muted)
+        {
+            AudioFocusMutedCalls.Add(muted);
+            if (RecordAudioFocusMuted)
+                events.Add($"target-audio-focus-muted:{muted}");
         }
     }
 

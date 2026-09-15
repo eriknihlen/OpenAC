@@ -275,4 +275,64 @@ public sealed class SkyPesFrameControllerTests
         Assert.Equal(2, h.HookCalls.Count);
         Assert.Equal(0xF0000000u, h.HookCalls[1].EntityId);
     }
+
+    [Fact]
+    public void WeatherCarrier_SuppressedWhileDisableMostWeatherEffectsIsOn_NeverPlays()
+    {
+        var h = new Harness();
+        h.Controller.DisableMostWeatherEffects = () => true;
+
+        h.Controller.Update(0.1f, Group(Carrier(properties: 0x04u)), Vector3.Zero);
+
+        Assert.Empty(h.ResolvedScriptIds);
+        Assert.Equal(0, h.Runner.ActiveScriptCount);
+    }
+
+    [Fact]
+    public void WeatherCarrier_TurningTheOptionOn_StopsTheAlreadyPlayingScriptAndItsAudio()
+    {
+        var sound = new SoundTweakedHook
+        {
+            SoundId = 0x0A00038Bu,
+            Volume = 0.1f,
+            Priority = 1f,
+        };
+        var h = new Harness(sound, hookTime: 1.0);
+
+        h.Controller.Update(0.3f, Group(Carrier(properties: 0x04u)), Vector3.Zero);
+        Assert.Equal(1, h.Runner.ActiveScriptCount);
+
+        h.Controller.DisableMostWeatherEffects = () => true;
+        h.Controller.Update(0.4f, Group(Carrier(properties: 0x04u)), Vector3.Zero);
+
+        Assert.Equal(0, h.Runner.ActiveScriptCount);
+        Assert.Equal([0xF0000000u], h.StoppedAudioOwners);
+    }
+
+    [Fact]
+    public void WeatherCarrier_TurningTheOptionOff_ReplaysTheScript()
+    {
+        bool disabled = true;
+        var h = new Harness();
+        h.Controller.DisableMostWeatherEffects = () => disabled;
+
+        h.Controller.Update(0.1f, Group(Carrier(properties: 0x04u)), Vector3.Zero);
+        Assert.Equal(0, h.Runner.ActiveScriptCount);
+
+        disabled = false;
+        h.Controller.Update(0.2f, Group(Carrier(properties: 0x04u)), Vector3.Zero);
+
+        Assert.Equal(1, h.Runner.ActiveScriptCount);
+    }
+
+    [Fact]
+    public void NonWeatherCarrier_UnaffectedByDisableMostWeatherEffects()
+    {
+        var h = new Harness();
+        h.Controller.DisableMostWeatherEffects = () => true;
+
+        h.Controller.Update(0.1f, Group(Carrier(properties: 0u)), Vector3.Zero);
+
+        Assert.Equal(1, h.Runner.ActiveScriptCount);
+    }
 }
