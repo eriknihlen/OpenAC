@@ -909,6 +909,313 @@ public class RetailChaseCameraTests
         Assert.Equal(RetailChaseCamera.OffsetAngleRadians, cam.YawOffset, 6);
     }
 
+    // ── View rules and orbit ──────────────────────────────────────────
+
+    [Fact]
+    public void LookDown_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.ToggleRetailLookDownView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeTargetDirectionPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, new Vector3(0f, 0.5f, -1.8f));
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void MapMode_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.ToggleRetailMapModeView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeTargetDirectionPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, new Vector3(0f, 0.5f, -1.8f));
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_JustPastAlignmentThreshold_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            float threshold = MathF.Asin(1f / (cam.Distance * MathF.Cos(cam.Pitch)));
+            cam.YawOffset = threshold + 0.02f;
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_PastNinetyDegrees_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = 170f * MathF.PI / 180f };
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_WithinThresholdAndYawOffset_PlacesEyeAtTiltedBoomRotatedInTiltedFrame()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = 0.2f };
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, tiltedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_JustInsideAlignmentThreshold_Tilts()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            float threshold = MathF.Asin(1f / (cam.Distance * MathF.Cos(cam.Pitch)));
+            cam.YawOffset = threshold - 0.02f;
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, tiltedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void FirstPerson_OnASlopeWithRealizedVelocity_Tilts()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.SetRetailFirstPersonView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeInHeadPose(pivot, tiltedHeading);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void TrackedTarget_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            var targetPoint = new Vector3(10f, 0f, cam.PivotHeight);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f,
+                trackedTargetPoint: targetPoint);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 trackedHeading = RetailChaseCamera.ComputeTrackedHeading(pivot, targetPoint)!.Value;
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, trackedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public void DefaultPose_OptionOff_MatchesTheOldOrbitFormula(float yawOffset)
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = false;
+            var cam = new RetailChaseCamera { YawOffset = yawOffset };
+
+            float yaw = MathF.PI / 3f;
+            var velocity = new Vector3(3f, 4f, -2f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 oldHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw + yawOffset, inContact: true, contactPlaneNormal: normal, alignToSlope: false);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, oldHeading, cam.Distance, cam.Pitch, viewerYawOffset: 0f);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 5);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 5);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public void DefaultPose_FlatGround_MatchesTheOldOrbitFormula(float yawOffset)
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = yawOffset };
+
+            float yaw = MathF.PI / 3f;
+            var velocity = new Vector3(3f, 4f, -2f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 oldHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw + yawOffset, inContact: true, contactPlaneNormal: Vector3.UnitZ, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, oldHeading, cam.Distance, cam.Pitch, viewerYawOffset: 0f);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 5);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 5);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
 
     private sealed class FakeProbe : ICameraCollisionProbe
     {

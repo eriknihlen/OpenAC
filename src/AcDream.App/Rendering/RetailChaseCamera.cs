@@ -100,28 +100,39 @@ public sealed class RetailChaseCamera : ICamera
         Vector3 pivotWorld = playerPosition + new Vector3(0f, 0f, PivotHeight);
         Vector3? trackedHeading = ComputeTrackedHeading(pivotWorld, trackedTargetPoint);
 
+        // Look-down, map mode and a wide orbit see the flat facing; the head view always tilts.
+        bool alignmentApplies = CameraDiagnostics.AlignToSlope
+            && !_lookingDown
+            && !_mapMode
+            && (_inHead
+                || (trackedHeading is null
+                    && IsOrbitWithinAlignmentThreshold(Distance, Pitch, YawOffset)));
+
         // The velocity ring only advances on updates that align the heading to the plane.
-        bool alignmentApplies = CameraDiagnostics.AlignToSlope && trackedHeading is null;
         if (alignmentApplies)
             PushVelocity(_velocityRing, ref _velocityCount, playerVelocity);
         Vector3 avgVel = AverageVelocity(_velocityRing, _velocityCount);
 
+        // Look-down and map mode bake the orbit into the heading; their pose takes no yaw.
+        float headingYaw = !_inHead && _targetDirectionLocal is not null
+            ? playerYaw + YawOffset
+            : playerYaw;
+
         Vector3 heading = trackedHeading
             ?? ComputeHeading(
                 avgVel,
-                playerYaw + YawOffset,
+                headingYaw,
                 inContact,
                 contactPlaneNormal,
-                CameraDiagnostics.AlignToSlope);
+                alignmentApplies);
 
-        float viewerYawOffset = trackedHeading.HasValue ? YawOffset : 0f;
         (Vector3 targetEye, Vector3 targetForward) = _inHead
             ? ComputeInHeadPose(pivotWorld, heading, _targetDirectionLocal)
             : _targetDirectionLocal is { } localDirection
             ? ComputeTargetDirectionPose(
                 pivotWorld, heading, Distance, Pitch, localDirection)
             : ComputeDesiredPose(
-                pivotWorld, heading, Distance, Pitch, viewerYawOffset);
+                pivotWorld, heading, Distance, Pitch, YawOffset);
 
         if (!_initialised)
         {
@@ -418,6 +429,13 @@ public sealed class RetailChaseCamera : ICamera
         // Degenerate: facing parallel to normal falls back to the base heading.
         if (projected.Length() < MinTiltComponent) return baseHeading;
         return Vector3.Normalize(projected);
+    }
+
+    // True while the orbited boom stays behind the player with at most one unit of side offset.
+    internal static bool IsOrbitWithinAlignmentThreshold(float distance, float pitch, float yawOffset)
+    {
+        float horizontal = distance * MathF.Cos(pitch);
+        return horizontal * MathF.Abs(MathF.Sin(yawOffset)) <= 1f && MathF.Cos(yawOffset) >= 0f;
     }
 
     internal static Vector3? ComputeTrackedHeading(Vector3 pivotWorld, Vector3? trackedTargetPoint)
