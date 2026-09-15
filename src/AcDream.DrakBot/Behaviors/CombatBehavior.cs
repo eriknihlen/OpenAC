@@ -120,6 +120,9 @@ public sealed class CombatBehavior(
 
     public LineOfSightService LineOfSight => lineOfSight;
 
+    /// <summary>Whether a cell is a marked hazard; set by the controller. No fighting from inside one.</summary>
+    public Func<uint, bool>? IsHazardCell { get; set; }
+
     public bool WantsControl(Blackboard board, out string reason)
     {
         reason = string.Empty;
@@ -130,6 +133,17 @@ public sealed class CombatBehavior(
         // tick as often as not; the kill is noted from here too.
         if (_log is { } log)
             NoteKill(board, log);
+        // Standing in a hazard - acid underfoot - is not a place to fight
+        // from: the walk out comes first, and the swarm follows anyway.
+        if (IsHazardCell is not null && board.Navigation.IsAvailable && IsHazardCell(board.Navigation.Position.CellId))
+        {
+            if (_phase != Phase.Idle)
+            {
+                _log?.Info("combat: standing in a hazard; leaving it before fighting on");
+                EnterPhase(Phase.Idle, board.Now);
+            }
+            return false;
+        }
         // Only a hostile that can actually be fought - shot from here, or
         // walked to - is a reason to take over. Claiming control for one
         // that is blocked or too far to walk to, then finding nothing to do,

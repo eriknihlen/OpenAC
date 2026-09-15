@@ -92,6 +92,28 @@ public sealed class PatrolControllerTests
     }
 
     [Fact]
+    public void AcidDamageTwiceInACellMarksItAHazardAndReroutes()
+    {
+        (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build();
+        controller.ChatAfter = surface.CaptureMessages;
+        Assert.True(controller.TryStartPatrol(out _));
+        Route before = controller.Navigation.Route!;
+        // Standing in room 3 with acid underfoot: the first tick is not yet a hazard, the second is.
+        surface.Position = new PluginNavigationPosition(Block | 0x102, 20d / 240d, 20d / 240d, 0d, 0f, false);
+        surface.ChatMessages.Add(new PluginChatMessage(1UL, 0u, 4, string.Empty, "You suffer 47 damage from acid!", string.Empty));
+        clock.Advance(1.5d);
+        controller.Tick(clock.Now);
+        Assert.Equal(0, controller.HazardCount);
+
+        surface.ChatMessages.Add(new PluginChatMessage(2UL, 0u, 4, string.Empty, "You suffer 44 damage from acid!", string.Empty));
+        clock.Advance(3d);
+        controller.Tick(clock.Now);
+        Assert.Equal(1, controller.HazardCount);
+        Assert.NotSame(before, controller.Navigation.Route);
+        Assert.Contains(controller.Log.Snapshot(), line => line.Text.Contains("taking acid damage", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PatrolOnLoginStartsTheBotOnceInsideADungeon()
     {
         (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build();

@@ -397,8 +397,11 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   view and any named like a hotspot (lava, pool of acid, magma, cesspool,
   hot spring, pool of fire/cold) marks its cell; a new mark during a
   patrol rebuilds the patrol around it, resumed at the nearest step.
-  Server-side invisible hotspots are not seen this way, so the manual mark
-  stays (the Navigation window has Mark / Unmark / Clear buttons).
+  Server-side invisible hotspots are not seen this way, but they are
+  felt: "You suffer 47 damage from acid!" twice in the same cell within
+  ten seconds marks that cell too, and combat never fights from inside a
+  marked cell - the walk out comes first. The manual mark stays (the
+  Navigation window has Mark / Unmark / Clear buttons).
 - **Patrol on login** (Settings > Navigation) starts a patrol, and the bot,
   as soon as the character appears in the world inside a dungeon.
 - `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.

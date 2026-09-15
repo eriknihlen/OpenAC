@@ -43,6 +43,11 @@ public sealed class BotController : IMetaBot
         Files.EnsureLayout();
         _dungeon = dungeon ?? NoOpAutomationSurface.Instance;
         Hazards = hazards ?? new DungeonHazards(NoOpPluginStorage.Instance);
+        foreach (IBehavior behavior in Engine.Behaviors)
+        {
+            if (behavior is CombatBehavior combat)
+                combat.IsHazardCell = cell => Hazards.For(cell).Contains(cell);
+        }
     }
 
     public DungeonHazards Hazards { get; }
@@ -307,11 +312,45 @@ public sealed class BotController : IMetaBot
         {
             if (message.Sequence > _chatSequence)
                 _chatSequence = message.Sequence;
+            NoticeEnvironmentalDamage(message.Text);
             if (!Log.Debugs())
                 continue;
             string who = string.IsNullOrEmpty(message.Sender) ? string.Empty : $"{message.Sender}: ";
             Log.Debug($"chat[{message.Kind}]: {who}{message.Text}");
         }
+    }
+
+    /// <summary>
+    /// "You suffer 47 damage from acid!" every few seconds is the ground
+    /// itself: a pool with no object to sight, or one sighted too late.
+    /// Two such ticks in the same cell within ten seconds mark it a
+    /// hazard, and the patrol is rebuilt around it; the walk away is what
+    /// stops the bleeding. A poison landing from a monster says
+    /// something else ("You are poisoned"), and a single tick while
+    /// passing through is not a hazard.
+    /// </summary>
+    private const double EnvironmentalDamageWindowSeconds = 10d;
+    private uint _environmentalDamageCell;
+    private double _environmentalDamageAt = double.NegativeInfinity;
+
+    private void NoticeEnvironmentalDamage(string text)
+    {
+        if (!text.StartsWith("You suffer ", StringComparison.Ordinal) || !text.Contains(" damage from ", StringComparison.Ordinal))
+            return;
+        PluginNavigationSnapshot snapshot = _navigationSnapshot();
+        if (!snapshot.IsAvailable || snapshot.Position.IsOutdoor || (snapshot.Position.CellId & 0xFFFFu) < 0x100u)
+            return;
+        uint cell = snapshot.Position.CellId;
+        double now = Engine.Clock.Now;
+        bool second = cell == _environmentalDamageCell && now - _environmentalDamageAt <= EnvironmentalDamageWindowSeconds;
+        _environmentalDamageCell = cell;
+        _environmentalDamageAt = now;
+        if (!second || !Hazards.Add(cell))
+            return;
+        string source = text[(text.IndexOf(" damage from ", StringComparison.Ordinal) + " damage from ".Length)..].TrimEnd('!', '.', ' ');
+        Log.Warn($"hazard: taking {source} damage in cell 0x{cell:X8} at {BotEngine.Describe(snapshot.Position)}; marked, patrol rebuilt around it");
+        if (IsPatrolling && _patrolLandblock == (cell & 0xFFFF0000u))
+            RebuildPatrol();
     }
 
     private void DrainCommandFile()
