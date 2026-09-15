@@ -6,6 +6,7 @@ using AcDream.App.Rendering;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Streaming;
 using AcDream.App.UI;
+using AcDream.Core.Rendering;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Settings;
 using AcDream.UI.Abstractions.Settings;
@@ -429,4 +430,10 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
 
     public void SetChatOpacity(float defaultOpacity, float activeOpacity) =>
         _chatOpacity.Apply(defaultOpacity, activeOpacity);
+
+    public void ApplyCameraTurning(CameraTurningSettings cameraTurning)
+    {
+        ArgumentNullException.ThrowIfNull(cameraTurning);
+        CameraDiagnostics.AlignToSlope = cameraTurning.AlignToSlope && CameraDiagnostics.AlignToSlopeAllowed;
+    }
 }

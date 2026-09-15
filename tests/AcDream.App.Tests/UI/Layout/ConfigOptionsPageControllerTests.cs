@@ -1411,7 +1411,7 @@ public sealed class ConfigOptionsPageControllerTests
         (12, RowKind.Slider, true, "Camera Stiffness"),
         (13, RowKind.Slider, true, "Camera Adjustment Speed"),
         (14, RowKind.Slider, false, "Field Of View"),                 // NEXT-LAUNCH
-        (15, RowKind.Toggle, true, "Align To Slope"),
+        (15, RowKind.Toggle, false, "Align To Slope"),                // LIVE
         (18, RowKind.Menu, false, "Resolution"),                      // LIVE
         (19, RowKind.Toggle, false, "Full Screen"),                   // LIVE
         (20, RowKind.Toggle, false, "Sync To Refresh"),               // NEXT-LAUNCH
@@ -1454,7 +1454,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => "x");
         Assert.True(bound);
-        Assert.Equal(12, DimmingExpectations.Count(expectation => expectation.StoreOnly));
+        Assert.Equal(11, DimmingExpectations.Count(expectation => expectation.StoreOnly));
 
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(

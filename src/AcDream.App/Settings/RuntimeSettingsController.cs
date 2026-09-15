@@ -112,6 +112,8 @@ internal interface IRuntimeSettingsTargets
     void SetSingleCharacterOption(uint optionId, bool value);
 
     void SetChatOpacity(float defaultOpacity, float activeOpacity);
+
+    void ApplyCameraTurning(CameraTurningSettings cameraTurning);
 }
 
 internal interface IRuntimeSettingsPreviewSource
@@ -310,6 +312,7 @@ internal sealed class RuntimeSettingsController :
             throw new InvalidOperationException("Runtime settings targets are already bound.");
         _runtimeTargets = targets;
         targets.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
+        targets.ApplyCameraTurning(LoadCameraTurning());
     }
 
     public IDisposable BindRuntimeTargetsOwned(IRuntimeSettingsTargets targets)
@@ -395,6 +398,7 @@ internal sealed class RuntimeSettingsController :
         try
         {
             _storage.SaveCameraTurning(cameraTurning);
+            _runtimeTargets?.ApplyCameraTurning(cameraTurning);
         }
         catch (Exception ex)
         {
