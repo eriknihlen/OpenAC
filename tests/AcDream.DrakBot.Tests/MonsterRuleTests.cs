@@ -25,7 +25,12 @@ public sealed class MonsterRuleTests
         Assert.Equal(5, MonsterRules.For(rules, "Olthoi Soldier")!.Priority);
         Assert.Equal(0, MonsterRules.For(rules, "Drudge Slinker")!.Priority);
         Assert.Equal(1, MonsterRules.For(rules, "Rabbit")!.Priority);
-        Assert.Null(MonsterRules.For(rules[..2], "Rabbit"));
+        // No Default written: the built-in one answers, and fights.
+        Assert.True(MonsterRules.For(rules[..2], "Rabbit") is { IsDefault: true, Priority: 1 });
+        // The window shows the Default first and once, whatever the profile holds.
+        Assert.True(MonsterRules.WithDefaultFirst(rules[..2])[0].IsDefault);
+        Assert.Equal(3, MonsterRules.WithDefaultFirst(rules).Count);
+        Assert.Equal(MonsterRule.DefaultName, MonsterRules.WithDefaultFirst(rules)[0].Name);
         Assert.True(new MonsterRule { Name = "[unclosed" }.Matches("An [unclosed name")); // bad regex falls back to a substring
     }
 

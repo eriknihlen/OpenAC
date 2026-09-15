@@ -104,8 +104,14 @@ public enum DebuffKind
 
 public static class MonsterRules
 {
-    /// <summary>The rule for a monster: the first matching one, else the Default rule, else null.</summary>
-    public static MonsterRule? For(IReadOnlyList<MonsterRule> rules, string monsterName)
+    /// <summary>
+    /// The rule for a monster: the first matching one, else the Default
+    /// rule. There is always a Default - the list is a list of exceptions
+    /// to it, and a monster nothing names is fought its way - so a list
+    /// without one written down answers with the built-in one, which
+    /// fights with the profile's settings.
+    /// </summary>
+    public static MonsterRule For(IReadOnlyList<MonsterRule> rules, string monsterName)
     {
         MonsterRule? fallback = null;
         foreach (MonsterRule rule in rules)
@@ -118,7 +124,33 @@ public static class MonsterRules
             if (rule.Matches(monsterName))
                 return rule;
         }
-        return fallback;
+        return fallback ?? Default;
+    }
+
+    /// <summary>The Default rule a list has when none is written in it.</summary>
+    public static MonsterRule Default { get; } = new() { Name = MonsterRule.DefaultName };
+
+    /// <summary>
+    /// The list with its Default rule first and exactly once, as the
+    /// Monsters window shows it: the Default cannot be deleted, only set
+    /// to priority zero to leave unlisted monsters alone.
+    /// </summary>
+    public static List<MonsterRule> WithDefaultFirst(IReadOnlyList<MonsterRule> rules)
+    {
+        var result = new List<MonsterRule>(rules.Count + 1);
+        MonsterRule? first = null;
+        foreach (MonsterRule rule in rules)
+        {
+            if (rule.IsDefault)
+                first ??= rule;
+        }
+        result.Add(first ?? Default);
+        foreach (MonsterRule rule in rules)
+        {
+            if (!rule.IsDefault)
+                result.Add(rule);
+        }
+        return result;
     }
 
     /// <summary>The debuffs a rule wants, each with the element it applies to (empty for the untyped ones).</summary>

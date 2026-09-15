@@ -164,6 +164,11 @@ internal sealed class RuntimeFirstEntryDriveController
                 awaitingContinuationPlacement = status
                     is RuntimeLocalPlayerFirstEntryStatus
                         .AwaitingContinuationPlacement;
+                if (Core.Physics.PhysicsDiagnostics.ProbeParkEnabled)
+                {
+                    Console.WriteLine(FormattableString.Invariant(
+                        $"[pump] local first entry step {step}: {status}"));
+                }
             }
             else
             {

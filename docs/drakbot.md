@@ -107,10 +107,11 @@ the profile's), the war spell's shape (bolt, arc, streak) and whether to
 ring instead once the profile's minimum number of hostiles stand within
 ring range, and the debuffs to land first - imperil, the element's
 vulnerability, a second vulnerability, fester, yield, broadside, gravity
-well, and a weapon to wield for it. A rule named `Default` covers what
-nothing else matches; a monster with no rule at all is still fought,
-with the profile's settings - the list is a list of exceptions, and only
-a rule with priority zero leaves a monster alone. Debuffs are cast in that order until
+well, and a weapon to wield for it. The list always begins with
+`Default`, which cannot be deleted: it is every monster no other rule
+names, fought with the profile's settings. The rules below it are the
+exceptions - a monster added to the list is fought its own way, and
+priority zero (on a rule, or on Default itself) leaves it alone. Debuffs are cast in that order until
 the client's record of what the character landed shows them on the
 target; spells are chosen by family, so a lore-named top tier (Outlander's
 Insolence for Force Streak VII) is reached through its lower tiers. The

@@ -43,7 +43,7 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
             return;
         }
         CombatSettings combat = controller.Profile.Combat;
-        ImGui.TextDisabled("Empty list: fight every hostile with the Combat settings' element. With rules, unmatched monsters use Default or are left alone.");
+        ImGui.TextDisabled("Default is every monster no rule names, and cannot be deleted. Add a monster to fight it its own way; priority 0 leaves it alone.");
         ImGui.Separator();
         DrawTable(combat);
         ImGui.Separator();
@@ -63,7 +63,10 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
 
     private void DrawTable(CombatSettings combat)
     {
-        List<MonsterRule> rules = [.. combat.Monsters];
+        // The Default always heads the list; a profile written before it
+        // was built in, or one edited by hand, gets it put back.
+        List<MonsterRule> rules = MonsterRules.WithDefaultFirst(combat.Monsters);
+        bool defaultPutBack = rules.Count != combat.Monsters.Count || !combat.Monsters[0].IsDefault;
         if (!ImGui.BeginTable("monsters", 16,
                 ImGuiTableFlags.NoSavedSettings | ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY,
                 new Vector2(0f, -110f)))
@@ -89,7 +92,7 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
         ImGui.TableHeadersRow();
 
         int deleteIndex = -1;
-        bool changed = false;
+        bool changed = defaultPutBack;
         for (int i = 0; i < rules.Count; i++)
         {
             MonsterRule rule = rules[i];
@@ -202,7 +205,7 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
             }
 
             ImGui.TableNextColumn();
-            if (ImGui.SmallButton(PhosphorIcons.X))
+            if (!rule.IsDefault && ImGui.SmallButton(PhosphorIcons.X))
                 deleteIndex = i;
             ImGui.PopID();
         }
@@ -244,11 +247,6 @@ public sealed class MonstersWindow(BotController controller, IAutomationSurface 
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Adds the current target, or the selected monster");
-        ImGui.SameLine();
-        ImGui.BeginDisabled(combat.Monsters.Any(rule => rule.IsDefault));
-        if (ImGui.Button("Add Default", new Vector2(90f, 22f)))
-            TryAdd(combat, MonsterRule.DefaultName);
-        ImGui.EndDisabled();
     }
 
     private void TryAdd(CombatSettings combat, string name)
