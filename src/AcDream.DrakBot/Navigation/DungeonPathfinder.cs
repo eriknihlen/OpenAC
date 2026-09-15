@@ -37,19 +37,12 @@ public static class DungeonPathfinder
 
     public static bool IsDropEdge(in PluginDungeonCell from, in PluginDungeonCell to)
     {
-        // The doorway, when the host names it, is the honest test: a
-        // portal six metres above this cell's floor and three metres off
-        // is a hole in the ceiling to the room above, however far apart
-        // the two cells' centres are on the map. Cell centres alone let
-        // that edge through, and the walk stood at the wall beneath it.
-        if (TryDoorway(from, to, out PluginDungeonDoorway doorway) || TryDoorway(to, from, out doorway))
-        {
-            if (IsSteep(from.Elevation, from.Position, doorway.Elevation, doorway.Position)
-                || IsSteep(to.Elevation, to.Position, doorway.Elevation, doorway.Position))
-            {
-                return true;
-            }
-        }
+        // Cell centres only. Judging the doorway against them as well
+        // looked right for the hole in the ceiling, and cut a dungeon of
+        // 174 steps down to a 14-step loop: a cell's elevation is not its
+        // floor's, and a doorway three metres off a centre is ordinary. A
+        // point behind a hole is given up by the walk instead, and
+        // remembered.
         return IsSteep(from.Elevation, from.Position, to.Elevation, to.Position);
     }
 
