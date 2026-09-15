@@ -29,6 +29,8 @@ public sealed class CastCooldowns(IBotClock clock)
 public sealed class CastTracker(IMagicCommands magic, IBotClock clock, CastCooldowns cooldowns)
 {
     public const double RequestTimeoutSeconds = 8d;
+    /// <summary>The most a cast the host reports in progress is waited for; the longest real cast is a few seconds.</summary>
+    public const double CastingTimeoutSeconds = 20d;
 
     private long _completionRevisionAtRequest;
     private double _requestedAt = double.NegativeInfinity;
@@ -82,10 +84,13 @@ public sealed class CastTracker(IMagicCommands magic, IBotClock clock, CastCoold
             return CastOutcome.Failed;
         }
 
-        if (magic.IsCasting)
-            return null;
-
-        if (clock.Now - _requestedAt > RequestTimeoutSeconds)
+        // A cast the host still calls in progress gets longer than one it
+        // never started - but not for ever: a cast refused before it left
+        // the client (no components in the pack) once left the host saying
+        // 'casting' for twelve minutes, and the vitals behaviour holding
+        // the bot with it.
+        double timeout = magic.IsCasting ? CastingTimeoutSeconds : RequestTimeoutSeconds;
+        if (clock.Now - _requestedAt > timeout)
         {
             cooldowns.MarkFailed(PendingSpellId);
             Clear();

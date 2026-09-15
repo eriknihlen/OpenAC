@@ -45,6 +45,9 @@ public sealed class BotEngine
     public BotProfile Profile { get; set; } = BotProfile.Default;
 
     public string ActiveBehaviorName => _active?.Name ?? "idle";
+    private double _activeSince;
+    private double _heldWarnedAt;
+    private const double HeldWarnSeconds = 60d;
 
     public string LastReason { get; private set; } = string.Empty;
 
@@ -177,9 +180,18 @@ public sealed class BotEngine
                 if (_active is not null)
                     SafeInterrupt(_active, context);
                 _active = behavior;
+                _activeSince = board.Now;
+                _heldWarnedAt = board.Now;
                 LastReason = reason;
             }
             break;
+        }
+        // A behaviour that holds the tick for a minute without a word is
+        // the kind of silence that hid a cast the host never finished.
+        if (_active is not null && board.Now - _heldWarnedAt >= HeldWarnSeconds)
+        {
+            _heldWarnedAt = board.Now;
+            _log.Warn($"engine: {_active.Name} has held control for {board.Now - _activeSince:0}s ({LastReason}); action pending: {board.IsActionPending}, casting: {_surface.Magic.IsCasting}");
         }
 
         Inventory.Tick(_surface, board);
