@@ -17,6 +17,26 @@ public sealed class SpellSelector(
     Func<uint, bool>? isBlocked = null,
     SpellTierGate? tiers = null)
 {
+    /// <summary>
+    /// The host's component check walks the whole inventory; asked for
+    /// every tier of every buff on every tick it is a cost worth sparing,
+    /// and a pack does not change inside a second.
+    /// </summary>
+    private const double ComponentCacheSeconds = 1d;
+    private readonly Dictionary<uint, (DateTime At, bool Has)> _components = [];
+
+    private bool HasComponents(uint spellId)
+    {
+        DateTime now = DateTime.UtcNow;
+        if (_components.TryGetValue(spellId, out (DateTime At, bool Has) kept) && (now - kept.At).TotalSeconds <= ComponentCacheSeconds)
+            return kept.Has;
+        bool has = magic.HasComponents(spellId);
+        if (_components.Count > 512)
+            _components.Clear();
+        _components[spellId] = (now, has);
+        return has;
+    }
+
     private static readonly string[] TierSuffixes =
     [
         " VIII", " VII", " VI", " IV", " V", " III", " II", " I",
@@ -116,7 +136,8 @@ public sealed class SpellSelector(
     private bool TryBestInFamily(
         IReadOnlyList<PluginSpellInfo> pool,
         string baseName,
-        out PluginSpellInfo spell)
+        out PluginSpellInfo spell,
+        bool buff = false)
     {
         spell = default;
         string wanted = BaseName(baseName);
@@ -130,12 +151,12 @@ public sealed class SpellSelector(
             }
         }
         if (family == 0u)
-            return TryBest(pool, baseName, out spell);
+            return TryByName(pool, baseName, out spell, buff);
 
         int bestTier = int.MinValue;
         foreach (PluginSpellInfo candidate in pool)
         {
-            if (candidate.Family != family || !IsCastable(candidate, buff: false))
+            if (candidate.Family != family || !IsCastable(candidate, buff))
                 continue;
             if (candidate.Tier > bestTier)
             {
@@ -159,14 +180,27 @@ public sealed class SpellSelector(
         int known = 0, withComponents = 0, unblocked = 0, allowed = 0;
         PluginSpellInfo best = default;
         int bestTier = int.MinValue;
-        foreach (IReadOnlyList<PluginSpellInfo> pool in (IReadOnlyList<PluginSpellInfo>[])[catalog.KnownSelfBuffs, catalog.KnownCombatSpells, catalog.KnownAttackSpells])
+        IReadOnlyList<PluginSpellInfo>[] pools = [catalog.KnownSelfBuffs, catalog.KnownCombatSpells, catalog.KnownAttackSpells];
+        uint family = 0u;
+        foreach (IReadOnlyList<PluginSpellInfo> pool in pools)
         {
             foreach (PluginSpellInfo candidate in pool)
             {
-                if (!string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+                if (family == 0u && string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+                    family = candidate.Family;
+            }
+        }
+        foreach (IReadOnlyList<PluginSpellInfo> pool in pools)
+        {
+            foreach (PluginSpellInfo candidate in pool)
+            {
+                bool inFamily = family != 0u
+                    ? candidate.Family == family
+                    : string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase);
+                if (!inFamily)
                     continue;
                 known++;
-                if (!magic.HasComponents(candidate.SpellId))
+                if (!HasComponents(candidate.SpellId))
                     continue;
                 withComponents++;
                 if (isBlocked is not null && isBlocked(candidate.SpellId))
@@ -193,7 +227,21 @@ public sealed class SpellSelector(
         return $"casts {best.Name}";
     }
 
+    /// <summary>
+    /// The highest castable tier of what the user named. The name finds
+    /// the family - "Strength Self" is any tier of it the character knows -
+    /// and the family's top castable tier is cast whatever it is called:
+    /// the lore-named sevenths and the "Incantation of" eighths are reached
+    /// this way, as RynthAi reached them through its lore table.
+    /// </summary>
     private bool TryBest(
+        IReadOnlyList<PluginSpellInfo> pool,
+        string baseName,
+        out PluginSpellInfo spell,
+        bool buff = false) =>
+        TryBestInFamily(pool, baseName, out spell, buff);
+
+    private bool TryByName(
         IReadOnlyList<PluginSpellInfo> pool,
         string baseName,
         out PluginSpellInfo spell,
@@ -219,7 +267,7 @@ public sealed class SpellSelector(
 
     private bool IsCastable(in PluginSpellInfo spell, bool buff)
     {
-        if (!magic.HasComponents(spell.SpellId) || (isBlocked is not null && isBlocked(spell.SpellId)))
+        if (!HasComponents(spell.SpellId) || (isBlocked is not null && isBlocked(spell.SpellId)))
             return false;
         if (tiers is null)
             return true;

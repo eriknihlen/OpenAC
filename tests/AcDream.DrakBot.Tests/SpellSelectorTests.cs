@@ -31,6 +31,39 @@ public sealed class SpellSelectorTests
     }
 
     [Fact]
+    public void TheLoreNamedSeventhAndTheIncantationAreReachedThroughTheFamily()
+    {
+        // The book holds tiers I-VI under the plain name, the seventh under
+        // its lore name and the eighth as an Incantation: the user still
+        // just says "Strength Self" and gets the top one the tiers allow.
+        var surface = new FakeAutomationSurface();
+        surface.SelfBuffs.Add(Spell.SelfBuff(1, "Strength Self I", 10, 1));
+        surface.SelfBuffs.Add(Spell.SelfBuff(6, "Strength Self VI", 10, 6));
+        surface.SelfBuffs.Add(Spell.SelfBuff(7, "Bulwark of Strength", 10, 7));
+        surface.SelfBuffs.Add(Spell.SelfBuff(8, "Incantation of Strength Self", 10, 8));
+        var selector = new SpellSelector(surface, surface);
+
+        Assert.True(selector.TryBestSelfBuff("Strength Self", out PluginSpellInfo spell));
+        Assert.Equal(8u, spell.SpellId);
+        Assert.Equal("casts Incantation of Strength Self", selector.Explain("Strength Self"));
+
+        // No scarabs for the top two: the family falls to the sixth.
+        surface.MissingComponents.Add(8u);
+        surface.MissingComponents.Add(7u);
+        selector = new SpellSelector(surface, surface);
+        Assert.True(selector.TryBestSelfBuff("Strength Self", out spell));
+        Assert.Equal(6u, spell.SpellId);
+
+        // Nothing of the family has components: said so, not guessed.
+        surface.MissingComponents.Add(6u);
+        surface.MissingComponents.Add(1u);
+        selector = new SpellSelector(surface, surface);
+        Assert.False(selector.TryBestSelfBuff("Strength Self", out _));
+        Assert.Equal("4 tier(s) known, no components for any", selector.Explain("Strength Self"));
+        Assert.Equal("not in the spellbook", selector.Explain("Quickness Self"));
+    }
+
+    [Fact]
     public void SkipsTiersWithoutComponents()
     {
         var surface = new FakeAutomationSurface();

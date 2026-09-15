@@ -147,6 +147,15 @@ school is unknown, or a skill the host cannot read, is not gated. The
 selector then takes the highest allowed known tier, so a low-skill
 character casts what lands instead of fizzling on the top tier.
 
+Spells are named the way the game names them, without a tier:
+"Strength Self". The name finds the family - any tier of it the
+character knows - and the family's top allowed tier is what is cast,
+whatever it is called, so the lore-named sevenths and the "Incantation
+of" eighths are reached without naming them. A tier without its
+components in the pack is skipped for the next one down. `/drakbot
+spells` shows, for every configured buff, the tier that would be cast
+and whether it is up or due, or what stands in the way.
+
 ## Weapons and ammunition
 
 The Combat tab names a weapon per style (melee, missile, wand) and a
