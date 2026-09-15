@@ -137,6 +137,7 @@ public sealed class CombatBehaviorTests
     {
         static void Swing(CombatBehavior behavior, FakeAutomationSurface surface, TickClock clock)
         {
+            surface.Commands.Clear();
             for (int step = 0; step < 8 && (surface.Commands.Count == 0 || surface.Commands[^1] != "release"); step++)
             {
                 Step(behavior, surface, clock);
@@ -160,34 +161,33 @@ public sealed class CombatBehaviorTests
         Step(behavior, surface, clock);
         Assert.Equal(1, behavior.Kills);
 
-        // A second one, swung at, then gone from the list with only the old corpse nearby: not a kill.
+        // A second one, swung at, then gone from the list a while later with only the old corpse nearby: not a kill.
         surface.Hostiles.Clear();
         surface.Hostiles.Add(Hostile(8, "Drudge", 2f));
         Swing(behavior, surface, clock);
-        Step(behavior, surface, clock);
+        Step(behavior, surface, clock); // the completed swing is seen here
+        clock.Advance(3d);
         surface.Hostiles.Clear();
         Step(behavior, surface, clock);
         Assert.Equal(1, behavior.Kills);
 
-        // A third, gone with a fresh corpse of its name beside the character: a kill.
+        // A third, gone a while later but with a fresh corpse of its name beside the character: a kill.
         surface.Hostiles.Add(Hostile(9, "Drudge", 2f));
         Swing(behavior, surface, clock);
         Step(behavior, surface, clock);
+        clock.Advance(3d);
         surface.Hostiles.Clear();
         surface.Corpses.Add(new PluginLootContainer(901u, 0u, "Corpse of Drudge", 2f, false, false, false));
         Step(behavior, surface, clock);
         Assert.Equal(2, behavior.Kills);
 
-        // A fourth goes down while the next target has already been taken up: still its kill.
+        // A fourth, two metres off and gone the moment after the swing while the next target is taken up: a kill, corpse or no corpse.
         surface.Hostiles.Add(Hostile(10, "Drudge", 2f));
         Swing(behavior, surface, clock);
         surface.Hostiles.Clear();
         surface.Hostiles.Add(Hostile(11, "Drudge", 2.2f));
-        Step(behavior, surface, clock); // 10 is gone but its corpse is not there yet; 11 is taken up
-        Step(behavior, surface, clock);
-        Assert.Equal(2, behavior.Kills);
-        surface.Corpses.Add(new PluginLootContainer(902u, 0u, "Corpse of Drudge", 2f, false, false, false));
-        Step(behavior, surface, clock);
+        Step(behavior, surface, clock); // the completed swing is seen
+        Step(behavior, surface, clock); // and its target found gone
         Assert.Equal(3, behavior.Kills);
     }
 

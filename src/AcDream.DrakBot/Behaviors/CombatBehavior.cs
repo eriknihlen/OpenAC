@@ -101,8 +101,11 @@ public sealed class CombatBehavior(
     /// since a monster that goes down is out of the hostiles a tick or
     /// two later, and by then the next one has usually been chosen.
     /// </summary>
-    private readonly List<(uint Id, string Name, double SwungAt)> _pendingKills = [];
+    private readonly List<(uint Id, string Name, double SwungAt, float Distance)> _pendingKills = [];
     private const double KillWatchSeconds = 4d;
+    /// <summary>A monster this close that is gone this soon after the swing did not walk away: it died.</summary>
+    private const double VanishKillSeconds = 2d;
+    private const float VanishKillMeters = 3f;
     private readonly HashSet<uint> _seenCorpses = [];
 
     public bool IsApproaching => _phase == Phase.Approaching;
@@ -373,6 +376,7 @@ public sealed class CombatBehavior(
             return BeginCast(context, combat, target);
 
         _completionRevisionAtSwing = board.Combat.CompletionRevision;
+        _swingTarget = (target.ObjectId, target.Name, target.Distance);
         PluginCombatCommandResult begin = host.BeginPhysicalAttack(
             target.ObjectId,
             engagement.Height,
@@ -876,19 +880,23 @@ public sealed class CombatBehavior(
     /// gone, or gone from the hostiles with its corpse where it stood -
     /// is a kill. One that simply walked out of range is not.
     /// </summary>
+    /// <summary>The target the swing in flight went at, as it was when the swing was sent: it may be gone by the time the swing completes.</summary>
+    private (uint Id, string Name, float Distance) _swingTarget;
+
     private void NoteSwing(Blackboard board)
     {
-        if (_targetId == 0u || !TryFindHostile(board, _targetId, out PluginCombatTarget target))
+        (uint id, string name, float distance) = _swingTarget;
+        if (id == 0u)
             return;
         for (int index = 0; index < _pendingKills.Count; index++)
         {
-            if (_pendingKills[index].Id == _targetId)
+            if (_pendingKills[index].Id == id)
             {
-                _pendingKills[index] = (_targetId, target.Name, board.Now);
+                _pendingKills[index] = (id, name, board.Now, distance);
                 return;
             }
         }
-        _pendingKills.Add((_targetId, target.Name, board.Now));
+        _pendingKills.Add((id, name, board.Now, distance));
     }
 
     private void NoteKill(Blackboard board, IPluginLogger log)
@@ -900,7 +908,7 @@ public sealed class CombatBehavior(
         }
         for (int index = _pendingKills.Count - 1; index >= 0; index--)
         {
-            (uint id, string name, double swungAt) = _pendingKills[index];
+            (uint id, string name, double swungAt, float distance) = _pendingKills[index];
             bool dead = false;
             bool present = false;
             foreach (PluginCombatTarget hostile in board.Hostiles)
@@ -911,7 +919,13 @@ public sealed class CombatBehavior(
                 dead = hostile.IsHealthKnown && hostile.HealthFraction <= 0f;
                 break;
             }
-            if (!present)
+            if (!present && distance <= VanishKillMeters && board.Now - swungAt <= VanishKillSeconds)
+            {
+                // Two metres away a moment ago and gone: nothing walks out
+                // of the scan that fast. The corpse follows a tick later.
+                dead = true;
+            }
+            else if (!present)
             {
                 // Gone from the hostiles: a kill when a corpse of its name
                 // has just appeared close by - one not seen on an earlier
