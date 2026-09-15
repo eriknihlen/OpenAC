@@ -118,7 +118,7 @@ public sealed class CursorFeedbackController
             WindowMoveActive: root.IsWindowMoveActive,
             HoverWindowMove: root.HoverWindowMove,
             HoverUi: hover is not null,
-            HoverTextEdit: hover?.IsEditControl == true,
+            HoverTextEdit: hover is { IsEditControl: true } or UiText { Selectable: true },
             HoverTargetGuid: hoverTarget,
             HoverTargetCompatible: hoverTargetCompatible,
             BusyCount: _itemInteraction?.BusyCount ?? 0,

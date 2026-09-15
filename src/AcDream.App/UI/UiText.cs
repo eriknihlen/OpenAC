@@ -138,8 +138,9 @@ public sealed class UiText : UiElement, IUiDatStateful
             if (_selectable == value) return;
             _selectable = value;
             ClickThrough = !value;
+            // Focus is for Ctrl+C on the selection; this is not an edit box,
+            // so the game keeps its keys while a transcript holds a selection.
             AcceptsFocus = value;
-            IsEditControl = value;
             CapturesPointerDrag = value;
             if (!value)
                 ClearSelection();
