@@ -95,9 +95,14 @@ public sealed class CombatBehavior(
     /// <summary>Hostiles this session's fights have put down.</summary>
     public int Kills { get; private set; }
 
-    /// <summary>The name and health of the target the last swing went at, to tell a kill from a walk-away.</summary>
-    private string _swungAtName = string.Empty;
-    private bool _swungAt;
+    /// <summary>
+    /// The last few targets swung at and not yet accounted for: each is
+    /// watched for a moment after the swing, whatever target comes next,
+    /// since a monster that goes down is out of the hostiles a tick or
+    /// two later, and by then the next one has usually been chosen.
+    /// </summary>
+    private readonly List<(uint Id, string Name, double SwungAt)> _pendingKills = [];
+    private const double KillWatchSeconds = 4d;
     private readonly HashSet<uint> _seenCorpses = [];
 
     public bool IsApproaching => _phase == Phase.Approaching;
@@ -118,6 +123,10 @@ public sealed class CombatBehavior(
         CombatSettings combat = settings();
         if (!combat.Enabled)
             return false;
+        // The last swing's target goes down while something else has the
+        // tick as often as not; the kill is noted from here too.
+        if (_log is { } log)
+            NoteKill(board, log);
         // Only a hostile that can actually be fought - shot from here, or
         // walked to - is a reason to take over. Claiming control for one
         // that is blocked or too far to walk to, then finding nothing to do,
@@ -168,6 +177,7 @@ public sealed class CombatBehavior(
         CombatSettings combat = settings();
         ICombatAutomation host = context.Surface.Combat;
         _log = context.Log;
+        NoteKill(board, context.Log);
 
         if (_phase == Phase.Approaching)
             return StepApproach(context, combat);
@@ -252,7 +262,7 @@ public sealed class CombatBehavior(
                     || (!board.Combat.RequestInProgress && !board.Combat.ServerResponsePending))
                 {
                     _closeInOn = 0u;
-                    _swungAt = true;
+                    NoteSwing(board);
                     EnterPhase(Phase.Idle, board.Now);
                     return BehaviorStep.Done;
                 }
@@ -267,8 +277,6 @@ public sealed class CombatBehavior(
                     ? BehaviorStep.Done
                     : BehaviorStep.Fail($"cast {outcome}");
         }
-
-        NoteKill(board, context.Log);
 
         // Idle: pick a target or stand down.
         Engagement engagement;
@@ -308,12 +316,8 @@ public sealed class CombatBehavior(
         if (target.ObjectId != _targetId)
             context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m dz {target.HeightDifferenceMeters:+0.0;-0.0} ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
         if (target.ObjectId != _targetId)
-        {
             _closeInOn = 0u;
-            _swungAt = false;
-        }
         _targetId = target.ObjectId;
-        _swungAtName = target.Name;
         _leftCombat = false;
 
         if (board.IsActionPending || board.Now < _holdUntil)
@@ -872,49 +876,82 @@ public sealed class CombatBehavior(
     /// gone, or gone from the hostiles with its corpse where it stood -
     /// is a kill. One that simply walked out of range is not.
     /// </summary>
-    private void NoteKill(Blackboard board, IPluginLogger log)
+    private void NoteSwing(Blackboard board)
     {
-        if (_targetId == 0u || !_swungAt)
+        if (_targetId == 0u || !TryFindHostile(board, _targetId, out PluginCombatTarget target))
             return;
-        bool dead = false;
-        bool present = false;
-        foreach (PluginCombatTarget hostile in board.Hostiles)
+        for (int index = 0; index < _pendingKills.Count; index++)
         {
-            if (hostile.ObjectId != _targetId)
-                continue;
-            present = true;
-            dead = hostile.IsHealthKnown && hostile.HealthFraction <= 0f;
-            break;
-        }
-        if (!present)
-        {
-            // Gone from the hostiles: a kill when a corpse of its name has
-            // just appeared close by - one not seen on an earlier look, so
-            // an old corpse of a swarm-mate does not count for a target
-            // that merely walked off.
-            foreach (PluginLootContainer corpse in board.Corpses)
+            if (_pendingKills[index].Id == _targetId)
             {
-                if (_seenCorpses.Contains(corpse.ObjectId))
-                    continue;
-                if (corpse.ObjectId == _targetId
-                    || (corpse.Distance < 6f && string.Equals(corpse.Name, $"Corpse of {_swungAtName}", StringComparison.Ordinal)))
-                {
-                    dead = true;
-                    _seenCorpses.Add(corpse.ObjectId);
-                    break;
-                }
+                _pendingKills[index] = (_targetId, target.Name, board.Now);
+                return;
             }
         }
+        _pendingKills.Add((_targetId, target.Name, board.Now));
+    }
+
+    private void NoteKill(Blackboard board, IPluginLogger log)
+    {
+        if (_pendingKills.Count == 0)
+        {
+            RememberCorpses(board);
+            return;
+        }
+        for (int index = _pendingKills.Count - 1; index >= 0; index--)
+        {
+            (uint id, string name, double swungAt) = _pendingKills[index];
+            bool dead = false;
+            bool present = false;
+            foreach (PluginCombatTarget hostile in board.Hostiles)
+            {
+                if (hostile.ObjectId != id)
+                    continue;
+                present = true;
+                dead = hostile.IsHealthKnown && hostile.HealthFraction <= 0f;
+                break;
+            }
+            if (!present)
+            {
+                // Gone from the hostiles: a kill when a corpse of its name
+                // has just appeared close by - one not seen on an earlier
+                // look, so an old corpse of a swarm-mate does not count for
+                // a target that merely walked off.
+                foreach (PluginLootContainer corpse in board.Corpses)
+                {
+                    if (_seenCorpses.Contains(corpse.ObjectId))
+                        continue;
+                    if (corpse.ObjectId == id
+                        || (corpse.Distance < 8f && string.Equals(corpse.Name, $"Corpse of {name}", StringComparison.Ordinal)))
+                    {
+                        dead = true;
+                        _seenCorpses.Add(corpse.ObjectId);
+                        break;
+                    }
+                }
+            }
+            if (dead)
+            {
+                Kills++;
+                log.Info($"combat: {name} down; {Kills} kill(s) this session");
+                _pendingKills.RemoveAt(index);
+                if (_targetId == id)
+                    _targetId = 0u;
+            }
+            else if (board.Now - swungAt > KillWatchSeconds)
+            {
+                _pendingKills.RemoveAt(index);
+            }
+        }
+        RememberCorpses(board);
+    }
+
+    private void RememberCorpses(Blackboard board)
+    {
         if (_seenCorpses.Count > 256)
             _seenCorpses.Clear();
         foreach (PluginLootContainer corpse in board.Corpses)
             _seenCorpses.Add(corpse.ObjectId);
-        if (!dead)
-            return;
-        Kills++;
-        log.Info($"combat: {_swungAtName} down; {Kills} kill(s) this session");
-        _targetId = 0u;
-        _swungAt = false;
     }
 
     private static bool TryFindHostile(Blackboard board, uint targetId, out PluginCombatTarget target)

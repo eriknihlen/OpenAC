@@ -177,6 +177,18 @@ public sealed class CombatBehaviorTests
         surface.Corpses.Add(new PluginLootContainer(901u, 0u, "Corpse of Drudge", 2f, false, false, false));
         Step(behavior, surface, clock);
         Assert.Equal(2, behavior.Kills);
+
+        // A fourth goes down while the next target has already been taken up: still its kill.
+        surface.Hostiles.Add(Hostile(10, "Drudge", 2f));
+        Swing(behavior, surface, clock);
+        surface.Hostiles.Clear();
+        surface.Hostiles.Add(Hostile(11, "Drudge", 2.2f));
+        Step(behavior, surface, clock); // 10 is gone but its corpse is not there yet; 11 is taken up
+        Step(behavior, surface, clock);
+        Assert.Equal(2, behavior.Kills);
+        surface.Corpses.Add(new PluginLootContainer(902u, 0u, "Corpse of Drudge", 2f, false, false, false));
+        Step(behavior, surface, clock);
+        Assert.Equal(3, behavior.Kills);
     }
 
     [Fact]
