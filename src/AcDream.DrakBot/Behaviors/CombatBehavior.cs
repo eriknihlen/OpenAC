@@ -38,6 +38,9 @@ public sealed class CombatBehavior(
     private long _completionRevisionAtSwing;
     private double _phaseStartedAt;
     private double _lastApproachTraceAt = double.NegativeInfinity;
+    private double _lastSightCheckAt = double.NegativeInfinity;
+    /// <summary>How often the approach looks again for the target it is walking at.</summary>
+    private const double SightRecheckSeconds = 0.5d;
     private (double At, Engagement Engagement)? _chosen;
     private bool _modeMismatchTold;
     /// <summary>The log of the last Execute, for the selection that runs inside WantsControl.</summary>
@@ -100,12 +103,18 @@ public sealed class CombatBehavior(
         // resume. The choice is kept for Execute on the same tick.
         if (_phase == Phase.Idle)
         {
-            if (TryChooseEngagement(board, combat, out Engagement engagement, out _))
+            if (TryChooseEngagement(board, combat, out Engagement engagement, out int blocked))
             {
                 _chosen = (board.Now, engagement);
                 reason = $"{engagement.Target.Name} at {engagement.Target.Distance:0.0}m";
                 return true;
             }
+            // Hostiles about that cannot be fought from here keep the
+            // stance, and are nothing to take over for: claiming control
+            // to leave combat, then keeping the stance, was a takeover
+            // every tick that walked nowhere.
+            if (blocked != 0)
+                return false;
         }
         else if (TargetSelector.TrySelect(board.Hostiles, combat, _targetId, out PluginCombatTarget target, lineOfSight.IsBlacklisted))
         {
@@ -147,7 +156,12 @@ public sealed class CombatBehavior(
             host.AbortPhysicalAttack();
             casts.Clear();
             EnterPhase(Phase.Idle, board.Now);
-            return BehaviorStep.Fail("swing timed out");
+            // A swing the server never finished - the target flitted out
+            // of reach, or is not one it lets the character hit - counts
+            // like a walk that never arrived: enough of them and the
+            // target is left alone for a while.
+            bool blacklisted = lineOfSight.ReportUnreachable(_targetId);
+            return BehaviorStep.Fail($"swing timed out{(blacklisted ? "; leaving the target alone" : string.Empty)}");
         }
 
         switch (_phase)
@@ -234,7 +248,8 @@ public sealed class CombatBehavior(
             _targetId = 0u;
             // Hostiles are there but none can be shot from here and none
             // is worth walking to; the strikes just taken will blacklist
-            // them shortly. Not a failure worth a log line every tick.
+            // them shortly. The stance is kept for when one comes into
+            // view. Not a failure worth a log line every tick.
             if (blocked != 0)
                 return BehaviorStep.Done;
             if (combat.LeaveCombatWhenIdle && board.Combat.Mode != PluginCombatMode.Peace)
@@ -438,12 +453,20 @@ public sealed class CombatBehavior(
             // Out of sight is out of mind: a hostile the world hides - the
             // floor above, the far side of a wall - is not a candidate at
             // all, for any style, and needs no strike to be passed over.
-            // One in reach is fought regardless: nothing hides a monster
-            // two metres away that the body is touching.
-            if (candidate.Distance > combat.MeleeRangeMeters && lineOfSight.See(candidate.ObjectId) == Sight.Hidden)
+            // For a walk, one another creature stands in front of is
+            // passed over too: the creature in front is the one in sight,
+            // and it ranks on its own; a shot may still arc over it, so
+            // the ranged styles let the path sweeps decide. One in reach
+            // is fought regardless: nothing hides a monster two metres
+            // away that the body is touching.
+            if (candidate.Distance > combat.MeleeRangeMeters)
             {
-                blocked++;
-                continue;
+                Sight sight = lineOfSight.See(candidate.ObjectId);
+                if (sight == Sight.Hidden || (sight == Sight.Obscured && combat.Style == CombatStyle.Melee))
+                {
+                    blocked++;
+                    continue;
+                }
             }
             if (combat.Style == CombatStyle.Melee)
             {
@@ -581,6 +604,21 @@ public sealed class CombatBehavior(
             StopMoving(nav);
             EnterPhase(Phase.Idle, board.Now);
             return BehaviorStep.Done;
+        }
+        // A target that walks out of sight on the way - round a corner,
+        // through a door - is let go there and then, not chased round the
+        // corner by the steering fan until the walk times out with the
+        // character wedged in a doorway. It is looked at again when it
+        // shows itself.
+        if (board.Now - _lastSightCheckAt >= SightRecheckSeconds)
+        {
+            _lastSightCheckAt = board.Now;
+            if (lineOfSight.See(target.ObjectId) == Sight.Hidden)
+            {
+                StopMoving(nav);
+                EnterPhase(Phase.Idle, board.Now);
+                return BehaviorStep.Fail($"lost sight of {target.Name} at {target.Distance:0.0}m; leaving it");
+            }
         }
         if (board.Now - _phaseStartedAt > combat.ApproachTimeoutSeconds)
         {

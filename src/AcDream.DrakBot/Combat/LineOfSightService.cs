@@ -35,8 +35,10 @@ public readonly record struct LineOfSightVerdict(
 /// <summary>Whether a hostile can be seen from where the character stands.</summary>
 public enum Sight
 {
-    /// <summary>A straight line reaches it at some height, or only a creature is in the way.</summary>
+    /// <summary>A straight line reaches it at some height.</summary>
     Seen,
+    /// <summary>Something that is not the world - another creature, a door - stops every line short of it; what lies past that is not known.</summary>
+    Obscured,
     /// <summary>The world is between: a wall, a floor, a pillar at every height. Not a hostile to fight or walk at.</summary>
     Hidden,
     /// <summary>No probe to ask.</summary>
@@ -227,7 +229,11 @@ public sealed class LineOfSightService(
     /// is simply not a hostile to fight or walk at, with no strike and no
     /// blacklist to wait out: it is looked at again each cache period and
     /// fought the moment it comes into view. A creature in the way is not
-    /// a wall; the approach goes round it. Unknown without a probe, or
+    /// a wall, but it is not a sighting either: the sweep stops at it and
+    /// says nothing about what is past it - a swarm's last straggler
+    /// round the corner looked seen through the bodies in front, and the
+    /// character ran round the corner after it. Obscured, then, and the
+    /// creature in front is the one to fight. Unknown without a probe, or
     /// with the line-of-sight check turned off.
     /// </summary>
     public Sight See(uint targetId)
@@ -236,18 +242,29 @@ public sealed class LineOfSightService(
         if (targetId == 0u || !options.Enabled || !projectiles.IsAvailable)
             return Sight.Unknown;
         double now = clock.Now;
+        bool obscured = false;
         foreach (PluginAttackHeight height in Heights)
         {
             LineOfSightVerdict verdict = Cached(targetId, PluginProjectilePathKind.Straight, height, options, now)
                 ?? Probe(targetId, PluginProjectilePathKind.Straight, height, options, now);
             if (verdict.State == LineOfSightState.Clear)
                 return Sight.Seen;
-            if (verdict.State == LineOfSightState.Blocked && !verdict.ByEnvironment)
+            if (verdict.State == LineOfSightState.Blocked && verdict.BlockingObjectId == targetId)
                 return Sight.Seen;
             if (verdict.State == LineOfSightState.Unavailable)
                 return Sight.Unknown;
+            if (verdict.State == LineOfSightState.Blocked && !verdict.ByEnvironment)
+            {
+                // A creature in the way is a strike for the ranged styles,
+                // as their own sweep would have made it, so a target kept
+                // covered is blacklisted in due course; the world in the
+                // way is not.
+                if (!verdict.FromCache)
+                    _strikePending.Add(targetId);
+                obscured = true;
+            }
         }
-        return Sight.Hidden;
+        return obscured ? Sight.Obscured : Sight.Hidden;
     }
 
     private LineOfSightVerdict? Cached(uint targetId, PluginProjectilePathKind kind, PluginAttackHeight height, LineOfSightSettings options, double now)

@@ -211,9 +211,17 @@ Ranged styles do not fire blind, and nobody walks into a wall:
   world blocks all three - the floor above, the far side of a wall, round
   a corner - it is *hidden*: not a candidate, no strike, no blacklist to
   wait out; it is looked at again each cache period and fought the moment
-  it comes into view. A creature in the way is not a wall; the approach
-  goes round it. The strikes and the blacklist below are for what can be
-  seen but not shot or reached, and for the host refusing to swing.
+  it comes into view. A creature in the way is not a wall, but it is not
+  a sighting either - the sweep says nothing about what lies past it -
+  so for a melee walk a hostile *covered* by another creature is passed
+  over and the creature in front, in plain sight, is the one fought (the
+  ranged styles let their own sweeps decide; a shot may still arc over
+  it). While walking at a target the bot keeps looking for it, twice a
+  second: one that goes round a corner or through a door on the way is
+  let go there and then, not steered after until the walk times out.
+  The strikes and the blacklist below are for what can be seen but not
+  shot or reached, for the host refusing to swing, and for a swing the
+  server never finishes.
 - **Choosing a target.** Hostiles are ranked as before (distance is the
   straight line, height included; one more than *Ignore above/below*
   metres up or down is not a hostile at all); the first one with a

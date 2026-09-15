@@ -68,6 +68,7 @@ public sealed class BotController : IMetaBot
     private double _lastHazardScanAt = double.NegativeInfinity;
     private double _loginPatrolFirstTryAt = double.NaN;
     private bool _loginPatrolWaitTold;
+    private bool _loginPatrolOutdoorsTold;
     /// <summary>How long the login patrol keeps asking for the dungeon before it stops trying.</summary>
     public const double LoginPatrolGiveUpSeconds = 120d;
 
@@ -113,12 +114,12 @@ public sealed class BotController : IMetaBot
             return;
         }
         bool inDungeon = !snapshot.Position.IsOutdoor && (snapshot.Position.CellId & 0xFFFFu) >= 0x100u;
-        if (loginPatrolPending && !inDungeon)
+        if (loginPatrolPending && !inDungeon && !_loginPatrolOutdoorsTold)
         {
-            // Outdoors there is nothing to patrol; said once, then the
-            // setting waits for the next login inside a dungeon.
-            _patrolOnLoginDone = true;
-            Log.Info($"patrol: not started on login; the character is outdoors in 0x{snapshot.Position.CellId:X8}");
+            // Outdoors there is nothing to patrol yet; said once, and the
+            // patrol starts when the character walks into a dungeon.
+            _loginPatrolOutdoorsTold = true;
+            Log.Info($"patrol: not started on login; the character is outdoors in 0x{snapshot.Position.CellId:X8} and the patrol starts in the first dungeon it enters");
         }
 
         if (loginPatrolPending && inDungeon)

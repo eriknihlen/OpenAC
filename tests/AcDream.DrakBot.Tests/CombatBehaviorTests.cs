@@ -476,11 +476,76 @@ public sealed class CombatBehaviorTests
         Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
         Assert.True(behavior.IsApproaching);
 
-        // A creature in the way is not a wall: the hostile behind it is still a target.
+        // A creature steps in the way mid-walk: not a wall, the walk goes on.
         surface.PathBlockedByEnvironment = false;
         surface.BlockPath(9u);
         clock.Advance(0.6d);
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out _));
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.True(behavior.IsApproaching);
+    }
+
+    [Fact]
+    public void AMeleeHostileCoveredByAnotherCreatureIsPassedOverForTheOneInFront()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Melee,
+            MeleeRangeMeters = 1.5f,
+            ApproachRangeMeters = 10f,
+            LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        // The straggler ranks first (nearer), but every line to it stops at the swarm-mate in front.
+        surface.Hostiles.Add(Hostile(9, "Straggler", 4f));
+        surface.Hostiles.Add(Hostile(8, "Swarm-mate", 6f));
+        Place(surface, 9u, north: 4d, east: 0d);
+        Place(surface, 8u, north: 6d, east: 0d);
+        surface.BlockingObjectId = 8u;
+        surface.BlockPath(9u);
+
+        // The one in front is what the character walks at; the covered one is
+        // not a wall, so it is not hidden for good, just not the target now.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Swarm-mate at 6.0m", reason);
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(8u, behavior.CurrentTargetId);
+        Assert.False(behavior.LineOfSight.IsBlacklisted(9u));
+    }
+
+    [Fact]
+    public void AnApproachLetsGoOfATargetThatWalksOutOfSight()
+    {
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Melee,
+            MeleeRangeMeters = 1.5f,
+            ApproachRangeMeters = 20f,
+            ApproachTimeoutSeconds = 30d,
+            LineOfSight = new LineOfSightSettings { CacheSeconds = 0.5d },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(9, "Runner", 12f));
+        Place(surface, 9u, north: 12d, east: 0d);
+
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.True(behavior.IsApproaching);
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock, dt: 0.3).Result);
+
+        // Round the corner: the world now hides it. The walk stops there, well
+        // before its timeout, rather than steering round the corner after it.
+        surface.PathBlockedByEnvironment = true;
+        surface.BlockPath(9u);
+        BehaviorStep step = Step(behavior, surface, clock, dt: 0.6);
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.StartsWith("lost sight of Runner", step.Reason);
+        Assert.False(behavior.IsApproaching);
+        Assert.Equal("move:clear", surface.Commands[^1]);
+        // Not a hostile now, and nothing held against it: it is fought when it shows itself again.
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        Assert.False(behavior.LineOfSight.IsBlacklisted(9u));
     }
 
     [Fact]
