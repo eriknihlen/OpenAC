@@ -95,7 +95,7 @@ public class WallPressEquilibriumTests
                 playerPosition: playerPos,
                 playerYaw: yaw,
                 playerVelocity: Vector3.Zero,
-                isOnGround: true,
+                inContact: true,
                 contactPlaneNormal: Vector3.UnitZ,
                 dt: dt,
                 cellId: cellId,

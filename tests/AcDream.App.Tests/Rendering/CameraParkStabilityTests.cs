@@ -19,8 +19,11 @@ public class CameraParkStabilityTests
             => new(desiredEye, cellId);
     }
 
-    [Fact]
-    public void ParkedCamera_StaticInputs_ReachesBitStableFixedPoint()
+    [Theory]
+    [InlineData(1.83f, 0f, 0f)]
+    [InlineData(0f, 3f, -0.25f)]
+    public void ParkedCamera_StaticInputs_ReachesBitStableFixedPoint(
+        float yaw, float velocityX, float normalX)
     {
         bool  savedAlign = CameraDiagnostics.AlignToSlope;
         bool  savedColl  = CameraDiagnostics.CollideCamera;
@@ -36,15 +39,17 @@ public class CameraParkStabilityTests
             var cam = new RetailChaseCamera { CollisionProbe = new PassthroughProbe() };
 
             var playerPos = new Vector3(49.5f, -39.9f, -5.9f);
-            float yaw     = 1.83f;
-            float dt      = 1f / 1500f;
+            float dt = 1f / 1500f;
+            // Diagonal clears the per-axis tilt gate; velocityX alone stays zero for the flat case.
+            Vector3 velocity = new(velocityX, velocityX, 0f);
+            Vector3 normal = Vector3.Normalize(new Vector3(normalX, 0f, 1f));  // normalX -0.25 is ~14 degrees
 
             void Step() => cam.Update(
                 playerPosition: playerPos,
                 playerYaw: yaw,
-                playerVelocity: Vector3.Zero,
-                isOnGround: true,
-                contactPlaneNormal: Vector3.UnitZ,
+                playerVelocity: velocity,
+                inContact: true,
+                contactPlaneNormal: normal,
                 dt: dt,
                 cellId: 0x8A020142u,
                 selfEntityId: 0x5);

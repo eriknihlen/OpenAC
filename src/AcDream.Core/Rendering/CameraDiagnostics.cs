@@ -7,8 +7,10 @@ public static class CameraDiagnostics
     public static bool UseRetailChaseCamera { get; set; } =
         Environment.GetEnvironmentVariable("ACDREAM_RETAIL_CHASE") != "0";
 
-    public static bool AlignToSlope { get; set; } =
+    public static bool AlignToSlopeAllowed { get; set; } =
         Environment.GetEnvironmentVariable("ACDREAM_CAMERA_ALIGN_SLOPE") != "0";
+
+    public static bool AlignToSlope { get; set; } = AlignToSlopeAllowed;
 
     public static bool CollideCamera { get; set; } =
         Environment.GetEnvironmentVariable("ACDREAM_CAMERA_COLLIDE") != "0";

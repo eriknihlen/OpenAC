@@ -191,7 +191,7 @@ public sealed class WorldRenderFrameBuilderTests
             playerPosition: Vector3.Zero,
             playerYaw: 0f,
             playerVelocity: Vector3.Zero,
-            isOnGround: true,
+            inContact: true,
             contactPlaneNormal: Vector3.UnitZ,
             dt: 1f / 60f,
             cellId: viewerCellId);
