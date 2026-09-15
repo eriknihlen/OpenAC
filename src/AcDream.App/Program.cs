@@ -184,6 +184,10 @@ var host = new AppPluginHost(
         runtimeOptions.VtankProfileDirectoryOverride
             ?? VtankProfilesDefault.Resolve(applicationPaths.DataDirectory)),
     window.ImmediateUi);
+// The bot, and its remote after it: the remote reads the bot through the
+// bot's controller, which exists once the bot has initialized. The remote
+// listens only when configured (/remote setup, remote.json, ACDREAM_REMOTE).
+var drakBot = new AcDream.DrakBot.DrakBotPlugin(AcDream.DrakBot.Ui.DrakBotWindows.Create);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,
@@ -196,7 +200,18 @@ GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
             AcDream.DrakBot.DrakBotPlugin.Id,
             AcDream.DrakBot.DrakBotPlugin.DisplayName,
             AcDream.DrakBot.DrakBotPlugin.Version,
-            new AcDream.DrakBot.DrakBotPlugin(AcDream.DrakBot.Ui.DrakBotWindows.Create)),
+            drakBot),
+        new AcDream.Core.Plugins.BuiltInPlugin(
+            AcDream.DrakBot.Remote.DrakBotRemotePlugin.Id,
+            AcDream.DrakBot.Remote.DrakBotRemotePlugin.DisplayName,
+            AcDream.DrakBot.Remote.DrakBotRemotePlugin.Version,
+            new AcDream.DrakBot.Remote.DrakBotRemotePlugin(
+                drakBot,
+                new AcDream.DrakBot.Remote.RemoteHostServices
+                {
+                    RenderIconPng = iconId => AcDream.App.Plugins.RemoteIconRenderer.RenderPng(window.Dats, iconId),
+                    CloseClient = window.RequestClose,
+                })),
     ]);
 window.StartPluginHosting(pluginSession);
 

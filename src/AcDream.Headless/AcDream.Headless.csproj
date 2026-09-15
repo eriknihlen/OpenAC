@@ -17,5 +17,6 @@
     <ProjectReference Include="..\AcDream.Runtime\AcDream.Runtime.csproj" />
     <ProjectReference Include="..\AcDream.Automation\AcDream.Automation.csproj" />
     <ProjectReference Include="..\AcDream.DrakBot\AcDream.DrakBot.csproj" />
+    <ProjectReference Include="..\AcDream.DrakBot.Remote\AcDream.DrakBot.Remote.csproj" />
   </ItemGroup>
 </Project>

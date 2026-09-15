@@ -35,6 +35,13 @@ public sealed class SelfBuffBehavior(
 
     public bool IsForceRebuffPending => _forceRebuff;
 
+    /// <summary>Drops a forced rebuff that has not finished; what is already recast stays.</summary>
+    public void CancelForceRebuff()
+    {
+        _forceRebuff = false;
+        _forcedFamiliesDone.Clear();
+    }
+
     public BehaviorPriority Priority => BehaviorPriority.Buffing;
 
     public bool WantsControl(Blackboard board, out string reason)

@@ -1,6 +1,7 @@
 using AcDream.Automation;
 using AcDream.Automation.Items;
 using AcDream.DrakBot;
+using AcDream.DrakBot.Remote;
 using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
@@ -518,14 +519,28 @@ internal sealed class HeadlessSessionHost : IDisposable
             return [];
         }
 
-        return
-        [
-            new BuiltInPlugin(
+        var bot = new DrakBotPlugin();
+        var builtIns = new List<BuiltInPlugin>
+        {
+            new(
                 DrakBotPlugin.Id,
                 DrakBotPlugin.DisplayName,
                 DrakBotPlugin.Version,
-                new DrakBotPlugin()),
-        ];
+                bot),
+        };
+        // The bot's remote only when a session names it, so a session that
+        // never asked carries no listener and no extra plugin event; it
+        // then listens on whatever port its pluginSettings or remote.json give.
+        if (allowList is not null
+            && allowList.Contains(DrakBotRemotePlugin.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            builtIns.Add(new BuiltInPlugin(
+                DrakBotRemotePlugin.Id,
+                DrakBotRemotePlugin.DisplayName,
+                DrakBotRemotePlugin.Version,
+                new DrakBotRemotePlugin(bot)));
+        }
+        return builtIns.ToArray();
     }
 
     internal RuntimeSessionStartResult Start()

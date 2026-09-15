@@ -396,6 +396,12 @@ public sealed class GameWindow :
 
     /// <summary>Per-frame immediate-mode draw callbacks; handed to the plugin host.</summary>
     internal AcDream.Plugin.Abstractions.IImmediateUiHost ImmediateUi => _immediateUi;
+
+    /// <summary>The open data files, once startup has published them; null before.</summary>
+    internal IDatReaderWriter? Dats => _dats;
+
+    /// <summary>Closes the window the way its close button does; from the frame thread.</summary>
+    internal void RequestClose() => _window?.Close();
     private readonly AcDream.App.Input.DispatcherMovementInputSource _movementInput;
     private readonly AcDream.App.Input.DispatcherCameraInputSource _cameraInput = new();
     private AcDream.App.Input.IMouseLookCursor? _mouseLookCursor;

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The bot tests' scriptable automation surface, shared by source. -->
+    <Compile Include="..\AcDream.DrakBot.Tests\Fakes\FakeAutomationSurface.cs" Link="Fakes\FakeAutomationSurface.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AcDream.DrakBot.Remote\AcDream.DrakBot.Remote.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.DrakBot\AcDream.DrakBot.csproj" />
+    <ProjectReference Include="..\..\src\AcDream.Core\AcDream.Core.csproj" />
+  </ItemGroup>
+
+</Project>

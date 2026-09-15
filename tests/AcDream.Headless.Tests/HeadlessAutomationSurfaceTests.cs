@@ -3,6 +3,7 @@ using AcDream.Automation;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.DrakBot;
+using AcDream.DrakBot.Remote;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
@@ -84,6 +85,63 @@ public sealed class HeadlessAutomationSurfaceTests
             SubmitOutcome.ClientHandled,
             session.SubmitConsoleLine("/drakbot status"));
         Assert.True(surface.TryHandlePluginCommand("/bot status"));
+    }
+
+    [Fact]
+    public async Task ASessionThatNamesTheRemoteGetsItOnThePortItSets()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-remote-{Guid.NewGuid():N}.jsonl");
+        using var cleanup = new DeleteOnDispose(statusPath);
+        var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor(
+                [DrakBotPlugin.Id, DrakBotRemotePlugin.Id],
+                statusPath,
+                pluginSettings: new()
+                {
+                    [DrakBotRemotePlugin.Id] = new()
+                    {
+                        ["port"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    },
+                }),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations());
+
+        _ = session.Start();
+
+        Assert.Equal(2, session.Plugins.LoadedCount);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
+        Assert.Equal("ok", await client.GetStringAsync("healthz"));
+        Assert.Contains(
+            "acdream.drakbot.remote",
+            await client.GetStringAsync("status"),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASessionThatNamesOnlyTheBotHasNoRemote()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-noremote-{Guid.NewGuid():N}.jsonl");
+        using var cleanup = new DeleteOnDispose(statusPath);
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([DrakBotPlugin.Id], statusPath),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations());
+
+        _ = session.Start();
+
+        Assert.Equal(1, session.Plugins.LoadedCount);
     }
 
     private static HeadlessSessionDescriptor Descriptor(

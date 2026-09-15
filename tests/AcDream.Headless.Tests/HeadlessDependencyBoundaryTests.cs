@@ -62,6 +62,11 @@ public sealed class HeadlessDependencyBoundaryTests
                 "src",
                 "AcDream.DrakBot",
                 "AcDream.DrakBot.csproj"),
+            Path.Combine(
+                repositoryRoot,
+                "src",
+                "AcDream.DrakBot.Remote",
+                "AcDream.DrakBot.Remote.csproj"),
         ];
 
         Assert.Equal(expected, actual);

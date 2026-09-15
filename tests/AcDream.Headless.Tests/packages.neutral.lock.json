@@ -293,6 +293,7 @@
         "dependencies": {
           "AcDream.Automation": "[0.1.7, )",
           "AcDream.DrakBot": "[0.1.7, )",
+          "AcDream.DrakBot.Remote": "[0.1.7, )",
           "AcDream.Runtime": "[0.1.7, )"
         }
       },
@@ -335,6 +336,13 @@
       "acdream.drakbot": {
         "type": "Project",
         "dependencies": {
+          "AcDream.Plugin.Abstractions": "[0.1.7, )"
+        }
+      },
+      "acdream.drakbot.remote": {
+        "type": "Project",
+        "dependencies": {
+          "AcDream.DrakBot": "[0.1.7, )",
           "AcDream.Plugin.Abstractions": "[0.1.7, )"
         }
       },

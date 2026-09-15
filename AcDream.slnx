@@ -5,6 +5,7 @@
     <Project Path="src/AcDream.Bake/AcDream.Bake.csproj" />
     <Project Path="src/AcDream.DrakBot/AcDream.DrakBot.csproj" />
     <Project Path="src/AcDream.DrakBot.Ui/AcDream.DrakBot.Ui.csproj" />
+    <Project Path="src/AcDream.DrakBot.Remote/AcDream.DrakBot.Remote.csproj" />
     <Project Path="src/AcDream.Cli/AcDream.Cli.csproj" />
     <Project Path="src/AcDream.Content/AcDream.Content.csproj" />
     <Project Path="src/AcDream.Core/AcDream.Core.csproj" />
@@ -31,6 +32,7 @@
     <Project Path="tests/AcDream.App.Tests/AcDream.App.Tests.csproj" />
     <Project Path="tests/AcDream.Bake.Tests/AcDream.Bake.Tests.csproj" />
     <Project Path="tests/AcDream.DrakBot.Tests/AcDream.DrakBot.Tests.csproj" />
+    <Project Path="tests/AcDream.DrakBot.Remote.Tests/AcDream.DrakBot.Remote.Tests.csproj" />
     <Project Path="tests/AcDream.Cli.Tests/AcDream.Cli.Tests.csproj" />
     <Project Path="tests/AcDream.Content.Tests/AcDream.Content.Tests.csproj" />
     <Project Path="tests/AcDream.Core.Tests.Fixtures.HelloPlugin/AcDream.Core.Tests.Fixtures.HelloPlugin.csproj" />

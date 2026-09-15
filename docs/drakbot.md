@@ -71,6 +71,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
                      DungeonPathfinder (A*, patrols), DungeonHazards, Jumper
   Meta/              MetaEngine (states/rules), ExpressionEngine, MetaWorld, .af/.met parsers
   Profiles/          BotProfile (JSON), BotStore (plugin storage)
+DrakBotRemotePlugin  ..DrakBot.Remote/: the phone's listener (status, feed, commands), off unless configured
 ```
 
 Arbitration: behaviors are ordered by `BehaviorPriority`. Each tick the
@@ -667,6 +668,86 @@ the route moves on. A teleport the route did not ask for - a portal walked
 into, a recall cast by hand - is noticed the same way; the walk stops,
 settles, and carries on from the current step.
 
+## The phone remote
+
+`src/AcDream.DrakBot.Remote` is DrakBot Remote, a second built-in plugin
+(`acdream.drakbot.remote`) registered after the bot that lets a phone watch
+and drive one client: the [DrakRemote](https://github.com/tombohar/DrakRemote)
+iOS app is its client, ported from RynthSuite's RynthRemote. It is an
+HTTP + WebSocket listener inside the client, its own small server over a
+plain socket (no http.sys reservation on Windows, the same on Linux), that
+serves what the bot and the character are doing and takes commands. It
+never touches the game from a request thread: the plugin tick builds the
+documents it serves and applies the commands it queued, so a phone tap
+lands the way a chat command does.
+
+**It is off unless configured.** No socket is opened without a port. Turn
+it on with `/remote setup <port> [token] [lan]`, which writes
+`remote.json` in the plugin's folder
+(`<config>/plugins/acdream.drakbot.remote/`) and starts listening:
+
+```
+/remote setup 8740                  this PC only, no token
+/remote setup 8740 mytoken lan      every interface, token required
+/remote status | on | off
+```
+
+`remote.json` is `{"enabled":true,"port":8740,"bind":"any","token":"..."}`;
+a headless session sets the same keys in `pluginSettings` under
+`acdream.drakbot.remote` and names the plugin in `plugins`; the
+environment overrides both (`ACDREAM_REMOTE=1`, `ACDREAM_REMOTE_PORT`,
+`ACDREAM_REMOTE_TOKEN`, `ACDREAM_REMOTE_BIND=any`). Listening on every
+interface without a token is refused. The token travels as
+`Authorization: Bearer` or `?token=`; `/healthz` alone is open. A
+multi-box needs no configuration per client: a client whose port is taken
+walks up to the next free one (ten ports from the configured one), and the
+app looks for its siblings the same way.
+
+What it serves, in the shape RynthCore's StatusAgent served so the app's
+screens carry over:
+
+- `GET /status` - one document with this client: state (loading, idle,
+  botting, wedged, hung), vitals, the bot's activity and reason, the meta
+  state, the target and its health, the four module switches and the meta
+  switch, the profile / route / loot / meta pickers with their lists, kills
+  and rates, XP and deaths this session (from the character's own
+  properties), burden, free slots, scarabs by tier and tapers, the worn
+  gear with its appraisal, position and area, the last sixty chat lines,
+  and the last warning. `GET /statusfeed` is the same over a WebSocket,
+  pushed within ~150 ms of a change. The document also states the
+  server's `capabilities` so the app hides what a host cannot do.
+- `POST /command` `{"action":..,"value":..}` - `macro`, `combat`,
+  `buffing`, `navigation`, `looting`, `meta` (on/off), `navProfile`,
+  `lootProfile`, `metaProfile`, `settingsProfile` (an index into the lists
+  the status carried, or a name; -1 or `none` clears), `forceRebuff`,
+  `cancelRebuff`, `clearBusy`, `sendChat`, `botCommand` (a `/drakbot`
+  verb), `moveStart` / `moveStop` (`forward`, `back`, `left`, `right`,
+  `strafeleft`, `straferight`, `stop`), `assess` (an item id),
+  `setSetting` (`{"key":"vitals.healBelow","value":0.5}`), `closeClient`,
+  `hideUi`. A held direction is a dead-man's switch: the app re-sends the
+  start every third of a second and a hold that goes quiet for two
+  seconds is let go of, so a dropped connection never leaves the character
+  running.
+- `GET /inventory` - the whole pack: worn, main pack, side packs, with
+  the appraisal of anything already assessed and an `appraised` flag, so
+  the app can offer a tap-to-assess; re-read every second, its `version`
+  moves only when something changed.
+- `GET /settings` - the live profile as a flat form (`vitals.healBelow`,
+  `combat.style`, ...; lists of names read-only, the monster and loot
+  rules left out), and `setSetting` writes one key back, refused unless
+  the whole profile still parses.
+- `GET /icon?did=N` - an item's icon as a PNG, rendered by the graphical
+  client from its data files on the tick; a headless host has none.
+- `/runs`, `/maps`, `/frame`, `/stream`, `/video` answer as absent: the
+  run archive, dungeon maps and the screen stream of the RynthCore agent
+  are not here yet.
+
+`tests/AcDream.DrakBot.Remote.Tests` drives the document builders and the
+command routing against the bot's fake surface, and the listener with a
+real `HttpClient` and `ClientWebSocket`, including the whole hosted round
+trip: a session port, a `POST /command`, the next tick applying it, the
+feed pushing the change.
+
 ## Testing
 
 `tests/AcDream.DrakBot.Tests` drives every behavior through
@@ -695,3 +776,5 @@ In rough priority order:
 - **Terrain passability overlays and the radar wall renderer** - the
   route markers are drawn now; those two need cell surface data the
   contract does not carry.
+- **The remote's screen stream, run archive and dungeon maps** - the
+  RynthCore agent had all three; the remote answers them as absent for now.
