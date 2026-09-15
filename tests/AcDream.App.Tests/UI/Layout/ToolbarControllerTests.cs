@@ -368,6 +368,9 @@ public class ToolbarControllerTests
 
         Assert.Equal(0x5001u, selection.SelectedObjectId);
         Assert.Equal(0u, used);
+        Assert.True(cell.Selected);
+        selection.Clear(SelectionChangeSource.Toolbar);
+        Assert.False(cell.Selected);
     }
 
     [Fact]

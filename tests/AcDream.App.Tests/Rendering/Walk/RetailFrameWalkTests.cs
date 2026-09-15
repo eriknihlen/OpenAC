@@ -403,6 +403,42 @@ public sealed class RetailFrameWalkTests
         Assert.Equal(1, selection.Level);
     }
 
+    [Theory]
+    [InlineData(2u, 150f)]
+    [InlineData(3u, 150f)]
+    [InlineData(4u, 150f)]
+    [InlineData(5u, 150f)]
+    [InlineData(2u, 500f)]
+    [InlineData(3u, 500f)]
+    [InlineData(4u, 500f)]
+    [InlineData(5u, 500f)]
+    public void KeepDistantBuildingsRetainsSimplifiedSolidShellAndItsPortals(
+        uint facingMode, float distance)
+    {
+        var fullBsp = new WalkBspNode();
+        var simplifiedBsp = new WalkBspNode();
+        var building = new WalkBuilding
+        {
+            DegradeLevels =
+            [
+                new(0x01000071u, 1u, 25f, 50f, 75f, fullBsp),
+                new(0x01000072u, 1u, 50f, 100f, 150f, simplifiedBsp),
+                new(0x01000073u, facingMode, 100f, 400f, 500f, null),
+                new(0u, 1u, float.MaxValue, float.MaxValue, float.MaxValue, null),
+            ],
+        };
+
+        Assert.Equal(
+            new WalkBuildingSelection(0x01000072u, simplifiedBsp, 1, 1u),
+            building.Select(distance, 0f, 0f, keepDistantBuildings: true));
+        Assert.Equal(
+            distance < 400f ? 2 : 3,
+            building.Select(distance, 0f, 0f, keepDistantBuildings: false).Level);
+        Assert.Equal(
+            new WalkBuildingSelection(0x01000071u, fullBsp, 0, 1u),
+            building.Select(0f, 0f, 0f, keepDistantBuildings: true));
+    }
+
     [Fact]
     public void KeepDistantBuildingsReachesSelectionThroughTheWalkContext()
     {

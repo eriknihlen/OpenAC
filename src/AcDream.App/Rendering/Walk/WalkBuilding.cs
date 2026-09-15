@@ -67,13 +67,11 @@ public sealed class WalkBuilding
     public float PartZeroScaleZ = 1f;
 
     /// <param name="keepDistantBuildings">
-    /// When a building's detail ladder ends in an entry that names no mesh at
-    /// all — "at this distance, draw nothing" — take the nearest entry below it
-    /// that does name one instead of drawing nothing. Our object range reaches
-    /// much further than the ladder's authors assumed, and the small objects
-    /// around a building carry no ladder, so honouring that entry leaves fences
-    /// and stairs standing around a building that is no longer there. Off, the
-    /// ladder is honoured exactly as authored.
+    /// Retain the nearest preceding solid model when a distance level is blank
+    /// or camera-facing. Surrounding objects remain three-dimensional at our
+    /// extended object range, so a flat building silhouette cannot enclose its
+    /// stairs and roof pieces. Buildings with only camera-facing models retain
+    /// their nearest nonblank level. Off, the ladder is used as authored.
     /// </param>
     public WalkBuildingSelection Select(
         float viewerDistance,
@@ -106,19 +104,25 @@ public sealed class WalkBuilding
 
         WalkBuildingSelection SelectionAt(int index)
         {
-            // The ladder's entries come straight from the authored data, so
-            // even the nearest one can name no mesh; when none of them does,
-            // the building draws nothing, exactly as authored.
-            if (keepDistantBuildings && DegradeLevels[index].GfxObjId == 0)
+            if (keepDistantBuildings
+                && (DegradeLevels[index].GfxObjId == 0
+                    || IsCameraFacing(DegradeLevels[index].Mode)))
             {
-                for (int i = index - 1; i >= 0; i--)
+                int nearestNonblank = -1;
+                for (int i = index; i >= 0; i--)
                 {
-                    if (DegradeLevels[i].GfxObjId != 0)
+                    if (DegradeLevels[i].GfxObjId == 0)
+                        continue;
+                    if (nearestNonblank < 0)
+                        nearestNonblank = i;
+                    if (!IsCameraFacing(DegradeLevels[i].Mode))
                     {
-                        index = i;
+                        nearestNonblank = i;
                         break;
                     }
                 }
+                if (nearestNonblank >= 0)
+                    index = nearestNonblank;
             }
 
             WalkBuildingDegradeLevel level = DegradeLevels[index];
@@ -126,6 +130,8 @@ public sealed class WalkBuilding
                 level.GfxObjId, level.DrawingBsp, index, level.Mode);
         }
     }
+
+    private static bool IsCameraFacing(uint mode) => mode is >= 2 and <= 5;
 }
 
 public static class WalkBuildingPortals

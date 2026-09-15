@@ -221,6 +221,8 @@ public sealed class FloatingChatWindowController : IRetainedPanelController
         return result;
     }
 
+    internal void ApplyChatFont(UiDatFont font) => Transcript.DatFont = font;
+
     public void Dispose()
     {
         if (_disposed) return;

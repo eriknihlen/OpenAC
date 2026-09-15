@@ -58,6 +58,37 @@ public sealed class CameraFrameControllerTests
     }
 
     [Fact]
+    public void DevToolsKeyboardCapture_KeepsTheChaseCameraFollowing_AndOnlyMutesTheAdjustmentKeys()
+    {
+        PlayerMovementController controller = CreatePlayer();
+        var calls = new List<string>();
+        var runtime = new PlayerRuntime(controller, calls);
+        var localFrame = new RetailLocalPlayerFrameController(
+            runtime,
+            new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        float distanceBefore = legacy.Distance;
+        var frame = new CameraFrameController(
+            camera,
+            new CaptureSource { DevToolsKeyboard = true },
+            new InputSource { Chase = new ChaseCameraAdjustmentInput(ZoomIn: true, false, false, false, false, false) },
+            runtime,
+            new ChaseSource(legacy, retail),
+            localFrame,
+            new Reconciler(calls),
+            new CombatTargetSource());
+
+        frame.Tick(new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0));
+
+        // The camera still went to the character; the held zoom key did nothing.
+        Assert.NotEqual(Vector3.Zero, legacy.Position);
+        Assert.Equal(distanceBefore, legacy.Distance);
+    }
+
+    [Fact]
     public void InboundCreatedPlayer_ProjectsThenReconcilesBeforeCameraPublication()
     {
         PlayerMovementController controller = CreatePlayer();

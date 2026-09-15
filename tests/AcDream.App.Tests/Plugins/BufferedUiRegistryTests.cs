@@ -22,6 +22,26 @@ public class BufferedUiRegistryTests
     }
 
     [Fact]
+    public void HasUndrained_TracksRegistrationsMadeAfterADrain()
+    {
+        var reg = new BufferedUiRegistry();
+        Assert.False(reg.HasUndrained);
+
+        reg.AddMarkupPanel("a.xml", new object());
+        Assert.True(reg.HasUndrained);
+        reg.Drain();
+        Assert.False(reg.HasUndrained);
+
+        // A window registered once the UI is up (a server-fed panel) is what
+        // the runtime polls for; draining again picks up only that one.
+        reg.AddMarkupPanel("late.xml", new object());
+        Assert.True(reg.HasUndrained);
+        var late = reg.Drain();
+        Assert.Equal("late.xml", Assert.Single(late).MarkupPath);
+        Assert.False(reg.HasUndrained);
+    }
+
+    [Fact]
     public void ScopedRegistrationTokenRemovesAnAlreadyMountedElement()
     {
         var registry = new BufferedUiRegistry();

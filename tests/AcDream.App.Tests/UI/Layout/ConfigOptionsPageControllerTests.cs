@@ -253,6 +253,7 @@ public sealed class ConfigOptionsPageControllerTests
         public List<AudioSettings> AudioSaves { get; } = new();
         public List<CameraTurningSettings> CameraTurningSaves { get; } = new();
         public List<ChatSettings> ChatSaves { get; } = new();
+        public List<(int Face, int Size)> ChatFontApplies { get; } = new();
 
         /// <summary>
         /// The mixer seam every graphical host supplies, so the retail rows
@@ -275,6 +276,7 @@ public sealed class ConfigOptionsPageControllerTests
             AudioMixer: audioMixer ?? Mixer.Bindings)
         {
             RenderPacks = renderPacks,
+            ApplyChatFont = (face, size) => ChatFontApplies.Add((face, size)),
         };
     }
 
@@ -951,6 +953,49 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
+    public void MenuRow_ChatFontFace_ReachesApplyChatFont_WithNoApplyButton_Issue72()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var row = (IntOptionRow)controller.ConfigPage.Rows[37]; // Chat Font Face
+
+        row.SetCurrentValue(0);
+
+        Assert.Equal((0, ChatSettings.Default.ChatFontSizeIndex), bindings.ChatFontApplies[^1]);
+    }
+
+    [Fact]
+    public void MenuRow_ChatFontSize_ReachesApplyChatFont_WithNoApplyButton_Issue72()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var row = (IntOptionRow)controller.ConfigPage.Rows[38]; // Chat Font Size
+
+        row.SetCurrentValue(3);
+
+        Assert.Equal((ChatSettings.Default.ChatFontFace, 3), bindings.ChatFontApplies[^1]);
+    }
+
+    [Fact]
+    public void ChatFontRows_ResetAndDefaults_ReachApplyChatFont_Issue72()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var faceRow = (IntOptionRow)controller.ConfigPage.Rows[37];
+
+        faceRow.SetCurrentValue(0);
+        bindings.ChatFontApplies.Clear();
+        controller.ConfigPage.Reset();
+        Assert.Equal(
+            (ChatSettings.Default.ChatFontFace, ChatSettings.Default.ChatFontSizeIndex),
+            bindings.ChatFontApplies[^1]);
+
+        faceRow.SetCurrentValue(0);
+        bindings.ChatFontApplies.Clear();
+        controller.ConfigPage.Defaults();
+        Assert.Equal(
+            (ChatSettings.Default.ChatFontFace, ChatSettings.Default.ChatFontSizeIndex),
+            bindings.ChatFontApplies[^1]);
+    }
+
+    [Fact]
     public void Apply_CommitsBaseline_ForAMixOfRowTypes()
     {
         (OptionsPanelController controller, _, _) = BindReal();
@@ -1392,8 +1437,8 @@ public sealed class ConfigOptionsPageControllerTests
         (40, RowKind.Slider, true, "Mouse Look Sensitivity"),
         (41, RowKind.Toggle, true, "Invert Mouselook Y Axis"),
         (42, RowKind.Toggle, true, "Use Mouse Turning"),
-        (45, RowKind.Menu, true, "Chat Font Face"),
-        (46, RowKind.Menu, true, "Chat Font Size"),
+        (45, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
+        (46, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
     };
 
     private static Vector4? FindTextLineColor(UiElement root, uint elementId)
@@ -1409,7 +1454,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => "x");
         Assert.True(bound);
-        Assert.Equal(14, DimmingExpectations.Count(expectation => expectation.StoreOnly));
+        Assert.Equal(12, DimmingExpectations.Count(expectation => expectation.StoreOnly));
 
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(

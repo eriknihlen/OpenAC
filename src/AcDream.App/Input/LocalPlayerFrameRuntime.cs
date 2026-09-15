@@ -27,7 +27,6 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
     private readonly IRuntimeLocalPlayerControllerSource _controller;
     private readonly IChaseCameraSource _chase;
     private readonly DispatcherMovementInputSource _input;
-    private readonly IInputCaptureSource _capture;
     private readonly LiveEntityRuntime _liveEntities;
     private readonly ILocalPlayerIdentitySource _identity;
     private readonly ILocalPlayerPhysicsHostSource _physicsHost;
@@ -41,7 +40,6 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
         IRuntimeLocalPlayerControllerSource controller,
         IChaseCameraSource chase,
         DispatcherMovementInputSource input,
-        IInputCaptureSource capture,
         LiveEntityRuntime liveEntities,
         ILocalPlayerIdentitySource identity,
         ILocalPlayerPhysicsHostSource physicsHost,
@@ -54,7 +52,6 @@ internal sealed class LiveLocalPlayerFrameRuntime : ILocalPlayerFrameRuntime
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _chase = chase ?? throw new ArgumentNullException(nameof(chase));
         _input = input ?? throw new ArgumentNullException(nameof(input));
-        _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _liveEntities = liveEntities ?? throw new ArgumentNullException(nameof(liveEntities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _physicsHost = physicsHost ?? throw new ArgumentNullException(nameof(physicsHost));

@@ -570,6 +570,8 @@ public sealed class ChatWindowController : IRetainedWindowStateController, IReta
         _hasUnseenText = false;
     }
 
+    internal void ApplyChatFont(UiDatFont font) => Transcript.DatFont = font;
+
     internal void UpdateUnreadIndicator()
     {
         if (Transcript.Scroll.AtEnd)

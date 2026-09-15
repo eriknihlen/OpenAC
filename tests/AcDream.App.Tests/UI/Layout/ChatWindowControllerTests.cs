@@ -6,6 +6,7 @@ using AcDream.Core.Chat;
 using AcDream.UI.Abstractions;
 using AcDream.UI.Abstractions.Panels.Chat;
 using AcDream.Runtime.Chat;
+using DatReaderWriter.Types;
 
 namespace AcDream.App.Tests.UI.Layout;
 
@@ -754,4 +755,47 @@ public class ChatWindowControllerTests
         toggle.OnClick!();
         Assert.Equal(350f, handle.Top);
         Assert.Equal(150f, handle.Height);
-    }}
+    }
+
+    // ── Chat font applies to the transcript only ──────────────────────────
+
+    private static UiDatFont BuildDatFont() => new(
+        fgTex: 1u, fgW: 1, fgH: 1,
+        bgTex: 0, bgW: 0, bgH: 0,
+        lineHeight: 16f, baselineOffset: 12f,
+        glyphs: new Dictionary<char, FontCharDesc>());
+
+    [Fact]
+    public void ApplyChatFont_SetsTheTranscriptFont_AndLeavesTheInputAlone()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+        UiDatFont builtFont = BuildDatFont();
+        UiDatFont newFont = BuildDatFont();
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(),
+            builtFont, null, NoTex)!;
+
+        ctrl.ApplyChatFont(newFont);
+
+        Assert.Same(newFont, ctrl.Transcript.DatFont);
+        Assert.Same(builtFont, ctrl.Input.DatFont);
+    }
+
+    [Fact]
+    public void ApplyChatFont_ForcesTheTranscriptToReWrap()
+    {
+        var (rootInfo, layout, vm) = BuildTestTree();
+        var bus = new CaptureBus();
+        var ctrl = ChatWindowController.Bind(
+            rootInfo, layout, vm, () => bus, new ChatWindowState(),
+            BuildDatFont(), null, NoTex)!;
+        vm.ShowSystemMessage("one line before the font changes");
+        IReadOnlyList<UiText.Line> before = ctrl.Transcript.LinesProvider();
+
+        ctrl.ApplyChatFont(BuildDatFont());
+        IReadOnlyList<UiText.Line> after = ctrl.Transcript.LinesProvider();
+
+        Assert.NotSame(before, after);
+    }
+}

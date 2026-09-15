@@ -117,6 +117,10 @@ public static class ConfigOptionsPageController
         AudioMixerBindings AudioMixer)
     {
         public RenderPackBindings? RenderPacks { get; init; }
+
+        /// <summary>Applies a chat face/size pair to the live chat windows, called after
+        /// <see cref="SaveChat"/> so the choice is both stored and live.</summary>
+        public Action<int, int>? ApplyChatFont { get; init; }
     }
 
     /// <summary>
@@ -1298,17 +1302,27 @@ public static class ConfigOptionsPageController
         BuildMenuRow(
             listBox, "ID_UI_ChatFontFace", ChatFontFaceChoices, page, resolveString,
             read: () => bindings.LoadChat().ChatFontFace,
-            apply: value => bindings.SaveChat(bindings.LoadChat() with { ChatFontFace = value }),
+            apply: value =>
+            {
+                ChatSettings updated = bindings.LoadChat() with { ChatFontFace = value };
+                bindings.SaveChat(updated);
+                bindings.ApplyChatFont?.Invoke(updated.ChatFontFace, updated.ChatFontSizeIndex);
+            },
             defaultValue: 2,
-            storeOnly: true,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         BuildMenuRow(
             listBox, "ID_UI_ChatFontSize", ChatFontSizeChoices, page, resolveString,
             read: () => bindings.LoadChat().ChatFontSizeIndex,
-            apply: value => bindings.SaveChat(bindings.LoadChat() with { ChatFontSizeIndex = value }),
+            apply: value =>
+            {
+                ChatSettings updated = bindings.LoadChat() with { ChatFontSizeIndex = value };
+                bindings.SaveChat(updated);
+                bindings.ApplyChatFont?.Invoke(updated.ChatFontFace, updated.ChatFontSizeIndex);
+            },
             defaultValue: 1,
-            storeOnly: true,
+            storeOnly: false,
             resolveSprite, datFont, debugFont);
 
         chat = bindings.LoadChat();

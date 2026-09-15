@@ -37,7 +37,7 @@ public sealed class MossTankPlugin : IAcDreamPlugin
                 // IconText remains the fallback if this id is ever absent
                 // from an install.
                 IconSurfaceId = 0x06002C41u,
-                StartVisible = true,
+                StartVisible = false,
                 ShowInSidePanel = true,
             },
             Path.Combine(directory, "mosstank.xml"),
