@@ -64,6 +64,21 @@ public sealed class SpellSelectorTests
     }
 
     [Fact]
+    public void ABookHoldingOnlyTheLoreNamedSeventhStillAnswersToThePlainName()
+    {
+        var surface = new FakeAutomationSurface();
+        surface.SelfBuffs.Add(Spell.SelfBuff(7, "Might of the Lugians", 10, 7));
+        surface.SelfBuffs.Add(Spell.SelfBuff(17, "Blessing of the Mace Turner", 12, 7));
+        var selector = new SpellSelector(surface, surface);
+
+        Assert.True(selector.TryBestSelfBuff("Strength Self", out PluginSpellInfo spell));
+        Assert.Equal(7u, spell.SpellId);
+        Assert.True(selector.TryBestSelfBuff("Bludgeon Protection Self", out spell));
+        Assert.Equal(17u, spell.SpellId);
+        Assert.False(selector.TryBestSelfBuff("Focus Self", out _));
+    }
+
+    [Fact]
     public void SkipsTiersWithoutComponents()
     {
         var surface = new FakeAutomationSurface();

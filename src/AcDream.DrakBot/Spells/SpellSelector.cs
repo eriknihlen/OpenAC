@@ -144,7 +144,7 @@ public sealed class SpellSelector(
         uint family = 0u;
         foreach (PluginSpellInfo candidate in pool)
         {
-            if (string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+            if (SpellLore.IsTierOf(BaseName(candidate.Name), wanted))
             {
                 family = candidate.Family;
                 break;
@@ -186,7 +186,7 @@ public sealed class SpellSelector(
         {
             foreach (PluginSpellInfo candidate in pool)
             {
-                if (family == 0u && string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+                if (family == 0u && SpellLore.IsTierOf(BaseName(candidate.Name), wanted))
                     family = candidate.Family;
             }
         }
@@ -196,7 +196,7 @@ public sealed class SpellSelector(
             {
                 bool inFamily = family != 0u
                     ? candidate.Family == family
-                    : string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase);
+                    : SpellLore.IsTierOf(BaseName(candidate.Name), wanted);
                 if (!inFamily)
                     continue;
                 known++;
@@ -252,7 +252,7 @@ public sealed class SpellSelector(
         int bestTier = int.MinValue;
         foreach (PluginSpellInfo candidate in pool)
         {
-            if (!string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+            if (!SpellLore.IsTierOf(BaseName(candidate.Name), wanted))
                 continue;
             if (!IsCastable(candidate, buff))
                 continue;
