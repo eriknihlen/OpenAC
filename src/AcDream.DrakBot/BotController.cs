@@ -337,11 +337,20 @@ public sealed class BotController : IMetaBot
             string line = raw.Trim();
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
+            Log.Info($"command file: {line}");
+            if (line.StartsWith("/mt ", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("/ub ", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("/ra ", StringComparison.OrdinalIgnoreCase))
+            {
+                // The VTank-style utility verbs, /ub opt set and the rest.
+                if (Meta?.Utility?.TryHandle(line) != true)
+                    Log.Warn($"command file: {line.Split(' ')[0]} {line.Split(' ').ElementAtOrDefault(1)} is not a command the bot knows");
+                continue;
+            }
             if (line.StartsWith("/drakbot ", StringComparison.OrdinalIgnoreCase))
                 line = line["/drakbot ".Length..];
             else if (line.StartsWith("/bot ", StringComparison.OrdinalIgnoreCase))
                 line = line["/bot ".Length..];
-            Log.Info($"command file: {line}");
             CommandHandler(line);
         }
     }
