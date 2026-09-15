@@ -203,6 +203,7 @@ public sealed class CombatBehavior(
         }
         if (_phase != Phase.Idle && board.Now - _phaseStartedAt > SwingTimeoutSeconds)
         {
+            Phase timedOut = _phase;
             host.AbortPhysicalAttack();
             casts.Clear();
             EnterPhase(Phase.Idle, board.Now);
@@ -211,7 +212,8 @@ public sealed class CombatBehavior(
             // like a walk that never arrived: enough of them and the
             // target is left alone for a while.
             bool blacklisted = lineOfSight.ReportUnreachable(_targetId);
-            return BehaviorStep.Fail($"swing timed out{(blacklisted ? "; leaving the target alone" : string.Empty)}");
+            PluginCombatSnapshot c = board.Combat;
+            return BehaviorStep.Fail($"swing timed out in {timedOut} (mode {c.Mode}, request {c.RequestInProgress}, build {c.BuildInProgress}, power {c.PowerBarLevel:0.00}/{c.DesiredPower:0.00}, server pending {c.ServerResponsePending}, completion #{c.CompletionRevision} error {c.CompletionWeenieError}){(blacklisted ? "; leaving the target alone" : string.Empty)}");
         }
 
         switch (_phase)
