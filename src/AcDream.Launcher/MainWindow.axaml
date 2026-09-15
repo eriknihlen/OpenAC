@@ -35,8 +35,20 @@
     <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,3" /><Setter Property="Background" Value="#131D23" /></Style>
     <Style Selector="CheckBox"><Setter Property="MinHeight" Value="24" /></Style>
     <Style Selector="Expander"><Setter Property="Padding" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="Margin" Value="0,3,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.chip TextBlock"><Setter Property="FontSize" Value="11" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
+    <Style Selector="Border.chip.update"><Setter Property="Background" Value="#3A2E17" /><Setter Property="BorderBrush" Value="#DBB573" /></Style>
+    <Style Selector="Border.chip.update TextBlock"><Setter Property="Foreground" Value="#DBB573" /></Style>
+    <Style Selector="Border.chip.blocked"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /></Style>
+    <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
   </Window.Styles>
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Border Padding="18,10" Background="#152029">
       <StackPanel Spacing="1">
         <TextBlock Text="OpenAC" FontFamily="Georgia,serif" FontSize="27" Foreground="#DBB573" />
@@ -57,7 +69,13 @@
         </Grid>
       </Border>
     </StackPanel>
-    <Grid Grid.Row="2" Margin="14,10" RowDefinitions="Auto,Auto,*">
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="14,0">
+      <ToggleButton x:Name="AccountsTabButton" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
+                    Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
+      <ToggleButton x:Name="PluginsTabButton" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
+                    Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
+    </StackPanel>
+    <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsAccountsTabSelected}">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
           <TextBlock Text="Accounts" Classes="section" />
@@ -110,7 +128,83 @@
         </StackPanel>
       </ScrollViewer>
     </Grid>
-    <Border Grid.Row="3" Background="#172128" Padding="14,8">
+    <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsPluginsTabSelected}">
+      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8" ColumnSpacing="8">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="Plugins" Classes="section" />
+          <TextBlock Text="{Binding Plugins.ListAgeText}" Classes="muted" FontSize="12" VerticalAlignment="Center" IsVisible="{Binding Plugins.IsUsingCachedList}" />
+        </StackPanel>
+        <TextBox Grid.Column="1" Width="280" Text="{Binding Plugins.AddFromUrlText, Mode=TwoWay}"
+                 PlaceholderText="https://github.com/owner/name" AutomationProperties.Name="Add plugin from URL" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+          <Button Content="Add from URL" Command="{Binding Plugins.AddFromUrlCommand}" />
+          <Button Content="Refresh list" Command="{Binding Plugins.CheckNowCommand}" />
+        </StackPanel>
+      </Grid>
+      <StackPanel Grid.Row="1" Spacing="2" Margin="0,0,0,6">
+        <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Plugins.StatusText}" Classes="muted" IsVisible="{Binding Plugins.HasStatusText}" TextWrapping="Wrap" />
+      </StackPanel>
+      <ScrollViewer Grid.Row="2" x:Name="PluginsScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="10">
+          <StackPanel Spacing="5">
+            <TextBlock Text="Installed" FontWeight="SemiBold" />
+            <TextBlock Text="No plugins are installed yet." Classes="muted" IsVisible="{Binding !Plugins.HasInstalled}" />
+            <ItemsControl ItemsSource="{Binding Plugins.Installed}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginInstalledRowViewModel">
+                  <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Padding="10,6" Margin="0,0,0,5">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="12" />
+                        <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityMuted}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <Border Classes="chip update" IsVisible="{Binding HasUpdateChip}" AutomationProperties.Name="{Binding UpdateChipText}">
+                          <TextBlock Text="{Binding UpdateChipText}" TextWrapping="Wrap" />
+                        </Border>
+                        <TextBlock Text="{Binding UpdateCompatibilityNote}" IsVisible="{Binding ShowUpdateCompatibilityNote}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                        <Border Classes="chip blocked" IsVisible="{Binding IsBlocked}" AutomationProperties.Name="{Binding BlockedText}">
+                          <TextBlock Text="{Binding BlockedText}" TextWrapping="Wrap" />
+                        </Border>
+                        <TextBlock Text="A newer client version bundles this plugin; it will replace this copy on update." IsVisible="{Binding Conflict}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding UpdateWithheldReason, StringFormat='Update withheld: {0}'}" IsVisible="{Binding HasUpdateWithheldReason}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="Update" IsVisible="{Binding UpdateAvailable}" Command="{Binding UpdateCommand}" AutomationProperties.Name="{Binding UpdateAutomationName}" />
+                      <Button Grid.Column="2" Content="Remove" IsVisible="{Binding CanRemove}" Command="{Binding RemoveCommand}" AutomationProperties.Name="{Binding RemoveAutomationName}" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <StackPanel Spacing="5">
+            <TextBlock Text="Discover" FontWeight="SemiBold" />
+            <TextBlock Text="No listed plugins are available to install." Classes="muted" IsVisible="{Binding !Plugins.HasDiscover}" />
+            <ItemsControl ItemsSource="{Binding Plugins.Discover}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">
+                  <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Padding="10,6" Margin="0,0,0,5">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                      <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Description}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <SelectableTextBlock Text="{Binding AuthorAndRepo}" Classes="muted" FontSize="12" />
+                        <TextBlock Text="{Binding LatestVersion, StringFormat='Latest: v{0}'}" IsVisible="{Binding HasLatestVersion}" Classes="muted" FontSize="12" />
+                        <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityWarning}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Compatibility}" IsVisible="{Binding ShowCompatibilityMuted}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="Install" Classes="primary" Command="{Binding InstallCommand}" AutomationProperties.Name="{Binding InstallAutomationName}" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+    <Border Grid.Row="4" Background="#172128" Padding="14,8">
       <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
           <WrapPanel Orientation="Horizontal">
@@ -141,7 +235,7 @@
       </Grid>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="20"
             Background="#C010151D"
             Focusable="True"
@@ -211,7 +305,7 @@
       </Border>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="30"
             Background="#C010151D"
             Focusable="True"
@@ -321,7 +415,7 @@
       </Border>
     </Border>
 
-    <Border Grid.RowSpan="4"
+    <Border Grid.RowSpan="5"
             ZIndex="30"
             Background="#C010151D"
             Focusable="True"
@@ -375,7 +469,7 @@
         </StackPanel>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding TextEditor.IsOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding TextEditor.IsOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Profile editor dialog">
       <Border Classes="card" Margin="24" MaxWidth="880" VerticalAlignment="Stretch">
         <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10">
@@ -415,13 +509,22 @@
         </Grid>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsCharacterOptionsOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsCharacterOptionsOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Character options dialog">
       <Border Classes="card" Margin="24" MaxWidth="720" VerticalAlignment="Stretch">
         <Grid RowDefinitions="Auto,Auto,*,Auto,*,Auto,Auto" RowSpacing="8">
           <TextBlock Text="{Binding SelectionTitle}" FontSize="22" />
-          <TextBlock Grid.Row="1" Text="Plugins · one id per line; blank loads all, none disables" Classes="muted" />
-          <TextBox Grid.Row="2" x:Name="CharacterPluginsTextBox" Text="{Binding CharacterPluginsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          <TextBlock Grid.Row="1" Text="Plugins · only checked plugins load" Classes="muted" />
+          <ScrollViewer Grid.Row="2" x:Name="CharacterPluginsPanel" Focusable="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding CharacterPluginChoices}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:CharacterPluginChoiceViewModel">
+                  <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                            AutomationProperties.Name="{Binding DisplayName}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
           <TextBlock Grid.Row="3" Text="Logon commands · one command per line" Classes="muted" />
           <TextBox Grid.Row="4" Text="{Binding CharacterLoginCommandsText, Mode=TwoWay}" AcceptsReturn="True" ScrollViewer.VerticalScrollBarVisibility="Auto" />
           <TextBlock Grid.Row="5" Text="{Binding LastError}" Foreground="#FFB0A0" TextWrapping="Wrap" />
@@ -432,7 +535,7 @@
         </Grid>
       </Border>
     </Border>
-    <Border Grid.RowSpan="4" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSessionLogOpen}"
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding IsSessionLogOpen}"
             KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Session log dialog">
       <Border Classes="card" Margin="24" MaxWidth="960">
         <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
@@ -440,11 +543,69 @@
           <ScrollViewer Grid.Row="1"><ItemsControl ItemsSource="{Binding Sessions}"><ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:LauncherSessionRowViewModel"><Border Padding="6,8" BorderBrush="#35434B" BorderThickness="0,0,0,1">
               <Grid ColumnDefinitions="160,160,*" ColumnSpacing="10"><TextBlock Text="{Binding Account}" TextWrapping="Wrap" /><TextBlock Grid.Column="1" Text="{Binding Character}" TextWrapping="Wrap" />
-                <StackPanel Grid.Column="2"><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFB0A0" /></StackPanel>
+                <StackPanel Grid.Column="2"><TextBlock Text="{Binding Status}" TextWrapping="Wrap" /><TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="#FFB0A0" /><TextBlock Text="{Binding PluginNotice}" TextWrapping="Wrap" IsVisible="{Binding HasPluginNotice}" Classes="muted" /></StackPanel>
               </Grid></Border></DataTemplate>
           </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
           <Button Grid.Row="2" x:Name="SessionLogCloseButton" Content="Close" Command="{Binding CloseDesktopDialogCommand}" HorizontalAlignment="Right" />
         </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding Plugins.InstallDialog.IsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Install plugin dialog">
+      <Border Classes="card" Margin="24" MaxWidth="560" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+          <TextBlock Text="{Binding Plugins.InstallDialog.DisplayName}" FontSize="22" FontWeight="Bold" />
+          <SelectableTextBlock Grid.Row="1" Text="{Binding Plugins.InstallDialog.Repo}" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="2" Text="{Binding Plugins.InstallDialog.WarningText}" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="4" Spacing="6" IsVisible="{Binding Plugins.InstallDialog.ShowEnableChoice}">
+            <TextBlock Text="Enable for" FontWeight="SemiBold" />
+            <RadioButton Content="None (enable later)" GroupName="PluginEnableChoice"
+                         IsChecked="{Binding Plugins.InstallDialog.EnableNone, Mode=TwoWay}"
+                         AutomationProperties.Name="Enable for no characters yet" />
+            <RadioButton Content="All characters" GroupName="PluginEnableChoice"
+                         IsChecked="{Binding Plugins.InstallDialog.EnableAll, Mode=TwoWay}"
+                         AutomationProperties.Name="Enable for all characters" />
+            <RadioButton Content="Choose characters" GroupName="PluginEnableChoice"
+                         IsChecked="{Binding Plugins.InstallDialog.EnableChoose, Mode=TwoWay}"
+                         AutomationProperties.Name="Choose characters to enable for" />
+            <ItemsControl ItemsSource="{Binding Plugins.InstallDialog.Characters}"
+                          IsVisible="{Binding Plugins.InstallDialog.IsChooseListVisible}" Margin="20,0,0,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PluginCharacterChoiceViewModel">
+                  <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                            AutomationProperties.Name="{Binding DisplayName}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <TextBlock Grid.Row="5" Text="{Binding Plugins.InstallDialog.Error}" Foreground="#FFB0A0"
+                     IsVisible="{Binding Plugins.InstallDialog.HasError}" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="InstallCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.InstallDialog.CancelCommand}" />
+            <Button x:Name="InstallConfirmButton" Content="Install" Classes="primary" IsDefault="True"
+                    Command="{Binding Plugins.InstallDialog.ConfirmCommand}"
+                    AutomationProperties.Name="Confirm plugin install" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding Plugins.IsRemoveDialogOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Remove plugin dialog">
+      <Border Classes="card" Margin="24" MaxWidth="480" VerticalAlignment="Center">
+        <StackPanel Spacing="10">
+          <TextBlock Text="{Binding Plugins.RemoveDisplayName}" FontSize="22" FontWeight="Bold" />
+          <TextBlock Text="This removes the plugin's files. Vtank profiles are kept; they live outside any plugin's scope." TextWrapping="Wrap" Classes="muted" />
+          <CheckBox Content="Also delete this plugin's saved settings"
+                    IsChecked="{Binding Plugins.RemoveDeleteStorage, Mode=TwoWay}"
+                    AutomationProperties.Name="Also delete this plugin's saved settings" />
+          <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="RemoveCancelButton" Content="Cancel" IsCancel="True" Command="{Binding Plugins.CancelRemoveCommand}" />
+            <Button x:Name="RemoveConfirmButton" Content="Remove" Classes="danger" IsDefault="True"
+                    Command="{Binding Plugins.ConfirmRemoveCommand}"
+                    AutomationProperties.Name="Confirm plugin removal" />
+          </StackPanel>
+        </StackPanel>
       </Border>
     </Border>
   </Grid>

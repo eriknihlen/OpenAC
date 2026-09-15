@@ -116,7 +116,7 @@ public sealed partial class MainWindow : Window
         }
         else if (viewModel.IsCharacterOptionsOpen)
         {
-            CharacterPluginsTextBox.Focus();
+            CharacterPluginsPanel.Focus();
         }
         else if (viewModel.IsSessionLogOpen)
         {
@@ -140,6 +140,14 @@ public sealed partial class MainWindow : Window
         else if (viewModel.UpdatePrompt.IsOpen)
         {
             UpdateCloseButton.Focus();
+        }
+        else if (viewModel.Plugins.InstallDialog.IsOpen)
+        {
+            InstallCancelButton.Focus();
+        }
+        else if (viewModel.Plugins.IsRemoveDialogOpen)
+        {
+            RemoveCancelButton.Focus();
         }
     }
 

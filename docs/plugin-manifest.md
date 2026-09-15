@@ -37,3 +37,41 @@ already does: the player asked for it by id, or they didn't.
 If more than one folder under the configured plugin roots declares the same `id`, once each has
 passed its own `kinds` and compatibility check, the session reports `pluginFailed` for that id and
 loads no copy.
+
+## Publishing for the launcher
+
+The launcher installs plugins from GitHub releases (`shaneedwards/openac-plugins` lists them for
+now). A plugin author who wants a plugin installable through the launcher follows a stricter
+contract than the fields above:
+
+| Field | Launcher install |
+|---|---|
+| `id` | must match `^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$`, for example `edwards.buffbot` |
+| `version` | SemVer 2.0, equal to the release tag minus a leading `v` |
+| `minHostVersion` | required |
+| `hosts` | required, non-empty |
+
+**Release, one per version:**
+
+- Public repository. Releases are not drafts or prereleases. The release GitHub marks *latest*
+  must be the highest version; the launcher refuses to install an older one.
+- **Tag:** `v<version>`, for example `v1.2.0`.
+- **Three assets, exact names:**
+  - `plugin.json`, byte-identical to the one at the root of the zip
+  - `<id>-<version>.zip`, with `plugin.json` at the zip root (not inside a folder) plus the entry
+    DLL and its dependencies
+  - `<id>-<version>.zip.sha256`, the output of `shasum -a 256 <zip>` (hash, optional whitespace
+    and file name)
+
+**Managed code only, by allowlist.** Every file in the zip must end in one of: `.dll`, `.pdb`,
+`.json`, `.xml`, `.txt`, `.md`, `.png`, `.jpg`, `.jpeg`, `.ttf`, `.otf`. A `runtimes/` folder is
+rejected.
+
+**Caps:** zip at most 64 MiB. Extraction: 2,000 entries, 64 MiB per entry, 256 MiB total,
+compression ratio 200.
+
+**Recommended:** enable immutable releases on the repository.
+
+The launcher never loads, reflects over, or runs a downloaded file. It unzips, verifies the
+`.sha256`, and stages the plugin disabled; enabling it is a separate, explicit choice the player
+makes on the Plugins tab.

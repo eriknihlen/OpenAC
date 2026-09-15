@@ -36,9 +36,54 @@ Removing a server removes its saved characters. Keep server names unchanged
 to retain their character settings. If profiles change while an editor is open,
 reopen the editor before saving.
 
-Use a named character row's **…** action for plugins and one-command-per-line
-logon commands. **Logon commands** in the bottom bar provides the complete
+Use a named character row's **…** action to choose which installed plugins
+load for it (see **Plugins** below) and to edit one-command-per-line logon
+commands. **Logon commands** in the bottom bar provides the complete
 structured command list for bulk editing.
+
+## Plugins
+
+The **Plugins** tab lists what is installed and what is available to install
+from the curated list. **Discover** shows plugins not yet installed, except
+any the curated list blocks; **Install** downloads and unzips one, but never
+runs it. **Installed** shows what is on disk, with a source badge (**Listed**
+or **Unlisted** for a launcher-managed plugin, **Manual** or **Bundled**
+otherwise) and **Update** and **Remove** for plugins the launcher itself
+installed. Removing a plugin also unticks it for every character that had it
+enabled, so reinstalling it always starts from none. **Refresh list** reloads
+both lists; the launcher also checks once at startup, without delaying the
+window. **Add from URL** adds a plugin from a `https://github.com/owner/name`
+repository not on the list. Right after a curated-list release publishes,
+GitHub's "latest" link can keep serving the previous release for under a
+minute; wait a moment and press **Refresh list** again.
+
+Every row shows its compatibility with the installed client: compatible and
+which version, graphical-only or headless-only when the plugin restricts
+itself to one host, the incompatibility reason, or that no client is
+installed yet.
+
+Every install and update dialog shows a short notice: plugins are made by
+third parties, not OpenAC, and installing one is the player's choice and
+responsibility; an unlisted plugin adds that it is not on the curated list.
+The plugin is downloaded and unzipped, never run automatically, and stays
+disabled until the player chooses to enable it.
+
+Installing never enables a plugin. Choose **None** to install without
+enabling anything, **All characters**, or **Choose** to pick specific
+characters; an update carries no such choice, since it can only affect a
+plugin already enabled where it was chosen before. A character's own **…**
+action opens a checklist of installed plugins compatible with its launch
+mode; only checked plugins load, and a blank list loads nothing, bundled
+plugins included. Existing profiles are not migrated: anyone who relied on a
+plugin loading by default, MossTank included, must tick it once.
+
+A blocked plugin (listed as unsafe by the curated list) shows a red
+"Blocked: <reason>" badge, cannot be installed or updated to, and is filtered
+out of every character's list at launch, with a status line saying so. A
+blocked plugin not yet installed does not appear in Discover at all.
+
+`--plugin-list-uri <https-uri>` overrides the curated list for testing, the
+same way `--update-manifest-uri` overrides the update feed.
 
 ## Installation and updates
 

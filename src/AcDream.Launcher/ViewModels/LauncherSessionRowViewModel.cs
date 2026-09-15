@@ -19,6 +19,7 @@ public sealed class LauncherSessionRowViewModel
         State = DescribeState(snapshot);
         Status = DescribeStatus(snapshot);
         Error = snapshot.Error;
+        PluginNotice = snapshot.PluginNotice;
         IsActive = snapshot.IsActive;
         StopCommand = new AsyncRelayCommand(
             () => stop(SessionId),
@@ -40,6 +41,10 @@ public sealed class LauncherSessionRowViewModel
     public string? Error { get; }
 
     public bool HasError => !string.IsNullOrWhiteSpace(Error);
+
+    public string? PluginNotice { get; }
+
+    public bool HasPluginNotice => !string.IsNullOrWhiteSpace(PluginNotice);
 
     public bool IsActive { get; }
 

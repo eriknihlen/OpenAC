@@ -121,6 +121,10 @@ public sealed partial class LauncherWindowViewModel
             .FirstOrDefault(character => character.CharacterName == row.CharacterName);
         if (SelectedNode is not null)
         {
+            // Reselecting the already-open character's own row leaves SetSelectedNode a no-op, so
+            // the draft needs its own rebuild here to show the saved state on every open, not just
+            // the first.
+            LoadCharacterDraft();
             CharacterLaunchMode = row.Mode;
             IsCharacterOptionsOpen = true;
         }

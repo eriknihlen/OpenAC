@@ -7,6 +7,7 @@ using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Headless;
 using Avalonia.Threading;
@@ -19,9 +20,12 @@ public sealed class MainWindowViewTests
     private static readonly (string Name, Type Type)[] ExpectedNamedControls =
     [
         ("AccountsScroll", typeof(ScrollViewer)),
+        ("AccountsTabButton", typeof(ToggleButton)),
+        ("PluginsTabButton", typeof(ToggleButton)),
+        ("PluginsScroll", typeof(ScrollViewer)),
         ("PlayCheckedButton", typeof(Button)),
         ("ProfileTextBox", typeof(TextBox)),
-        ("CharacterPluginsTextBox", typeof(TextBox)),
+        ("CharacterPluginsPanel", typeof(ScrollViewer)),
         ("SessionLogCloseButton", typeof(Button)),
         ("ServerNameTextBox", typeof(TextBox)),
         ("AccountNameTextBox", typeof(TextBox)),
@@ -44,6 +48,7 @@ public sealed class MainWindowViewTests
         ClosingAModalRestoresThePreviouslyFocusedControlWithoutThrowing();
         ResizingKeepsBatchActionsVisibleWhileManyAccountsScroll();
         ProfileEditorsExposeTwoFieldsAndMaskPasswords();
+        TabsRenderAndSwitchBetweenAccountsAndPlugins();
     }
 
     private static void EveryExplicitlyNamedControlIsAssignedAfterConstruction()
@@ -321,6 +326,49 @@ public sealed class MainWindowViewTests
             }
         }
         finally { CloseTestWindow(window); }
+    }
+
+    private static void TabsRenderAndSwitchBetweenAccountsAndPlugins()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+
+            var accountsTab = (ToggleButton)GetNamedField(window, "AccountsTabButton")!;
+            var pluginsTab = (ToggleButton)GetNamedField(window, "PluginsTabButton")!;
+            var accountsScroll = window.FindControl<ScrollViewer>("AccountsScroll")!;
+            var pluginsScroll = window.FindControl<ScrollViewer>("PluginsScroll")!;
+
+            Assert.True(viewModel.IsAccountsTabSelected);
+            Assert.True(accountsTab.IsChecked);
+            Assert.False(pluginsTab.IsChecked);
+            Assert.True(accountsScroll.IsEffectivelyVisible);
+            Assert.False(pluginsScroll.IsEffectivelyVisible);
+
+            pluginsTab.Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.IsPluginsTabSelected);
+            Assert.True(pluginsTab.IsChecked);
+            Assert.False(accountsTab.IsChecked);
+            Assert.False(accountsScroll.IsEffectivelyVisible);
+            Assert.True(pluginsScroll.IsEffectivelyVisible);
+
+            accountsTab.Command?.Execute(null);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.IsAccountsTabSelected);
+            Assert.True(accountsScroll.IsEffectivelyVisible);
+            Assert.False(pluginsScroll.IsEffectivelyVisible);
+        }
+        finally
+        {
+            CloseTestWindow(window);
+        }
     }
 
     private static Control? CurrentFocus(MainWindow window) =>
