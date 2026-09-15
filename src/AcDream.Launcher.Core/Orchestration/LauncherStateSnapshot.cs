@@ -58,7 +58,8 @@ public sealed record LauncherSessionSnapshot(
     string? Error,
     DateTimeOffset CreatedAt,
     string? ExitReason = null,
-    bool ExitedGracefully = false)
+    bool ExitedGracefully = false,
+    string? PluginNotice = null)
 {
     public bool IsActive => State is not (
         LauncherActivityState.Exited

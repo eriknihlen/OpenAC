@@ -1,3 +1,4 @@
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 
@@ -61,6 +62,7 @@ public sealed class LauncherStartupOptionsTests
         Assert.Same(expected, options.Paths);
         Assert.Equal(1, calls);
         Assert.Equal(ReleaseManifestClient.ProductionManifestUri, options.UpdateManifestUri);
+        Assert.Equal(PluginCatalog.ProductionListUri, options.PluginListUri);
     }
 
     [Fact]
@@ -104,6 +106,28 @@ public sealed class LauncherStartupOptionsTests
             () => new ApplicationPathSet("c", "d", "x", null));
 
         Assert.Equal(new Uri(value), options.UpdateManifestUri);
+    }
+
+    [Theory]
+    [InlineData("https://plugins.example.test/plugins.json")]
+    [InlineData("http://localhost:8123/plugins.json")]
+    public void AcceptsHttpsAndLoopbackHttpPluginListFeeds(string value)
+    {
+        LauncherStartupOptions options = LauncherStartupOptions.Parse(
+            ["--plugin-list-uri", value],
+            () => new ApplicationPathSet("c", "d", "x", null));
+
+        Assert.Equal(new Uri(value), options.PluginListUri);
+    }
+
+    [Fact]
+    public void NoPluginListUriOverrideResolvesTheProductionListUri()
+    {
+        LauncherStartupOptions options = LauncherStartupOptions.Parse(
+            [],
+            () => new ApplicationPathSet("c", "d", "x", null));
+
+        Assert.Equal(PluginCatalog.ProductionListUri, options.PluginListUri);
     }
 
     [Fact]
@@ -247,6 +271,20 @@ public sealed class LauncherStartupOptionsTests
         [
             "--update-manifest-uri", "https://example.test/a",
             "--update-manifest-uri", "https://example.test/b",
+        ]);
+        data.Add(["--plugin-list-uri", "http://plugins.example.test/plugins.json"]);
+        data.Add(["--plugin-list-uri", "file:///tmp/plugins.json"]);
+        data.Add(
+            ["--plugin-list-uri", "https://user:secret@example.test/plugins.json"]);
+        data.Add(
+            ["--plugin-list-uri", "https://example.test/plugins.json?token=secret"]);
+        data.Add(
+            ["--plugin-list-uri", "https://example.test/plugins.json#fragment"]);
+        data.Add(["--plugin-list-uri", "not-a-uri"]);
+        data.Add(
+        [
+            "--plugin-list-uri", "https://example.test/a",
+            "--plugin-list-uri", "https://example.test/b",
         ]);
         return data;
     }

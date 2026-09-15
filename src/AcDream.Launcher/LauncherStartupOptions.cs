@@ -1,3 +1,4 @@
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 
@@ -19,11 +20,13 @@ internal sealed class LauncherStartupOptions
         LauncherStartupMode mode,
         ApplicationPathSet paths,
         Uri updateManifestUri,
+        Uri pluginListUri,
         IReadOnlyList<string> publicArguments)
     {
         Mode = mode;
         Paths = paths;
         UpdateManifestUri = updateManifestUri;
+        PluginListUri = pluginListUri;
         _publicArguments = Array.AsReadOnly(publicArguments.ToArray());
     }
 
@@ -32,6 +35,8 @@ internal sealed class LauncherStartupOptions
     internal ApplicationPathSet Paths { get; }
 
     internal Uri UpdateManifestUri { get; }
+
+    internal Uri PluginListUri { get; }
 
     internal IReadOnlyList<string> PublicArguments => _publicArguments;
 
@@ -65,6 +70,7 @@ internal sealed class LauncherStartupOptions
                 // user-profile-free even under a deliberately broken runtime.
                 new ApplicationPathSet(string.Empty, string.Empty, string.Empty, null),
                 ReleaseManifestClient.ProductionManifestUri,
+                PluginCatalog.ProductionListUri,
                 publicArguments);
         }
 
@@ -72,6 +78,7 @@ internal sealed class LauncherStartupOptions
         string? dataDirectory = null;
         string? cacheDirectory = null;
         Uri? updateManifestUri = null;
+        Uri? pluginListUri = null;
 
         for (int index = 0; index < publicArguments.Length; index += 2)
         {
@@ -108,34 +115,16 @@ internal sealed class LauncherStartupOptions
                             "Launcher options cannot be repeated.");
                     }
 
-                    if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? parsed))
+                    updateManifestUri = ParseManifestUri(name, value);
+                    break;
+                case "--plugin-list-uri":
+                    if (pluginListUri is not null)
                     {
                         throw new LauncherStartupOptionsException(
-                            "--update-manifest-uri must be an absolute URI.");
+                            "Launcher options cannot be repeated.");
                     }
 
-                    if (parsed.Scheme != Uri.UriSchemeHttps
-                        && !(parsed.Scheme == Uri.UriSchemeHttp && parsed.IsLoopback))
-                    {
-                        throw new LauncherStartupOptionsException(
-                            "The update manifest URI must use HTTPS "
-                            + "(loopback HTTP is test-only).");
-                    }
-
-                    if (!string.IsNullOrEmpty(parsed.UserInfo))
-                    {
-                        throw new LauncherStartupOptionsException(
-                            "The update manifest URI cannot contain user information.");
-                    }
-
-                    if (!string.IsNullOrEmpty(parsed.Query)
-                        || !string.IsNullOrEmpty(parsed.Fragment))
-                    {
-                        throw new LauncherStartupOptionsException(
-                            "The update manifest URI cannot contain a query or fragment.");
-                    }
-
-                    updateManifestUri = parsed;
+                    pluginListUri = ParseManifestUri(name, value);
                     break;
                 default:
                     throw new LauncherStartupOptionsException(
@@ -162,7 +151,40 @@ internal sealed class LauncherStartupOptions
             mode,
             paths,
             updateManifestUri ?? ReleaseManifestClient.ProductionManifestUri,
+            pluginListUri ?? PluginCatalog.ProductionListUri,
             publicArguments);
+    }
+
+    /// <summary>Once-only HTTPS-or-loopback URI parsing shared by <c>--update-manifest-uri</c> and
+    /// <c>--plugin-list-uri</c>.</summary>
+    private static Uri ParseManifestUri(string optionName, string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? parsed))
+        {
+            throw new LauncherStartupOptionsException(
+                $"{optionName} must be an absolute URI.");
+        }
+
+        if (parsed.Scheme != Uri.UriSchemeHttps
+            && !(parsed.Scheme == Uri.UriSchemeHttp && parsed.IsLoopback))
+        {
+            throw new LauncherStartupOptionsException(
+                $"The {optionName} URI must use HTTPS (loopback HTTP is test-only).");
+        }
+
+        if (!string.IsNullOrEmpty(parsed.UserInfo))
+        {
+            throw new LauncherStartupOptionsException(
+                $"The {optionName} URI cannot contain user information.");
+        }
+
+        if (!string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment))
+        {
+            throw new LauncherStartupOptionsException(
+                $"The {optionName} URI cannot contain a query or fragment.");
+        }
+
+        return parsed;
     }
 
     private static (LauncherStartupMode Mode, int PublicStart) ReadMode(

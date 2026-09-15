@@ -1,4 +1,5 @@
 using AcDream.Launcher.Core.Launching;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.Core.Updates;
@@ -27,6 +28,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
 
     private LauncherInstallRecord? _installRecord;
     private string _installationStatus;
+    private PluginCatalog? _pluginCatalog;
     private bool _disposed;
 
     public LauncherOrchestrator(
@@ -242,6 +244,17 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         RaiseStateChanged();
     }
 
+    /// <summary>The plugin list the next launched session composes its allow-list against
+    /// (L-302). Set by <c>LauncherPluginComposition</c> after each Check pass.</summary>
+    public void SetPluginCatalog(PluginCatalog? catalog)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            _pluginCatalog = catalog;
+        }
+    }
+
     public void AddServer(string name, string host, int port) =>
         MutateProfiles(() => _profileStore.AddServer(name, host, port));
 
@@ -438,7 +451,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 install,
                 account.Password,
                 isProbe: false,
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken));
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken),
+                _pluginCatalog);
             activity.StartCancellation = request.Cancellation;
         }
 
@@ -721,7 +735,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                     request.Character!,
                     request.Install,
                     _paths,
-                    request.Activity.SessionId);
+                    request.Activity.SessionId,
+                    catalog: request.PluginCatalog);
 
             request.Cancellation.Token.ThrowIfCancellationRequested();
 
@@ -738,6 +753,9 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 request.Activity.SupervisorStateHandler = stateHandler;
                 request.Activity.StatusSource = statusSource;
                 request.Activity.StderrLogPath = composed.StderrLogPath;
+                request.Activity.PluginNotice = composed.PluginStatusLines.Count > 0
+                    ? string.Join(' ', composed.PluginStatusLines)
+                    : null;
                 request.Activity.Status = "Starting host process…";
             }
 
@@ -1372,6 +1390,11 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         public int? ExitCode { get; set; }
 
         public string? Error { get; set; }
+
+        /// <summary>The plugin status lines from launch (blocked ids), shown
+        /// alongside Error rather than in Status, which later state updates
+        /// overwrite.</summary>
+        public string? PluginNotice { get; set; }
         public string? StderrLogPath { get; set; }
 
         public string? HostTerminalStatus { get; set; }
@@ -1424,7 +1447,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 Error,
                 CreatedAt,
                 ExitReason,
-                ExitedGracefully);
+                ExitedGracefully,
+                PluginNotice);
     }
 
     private sealed class StartRequest(
@@ -1435,7 +1459,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         LauncherInstallRecord install,
         string password,
         bool isProbe,
-        CancellationTokenSource cancellation)
+        CancellationTokenSource cancellation,
+        PluginCatalog? pluginCatalog = null)
     {
         public ManagedActivity Activity { get; } = activity;
 
@@ -1452,5 +1477,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         public bool IsProbe { get; } = isProbe;
 
         public CancellationTokenSource Cancellation { get; } = cancellation;
+
+        public PluginCatalog? PluginCatalog { get; } = pluginCatalog;
     }
 }

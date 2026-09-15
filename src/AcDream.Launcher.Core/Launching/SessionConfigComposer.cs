@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
+using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
 
 namespace AcDream.Launcher.Core.Launching;
@@ -10,7 +12,8 @@ public sealed record ComposedSessionConfig(
     string ConfigFilePath,
     string StatusFilePath,
     string StderrLogPath,
-    SessionConfigDocument Document);
+    SessionConfigDocument Document,
+    IReadOnlyList<string> PluginStatusLines);
 
 public interface ILauncherSessionConfigService
 {
@@ -21,7 +24,8 @@ public interface ILauncherSessionConfigService
         LauncherInstallRecord install,
         ApplicationPathSet paths,
         string sessionId,
-        int? loginCommandDelayMs = null);
+        int? loginCommandDelayMs = null,
+        PluginCatalog? catalog = null);
 
     ComposedSessionConfig ComposeProbeAndWrite(
         ServerProfile server,
@@ -40,7 +44,8 @@ public sealed class LauncherSessionConfigService : ILauncherSessionConfigService
         LauncherInstallRecord install,
         ApplicationPathSet paths,
         string sessionId,
-        int? loginCommandDelayMs = null) =>
+        int? loginCommandDelayMs = null,
+        PluginCatalog? catalog = null) =>
         SessionConfigComposer.ComposeAndWrite(
             server,
             account,
@@ -48,7 +53,8 @@ public sealed class LauncherSessionConfigService : ILauncherSessionConfigService
             install,
             paths,
             sessionId,
-            loginCommandDelayMs);
+            loginCommandDelayMs,
+            catalog);
 
     public ComposedSessionConfig ComposeProbeAndWrite(
         ServerProfile server,
@@ -80,7 +86,8 @@ public static class SessionConfigComposer
         LauncherInstallRecord install,
         ApplicationPathSet paths,
         string sessionId,
-        int? loginCommandDelayMs = null)
+        int? loginCommandDelayMs = null,
+        PluginCatalog? catalog = null)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(account);
@@ -101,6 +108,9 @@ public static class SessionConfigComposer
             ? new SessionPolicyDescriptor()
             : null;
 
+        (List<string> pluginAllowList, IReadOnlyList<string> pluginStatusLines) =
+            ComposePluginAllowList(character.Plugins, catalog, paths);
+
         var descriptor = new SessionDescriptor
         {
             Id = sessionId,
@@ -113,7 +123,7 @@ public static class SessionConfigComposer
             Character = selector,
             Policy = policy,
             Credential = new SessionCredentialDescriptor(),
-            Plugins = ComposePluginAllowList(character.Plugins),
+            Plugins = pluginAllowList,
             LoginCommands = character.LoginCommands.Count > 0
                 ? [.. character.LoginCommands]
                 : null,
@@ -148,7 +158,8 @@ public static class SessionConfigComposer
             configFilePath,
             statusFilePath,
             stderrLogPath,
-            document);
+            document,
+            pluginStatusLines);
     }
 
     public static ComposedSessionConfig ComposeProbe(
@@ -214,7 +225,8 @@ public static class SessionConfigComposer
             configFilePath,
             statusFilePath,
             stderrLogPath,
-            document);
+            document,
+            PluginStatusLines: []);
     }
 
     public static ComposedSessionConfig ComposeAndWrite(
@@ -224,7 +236,8 @@ public static class SessionConfigComposer
         LauncherInstallRecord install,
         ApplicationPathSet paths,
         string sessionId,
-        int? loginCommandDelayMs = null)
+        int? loginCommandDelayMs = null,
+        PluginCatalog? catalog = null)
     {
         ComposedSessionConfig composed = Compose(
             server,
@@ -233,7 +246,8 @@ public static class SessionConfigComposer
             install,
             paths,
             sessionId,
-            loginCommandDelayMs);
+            loginCommandDelayMs,
+            catalog);
 
         return Write(composed);
     }
@@ -246,18 +260,56 @@ public static class SessionConfigComposer
         string sessionId) =>
         Write(ComposeProbe(server, account, install, paths, sessionId));
 
-    private static List<string>? ComposePluginAllowList(IReadOnlyList<string> configured)
+    /// <summary>Blank means none, and always sends an explicit list, so a downloaded plugin never
+    /// loads until a character opts in (L-300, L-302).</summary>
+    private static (List<string> Allowed, IReadOnlyList<string> StatusLines) ComposePluginAllowList(
+        IReadOnlyList<string> configured,
+        PluginCatalog? catalog,
+        ApplicationPathSet paths)
     {
         if (configured.Count == 0)
-            return null;                                   // default: load all
+            return ([], []);                                // blank: load none (L-302)
 
         if (configured.Count == 1
             && string.Equals(configured[0], "none", StringComparison.OrdinalIgnoreCase))
         {
-            return [];                                     // explicit: load none
+            return ([], []);                                // explicit: load none
         }
 
-        return [.. configured];
+        PluginCatalog? effective = catalog ?? TryLoadCachedCatalog(paths);
+        if (effective is null)
+            return ([.. configured], []);
+
+        var allowed = new List<string>(configured.Count);
+        var statusLines = new List<string>();
+        foreach (string id in configured)
+        {
+            if (effective.IsBlocked(id, version: null))
+            {
+                statusLines.Add($"Plugin '{id}' is blocked and was not loaded.");
+                continue;
+            }
+
+            allowed.Add(id);
+        }
+
+        return (allowed, statusLines);
+    }
+
+    private static PluginCatalog? TryLoadCachedCatalog(ApplicationPathSet paths)
+    {
+        string path = Path.Combine(paths.CacheDirectory, "plugins.json");
+        if (!File.Exists(path))
+            return null;
+
+        try
+        {
+            return PluginCatalog.Parse(File.ReadAllText(path));
+        }
+        catch (LauncherUpdateException)
+        {
+            return null;
+        }
     }
 
     private static void EnsureClientCompatibilityConfirmed(

@@ -1,5 +1,6 @@
 using AcDream.Launcher.Core.Launching;
 using AcDream.Launcher.Core.Orchestration;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.Core.Updates;
@@ -215,6 +216,44 @@ public sealed class LauncherOrchestratorTests : IDisposable
             session.Error);
         Assert.Equal(session.Error, session.Status);
         Assert.Null(session.ExitCode);
+    }
+
+    [Fact]
+    public async Task BlockedPluginNoticeSurvivesLaterStatusUpdates()
+    {
+        var statusSources = new QueueStatusSourceFactory();
+        using LauncherOrchestrator orchestrator = CreateOrchestrator(
+            statusSourceFactory: statusSources);
+        orchestrator.SetPluginCatalog(PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "ExamplePlugin", "name": "Example", "author": "Shane Edwards",
+                  "description": "Test fixture.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "ExamplePlugin", "versions": ["*"], "reason": "test" }
+              ]
+            }
+            """));
+
+        LauncherSessionSnapshot launched = await orchestrator.LaunchAsync(
+            "Local ACE",
+            "testaccount",
+            "+Acdream",
+            LaunchMode.Headless);
+
+        const string notice = "Plugin 'ExamplePlugin' is blocked and was not loaded.";
+        Assert.Equal(notice, launched.PluginNotice);
+
+        QueueStatusSource source = Assert.Single(statusSources.Created);
+        source.Enqueue(Connected("s1"));
+        source.Enqueue(EnteredWorld("s1", "+Acdream"));
+        orchestrator.PollStatus();
+
+        LauncherSessionSnapshot inWorld = Assert.Single(orchestrator.GetSnapshot().Sessions);
+        Assert.Equal(LauncherActivityState.InWorld, inWorld.State);
+        Assert.Equal(notice, inWorld.PluginNotice);
     }
 
     [Fact]
@@ -753,7 +792,8 @@ public sealed class LauncherOrchestratorTests : IDisposable
             LauncherInstallRecord install,
             ApplicationPathSet paths,
             string sessionId,
-            int? loginCommandDelayMs = null)
+            int? loginCommandDelayMs = null,
+            PluginCatalog? catalog = null)
         {
             PlayCallCount++;
             LastCharacter = character;
@@ -765,7 +805,8 @@ public sealed class LauncherOrchestratorTests : IDisposable
                 install,
                 paths,
                 sessionId,
-                loginCommandDelayMs);
+                loginCommandDelayMs,
+                catalog);
             return LastComposed;
         }
 

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AcDream.Launcher.Core.Launching;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Platform;
 
@@ -192,8 +193,9 @@ public sealed class SessionConfigComposerTests
     }
 
     [Fact]
-    public void UnconfiguredPluginsOmitTheAllowListSoEveryPluginLoads()
+    public void UnconfiguredPluginsExplicitlyLoadNone()
     {
+        // L-302: a blank list means none, not "every plugin loads".
         CharacterProfile character = Character(LaunchMode.Gui);
         character.Plugins = [];
         character.LoginCommands = [];
@@ -207,8 +209,10 @@ public sealed class SessionConfigComposerTests
             sessionId: "session-empty-lists");
 
         JsonObject session = SingleSession(composed);
-        Assert.False(session.ContainsKey("plugins"));
+        Assert.True(session.ContainsKey("plugins"));
+        Assert.Empty(session["plugins"]!.AsArray());
         Assert.False(session.ContainsKey("loginCommands"));
+        Assert.Empty(composed.PluginStatusLines);
     }
 
     [Fact]
@@ -248,6 +252,109 @@ public sealed class SessionConfigComposerTests
         Assert.Equal(
             ["acdream.mosstank"],
             session["plugins"]!.AsArray().Select(node => (string?)node));
+    }
+
+    [Fact]
+    public void ABlockedConfiguredPluginIsFilteredWithOneStatusLine()
+    {
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello", "acdream.mosstank"];
+        PluginCatalog catalog = PluginCatalog.Parse("""
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                  "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+              ],
+              "blocked": [
+                { "id": "edwards.hello", "versions": ["*"], "reason": "test" }
+              ]
+            }
+            """);
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            Paths,
+            sessionId: "session-blocked-plugin",
+            catalog: catalog);
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            ["acdream.mosstank"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Equal(
+            ["Plugin 'edwards.hello' is blocked and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    [Fact]
+    public void WithNoCatalogAndNoCacheConfiguredPluginsAreNotFiltered()
+    {
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            Paths,
+            sessionId: "session-no-catalog-no-cache");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Equal(
+            ["edwards.hello"],
+            session["plugins"]!.AsArray().Select(node => (string?)node));
+        Assert.Empty(composed.PluginStatusLines);
+    }
+
+    [Fact]
+    public void WithNoCatalogTheCachedListStillFiltersBlockedIds()
+    {
+        string cacheDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-session-config-plugins-cache-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cacheDirectory);
+        try
+        {
+            File.WriteAllText(Path.Combine(cacheDirectory, "plugins.json"), """
+                {
+                  "schemaVersion": 1,
+                  "plugins": [
+                    { "id": "edwards.hello", "name": "Hello", "author": "Shane Edwards",
+                      "description": "Says hello.", "repo": "shaneedwards/openac-plugin-hello" }
+                  ],
+                  "blocked": [
+                    { "id": "edwards.hello", "versions": ["*"], "reason": "test" }
+                  ]
+                }
+                """);
+            var paths = Paths with { CacheDirectory = cacheDirectory };
+            CharacterProfile character = Character(LaunchMode.Gui);
+            character.Plugins = ["edwards.hello"];
+
+            ComposedSessionConfig composed = SessionConfigComposer.Compose(
+                Server(),
+                Account(),
+                character,
+                Install,
+                paths,
+                sessionId: "session-cached-catalog");
+
+            JsonObject session = SingleSession(composed);
+            Assert.Empty(session["plugins"]!.AsArray());
+            Assert.Equal(
+                ["Plugin 'edwards.hello' is blocked and was not loaded."],
+                composed.PluginStatusLines);
+        }
+        finally
+        {
+            Directory.Delete(cacheDirectory, recursive: true);
+        }
     }
 
     [Fact]

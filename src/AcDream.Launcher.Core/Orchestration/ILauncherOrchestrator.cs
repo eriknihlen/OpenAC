@@ -1,4 +1,5 @@
 using AcDream.Launcher.Core.Launching;
+using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.Core.Orchestration;
@@ -32,6 +33,12 @@ public interface ILauncherOrchestrator : IDisposable
         LauncherInstallRecord? installRecord,
         string installationStatus) =>
         SetInstallRecord(installRecord);
+
+    /// <summary>The catalog the next launched session filters blocked ids against (L-302). A
+    /// no-op default, since most fakes never exercise a launched session's plugin allow-list.</summary>
+    void SetPluginCatalog(PluginCatalog? catalog)
+    {
+    }
 
     void AddServer(string name, string host, int port);
 
