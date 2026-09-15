@@ -103,7 +103,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
             new DoorBehavior(
                 () => engine.Profile.Doors,
                 () => engine.Profile.Navigation.Enabled && navigation.Route is not null,
-                surface.Navigation.CaptureObjects),
+                surface.Navigation.CaptureObjects,
+                doorId => DoorBlocks(surface, doorId)),
             loot,
             salvage,
             navigation,
@@ -286,6 +287,34 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         _drawerLease = null;
         _panelLease?.Dispose();
         _panelLease = null;
+    }
+
+    /// <summary>
+    /// Whether a walk at a door runs into it: true for a closed door, false
+    /// for one the body passes through, null when there is no probe or no
+    /// position to walk from.
+    /// </summary>
+    private static bool? DoorBlocks(IAutomationSurface surface, uint doorId)
+    {
+        if (!surface.MovementProbe.IsAvailable
+            || !surface.Navigation.Snapshot.IsAvailable
+            || !surface.Navigation.TryGetObject(doorId, out PluginNavigationObject door))
+        {
+            return null;
+        }
+        PluginNavigationPosition here = surface.Navigation.Snapshot.Position;
+        float distance = (float)here.HorizontalDistanceMeters(door.Position);
+        if (distance > 12f)
+            return null;
+        float heading = Navigation.RouteFollower.HeadingTo(here, door.Position);
+        PluginWalkProbeResult result = surface.MovementProbe.ProbeWalk(new PluginWalkProbeRequest(heading, distance + 1.5f)
+        {
+            StepDistance = 0.5f,
+            MaximumCollisionChecks = 40,
+        });
+        if (result.Status == PluginWalkProbeStatus.Blocked)
+            return result.BlockingObjectId == doorId || result.BlockingObjectId == 0u ? true : null;
+        return result.Status == PluginWalkProbeStatus.Clear ? false : null;
     }
 
     private void OnTick(double elapsedSeconds)

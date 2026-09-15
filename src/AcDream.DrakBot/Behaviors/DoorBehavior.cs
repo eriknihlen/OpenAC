@@ -14,7 +14,8 @@ namespace AcDream.DrakBot.Behaviors;
 public sealed class DoorBehavior(
     Func<DoorSettings> settings,
     Func<bool> walking,
-    Func<IReadOnlyList<PluginNavigationObject>> scan) : IBehavior
+    Func<IReadOnlyList<PluginNavigationObject>> scan,
+    Func<uint, bool?>? blocks = null) : IBehavior
 {
     private const double ActionTimeoutSeconds = 3d;
     /// <summary>A use with no reply this long has lost its reply; the busy count it raised is let go.</summary>
@@ -192,11 +193,16 @@ public sealed class DoorBehavior(
             if (_parkedUntil.TryGetValue(candidate.ObjectId, out double until) && board.Now < until)
                 continue;
             double distance = candidate.Position.HorizontalDistanceMeters(board.Navigation.Position);
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = candidate.ObjectId;
-            }
+            if (distance >= bestDistance)
+                continue;
+            // The host's open flag is only as good as what the server sent;
+            // a door that stands open is not worth ten seconds of asking.
+            // When the body can be walked at it, the walk decides: a door
+            // the walk goes through is open, whatever the flag says.
+            if (blocks?.Invoke(candidate.ObjectId) == false)
+                continue;
+            bestDistance = distance;
+            best = candidate.ObjectId;
         }
         return best;
     }

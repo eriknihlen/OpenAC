@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- DrakBot Remote: the phone's view of one client. An opt-in, token-gated
+       HTTP + WebSocket server inside the client that publishes what the bot
+       and the character are doing and takes the phone's commands, applying
+       them on the plugin tick like everything else the bot does. It reads
+       the bot through BotController and the world through the plugin
+       contract; nothing here reaches the renderer or the wire protocol.
+       Off unless configured: no socket is opened without a port. -->
+  <PropertyGroup>
+    <RootNamespace>AcDream.DrakBot.Remote</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AcDream.Plugin.Abstractions\AcDream.Plugin.Abstractions.csproj" />
+    <ProjectReference Include="..\AcDream.DrakBot\AcDream.DrakBot.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AcDream.DrakBot.Remote.Tests" />
+  </ItemGroup>
+</Project>

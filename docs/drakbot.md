@@ -61,7 +61,7 @@ DrakBotPlugin      IAcDreamPlugin: wires host, /drakbot, windows, Tick
       combat         Combat      target selection, line of sight, approach, swing or war spell; fletches ammo
       loot           Looting     open corpse, appraise on demand, pick up by rule or VTank .utl
       salvage        Salvage     salvage what was looted under a salvage rule; merge partial bags
-      doors          Doors       open a closed door in the way of the walk
+      doors          Doors       open a closed door in the way of the walk (closed = the walk probe runs into it; the host's open flag alone is not trusted)
       nav            Navigation  follow a route through the Walker, or a player
     InventoryTidy    beside the behaviors: autostack and autocram
   Spells/            SpellSelector (name -> best known tier), SpellTierGate, CastTracker
