@@ -91,6 +91,30 @@ public class UiRootInputTests
     }
 
     [Fact]
+    public void Tab_TogglesTheChatEntry_AndKeepsTheTextAcrossTheClose()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        root.AddChild(field);
+        root.DefaultTextInput = field;
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        root.OnKeyUp((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(field, root.KeyboardFocus);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.H);
+        root.OnChar('h');
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);   // used to fall through unhandled
+        root.OnKeyUp((int)Silk.NET.Input.Key.Tab);
+        Assert.Null(root.KeyboardFocus);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(field, root.KeyboardFocus);
+        Assert.Equal("h", field.Text);
+    }
+
+    [Fact]
     public void UiNineSlicePanel_IsNotAnchorManaged_SoUserMoveResizeSticks()
     {
         // Regression: the per-frame anchor pass must NOT reset a window's rect,
