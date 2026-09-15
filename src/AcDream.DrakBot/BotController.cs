@@ -102,6 +102,7 @@ public sealed class BotController : IMetaBot
         if (now - _lastHazardScanAt < 1d)
             return;
         _lastHazardScanAt = now;
+        DrainCommandFile();
         PluginNavigationSnapshot snapshot = _navigationSnapshot();
         bool loginPatrolPending = Profile.Navigation.PatrolOnLogin && !_patrolOnLoginDone;
         if (!snapshot.IsAvailable)
@@ -276,6 +277,49 @@ public sealed class BotController : IMetaBot
 
     /// <summary>The <c>/drakbot</c> command handler, so a meta's chat action can reach the bot's own verbs.</summary>
     public Func<string, bool>? CommandHandler { get; set; }
+
+    /// <summary>
+    /// A file of /drakbot commands, one per line, dropped in the bot's
+    /// folder: read and deleted once a second, each line run as if typed.
+    /// For driving the bot from outside the client - a script, a remote,
+    /// a developer with the log open - without a chat box.
+    /// </summary>
+    public const string CommandFileName = "commands.txt";
+
+    private void DrainCommandFile()
+    {
+        if (CommandHandler is null || Files.Directory is not { } root)
+            return;
+        string path = Path.Combine(root, CommandFileName);
+        if (!File.Exists(path))
+            return;
+        string[] lines;
+        try
+        {
+            lines = File.ReadAllLines(path);
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            return; // still being written; next second
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        foreach (string raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                continue;
+            if (line.StartsWith("/drakbot ", StringComparison.OrdinalIgnoreCase))
+                line = line["/drakbot ".Length..];
+            else if (line.StartsWith("/bot ", StringComparison.OrdinalIgnoreCase))
+                line = line["/bot ".Length..];
+            Log.Info($"command file: {line}");
+            CommandHandler(line);
+        }
+    }
 
     public Route DraftRoute { get; private set; } = new() { Name = "draft" };
 
