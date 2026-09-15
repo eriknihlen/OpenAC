@@ -402,6 +402,19 @@ public sealed class GameWindow :
 
     /// <summary>Closes the window the way its close button does; from the frame thread.</summary>
     internal void RequestClose() => _window?.Close();
+
+    private AcDream.App.Plugins.RemoteFrameCapture? _remoteFrames;
+
+    /// <summary>
+    /// The phone's live view takes its frames from this window: bound to
+    /// the GPU device once graphics exist, told about each presented frame.
+    /// </summary>
+    internal void AttachRemoteFrames(AcDream.App.Plugins.RemoteFrameCapture capture)
+    {
+        _remoteFrames = capture ?? throw new ArgumentNullException(nameof(capture));
+        if (_vulkanGraphics is { } graphics)
+            capture.Bind(graphics.Device);
+    }
     private readonly AcDream.App.Input.DispatcherMovementInputSource _movementInput;
     private readonly AcDream.App.Input.DispatcherCameraInputSource _cameraInput = new();
     private AcDream.App.Input.IMouseLookCursor? _mouseLookCursor;
@@ -1168,6 +1181,7 @@ public sealed class GameWindow :
                 _startupMemoryProfile,
                 Console.WriteLine);
         _vulkanGraphics = vulkan;
+        _remoteFrames?.Bind(vulkan.Device);
         return new VulkanGameWindowGraphics(vulkan);
     }
 
@@ -1539,6 +1553,7 @@ public sealed class GameWindow :
             return;
         }
         Vector2D<int> size = _window!.Size;
+        _remoteFrames?.NoteWindowState(_window.WindowState == WindowState.Minimized);
         if (_vulkanGraphics is { } vulkan && !vulkan.PrepareFrame())
         {
             _renderLoopArmed = false;
@@ -1563,7 +1578,10 @@ public sealed class GameWindow :
         }
 
         if (!outcome.SkippedZeroArea)
+        {
             _vulkanGraphics?.NoteFrameClosed();
+            _remoteFrames?.OnFrame(size.X, size.Y);
+        }
         _renderLoopArmed = false;
     }
 

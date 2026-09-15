@@ -81,6 +81,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         bool retainBackbufferCapture = false)
     {
         _retainBackbufferCapture = retainBackbufferCapture;
+        _retainBackbufferCaptureAlways = retainBackbufferCapture;
         _vk = vk ?? throw new ArgumentNullException(nameof(vk));
         ArgumentNullException.ThrowIfNull(features);
         ArgumentNullException.ThrowIfNull(limits);

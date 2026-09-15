@@ -44,6 +44,7 @@ internal sealed class RemoteHttpServer : IDisposable
     private readonly IPluginLogger _log;
     private readonly Func<RemoteCommand, bool> _enqueue;
     private readonly Func<uint, Task<byte[]?>>? _renderIcon;
+    private readonly IRemoteFrameSource? _frames;
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _feeds = new();
     private readonly SemaphoreSlim _connections = new(MaxConnections, MaxConnections);
     private readonly CancellationTokenSource _stopping = new();
@@ -57,16 +58,19 @@ internal sealed class RemoteHttpServer : IDisposable
 
     /// <param name="enqueue">Takes a command off the request thread; false when the plugin is not taking commands.</param>
     /// <param name="renderIcon">Answers an icon request from the tick thread, or null when the host has no icons.</param>
+    /// <param name="frames">The host's presented frames, or null when it does not render.</param>
     public RemoteHttpServer(
         RemoteOptions options,
         IPluginLogger log,
         Func<RemoteCommand, bool> enqueue,
-        Func<uint, Task<byte[]?>>? renderIcon)
+        Func<uint, Task<byte[]?>>? renderIcon,
+        IRemoteFrameSource? frames = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _enqueue = enqueue ?? throw new ArgumentNullException(nameof(enqueue));
         _renderIcon = renderIcon;
+        _frames = frames;
         _token = string.IsNullOrEmpty(options.Token) ? null : Encoding.UTF8.GetBytes(options.Token);
     }
 
@@ -205,6 +209,12 @@ internal sealed class RemoteHttpServer : IDisposable
             await RunFeedAsync(stream, stopping).ConfigureAwait(false);
             return;
         }
+        if (response.Streamer is { } streamer)
+        {
+            await WriteAsync(stream, response, timeout.Token).ConfigureAwait(false);
+            await streamer(stream, stopping).ConfigureAwait(false);
+            return;
+        }
         await WriteAsync(stream, response, timeout.Token).ConfigureAwait(false);
     }
 
@@ -217,10 +227,26 @@ internal sealed class RemoteHttpServer : IDisposable
             return Response.Empty(204);
         if (path == "/healthz")
             return Response.Text(200, "ok");
-        if (path is "/frame" or "/stream" or "/video" || path.StartsWith("/webrtc/", StringComparison.Ordinal))
-            return Response.Error(503, "video is not available on this client");
+        if (path is "/video" || path.StartsWith("/webrtc/", StringComparison.Ordinal))
+            return Response.Error(503, "the H.264 stream is not available on this client");
         if (!Authorized(request))
             return Response.Error(401, "unauthorized");
+        if (path is "/frame" or "/stream")
+        {
+            if (request.Method != "GET")
+                return Response.Error(405, "method not allowed");
+            if (_frames is null || !_frames.IsAvailable)
+                return Response.Error(503, "video is not available on this client");
+            if (NotThisClient(request))
+                return Response.Error(404, "no such client");
+            int quality = request.QueryInt("q", 55, 1, 100);
+            int maxWidth = request.QueryInt("w", 0, 0, 4096);
+            if (path == "/frame")
+                return await HandleFrameAsync(quality, maxWidth, stopping).ConfigureAwait(false);
+            int fps = request.QueryInt("fps", 0, 0, 30);
+            int intervalMs = fps > 0 ? Math.Clamp(1000 / fps, 33, 2000) : DefaultStreamIntervalMs;
+            return Response.Mjpeg((socket, ct) => RunMjpegAsync(socket, quality, maxWidth, intervalMs, ct));
+        }
 
         switch (path)
         {
@@ -250,13 +276,86 @@ internal sealed class RemoteHttpServer : IDisposable
     }
 
     /// <summary>A per-client document is only this client's; another pid is not here.</summary>
-    private static Response ForThisClient(Request request, byte[] document)
+    private static Response ForThisClient(Request request, byte[] document) =>
+        NotThisClient(request) ? Response.Error(404, "no such client") : Response.Json(200, document);
+
+    private static bool NotThisClient(Request request)
     {
         string? pid = request.Query("pid");
-        if (pid is not null && int.TryParse(pid, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) && value != 0 && value != Environment.ProcessId)
-            return Response.Error(404, "no such client");
-        return Response.Json(200, document);
+        return pid is not null
+            && int.TryParse(pid, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+            && value != 0 && value != Environment.ProcessId;
     }
+
+    // ── The live view ──────────────────────────────────────────────────
+
+    private const int DefaultStreamIntervalMs = 400;
+    private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(5);
+
+    private async Task<Response> HandleFrameAsync(int quality, int maxWidth, CancellationToken stopping)
+    {
+        byte[]? jpeg;
+        try
+        {
+            jpeg = await _frames!.CaptureJpegAsync(quality, maxWidth, stopping).WaitAsync(FrameTimeout, stopping).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return Response.Error(504, "frame timed out");
+        }
+        if (jpeg is null)
+            return Response.Error(503, _frames.IsMinimized ? "minimized" : "notfound");
+        return new Response(200, "image/jpeg", jpeg) { CacheControl = "no-store" };
+    }
+
+    /// <summary>
+    /// One MJPEG viewer: frames as multipart parts until the phone lets go
+    /// (the write fails) or the server stops. Frames are captured only
+    /// while someone watches, paced to the asked interval measured from
+    /// the start of each capture, so the achieved rate is the asked one
+    /// rather than the interval plus the capture. A frame the host cannot
+    /// give (minimized) is waited out, not an error.
+    /// </summary>
+    private async Task RunMjpegAsync(NetworkStream stream, int quality, int maxWidth, int intervalMs, CancellationToken stopping)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            while (!stopping.IsCancellationRequested)
+            {
+                clock.Restart();
+                byte[]? jpeg;
+                try
+                {
+                    jpeg = await _frames!.CaptureJpegAsync(quality, maxWidth, stopping).WaitAsync(FrameTimeout, stopping).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    jpeg = null;
+                }
+                if (jpeg is null)
+                {
+                    await Task.Delay(500, stopping).ConfigureAwait(false);
+                    continue;
+                }
+                byte[] header = Encoding.ASCII.GetBytes(
+                    "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + jpeg.Length.ToString(CultureInfo.InvariantCulture) + "\r\n\r\n");
+                await stream.WriteAsync(header, stopping).ConfigureAwait(false);
+                await stream.WriteAsync(jpeg, stopping).ConfigureAwait(false);
+                await stream.WriteAsync(PartEnd, stopping).ConfigureAwait(false);
+                await stream.FlushAsync(stopping).ConfigureAwait(false);
+                int left = intervalMs - (int)clock.ElapsedMilliseconds;
+                if (left > 1)
+                    await Task.Delay(left, stopping).ConfigureAwait(false);
+            }
+        }
+        catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException or SocketException)
+        {
+            // The viewer went away, or the server is stopping.
+        }
+    }
+
+    private static readonly byte[] PartEnd = "\r\n"u8.ToArray();
 
     private Response HandleCommand(Request request)
     {
@@ -566,7 +665,8 @@ internal sealed class RemoteHttpServer : IDisposable
             head.Append("Access-Control-Allow-Headers: Authorization, Content-Type, If-None-Match\r\n");
             if (response.ContentType is not null)
                 head.Append("Content-Type: ").Append(response.ContentType).Append("\r\n");
-            head.Append("Content-Length: ").Append(response.Body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+            if (response.Streamer is null)
+                head.Append("Content-Length: ").Append(response.Body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
             if (response.ETag is not null)
                 head.Append("ETag: ").Append(response.ETag).Append("\r\n");
             head.Append("Cache-Control: ").Append(response.CacheControl ?? "no-store").Append("\r\n");
@@ -618,6 +718,11 @@ internal sealed class RemoteHttpServer : IDisposable
             return null;
         }
 
+        public int QueryInt(string name, int fallback, int minimum, int maximum) =>
+            int.TryParse(Query(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+                ? Math.Clamp(value, minimum, maximum)
+                : fallback;
+
         public bool IsWebSocketUpgrade(out string? key)
         {
             key = Header("Sec-WebSocket-Key");
@@ -634,6 +739,11 @@ internal sealed class RemoteHttpServer : IDisposable
         public string? CacheControl { get; init; }
         public bool Feed { get; init; }
         public string? WebSocketAcceptKey { get; init; }
+        /// <summary>Writes the body after the head for as long as the viewer stays; the connection ends with it.</summary>
+        public Func<NetworkStream, CancellationToken, Task>? Streamer { get; init; }
+
+        public static Response Mjpeg(Func<NetworkStream, CancellationToken, Task> streamer) =>
+            new(200, "multipart/x-mixed-replace; boundary=frame", []) { Streamer = streamer, CacheControl = "no-cache, no-store, must-revalidate" };
 
         public static Response Empty(int status) => new(status, null, []);
         public static Response Text(int status, string text) => new(status, "text/plain", Encoding.UTF8.GetBytes(text));

@@ -188,6 +188,8 @@ var host = new AppPluginHost(
 // bot's controller, which exists once the bot has initialized. The remote
 // listens only when configured (/remote setup, remote.json, ACDREAM_REMOTE).
 var drakBot = new AcDream.DrakBot.DrakBotPlugin(AcDream.DrakBot.Ui.DrakBotWindows.Create);
+var remoteFrames = new AcDream.App.Plugins.RemoteFrameCapture(message => Log.Information("{RemoteFrames}", message));
+window.AttachRemoteFrames(remoteFrames);
 GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
     applicationPaths,
     runtimeOptions.Plugins,
@@ -211,6 +213,7 @@ GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
                 {
                     RenderIconPng = iconId => AcDream.App.Plugins.RemoteIconRenderer.RenderPng(window.Dats, iconId),
                     CloseClient = window.RequestClose,
+                    Frames = remoteFrames,
                 })),
     ]);
 window.StartPluginHosting(pluginSession);

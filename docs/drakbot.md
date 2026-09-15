@@ -741,9 +741,20 @@ screens carry over:
   the whole profile still parses.
 - `GET /icon?did=N` - an item's icon as a PNG, rendered by the graphical
   client from its data files on the tick; a headless host has none.
-- `/runs`, `/maps`, `/frame`, `/stream`, `/video` answer as absent: the
-  run archive, dungeon maps and the screen stream of the RynthCore agent
-  are not here yet.
+- `GET /frame?q=55&w=720` and `GET /stream?fps=5&q=55&w=720` - the live
+  view: the frame the client just presented as a JPEG, or an MJPEG stream
+  of them (`multipart/x-mixed-replace`) at the asked rate, quality and
+  width. The frames are the renderer's own: while a phone watches, the
+  GPU keeps a host-readable copy of each presented frame
+  (`IGpuDevice.RetainBackbufferCapture`, the screenshot path's copy),
+  `RemoteFrameCapture` in the client reads it on the frame thread right
+  after the frame closes and encodes on the pool, and requests that
+  arrive together share one capture; five seconds after the last request
+  the copy is released, so an idle client pays nothing. A minimized
+  window has no frame, and the status says so (`isMinimized`).
+- `/runs`, `/maps` and `/video` answer as absent: the run archive, dungeon
+  maps and the H.264 stream of the RynthCore agent are not here yet, nor
+  is tap-to-click in the live view.
 
 `tests/AcDream.DrakBot.Remote.Tests` drives the document builders and the
 command routing against the bot's fake surface, and the listener with a
@@ -779,5 +790,6 @@ In rough priority order:
 - **Terrain passability overlays and the radar wall renderer** - the
   route markers are drawn now; those two need cell surface data the
   contract does not carry.
-- **The remote's screen stream, run archive and dungeon maps** - the
-  RynthCore agent had all three; the remote answers them as absent for now.
+- **The remote's H.264 stream, tap-to-click, run archive and dungeon
+  maps** - the RynthCore agent had them; the remote serves an MJPEG live
+  view and answers the rest as absent for now.

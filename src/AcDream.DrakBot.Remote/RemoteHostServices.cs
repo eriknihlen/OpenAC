@@ -20,6 +20,9 @@ public sealed record RemoteHostServices
     /// <summary>Frames the host presented in the last second, when it renders at all.</summary>
     public Func<double>? FramesPerSecond { get; init; }
 
+    /// <summary>The host's presented frames as JPEG, for the phone's live view; null on a host that does not render.</summary>
+    public IRemoteFrameSource? Frames { get; init; }
+
     /// <summary>
     /// Asks the host to leave the world and close, for the phone's
     /// close-client command. Null when the host would rather not be closed

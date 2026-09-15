@@ -124,7 +124,8 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
                 commands.Enqueue(command);
                 return true;
             },
-            _services.RenderIconPng is null ? null : RequestIcon);
+            _services.RenderIconPng is null ? null : RequestIcon,
+            _services.Frames);
         if (server.TryStart() is { } failure)
         {
             _host.Log.Warn($"DrakBot Remote could not listen ({failure})");

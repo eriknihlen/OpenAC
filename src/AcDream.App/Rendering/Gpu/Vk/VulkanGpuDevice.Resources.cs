@@ -1405,6 +1405,30 @@ internal sealed unsafe partial class VulkanGpuDevice
         return ImageLayout.TransferSrcOptimal;
     }
 
+    public void RetainBackbufferCapture(bool retain)
+    {
+        ThrowIfDisposed();
+        if (_retainBackbufferCaptureAlways || retain == _retainBackbufferCapture)
+            return;
+        _retainBackbufferCapture = retain;
+        if (retain)
+        {
+            if (_backbuffer is not null)
+                ConfigureBackbufferCapture(_backbuffer.Width, _backbuffer.Height);
+            return;
+        }
+        // A frame in flight may still be copying into the buffer; let it land before the buffer goes.
+        VulkanInterop.Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle (release capture)");
+        _captureValidity.Invalidate();
+        _captureBuffer?.Dispose();
+        _captureBuffer = null;
+        _captureWidth = 0;
+        _captureHeight = 0;
+    }
+
+    public bool HasRetainedCapture =>
+        _captureBuffer is not null && _captureValidity.HasSubmittedCopy;
+
     private void ConfigureBackbufferCapture(uint width, uint height)
     {
         if (!_retainBackbufferCapture)
@@ -1435,7 +1459,8 @@ internal sealed unsafe partial class VulkanGpuDevice
             NoteBufferDestroyed);
     }
 
-    private readonly bool _retainBackbufferCapture;
+    private bool _retainBackbufferCapture;
+    private readonly bool _retainBackbufferCaptureAlways;
     private VulkanGpuBuffer? _captureBuffer;
     private uint _captureWidth;
     private uint _captureHeight;

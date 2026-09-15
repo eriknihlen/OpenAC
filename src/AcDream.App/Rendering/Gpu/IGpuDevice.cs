@@ -69,5 +69,16 @@ internal interface IGpuDevice : IDisposable
 
     byte[] CaptureBackbuffer(int width, int height);
 
+    /// <summary>
+    /// Keeps a host-readable copy of every presented frame (what
+    /// <see cref="CaptureBackbuffer"/> reads), or stops keeping one. A
+    /// device built to retain captures ignores the request to stop. From
+    /// the frame thread, between frames.
+    /// </summary>
+    void RetainBackbufferCapture(bool retain) { }
+
+    /// <summary>Whether a retained copy of the frame just presented is ready for <see cref="CaptureBackbuffer"/>.</summary>
+    bool HasRetainedCapture => false;
+
     void WaitIdle();
 }

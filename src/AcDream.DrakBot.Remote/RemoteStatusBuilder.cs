@@ -195,7 +195,7 @@ internal sealed class RemoteStatusBuilder
         json.WriteNumber("secsSinceLastKill", _telemetry.SecondsSinceLastKill);
         json.WriteNumber("freeSlots", inWorld ? character.MainPackFreeSlots : -1);
         json.WriteBoolean("uiHidden", UiHidden);
-        json.WriteBoolean("isMinimized", false);
+        json.WriteBoolean("isMinimized", _services.Frames?.IsMinimized == true);
         json.WriteNumber("scarabs", _scarabTotal);
         json.WriteNumber("tapers", _tapers);
         json.WritePropertyName("scarabsByType");
