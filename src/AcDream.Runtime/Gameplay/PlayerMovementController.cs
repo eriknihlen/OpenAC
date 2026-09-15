@@ -275,6 +275,9 @@ public sealed class PlayerMovementController
     /// <summary>Full 3D world-space velocity of the physics body. Exposed for diagnostic logging.</summary>
     public Vector3 BodyVelocity => _body.Velocity;
 
+    /// <summary>The realized world-space velocity of the last physics quantum.</summary>
+    public Vector3 CachedVelocity => _body.CachedVelocity;
+
     public System.Numerics.Plane ContactPlane => _body.ContactPlane;
 
     private bool _jumpCharging;

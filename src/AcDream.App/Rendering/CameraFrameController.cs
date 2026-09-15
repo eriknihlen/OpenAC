@@ -125,7 +125,7 @@ internal sealed class CameraFrameController : ICameraFramePhase
         retail?.Update(
             result.RenderPosition,
             controller.Yaw,
-            playerVelocity: controller.BodyVelocity,
+            playerVelocity: controller.CachedVelocity,
             isOnGround: result.IsOnGround,
             contactPlaneNormal: controller.ContactPlane.Normal,
             dt: cameraDt,
