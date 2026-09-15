@@ -366,6 +366,21 @@ public sealed class CombatBehavior(
     /// </summary>
     private bool TouchesTarget(Blackboard board, in PluginCombatTarget target)
     {
+        // Asked for every near hostile on every tick while idle - a swarm
+        // of twenty at four metres was a thousand collision walks a second
+        // and the frame rate went with them - so the answer is kept for a
+        // moment. Bodies do not move far in a quarter of a second.
+        if (_touches.TryGetValue(target.ObjectId, out (double At, bool Touches) kept) && board.Now - kept.At <= TouchCacheSeconds)
+            return kept.Touches;
+        bool touches = ProbeTouch(board, target);
+        if (_touches.Count > 64)
+            _touches.Clear();
+        _touches[target.ObjectId] = (board.Now, touches);
+        return touches;
+    }
+
+    private bool ProbeTouch(Blackboard board, in PluginCombatTarget target)
+    {
         IMovementProbeAutomation probe = surface.MovementProbe;
         if (!probe.IsAvailable || !surface.Navigation.TryGetObject(target.ObjectId, out PluginNavigationObject body))
             return false;
@@ -383,6 +398,9 @@ public sealed class CombatBehavior(
 
     /// <summary>How far a walk may go before bumping the target and still count as touching it.</summary>
     private const float combatReachSlack = 1.5f;
+    /// <summary>How long a body-to-body answer is kept before the walk is probed again.</summary>
+    private const double TouchCacheSeconds = 0.25d;
+    private readonly Dictionary<uint, (double At, bool Touches)> _touches = [];
 
     /// <summary>
     /// Makes ammunition from bundles in the pack when the quiver is empty;
