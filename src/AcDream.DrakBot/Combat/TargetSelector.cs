@@ -79,7 +79,7 @@ public static class TargetSelector
         return result;
     }
 
-    private static bool IsIgnored(string name, IReadOnlyList<string> ignoreNames)
+    internal static bool IsIgnored(string name, IReadOnlyList<string> ignoreNames)
     {
         foreach (string ignored in ignoreNames)
         {

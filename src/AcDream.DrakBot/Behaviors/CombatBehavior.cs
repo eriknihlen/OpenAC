@@ -131,6 +131,7 @@ public sealed class CombatBehavior(
                 reason = $"{engagement.Target.Name} at {engagement.Target.Distance:0.0}m";
                 return true;
             }
+            TraceNoTarget(board, combat);
             // Hostiles about that cannot be fought from here keep the
             // stance, and are nothing to take over for: claiming control
             // to leave combat, then keeping the stance, was a takeover
@@ -819,6 +820,48 @@ public sealed class CombatBehavior(
     };
 
     private void StopMoving(INavigationAutomation nav) => _walker.Reset(nav);
+
+    private double _lastNoTargetTraceAt = double.NegativeInfinity;
+
+    /// <summary>
+    /// With hostiles about and none chosen, say every few seconds why the
+    /// nearest few were passed over: the character standing in a pack in
+    /// peace mode is otherwise a silence in the log.
+    /// </summary>
+    private void TraceNoTarget(Blackboard board, CombatSettings combat)
+    {
+        if (board.Hostiles.Count == 0 || _log is not { } log || !log.Debugs() || board.Now - _lastNoTargetTraceAt < 5d)
+            return;
+        _lastNoTargetTraceAt = board.Now;
+        var nearest = new List<PluginCombatTarget>(board.Hostiles);
+        nearest.Sort(static (a, b) => a.Distance.CompareTo(b.Distance));
+        var line = new System.Text.StringBuilder($"combat: none of {board.Hostiles.Count} hostile(s) taken:");
+        for (int index = 0; index < nearest.Count && index < 4; index++)
+        {
+            PluginCombatTarget hostile = nearest[index];
+            string why;
+            if (hostile.Distance > combat.EngageDistance)
+                why = "beyond monster range";
+            else if (combat.MaxHeightDifferenceMeters > 0f && Math.Abs(hostile.HeightDifferenceMeters) > combat.MaxHeightDifferenceMeters)
+                why = "another floor";
+            else if (combat.Monsters.Count > 0 && MonsterRules.For(combat.Monsters, hostile.Name) is not { Priority: > 0 })
+                why = "not on the monster list";
+            else if (TargetSelector.IsIgnored(hostile.Name, combat.IgnoreNames))
+                why = "ignored by name";
+            else if (lineOfSight.IsBlacklisted(hostile.ObjectId))
+                why = "blacklisted";
+            else if (hostile.IsHealthKnown && hostile.HealthFraction <= 0f)
+                why = "dead";
+            else if (hostile.Distance > combat.MeleeRangeMeters && lineOfSight.See(hostile.ObjectId) is Sight sight and not Sight.Seen)
+                why = sight.ToString().ToLowerInvariant();
+            else if (combat.Style == CombatStyle.Melee && hostile.Distance > combat.ApproachRangeMeters)
+                why = "beyond walk-up range";
+            else
+                why = "no way to it";
+            line.Append($" {hostile.Name} {hostile.Distance:0.0}m dz{hostile.HeightDifferenceMeters:+0.0;-0.0} ({why});");
+        }
+        log.Debug(line.ToString());
+    }
 
     /// <summary>
     /// A target the character has swung at and that is now dead - health
