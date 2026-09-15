@@ -51,7 +51,12 @@ public sealed record SpellMetadata(
 
     public bool IsSelfTargeted => (Flags & (uint)SpellFlags.SelfTargeted) != 0;
     public bool IsBeneficial => (Flags & (uint)SpellFlags.Beneficial) != 0;
-    public bool IsProjectile => (Flags & (uint)SpellFlags.Projectile) != 0;
+    public bool IsProjectile =>
+        (Flags & (uint)SpellFlags.Projectile) != 0
+        || (DatReaderWriter.Enums.SpellType)SpellType
+            is DatReaderWriter.Enums.SpellType.Projectile
+            or DatReaderWriter.Enums.SpellType.LifeProjectile
+            or DatReaderWriter.Enums.SpellType.EnchantmentProjectile;
 }
 
 public readonly record struct SpellComponentSet(

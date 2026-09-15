@@ -354,7 +354,9 @@ internal sealed class CombatController
         if (_targetId == 0u)
         {
             StopApproachMovement();
-            Status = "Waiting for a target";
+            Status = _walledNote is null
+                ? "Waiting for a target"
+                : $"Waiting for a target: {_walledNote}";
             return;
         }
 
@@ -461,6 +463,7 @@ internal sealed class CombatController
                 out PluginProjectilePathResult missilePath))
         {
             Status = ProjectileStatus(missilePath, _targetName);
+            SetAsideIfWalled(missilePath.Status == PluginProjectilePathStatus.Blocked);
             return;
         }
         float desiredPower = AutoAttackPower.Resolve(
@@ -652,6 +655,7 @@ internal sealed class CombatController
     {
         bool boltBlocked = false;   // f7.a.c
         bool arcBlocked = false;    // f7.a.b
+        bool walled = false;
         string? projectileRefusal = null;
         Func<PluginSpellInfo, bool> usable = IsUsableAttackSpell(target);
         for (int attempt = 0; attempt < 3; attempt++)
@@ -666,10 +670,16 @@ internal sealed class CombatController
             // hi.cs:483-488
             if (bolt is null && arc is null)
             {
+                if (projectileRefusal is not null)
+                {
+                    Status = projectileRefusal;
+                    SetAsideIfWalled(walled);
+                    return null;
+                }
                 PostAttackWarning(
                     "Warning: no usable attack spell detected for element \""
                     + ElementName(element) + "\"");
-                Status = projectileRefusal ?? "No usable attack spell";
+                Status = "No usable attack spell";
                 return null;
             }
 
@@ -734,19 +744,24 @@ internal sealed class CombatController
             {
                 projectileRefusal = ProjectileStatus(path, _targetName);
                 Status = projectileRefusal;
+                walled |= path.Status == PluginProjectilePathStatus.Blocked;
                 if (type == VtankCombatSpellType.Arc)
                     arcBlocked = true;
                 else
                     boltBlocked = true;
                 if (arcBlocked && boltBlocked)
+                {
+                    SetAsideIfWalled(walled);
                     return null;
+                }
                 continue;
             }
             return new AttackSpellChoice(
                 spell,
                 type,
                 element,
-                CastWithoutTarget: false);
+                CastWithoutTarget: false,
+                PathChecked: true);
         }
         return null;
     }
@@ -806,6 +821,21 @@ internal sealed class CombatController
         in PluginCombatTarget target)
     {
         IMagicCommands magic = _host.Automation.Magic;
+        if (!choice.CastWithoutTarget
+            && !choice.PathChecked
+            && choice.Spell.IsProjectile
+            && !ProjectilePathIsClear(
+                _targetId,
+                choice.Type == VtankCombatSpellType.Arc
+                    ? PluginProjectilePathKind.Arc
+                    : PluginProjectilePathKind.Straight,
+                _settings.AttackHeight,
+                out PluginProjectilePathResult path))
+        {
+            Status = ProjectileStatus(path, _targetName);
+            SetAsideIfWalled(path.Status == PluginProjectilePathStatus.Blocked);
+            return;
+        }
         if (!choice.CastWithoutTarget
             && !ReadyForBreakableTurn(choice.Spell, _targetId))
         {
@@ -1446,6 +1476,19 @@ internal sealed class CombatController
         }
 
         return DebuffPassResult.Idle;
+    }
+
+    /// <summary>
+    /// How long a monster is set aside when every shot the macro could take at it
+    /// would meet a wall, so the macro attacks one it can hit instead of waiting on
+    /// the wall.
+    /// </summary>
+    internal const double WalledTargetSeconds = 5d;
+
+    private void SetAsideIfWalled(bool walled)
+    {
+        if (walled && _targetId != 0u)
+            _failures.SetAside(_targetId, _now + WalledTargetSeconds);
     }
 
     private bool ProjectilePathIsClear(
@@ -2120,11 +2163,10 @@ internal sealed class CombatController
             }
         }
 
-        CombatTargetCandidate chosen = CombatTargetSelector.Select(
+        CombatTargetCandidate chosen = SelectReachable(
             candidates,
-            _settings.DebuffEachFirst,
-            _settings.SelectionMethod,
-            _settings.TargetSelectAngleRange,
+            equipment,
+            combat.Mode,
             wieldedWeapon,
             wieldedOffhand);
 
@@ -2157,6 +2199,108 @@ internal sealed class CombatController
         }
         return (weapon, offhand);
     }
+
+    /// <summary>How many candidates one target choice traces shots at before it takes the best one left.</summary>
+    internal const int MaximumTargetTraces = 4;
+
+    /// <summary>Why the macro waits when every monster in range was passed over for a wall, or null.</summary>
+    private string? _walledNote;
+
+    /// <summary>
+    /// The best candidate a shot can reach. With projectile awareness on, the best candidate
+    /// is traced first, and one every shot at which would meet a wall is set aside as a
+    /// refused shot sets it aside, so the next best is chosen instead of standing on it.
+    /// </summary>
+    private CombatTargetCandidate SelectReachable(
+        List<CombatTargetCandidate> candidates,
+        IReadOnlyList<PluginEquipmentItem> equipment,
+        PluginCombatMode mode,
+        uint wieldedWeapon,
+        uint wieldedOffhand)
+    {
+        _walledNote = null;
+        for (int traced = 0; ; traced++)
+        {
+            CombatTargetCandidate chosen = CombatTargetSelector.Select(
+                candidates,
+                _settings.DebuffEachFirst,
+                _settings.SelectionMethod,
+                _settings.TargetSelectAngleRange,
+                wieldedWeapon,
+                wieldedOffhand);
+            if (chosen.ObjectId == 0u
+                || traced >= MaximumTargetTraces
+                || !EveryShotMeetsAWall(chosen, equipment, mode, out PluginProjectilePathResult path))
+            {
+                if (chosen.ObjectId != 0u)
+                    _walledNote = null;
+                return chosen;
+            }
+            _walledNote = ProjectileStatus(path, chosen.Target.Name);
+            uint walled = chosen.ObjectId;
+            _failures.SetAside(walled, _now + WalledTargetSeconds);
+            candidates.RemoveAll(candidate => candidate.ObjectId == walled);
+        }
+    }
+
+    /// <summary>
+    /// Whether every shot the macro would take at a candidate meets a wall: the projectile
+    /// bolts, streaks and arcs it can cast at the monster's element when it attacks with a
+    /// casting device, and arrows when it attacks with a missile weapon. A melee attack, a
+    /// rule that only debuffs, spells that do not fly, and projectile awareness turned off
+    /// take no shot to trace.
+    /// </summary>
+    private bool EveryShotMeetsAWall(
+        in CombatTargetCandidate candidate,
+        IReadOnlyList<PluginEquipmentItem> equipment,
+        PluginCombatMode mode,
+        out PluginProjectilePathResult path)
+    {
+        path = default;
+        MonsterRuleActions actions = candidate.Rule.Actions;
+        if (!_settings.UseProjectileAwareness || (!actions.Attacks && !actions.UsesStreak))
+            return false;
+        foreach (PluginEquipmentItem item in equipment)
+        {
+            if (item.ObjectId == candidate.PlannedWeapon)
+            {
+                mode = CombatModeGate.ModeFor(in item);
+                break;
+            }
+        }
+        var shots = new List<PluginProjectilePathKind>(2);
+        if (mode == PluginCombatMode.Missile)
+        {
+            shots.Add(PluginProjectilePathKind.Missile);
+        }
+        else if (mode == PluginCombatMode.Magic)
+        {
+            PluginCombatTarget target = candidate.Target;
+            MonsterDamageType element = ResolveAttackElement(actions, target);
+            if (element != MonsterDamageType.DrainAuto)
+            {
+                Func<PluginSpellInfo, bool> usable = IsUsableAttackSpell(target);
+                if (Flies(_attackCatalog.Resolve(element, VtankCombatSpellType.War, usable))
+                    || Flies(_attackCatalog.Resolve(element, VtankCombatSpellType.Streak, usable)))
+                {
+                    shots.Add(PluginProjectilePathKind.Straight);
+                }
+                if (Flies(_attackCatalog.Resolve(element, VtankCombatSpellType.Arc, usable)))
+                    shots.Add(PluginProjectilePathKind.Arc);
+            }
+        }
+        if (shots.Count == 0)
+            return false;
+        foreach (PluginProjectilePathKind shot in shots)
+        {
+            ProjectilePathIsClear(candidate.ObjectId, shot, _settings.AttackHeight, out path);
+            if (path.Status != PluginProjectilePathStatus.Blocked)
+                return false;
+        }
+        return true;
+    }
+
+    private static bool Flies(PluginSpellInfo? spell) => spell is { IsProjectile: true };
 
     /// <summary>
     /// <c>f7.a(fu, maxDist, minDist, targetLock)</c> (<c>f7.cs:247-297</c>) —

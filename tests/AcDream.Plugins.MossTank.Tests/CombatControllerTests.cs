@@ -605,6 +605,120 @@ public sealed class CombatControllerTests
     }
 
     [Fact]
+    public void AStreakIsNotCastAtAMonsterAWallStandsBefore()
+    {
+        var surface = new FakeAutomation
+        {
+            CombatSnapshot = Physical() with { Mode = PluginCombatMode.Magic },
+            Targets = [Target(10, "Drudge", 5, 0)],
+            KnownCombatSpells =
+            [
+                MagicSpell(102, "Flame Streak VII", difficulty: 350) with { IsProjectile = true },
+            ],
+            ProjectilePath = new(
+                PluginProjectilePathStatus.Blocked,
+                BlockingObjectId: 0x50000001u),
+            EquipmentItems = [WieldedCaster()],
+        };
+        var settings = new CombatSettings { UseProjectileAwareness = true, MaximumRange = 40d };
+        settings.Rules.Clear();
+        settings.Rules.Add(new MonsterRule(
+            "DEFAULT",
+            new MonsterRuleActions
+            {
+                Flags = MonsterActionFlags.Streak,
+                DamageType = MonsterDamageType.Fire,
+            }));
+        var controller = new CombatController(new FakeHost(surface), settings);
+
+        controller.Toggle();
+        controller.OnTick(0.25);
+
+        Assert.Empty(surface.CastSpellIds);
+        Assert.Contains("blocked", controller.Status, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(10u, surface.LastProjectileTarget);
+    }
+
+    [Fact]
+    public void AMonsterEveryShotAtWhichMeetsAWallIsPassedOverForOneThatCanBeHit()
+    {
+        var surface = new FakeAutomation
+        {
+            CombatSnapshot = Physical() with { Mode = PluginCombatMode.Magic },
+            Targets = [Target(10, "Drudge", 5, 0), Target(11, "Drudge Skulker", 12, 0)],
+            KnownAttackSpells =
+            [
+                Spell(100, "Incantation of Flame Bolt") with
+                {
+                    IsProjectile = true,
+                },
+            ],
+            EquipmentItems = [WieldedCaster()],
+        };
+        surface.ProjectilePaths[10u] = new(PluginProjectilePathStatus.Blocked, BlockingObjectId: 0x50000001u);
+        var controller = new CombatController(
+            new FakeHost(surface),
+            FireAttackRule(new CombatSettings { UseProjectileAwareness = true, MaximumRange = 40d }));
+
+        controller.Toggle();
+        controller.OnTick(0.25);
+
+        Assert.Equal((100u, 11u), surface.LastTargetedCast);
+        Assert.Equal(100u, Assert.Single(surface.CastSpellIds));
+    }
+
+    [Fact]
+    public void ATargetAWallComesBetweenIsDroppedForOneAShotReaches()
+    {
+        var surface = new FakeAutomation
+        {
+            CombatSnapshot = Physical() with { Mode = PluginCombatMode.Magic },
+            Targets = [Target(10, "Drudge", 5, 0), Target(11, "Drudge Skulker", 12, 0)],
+            KnownAttackSpells =
+            [
+                Spell(100, "Incantation of Flame Bolt") with
+                {
+                    IsProjectile = true,
+                },
+            ],
+            EquipmentItems = [WieldedCaster()],
+        };
+        var controller = new CombatController(
+            new FakeHost(surface),
+            FireAttackRule(new CombatSettings { UseProjectileAwareness = true, MaximumRange = 40d }));
+        controller.Toggle();
+        controller.OnTick(0.25);
+        Assert.Equal((100u, 10u), surface.LastTargetedCast);
+
+        surface.ProjectilePaths[10u] = new(PluginProjectilePathStatus.Blocked);
+        for (int tick = 0; tick < 8 && surface.LastTargetedCast.Target != 11u; tick++)
+            controller.OnTick(0.3);
+
+        Assert.Equal((100u, 11u), surface.LastTargetedCast);
+    }
+
+    [Fact]
+    public void AMeleeAttackTracesNoShotsWhenChoosingItsTarget()
+    {
+        var surface = new FakeAutomation
+        {
+            CombatSnapshot = Physical(),
+            Targets = [Target(10, "Drudge", 2, 0)],
+            EquipmentItems = [WieldedPlannedWeapon()],
+            ProjectilePath = new(PluginProjectilePathStatus.Blocked),
+        };
+        var settings = new CombatSettings { UseProjectileAwareness = true };
+        ProfileFixtureWeapon(settings);
+        var controller = new CombatController(new FakeHost(surface), settings);
+
+        controller.Toggle();
+        controller.OnTick(0.25);
+
+        Assert.Equal(10u, surface.LastBeginTarget);
+        Assert.Equal(0u, surface.LastProjectileTarget);
+    }
+
+    [Fact]
     public void ProjectileAwarenessCanBeExplicitlyDisabled()
     {
         var surface = new FakeAutomation
@@ -3107,6 +3221,7 @@ public sealed class CombatControllerTests
         public int ClearMovementCount { get; private set; }
         public PluginProjectilePathResult ProjectilePath { get; set; } =
             new(PluginProjectilePathStatus.Clear);
+        public Dictionary<uint, PluginProjectilePathResult> ProjectilePaths { get; } = [];
         public uint LastProjectileTarget { get; private set; }
         public IReadOnlyList<PluginProjectileDebugSample>
             ShownProjectileDebugSamples { get; private set; } = [];
@@ -3260,7 +3375,9 @@ public sealed class CombatControllerTests
             int maximumCollisionChecks)
         {
             LastProjectileTarget = targetObjectId;
-            return ProjectilePath;
+            return ProjectilePaths.TryGetValue(targetObjectId, out PluginProjectilePathResult path)
+                ? path
+                : ProjectilePath;
         }
 
         public PluginProjectilePathResult EvaluatePathWithDiagnostics(

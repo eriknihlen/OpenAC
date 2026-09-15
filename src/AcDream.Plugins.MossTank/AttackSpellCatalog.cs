@@ -15,7 +15,8 @@ internal readonly record struct AttackSpellChoice(
     PluginSpellInfo Spell,
     VtankCombatSpellType Type,
     MonsterDamageType DamageType,
-    bool CastWithoutTarget);
+    bool CastWithoutTarget,
+    bool PathChecked = false);
 
 internal sealed class AttackSpellCatalog
 {

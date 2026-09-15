@@ -103,4 +103,17 @@ public sealed class CombatFailureTrackerTests
         HealthRevision = healthRevision,
         SecondsSinceHealthUpdate = 0,
     };
+
+    [Fact]
+    public void AMonsterSetAsideIsKeptOutOfTargetChoiceUntilItsTimeIsUp()
+    {
+        var tracker = new CombatFailureTracker();
+
+        tracker.SetAside(10u, until: 5d);
+        tracker.SetAside(10u, until: 2d);
+
+        Assert.Equal(CombatSuppressionReason.Walled, tracker.Reason(10u, 4.9d));
+        Assert.Equal(CombatSuppressionReason.None, tracker.Reason(10u, 5d));
+        Assert.Equal(CombatSuppressionReason.None, tracker.Reason(11u, 1d));
+    }
 }
