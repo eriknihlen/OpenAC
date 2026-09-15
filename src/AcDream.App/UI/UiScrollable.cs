@@ -16,8 +16,10 @@ public sealed class UiScrollable
 
     public bool HasOverflow => ContentHeight > ViewHeight;
 
-    /// <summary>True when the offset is at (or past) the bottom — used for bottom-pin.</summary>
-    public bool AtEnd => _scrollY >= MaxScroll;
+    /// <summary>True when the offset is at (or past) the bottom — used for bottom-pin. Short of
+    /// it by less than half a line still counts: a thumb drag rarely lands on the exact pixel,
+    /// and the reader who dragged there meant the end.</summary>
+    public bool AtEnd => _scrollY >= MaxScroll - LineHeight / 2;
 
     public void SetExtents(int contentHeight, int viewHeight, bool preserveEnd = false)
     {
