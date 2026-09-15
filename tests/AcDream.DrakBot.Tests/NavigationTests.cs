@@ -322,6 +322,19 @@ public sealed class NavigationTests
         Assert.Equal(1, behavior.WaypointIndex);
         Assert.Equal(6, log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal)));
         Assert.Contains(log.Lines, line => line.Contains("skipping it", StringComparison.Ordinal));
+
+        // Next lap, same cell, same point: given up at once, no detours.
+        behavior.SetRoute(new Route
+        {
+            Name = "floors",
+            Waypoints = [new Waypoint(WaypointKind.Point, 0d, 20d / 240d), new Waypoint(WaypointKind.Point, 20d / 240d, 0d)],
+        });
+        int detoursBefore = log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal));
+        clock.Advance(0.1d);
+        behavior.Execute(Context());
+        Assert.Equal(1, behavior.WaypointIndex);
+        Assert.Equal(detoursBefore, log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal)));
+        Assert.Contains(log.Lines, line => line.Contains("last time; skipping it", StringComparison.Ordinal));
     }
 
     [Fact]

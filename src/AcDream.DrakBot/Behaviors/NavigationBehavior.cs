@@ -45,6 +45,10 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     public const double WedgeSeconds = 45d;
     private const double WedgeMeters = 0.3d;
     private const double WedgeJumpIntervalSeconds = 60d;
+    /// <summary>Points given up on, by the cell they were given up from: (cell, point to the nearest quarter metre).</summary>
+    private readonly HashSet<(uint Cell, long EastWest, long NorthSouth)> _givenUp = [];
+    private static (uint, long, long) GivenUpKey(uint cellId, Waypoint point) =>
+        (cellId, (long)Math.Round(point.EastWest * 960d), (long)Math.Round(point.NorthSouth * 960d));
     private PluginNavigationPosition _wedgeAnchor;
     private double _wedgeAnchorAt = double.NaN;
     private double _lastWedgeJumpAt = double.NegativeInfinity;
@@ -209,6 +213,17 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
             nav.TurnToleranceDegrees,
             nav.LookaheadMeters);
 
+        // A point given up from this cell before is given up at once: the
+        // wall has not moved since last lap.
+        if (step.Action == NavigationAction.Walk && _follower.Current is { } aim
+            && _givenUp.Contains(GivenUpKey(board.Navigation.Position.CellId, aim)))
+        {
+            context.Log.Info($"nav: step {_follower.CurrentIndex + 1} was not reachable from cell 0x{board.Navigation.Position.CellId:X8} last time; skipping it");
+            _walker.Reset(host);
+            _follower.Skip();
+            return BehaviorStep.Continue;
+        }
+
         switch (step.Action)
         {
             case NavigationAction.Finished:
@@ -275,6 +290,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                             // aimed for; the route's shape carries the walk
                             // on, and the skipped point comes round again.
                             context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} not reached after {_detours} detours from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
+                            if (_follower.Current is { } givenUp)
+                                _givenUp.Add(GivenUpKey(board.Navigation.Position.CellId, givenUp));
                             _detours = 0;
                             _walker.Reset(host);
                             _follower.Skip();

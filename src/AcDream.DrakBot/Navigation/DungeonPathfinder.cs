@@ -37,10 +37,28 @@ public static class DungeonPathfinder
 
     public static bool IsDropEdge(in PluginDungeonCell from, in PluginDungeonCell to)
     {
-        double rise = Math.Abs(to.Elevation - from.Elevation) * 240d;
+        // The doorway, when the host names it, is the honest test: a
+        // portal six metres above this cell's floor and three metres off
+        // is a hole in the ceiling to the room above, however far apart
+        // the two cells' centres are on the map. Cell centres alone let
+        // that edge through, and the walk stood at the wall beneath it.
+        if (TryDoorway(from, to, out PluginDungeonDoorway doorway) || TryDoorway(to, from, out doorway))
+        {
+            if (IsSteep(from.Elevation, from.Position, doorway.Elevation, doorway.Position)
+                || IsSteep(to.Elevation, to.Position, doorway.Elevation, doorway.Position))
+            {
+                return true;
+            }
+        }
+        return IsSteep(from.Elevation, from.Position, to.Elevation, to.Position);
+    }
+
+    private static bool IsSteep(double fromElevation, in PluginNavigationPosition from, double toElevation, in PluginNavigationPosition to)
+    {
+        double rise = Math.Abs(toElevation - fromElevation) * 240d;
         if (rise < 0.5d)
             return false;
-        double run = from.Position.HorizontalDistanceMeters(to.Position);
+        double run = from.HorizontalDistanceMeters(to);
         if (run < 1d)
             return true;
         return Math.Atan2(rise, run) * (180d / Math.PI) > DropAngleDegrees;

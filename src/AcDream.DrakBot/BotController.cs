@@ -138,7 +138,9 @@ public sealed class BotController : IMetaBot
             else if (TryStartPatrol(out string message, quiet: true))
             {
                 _patrolOnLoginDone = true;
-                Log.Info($"patrol: started on login after {now - _loginPatrolFirstTryAt:0}s");
+                Log.Info(double.IsNaN(_loginPatrolFirstTryAt)
+                    ? "patrol: started on login"
+                    : $"patrol: started on login after {now - _loginPatrolFirstTryAt:0}s");
                 Engine.Start();
             }
             else if (double.IsNaN(_loginPatrolFirstTryAt))

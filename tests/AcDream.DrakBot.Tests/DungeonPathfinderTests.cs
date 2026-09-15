@@ -42,6 +42,29 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void ADoorwaySixMetresAboveTheFloorIsAHoleNotAWayUp()
+    {
+        // Two cells whose centres are far enough apart on the map for a
+        // gentle slope, but whose shared doorway sits straight above the
+        // lower cell's floor: a hole in the ceiling to the room above.
+        PluginDungeonCell corridor = Cell(0x200, 0d, 0d, -12d, 0x201) with
+        {
+            Doorways = [new PluginDungeonDoorway(Block | 0x201, 3d / 240d, 0d, -6d / 240d)],
+        };
+        PluginDungeonCell room = Cell(0x201, 12d, 0d, -6d, 0x200);
+        Assert.True(DungeonPathfinder.IsDropEdge(corridor, room));
+        Assert.True(DungeonPathfinder.IsDropEdge(room, corridor));
+
+        // The same rise over a ramp's length, doorway at the ramp's foot: walkable.
+        PluginDungeonCell foot = Cell(0x202, 0d, 0d, -12d, 0x203) with
+        {
+            Doorways = [new PluginDungeonDoorway(Block | 0x203, 2d / 240d, 0d, -12d / 240d)],
+        };
+        PluginDungeonCell ramp = Cell(0x203, 10d, 0d, -9d, 0x202);
+        Assert.False(DungeonPathfinder.IsDropEdge(foot, ramp));
+    }
+
+    [Fact]
     public void HazardsAreRoutedAroundUnlessTheyAreTheGoal()
     {
         Dictionary<uint, PluginDungeonCell> graph = Loop();
