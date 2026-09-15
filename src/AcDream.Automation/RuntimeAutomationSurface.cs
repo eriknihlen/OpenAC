@@ -1390,7 +1390,10 @@ public sealed class RuntimeAutomationSurface
                         other,
                         (world.X + offsetX) / 240d,
                         (world.Y + offsetY) / 240d,
-                        world.Z / 240d));
+                        world.Z / 240d)
+                    {
+                        IsFloorOpening = IsFlatPolygon(portal.PolygonLocal),
+                    });
                 }
             }
             result[index] = new PluginDungeonCell(
@@ -1404,6 +1407,27 @@ public sealed class RuntimeAutomationSurface
             };
         }
         return result;
+    }
+
+    /// <summary>
+    /// Whether a portal polygon lies flat: its normal (Newell's method,
+    /// in the cell's frame - cells turn about the vertical only, so the
+    /// vertical stays vertical) points mostly up or down. A door stands
+    /// in a wall; a hole between floors lies in the floor.
+    /// </summary>
+    private static bool IsFlatPolygon(IReadOnlyList<System.Numerics.Vector3> polygon)
+    {
+        System.Numerics.Vector3 normal = System.Numerics.Vector3.Zero;
+        for (int index = 0; index < polygon.Count; index++)
+        {
+            System.Numerics.Vector3 current = polygon[index];
+            System.Numerics.Vector3 next = polygon[(index + 1) % polygon.Count];
+            normal.X += (current.Y - next.Y) * (current.Z + next.Z);
+            normal.Y += (current.Z - next.Z) * (current.X + next.X);
+            normal.Z += (current.X - next.X) * (current.Y + next.Y);
+        }
+        float length = normal.Length();
+        return length > 0f && Math.Abs(normal.Z) / length > 0.7f;
     }
 
     PluginWalkProbeResult IMovementProbeAutomation.ProbeWalk(in PluginWalkProbeRequest request)

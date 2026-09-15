@@ -42,6 +42,28 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void AnOpeningThatLiesFlatIsAHoleBetweenFloorsNotADoorway()
+    {
+        // The corridor and the room above share an opening the host reports
+        // as flat: a hole in the ceiling. Their centres, far apart on the
+        // map, would pass as a gentle slope.
+        PluginDungeonCell corridor = Cell(0x200, 0d, 0d, -12d, 0x201) with
+        {
+            Doorways = [new PluginDungeonDoorway(Block | 0x201, 3d / 240d, 0d, -6d / 240d) { IsFloorOpening = true }],
+        };
+        PluginDungeonCell room = Cell(0x201, 12d, 0d, -6d, 0x200);
+        Assert.True(DungeonPathfinder.IsDropEdge(corridor, room));
+        Assert.True(DungeonPathfinder.IsDropEdge(room, corridor));
+
+        // The same two cells joined by a door standing in a wall: walkable.
+        PluginDungeonCell doored = corridor with
+        {
+            Doorways = [new PluginDungeonDoorway(Block | 0x201, 3d / 240d, 0d, -6d / 240d)],
+        };
+        Assert.False(DungeonPathfinder.IsDropEdge(doored, room));
+    }
+
+    [Fact]
     public void HazardsAreRoutedAroundUnlessTheyAreTheGoal()
     {
         Dictionary<uint, PluginDungeonCell> graph = Loop();

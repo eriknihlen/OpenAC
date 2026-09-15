@@ -37,12 +37,13 @@ public static class DungeonPathfinder
 
     public static bool IsDropEdge(in PluginDungeonCell from, in PluginDungeonCell to)
     {
-        // Cell centres only. Judging the doorway against them as well
-        // looked right for the hole in the ceiling, and cut a dungeon of
-        // 174 steps down to a 14-step loop: a cell's elevation is not its
-        // floor's, and a doorway three metres off a centre is ordinary. A
-        // point behind a hole is given up by the walk instead, and
-        // remembered.
+        // An opening that lies flat is a hole between floors, whatever the
+        // two cells' centres say: the host reads that off the portal
+        // polygon itself. (Judging elevations against the doorway was
+        // tried and cut a dungeon of 174 steps down to 14: a cell's
+        // elevation is not its floor's.) Otherwise the cell centres decide.
+        if ((TryDoorway(from, to, out PluginDungeonDoorway doorway) || TryDoorway(to, from, out doorway)) && doorway.IsFloorOpening)
+            return true;
         return IsSteep(from.Elevation, from.Position, to.Elevation, to.Position);
     }
 

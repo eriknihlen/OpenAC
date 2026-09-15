@@ -33,6 +33,13 @@ public readonly record struct PluginDungeonDoorway(
 {
     public PluginNavigationPosition Position =>
         new(0u, EastWest, NorthSouth, Elevation, 0f, IsOutdoor: false);
+
+    /// <summary>
+    /// The opening lies flat - a hole in a floor or a ceiling between two
+    /// cells one above the other - rather than standing in a wall like a
+    /// door. Something can fall through it; nothing walks through it.
+    /// </summary>
+    public bool IsFloorOpening { get; init; }
 }
 
 /// <summary>The loaded dungeon's cell graph, for a plugin that plans its own way through it.</summary>
