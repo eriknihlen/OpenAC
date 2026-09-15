@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using AcDream.Core.Physics;
 using AcDream.Core.Rendering;
 
 namespace AcDream.App.Rendering;
@@ -22,6 +23,12 @@ public sealed class RetailChaseCamera : ICamera
     internal const float MaximumHorizontalComponent = 10f;
     internal const float MaximumVerticalComponent = 450f;
     internal const float MinimumVerticalComponent = -1.8f;
+
+    // Floor below which a velocity, normal or projection is treated as zero for tilt purposes.
+    internal const float MinTiltComponent = 2e-4f;
+
+    // Scales the normalized average velocity's Z for the airborne heading frame's forward axis.
+    internal const float AirbornePlaneVerticalScale = 0.1f;
 
     // ICamera surface.
     public Vector3   Position   { get; private set; }
@@ -83,24 +90,27 @@ public sealed class RetailChaseCamera : ICamera
         Vector3 playerPosition,
         float playerYaw,
         Vector3 playerVelocity,
-        bool isOnGround,
+        bool inContact,
         Vector3 contactPlaneNormal,
         float dt,
         uint cellId = 0,
         uint selfEntityId = 0,
         Vector3? trackedTargetPoint = null)
     {
-        // 1. Push velocity into 5-frame ring, get average.
-        PushVelocity(_velocityRing, ref _velocityCount, playerVelocity);
-        Vector3 avgVel = AverageVelocity(_velocityRing, _velocityCount);
-
         Vector3 pivotWorld = playerPosition + new Vector3(0f, 0f, PivotHeight);
         Vector3? trackedHeading = ComputeTrackedHeading(pivotWorld, trackedTargetPoint);
+
+        // The velocity ring only advances on updates that align the heading to the plane.
+        bool alignmentApplies = CameraDiagnostics.AlignToSlope && trackedHeading is null;
+        if (alignmentApplies)
+            PushVelocity(_velocityRing, ref _velocityCount, playerVelocity);
+        Vector3 avgVel = AverageVelocity(_velocityRing, _velocityCount);
+
         Vector3 heading = trackedHeading
             ?? ComputeHeading(
                 avgVel,
                 playerYaw + YawOffset,
-                isOnGround,
+                inContact,
                 contactPlaneNormal,
                 CameraDiagnostics.AlignToSlope);
 
@@ -371,7 +381,7 @@ public sealed class RetailChaseCamera : ICamera
     internal static Vector3 ComputeHeading(
         Vector3 avgVelocity,
         float yaw,
-        bool isOnGround,
+        bool inContact,
         Vector3 contactPlaneNormal,
         bool alignToSlope)
     {
@@ -380,22 +390,33 @@ public sealed class RetailChaseCamera : ICamera
 
         if (!alignToSlope) return baseHeading;
 
-        float hMagSq = avgVelocity.X * avgVelocity.X + avgVelocity.Y * avgVelocity.Y;
-        if (hMagSq < 1e-4f) return baseHeading;
+        float avgLength = avgVelocity.Length();
+        if (avgLength < MinTiltComponent) return baseHeading;
+
+        Vector3 normAvg = avgVelocity / avgLength;
+        if (MathF.Abs(normAvg.X) < MinTiltComponent || MathF.Abs(normAvg.Y) < MinTiltComponent)
+            return baseHeading;
 
         Vector3 normal;
-        if (isOnGround && contactPlaneNormal.LengthSquared() > 0.01f)
-            normal = Vector3.Normalize(contactPlaneNormal);
+        if (inContact)
+        {
+            normal = contactPlaneNormal.Length() >= MinTiltComponent
+                ? Vector3.Normalize(contactPlaneNormal)
+                : contactPlaneNormal;
+        }
         else
-            normal = new Vector3(0f, 0f, 1f);
+        {
+            Vector3 t = new(normAvg.X, normAvg.Y, AirbornePlaneVerticalScale * normAvg.Z);
+            normal = t.Length() >= MinTiltComponent
+                ? Vector3.Transform(Vector3.UnitZ, RetailFrameMath.SetVectorHeading(Quaternion.Identity, t))
+                : new Vector3(0f, 0f, 1f);
+        }
 
         float   dot       = Vector3.Dot(baseHeading, normal);
         Vector3 projected = baseHeading - normal * dot;
 
-        // Degenerate: facing nearly parallel to normal (rare — would
-        // require player rotated to face into the ground). Fall back to
-        // the unprojected base heading.
-        if (projected.LengthSquared() < 1e-4f) return baseHeading;
+        // Degenerate: facing parallel to normal falls back to the base heading.
+        if (projected.Length() < MinTiltComponent) return baseHeading;
         return Vector3.Normalize(projected);
     }
 

@@ -40,14 +40,15 @@ public class CameraParkStabilityTests
 
             var playerPos = new Vector3(49.5f, -39.9f, -5.9f);
             float dt = 1f / 1500f;
-            Vector3 velocity = new(velocityX, 0f, 0f);
+            // Diagonal clears the per-axis tilt gate; velocityX alone stays zero for the flat case.
+            Vector3 velocity = new(velocityX, velocityX, 0f);
             Vector3 normal = Vector3.Normalize(new Vector3(normalX, 0f, 1f));  // normalX -0.25 is ~14 degrees
 
             void Step() => cam.Update(
                 playerPosition: playerPos,
                 playerYaw: yaw,
                 playerVelocity: velocity,
-                isOnGround: true,
+                inContact: true,
                 contactPlaneNormal: normal,
                 dt: dt,
                 cellId: 0x8A020142u,

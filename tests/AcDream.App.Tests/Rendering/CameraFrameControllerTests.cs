@@ -252,6 +252,7 @@ public sealed class CameraFrameControllerTests
             Assert.True(controller.BodyVelocity.X * controller.BodyVelocity.X
                 + controller.BodyVelocity.Y * controller.BodyVelocity.Y < 1e-4f);
             Assert.True(MathF.Abs(controller.CachedVelocity.X) > 1f);
+            Assert.True(MathF.Abs(controller.CachedVelocity.Y) > 1f);
             Assert.False(controller.IsAirborne);
             Assert.True(controller.ContactPlane.Normal.Z < MathF.Cos(10f * MathF.PI / 180f));
             Assert.True(MathF.Abs(controller.Position.X - startX) > 0.5f);
@@ -274,7 +275,7 @@ public sealed class CameraFrameControllerTests
         var heights = new byte[81];
         for (int x = 0; x < 9; x++)
             for (int y = 0; y < 9; y++)
-                heights[x * 9 + y] = (byte)(50 + x * 6);
+                heights[x * 9 + y] = (byte)(50 + x * 6 + y * 6);
         var heightTable = new float[256];
         for (int i = 0; i < heightTable.Length; i++)
             heightTable[i] = i;
@@ -290,7 +291,8 @@ public sealed class CameraFrameControllerTests
 
         var controller = new PlayerMovementController(engine);
         controller.SeedPlacementForTest(new Vector3(96f, 96f, 74f), 0x0001u, new Vector3(96f, 96f, 74f));
-        controller.Yaw = 0f;
+        // Backpedaling at 45 deg realizes a diagonal world velocity from the one local root-motion axis.
+        controller.Yaw = MathF.PI / 4f;
         return controller;
     }
 
