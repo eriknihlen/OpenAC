@@ -257,6 +257,25 @@ public class UiFieldTests
     }
 
     [Fact]
+    public void TabLeavesTheFieldAndKeepsWhatWasTyped()
+    {
+        // Tab is retail's chat toggle: it must close the entry it opened, not
+        // fall through unhandled while the field keeps the keyboard.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var input = new UiField { Width = 100, Height = 20 };
+        root.AddChild(input);
+        root.SetKeyboardFocus(input);
+        input.SetText("half written");
+
+        bool handled = input.OnEvent(new UiEvent(
+            0, input, UiEventType.KeyDown, Data0: (int)Silk.NET.Input.Key.Tab));
+
+        Assert.True(handled);
+        Assert.Null(root.KeyboardFocus);
+        Assert.Equal("half written", input.Text);
+    }
+
+    [Fact]
     public void EscapeIsIgnoredWhenTheFieldIsNotEditable()
     {
         // A read-only field returns early before the key switch, so Escape
