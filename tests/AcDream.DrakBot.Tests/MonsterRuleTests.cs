@@ -55,11 +55,15 @@ public sealed class MonsterRuleTests
     }
 
     [Fact]
-    public void WithoutADefaultRuleUnmatchedMonstersAreLeftAlone()
+    public void AnUnmatchedMonsterIsStillFoughtAndOnlyAZeroPriorityLeavesOneAlone()
     {
-        var settings = new CombatSettings { Monsters = [new() { Name = "Olthoi", Priority = 1 }] };
-        IReadOnlyList<PluginCombatTarget> ranked = TargetSelector.Rank([Hostile(1, "Rabbit", 1f), Hostile(2, "Olthoi", 5f)], settings, 0u);
-        Assert.Equal([2u], ranked.Select(t => t.ObjectId));
+        // The list is exceptions: the Olthoi rule ranks it ahead, the
+        // Rabbit with no rule is fought as any other, and a zero-priority
+        // rule is the way to leave a monster alone.
+        var settings = new CombatSettings { Monsters = [new() { Name = "Olthoi", Priority = 2 }, new() { Name = "Wisp", Priority = 0 }] };
+        IReadOnlyList<PluginCombatTarget> ranked = TargetSelector.Rank(
+            [Hostile(1, "Rabbit", 1f), Hostile(2, "Olthoi", 5f), Hostile(3, "Wisp", 0.5f)], settings, 0u);
+        Assert.Equal([2u, 1u], ranked.Select(t => t.ObjectId));
     }
 
     [Fact]

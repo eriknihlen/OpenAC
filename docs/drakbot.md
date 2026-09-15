@@ -108,7 +108,9 @@ ring instead once the profile's minimum number of hostiles stand within
 ring range, and the debuffs to land first - imperil, the element's
 vulnerability, a second vulnerability, fester, yield, broadside, gravity
 well, and a weapon to wield for it. A rule named `Default` covers what
-nothing else matches; without one an unmatched monster is left alone. Debuffs are cast in that order until
+nothing else matches; a monster with no rule at all is still fought,
+with the profile's settings - the list is a list of exceptions, and only
+a rule with priority zero leaves a monster alone. Debuffs are cast in that order until
 the client's record of what the character landed shows them on the
 target; spells are chosen by family, so a lore-named top tier (Outlander's
 Insolence for Force Streak VII) is reached through its lower tiers. The

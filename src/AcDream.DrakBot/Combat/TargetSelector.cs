@@ -52,13 +52,17 @@ public static class TargetSelector
             int priorityRank = PriorityRank(candidate.Name, settings.PriorityNames);
             if (settings.Monsters.Count > 0)
             {
-                // The monster list decides first: no rule (and no Default)
-                // or a zero priority leaves the monster alone; a higher
-                // priority ranks ahead of the name lists.
+                // The monster list is a list of exceptions, as RynthAi's
+                // is: a rule with a zero priority leaves that monster
+                // alone, a higher one ranks it ahead of the name lists,
+                // and a monster with no rule (and no Default) is fought
+                // like any other. A list naming one kind is not a wish to
+                // stand in a pack of the others in peace mode.
                 MonsterRule? rule = MonsterRules.For(settings.Monsters, candidate.Name);
-                if (rule is null || rule.Priority <= 0)
+                if (rule is { Priority: <= 0 })
                     continue;
-                priorityRank = Math.Min(priorityRank, int.MaxValue - 1) - rule.Priority * 1_000_000;
+                if (rule is not null)
+                    priorityRank = Math.Min(priorityRank, int.MaxValue - 1) - rule.Priority * 1_000_000;
             }
             float distance = candidate.ObjectId == currentTargetId
                 ? candidate.Distance * 0.5f

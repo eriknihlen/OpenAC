@@ -844,8 +844,8 @@ public sealed class CombatBehavior(
                 why = "beyond monster range";
             else if (combat.MaxHeightDifferenceMeters > 0f && Math.Abs(hostile.HeightDifferenceMeters) > combat.MaxHeightDifferenceMeters)
                 why = "another floor";
-            else if (combat.Monsters.Count > 0 && MonsterRules.For(combat.Monsters, hostile.Name) is not { Priority: > 0 })
-                why = "not on the monster list";
+            else if (combat.Monsters.Count > 0 && MonsterRules.For(combat.Monsters, hostile.Name) is { Priority: <= 0 })
+                why = "priority zero on the monster list";
             else if (TargetSelector.IsIgnored(hostile.Name, combat.IgnoreNames))
                 why = "ignored by name";
             else if (lineOfSight.IsBlacklisted(hostile.ObjectId))
