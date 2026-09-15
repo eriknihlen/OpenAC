@@ -270,7 +270,10 @@ public sealed class RuntimeLocalPlayerMovementState
     public bool IsReadyForAttack(CombatMode mode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_controller is not { } controller)
+        // A controller committed but not yet activated - dormant while the
+        // landblock's collision is still coming in - has no motion to ask
+        // about, and asking throws; it is not ready for anything yet.
+        if (_controller is not { CanExecuteLiveMovement: true } controller)
             return false;
         var motion = controller.Motion.InterpretedState;
         return CombatInputPlanner.PlayerInReadyPositionForAttack(
@@ -293,7 +296,8 @@ public sealed class RuntimeLocalPlayerMovementState
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         CancelAutoRun();
-        return _controller?.PrepareForAttackRequest() == true;
+        return _controller is { CanExecuteLiveMovement: true } controller
+            && controller.PrepareForAttackRequest();
     }
 
     public bool CommandInterpreterDisabled => _commandInterpreterDisabled;

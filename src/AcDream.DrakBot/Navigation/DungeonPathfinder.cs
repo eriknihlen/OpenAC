@@ -206,6 +206,11 @@ public static class DungeonPathfinder
         if (waypoints.Count > 0 && waypoints[^1].ToPosition().HorizontalDistanceMeters(target.ToPosition()) < 1d)
             waypoints.RemoveAt(waypoints.Count - 1);
         int leadIn = waypoints.Count;
+        // No lead-in left is no rejoin: the same step from the same spot,
+        // and the caller would take it for progress and ask again every
+        // few seconds instead of detouring or giving the step up.
+        if (leadIn == 0)
+            return null;
 
         RouteMode mode = route.Mode ?? RouteMode.Once;
         if (mode == RouteMode.Loop)

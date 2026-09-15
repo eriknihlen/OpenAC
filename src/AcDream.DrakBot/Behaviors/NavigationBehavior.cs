@@ -34,6 +34,21 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     /// </summary>
     public Func<PluginNavigationPosition, int, Route?>? Rejoin { get; set; }
 
+    /// <summary>
+    /// A jump toward a heading, for a body that nothing else moves: wedged
+    /// between floors, in a corpse pile, in a door frame. Set by the
+    /// controller, which owns the jumper.
+    /// </summary>
+    public Action<float>? JumpToward { get; set; }
+
+    /// <summary>How long the body may stand on one spot with the walk pressed before it is called wedged and jumped.</summary>
+    public const double WedgeSeconds = 45d;
+    private const double WedgeMeters = 0.3d;
+    private const double WedgeJumpIntervalSeconds = 60d;
+    private PluginNavigationPosition _wedgeAnchor;
+    private double _wedgeAnchorAt = double.NaN;
+    private double _lastWedgeJumpAt = double.NegativeInfinity;
+
     /// <summary>The walker's one-word state, for the log and the tests.</summary>
     public string WalkerState => _walker.State;
 
@@ -220,6 +235,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                     if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
                         return BehaviorStep.Continue;
                 }
+                if (NoticeWedge(board, step, context.Log))
+                    return BehaviorStep.Continue;
                 StuckRecovery? recovery = _walker.Toward(
                     host, board.Navigation.Position, step.HeadingDegrees, board.Now, nav.TurnToleranceDegrees);
                 if (board.Now - _lastTraceAt >= 0.5d && context.Log.Debugs())
@@ -469,6 +486,31 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 ForgetPosition();
                 return BehaviorStep.Continue;
         }
+    }
+
+    /// <summary>
+    /// The recoveries, detours and rejoins all assume a body that moves
+    /// when a key is pressed. One that has not left a thirty-centimetre
+    /// circle in three quarters of a minute of walking is wedged - between
+    /// floors, in a corpse pile, in a door frame - and the one thing that
+    /// has a chance of freeing it is a jump. Once a minute at most.
+    /// </summary>
+    private bool NoticeWedge(Blackboard board, NavigationStep step, IPluginLogger log)
+    {
+        PluginNavigationPosition here = board.Navigation.Position;
+        if (double.IsNaN(_wedgeAnchorAt) || here.HorizontalDistanceMeters(_wedgeAnchor) > WedgeMeters || Math.Abs(here.Elevation - _wedgeAnchor.Elevation) * 240d > WedgeMeters)
+        {
+            _wedgeAnchor = here;
+            _wedgeAnchorAt = board.Now;
+            return false;
+        }
+        if (board.Now - _wedgeAnchorAt < WedgeSeconds || board.Now - _lastWedgeJumpAt < WedgeJumpIntervalSeconds || JumpToward is null)
+            return false;
+        _lastWedgeJumpAt = board.Now;
+        _wedgeAnchorAt = board.Now;
+        log.Warn($"nav: wedged at {BotEngine.Describe(here)} for {WedgeSeconds:0}s; jumping toward step {_follower!.CurrentIndex + 1}");
+        JumpToward(step.HeadingDegrees);
+        return true;
     }
 
     /// <summary>

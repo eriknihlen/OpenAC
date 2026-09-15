@@ -1482,8 +1482,15 @@ public sealed class RuntimeAutomationSurface
                 return default;
 
             RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
-            if (!movement.HasController)
+            // A dormant controller - committed while the landblock is still
+            // coming in, not yet activated - has a position but cannot
+            // move or swing; a plugin given it would act on a body that
+            // throws. Not available until it is live.
+            if (!movement.HasController
+                || runtime.MovementOwner.Controller is not { CanExecuteLiveMovement: true })
+            {
                 return default;
+            }
             RuntimePortalSnapshot portal = runtime.Portal.Snapshot;
             PluginNavigationPosition livePosition =
                 ProjectNavigationPosition(movement.Position);
@@ -3557,6 +3564,11 @@ public sealed class RuntimeAutomationSurface
             runtime = _runtime;
         if (runtime is null || !IsAvailable)
             return new(PluginCombatCommandStatus.Unavailable);
+        // No swinging from a dormant body: the controller is committed but
+        // not activated while the landblock comes in, and an attack on it
+        // throws inside the client's update loop.
+        if (runtime.MovementOwner.Controller is not { CanExecuteLiveMovement: true })
+            return new(PluginCombatCommandStatus.Unavailable, "the character is not in the world yet");
         if (!RuntimeHostileTargetQuery.IsHostile(runtime, targetObjectId))
             return new(PluginCombatCommandStatus.InvalidTarget);
         if (!CombatInputPlanner.SupportsTargetedAttack(

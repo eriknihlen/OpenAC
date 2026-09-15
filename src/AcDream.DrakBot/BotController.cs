@@ -35,6 +35,7 @@ public sealed class BotController : IMetaBot
         Store = store ?? throw new ArgumentNullException(nameof(store));
         Navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
         Navigation.Rejoin = RejoinRoute;
+        Navigation.JumpToward = heading => Engine.Jumper.Start(new PluginMovementIntent(Forward: true), heading, 350, Engine.Clock.Now);
         Buffs = buffs ?? throw new ArgumentNullException(nameof(buffs));
         _navigationSnapshot = navigationSnapshot ?? throw new ArgumentNullException(nameof(navigationSnapshot));
         _vtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;

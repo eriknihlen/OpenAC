@@ -179,7 +179,9 @@ internal sealed class LiveCombatAttackOperations
     {
         get
         {
-            if (_player.Controller is not { } controller)
+            // Dormant (committed, not yet activated) is not a controller
+            // to read motion from: it throws, and the update loop with it.
+            if (_player.Controller is not { CanExecuteLiveMovement: true } controller)
                 return false;
             var motion = controller.Motion.InterpretedState;
             return CombatInputPlanner.PlayerInReadyPositionForAttack(
@@ -243,7 +245,7 @@ internal sealed class LiveCombatAttackOperations
 
     public void PrepareAttackRequest()
     {
-        if (_player.Controller is not { } controller
+        if (_player.Controller is not { CanExecuteLiveMovement: true } controller
             || !controller.PrepareForAttackRequest())
         {
             return;
