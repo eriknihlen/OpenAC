@@ -545,6 +545,10 @@ public sealed class CombatBehavior(
                 }
                 if (candidate.Distance > combat.ApproachRangeMeters)
                     continue;
+                // No walking without a position (the first second after
+                // login, portal space): the walk-up candidates wait.
+                if (!board.Navigation.IsAvailable || board.Navigation.IsPortalSpace)
+                    continue;
                 if (approach is null && !CanWalkToward(board, candidate))
                 {
                     blocked++;
