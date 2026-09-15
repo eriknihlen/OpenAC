@@ -92,6 +92,14 @@ public sealed class CombatBehavior(
 
     public uint CurrentTargetId => _targetId;
 
+    /// <summary>Hostiles this session's fights have put down.</summary>
+    public int Kills { get; private set; }
+
+    /// <summary>The name and health of the target the last swing went at, to tell a kill from a walk-away.</summary>
+    private string _swungAtName = string.Empty;
+    private bool _swungAt;
+    private readonly HashSet<uint> _seenCorpses = [];
+
     public bool IsApproaching => _phase == Phase.Approaching;
 
     public bool IsBackingOff => _phase == Phase.BackingOff;
@@ -243,6 +251,7 @@ public sealed class CombatBehavior(
                     || (!board.Combat.RequestInProgress && !board.Combat.ServerResponsePending))
                 {
                     _closeInOn = 0u;
+                    _swungAt = true;
                     EnterPhase(Phase.Idle, board.Now);
                     return BehaviorStep.Done;
                 }
@@ -257,6 +266,8 @@ public sealed class CombatBehavior(
                     ? BehaviorStep.Done
                     : BehaviorStep.Fail($"cast {outcome}");
         }
+
+        NoteKill(board, context.Log);
 
         // Idle: pick a target or stand down.
         Engagement engagement;
@@ -296,8 +307,12 @@ public sealed class CombatBehavior(
         if (target.ObjectId != _targetId)
             context.Log.Info($"combat: target {target.Name} 0x{target.ObjectId:X8} at {target.Distance:0.0}m dz {target.HeightDifferenceMeters:+0.0;-0.0} ({(engagement.Approach ? "approach" : "in reach")}, {(target.IsHealthKnown ? $"{target.HealthFraction:P0}" : "hp ?")}) of {board.Hostiles.Count} hostile(s)");
         if (target.ObjectId != _targetId)
+        {
             _closeInOn = 0u;
+            _swungAt = false;
+        }
         _targetId = target.ObjectId;
+        _swungAtName = target.Name;
         _leftCombat = false;
 
         if (board.IsActionPending || board.Now < _holdUntil)
@@ -804,6 +819,56 @@ public sealed class CombatBehavior(
     };
 
     private void StopMoving(INavigationAutomation nav) => _walker.Reset(nav);
+
+    /// <summary>
+    /// A target the character has swung at and that is now dead - health
+    /// gone, or gone from the hostiles with its corpse where it stood -
+    /// is a kill. One that simply walked out of range is not.
+    /// </summary>
+    private void NoteKill(Blackboard board, IPluginLogger log)
+    {
+        if (_targetId == 0u || !_swungAt)
+            return;
+        bool dead = false;
+        bool present = false;
+        foreach (PluginCombatTarget hostile in board.Hostiles)
+        {
+            if (hostile.ObjectId != _targetId)
+                continue;
+            present = true;
+            dead = hostile.IsHealthKnown && hostile.HealthFraction <= 0f;
+            break;
+        }
+        if (!present)
+        {
+            // Gone from the hostiles: a kill when a corpse of its name has
+            // just appeared close by - one not seen on an earlier look, so
+            // an old corpse of a swarm-mate does not count for a target
+            // that merely walked off.
+            foreach (PluginLootContainer corpse in board.Corpses)
+            {
+                if (_seenCorpses.Contains(corpse.ObjectId))
+                    continue;
+                if (corpse.ObjectId == _targetId
+                    || (corpse.Distance < 6f && string.Equals(corpse.Name, $"Corpse of {_swungAtName}", StringComparison.Ordinal)))
+                {
+                    dead = true;
+                    _seenCorpses.Add(corpse.ObjectId);
+                    break;
+                }
+            }
+        }
+        if (_seenCorpses.Count > 256)
+            _seenCorpses.Clear();
+        foreach (PluginLootContainer corpse in board.Corpses)
+            _seenCorpses.Add(corpse.ObjectId);
+        if (!dead)
+            return;
+        Kills++;
+        log.Info($"combat: {_swungAtName} down; {Kills} kill(s) this session");
+        _targetId = 0u;
+        _swungAt = false;
+    }
 
     private static bool TryFindHostile(Blackboard board, uint targetId, out PluginCombatTarget target)
     {

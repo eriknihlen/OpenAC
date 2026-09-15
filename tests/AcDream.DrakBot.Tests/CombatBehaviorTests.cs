@@ -133,6 +133,53 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void ATargetThatDiesAfterASwingIsAKillAndOneThatWalksOffIsNot()
+    {
+        static void Swing(CombatBehavior behavior, FakeAutomationSurface surface, TickClock clock)
+        {
+            for (int step = 0; step < 8 && (surface.Commands.Count == 0 || surface.Commands[^1] != "release"); step++)
+            {
+                Step(behavior, surface, clock);
+                surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee, PowerBarLevel = 1f };
+            }
+            Assert.Equal("release", surface.Commands[^1]);
+            surface.CompleteSwing();
+        }
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Melee, LineOfSight = new LineOfSightSettings { Enabled = false } });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 2f));
+        surface.Corpses.Add(new PluginLootContainer(900u, 0u, "Corpse of Drudge", 3f, true, false, false)); // an old one lying about
+
+        Swing(behavior, surface, clock);
+        Assert.Equal(StepResult.Done, Step(behavior, surface, clock).Result);
+        Assert.Equal(0, behavior.Kills);
+
+        // Health gone: a kill.
+        surface.Hostiles[0] = new PluginCombatTarget(7u, "Drudge", 0u, 2f, 0f, true, 0f);
+        Step(behavior, surface, clock);
+        Assert.Equal(1, behavior.Kills);
+
+        // A second one, swung at, then gone from the list with only the old corpse nearby: not a kill.
+        surface.Hostiles.Clear();
+        surface.Hostiles.Add(Hostile(8, "Drudge", 2f));
+        Swing(behavior, surface, clock);
+        Step(behavior, surface, clock);
+        surface.Hostiles.Clear();
+        Step(behavior, surface, clock);
+        Assert.Equal(1, behavior.Kills);
+
+        // A third, gone with a fresh corpse of its name beside the character: a kill.
+        surface.Hostiles.Add(Hostile(9, "Drudge", 2f));
+        Swing(behavior, surface, clock);
+        Step(behavior, surface, clock);
+        surface.Hostiles.Clear();
+        surface.Corpses.Add(new PluginLootContainer(901u, 0u, "Corpse of Drudge", 2f, false, false, false));
+        Step(behavior, surface, clock);
+        Assert.Equal(2, behavior.Kills);
+    }
+
+    [Fact]
     public void ReturnsToPeaceWhenNothingIsLeft()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =

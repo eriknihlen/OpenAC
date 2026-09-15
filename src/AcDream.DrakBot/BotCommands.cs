@@ -1,3 +1,4 @@
+using AcDream.DrakBot.Behaviors;
 using System.Globalization;
 using AcDream.DrakBot.Meta;
 using AcDream.DrakBot.Navigation;
@@ -128,6 +129,11 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         Say(engine.IsRunning
             ? $"DrakBot running: {engine.ActiveBehaviorName} ({engine.LastReason})"
             : "DrakBot stopped");
+        foreach (IBehavior behavior in engine.Behaviors)
+        {
+            if (behavior is CombatBehavior fights)
+                Say($"kills this session: {fights.Kills}");
+        }
         Say($"profile '{profile.Name}': style {profile.Combat.Style}, "
             + $"buffs {(profile.Buffs.Enabled ? "on" : "off")}, "
             + $"combat {(profile.Combat.Enabled ? "on" : "off")}, "
