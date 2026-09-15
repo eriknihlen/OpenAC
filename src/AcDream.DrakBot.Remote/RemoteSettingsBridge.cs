@@ -50,7 +50,9 @@ internal static class RemoteSettingsBridge
                     Flatten(nested, key, into);
                     break;
                 case JsonArray array:
-                    if (array.All(static element => element is JsonValue))
+                    // A list of names reads as one line; a list of objects (the monster and loot
+                    // rules) and an empty list (which could be either) stay out of the form.
+                    if (array.Count > 0 && array.All(static element => element is JsonValue))
                         into[key] = string.Join(", ", array.Select(static element => element!.ToString()));
                     break;
                 case JsonValue value:

@@ -26,6 +26,8 @@ public sealed class RemoteSettingsBridgeTests
         Assert.False(values.TryGetProperty("name", out _));
         Assert.DoesNotContain(values.EnumerateObject(), static property => property.Name.StartsWith("dashboard.", StringComparison.Ordinal));
         Assert.DoesNotContain(values.EnumerateObject(), static property => property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array);
+        Assert.False(values.TryGetProperty("combat.monsters", out _));      // an empty list of rules is not a setting
+        Assert.False(values.TryGetProperty("combat.priorityNames", out _)); // nor an empty list of names
     }
 
     [Fact]
