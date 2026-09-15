@@ -28,10 +28,13 @@ public sealed class VitalRechargeBehavior(
     /// for control sixty times a second and nothing else ever ran.
     /// </summary>
     private const double FailRetrySeconds = 15d;
+    /// <summary>The same failure again doubles the wait, up to this: no components is not going to change in a hurry, and every try interrupts the walk.</summary>
+    private const double FailRetryCeilingSeconds = 300d;
 
     private enum Vital { Health, Stamina, Mana, Fellow }
 
     private readonly double[] _retryAfter = [double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity];
+    private readonly double[] _retryWait = [FailRetrySeconds, FailRetrySeconds, FailRetrySeconds, FailRetrySeconds];
     private readonly string?[] _lastFailure = new string?[4];
 
     public string Name => "vitals";
@@ -74,13 +77,19 @@ public sealed class VitalRechargeBehavior(
     /// </summary>
     private BehaviorStep GiveUp(Vital vital, Blackboard board, string reason)
     {
-        _retryAfter[(int)vital] = board.Now + FailRetrySeconds;
-        bool repeated = string.Equals(_lastFailure[(int)vital], reason, StringComparison.Ordinal);
-        _lastFailure[(int)vital] = reason;
-        return repeated ? BehaviorStep.Done : BehaviorStep.Fail($"{reason}; not tried again for {FailRetrySeconds:0}s");
+        int slot = (int)vital;
+        bool repeated = string.Equals(_lastFailure[slot], reason, StringComparison.Ordinal);
+        _retryWait[slot] = repeated ? Math.Min(_retryWait[slot] * 2d, FailRetryCeilingSeconds) : FailRetrySeconds;
+        _retryAfter[slot] = board.Now + _retryWait[slot];
+        _lastFailure[slot] = reason;
+        return repeated ? BehaviorStep.Done : BehaviorStep.Fail($"{reason}; not tried again for {FailRetrySeconds:0}s, then less and less often");
     }
 
-    private void Recovered(Vital vital) => _lastFailure[(int)vital] = null;
+    private void Recovered(Vital vital)
+    {
+        _lastFailure[(int)vital] = null;
+        _retryWait[(int)vital] = FailRetrySeconds;
+    }
 
     public BehaviorStep Execute(BehaviorContext context)
     {
