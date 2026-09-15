@@ -560,6 +560,16 @@ internal sealed class HeadlessSessionWorldProjection
             && record.ServerGuid == _runtime.PlayerIdentity.ServerGuid
             && record.Snapshot.Position is { LandblockId: not 0u } position)
         {
+            // The first drive comes before the landblock, as it does in the
+            // graphical client: it prepares the player's placement and
+            // leaves it dormant, for the landblock's collision commit to
+            // wake. Loading the landblock first cancels an unprepared
+            // placement in its prefix as debt, the residence lease dies
+            // with it, and the first drive after that answers RejectedToken
+            // - no controller, no position, ever. The conductor is still
+            // never driven over an open admission: only while quiescent.
+            if (_collision.IsQuiescent)
+                _firstEntry?.DriveAll();
             _requestedLocalPlayerCell = position.LandblockId;
             _collision.CenterOn(position.LandblockId);
         }
@@ -589,6 +599,8 @@ internal sealed class HeadlessSessionWorldProjection
         {
             if (record.Snapshot.Position is { LandblockId: not 0u } position)
             {
+                if (_collision.IsQuiescent)
+                    _firstEntry?.DriveAll();
                 _requestedLocalPlayerCell = position.LandblockId;
                 _collision.CenterOn(position.LandblockId);
             }

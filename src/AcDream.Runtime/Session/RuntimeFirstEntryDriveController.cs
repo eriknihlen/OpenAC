@@ -169,6 +169,17 @@ internal sealed class RuntimeFirstEntryDriveController
                     Console.WriteLine(FormattableString.Invariant(
                         $"[pump] local first entry step {step}: {status}"));
                 }
+                if (status is RuntimeLocalPlayerFirstEntryStatus.RejectedToken
+                    or RuntimeLocalPlayerFirstEntryStatus.RejectedAuthority)
+                {
+                    // Terminal, and fatal for the session: the local player
+                    // never gets a movement controller. Always said, so a
+                    // login that leaves the character without a position
+                    // names its cause in the process output.
+                    bool residence = _entityObjects.TryGetInitialCreateResidence(pending.Record, out _);
+                    Console.WriteLine(FormattableString.Invariant(
+                        $"[first-entry] local player rejected at step {step}: {status} (residence lease current: {residence}); no movement controller will be built for this login"));
+                }
             }
             else
             {
