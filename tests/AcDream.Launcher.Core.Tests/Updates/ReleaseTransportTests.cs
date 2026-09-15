@@ -372,6 +372,66 @@ public sealed class VerifiedArtifactDownloaderTests : IDisposable
         Assert.False(File.Exists(destination));
     }
 
+    [Fact]
+    public async Task MaximumBytesStreamsAndVerifiesHashWhenSizeIsUnknownUpFront()
+    {
+        using var server = new LocalHttpFixture();
+        byte[] bytes = Encoding.UTF8.GetBytes("plugin release bytes");
+        server.Add("plugin.zip", bytes);
+        using var http = new HttpClient();
+        var downloader = new VerifiedArtifactDownloader(http);
+        string destination = Path.Combine(_root, "max-bytes.zip");
+
+        VerifiedArtifactDownload result = await downloader.DownloadAsync(
+            server.UriFor("plugin.zip"),
+            UpdateTestData.Sha256(bytes),
+            maximumBytes: 1024,
+            destination);
+
+        Assert.Equal(bytes.LongLength, result.Size);
+        Assert.Equal(UpdateTestData.Sha256(bytes), result.Sha256);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Fact]
+    public async Task MaximumBytesRejectsAnOverCapSizeHeaderBeforeStreaming()
+    {
+        using var server = new LocalHttpFixture();
+        byte[] bytes = Encoding.UTF8.GetBytes("plugin release bytes");
+        server.Add("plugin.zip", bytes, declaredLength: 5000);
+        using var http = new HttpClient();
+        var downloader = new VerifiedArtifactDownloader(http);
+        string destination = Path.Combine(_root, "max-bytes-header.zip");
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() => downloader.DownloadAsync(
+            server.UriFor("plugin.zip"),
+            UpdateTestData.Sha256(bytes),
+            maximumBytes: 1024,
+            destination));
+
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public async Task MaximumBytesRejectsAnOverCapStreamAndDeletesStaging()
+    {
+        using var server = new LocalHttpFixture();
+        byte[] bytes = new byte[2048];
+        Random.Shared.NextBytes(bytes);
+        server.Add("plugin.zip", bytes, declaredLength: 100);
+        using var http = new HttpClient();
+        var downloader = new VerifiedArtifactDownloader(http);
+        string destination = Path.Combine(_root, "max-bytes-stream.zip");
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() => downloader.DownloadAsync(
+            server.UriFor("plugin.zip"),
+            UpdateTestData.Sha256(bytes),
+            maximumBytes: 1024,
+            destination));
+
+        Assert.False(File.Exists(destination));
+    }
+
     private sealed class ImmediateProgress(Action<ArtifactDownloadProgress> callback)
         : IProgress<ArtifactDownloadProgress>
     {

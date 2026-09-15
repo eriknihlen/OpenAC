@@ -33,12 +33,15 @@ public sealed class SafeZipExtractor
 
     private readonly SafeZipExtractionLimits _limits;
     private readonly Action<string, UnixFileMode>? _applyUnixFileMode;
+    private readonly bool _ignoreDeclaredModes;
 
     public SafeZipExtractor(
         SafeZipExtractionLimits? limits = null,
-        Action<string, UnixFileMode>? applyUnixFileMode = null)
+        Action<string, UnixFileMode>? applyUnixFileMode = null,
+        bool ignoreDeclaredModes = false)
     {
         _limits = limits ?? new SafeZipExtractionLimits();
+        _ignoreDeclaredModes = ignoreDeclaredModes;
         _applyUnixFileMode = applyUnixFileMode
             ?? (OperatingSystem.IsWindows() ? null : File.SetUnixFileMode);
         if (_limits.MaximumEntries <= 0
@@ -64,6 +67,13 @@ public sealed class SafeZipExtractor
         var executables = new HashSet<string>(
             executableNames ?? [],
             StringComparer.Ordinal);
+        if (_ignoreDeclaredModes && executables.Count > 0)
+        {
+            throw new ArgumentException(
+                "executableNames cannot be used together with ignoreDeclaredModes.",
+                nameof(executableNames));
+        }
+
         string archive = Path.GetFullPath(archivePath);
         string destination = Path.GetFullPath(destinationDirectory);
 
@@ -168,11 +178,13 @@ public sealed class SafeZipExtractor
                 }
 
                 int declaredMode = entry.UnixMode & UnixPermissionMask;
-                int unixMode = executables.Contains(entry.RelativePath)
-                    ? ExecutableMode
-                    : declaredMode != 0
-                        ? declaredMode
-                        : RegularFileMode;
+                int unixMode = _ignoreDeclaredModes
+                    ? RegularFileMode
+                    : executables.Contains(entry.RelativePath)
+                        ? ExecutableMode
+                        : declaredMode != 0
+                            ? declaredMode
+                            : RegularFileMode;
                 _applyUnixFileMode?.Invoke(outputPath, (UnixFileMode)unixMode);
 
                 files.Add(new ExtractedFileRecord(

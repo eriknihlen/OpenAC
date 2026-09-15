@@ -137,6 +137,47 @@ public sealed class SafeZipExtractorTests : IDisposable
     }
 
     [Fact]
+    [Trait("Lane", "Unix")]
+    public async Task IgnoreDeclaredModesWritesRegularFiles()
+    {
+        if (!LauncherOperatingSystem.IsUnix)
+        {
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
+        }
+
+        byte[] archive = UpdateTestData.CreateZip(
+        [
+            ("plugin.dll", Encoding.UTF8.GetBytes("plugin"), 0x81ED),
+            ("assets/readme.txt", Encoding.UTF8.GetBytes("readme"), 0x81A4),
+        ]);
+        string zip = WriteArchive("ignore-modes.zip", archive);
+        string destination = Path.Combine(_root, "ignore-modes");
+
+        IReadOnlyList<ExtractedFileRecord> files = await new SafeZipExtractor(
+                ignoreDeclaredModes: true)
+            .ExtractAsync(zip, destination);
+
+        Assert.Equal(Readable, File.GetUnixFileMode(Path.Combine(destination, "plugin.dll")));
+        Assert.Equal(
+            Readable,
+            File.GetUnixFileMode(Path.Combine(destination, "assets", "readme.txt")));
+        Assert.Equal(0x1A4, ModeOf(files, "plugin.dll"));
+    }
+
+    [Fact]
+    public async Task IgnoreDeclaredModesRejectsExecutableNames()
+    {
+        byte[] archive = UpdateTestData.CreateZip(
+            [("plugin.dll", Encoding.UTF8.GetBytes("plugin"), 0x81ED)]);
+        string zip = WriteArchive("ignore-modes-conflict.zip", archive);
+        string destination = Path.Combine(_root, "ignore-modes-conflict");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => new SafeZipExtractor(
+                ignoreDeclaredModes: true)
+            .ExtractAsync(zip, destination, ["plugin.dll"]));
+    }
+
+    [Fact]
     public async Task DeclaredUnixModesStillWinForEveryNonExecutableEntry()
     {
         byte[] archive = UpdateTestData.CreateZip(
