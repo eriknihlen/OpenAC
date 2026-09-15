@@ -536,6 +536,7 @@ game's own look.
 
 ```
 /drakbot start | stop | status | rebuff
+/drakbot spells        (what the character can cast; each configured buff: what would be cast, up or due, or what is in the way)
 /drakbot folder [profiles|routes|loot|metas|logs]     (where the bot's files are; opens it)
 /drakbot log quiet|info|debug|trace | tail [n] | dump | clear
 /drakbot profile list | load <name> | save [name] | reset

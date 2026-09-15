@@ -146,6 +146,53 @@ public sealed class SpellSelector(
         return bestTier != int.MinValue;
     }
 
+    /// <summary>
+    /// Why a spell named by the user is, or is not, castable now: the tier
+    /// that would be cast, or the first thing in the way - not in the
+    /// spellbook, no components for any tier, every tier on the block
+    /// list, or the tier ladder allowing none. For the spells window and
+    /// the /drakbot spells command.
+    /// </summary>
+    public string Explain(string baseName, bool buff = true)
+    {
+        string wanted = BaseName(baseName);
+        int known = 0, withComponents = 0, unblocked = 0, allowed = 0;
+        PluginSpellInfo best = default;
+        int bestTier = int.MinValue;
+        foreach (IReadOnlyList<PluginSpellInfo> pool in (IReadOnlyList<PluginSpellInfo>[])[catalog.KnownSelfBuffs, catalog.KnownCombatSpells, catalog.KnownAttackSpells])
+        {
+            foreach (PluginSpellInfo candidate in pool)
+            {
+                if (!string.Equals(BaseName(candidate.Name), wanted, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                known++;
+                if (!magic.HasComponents(candidate.SpellId))
+                    continue;
+                withComponents++;
+                if (isBlocked is not null && isBlocked(candidate.SpellId))
+                    continue;
+                unblocked++;
+                if (tiers is not null && !(buff ? tiers.AllowsBuff(candidate) : tiers.AllowsCombat(candidate)))
+                    continue;
+                allowed++;
+                if (candidate.Tier > bestTier)
+                {
+                    bestTier = candidate.Tier;
+                    best = candidate;
+                }
+            }
+        }
+        if (known == 0)
+            return "not in the spellbook";
+        if (withComponents == 0)
+            return $"{known} tier(s) known, no components for any";
+        if (unblocked == 0)
+            return $"{withComponents} tier(s) castable, all backing off after a failure";
+        if (allowed == 0)
+            return $"{unblocked} tier(s) castable, none allowed by the tier ladder";
+        return $"casts {best.Name}";
+    }
+
     private bool TryBest(
         IReadOnlyList<PluginSpellInfo> pool,
         string baseName,

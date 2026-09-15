@@ -155,6 +155,38 @@ public sealed class VitalRechargeBehaviorTests
         Assert.Equal(["cast:51", "cast:50"], surface.Commands);
     }
 
+    [Fact]
+    public void AVitalWithNoWayToTopItUpIsLeftAloneForAWhile()
+    {
+        // No mana spell known: a melee character at low mana must not ask
+        // for control on every tick, or nothing else ever runs.
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build(
+            new VitalSettings { IdleManaBelow = 0.9, ManaBelow = 0.25, IdleHealthBelow = 0d, IdleStaminaBelow = 0d });
+        surface.CurrentMana = 16;
+
+        Assert.True(behavior.WantsControl(Board(surface, clock), out string reason));
+        Assert.Contains("mana", reason);
+        BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("Stamina to Mana Self", step.Reason);
+        Assert.Contains("not tried again", step.Reason);
+
+        // Left alone for the wait, then asked again - quietly the second time.
+        clock.Advance(5d);
+        Assert.False(behavior.WantsControl(Board(surface, clock), out _));
+        clock.Advance(11d);
+        Assert.True(behavior.WantsControl(Board(surface, clock), out _));
+        step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Done, step.Result);
+        Assert.Empty(surface.Commands);
+
+        // Health still gets seen to meanwhile.
+        surface.CurrentHealth = 40;
+        clock.Advance(1d);
+        Assert.True(behavior.WantsControl(Board(surface, clock), out reason));
+        Assert.Contains("health", reason);
+    }
+
     private static PluginInventoryItem Kit(uint id) => new(
         id, 0u, "Healing Kit", 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 1, 10, 10, 0u, 0, 0, 0u,
         false, 0d, 0, 0, 0, 0d, 0, 0, 0)

@@ -85,6 +85,43 @@ public sealed class SelfBuffBehavior(
 
     public void Interrupt(BehaviorContext context) => casts.Clear();
 
+    /// <summary>
+    /// One line per configured buff: what would be cast and whether it is
+    /// due, or what stands in the way. For the /drakbot spells command.
+    /// </summary>
+    public IEnumerable<string> Describe(Blackboard board)
+    {
+        BuffSettings buffs = settings();
+        IReadOnlyList<PluginActiveEnchantment> registry = board.Enchantments;
+        IReadOnlyList<PluginTrackedEnchantment> landed = surface?.Enchantments.Capture(board.SelfId) ?? [];
+        foreach (string name in buffs.Spells)
+        {
+            string why = spells.Explain(name);
+            if (!spells.TryBestSelfBuff(name, out PluginSpellInfo spell) && !spells.TryBestKnown(name, out spell))
+            {
+                yield return $"{name}: {why}";
+                continue;
+            }
+            double remaining = double.NaN;
+            foreach (PluginActiveEnchantment active in registry)
+            {
+                if (active.Family == spell.Family && (double.IsNaN(remaining) || active.SecondsRemaining > remaining))
+                    remaining = active.SecondsRemaining;
+            }
+            foreach (PluginTrackedEnchantment tracked in landed)
+            {
+                if (tracked.Family == spell.Family && (double.IsNaN(remaining) || tracked.SecondsRemaining > remaining))
+                    remaining = tracked.SecondsRemaining;
+            }
+            string state = double.IsNaN(remaining)
+                ? "not up: due"
+                : remaining > buffs.RebuffWhenRemainingSeconds
+                    ? $"up, {remaining / 60d:0.0} min left"
+                    : $"up, {remaining:0}s left: due";
+            yield return $"{name}: {spell.Name}, {state}{(casts.IsOnCooldown(spell.SpellId) ? ", cooling down" : string.Empty)}";
+        }
+    }
+
     /// <summary>Whether any configured buff is missing or expiring, for a meta's NeedToBuff.</summary>
     public bool NeedsAnyBuff(Blackboard board) => TryNextDue(board, settings(), out _, out _);
 

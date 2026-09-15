@@ -50,6 +50,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     controller.Buffs.ForceRebuff();
                     Say("rebuffing everything");
                     break;
+                case "spells":
+                    Spells();
+                    break;
                 case "buffs":
                 case "combat":
                 case "loot":
@@ -93,6 +96,29 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
         {
             Say($"DrakBot: {error.Message}");
         }
+    }
+
+    /// <summary>What the character can cast, and where each configured buff stands.</summary>
+    private void Spells()
+    {
+        ISpellCatalog catalog = controller.Engine.Surface.Spells;
+        Say($"spellbook: {catalog.KnownSelfBuffs.Count} self buff(s), {catalog.KnownCombatSpells.Count} combat, {catalog.KnownAttackSpells.Count} attack spell(s) known");
+        if (controller.Engine.LastBoard is not { } board)
+        {
+            Say("not in world yet; nothing to check the buffs against");
+            return;
+        }
+        int due = 0;
+        foreach (string line in controller.Buffs.Describe(board))
+        {
+            if (line.EndsWith(": due", StringComparison.Ordinal) || line.Contains(": due,", StringComparison.Ordinal))
+                due++;
+            Say("  " + line);
+        }
+        BuffSettings buffs = controller.Profile.Buffs;
+        Say(buffs.Enabled
+            ? $"buffing on; {due} due"
+            : "buffing is off (/drakbot buffs on)");
     }
 
     private void Status()

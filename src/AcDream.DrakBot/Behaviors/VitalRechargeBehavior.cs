@@ -21,6 +21,19 @@ public sealed class VitalRechargeBehavior(
     private const double KitRetrySeconds = 3d;
     private double _kitRetryAfter = double.NegativeInfinity;
 
+    /// <summary>
+    /// How long a vital that could not be topped up - the spell unknown,
+    /// no kit, the cast refused - is left alone before it is tried again.
+    /// Without it a melee character at low mana with no mana spell asked
+    /// for control sixty times a second and nothing else ever ran.
+    /// </summary>
+    private const double FailRetrySeconds = 15d;
+
+    private enum Vital { Health, Stamina, Mana, Fellow }
+
+    private readonly double[] _retryAfter = [double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity];
+    private readonly string?[] _lastFailure = new string?[4];
+
     public string Name => "vitals";
 
     public BehaviorPriority Priority => BehaviorPriority.Survival;
@@ -28,22 +41,22 @@ public sealed class VitalRechargeBehavior(
     public bool WantsControl(Blackboard board, out string reason)
     {
         VitalSettings vitals = settings();
-        if (board.Vitals.HealthFraction < HealBelow(board, vitals))
+        if (Wanted(Vital.Health, board) && board.Vitals.HealthFraction < HealBelow(board, vitals))
         {
             reason = $"health {board.Vitals.HealthFraction:P0}";
             return true;
         }
-        if (board.Vitals.StaminaFraction < StaminaBelow(board, vitals))
+        if (Wanted(Vital.Stamina, board) && board.Vitals.StaminaFraction < StaminaBelow(board, vitals))
         {
             reason = $"stamina {board.Vitals.StaminaFraction:P0}";
             return true;
         }
-        if (board.Vitals.ManaFraction < ManaBelow(board, vitals))
+        if (Wanted(Vital.Mana, board) && board.Vitals.ManaFraction < ManaBelow(board, vitals))
         {
             reason = $"mana {board.Vitals.ManaFraction:P0}";
             return true;
         }
-        if (TryFindHurtFellow(board, vitals, out PluginFellowMember fellow))
+        if (Wanted(Vital.Fellow, board) && TryFindHurtFellow(board, vitals, out PluginFellowMember fellow))
         {
             reason = $"{fellow.Name} at {Fraction(fellow):P0}";
             return true;
@@ -51,6 +64,23 @@ public sealed class VitalRechargeBehavior(
         reason = string.Empty;
         return false;
     }
+
+    private bool Wanted(Vital vital, Blackboard board) => board.Now >= _retryAfter[(int)vital];
+
+    /// <summary>
+    /// A vital that could not be seen to is left alone for a while. The
+    /// first time is a failure worth a line; the same failure again, once
+    /// the wait is over, is not news and is passed over quietly.
+    /// </summary>
+    private BehaviorStep GiveUp(Vital vital, Blackboard board, string reason)
+    {
+        _retryAfter[(int)vital] = board.Now + FailRetrySeconds;
+        bool repeated = string.Equals(_lastFailure[(int)vital], reason, StringComparison.Ordinal);
+        _lastFailure[(int)vital] = reason;
+        return repeated ? BehaviorStep.Done : BehaviorStep.Fail($"{reason}; not tried again for {FailRetrySeconds:0}s");
+    }
+
+    private void Recovered(Vital vital) => _lastFailure[(int)vital] = null;
 
     public BehaviorStep Execute(BehaviorContext context)
     {
@@ -65,31 +95,40 @@ public sealed class VitalRechargeBehavior(
         if (board.IsActionPending)
             return BehaviorStep.Continue;
 
-        if (board.Vitals.HealthFraction < HealBelow(board, vitals))
+        if (Wanted(Vital.Health, board) && board.Vitals.HealthFraction < HealBelow(board, vitals))
         {
             if (TryCast(vitals.HealSpell, 0u, out PluginCastRequestResult result))
+            {
+                Recovered(Vital.Health);
                 return BehaviorStep.Continue;
+            }
             if (vitals.UseHealingKits && TryUseHealingKit(context))
+            {
+                Recovered(Vital.Health);
                 return BehaviorStep.Continue;
-            return BehaviorStep.Fail($"no way to heal ({result})");
+            }
+            return GiveUp(Vital.Health, board, $"no way to heal ({result})");
         }
-        if (board.Vitals.StaminaFraction < StaminaBelow(board, vitals))
+        if (Wanted(Vital.Stamina, board) && board.Vitals.StaminaFraction < StaminaBelow(board, vitals))
         {
-            return TryCast(vitals.StaminaSpell, 0u, out PluginCastRequestResult result)
-                ? BehaviorStep.Continue
-                : BehaviorStep.Fail($"cannot cast {vitals.StaminaSpell} ({result})");
+            if (!TryCast(vitals.StaminaSpell, 0u, out PluginCastRequestResult result))
+                return GiveUp(Vital.Stamina, board, $"cannot cast {vitals.StaminaSpell} ({result})");
+            Recovered(Vital.Stamina);
+            return BehaviorStep.Continue;
         }
-        if (board.Vitals.ManaFraction < ManaBelow(board, vitals))
+        if (Wanted(Vital.Mana, board) && board.Vitals.ManaFraction < ManaBelow(board, vitals))
         {
-            return TryCast(vitals.ManaSpell, 0u, out PluginCastRequestResult result)
-                ? BehaviorStep.Continue
-                : BehaviorStep.Fail($"cannot cast {vitals.ManaSpell} ({result})");
+            if (!TryCast(vitals.ManaSpell, 0u, out PluginCastRequestResult result))
+                return GiveUp(Vital.Mana, board, $"cannot cast {vitals.ManaSpell} ({result})");
+            Recovered(Vital.Mana);
+            return BehaviorStep.Continue;
         }
-        if (TryFindHurtFellow(board, vitals, out PluginFellowMember fellow))
+        if (Wanted(Vital.Fellow, board) && TryFindHurtFellow(board, vitals, out PluginFellowMember fellow))
         {
-            return TryCast(vitals.HealOtherSpell, fellow.ObjectId, out PluginCastRequestResult result)
-                ? BehaviorStep.Continue
-                : BehaviorStep.Fail($"cannot cast {vitals.HealOtherSpell} on {fellow.Name} ({result})");
+            if (!TryCast(vitals.HealOtherSpell, fellow.ObjectId, out PluginCastRequestResult result))
+                return GiveUp(Vital.Fellow, board, $"cannot cast {vitals.HealOtherSpell} on {fellow.Name} ({result})");
+            Recovered(Vital.Fellow);
+            return BehaviorStep.Continue;
         }
         return BehaviorStep.Done;
     }

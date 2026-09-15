@@ -53,6 +53,9 @@ public sealed class BotEngine
     /// <summary>The snapshot the last tick ran against; what a status window shows.</summary>
     public Blackboard? LastBoard { get; private set; }
 
+    /// <summary>The host the bot acts through.</summary>
+    public IAutomationSurface Surface => _surface;
+
     /// <summary>The meta, when one is wired in. It thinks every tick, beside the behaviors.</summary>
     public Meta.MetaEngine? Meta { get; set; }
 
