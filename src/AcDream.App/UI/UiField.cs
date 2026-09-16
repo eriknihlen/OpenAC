@@ -32,6 +32,8 @@ public sealed class UiField : UiElement
     public bool SelectAllOnFocus { get; set; }
     public UiScrollable Scroll { get; } = new();
     public Action? OnReadOnlyClick { get; set; }
+    /// <summary>Asked after Submit on Enter; keeps keyboard focus when it returns true.</summary>
+    public Func<bool>? StayFocusedAfterSubmit { get; set; }
 
     private bool _editable = true;
 
@@ -770,7 +772,8 @@ public sealed class UiField : UiElement
                             return true;
                         }
                         Submit();
-                        FindRoot()?.SetKeyboardFocus(null);   // exit write mode after sending
+                        if (StayFocusedAfterSubmit?.Invoke() != true)
+                            FindRoot()?.SetKeyboardFocus(null);   // exit write mode after sending
                         return true;
                     case Silk.NET.Input.Key.Backspace: Backspace();        StartRepeat(key); return true;
                     case Silk.NET.Input.Key.Delete:    DeleteForward();    StartRepeat(key); return true;

@@ -51,6 +51,9 @@ public sealed class ItemInteractionControllerTests
         public uint SelectedObject;
         public bool NonCombatMode;
         public bool DragOnPlayerOpensSecureTrade = true;
+        public bool MainPackPreferred;
+        public bool ConfirmVolatileRareUses = true;
+        public uint OpenBackpackContainerId = Player;
         public uint GroundObject;
         public long Now = 1_000;
 
@@ -98,6 +101,9 @@ public sealed class ItemInteractionControllerTests
                     Puts.Add((item, container, placement)),
                 sendGive: (target, item, amount) => Gives.Add((target, item, amount)),
                 dragOnPlayerOpensSecureTrade: () => DragOnPlayerOpensSecureTrade,
+                mainPackPreferred: () => MainPackPreferred,
+                confirmVolatileRareUses: () => ConfirmVolatileRareUses,
+                backpackContainerId: () => OpenBackpackContainerId,
                 systemMessage: SystemMessages.Add,
                 sendSplitToContainer: (item, container, placement, amount) =>
                     SplitPuts.Add((item, container, placement, amount)),
@@ -746,6 +752,25 @@ public sealed class ItemInteractionControllerTests
         Assert.True(h.Controller.ActivateItem(0x50000A03u));
 
         Assert.Equal(new[] { 0x50000A03u }, h.Uses);
+    }
+
+    [Fact]
+    public void VolatileRareUse_SendsDirectlyWhenConfirmOptionIsOff()
+    {
+        var h = new Harness { ConfirmVolatileRareUses = false };
+        const uint gem = 0x50000A32u;
+        var actions = new List<ItemPolicyAction>();
+        h.Controller.PolicyActionRequested += actions.Add;
+        h.AddContained(gem, item =>
+        {
+            item.Useability = ItemUseability.Contained;
+            item.PublicWeenieBitfield = (uint)PublicWeenieFlags.VolatileRare;
+        });
+
+        Assert.True(h.Controller.ActivateItem(gem));
+
+        Assert.Equal(new[] { gem }, h.Uses);
+        Assert.Empty(actions);
     }
 
     [Fact]
@@ -1940,6 +1965,91 @@ public sealed class ItemInteractionControllerTests
 
         Assert.Equal(0, h.Controller.BusyCount);
         Assert.True(h.Controller.CanMakeInventoryRequest);
+    }
+
+    [Fact]
+    public void MainPackPreferredSendsPickupsToTheRootPackInsteadOfTheOpenSidePack()
+    {
+        var h = new Harness();
+        const uint sidePack = 0x50000A19u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint intoSidePack = 0x70000A19u;
+        Assert.True(h.Controller.PlaceWorldItemInBackpack(intoSidePack));
+        Assert.Equal(new[] { (intoSidePack, sidePack, 0) }, h.BackpackPlacements);
+        h.Objects.ApplyConfirmedServerMove(intoSidePack, sidePack, 0u, 0);
+
+        h.MainPackPreferred = true;
+        const uint intoRoot = 0x70000A1Au;
+        Assert.True(h.Controller.PlaceWorldItemInBackpack(intoRoot));
+        Assert.Equal(
+            new[] { (intoSidePack, sidePack, 0), (intoRoot, Player, 0) },
+            h.BackpackPlacements);
+    }
+
+    [Fact]
+    public void ActivateItemOnAGroundItemHonorsMainPackPreferredLikePickupDoes()
+    {
+        var h = new Harness { MainPackPreferred = true };
+        const uint sidePack = 0x50000A21u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint groundItem = 0x70000A21u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = groundItem,
+            Name = "Loot",
+            Type = ItemType.Misc,
+        });
+        h.GroundObject = groundItem;
+        h.Objects.MoveItem(groundItem, groundItem, 0);
+
+        Assert.True(h.Controller.ActivateItem(groundItem));
+        Assert.Equal(new[] { (groundItem, Player, 0) }, h.BackpackPlacements);
+    }
+
+    [Fact]
+    public void DropOnSelfRoutesThroughMainPackPreferenceLikePickupDoes()
+    {
+        var h = new Harness();
+        const uint sidePack = 0x50000A22u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = sidePack,
+            Name = "Side Pack",
+            Type = ItemType.Container,
+            ItemsCapacity = 6,
+        });
+        h.Objects.MoveItem(sidePack, Player, 1);
+        h.OpenBackpackContainerId = sidePack;
+
+        const uint groundItem = 0x70000A22u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = groundItem,
+            Name = "Loot",
+            Type = ItemType.Misc,
+        });
+        var payload = new ItemDragPayload(groundItem, ItemDragSource.Ground, 0, SourceCell: null);
+
+        Assert.True(h.Controller.PlaceIn3D(payload, Player));
+        Assert.Equal(new[] { (groundItem, sidePack, 0) }, h.BackpackPlacements);
     }
 
     [Fact]

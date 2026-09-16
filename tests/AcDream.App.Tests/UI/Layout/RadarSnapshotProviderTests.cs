@@ -334,6 +334,109 @@ public sealed class RadarSnapshotProviderTests
         Assert.Equal(monster, Assert.Single(provider.BuildSnapshot().Blips).ObjectId);
     }
 
+    // OpenAC #105: height shading is a two-value rule, not a gradient. A blip
+    // keeps its full colour while the object is within five metres of the
+    // player's own height and drops to 65% of it beyond that. Nothing about
+    // the cell an object sits in takes part - only the vertical gap does.
+    //
+    // The reported spot is an underground chamber whose floor sits 4.80 m
+    // under a flat 30.00 m terrace and 5.20 m under the floor of the
+    // structure that covers its entrance. Stepping the 40 cm from the terrace
+    // onto that floor therefore crosses the boundary, and the same monsters
+    // change shade. These cases keep that exact behaviour from being smoothed
+    // into a gradient later.
+    [Theory]
+    [InlineData(30.00f, 25.20f, 1f)]      // stood on the terrace: 4.80 m below
+    [InlineData(30.40f, 25.20f, 0.65f)]   // stood on the entrance floor: 5.20 m below
+    [InlineData(30.00f, 20.00f, 0.65f)]   // the lower chamber, 10 m below
+    [InlineData(30.00f, 35.00f, 0.65f)]   // 5 m above reads the same as 5 m below
+    [InlineData(30.00f, 30.00f, 1f)]      // level with the player
+    public void BuildSnapshot_ShadesBlipsByTheVerticalGapAlone(
+        float playerZ,
+        float monsterZ,
+        float expectedShade)
+    {
+        const uint player = 60u;
+        const uint monster = 61u;
+        var snapshot = BuildHeightSnapshot(
+            player,
+            monster,
+            new Vector3(0f, 0f, playerZ),
+            new Vector3(0f, 10f, monsterZ),
+            playerCellId: 0xA9B40001u);
+
+        UiRadarBlip blip = Assert.Single(snapshot.Blips);
+        Assert.Equal(RadarBlipColors.Creature.Red * expectedShade, blip.Color.X, 5);
+        Assert.Equal(RadarBlipColors.Creature.Green * expectedShade, blip.Color.Y, 5);
+        Assert.Equal(RadarBlipColors.Creature.Blue * expectedShade, blip.Color.Z, 5);
+    }
+
+    // OpenAC #105: the player's own cell must not enter the height rule. The
+    // same 20 m drop reads as "below" whether the player is stood on open
+    // ground or inside a cell, and an object level with the player reads as
+    // level from either. Only the radar's reach changes with the player's
+    // cell, so both cases are kept well inside the shorter one.
+    [Theory]
+    [InlineData(0xA9B40001u)] // outdoors
+    [InlineData(0xA9B40100u)] // inside a cell
+    public void BuildSnapshot_HeightShadingIgnoresThePlayersOwnCell(uint playerCellId)
+    {
+        const uint player = 70u;
+        const uint monster = 71u;
+
+        UiRadarBlip below = Assert.Single(BuildHeightSnapshot(
+            player,
+            monster,
+            new Vector3(0f, 0f, 30f),
+            new Vector3(0f, 10f, 10f),
+            playerCellId).Blips);
+        Assert.Equal(RadarBlipColors.Creature.Red * 0.65f, below.Color.X, 5);
+        Assert.Equal(RadarBlipColors.Creature.Green * 0.65f, below.Color.Y, 5);
+
+        UiRadarBlip level = Assert.Single(BuildHeightSnapshot(
+            player,
+            monster,
+            new Vector3(0f, 0f, 30f),
+            new Vector3(0f, 10f, 30f),
+            playerCellId).Blips);
+        Assert.Equal(RadarBlipColors.Creature.Red, level.Color.X, 5);
+        Assert.Equal(RadarBlipColors.Creature.Green, level.Color.Y, 5);
+    }
+
+    private static UiRadarSnapshot BuildHeightSnapshot(
+        uint player,
+        uint monster,
+        Vector3 playerPosition,
+        Vector3 monsterPosition,
+        uint playerCellId)
+    {
+        var objects = new ClientObjectTable();
+        objects.Ingest(Weenie(player, "Player", ItemType.Creature));
+        objects.Ingest(Weenie(monster, "Drudge", ItemType.Creature) with
+        {
+            RadarBehavior = (byte)RadarBehavior.ShowAlways,
+        });
+        var entities = new Dictionary<uint, WorldEntity>
+        {
+            [player] = Entity(player, playerPosition, Quaternion.Identity),
+            [monster] = Entity(monster, monsterPosition, Quaternion.Identity),
+        };
+        var spawns = new Dictionary<uint, WorldSession.EntitySpawn>
+        {
+            [player] = Spawn(player) with { ObjectDescriptionFlags = 0x00000008u },
+            [monster] = Spawn(monster) with { ObjectDescriptionFlags = 0x00000010u },
+        };
+        var provider = new RadarSnapshotProvider(
+            objects, new RadarEntities(() => entities), () => spawns,
+            playerGuid: () => player,
+            playerYawRadians: () => 0f,
+            playerCellId: () => playerCellId,
+            selectedGuid: () => null,
+            coordinatesOnRadar: () => false,
+            uiLocked: () => false);
+        return provider.BuildSnapshot();
+    }
+
     private sealed class RecordingSpatialQuery(
         params KeyValuePair<uint, WorldEntity>[] candidates) : ILiveEntitySpatialQuery
     {

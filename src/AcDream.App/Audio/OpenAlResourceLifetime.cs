@@ -1,3 +1,4 @@
+using System;
 using AcDream.App.Rendering;
 using Silk.NET.OpenAL;
 
@@ -5,9 +6,6 @@ namespace AcDream.App.Audio;
 
 internal interface IOpenAlResourceApi
 {
-    AL? AudioApi { get; }
-    ALContext? ContextApi { get; }
-
     nint OpenDevice();
 
     /// <summary>True when this device lets a context turn its output limiter off.</summary>
@@ -30,6 +28,23 @@ internal interface IOpenAlResourceApi
     void DeleteBuffer(uint buffer);
     void DestroyContext(nint context);
     void CloseDevice(nint device);
+
+    // ── Playback: the engine's own voice, buffer and listener traffic. Kept
+    // behind the same seam as the lifetime calls so a test can stand in a
+    // recording backend and drive every playback gate without a device. ──
+    void SetListenerGain(float gain);
+    uint GenerateBuffer();
+    void FillBuffer(uint buffer, BufferFormat format, ReadOnlySpan<byte> pcm, int sampleRate);
+    /// <summary>Attaches a buffer to a source; buffer 0 detaches.</summary>
+    void AttachBuffer(uint source, uint buffer);
+    uint AttachedBuffer(uint source);
+    void SetSourceGain(uint source, float gain);
+    void SetSourceLooping(uint source, bool looping);
+    /// <summary>Places a listener-relative source at the given offset.</summary>
+    void PlaceSourceRelative(uint source, float x, float y, float z);
+    void PlaySource(uint source);
+    bool IsSourcePlaying(uint source);
+    float SourceSecondsOffset(uint source);
 }
 
 internal interface IOpenAlResourceApiFactory
@@ -122,6 +137,52 @@ internal sealed unsafe class SilkOpenAlResourceApi : IOpenAlResourceApi
 
     public void CloseDevice(nint device) =>
         ContextApi.CloseDevice((Device*)device);
+
+    public void SetListenerGain(float gain) =>
+        AudioApi.SetListenerProperty(ListenerFloat.Gain, gain);
+
+    public uint GenerateBuffer() => AudioApi.GenBuffer();
+
+    public void FillBuffer(uint buffer, BufferFormat format, ReadOnlySpan<byte> pcm, int sampleRate)
+    {
+        fixed (byte* p = pcm)
+            AudioApi.BufferData(buffer, format, p, pcm.Length, sampleRate);
+    }
+
+    public void AttachBuffer(uint source, uint buffer) =>
+        AudioApi.SetSourceProperty(source, SourceInteger.Buffer, (int)buffer);
+
+    public uint AttachedBuffer(uint source)
+    {
+        AudioApi.GetSourceProperty(source, GetSourceInteger.Buffer, out int attached);
+        return (uint)attached;
+    }
+
+    public void SetSourceGain(uint source, float gain) =>
+        AudioApi.SetSourceProperty(source, SourceFloat.Gain, gain);
+
+    public void SetSourceLooping(uint source, bool looping) =>
+        AudioApi.SetSourceProperty(source, SourceBoolean.Looping, looping);
+
+    public void PlaceSourceRelative(uint source, float x, float y, float z)
+    {
+        AudioApi.SetSourceProperty(source, SourceBoolean.SourceRelative, true);
+        AudioApi.SetSourceProperty(source, SourceVector3.Position, x, y, z);
+    }
+
+    public void PlaySource(uint source) => AudioApi.SourcePlay(source);
+
+    public bool IsSourcePlaying(uint source)
+    {
+        AudioApi.GetSourceProperty(source, GetSourceInteger.SourceState, out int state);
+        return state == (int)SourceState.Playing;
+    }
+
+    public float SourceSecondsOffset(uint source)
+    {
+        AudioApi.GetSourceProperty(source, SourceFloat.SecOffset, out float offset);
+        return offset;
+    }
 }
 
 internal sealed class OpenAlResourceLifetime : IRetryableResourceCleanup

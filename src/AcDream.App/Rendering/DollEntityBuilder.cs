@@ -21,7 +21,8 @@ public static class DollEntityBuilder
         IReadOnlyList<MeshRef> meshRefs,
         uint? basePaletteId = null,
         IReadOnlyList<(uint SubPaletteId, byte Offset, byte Length)>? subPalettes = null,
-        IReadOnlyList<(byte PartIndex, uint GfxObjId)>? partOverrides = null)
+        IReadOnlyList<(byte PartIndex, uint GfxObjId)>? partOverrides = null,
+        float objectScale = 1f)
     {
         // --- palette override (mirrors GameWindow:3395-3405) ---
         // Only build when there are sub-palette overlays — same gate as GameWindow.
@@ -65,6 +66,11 @@ public static class DollEntityBuilder
             PaletteOverride = paletteOverride,
             PartOverrides = entityPartOverrides,
             ParentCellId = null,
+            // The doll wears the character's own scale. The part transforms
+            // handed in already carry it; this keeps the entity's own record
+            // of it in step so nothing downstream reads a size the meshes
+            // disagree with.
+            Scale = objectScale,
         };
     }
 }

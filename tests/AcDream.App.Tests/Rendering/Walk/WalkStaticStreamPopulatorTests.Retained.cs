@@ -88,7 +88,6 @@ public sealed partial class WalkStaticStreamPopulatorTests
         public RetailSelectionLighting Value = new(0.1f, 0.9f);
         public void AddVisiblePart(uint serverGuid, uint localEntityId, int partIndex, uint gfxObjId, Matrix4x4 partWorld) =>
             Sink.AddVisiblePart(serverGuid, localEntityId, partIndex, gfxObjId, partWorld);
-        public void TickLighting() { }
         public bool TryGetLighting(uint serverGuid, uint localEntityId, out RetailSelectionLighting lighting)
         {
             lighting = Value;

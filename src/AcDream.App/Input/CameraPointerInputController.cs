@@ -450,6 +450,7 @@ internal sealed class CameraPointerInputController
             && _chase.Legacy is not null)
         {
             float sensitivity = _chase.Sensitivity;
+            float invertSign = _chase.InvertMouseLookYAxis ? -1f : 1f;
             if (_gameplayFrame?.MouseLookActive == true)
             {
                 _gameplayFrame.QueueRawMouseDelta(dx, dy);
@@ -465,13 +466,13 @@ internal sealed class CameraPointerInputController
                         weight: 0.5f,
                         nowSec: _clock.NowSeconds);
                     const float retailMouseScale = 0.0666666701f;
-                    _chase.Retail.AdjustYaw(-filteredDx * sensitivity * retailMouseScale);
-                    _chase.Retail.AdjustPitch(filteredDy * sensitivity * retailMouseScale);
+                    _chase.Retail.AdjustYaw(-invertSign * filteredDx * sensitivity * retailMouseScale);
+                    _chase.Retail.AdjustPitch(invertSign * filteredDy * sensitivity * retailMouseScale);
                 }
                 else
                 {
-                    _chase.Legacy.YawOffset -= dx * 0.004f * sensitivity;
-                    _chase.Legacy.AdjustPitch(dy * 0.003f * sensitivity);
+                    _chase.Legacy.YawOffset -= invertSign * dx * 0.004f * sensitivity;
+                    _chase.Legacy.AdjustPitch(invertSign * dy * 0.003f * sensitivity);
                 }
             }
         }

@@ -320,6 +320,13 @@ internal sealed class FrameRootCompositionPhase
             }
         }
 
+        if (live.SkyRenderer is { } skyForWeather)
+        {
+            skyForWeather.DisableMostWeatherEffects = () =>
+                d.Runtime.CharacterOwner.Options.GetOptionBit(
+                    CharacterOptionId.DisableMostWeatherEffects);
+        }
+
         var renderWeatherFrame = new RenderWeatherFrameController(
             d.WorldTime,
             d.Weather);
@@ -331,7 +338,12 @@ internal sealed class FrameRootCompositionPhase
             d.Log,
             content.Audio is { } audio
                 ? audio.Engine.StopAllForOwner
-                : null);
+                : null)
+        {
+            DisableMostWeatherEffects = () =>
+                d.Runtime.CharacterOwner.Options.GetOptionBit(
+                    CharacterOptionId.DisableMostWeatherEffects),
+        };
         IWorldSceneFramePhase? worldSceneRenderer = null;
         CurrentRenderSceneOracle? currentRenderSceneOracle = null;
         RenderSceneShadowComparisonController? renderSceneShadowComparison = null;

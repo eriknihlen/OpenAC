@@ -148,12 +148,15 @@ public sealed class AudioHookSink : IAnimationHookSink
         }
     }
 
+    // OnUiHook exists to bypass the world 3-D path for a synthetic scene with no
+    // real position (the portal tunnel) — its cues are not interface sounds and
+    // "Disable Interface Sound" leaves them alone.
     private void PlayUi(uint waveId, float volume, float priority)
     {
         if (waveId == 0) return;
         WaveData? wave = _cache.GetWave(waveId);
         if (wave is null) return;
-        _engine.PlayUiWave(waveId, wave, volume, priority);
+        _engine.PlayUiWave(waveId, wave, volume, priority, isInterfaceSound: false);
     }
 
     private void PlayFromSoundTable(

@@ -7,6 +7,7 @@ using Silk.NET.Input;
 
 namespace AcDream.App.Tests.Input;
 
+[Collection(AcDream.App.Tests.Rendering.CameraDiagnosticsCollection.Name)]
 public sealed class CameraPointerInputControllerTests
 {
     [Theory]
@@ -205,6 +206,55 @@ public sealed class CameraPointerInputControllerTests
         {
             CameraDiagnostics.UseRetailChaseCamera = savedRetail;
         }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RmbOrbitInvertMouseLookYAxisFlipsPitchAndYaw(bool retailCamera)
+    {
+        bool savedRetail = CameraDiagnostics.UseRetailChaseCamera;
+        try
+        {
+            CameraDiagnostics.UseRetailChaseCamera = retailCamera;
+            (float normalPitch, float normalYaw) =
+                DeltasAfterRmbOrbit(retailCamera, invert: false, dx: 10f, dy: 10f);
+            (float invertedPitch, float invertedYaw) =
+                DeltasAfterRmbOrbit(retailCamera, invert: true, dx: 10f, dy: 10f);
+
+            Assert.True(normalPitch > 0f);
+            Assert.Equal(-normalPitch, invertedPitch, 5);
+            Assert.NotEqual(0f, normalYaw);
+            Assert.Equal(-normalYaw, invertedYaw, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = savedRetail;
+        }
+    }
+
+    private static (float PitchDelta, float YawDelta) DeltasAfterRmbOrbit(
+        bool retailCamera, bool invert, float dx, float dy)
+    {
+        var surface = new RawSurface();
+        var fixture = Create([surface]);
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        fixture.Mode.IsPlayerMode = true;
+        fixture.Chase.Legacy = legacy;
+        fixture.Chase.Retail = retail;
+        fixture.Chase.RmbOrbitHeld = true;
+        fixture.Chase.InvertMouseLookYAxis = invert;
+        fixture.Camera.EnterChaseMode(legacy, retail);
+        fixture.Owner.AttachRaw();
+        float beforePitch = retailCamera ? retail.Pitch : legacy.Pitch;
+        float beforeYaw = retailCamera ? retail.YawOffset : legacy.YawOffset;
+
+        surface.Raise(new Vector2(dx, dy));
+
+        float afterPitch = retailCamera ? retail.Pitch : legacy.Pitch;
+        float afterYaw = retailCamera ? retail.YawOffset : legacy.YawOffset;
+        return (afterPitch - beforePitch, afterYaw - beforeYaw);
     }
 
     private static Fixture Create(IReadOnlyList<RawSurface> surfaces)

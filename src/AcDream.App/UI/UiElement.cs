@@ -198,6 +198,14 @@ public abstract class UiElement
     public bool ResizeX { get; set; } = true;
     public bool ResizeY { get; set; } = true;
 
+    /// <summary>Which of the four FLAT border runs (the spans between the
+    /// corners) of the synthesized window border begin a resize; the rest of
+    /// that border is the move affordance. The four corner squares are NOT
+    /// governed by this set - a corner always offers its own two sides,
+    /// filtered only by <see cref="ResizeX"/> / <see cref="ResizeY"/>, so a
+    /// height-only window still resizes from its corners while its flat top
+    /// run stays a move handle. (An authored resize grip is a separate,
+    /// explicit region and this set still gates it.)</summary>
     public ResizeEdges ResizableEdges { get; set; } =
         ResizeEdges.Left | ResizeEdges.Right | ResizeEdges.Top | ResizeEdges.Bottom;
 
@@ -386,6 +394,13 @@ public abstract class UiElement
         string? text = RuntimeTooltipTextSource?.Invoke();
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
+
+    /// <summary>Announce that <see cref="GetTooltipText"/> would now return something else.
+    /// A tooltip this element already owns is torn down and its dwell re-armed from the last
+    /// cursor movement, so the reader sees the text that is current now rather than the text
+    /// that happened to be current when the tooltip first appeared. Cheap while no tooltip is
+    /// showing, so call it from every runtime tooltip-text change.</summary>
+    protected void NotifyTooltipTextChanged() => FindRoot()?.ResetTooltip(this);
 
 
     internal void DrawSelfAndChildren(UiRenderContext ctx)

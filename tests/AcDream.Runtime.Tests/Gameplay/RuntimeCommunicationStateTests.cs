@@ -281,6 +281,77 @@ public sealed class RuntimeCommunicationStateTests
     }
 
     [Fact]
+    public void AddText_FilterLanguageOn_CensorsMatchingWords()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+
+        state.AddText("a zork b", RetailLogTextType.Default);
+
+        Assert.Equal("a **** b", state.Chat.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void AddText_FilterLanguageOff_LeavesTextUntouched()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => false,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+
+        state.AddText("a zork b", RetailLogTextType.Default);
+
+        Assert.Equal("a zork b", state.Chat.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void AddText_FilterLanguageOn_TabooTableMissing_CensorsEveryWord()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = null,
+        };
+
+        state.AddText("a zork b", RetailLogTextType.Default);
+
+        Assert.Equal("**** **** ****", state.Chat.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void AddText_FilterLanguageOn_NeverAppliedToClientLocalSpewBox()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+
+        state.AddText("a zork b", RetailLogTextType.ClientLocal);
+
+        state.SpewBox.Tick(0d);
+        Assert.Equal("a zork b", state.SpewBox.Snapshot()[0].Text);
+    }
+
+    [Fact]
+    public void FilterLanguageSource_ForwardsToChat_SoIncomingSpeechIsCensoredToo()
+    {
+        using var state = new RuntimeCommunicationState
+        {
+            FilterLanguageSource = () => true,
+            FilterLanguagePatterns = new[] { "zork" },
+        };
+
+        state.Chat.OnLocalSpeech("Alice", "a zork b", 0xAAu, isRanged: false, logTextType: 0x02u);
+
+        Assert.Equal("a **** b", state.Chat.Snapshot()[0].Text);
+    }
+
+    [Fact]
     public void Dispose_ResetsSpewBox()
     {
         var state = new RuntimeCommunicationState();

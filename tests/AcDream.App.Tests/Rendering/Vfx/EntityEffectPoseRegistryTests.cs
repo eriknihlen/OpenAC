@@ -80,8 +80,13 @@ public sealed class EntityEffectPoseRegistryTests
         Assert.Equal(new Vector3(4, 5, 6), parts[1].Translation);
     }
 
+    /// <summary>
+    /// A part the object does not draw keeps its index, and still resolves:
+    /// a caller parenting to a part by index is asking where the part is,
+    /// not whether it draws. Only an index outside the part count fails.
+    /// </summary>
     [Fact]
-    public void Publish_MissingMiddlePartRetainsIndicesButCannotBeResolved()
+    public void Publish_NonDrawingMiddlePartKeepsItsIndexAndStillResolves()
     {
         var poses = new EntityEffectPoseRegistry();
         WorldEntity entity = Entity(81u, Vector3.Zero);
@@ -95,9 +100,14 @@ public sealed class EntityEffectPoseRegistryTests
             ],
             [true, false, true]);
 
-        Assert.False(poses.TryGetPartPose(81u, 1, out _));
+        Assert.True(poses.TryGetPartPose(81u, 1, out Matrix4x4 second));
+        Assert.Equal(2f, second.Translation.X);
         Assert.True(poses.TryGetPartPose(81u, 2, out Matrix4x4 third));
         Assert.Equal(3f, third.Translation.X);
+        Assert.False(poses.TryGetPartPose(81u, 3, out _));
+
+        Assert.True(poses.TryGetPartPoseSnapshot(81u, out _, out var availability));
+        Assert.False(availability[1]);
     }
 
     [Fact]
@@ -120,7 +130,10 @@ public sealed class EntityEffectPoseRegistryTests
 
         poses.PublishMeshRefs(entity);
 
-        Assert.False(poses.TryGetPartPose(82u, 1, out _));
+        // Compacting the drawables would put the third part's pose at index
+        // 1; the stable setup indices keep the second part's pose there.
+        Assert.True(poses.TryGetPartPose(82u, 1, out Matrix4x4 second));
+        Assert.Equal(2f, second.Translation.X);
         Assert.True(poses.TryGetPartPose(82u, 2, out Matrix4x4 third));
         Assert.Equal(3f, third.Translation.X);
     }

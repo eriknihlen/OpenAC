@@ -1,3 +1,4 @@
+using System;
 using AcDream.App.Audio;
 using AcDream.Core.Audio;
 using Silk.NET.OpenAL;
@@ -298,8 +299,7 @@ public sealed class OpenAlResourceLifetimeTests
     {
         private uint _nextSource = 1;
 
-        public AL? AudioApi => null;
-        public ALContext? ContextApi => null;
+        private uint _nextBuffer = 1;
         public nint DeviceResult { get; set; } = 101;
         public nint ContextResult { get; set; } = 202;
         public uint? ConfigureFailureSource { get; set; }
@@ -378,6 +378,17 @@ public sealed class OpenAlResourceLifetimeTests
         public void DestroyContext(nint context) => DestroyContextCalls++;
 
         public void CloseDevice(nint device) => CloseDeviceCalls++;
+        public void SetListenerGain(float gain) { }
+        public uint GenerateBuffer() => _nextBuffer++;
+        public void FillBuffer(uint buffer, BufferFormat format, ReadOnlySpan<byte> pcm, int sampleRate) { }
+        public void AttachBuffer(uint source, uint buffer) { }
+        public uint AttachedBuffer(uint source) => 0;
+        public void SetSourceGain(uint source, float gain) { }
+        public void SetSourceLooping(uint source, bool looping) { }
+        public void PlaceSourceRelative(uint source, float x, float y, float z) { }
+        public void PlaySource(uint source) { }
+        public bool IsSourcePlaying(uint source) => false;
+        public float SourceSecondsOffset(uint source) => 0f;
 
         private void ThrowIfConfiguredFailure(uint source)
         {

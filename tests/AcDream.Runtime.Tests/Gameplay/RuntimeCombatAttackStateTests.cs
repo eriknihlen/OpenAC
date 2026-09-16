@@ -88,9 +88,97 @@ public sealed class RuntimeCombatAttackStateTests
         now = 0.8d;
         controller.ReleaseAttack();
 
-        var attack = Assert.Single(sent);
-        Assert.Equal(AttackHeight.Medium, attack.Height);
-        Assert.Equal(0.8f, attack.Power, 3);
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(AttackHeight.Medium, sent[0].Height);
+        Assert.Equal(0.8f, sent[0].Power, 3);
+        Assert.Equal(AttackHeight.Medium, sent[1].Height);
+        Assert.Equal(0.5f, sent[1].Power, 3);
+    }
+
+    [Fact]
+    public void ChargedRelease_ImmediatelyFollowsWithTheBarSetting()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(
+            combat,
+            () => now,
+            sent,
+            autoRepeatAttack: () => true);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0f);
+
+        controller.PressAttack(AttackHeight.High);
+        now = 1.2d;
+        controller.ReleaseAttack();
+
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(1f, sent[0].Power, 3);
+        Assert.Equal(0f, sent[1].Power, 3);
+        Assert.Equal(0f, controller.RequestedAttackPower, 3);
+    }
+
+    [Fact]
+    public void RepeatAfterAChargedRelease_CarriesTheBarSettingNotTheChargedLevel()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(
+            combat,
+            () => now,
+            sent,
+            autoRepeatAttack: () => true);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(1f / 6f);
+
+        controller.PressAttack(AttackHeight.Medium);
+        now = 1.2d;
+        controller.ReleaseAttack();
+
+        // The charged swing, then the level the next swing must use.
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(1f, sent[0].Power, 3);
+        Assert.Equal(1f / 6f, sent[1].Power, 3);
+
+        combat.OnCombatCommenceAttack();
+        now = 1.4d;
+        combat.OnAttackDone(1u, 0u);
+
+        // Nothing more is requested: the level in flight already matches the bar.
+        Assert.Equal(2, sent.Count);
+        Assert.True(controller.RepeatAttackInProgress);
+        Assert.Equal(1f / 6f, controller.RequestedAttackPower, 3);
+    }
+
+    [Fact]
+    public void MovingTheBarDuringRepeats_RequestsTheNewLevelAtTheNextCompletion()
+    {
+        double now = 0d;
+        var sent = new List<(AttackHeight Height, float Power)>();
+        var combat = new CombatState();
+        using var controller = Create(
+            combat,
+            () => now,
+            sent,
+            autoRepeatAttack: () => true);
+        combat.SetCombatMode(CombatMode.Melee);
+        controller.SetDesiredPower(0.25f);
+
+        controller.PressAttack(AttackHeight.Low);
+        now = 0.25d;
+        controller.ReleaseAttack();
+        Assert.Single(sent);
+
+        combat.OnCombatCommenceAttack();
+        controller.SetDesiredPower(1f);
+        now = 0.5d;
+        combat.OnAttackDone(1u, 0u);
+
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(1f, sent[1].Power, 3);
+        Assert.Equal(AttackHeight.Low, sent[1].Height);
     }
 
     [Fact]
@@ -277,7 +365,10 @@ public sealed class RuntimeCombatAttackStateTests
                 Assert.True(controller!.AttackRequestInProgress);
                 Assert.Equal(1f, controller.RequestedAttackPower);
                 events.Add("prepare");
-            });
+            },
+            // Frozen clock: the release commits the bar setting exactly, so the
+            // charged-release follow-up request does not apply here.
+            now: () => 5d);
         using (controller)
         {
         combat.SetCombatMode(CombatMode.Missile);
@@ -326,7 +417,8 @@ public sealed class RuntimeCombatAttackStateTests
         CombatState combat,
         Func<double> now,
         List<(AttackHeight Height, float Power)> sent,
-        Func<bool>? isDualWield = null)
+        Func<bool>? isDualWield = null,
+        Func<bool>? autoRepeatAttack = null)
         => new(
             combat,
             canStartAttack: () => true,
@@ -336,6 +428,6 @@ public sealed class RuntimeCombatAttackStateTests
                 return true;
             },
             isDualWield: isDualWield,
-            autoRepeatAttack: () => false,
+            autoRepeatAttack: autoRepeatAttack ?? (() => false),
             now: now);
 }

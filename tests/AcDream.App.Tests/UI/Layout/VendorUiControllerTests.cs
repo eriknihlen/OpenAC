@@ -1491,6 +1491,120 @@ public sealed class VendorUiControllerTests
         Assert.Equal(new[] { "You must empty some slots in your backpack first" }, h.SystemMessages);
     }
 
+    // Filling the main pack and leaving a side pack empty used to
+    // let the whole purchase through: the server has no objection to filing
+    // the goods into a side pack, so the refusal has to happen here, before
+    // anything is sent. Only the player's own pack counts as room.
+    private const uint MainPackFillerAGuid = 0x60002101u;
+    private const uint MainPackFillerBGuid = 0x60002102u;
+    private const uint MortarAndPestleGuid = 0x60002110u;
+    private const uint BirchBackpackGuid = 0x60002111u;
+
+    private static void FillMainPackLeavingAnEmptySidePack(Harness h, int freeItemSlots)
+    {
+        MakeContained(h, MainPackFillerAGuid, Harness.PlayerGuid, ItemType.Armor, 5);
+        MakeContained(h, MainPackFillerBGuid, Harness.PlayerGuid, ItemType.Armor, 5);
+        MakeContained(
+            h, PlayerOwnedPackGuid, Harness.PlayerGuid, ItemType.Container, 5, itemsCapacity: 24);
+        h.Objects.Get(Harness.PlayerGuid)!.ItemsCapacity = 2 + freeItemSlots;
+    }
+
+    private static VendorShopItem MortarAndPestle() =>
+        new(MortarAndPestleGuid, -1, 0x5348u, "Mortar and Pestle",
+            (uint)ItemType.CraftCookingBase, 200u, 10);
+
+    [Fact]
+    public void BuyButton_MainPackFullSidePackEmpty_RefusesWithRetailsNoticeAndSendsNothing()
+    {
+        var h = new Harness();
+        FillMainPackLeavingAnEmptySidePack(h, freeItemSlots: 0);
+        h.State.Apply(VendorGuid, Profile(), new[] { MortarAndPestle() });
+
+        h.BuyButton.OnClick!.Invoke();
+
+        Assert.Empty(h.Buys);
+        Assert.Equal(new[] { "You must empty some slots in your backpack first" }, h.SystemMessages);
+    }
+
+    [Fact]
+    public void BuyButton_MainPackWithOneFreeSlot_SendsTheBuy()
+    {
+        var h = new Harness();
+        FillMainPackLeavingAnEmptySidePack(h, freeItemSlots: 1);
+        h.State.Apply(VendorGuid, Profile(), new[] { MortarAndPestle() });
+
+        h.BuyButton.OnClick!.Invoke();
+
+        Assert.Equal(new[] { (VendorGuid, MortarAndPestleGuid, 1, 0u) }, h.Buys);
+        Assert.Empty(h.SystemMessages);
+    }
+
+    [Fact]
+    public void ShopCellDoubleClick_MainPackFull_RefusesWithRetailsNoticeAndSendsNothing()
+    {
+        var h = new Harness();
+        FillMainPackLeavingAnEmptySidePack(h, freeItemSlots: 0);
+        h.State.Apply(VendorGuid, Profile(), new[] { MortarAndPestle() });
+
+        h.ItemList.GetItem(0)!.DoubleClicked!.Invoke();
+
+        Assert.Empty(h.Buys);
+        Assert.Equal(new[] { "You must empty some slots in your backpack first" }, h.SystemMessages);
+    }
+
+    [Fact]
+    public void BuyButton_ContainerSlotsFullButItemSlotsFree_RefusesToBuyAPack()
+    {
+        var h = new Harness();
+        MakeContained(
+            h, PlayerOwnedPackGuid, Harness.PlayerGuid, ItemType.Container, 5, itemsCapacity: 24);
+        h.Objects.Get(Harness.PlayerGuid)!.ContainersCapacity = 1;
+
+        h.State.Apply(VendorGuid, Profile(), new[]
+        {
+            new VendorShopItem(
+                BirchBackpackGuid, -1, 0x15Fu, "Birch Backpack", (uint)ItemType.Container, 200u, 100),
+        });
+
+        h.BuyButton.OnClick!.Invoke();
+
+        Assert.Empty(h.Buys);
+        Assert.Equal(new[] { "You must empty some slots in your backpack first" }, h.SystemMessages);
+    }
+
+    [Fact]
+    public void BuyItemButton_MainPackFull_RefusesAndLeavesTheStagedRowIntact()
+    {
+        var h = new Harness();
+        FillMainPackLeavingAnEmptySidePack(h, freeItemSlots: 0);
+        h.State.Apply(VendorGuid, Profile(), new[] { MortarAndPestle() });
+        h.AddButton.OnClick!.Invoke();
+        Assert.Equal(1, h.BuyingList.GetNumUIItems());
+
+        h.BuyItemButton.OnClick!.Invoke();
+
+        Assert.Empty(h.Buys);
+        Assert.Equal(1, h.BuyingList.GetNumUIItems());
+        Assert.Equal(new[] { "You must empty some slots in your backpack first" }, h.SystemMessages);
+    }
+
+    [Fact]
+    public void BuyAllButton_NoMoneyAndNoRoom_ReportsTheMoneyRefusalFirst()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(), new[]
+        {
+            new VendorShopItem(ArmorItemGuid, -1, 2u, "Chainmail", (uint)ItemType.Armor, 200u, 5000),
+        });
+        h.AddButton.OnClick!.Invoke();
+        h.Objects.Get(Harness.PlayerGuid)!.ItemsCapacity = 0;
+
+        h.BuyAllButton.OnClick!.Invoke();
+
+        Assert.Empty(h.BuyAlls);
+        Assert.Equal(new[] { "You don't have enough money" }, h.SystemMessages);
+    }
+
     [Fact]
     public void BuyItemButton_BuysTheSelectedStagedItemAndRemovesItFromStagingOnSuccess()
     {

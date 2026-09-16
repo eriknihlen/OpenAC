@@ -186,6 +186,72 @@ public sealed class MouseLookControllerTests
         Assert.False(harness.Chase.RmbOrbitHeld);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void InvertMouseLookYAxisFlipsPitchForMouseLook(bool retailCamera)
+    {
+        bool previousRetailCamera = CameraDiagnostics.UseRetailChaseCamera;
+        CameraDiagnostics.UseRetailChaseCamera = retailCamera;
+        try
+        {
+            float normal = PitchChangeAfterMouseLook(retailCamera, invert: false, dy: 10f);
+            float inverted = PitchChangeAfterMouseLook(retailCamera, invert: true, dy: 10f);
+
+            Assert.True(normal > 0f);
+            Assert.Equal(-normal, inverted, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = previousRetailCamera;
+        }
+    }
+
+    [Fact]
+    public void InvertMouseLookYAxisFlipsYawTurnDirection()
+    {
+        uint? normal = TurnCommandAfterMouseLook(invert: false, dx: 2f);
+        uint? inverted = TurnCommandAfterMouseLook(invert: true, dx: 2f);
+
+        Assert.NotNull(normal);
+        Assert.NotNull(inverted);
+        Assert.NotEqual(normal, inverted);
+    }
+
+    private static float PitchChangeAfterMouseLook(bool retailCamera, bool invert, float dy)
+    {
+        Harness harness = CreateActiveHarness();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        harness.Chase.Legacy = legacy;
+        harness.Chase.Retail = retailCamera ? retail : null;
+        harness.Chase.InvertMouseLookYAxis = invert;
+        float before = retailCamera ? retail.Pitch : legacy.Pitch;
+
+        harness.Clock.NowSeconds += 0.01f;
+        harness.Owner.QueueRawDelta(0f, dy);
+        harness.Owner.Tick();
+
+        return (retailCamera ? retail.Pitch : legacy.Pitch) - before;
+    }
+
+    private static uint? TurnCommandAfterMouseLook(bool invert, float dx)
+    {
+        Harness harness = CreateActiveHarness();
+        harness.Chase.InvertMouseLookYAxis = invert;
+
+        for (int i = 0; i < 6; i++)
+        {
+            harness.Clock.NowSeconds += 0.01f;
+            harness.Owner.QueueRawDelta(dx, 0f);
+            harness.Owner.Tick();
+        }
+
+        return harness.Player.Update(
+            PhysicsBody.MinQuantum + 0.001f,
+            new MovementInput()).TurnCommand;
+    }
+
     private static Harness CreateActiveHarness()
     {
         Harness harness = CreateHarness();

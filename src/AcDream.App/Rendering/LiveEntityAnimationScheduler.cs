@@ -236,10 +236,8 @@ internal sealed class LiveEntityAnimationScheduler
         ProjectileController projectileController = _projectiles;
         bool projectileHandlesMovement = projectile is not null
             && projectileController?.HandlesMovement(serverGuid) == true;
-        float objectScale = animation?.Scale
-            ?? record.Snapshot.Physics?.Scale
-            ?? record.Snapshot.ObjScale
-            ?? entity.Scale;
+        float objectScale =
+            LiveEntityObjectScale.Resolve(animation, record, entity);
 
         for (int qi = 0; qi < batch.Count; qi++)
         {

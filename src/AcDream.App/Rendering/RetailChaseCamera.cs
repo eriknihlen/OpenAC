@@ -122,8 +122,9 @@ public sealed class RetailChaseCamera : ICamera
         }
         else
         {
-            float tAlpha = ComputeDampingAlpha(CameraDiagnostics.TranslationStiffness, dt);
-            float rAlpha = ComputeDampingAlpha(CameraDiagnostics.RotationStiffness,    dt);
+            // Retail's Camera Stiffness sets rotation only in first person (CameraSet::SetStiffness).
+            float tAlpha = _inHead ? 1f : ComputeDampingAlpha(CameraDiagnostics.TranslationStiffness, dt);
+            float rAlpha = ComputeDampingAlpha(CameraDiagnostics.RotationStiffness, dt);
             Vector3 candidateEye     = Vector3.Lerp(_publishedEye, targetEye, tAlpha);
             Vector3 candidateForward = Vector3.Normalize(Vector3.Lerp(_dampedForward, targetForward, rAlpha));
 

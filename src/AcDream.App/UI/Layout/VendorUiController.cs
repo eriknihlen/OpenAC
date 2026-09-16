@@ -877,15 +877,17 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
 
         uint quantity = ResolveBuyQuantity(shopItem);
         VendorShopProfile profile = _vendor.Profile;
+        int price = ComputeShopItemPrice(shopItem, (int)quantity);
+        if (!BuyHasRoom(new[] { ((int)quantity, shopItem.ItemGuid) }))
+            return;
+
         if (_itemInteraction.TryBuy(
                 _vendor.VendorId,
                 shopItem.ItemGuid,
                 (int)quantity,
                 profile.AlternateCurrencyWcid))
         {
-            RecordAlternateCurrencyPurchase(
-                profile,
-                ComputeShopItemPrice(shopItem, (int)quantity));
+            RecordAlternateCurrencyPurchase(profile, price);
         }
     }
 
@@ -978,15 +980,17 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             return;
 
         uint quantity = ResolveBuyQuantity(shopItem);
+        int price = ComputeShopItemPrice(shopItem, (int)quantity);
+        if (!BuyHasRoom(new[] { ((int)quantity, shopItem.ItemGuid) }))
+            return;
+
         if (_itemInteraction.TryBuy(
                 _vendor.VendorId,
                 shopItem.ItemGuid,
                 (int)quantity,
                 _vendor.Profile.AlternateCurrencyWcid))
         {
-            RecordAlternateCurrencyPurchase(
-                _vendor.Profile,
-                ComputeShopItemPrice(shopItem, (int)quantity));
+            RecordAlternateCurrencyPurchase(_vendor.Profile, price);
             _buyStaging.Remove(shopItem.ItemGuid, BuyStagingRemovalAmount(shopItem));
         }
     }
@@ -1022,6 +1026,27 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
             return;
         }
 
+        if (!BuyHasRoom(items))
+            return;
+
+        if (_itemInteraction.TryBuyAll(_vendor.VendorId, items, profile.AlternateCurrencyWcid))
+        {
+            RecordAlternateCurrencyPurchase(profile, transactionValue);
+            _buyStaging.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Every purchase -- one item or a whole shopping list -- has to fit in
+    /// the player's OWN pack before anything reaches the wire. Side packs do
+    /// not count towards that room: a full backpack refuses the purchase even
+    /// when every side pack is empty, because the server would then quietly
+    /// file the goods into a side pack instead. The container half of the
+    /// pack is checked before the item half, and both refusals leave the
+    /// shopping list untouched so the player can free a slot and press again.
+    /// </summary>
+    private bool BuyHasRoom(IReadOnlyList<(int Amount, uint ItemGuid)> items)
+    {
         (int itemSlotsNeeded, int containerSlotsNeeded) = ComputeBuySlotsNeeded(items);
         ClientObject? player = _objects.Get(_playerGuid());
         (int itemsUsed, int containersUsed) = CountPlayerContents();
@@ -1030,20 +1055,17 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         if (containerSlotsNeeded > freeContainerSlots)
         {
             _systemMessage?.Invoke(NotEnoughRoomMessage);
-            return;
+            return false;
         }
+
         int freeItemSlots = (player?.ItemsCapacity ?? 0) - itemsUsed;
         if (itemSlotsNeeded > freeItemSlots)
         {
             _systemMessage?.Invoke(NotEnoughRoomMessage);
-            return;
+            return false;
         }
 
-        if (_itemInteraction.TryBuyAll(_vendor.VendorId, items, profile.AlternateCurrencyWcid))
-        {
-            RecordAlternateCurrencyPurchase(profile, transactionValue);
-            _buyStaging.Clear();
-        }
+        return true;
     }
 
     private int ComputeBuyTransactionValue()

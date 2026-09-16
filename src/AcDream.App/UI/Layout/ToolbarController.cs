@@ -449,25 +449,36 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             return;
         if (_itemInteraction is not null)
         {
-            Func<bool> dispatch = () =>
-            {
-                if (_sendPutItemInContainer is null)
-                    return false;
-                _sendPutItemInContainer(payload.ObjId, player, 0);
-                return true;
-            };
             if (_itemInteraction.IsOwnedByPlayer(payload.ObjId))
+            {
+                uint target = _itemInteraction.PreferredBackpackContainer();
                 _itemInteraction.TryDispatchPendingBackpackPlacement(
                     payload.ObjId,
-                    player,
+                    target,
                     0,
                     InventoryRequestKind.PutInContainer,
-                    dispatch);
+                    () =>
+                    {
+                        if (_sendPutItemInContainer is null)
+                            return false;
+                        _sendPutItemInContainer(payload.ObjId, target, 0);
+                        return true;
+                    });
+            }
             else
+            {
+                Func<bool> dispatch = () =>
+                {
+                    if (_sendPutItemInContainer is null)
+                        return false;
+                    _sendPutItemInContainer(payload.ObjId, player, 0);
+                    return true;
+                };
                 _itemInteraction.TryDispatchInventoryRequest(
                     InventoryRequestKind.Pickup,
                     payload.ObjId,
                     dispatch);
+            }
             return;
         }
         _sendPutItemInContainer?.Invoke(payload.ObjId, player, 0);

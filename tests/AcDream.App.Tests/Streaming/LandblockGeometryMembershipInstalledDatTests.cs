@@ -28,7 +28,11 @@ public sealed partial class LandblockGeometryMembershipInstalledDatTests
     private const uint LandblockId = 0xF418FFFFu;
     private const uint ShellCellId = 0xF4180104u;
     private const uint RampSetupId = 0x020009A2u;
-    private const string ExpectedCombinedHash = "251A13A58133D79062B38A7145250E5B1FE018AF8E28E1D29A092C4B6C63ABF0";
+    // Re-baselined when interior hydration stopped dropping placements whose
+    // only authored content is a default script: the landblock gained 20
+    // non-drawing effect owners (241 -> 261 published entities, 35 -> 43 setup
+    // meshes) while every drawn-geometry count stayed byte-identical.
+    private const string ExpectedCombinedHash = "F894E8A258A5D01DF233BED41734CC947627AFC194458DC03267D6DCDC5B80FE";
 
     private static readonly (string Name, string Sha256)[] AcceptedDatFiles =
     [

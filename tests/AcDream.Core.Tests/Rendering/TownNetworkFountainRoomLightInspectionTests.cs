@@ -200,9 +200,12 @@ public class TownNetworkFountainRoomLightInspectionTests
             if (dats.Get<GfxObj>(mr.GfxObjId) is null) continue;
             survivors++;
         }
-        bool wouldBeKeptByCurrentFix = AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(survivors, setup.Lights.Count);
+        bool wouldBeKeptByCurrentFix = AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(
+            survivors,
+            setup.Lights.Count,
+            setup.DefaultScript.DataId != 0 || (uint)setup.DefaultScriptTable != 0);
         _out.WriteLine($"  flattened={flat.Count} meshSurvivors={survivors} " +
                        $"hasDefaultScript={setup.DefaultScript.DataId != 0} " +
-                       $"=> current ShouldKeepEntity(mesh,lights) = {wouldBeKeptByCurrentFix}");
+                       $"=> ShouldKeepEntity = {wouldBeKeptByCurrentFix}");
     }
 }

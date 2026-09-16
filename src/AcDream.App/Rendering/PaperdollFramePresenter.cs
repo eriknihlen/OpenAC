@@ -4,7 +4,9 @@ using AcDream.App.Rendering.Gpu;
 using AcDream.App.UI;
 using AcDream.App.World;
 using AcDream.Content;
+using AcDream.Core.Items;
 using AcDream.Core.Physics;
+using AcDream.Core.Player;
 using AcDream.Core.World;
 using DatReaderWriter;
 
@@ -12,6 +14,8 @@ namespace AcDream.App.Rendering;
 
 internal interface IPaperdollDollRenderer
 {
+    void SetHeritage(uint heritageId);
+
     void SetDoll(WorldEntity? doll);
 
     void Prepare();
@@ -35,17 +39,28 @@ internal interface IPaperdollInventoryVisibility
 
 internal interface IPaperdollDollFactory
 {
-    bool TryBuild(out WorldEntity? doll);
+    bool TryBuild(uint heritageId, out WorldEntity? doll);
+}
+
+/// <summary>The heritage the doll is posed and framed for.</summary>
+internal interface IPaperdollHeritageSource
+{
+    uint HeritageGroup { get; }
 }
 
 internal interface IPaperdollEntityLookup
 {
-    bool TryGet(uint serverGuid, out WorldEntity player);
+    /// <summary>
+    /// The character as the world has it, together with the uniform scale its
+    /// body wears. The scale is not on the projection itself, so it is read
+    /// here and carried with the character rather than guessed downstream.
+    /// </summary>
+    bool TryGet(uint serverGuid, out WorldEntity player, out float objectScale);
 }
 
 internal interface IPaperdollPoseApplicator
 {
-    void Apply(WorldEntity doll, uint setupId);
+    void Apply(WorldEntity doll, uint setupId, uint heritageId, float objectScale);
 }
 
 /// <summary>
@@ -60,17 +75,21 @@ internal sealed class PaperdollFramePresenter :
     private readonly IPaperdollDollRenderer _renderer;
     private readonly IPaperdollFrameView _view;
     private readonly IPaperdollDollFactory _factory;
+    private readonly IPaperdollHeritageSource _heritage;
     private WorldEntity? _doll;
     private bool _dirty = true;
+    private uint _appliedHeritage;
 
     public PaperdollFramePresenter(
         IPaperdollDollRenderer renderer,
         IPaperdollFrameView view,
-        IPaperdollDollFactory factory)
+        IPaperdollDollFactory factory,
+        IPaperdollHeritageSource heritage)
     {
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _view = view ?? throw new ArgumentNullException(nameof(view));
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _heritage = heritage ?? throw new ArgumentNullException(nameof(heritage));
     }
 
     internal bool IsDirty => _dirty;
@@ -79,16 +98,24 @@ internal sealed class PaperdollFramePresenter :
 
     public void PrepareResources()
     {
+        // The heritage arrives with the character description, which can land
+        // after the doll is first built, so a change has to redress it: the
+        // pose animation and the camera distance are both chosen by heritage.
+        uint heritage = _heritage.HeritageGroup;
+        if (heritage != _appliedHeritage)
+        {
+            _appliedHeritage = heritage;
+            _renderer.SetHeritage(heritage);
+            _dirty = true;
+        }
+
         if (_dirty)
         {
-            if (_factory.TryBuild(out WorldEntity? doll))
+            if (_factory.TryBuild(heritage, out WorldEntity? doll))
             {
                 _renderer.SetDoll(doll);
                 _doll = doll;
                 _dirty = false;
-            }
-            else
-            {
             }
         }
 
@@ -108,9 +135,11 @@ internal sealed class PaperdollFramePresenter :
     public void ResetSession()
     {
         _renderer.SetDoll(null);
+        _renderer.SetHeritage(0u);
         _view.ClearTextureHandle();
         _doll = null;
         _dirty = true;
+        _appliedHeritage = 0u;
     }
 }
 
@@ -173,8 +202,60 @@ internal sealed class LivePaperdollEntityLookup : IPaperdollEntityLookup
             ?? throw new ArgumentNullException(nameof(liveEntities));
     }
 
-    public bool TryGet(uint serverGuid, out WorldEntity player) =>
-        _liveEntities.TryGetWorldEntity(serverGuid, out player);
+    public bool TryGet(uint serverGuid, out WorldEntity player, out float objectScale)
+    {
+        if (_liveEntities.TryGetRecord(serverGuid, out LiveEntityRecord record)
+            && record.WorldEntity is { } found)
+        {
+            player = found;
+            objectScale = LiveEntityObjectScale.Resolve(record, found);
+            return true;
+        }
+
+        player = null!;
+        objectScale = 1f;
+        return false;
+    }
+}
+
+/// <summary>
+/// Reads the heritage the local character was made with. It comes in on the
+/// character description, so it is absent until that lands.
+/// </summary>
+internal sealed class LivePaperdollHeritageSource : IPaperdollHeritageSource
+{
+    private const uint HeritageGroupPropertyId = 0xBCu;
+
+    private readonly ClientObjectTable _objects;
+    private readonly LocalPlayerState _localPlayer;
+    private readonly ILocalPlayerIdentitySource _identity;
+
+    public LivePaperdollHeritageSource(
+        ClientObjectTable objects,
+        LocalPlayerState localPlayer,
+        ILocalPlayerIdentitySource identity)
+    {
+        _objects = objects ?? throw new ArgumentNullException(nameof(objects));
+        _localPlayer = localPlayer ?? throw new ArgumentNullException(nameof(localPlayer));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+    }
+
+    public uint HeritageGroup
+    {
+        get
+        {
+            // The description writes the same properties to the player's object
+            // and to the local-player state, but the object can exist first with
+            // nothing on it, so an absent value there is not an answer.
+            uint guid = _identity.ServerGuid;
+            int heritage = guid != 0u && _objects.Get(guid) is { } player
+                ? player.Properties.GetInt(HeritageGroupPropertyId)
+                : 0;
+            if (heritage <= 0)
+                heritage = _localPlayer.Properties.GetInt(HeritageGroupPropertyId);
+            return heritage > 0 ? (uint)heritage : 0u;
+        }
+    }
 }
 
 internal sealed class RetailPaperdollDollFactory : IPaperdollDollFactory
@@ -193,10 +274,13 @@ internal sealed class RetailPaperdollDollFactory : IPaperdollDollFactory
         _pose = pose ?? throw new ArgumentNullException(nameof(pose));
     }
 
-    public bool TryBuild(out WorldEntity? doll)
+    public bool TryBuild(uint heritageId, out WorldEntity? doll)
     {
         doll = null;
-        if (!_entities.TryGet(_identity.ServerGuid, out WorldEntity player)
+        if (!_entities.TryGet(
+                _identity.ServerGuid,
+                out WorldEntity player,
+                out float objectScale)
             || player.MeshRefs.Count == 0)
         {
             return false;
@@ -230,8 +314,9 @@ internal sealed class RetailPaperdollDollFactory : IPaperdollDollFactory
             new List<MeshRef>(player.MeshRefs),
             basePalette,
             subPalettes,
-            partOverrides);
-        _pose.Apply(doll, player.SourceGfxObjOrSetupId);
+            partOverrides,
+            objectScale);
+        _pose.Apply(doll, player.SourceGfxObjOrSetupId, heritageId, objectScale);
         return true;
     }
 }
@@ -252,15 +337,15 @@ internal sealed class RetailPaperdollPoseApplicator : IPaperdollPoseApplicator
         _datLock = datLock ?? throw new ArgumentNullException(nameof(datLock));
     }
 
-    private uint ResolvePoseDid() => RetailHeldPose.ResolvePoseDid(_dats, 0x10000005u);
-
-    public void Apply(WorldEntity doll, uint setupId)
+    public void Apply(WorldEntity doll, uint setupId, uint heritageId, float objectScale)
     {
         DatReaderWriter.DBObjs.Animation? animation;
         DatReaderWriter.DBObjs.Setup? setup;
         lock (_datLock)
         {
-            uint poseDid = ResolvePoseDid();
+            uint poseDid = RetailHeldPose.ResolvePoseDid(
+                _dats,
+                PaperdollHeritagePresentation.ResolvePoseEnum(heritageId));
             if ((poseDid >> 24) != 0x03u)
                 return;
 
@@ -285,7 +370,14 @@ internal sealed class RetailPaperdollPoseApplicator : IPaperdollPoseApplicator
                 orientation = frame.Frames[index].Orientation;
             }
 
-            Matrix4x4 transform = RetailHeldPose.ComposePartTransform(scale, origin, orientation);
+            // The pose replaces every part transform outright, so the scale the
+            // body wears has to be re-applied here: without it the doll is
+            // drawn at the size of a default body no matter whose it is.
+            Matrix4x4 transform = RetailHeldPose.ComposePartTransform(
+                scale,
+                origin,
+                orientation,
+                objectScale);
             MeshRef source = doll.MeshRefs[index];
             reposed.Add(new MeshRef(source.GfxObjId, transform)
             {

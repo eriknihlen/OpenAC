@@ -928,7 +928,11 @@ internal sealed class LivePresentationCompositionPhase
                     new RetailPaperdollPoseApplicator(
                         content.Dats,
                         content.AnimationLoader,
-                        d.DatLock)));
+                        d.DatLock)),
+                new LivePaperdollHeritageSource(
+                    d.EntityObjects.Objects,
+                    d.Character.LocalPlayer,
+                    d.PlayerIdentity));
         }
 
         CompositionAcquisitionScope.CompositionAcquisitionLease<

@@ -50,9 +50,6 @@ internal sealed class RetailSelectionScene :
     public void BeginWholeFigureLightingPulse(uint serverGuid, uint localEntityId)
         => _lightingPulse.StartWholeFigure(serverGuid, localEntityId);
 
-    public void TickLighting()
-        => _lightingPulse.Tick();
-
     public bool TryGetLighting(
         uint serverGuid,
         uint localEntityId,
@@ -91,6 +88,12 @@ internal sealed class RetailSelectionScene :
             throw new InvalidOperationException(
                 "The retail selection scene cannot begin a second frame before completing or aborting the first.");
         }
+
+        // The flash belongs to the selection, so the world frame that publishes
+        // the pickable scene is what advances it. Driving it from a draw call
+        // instead ties it to whichever viewports happen to be on screen, and a
+        // selection made with every panel closed then lights up and stays lit.
+        _lightingPulse.Tick();
 
         _frameOpen = true;
         _building.Clear();

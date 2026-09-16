@@ -33,6 +33,10 @@ public sealed class UiRadar : UiElement
     public const float RetailRefreshSeconds = RetailRadar.UpdateIntervalSeconds;
     public const float HoverRadiusPixels = 6f;
 
+    /// <summary>A blip counts as under the cursor within six pixels, compared squared so the
+    /// test stays in whole pixels - the same whole pixels the blip was drawn at.</summary>
+    public const int HoverRadiusPixelsSquared = 36;
+
     private static readonly Vector4 PlayerMarkerColor = new(0f, 1f, 0f, 1f);
 
     private UiRadarSnapshot _snapshot = UiRadarSnapshot.Empty;
@@ -84,34 +88,44 @@ public sealed class UiRadar : UiElement
             ApplySnapshot(provider() ?? UiRadarSnapshot.Empty);
     }
 
+    /// <summary>The cursor is re-tested against the blips on every move over the radar, not
+    /// only when it arrives, so sweeping from one blip to the next names each one in turn.</summary>
+    public override bool ReceivesHoverMouseMove => true;
+
     protected override void OnTick(double deltaSeconds)
     {
-        if (SnapshotProvider is null)
-            return;
-
-        _refreshAccumulator += deltaSeconds;
-        if (_refreshAccumulator < RetailRefreshSeconds)
-            return;
-
-        _refreshAccumulator %= RetailRefreshSeconds;
-        Refresh();
-    }
-
-    protected override bool OnHitTest(float localX, float localY)
-    {
-        bool inside = base.OnHitTest(localX, localY);
-        if (!inside)
+        if (SnapshotProvider is not null)
         {
-            SetHovered(null, null);
-            return false;
+            _refreshAccumulator += deltaSeconds;
+            if (_refreshAccumulator >= RetailRefreshSeconds)
+            {
+                _refreshAccumulator %= RetailRefreshSeconds;
+                Refresh();
+            }
         }
 
-        UpdateHoveredBlip(localX, localY);
-        return true;
+        // The blips move too, so the object under a parked cursor is resolved every frame
+        // against the live cursor position and not only when the cursor itself moves.
+        if (FindRoot() is { } root)
+        {
+            var screen = ScreenPosition;
+            ResolveObjectUnderCursor(
+                (int)(root.MouseX - screen.X),
+                (int)(root.MouseY - screen.Y));
+        }
     }
 
     public override bool OnEvent(in UiEvent e)
     {
+        // Only the event's own target may read its coordinates; a bubbled child move carries
+        // the child's local position, which would place the cursor somewhere it never was.
+        if ((e.Type == UiEventType.HoverEnter || e.Type == UiEventType.MouseMove)
+            && ReferenceEquals(e.Target, this))
+        {
+            ResolveObjectUnderCursor(e.Data1, e.Data2);
+            return false;
+        }
+
         if (e.Type == UiEventType.HoverLeave)
         {
             SetHovered(null, null);
@@ -142,39 +156,53 @@ public sealed class UiRadar : UiElement
         DrawPixels(ctx, cx, cy, PlayerMarkerColor, RetailRadar.PlayerMarkerPixels);
     }
 
-    private void UpdateHoveredBlip(float localX, float localY)
+    /// <summary>Pick the blip under <paramref name="localX"/>/<paramref name="localY"/>: the
+    /// closest one within the hover radius, measured from the whole pixel the blip was drawn at.
+    /// A blip only displaces a closer candidate, so an exact tie keeps the one drawn first.
+    /// Nothing within the radius clears the name.</summary>
+    private void ResolveObjectUnderCursor(int localX, int localY)
     {
-        uint? nearestId = null;
-        string? nearestName = null;
-        float nearestDistanceSquared = HoverRadiusPixels * HoverRadiusPixels;
+        uint candidateId = 0u;
+        string? candidateName = null;
+        int nearestDistanceSquared = int.MaxValue;
 
         if (!_snapshot.BlankBlips)
         {
             for (int i = 0; i < _snapshot.Blips.Count; i++)
             {
                 var blip = _snapshot.Blips[i];
-                float dx = localX - blip.PixelX;
-                float dy = localY - blip.PixelY;
-                float distanceSquared = dx * dx + dy * dy;
-                if (distanceSquared <= nearestDistanceSquared)
+                int dx = localX - RoundPixel(blip.PixelX);
+                int dy = localY - RoundPixel(blip.PixelY);
+                int distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared > HoverRadiusPixelsSquared
+                    || distanceSquared >= nearestDistanceSquared)
                 {
-                    nearestDistanceSquared = distanceSquared;
-                    nearestId = blip.ObjectId;
-                    nearestName = blip.Name;
+                    continue;
                 }
+
+                nearestDistanceSquared = distanceSquared;
+                candidateId = blip.ObjectId;
+                candidateName = blip.Name;
             }
         }
 
-        SetHovered(nearestId, nearestName);
+        SetHovered(candidateId == 0u ? null : candidateId, candidateId == 0u ? null : candidateName);
     }
 
     private void SetHovered(uint? id, string? name)
     {
-        if (_hoveredObjectId == id && _hoveredObjectName == name)
+        bool nameChanged = !string.Equals(_hoveredObjectName, name, StringComparison.Ordinal);
+        if (_hoveredObjectId == id && !nameChanged)
             return;
 
         _hoveredObjectId = id;
         _hoveredObjectName = name;
+
+        // A displayed name belongs to the blip that was under the cursor when it appeared, so a
+        // different name has to replace it instead of waiting for the cursor to leave the radar.
+        if (nameChanged)
+            NotifyTooltipTextChanged();
+
         HoveredObjectChanged?.Invoke(id);
     }
 

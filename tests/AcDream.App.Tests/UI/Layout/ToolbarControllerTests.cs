@@ -659,6 +659,50 @@ public class ToolbarControllerTests
     }
 
     [Fact]
+    public void InventoryButton_ownedDropHonorsMainPackPreferenceLikeGroundPickupDoes()
+    {
+        const uint player = 0x5000u;
+        const uint item = 0x70005010u;
+        var (layout, _, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        const uint sidePack = 0x5011u;
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Name = "Player", Type = ItemType.Creature });
+        repo.AddOrUpdate(new ClientObject { ObjectId = sidePack, Name = "Side Pack", Type = ItemType.Container });
+        repo.MoveItem(sidePack, player, 0);
+        repo.AddOrUpdate(new ClientObject { ObjectId = item, Name = "Loot", Type = ItemType.Misc });
+        repo.MoveItem(item, sidePack, 0);
+        var puts = new List<(uint Item, uint Container, int Placement)>();
+        using var interaction = new ItemInteractionController(
+            repo,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
+            new InteractionState(),
+            playerGuid: () => player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            mainPackPreferred: () => false,
+            backpackContainerId: () => sidePack);
+        ToolbarController.Bind(
+            layout,
+            repo,
+            new ShortcutStore(),
+            iconIds: static (_, _, _, _, _) => 0u,
+            useItem: static _ => { },
+            itemInteraction: interaction,
+            playerGuid: () => player,
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)),
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+        var button = (UiButton)layout.FindElement(InventoryButtonId)!;
+        var payload = new ItemDragPayload(item, ItemDragSource.Inventory, 0, new UiItemSlot());
+
+        button.OnEvent(new UiEvent(0u, button, UiEventType.DragEnter, Payload: payload));
+        button.OnEvent(new UiEvent(0u, button, UiEventType.DropReleased, Payload: payload));
+
+        Assert.Equal(new[] { (item, sidePack, 0) }, puts);
+    }
+
+    [Fact]
     public void InventoryButton_shortcutAliasDrop_staysNeutralAndDoesNotMovePhysicalItem()
     {
         const uint player = 0x5000u;

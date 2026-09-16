@@ -25,6 +25,7 @@ public sealed class EffectsUiController : IRetainedPanelController
     private readonly bool _positive;
     private readonly Func<double> _serverTime;
     private readonly Func<uint, uint> _resolveSpellIcon;
+    private readonly Func<bool> _showDuration;
     private readonly EffectRowTemplateFactory _templates;
     private readonly string _selectPrompt;
     private readonly UiItemList _list;
@@ -46,6 +47,7 @@ public sealed class EffectsUiController : IRetainedPanelController
         bool positive,
         Func<double> serverTime,
         Func<uint, uint> resolveSpellIcon,
+        Func<bool> showDuration,
         EffectRowTemplateFactory templates,
         string selectPrompt,
         UiItemList list,
@@ -55,6 +57,7 @@ public sealed class EffectsUiController : IRetainedPanelController
         _positive = positive;
         _serverTime = serverTime;
         _resolveSpellIcon = resolveSpellIcon;
+        _showDuration = showDuration;
         _templates = templates;
         _selectPrompt = selectPrompt;
         _list = list;
@@ -80,6 +83,7 @@ public sealed class EffectsUiController : IRetainedPanelController
         Func<double> serverTime,
         Func<uint, (uint Texture, int Width, int Height)> spriteResolve,
         Func<uint, uint> resolveSpellIcon,
+        Func<bool> showDuration,
         EffectRowTemplateFactory templates,
         string selectPrompt,
         Action? close = null)
@@ -106,6 +110,7 @@ public sealed class EffectsUiController : IRetainedPanelController
             positive,
             serverTime,
             resolveSpellIcon,
+            showDuration,
             templates,
             selectPrompt,
             list,
@@ -121,11 +126,12 @@ public sealed class EffectsUiController : IRetainedPanelController
             && now - _lastDurationUpdate < 1.0)
             return;
         _lastDurationUpdate = now;
+        bool showDuration = _showDuration();
         foreach (ActiveEnchantmentRecord enchantment in VisibleEnchantments())
             if (_rows.TryGetValue(
                     enchantment.Identity,
                     out EffectRowTemplateFactory.EffectRow? row))
-                row.Remaining = FormatRemaining(enchantment, now);
+                row.Remaining = showDuration ? FormatRemaining(enchantment, now) : string.Empty;
     }
 
     private void Rebuild()
@@ -133,6 +139,7 @@ public sealed class EffectsUiController : IRetainedPanelController
         _lastDurationUpdate = double.NaN;
         _rows.Clear();
         ActiveEnchantmentRecord[] enchantments = VisibleEnchantments().ToArray();
+        bool showDuration = _showDuration();
         using (_list.DeferLayout())
         {
             _list.Flush();
@@ -144,7 +151,7 @@ public sealed class EffectsUiController : IRetainedPanelController
                     enchantment.SpellId,
                     metadata is null ? 0u : _resolveSpellIcon(enchantment.SpellId),
                     metadata?.Name ?? $"Spell {enchantment.SpellId}",
-                    FormatRemaining(enchantment, _serverTime()));
+                    showDuration ? FormatRemaining(enchantment, _serverTime()) : string.Empty);
                 row.Slot.Clicked = () => Select(enchantment.SpellId);
                 _rows[identity] = row;
                 _list.AddItem(row.Slot);

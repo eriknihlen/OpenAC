@@ -47,7 +47,7 @@ public sealed class EffectsUiControllerTests
             [EffectsUiController.InfoTextId] = info,
         });
         using EffectsUiController controller = EffectsUiController.Bind(
-            layout, spellbook, positive: true, () => 0d, NoTex, id => id,
+            layout, spellbook, positive: true, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL")!;
 
         Assert.False(info.PreserveEndOnLayout);
@@ -73,6 +73,46 @@ public sealed class EffectsUiControllerTests
     }
 
     [Fact]
+    public void Tick_ClearsAndRepopulatesDuration_AsTheOptionIsToggled()
+    {
+        var table = SpellTable.LoadFromReader(new StringReader(
+            "Spell ID,Name,Flags [Hex]\n42,Boon,0x4\n"));
+        var spellbook = new Spellbook(table);
+        var root = new UiPanel { Width = 160f, Height = 100f };
+        var list = new UiItemList(NoTex) { Width = 160f, Height = 64f };
+        var info = new UiText { Width = 160f, Height = 32f };
+        root.AddChild(list);
+        root.AddChild(info);
+        var layout = new ImportedLayout(root, new Dictionary<uint, UiElement>
+        {
+            [EffectsUiController.ListId] = list,
+            [EffectsUiController.InfoTextId] = info,
+        });
+        double now = 0d;
+        bool showDuration = true;
+        using EffectsUiController controller = EffectsUiController.Bind(
+            layout, spellbook, positive: true, () => now, NoTex, id => id, () => showDuration,
+            Templates(), "SELECT A SPELL")!;
+        spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            42u, 1u, 60d, 1u, Bucket: 1u, SpellCategory: 42u));
+
+        UiTemplateListSlot row = Assert.IsType<UiTemplateListSlot>(list.GetItem(0));
+        UiText duration = Assert.IsType<UiText>(
+            row.Content.FindElement(EffectsUiController.RowDurationId));
+        Assert.Equal("1:00", Assert.Single(duration.LinesProvider()).Text);
+
+        showDuration = false;
+        now = 2d;
+        controller.Tick();
+        Assert.Equal(string.Empty, Assert.Single(duration.LinesProvider()).Text);
+
+        showDuration = true;
+        now = 3d;
+        controller.Tick();
+        Assert.Equal("0:57", Assert.Single(duration.LinesProvider()).Text);
+    }
+
+    [Fact]
     public void DuplicateLayersOfSameSpell_ShareRetailSelection()
     {
         var table = SpellTable.LoadFromReader(new StringReader(
@@ -86,7 +126,7 @@ public sealed class EffectsUiControllerTests
             [EffectsUiController.ListId] = list,
         });
         using EffectsUiController controller = EffectsUiController.Bind(
-            layout, spellbook, positive: true, () => 0d, NoTex, id => id,
+            layout, spellbook, positive: true, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL")!;
         spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             42u, 1u, 60f, 1u, Bucket: 1u, SpellCategory: 100u));
@@ -129,7 +169,7 @@ public sealed class EffectsUiControllerTests
         info.Width = 96f;
 
         using EffectsUiController controller = EffectsUiController.Bind(
-            layout, spellbook, positive, () => 0d, NoTex, id => id,
+            layout, spellbook, positive, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL")!;
         spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             42u, 1u, 60f, 1u, Bucket: 1u, SpellCategory: 42u));
@@ -173,7 +213,7 @@ public sealed class EffectsUiControllerTests
             [EffectsUiController.ListId] = list,
         });
         using EffectsUiController controller = EffectsUiController.Bind(
-            layout, spellbook, positive: true, () => 0d, NoTex, id => id,
+            layout, spellbook, positive: true, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL")!;
 
         spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
@@ -225,7 +265,7 @@ public sealed class EffectsUiControllerTests
         int closes = 0;
 
         using EffectsUiController? controller = EffectsUiController.Bind(
-            layout, spellbook, positive, () => 0d, NoTex, id => id,
+            layout, spellbook, positive, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL", () => closes++);
 
         Assert.NotNull(controller);
@@ -325,7 +365,7 @@ public sealed class EffectsUiControllerTests
         ImportedLayout layout = FixtureLoader.LoadPositiveEffects();
 
         using EffectsUiController controller = EffectsUiController.Bind(
-            layout, spellbook, positive: true, () => 0d, NoTex, id => id,
+            layout, spellbook, positive: true, () => 0d, NoTex, id => id, () => true,
             Templates(), "SELECT A SPELL")!;
 
         UiElement host = layout.FindElement(EffectsUiController.ListId)!;

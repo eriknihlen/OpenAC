@@ -38,6 +38,8 @@ public sealed partial class SkyRenderer : IDisposable
 
     internal Func<bool>? EnhancedNightSkyActive { get; set; }
 
+    internal Func<bool>? DisableMostWeatherEffects { get; set; }
+
     private const float NightSkySeed = 11f;
 
     public void RenderSky(
@@ -70,6 +72,7 @@ public sealed partial class SkyRenderer : IDisposable
         bool environOverrideActive)
     {
         if (group is null || group.SkyObjects.Count == 0) return;
+        if (postScenePass && (DisableMostWeatherEffects?.Invoke() ?? false)) return;
 
         var skyProj = SkyProjection.WithDepthRange(camera.Projection, Near, Far);
 
@@ -100,6 +103,7 @@ public sealed partial class SkyRenderer : IDisposable
         {
             var obj = group.SkyObjects[i];
             if (obj.IsPostScene != postScenePass) continue;
+            if (obj.IsWeather && (DisableMostWeatherEffects?.Invoke() ?? false)) continue;
             if (!obj.IsVisible(dayFraction)) continue;
             if (environOverrideActive && (obj.Properties & 0x02u) != 0u)
                 continue;

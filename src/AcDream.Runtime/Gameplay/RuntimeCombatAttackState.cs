@@ -212,7 +212,9 @@ public sealed class RuntimeCombatAttackState : IDisposable
         StateChanged?.Invoke();
     }
 
-    public void ReleaseAttack()
+    public void ReleaseAttack() => EndAttackRequest(committedPower: null);
+
+    private void EndAttackRequest(float? committedPower)
     {
         if (!_attackRequestInProgress)
             return;
@@ -221,8 +223,10 @@ public sealed class RuntimeCombatAttackState : IDisposable
         float currentPower = GetPowerBarLevel();
         // Key-up commits the larger of the bar setting and the level reached so
         // far: an early release keeps loading to the setting, a late release
-        // fires at the held level.
-        _requestedAttackPower = Math.Max(DesiredPower, currentPower);
+        // fires at the held level. A commit deferred over a busy server keeps
+        // the level it was queued with.
+        _requestedAttackPower = committedPower
+            ?? Math.Max(DesiredPower, currentPower);
 
         if (_attackServerResponsePending)
         {
@@ -232,6 +236,16 @@ public sealed class RuntimeCombatAttackState : IDisposable
         else if (DesiredPower <= currentPower || _repeatAttacking)
         {
             ExecuteAttack(RequestedHeight, setServerPending: true);
+
+            // A charged swing is immediately followed by a second request at
+            // the bar setting. The server consumes one requested level per
+            // swing, so without this the swing after the charged one repeats
+            // the charged level instead of returning to the setting.
+            if (_requestedAttackPower > DesiredPower)
+            {
+                _requestedAttackPower = DesiredPower;
+                ExecuteAttack(RequestedHeight, setServerPending: true);
+            }
         }
 
         StateChanged?.Invoke();
@@ -374,12 +388,15 @@ public sealed class RuntimeCombatAttackState : IDisposable
         if (weenieError != 0)
             _repeatAttacking = false;
 
+        // A repeat only needs a new request when the level in flight no longer
+        // matches the bar setting; the server keeps swinging at the level it
+        // already holds.
         if (!_attackRequestInProgress
             && _operations.AutoRepeatAttack
-            && _repeatAttacking)
+            && _repeatAttacking
+            && Math.Abs(_requestedAttackPower - DesiredPower) > 0.01f)
         {
-            if (Math.Abs(_requestedAttackPower - DesiredPower) >= 0.01f)
-                _requestedAttackPower = DesiredPower;
+            _requestedAttackPower = DesiredPower;
             ExecuteAttack(RequestedHeight, setServerPending: false);
         }
 
@@ -400,16 +417,10 @@ public sealed class RuntimeCombatAttackState : IDisposable
 
         if (_attackWhenResponseReceived)
         {
-            float queuedPower = _attackWhenResponseReceivedPower;
+            StartAttackRequest();
+            EndAttackRequest(_attackWhenResponseReceivedPower);
             _attackWhenResponseReceived = false;
             _attackWhenResponseReceivedPower = 0f;
-            StartAttackRequest();
-            if (_attackRequestInProgress)
-            {
-                _requestedAttackPower = queuedPower;
-                _attackRequestInProgress = false;
-                ExecuteAttack(RequestedHeight, setServerPending: true);
-            }
         }
 
         StateChanged?.Invoke();

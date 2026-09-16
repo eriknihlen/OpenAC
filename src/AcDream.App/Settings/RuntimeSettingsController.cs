@@ -112,6 +112,10 @@ internal interface IRuntimeSettingsTargets
     void SetSingleCharacterOption(uint optionId, bool value);
 
     void SetChatOpacity(float defaultOpacity, float activeOpacity);
+
+    void ApplyCameraTurning(CameraTurningSettings cameraTurning);
+
+    void SetAudioFocusMuted(bool muted);
 }
 
 internal interface IRuntimeSettingsPreviewSource
@@ -220,14 +224,16 @@ internal sealed class RuntimeSettingsController :
     /// <summary>
     /// The window gained or lost focus. With "UI Only in Background" on, losing
     /// focus switches the effective display to UI-only (world pass skipped,
-    /// window shrunk, nothing unowned kept) and gaining it switches back; the
-    /// stored settings are untouched.
+    /// window shrunk, nothing unowned kept) and gaining it switches back; with
+    /// "No Sound When Window Not Focused" on, losing focus mutes audio too.
+    /// The stored settings are untouched.
     /// </summary>
     public void SetWindowFocused(bool focused)
     {
         if (_windowFocused == focused)
             return;
         _windowFocused = focused;
+        _runtimeTargets?.SetAudioFocusMuted(!focused && Audio.PlaySoundOnlyWhenActive);
         bool wasUiOnly = _effectiveDisplay.UiOnly;
         RecomputeEffectiveDisplay();
         if (wasUiOnly == _effectiveDisplay.UiOnly)
@@ -310,6 +316,8 @@ internal sealed class RuntimeSettingsController :
             throw new InvalidOperationException("Runtime settings targets are already bound.");
         _runtimeTargets = targets;
         targets.SetUnownedContentRetained(!EffectiveDisplay.UiOnly);
+        targets.ApplyCameraTurning(LoadCameraTurning());
+        targets.SetAudioFocusMuted(!_windowFocused && Audio.PlaySoundOnlyWhenActive);
     }
 
     public IDisposable BindRuntimeTargetsOwned(IRuntimeSettingsTargets targets)
@@ -395,6 +403,7 @@ internal sealed class RuntimeSettingsController :
         try
         {
             _storage.SaveCameraTurning(cameraTurning);
+            _runtimeTargets?.ApplyCameraTurning(cameraTurning);
         }
         catch (Exception ex)
         {
@@ -490,6 +499,7 @@ internal sealed class RuntimeSettingsController :
             _storage.SaveAudio(audio);
             Audio = audio;
             _runtimeTargets?.ApplyAudio(audio);
+            _runtimeTargets?.SetAudioFocusMuted(!_windowFocused && audio.PlaySoundOnlyWhenActive);
             _log($"settings: audio saved to {_storage.Location}");
         }
         catch (Exception ex)

@@ -501,6 +501,41 @@ public class RetailChaseCameraTests
     }
 
     [Fact]
+    public void SecondUpdate_FirstPerson_SnapsTranslationAndOnlyDampsRotation()
+    {
+        bool  savedAlign       = CameraDiagnostics.AlignToSlope;
+        float savedTranslation = CameraDiagnostics.TranslationStiffness;
+        float savedRotation    = CameraDiagnostics.RotationStiffness;
+        try
+        {
+            var cam = new RetailChaseCamera();
+            cam.SetRetailFirstPersonView();
+            CameraDiagnostics.AlignToSlope         = false;
+            CameraDiagnostics.TranslationStiffness = 0.02f;
+            CameraDiagnostics.RotationStiffness    = 0.02f;
+
+            cam.Update(Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
+                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+
+            // Teleport the player one frame later. Retail's Camera Stiffness sets
+            // rotation only in first person, so the eye follows the pivot exactly
+            // regardless of the (low) translation stiffness.
+            cam.Update(new Vector3(5f, 0f, 0f), playerYaw: 0f, playerVelocity: Vector3.Zero,
+                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+
+            Assert.Equal(5f + 0.18f, cam.Position.X, 4);
+            Assert.Equal(0f,         cam.Position.Y, 4);
+            Assert.Equal(1.5f,       cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope         = savedAlign;
+            CameraDiagnostics.TranslationStiffness = savedTranslation;
+            CameraDiagnostics.RotationStiffness    = savedRotation;
+        }
+    }
+
+    [Fact]
     public void Translucency_PropertyReflectsCurrentDampedDistance()
     {
         bool savedAlign = CameraDiagnostics.AlignToSlope;

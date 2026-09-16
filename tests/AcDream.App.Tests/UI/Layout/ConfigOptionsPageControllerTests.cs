@@ -1399,8 +1399,8 @@ public sealed class ConfigOptionsPageControllerTests
         (1, RowKind.Menu, true, "Sound Features"),
         (2, RowKind.TrioToggle, false, "Disable Sound Effects"),      // LIVE
         (3, RowKind.TrioToggle, false, "Disable Ambient Sound"),      // LIVE
-        (4, RowKind.TrioToggle, true, "Disable Interface Sound"),
-        (5, RowKind.Toggle, true, "Play Sound Only When Active"),
+        (4, RowKind.TrioToggle, false, "Disable Interface Sound"),    // LIVE
+        (5, RowKind.Toggle, false, "Play Sound Only When Active"),    // LIVE
         // The four acdream-only mixer rows, appended to the Sound block. LIVE,
         // so undimmed: the three Retail Mixer overrides dim only while it is
         // on, which TurningTheRetailMixerOn_... pins.
@@ -1408,8 +1408,8 @@ public sealed class ConfigOptionsPageControllerTests
         (7, RowKind.Slider, false, "Voices"),
         (8, RowKind.Toggle, false, "Priority"),
         (9, RowKind.Slider, false, "Voices Per Sound"),
-        (12, RowKind.Slider, true, "Camera Stiffness"),
-        (13, RowKind.Slider, true, "Camera Adjustment Speed"),
+        (12, RowKind.Slider, false, "Camera Stiffness"),               // LIVE
+        (13, RowKind.Slider, false, "Camera Adjustment Speed"),        // LIVE
         (14, RowKind.Slider, false, "Field Of View"),                 // NEXT-LAUNCH
         (15, RowKind.Toggle, true, "Align To Slope"),
         (18, RowKind.Menu, false, "Resolution"),                      // LIVE
@@ -1434,8 +1434,8 @@ public sealed class ConfigOptionsPageControllerTests
         (35, RowKind.Menu, false, "Landscape Draw Distance"),
         (36, RowKind.Toggle, false, "Building Detail Textures"),
         (37, RowKind.Toggle, true, "Multi-Pass Alpha"),
-        (40, RowKind.Slider, true, "Mouse Look Sensitivity"),
-        (41, RowKind.Toggle, true, "Invert Mouselook Y Axis"),
+        (40, RowKind.Slider, false, "Mouse Look Sensitivity"),          // LIVE
+        (41, RowKind.Toggle, false, "Invert Mouselook Y Axis"),        // LIVE
         (42, RowKind.Toggle, true, "Use Mouse Turning"),
         (45, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
         (46, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
@@ -1454,7 +1454,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => "x");
         Assert.True(bound);
-        Assert.Equal(12, DimmingExpectations.Count(expectation => expectation.StoreOnly));
+        Assert.Equal(6, DimmingExpectations.Count(expectation => expectation.StoreOnly));
 
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(

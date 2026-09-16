@@ -11,6 +11,7 @@ public sealed class PaperdollViewportRenderer :
     IDisposable
 {
     private readonly PrivateEntityViewportRenderer _renderer;
+    private readonly DollViewportCamera _camera = new();
 
     internal PaperdollViewportRenderer(
         IWorldPassScope scope,
@@ -30,11 +31,13 @@ public sealed class PaperdollViewportRenderer :
             textureLifetime,
             meshAdapter,
             DollEntityBuilder.DollRenderId,
-            new DollViewportCamera(),
+            _camera,
             "paperdoll");
     }
 
     public bool TextureIsBottomUp => _renderer.TextureIsBottomUp;
+
+    public void SetHeritage(uint heritageId) => _camera.SetHeritage(heritageId);
 
     public void SetDoll(WorldEntity? doll) => _renderer.SetEntity(doll);
 

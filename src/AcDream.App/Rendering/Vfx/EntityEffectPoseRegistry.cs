@@ -191,12 +191,19 @@ public sealed class EntityEffectPoseRegistry :
         return false;
     }
 
+    /// <summary>
+    /// The local pose of one part, addressed by its index in the owner's
+    /// setup. Any index inside the owner's part count resolves. A caller
+    /// that parents to a part by index is asking where that part is, which
+    /// is a different question from whether the part draws: an object's
+    /// parts all exist and all carry a frame, and only the drawing
+    /// consumers read the separate availability flags.
+    /// </summary>
     public bool TryGetPartPose(uint localEntityId, int partIndex, out Matrix4x4 partLocal)
     {
         if (partIndex >= 0
             && _poses.TryGetValue(localEntityId, out PoseRecord? record)
-            && partIndex < record.PartLocal.Length
-            && record.PartAvailable[partIndex])
+            && partIndex < record.PartLocal.Length)
         {
             partLocal = record.PartLocal[partIndex];
             return true;

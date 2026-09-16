@@ -54,6 +54,8 @@ public sealed class ItemInteractionController : IDisposable
     private readonly Func<uint> _selectedObjectId;
     private readonly StackSplitQuantityState? _stackSplitQuantity;
     private readonly Func<bool> _dragOnPlayerOpensSecureTrade;
+    private readonly Func<bool> _mainPackPreferred;
+    private readonly Func<bool> _confirmVolatileRareUses;
     private readonly Action<string>? _systemMessage;
     private readonly Action<string, RetailLogTextType>? _interfaceText;
     private readonly AutoWieldController _autoWield;
@@ -97,6 +99,8 @@ public sealed class ItemInteractionController : IDisposable
         Action<uint, uint, int>? sendPutItemInContainer = null,
         Action<uint, uint, uint>? sendGive = null,
         Func<bool>? dragOnPlayerOpensSecureTrade = null,
+        Func<bool>? mainPackPreferred = null,
+        Func<bool>? confirmVolatileRareUses = null,
         Action<string>? systemMessage = null,
         Action<uint, uint, uint, uint>? sendSplitToContainer = null,
         Action<uint>? requestExternalContainer = null,
@@ -137,6 +141,8 @@ public sealed class ItemInteractionController : IDisposable
         _selectedObjectId = selectedObjectId ?? (() => 0u);
         _stackSplitQuantity = stackSplitQuantity;
         _dragOnPlayerOpensSecureTrade = dragOnPlayerOpensSecureTrade ?? (() => true);
+        _mainPackPreferred = mainPackPreferred ?? (() => false);
+        _confirmVolatileRareUses = confirmVolatileRareUses ?? (() => true);
         _systemMessage = systemMessage;
         _interfaceText = interfaceText;
         _requestUse = requestUse;
@@ -753,7 +759,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: false,
             UseCurrentSelection: false,
             SelectedTarget: null,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         var decision = ItemInteractionPolicy.DecideUse(input);
         return ExecuteUseActions(decision.Actions);
@@ -779,7 +785,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: false,
             SelectedTarget: null,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
         bool sends = decision.Actions.Any(static action =>
@@ -810,7 +816,7 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: true,
             SelectedTarget: Snapshot(target),
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         ItemUsePolicyDecision decision = ItemInteractionPolicy.DecideUse(input);
         bool sends = decision.Actions.Any(static action =>
@@ -853,9 +859,18 @@ public sealed class ItemInteractionController : IDisposable
             BypassClassification: true,
             UseCurrentSelection: true,
             SelectedTarget: selected,
-            ConfirmVolatileRareUses: true,
+            ConfirmVolatileRareUses: _confirmVolatileRareUses(),
             InNonCombatMode: _inNonCombatMode());
         return ExecuteUseActions(ItemInteractionPolicy.DecideUse(input).Actions);
+    }
+
+    /// <summary>The pack a request without a named destination should name: the
+    /// main pack when asked or preferred, the open side pack otherwise.</summary>
+    public uint PreferredBackpackContainer(bool mainPack = false)
+    {
+        uint root = _playerGuid();
+        uint target = mainPack || _mainPackPreferred() ? root : _backpackContainerId();
+        return target == 0u ? root : target;
     }
 
     /// <summary>
@@ -872,9 +887,7 @@ public sealed class ItemInteractionController : IDisposable
             return false;
 
         uint root = _playerGuid();
-        uint target = mainPack ? root : _backpackContainerId();
-        if (target == 0u)
-            target = root;
+        uint target = PreferredBackpackContainer(mainPack);
         const int placement = 0;
 
         uint containerId = InventoryPlacementSearch.ChooseContainer(
@@ -1431,6 +1444,9 @@ public sealed class ItemInteractionController : IDisposable
         {
             switch (action.Kind)
             {
+                case ItemPolicyActionKind.PlaceInBackpack:
+                    PlaceWorldItemInBackpack(action.ObjectId);
+                    break;
                 case ItemPolicyActionKind.StartSecureTrade:
                     SecureTradeRequested?.Invoke(action.TargetId, action.ObjectId);
                     break;

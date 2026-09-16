@@ -189,6 +189,26 @@ public class UiFieldTests
         Assert.Equal(0, submissions);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EnterOnOneLineField_KeepsFocusOnlyWhenTheHookSaysSo(bool stayFocused)
+    {
+        var root = new UiRoot();
+        var input = new UiField { OnSubmit = _ => { }, StayFocusedAfterSubmit = () => stayFocused };
+        root.AddChild(input);
+        input.InsertChar('a');
+        root.SetKeyboardFocus(input);
+
+        input.OnEvent(new UiEvent(
+            0u,
+            input,
+            UiEventType.KeyDown,
+            Data0: (int)Silk.NET.Input.Key.Enter));
+
+        Assert.Equal(stayFocused ? input : null, root.KeyboardFocus);
+    }
+
     // ── CT-B2: typed-abbreviation expansion ─────────────────────────────
 
     [Fact]

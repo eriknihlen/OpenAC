@@ -26,6 +26,13 @@ public sealed class ChatLog
 
     public Func<bool>? DisplayTimestampsSource { get; set; }
 
+    /// <summary>Whether the language filter is on; checked once per line appended.</summary>
+    public Func<bool>? FilterLanguageSource { get; set; }
+
+    /// <summary>The banned-word patterns to censor against; null when the taboo
+    /// table failed to load, empty when it loaded with none.</summary>
+    public IReadOnlyList<string>? FilterLanguagePatterns { get; set; }
+
     /// <summary>Fires every time a new entry is appended.</summary>
     public event Action<ChatEntry>? EntryAppended;
 
@@ -209,6 +216,9 @@ public sealed class ChatLog
 
     private void Append(ChatEntry entry)
     {
+        if (FilterLanguageSource?.Invoke() == true)
+            entry = entry with { Text = ChatLanguageFilter.Censor(entry.Text, FilterLanguagePatterns) };
+
         // Stamp every entry with an identity that is never reused, so anything holding on to
         // one line (a text selection, say) can still find it after older entries are dropped
         // and every remaining entry's position in the buffer has shifted.

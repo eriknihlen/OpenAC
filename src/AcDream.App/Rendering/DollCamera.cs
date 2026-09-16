@@ -5,10 +5,24 @@ namespace AcDream.App.Rendering;
 
 public sealed class DollCamera : ICamera
 {
-    internal static readonly Vector3 RetailEye = new(0.12f, -2.4f, 0.88f);
-    // Identity view orientation ⇒ look straight down +Y (no yaw/pitch). Target = Eye + (0,1,0).
-    private static readonly Vector3 Target = new(0.12f, -1.4f, 0.88f);
-    private static readonly Vector3 Up     = Vector3.UnitZ;
+    private static readonly Vector3 Up = Vector3.UnitZ;
+
+    private Vector3 _eye = PaperdollHeritagePresentation.DefaultEye;
+
+    /// <summary>
+    /// Where the doll is viewed from. Identity view orientation ⇒ look straight
+    /// down +Y (no yaw/pitch), so the target is always the eye plus one metre
+    /// of +Y.
+    /// </summary>
+    public Vector3 Eye
+    {
+        get => _eye;
+        set => _eye = value;
+    }
+
+    /// <summary>Frames the doll for the body this heritage wears.</summary>
+    public void SetHeritage(uint heritageId) =>
+        _eye = PaperdollHeritagePresentation.ResolveEye(heritageId);
 
     public float FovRadians { get; set; } = MathF.PI / 4f;
 
@@ -18,7 +32,7 @@ public sealed class DollCamera : ICamera
 
     /// <inheritdoc/>
     public Matrix4x4 View =>
-        Matrix4x4.CreateLookAt(RetailEye, Target, Up);
+        Matrix4x4.CreateLookAt(_eye, _eye + Vector3.UnitY, Up);
 
     /// <inheritdoc/>
     public Matrix4x4 Projection =>
@@ -29,7 +43,9 @@ internal sealed class DollViewportCamera : IPrivateEntityViewportCamera
 {
     private readonly DollCamera _camera = new();
 
-    public Vector3 Eye => DollCamera.RetailEye;
+    public void SetHeritage(uint heritageId) => _camera.SetHeritage(heritageId);
+
+    public Vector3 Eye => _camera.Eye;
     public float FovRadians
     {
         get => _camera.FovRadians;

@@ -405,12 +405,13 @@ public sealed class LandblockBuildFactory
             foreach (var stab in envCell.StaticObjects)
             {
                 if ((stab.Id & 0xFF000000u) == 0x01000000u
-                    && AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, stab.Id))
+                    && !KeepsInteriorPart(stab.Id))
                     continue;
 
                 var meshRefs = new List<AcDream.Core.World.MeshRef>();
                 var interiorBounds = new AcDream.Core.Meshing.LocalBoundsAccumulator();
                 int stabLightCount = 0;
+                bool stabHasDefaultScript = false;
                 if ((stab.Id & 0xFF000000u) == 0x01000000u)
                 {
                     var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(stab.Id);
@@ -427,10 +428,12 @@ public sealed class LandblockBuildFactory
                     if (setup is not null)
                     {
                         stabLightCount = setup.Lights.Count;
+                        stabHasDefaultScript = setup.DefaultScript.DataId != 0
+                            || (uint)setup.DefaultScriptTable != 0;
                         var flat = AcDream.Core.Meshing.SetupMesh.Flatten(setup);
                         foreach (var mr in flat)
                         {
-                            if (AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, mr.GfxObjId))
+                            if (!KeepsInteriorPart(mr.GfxObjId))
                                 continue;
                             var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(mr.GfxObjId);
                             if (gfx is null)
@@ -444,7 +447,10 @@ public sealed class LandblockBuildFactory
                     }
                 }
 
-                if (!AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(meshRefs.Count, stabLightCount))
+                if (!AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(
+                        meshRefs.Count,
+                        stabLightCount,
+                        stabHasDefaultScript))
                 {
                     continue;
                 }
@@ -474,6 +480,14 @@ public sealed class LandblockBuildFactory
         return result;
     }
 
+
+    private bool KeepsInteriorPart(uint gfxObjId) =>
+        AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepPart(
+            AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, gfxObjId),
+_dats.Get<DatReaderWriter.DBObjs.GfxObj>(gfxObjId) is { } gfx
+                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics)
+                && gfx.PhysicsBSP?.Root is not null
+                && gfx.VertexArray is not null);
 
     private (float MaxZ, float MinZ) ComputeWalkZSlab(byte[] heights)
     {

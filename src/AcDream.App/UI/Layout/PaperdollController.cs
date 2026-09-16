@@ -173,6 +173,10 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
 
     private const int DollDragGhostSize = 32;
 
+    /// <summary>Where the first pack slot sits in the pack row, so a lift of the
+    /// player from the figure reports the slot that holds them.</summary>
+    private const int MainPackSlotIndex = 0;
+
     /// <summary>Whether a drag now over the doll would be worn on release. The
     /// authored accept/reject overlay art is not imported yet, so this is state
     /// the panel keeps rather than paints.</summary>
@@ -189,14 +193,6 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         return bodyLocation == EquipMask.None
             ? 0u
             : PaperdollSelectionPolicy.GetUpperInventoryObject(_objects, _playerGuid(), bodyLocation);
-    }
-
-    /// <summary>The worn item under an element-local point, or 0 for an unmapped
-    /// point or a bare body location (where the hit test answers with the player).</summary>
-    private uint DollItemUnderPoint(int x, int y, out EquipMask bodyLocation)
-    {
-        uint hit = DollObjectUnderPoint(x, y, out bodyLocation);
-        return hit == _playerGuid() ? 0u : hit;
     }
 
     private void HandleDollClick(int x, int y)
@@ -222,31 +218,48 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
         ExamineItem(hitObject);
     }
 
-    /// <summary>Lifting from the doll carries the same payload the matching
-    /// equipped slot would: the worn item, an equipment source, and the slot the
-    /// resolved body location belongs to. A bare or unmapped region lifts nothing.</summary>
+    /// <summary>A lift from the figure carries whatever the hit test found, which
+    /// is the same object a click there would select. A worn item lifts exactly as
+    /// its equipped slot would: an equipment source and that slot's index. A mapped
+    /// region with nothing worn on it lifts the player, who is the object the first
+    /// pack slot holds, so the lift is indistinguishable from one started on that
+    /// slot and every drop target treats it the same. An unmapped point lifts
+    /// nothing.</summary>
     private object? BuildDollDragPayload(int x, int y)
     {
-        uint itemId = DollItemUnderPoint(x, y, out EquipMask bodyLocation);
-        return itemId == 0
-            ? null
+        uint hit = DollObjectUnderPoint(x, y, out EquipMask bodyLocation);
+        if (hit == 0)
+            return null;
+        return hit == _playerGuid()
+            ? new ItemDragPayload(
+                hit, ItemDragSource.Inventory, MainPackSlotIndex, SourceCell: null)
             : new ItemDragPayload(
-                itemId,
-                ItemDragSource.Equipment,
-                DollSlotIndex(bodyLocation),
-                SourceCell: null);
+                hit, ItemDragSource.Equipment, DollSlotIndex(bodyLocation), SourceCell: null);
     }
 
     private (uint tex, int w, int h)? BuildDollDragGhost(int x, int y)
     {
-        uint itemId = DollItemUnderPoint(x, y, out _);
-        if (itemId == 0 || _objects.Get(itemId) is not { } item)
+        uint hit = DollObjectUnderPoint(x, y, out _);
+        if (hit == 0)
             return null;
-        uint dragTex = _dragIconIds?.Invoke(
-            item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects) ?? 0u;
+        // The player has no icon of their own; the pack row draws the main pack
+        // with a fixed one, and the figure has to lift the same picture.
+        if (hit == _playerGuid())
+            return DollDragGhost(
+                ItemType.Container, InventoryController.PlayerPackBaseIcon, 0u, 0u, 0u);
+        return _objects.Get(hit) is { } item
+            ? DollDragGhost(
+                item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects)
+            : null;
+    }
+
+    private (uint tex, int w, int h)? DollDragGhost(
+        ItemType type, uint icon, uint underlay, uint overlay, uint effects)
+    {
+        uint dragTex = _dragIconIds?.Invoke(type, icon, underlay, overlay, effects) ?? 0u;
         if (dragTex != 0u)
             return (dragTex, DollDragGhostSize, DollDragGhostSize);
-        uint tex = _iconIds(item.Type, item.IconId, item.IconUnderlayId, item.IconOverlayId, item.Effects);
+        uint tex = _iconIds(type, icon, underlay, overlay, effects);
         return tex != 0u ? (tex, DollDragGhostSize, DollDragGhostSize) : null;
     }
 

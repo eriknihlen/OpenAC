@@ -1121,7 +1121,6 @@ public sealed partial class WbDrawDispatcher : IDisposable, Walk.IWalkShellResid
         out Matrix4x4 viewProjection,
         out Vector3 cameraWorldPosition)
     {
-        _selectionLighting?.TickLighting();
         viewProjection = camera.View * camera.Projection;
         _missRequested.Clear();
 

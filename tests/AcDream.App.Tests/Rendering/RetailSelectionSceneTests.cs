@@ -120,6 +120,89 @@ public sealed class RetailSelectionSceneTests
         Assert.Equal(1, oracle.Snapshot.SelectionPartCount);
     }
 
+    [Fact]
+    public void WorldFrameAloneRunsTheSelectionFlashThroughAndEndsIt()
+    {
+        double now = 10d;
+        var pulse = new RetailSelectionLightingPulse(() => now);
+        var scene = CreateScene(pulse);
+        var entity = Entity(localId: 60u, serverGuid: 0x5000_0060u);
+
+        // Nothing here ever draws this entity into a frame: no viewport, no
+        // panel, no doll. The world frame is the only thing running.
+        scene.BeginLightingPulse(entity.ServerGuid, entity.Id);
+        Assert.True(scene.TryGetLighting(entity.ServerGuid, entity.Id, out RetailSelectionLighting start));
+        Assert.Equal(RetailSelectionLighting.High, start);
+
+        RetailSelectionLighting[] steps =
+        [
+            RetailSelectionLighting.Low,
+            RetailSelectionLighting.High,
+            RetailSelectionLighting.Low,
+        ];
+        foreach (RetailSelectionLighting step in steps)
+        {
+            now += RetailSelectionLightingPulse.FlipIntervalSeconds;
+            RunEmptyWorldFrame(scene);
+            Assert.True(
+                scene.TryGetLighting(entity.ServerGuid, entity.Id, out RetailSelectionLighting current));
+            Assert.Equal(step, current);
+        }
+
+        now += RetailSelectionLightingPulse.FlipIntervalSeconds;
+        RunEmptyWorldFrame(scene);
+
+        Assert.False(scene.TryGetLighting(entity.ServerGuid, entity.Id, out _));
+    }
+
+    [Fact]
+    public void WorldFrameAloneEndsTheFigureFlashOnTheDollSchedule()
+    {
+        double now = 3d;
+        var pulse = new RetailSelectionLightingPulse(() => now);
+        var scene = CreateScene(pulse);
+        var entity = Entity(localId: 61u, serverGuid: 0x5000_0061u);
+
+        scene.BeginPartLightingPulse(entity.ServerGuid, entity.Id, partMask: 0b101u);
+        Assert.True(scene.HasPartLighting(entity.ServerGuid, entity.Id));
+
+        now += RetailSelectionLightingPulse.FlipIntervalSeconds;
+        RunEmptyWorldFrame(scene);
+        Assert.True(scene.TryGetPartLighting(
+            entity.ServerGuid, entity.Id, partIndex: 2, out RetailSelectionLighting dark));
+        Assert.Equal(RetailSelectionLighting.Low, dark);
+
+        now += RetailSelectionLightingPulse.FlipIntervalSeconds;
+        RunEmptyWorldFrame(scene);
+
+        Assert.False(scene.HasPartLighting(entity.ServerGuid, entity.Id));
+    }
+
+    [Fact]
+    public void RepeatedWorldFramesInsideOneIntervalDoNotRushTheFlash()
+    {
+        double now = 5d;
+        var pulse = new RetailSelectionLightingPulse(() => now);
+        var scene = CreateScene(pulse);
+        var entity = Entity(localId: 62u, serverGuid: 0x5000_0062u);
+
+        scene.BeginLightingPulse(entity.ServerGuid, entity.Id);
+        for (int frame = 0; frame < 30; frame++)
+        {
+            now += RetailSelectionLightingPulse.FlipIntervalSeconds / 40d;
+            RunEmptyWorldFrame(scene);
+        }
+
+        Assert.True(scene.TryGetLighting(entity.ServerGuid, entity.Id, out RetailSelectionLighting current));
+        Assert.Equal(RetailSelectionLighting.High, current);
+    }
+
+    private static void RunEmptyWorldFrame(RetailSelectionScene scene)
+    {
+        scene.BeginFrame();
+        scene.CompleteFrame();
+    }
+
     private static RetailSelectionScene CreateScene(
         RetailSelectionLightingPulse? pulse = null)
     {
