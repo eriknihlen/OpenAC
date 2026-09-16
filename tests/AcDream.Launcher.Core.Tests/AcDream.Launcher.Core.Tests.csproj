@@ -17,6 +17,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
+             Link="Fixtures\PngTestData.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AcDream.Launcher.Core\AcDream.Launcher.Core.csproj" />
     <ProjectReference Include="..\..\src\AcDream.Platform\AcDream.Platform.csproj" />
     <ProjectReference Include="..\AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder\AcDream.Launcher.Core.Tests.Fixtures.InstallLeaseHolder.csproj">

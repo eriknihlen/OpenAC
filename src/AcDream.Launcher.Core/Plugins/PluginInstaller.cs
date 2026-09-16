@@ -213,6 +213,26 @@ public sealed class PluginInstaller
                     "The plugin archive's plugin.json does not match the published release.");
             }
 
+            string zipIconPath = Path.Combine(stagingDirectory, LauncherPluginIcon.FileName);
+            if (File.Exists(zipIconPath))
+            {
+                byte[] zipIconBytes = await File.ReadAllBytesAsync(zipIconPath, cancellationToken)
+                    .ConfigureAwait(false);
+                LauncherPluginIcon.Validate(zipIconBytes);
+
+                PluginReleaseFetchResult iconFetch = await _releaseClient.FetchDocumentAsync(
+                        GitHubReleaseLocator.TaggedAsset(repo, tag, LauncherPluginIcon.FileName),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                RequireSuccess(iconFetch, "The release is missing its icon.png asset.");
+
+                if (!zipIconBytes.AsSpan().SequenceEqual(iconFetch.Document!.Content))
+                {
+                    throw new LauncherUpdateException(
+                        "The plugin archive's icon.png does not match the published release.");
+                }
+            }
+
             if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
             {
                 throw new LauncherUpdateException(SessionLeaseRefusal);
@@ -525,14 +545,16 @@ public sealed class PluginInstaller
         }
     }
 
-    private static void RequireSuccess(PluginReleaseFetchResult result)
+    private static void RequireSuccess(
+        PluginReleaseFetchResult result,
+        string unavailableMessage = "The plugin release is unavailable.")
     {
         switch (result.Status)
         {
             case PluginReleaseFetchStatus.RateLimited:
                 throw new LauncherUpdateException("GitHub is rate limiting; try later.");
             case PluginReleaseFetchStatus.Unavailable:
-                throw new LauncherUpdateException("The plugin release is unavailable.");
+                throw new LauncherUpdateException(unavailableMessage);
         }
     }
 

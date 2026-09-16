@@ -56,12 +56,18 @@ contract than the fields above:
 - Public repository. Releases are not drafts or prereleases. The release GitHub marks *latest*
   must be the highest version; the launcher refuses to install an older one.
 - **Tag:** `v<version>`, for example `v1.2.0`.
-- **Three assets, exact names:**
+- **Three assets, exact names, and an optional fourth:**
   - `plugin.json`, byte-identical to the one at the root of the zip
   - `<id>-<version>.zip`, with `plugin.json` at the zip root (not inside a folder) plus the entry
     DLL and its dependencies
   - `<id>-<version>.zip.sha256`, the output of `shasum -a 256 <zip>` (hash, optional whitespace
     and file name)
+  - `icon.png`, byte-identical to the zip's copy, only if the zip has one
+
+**Icon:** a plugin may ship one `icon.png` at the root of its zip, PNG only, exactly 64x64, at
+most 64 KiB, not animated. No icon is fine, but an icon that breaks a rule refuses the whole
+install. `icon.jpg` and `icon.jpeg` are never accepted at the zip root, in any case; an icon in a
+subfolder is untouched by this rule.
 
 **Managed code only, by allowlist.** Every file in the zip must end in one of: `.dll`, `.pdb`,
 `.json`, `.xml`, `.txt`, `.md`, `.png`, `.jpg`, `.jpeg`, `.ttf`, `.otf`. A `runtimes/` folder is

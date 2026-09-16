@@ -56,5 +56,38 @@ public sealed class PluginContentPolicyTests
             "Hello.dll"));
     }
 
+    [Theory]
+    [InlineData("ICON.PNG")]
+    [InlineData("Icon.png")]
+    public void RejectsACaseVariantOfTheRootIcon(string path)
+    {
+        Assert.Throws<LauncherUpdateException>(() => PluginContentPolicy.Validate(
+            [File("plugin.json"), File("Hello.dll"), File(path)],
+            "Hello.dll"));
+    }
+
+    [Theory]
+    [InlineData("icon.jpg")]
+    [InlineData("icon.jpeg")]
+    [InlineData("Icon.JPG")]
+    public void RejectsARootJpegIcon(string path)
+    {
+        Assert.Throws<LauncherUpdateException>(() => PluginContentPolicy.Validate(
+            [File("plugin.json"), File("Hello.dll"), File(path)],
+            "Hello.dll"));
+    }
+
+    [Fact]
+    public void AllowsAJpegIconInASubfolder()
+    {
+        PluginContentPolicy.Validate(
+            [
+                File("plugin.json"),
+                File("Hello.dll"),
+                File("assets/icon.jpg"),
+            ],
+            "Hello.dll");
+    }
+
     private static ExtractedFileRecord File(string path) => new(path, new string('a', 64), 1, 0x1A4);
 }

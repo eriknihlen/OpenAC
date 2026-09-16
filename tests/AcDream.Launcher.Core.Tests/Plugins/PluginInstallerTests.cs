@@ -5,6 +5,7 @@ using AcDream.Launcher.Core.Plugins;
 using AcDream.Launcher.Core.Tests.Updates;
 using AcDream.Launcher.Core.Updates;
 using AcDream.Platform;
+using AcDream.Tests.Fixtures.PluginIcons;
 
 namespace AcDream.Launcher.Core.Tests.Plugins;
 
@@ -199,6 +200,96 @@ public sealed class PluginInstallerTests
 
         Assert.Contains("plugin.json", error.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    [Fact]
+    public async Task InstallSucceedsWithAValidIconMatchingItsPublishedAsset()
+    {
+        using var fixture = new Fixture();
+        byte[] icon = PngTestData.Valid();
+        var release = fixture.BuildRelease(Id, "0.1.0", icon: icon);
+        fixture.RegisterRelease(Repo, release, iconAssetBytes: icon);
+
+        PluginInstallResult result = await fixture.Installer.InstallOrUpdateAsync(
+            Repo, catalog: null, clientResolution: null);
+
+        Assert.Equal(Id, result.Id);
+        Assert.True(File.Exists(
+            Path.Combine(fixture.Paths.PluginsDirectory, Id, LauncherPluginIcon.FileName)));
+    }
+
+    [Fact]
+    public async Task InstallRefusedWhenTheIconAssetIsNotRegistered()
+    {
+        using var fixture = new Fixture();
+        byte[] icon = PngTestData.Valid();
+        var release = fixture.BuildRelease(Id, "0.1.0", icon: icon);
+        fixture.RegisterRelease(Repo, release);
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+
+        Assert.Contains("missing its icon.png asset", error.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    [Fact]
+    public async Task InstallRefusedWhenTheIconAssetDiffersFromTheZipCopy()
+    {
+        using var fixture = new Fixture();
+        byte[] icon = PngTestData.Valid();
+        var release = fixture.BuildRelease(Id, "0.1.0", icon: icon);
+        fixture.RegisterRelease(Repo, release, iconAssetBytes: PngTestData.WrongDimensions());
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+
+        Assert.Contains("icon.png does not match", error.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    [Fact]
+    public async Task InstallRefusedWhenTheIconAssetIsRateLimited()
+    {
+        using var fixture = new Fixture();
+        byte[] icon = PngTestData.Valid();
+        var release = fixture.BuildRelease(Id, "0.1.0", icon: icon);
+        fixture.RegisterRelease(Repo, release, iconAssetRateLimited: true);
+
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+
+        Assert.Equal("GitHub is rate limiting; try later.", error.Message);
+    }
+
+    [Fact]
+    public async Task InstallRefusedWithAnInvalidIconAndNoIconRequest()
+    {
+        using var fixture = new Fixture();
+        byte[] icon = PngTestData.WrongDimensions();
+        var release = fixture.BuildRelease(Id, "0.1.0", icon: icon);
+        fixture.RegisterRelease(Repo, release);
+
+        await Assert.ThrowsAsync<LauncherUpdateException>(() =>
+            fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
+
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(
+            Repo, "v0.1.0", LauncherPluginIcon.FileName);
+        Assert.DoesNotContain(fixture.Handler.Requests, uri => uri == iconUri);
+    }
+
+    [Fact]
+    public async Task InstallWithNoIconMakesNoIconRequest()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+
+        Uri iconUri = GitHubReleaseLocator.TaggedAsset(
+            Repo, "v0.1.0", LauncherPluginIcon.FileName);
+        Assert.DoesNotContain(fixture.Handler.Requests, uri => uri == iconUri);
     }
 
     [Fact]
@@ -610,23 +701,36 @@ public sealed class PluginInstallerTests
             }
         }
 
-        public Release BuildRelease(string id, string version, string? entryDll = null)
+        public Release BuildRelease(
+            string id,
+            string version,
+            string? entryDll = null,
+            byte[]? icon = null)
         {
             entryDll ??= id + ".dll";
             byte[] manifestBytes = Encoding.UTF8.GetBytes(ManifestJson(id, version, entryDll));
-            byte[] zipBytes = UpdateTestData.CreateZip(
+            List<(string Name, byte[] Content, int? UnixAttributes)> entries =
             [
                 ("plugin.json", manifestBytes, null),
                 (entryDll, Encoding.UTF8.GetBytes("binary-" + id), null),
-            ]);
+            ];
+            if (icon is not null)
+            {
+                entries.Add((LauncherPluginIcon.FileName, icon, null));
+            }
+
+            byte[] zipBytes = UpdateTestData.CreateZip(entries);
             string sha256 = UpdateTestData.Sha256(zipBytes);
-            return new Release(id, version, manifestBytes, zipBytes, sha256, $"{id}-{version}.zip");
+            return new Release(
+                id, version, manifestBytes, zipBytes, sha256, $"{id}-{version}.zip", icon);
         }
 
         public void RegisterRelease(
             string repo,
             Release release,
-            string? shaFileSha256Override = null)
+            string? shaFileSha256Override = null,
+            byte[]? iconAssetBytes = null,
+            bool iconAssetRateLimited = false)
         {
             string tag = "v" + release.Version;
             Uri latestManifestUri = GitHubReleaseLocator.LatestAsset(repo, "plugin.json");
@@ -641,6 +745,16 @@ public sealed class PluginInstallerTests
                 Encoding.UTF8.GetBytes(
                     $"{shaFileSha256Override ?? release.Sha256}  {release.ZipName}\n"));
             Handler.EnqueueOk(zipUri, release.ZipBytes);
+
+            Uri iconUri = GitHubReleaseLocator.TaggedAsset(repo, tag, LauncherPluginIcon.FileName);
+            if (iconAssetRateLimited)
+            {
+                Handler.EnqueueRateLimited(iconUri);
+            }
+            else if (iconAssetBytes is not null)
+            {
+                Handler.EnqueueOk(iconUri, iconAssetBytes);
+            }
         }
 
         public static string ManifestJson(
@@ -666,7 +780,8 @@ public sealed class PluginInstallerTests
             byte[] ManifestBytes,
             byte[] ZipBytes,
             string Sha256,
-            string ZipName);
+            string ZipName,
+            byte[]? IconBytes = null);
     }
 
     private sealed class RoutingHandler : HttpMessageHandler
@@ -674,9 +789,14 @@ public sealed class PluginInstallerTests
         private readonly Dictionary<string, Queue<HttpResponseMessage>> _routes =
             new(StringComparer.Ordinal);
 
+        public readonly List<Uri> Requests = [];
+
         public void EnqueueRedirect(Uri from, Uri to) => Route(from).Enqueue(Redirect(to));
 
         public void EnqueueOk(Uri uri, byte[] body) => Route(uri).Enqueue(Ok(body));
+
+        public void EnqueueRateLimited(Uri uri) =>
+            Route(uri).Enqueue(new HttpResponseMessage(HttpStatusCode.TooManyRequests));
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -684,6 +804,7 @@ public sealed class PluginInstallerTests
         {
             Uri uri = request.RequestUri
                 ?? throw new InvalidOperationException("Test request has no URI.");
+            Requests.Add(uri);
             if (_routes.TryGetValue(uri.AbsoluteUri, out Queue<HttpResponseMessage>? queue)
                 && queue.Count > 0)
             {

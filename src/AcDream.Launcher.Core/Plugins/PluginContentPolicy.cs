@@ -38,6 +38,22 @@ public static class PluginContentPolicy
                 manifestAtRoot = true;
             if (string.Equals(file.Path, entryDll, StringComparison.Ordinal))
                 entryFound = true;
+
+            if (string.Equals(file.Path, LauncherPluginIcon.FileName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(file.Path, LauncherPluginIcon.FileName, StringComparison.Ordinal))
+            {
+                throw new LauncherUpdateException(
+                    $"Plugin file '{file.Path}' must be named '{LauncherPluginIcon.FileName}' "
+                    + "exactly.");
+            }
+
+            if (string.Equals(file.Path, "icon.jpg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(file.Path, "icon.jpeg", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LauncherUpdateException(
+                    $"Plugin file '{file.Path}' is a JPEG icon, which the launcher does not "
+                    + "support.");
+            }
         }
 
         if (!manifestAtRoot)
