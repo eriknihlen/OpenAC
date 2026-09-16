@@ -46,7 +46,7 @@ public sealed partial class MainWindow : Window
         if (DataContext is LauncherWindowViewModel viewModel)
         {
             viewModel.PollStatus();
-            viewModel.PollServerHealth();
+            viewModel.PollServerHealth(IsActive);
         }
     }
 

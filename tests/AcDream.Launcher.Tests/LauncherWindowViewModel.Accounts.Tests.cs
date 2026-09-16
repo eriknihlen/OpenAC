@@ -1,5 +1,6 @@
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
+using AcDream.Launcher.Core.Status;
 using AcDream.Launcher.ViewModels;
 
 namespace AcDream.Launcher.Tests;
@@ -56,6 +57,120 @@ public sealed partial class LauncherWindowViewModelTests
         ServersOverride = [BatchServer("One", "Alice", "Bob"), BatchServer("Two", "Alice")],
         Session = FakeLauncherOrchestrator.CreateSession(LauncherActivityState.Exited),
     };
+
+    [Fact]
+    public void AnInactiveWindowNeverChecksServers()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var health = new CountingServerHealth();
+        vm.ConfigureServerHealth(health);
+
+        vm.PollServerHealth(windowIsActive: false, DateTimeOffset.UtcNow);
+        vm.PollServerHealth(windowIsActive: false, DateTimeOffset.UtcNow.AddMinutes(5));
+
+        Assert.Equal(0, health.Checks);
+    }
+
+    [Fact]
+    public void AnActiveWindowChecksEveryTenSeconds()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var health = new CountingServerHealth();
+        vm.ConfigureServerHealth(health);
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+
+        vm.PollServerHealth(windowIsActive: true, start);
+        int afterFirst = health.Checks;
+        vm.PollServerHealth(windowIsActive: true, start.AddSeconds(5));
+        int afterFiveSeconds = health.Checks;
+        vm.PollServerHealth(windowIsActive: true, start.AddSeconds(11));
+
+        Assert.True(afterFirst > 0);
+        Assert.Equal(afterFirst, afterFiveSeconds);
+        Assert.Equal(afterFirst * 2, health.Checks);
+    }
+
+    [Fact]
+    public void ReactivatingPastTheIntervalChecksOnTheNextPoll()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var health = new CountingServerHealth();
+        vm.ConfigureServerHealth(health);
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+
+        vm.PollServerHealth(windowIsActive: true, start);
+        int afterFirst = health.Checks;
+        vm.PollServerHealth(windowIsActive: false, start.AddSeconds(30));
+        Assert.Equal(afterFirst, health.Checks);
+
+        vm.PollServerHealth(windowIsActive: true, start.AddSeconds(30));
+
+        Assert.Equal(afterFirst * 2, health.Checks);
+    }
+
+    [Fact]
+    public void ABackgroundCheckLeavesTheCheckServersButtonEnabled()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var health = new CountingServerHealth { Pending = new TaskCompletionSource<ServerHealthSnapshot>() };
+        vm.ConfigureServerHealth(health);
+
+        int canExecuteChanges = 0;
+        vm.CheckServersCommand.CanExecuteChanged += (_, _) => canExecuteChanges++;
+        vm.PollServerHealth(windowIsActive: true, DateTimeOffset.UtcNow);
+
+        Assert.True(health.Checks > 0);
+        Assert.True(vm.CheckServersCommand.CanExecute(null));
+        Assert.Equal(0, canExecuteChanges);
+    }
+
+    [Fact]
+    public void ConfiguringServerHealthEnablesTheCheckServersButton()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        Assert.False(vm.CheckServersCommand.CanExecute(null));
+        bool notified = false;
+        vm.CheckServersCommand.CanExecuteChanged += (_, _) => notified = vm.CheckServersCommand.CanExecute(null);
+
+        vm.ConfigureServerHealth(new CountingServerHealth());
+
+        Assert.True(notified);
+    }
+
+    [Fact]
+    public void ABackgroundCheckDoesNotStartWhileOneIsStillRunning()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var health = new CountingServerHealth { Pending = new TaskCompletionSource<ServerHealthSnapshot>() };
+        vm.ConfigureServerHealth(health);
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+
+        vm.PollServerHealth(windowIsActive: true, start);
+        int afterFirst = health.Checks;
+        vm.PollServerHealth(windowIsActive: true, start.AddMinutes(1));
+
+        Assert.Equal(afterFirst, health.Checks);
+    }
+
+    private sealed class CountingServerHealth : IServerHealthService
+    {
+        public int Checks { get; private set; }
+
+        public TaskCompletionSource<ServerHealthSnapshot>? Pending { get; init; }
+
+        public Task<ServerHealthSnapshot> CheckAsync(string host, int port, string serverName,
+            CancellationToken cancellationToken = default)
+        {
+            Checks++;
+            return Pending?.Task ?? Task.FromResult(new ServerHealthSnapshot(true, 1, 0, false, DateTimeOffset.UtcNow));
+        }
+    }
 
     [Fact]
     public void ChangingEndpointClearsHealthFromTheOldEndpoint()
