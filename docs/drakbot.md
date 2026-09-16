@@ -167,7 +167,9 @@ of" eighths are reached without naming them. A tier without its
 components in the pack is skipped for the next one down. Self and
 Other tiers share a family in the spell table, so a name ending in
 Self or Other keeps to its side: "Strength Self" is never Strength
-Other VI, which wants a target and never lands on the caster. A buff
+Other VI, which wants a target and never lands on the caster. The
+book's elements are spelt either way - Fire or Flame, Cold or Frost,
+Pierce or Piercing, Bludgeon or Bludgeoning - and so may the name. A buff
 the host calls cast three times running that is still due straight
 after is rested for two minutes rather than cast for ever. `/drakbot
 spells` shows, for every configured buff, the tier that would be cast

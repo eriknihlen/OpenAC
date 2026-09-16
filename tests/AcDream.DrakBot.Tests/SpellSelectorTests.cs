@@ -30,6 +30,22 @@ public sealed class SpellSelectorTests
         Assert.Equal(6u, spell.SpellId);
     }
 
+    [Theory]
+    [InlineData("Pierce Protection Self", "Piercing Protection Self VI")]
+    [InlineData("Bludgeon Protection Self", "Bludgeoning Protection Self VI")]
+    [InlineData("Flame Protection Self", "Fire Protection Self VI")]
+    [InlineData("Frost Protection Self", "Cold Protection Self VI")]
+    [InlineData("Fire Protection Self", "Fire Protection Self VI")]
+    public void TheOldNamesForTheProtectionsFindTheBooksSpelling(string asked, string book)
+    {
+        var surface = new FakeAutomationSurface();
+        surface.SelfBuffs.Add(Spell.SelfBuff(6, book, 30, 6));
+        var selector = new SpellSelector(surface, surface);
+
+        Assert.True(selector.TryBestSelfBuff(asked, out PluginSpellInfo spell));
+        Assert.Equal(6u, spell.SpellId);
+    }
+
     [Fact]
     public void ANumberedSiblingUnderAnotherNameIsNotATierOfTheFamily()
     {

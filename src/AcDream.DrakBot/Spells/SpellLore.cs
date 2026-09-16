@@ -81,6 +81,49 @@ public static class SpellLore
     private static readonly string[] TargetSuffixes = [" Self", " Other"];
 
     /// <summary>
+    /// The book is not of one mind about its elements - Fire Protection
+    /// but Flame Bane, Cold Protection but Frost Bane, Piercing here and
+    /// Pierce there - and VTank profiles and old habit pick either. Both
+    /// sides of a comparison are spelt one way first, so any of them
+    /// finds the family.
+    /// </summary>
+    private static readonly (string From, string To)[] ElementSpellings =
+    [
+        ("Flame", "Fire"),
+        ("Frost", "Cold"),
+        ("Piercing", "Pierce"),
+        ("Bludgeoning", "Bludgeon"),
+    ];
+
+    private static string Normalize(string baseName)
+    {
+        string[] words = baseName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        bool changed = false;
+        for (int index = 0; index < words.Length; index++)
+        {
+            foreach ((string from, string to) in ElementSpellings)
+            {
+                if (string.Equals(words[index], from, StringComparison.OrdinalIgnoreCase))
+                {
+                    words[index] = to;
+                    changed = true;
+                }
+            }
+        }
+        return changed ? string.Join(' ', words) : baseName;
+    }
+
+    private static readonly Dictionary<string, string[]> SeventhTierNamesNormalized = Build();
+
+    private static Dictionary<string, string[]> Build()
+    {
+        var table = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string root, string[] lore) in SeventhTierNames)
+            table[Normalize(root)] = lore;
+        return table;
+    }
+
+    /// <summary>
     /// Whether a spell in the book, by its tierless name, is a tier of the
     /// family the user named: the same name, "Incantation of" it, or the
     /// seventh tier's lore name (with the same Self/Other suffix, or none,
@@ -88,6 +131,8 @@ public static class SpellLore
     /// </summary>
     public static bool IsTierOf(string bookBaseName, string wantedBaseName)
     {
+        bookBaseName = Normalize(bookBaseName);
+        wantedBaseName = Normalize(wantedBaseName);
         if (string.Equals(bookBaseName, wantedBaseName, StringComparison.OrdinalIgnoreCase))
             return true;
         if (bookBaseName.StartsWith("Incantation of ", StringComparison.OrdinalIgnoreCase)
@@ -96,7 +141,7 @@ public static class SpellLore
             return true;
         }
         (string root, string suffix) = Split(wantedBaseName);
-        if (!SeventhTierNames.TryGetValue(root, out string[]? lore))
+        if (!SeventhTierNamesNormalized.TryGetValue(root, out string[]? lore))
             return false;
         foreach (string name in lore)
         {
