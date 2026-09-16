@@ -268,12 +268,23 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
                 // at the wall until the stuck detector says so. A probe
                 // costs nothing; the run at the wall cost the night's worst
                 // stalls.
-                if (_rejoinPending || _probedStep != _follower.CurrentIndex || _probedRoute != _follower)
+                if (_rejoinPending)
                 {
                     _rejoinPending = false;
                     _probedStep = _follower.CurrentIndex;
                     _probedRoute = _follower;
                     if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
+                        return BehaviorStep.Continue;
+                }
+                else if (_probedStep != _follower.CurrentIndex || _probedRoute != _follower)
+                {
+                    // Only a wall right in front counts here: a door frame
+                    // clipped further along the line is what the walker
+                    // turns through on its way, and calling it walled off
+                    // once sent the walk round three lead-ins for ever.
+                    _probedStep = _follower.CurrentIndex;
+                    _probedRoute = _follower;
+                    if (WallRightAhead(context.Surface, step) && TryRejoin(context))
                         return BehaviorStep.Continue;
                 }
                 if (NoticeWedge(board, step, context.Log))
@@ -463,6 +474,20 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
     }
 
     /// <summary>Whether the body can walk straight to the step: unknown counts as yes.</summary>
+    /// <summary>The line to the step is blocked within two metres of the body: a wall, not a corner the walker turns through.</summary>
+    private static bool WallRightAhead(IAutomationSurface surface, in NavigationStep step)
+    {
+        IMovementProbeAutomation probe = surface.MovementProbe;
+        if (!probe.IsAvailable || step.DistanceMeters <= 2.5d)
+            return false;
+        PluginWalkProbeResult result = probe.ProbeWalk(new PluginWalkProbeRequest(step.HeadingDegrees, (float)step.DistanceMeters)
+        {
+            StepDistance = 0.5f,
+            MaximumCollisionChecks = 64,
+        });
+        return result.Status == PluginWalkProbeStatus.Blocked && result.ClearDistanceMeters < 2f;
+    }
+
     private static bool DirectlyWalkable(IAutomationSurface surface, in NavigationStep step)
     {
         IMovementProbeAutomation probe = surface.MovementProbe;
