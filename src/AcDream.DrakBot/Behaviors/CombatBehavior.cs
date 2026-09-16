@@ -183,6 +183,36 @@ public sealed class CombatBehavior(
         return BehaviorStep.Continue;
     }
 
+    // ── shots into the wall ─────────────────────────────────────────────
+    // The sweep found a height the shot could take; the server disagreed
+    // and the arrow hit a door frame or the floor. Once is a miss; twice
+    // running at the same target is a target that cannot be shot from
+    // here, and it is given up for another, with a strike toward its
+    // blacklist. Six Olthoi at the character's feet once watched it
+    // shoot the same one through a wall for a minute.
+    public const int EnvironmentHitsToDrop = 2;
+    private uint _environmentHitTarget;
+    private int _environmentHits;
+    private bool _dropTarget;
+
+    /// <summary>A line of the character's chat; what the server says of a shot is read off it.</summary>
+    public void NoticeChat(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains("hit the environment", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (_targetId == 0u)
+            return;
+        if (_environmentHitTarget != _targetId)
+        {
+            _environmentHitTarget = _targetId;
+            _environmentHits = 0;
+        }
+        _environmentHits++;
+        lineOfSight.ReportUnreachable(_targetId);
+        if (_environmentHits >= EnvironmentHitsToDrop)
+            _dropTarget = true;
+    }
+
     public bool WantsControl(Blackboard board, out string reason)
     {
         reason = string.Empty;
@@ -258,6 +288,24 @@ public sealed class CombatBehavior(
         ICombatAutomation host = context.Surface.Combat;
         _log = context.Log;
         NoteKill(board, context.Log);
+        if (_dropTarget)
+        {
+            _dropTarget = false;
+            if (_targetId != 0u)
+            {
+                // Dropped is dropped: the strikes it has are made up to the
+                // blacklist, or the next pick would be the same one, nearest.
+                for (int guard = 0; guard < 8 && !lineOfSight.IsBlacklisted(_targetId); guard++)
+                    lineOfSight.ReportUnreachable(_targetId);
+                string name = board.Hostiles.FirstOrDefault(h => h.ObjectId == _targetId).Name ?? $"0x{_targetId:X8}";
+                context.Log.Info($"combat: {name} 0x{_targetId:X8} shot into the environment {_environmentHits} times running; leaving it alone for {combat.LineOfSight.BlacklistSeconds:0}s");
+                _environmentHits = 0;
+                if (_phase is Phase.Building or Phase.AwaitingSwing)
+                    host.AbortPhysicalAttack();
+                _targetId = 0u;
+                EnterPhase(Phase.Idle, board.Now);
+            }
+        }
 
         if (_phase == Phase.Approaching)
             return StepApproach(context, combat);

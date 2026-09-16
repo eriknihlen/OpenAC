@@ -46,12 +46,17 @@ public sealed class BotController : IMetaBot
         foreach (IBehavior behavior in Engine.Behaviors)
         {
             if (behavior is CombatBehavior combat)
+            {
                 combat.IsHazardCell = cell => Hazards.For(cell).Contains(cell);
+                _combat = combat;
+            }
         }
         Navigation.GaveUp += (cell, key) => Hazards.AddGivenUp(cell, key);
     }
 
     public DungeonHazards Hazards { get; }
+
+    private readonly CombatBehavior? _combat;
 
     /// <summary>The bot's files on disk: the folder layout, the VTank-format files, the log dump.</summary>
     public BotFiles Files { get; }
@@ -443,6 +448,7 @@ public sealed class BotController : IMetaBot
             if (message.Sequence > _chatSequence)
                 _chatSequence = message.Sequence;
             NoticeEnvironmentalDamage(message.Text);
+            _combat?.NoticeChat(message.Text);
             if (!Log.Debugs())
                 continue;
             string who = string.IsNullOrEmpty(message.Sender) ? string.Empty : $"{message.Sender}: ";

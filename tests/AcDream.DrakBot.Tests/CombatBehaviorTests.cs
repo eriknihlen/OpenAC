@@ -256,6 +256,28 @@ public sealed class CombatBehaviorTests
     }
 
     [Fact]
+    public void ATargetShotIntoTheEnvironmentTwiceIsLeftForAnother()
+    {
+        // The sweep said clear; the server said the arrow hit the door
+        // frame, twice. The target is dropped and the next one taken.
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
+            Build(new CombatSettings { Style = CombatStyle.Missile });
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Missile };
+        surface.Hostiles.Add(Hostile(9, "Tusker", 12f));
+        surface.Hostiles.Add(Hostile(10, "Drudge", 14f));
+
+        Assert.Equal(StepResult.Continue, Step(behavior, surface, clock).Result);
+        Assert.Equal(9u, behavior.CurrentTargetId);
+        behavior.NoticeChat("Your missile attack hit the environment.");
+        Step(behavior, surface, clock);
+        Assert.Equal(9u, behavior.CurrentTargetId);   // once is a miss
+        behavior.NoticeChat("Your missile attack hit the environment.");
+        Step(behavior, surface, clock);
+        Step(behavior, surface, clock);
+        Assert.Equal(10u, behavior.CurrentTargetId);   // twice is a wall
+    }
+
+    [Fact]
     public void MissileShotUsesTheFirstClearAimHeight()
     {
         (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) =
