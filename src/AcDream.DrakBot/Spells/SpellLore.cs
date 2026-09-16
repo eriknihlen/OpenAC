@@ -109,6 +109,16 @@ public static class SpellLore
         return false;
     }
 
+    /// <summary>True for a name ending in Self, false for Other, null when it names neither.</summary>
+    public static bool? WantsSelf(string baseName)
+    {
+        if (baseName.EndsWith(" Self", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (baseName.EndsWith(" Other", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return null;
+    }
+
     private static (string Root, string Suffix) Split(string baseName)
     {
         foreach (string suffix in TargetSuffixes)

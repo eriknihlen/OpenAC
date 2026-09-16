@@ -21,6 +21,7 @@ public sealed class SelfBuffBehavior(
 {
     private bool _forceRebuff;
     private readonly HashSet<uint> _forcedFamiliesDone = [];
+    private uint _pendingSpell;
     private uint _pendingFamily;
     private uint _pendingTarget;
 
@@ -28,6 +29,20 @@ public sealed class SelfBuffBehavior(
 
     private const double PendingWaitSeconds = 8d;
     private double _pendingSince = double.NaN;
+
+    /// <summary>
+    /// A cast the host calls a success, of a buff that is still due right
+    /// after, this many times running is one that never lands: an Other
+    /// tier sent with no target once "succeeded" nine thousand times in
+    /// five minutes with the bot standing still. It is rested instead.
+    /// </summary>
+    public const int NoEffectStrikes = 3;
+    public const double NoEffectRestSeconds = 120d;
+    /// <summary>How soon after a success the same buff being due again counts as no effect; a real enchantment is in the registry by then.</summary>
+    public const double NoEffectWindowSeconds = 3d;
+    private uint _lastSucceededSpell;
+    private double _lastSucceededAt = double.NegativeInfinity;
+    private int _noEffectStrikes;
 
     /// <summary>Recast every configured buff once, regardless of time remaining.</summary>
     public void ForceRebuff()
@@ -76,8 +91,13 @@ public sealed class SelfBuffBehavior(
             return BehaviorStep.Continue;
         if (outcome is not null)
         {
-            if (outcome == CastOutcome.Succeeded && _forceRebuff)
-                _forcedFamiliesDone.Add(_pendingTarget == 0u ? _pendingFamily : FamilyOn(_pendingFamily, _pendingTarget));
+            if (outcome == CastOutcome.Succeeded)
+            {
+                if (_forceRebuff)
+                    _forcedFamiliesDone.Add(_pendingTarget == 0u ? _pendingFamily : FamilyOn(_pendingFamily, _pendingTarget));
+                _lastSucceededSpell = _pendingSpell;
+                _lastSucceededAt = board.Now;
+            }
             return BehaviorStep.Done;
         }
         if (board.IsActionPending)
@@ -97,6 +117,20 @@ public sealed class SelfBuffBehavior(
 
         if (!TryNextDue(board, buffs, out PluginSpellInfo spell, out uint target))
             return BehaviorStep.Done;
+        if (spell.SpellId == _lastSucceededSpell && board.Now - _lastSucceededAt < NoEffectWindowSeconds)
+        {
+            if (++_noEffectStrikes >= NoEffectStrikes)
+            {
+                _noEffectStrikes = 0;
+                casts.Rest(spell.SpellId, NoEffectRestSeconds);
+                return BehaviorStep.Fail($"{spell.Name} was cast {NoEffectStrikes} times and never landed; resting it {NoEffectRestSeconds:0}s");
+            }
+        }
+        else
+        {
+            _noEffectStrikes = 0;
+        }
+        _pendingSpell = spell.SpellId;
         _pendingFamily = spell.Family;
         _pendingTarget = target;
         PluginCastRequestResult result = casts.Request(spell.SpellId, target);

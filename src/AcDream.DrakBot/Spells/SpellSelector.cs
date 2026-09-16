@@ -153,10 +153,16 @@ public sealed class SpellSelector(
         if (family == 0u)
             return TryByName(pool, baseName, out spell, buff);
 
+        // Self and Other tiers of a buff share a family in the spell table;
+        // "Strength Self" must not come back as Strength Other VI, which
+        // wants a target and never lands on the caster.
+        bool? wantsSelf = SpellLore.WantsSelf(wanted);
         int bestTier = int.MinValue;
         foreach (PluginSpellInfo candidate in pool)
         {
             if (candidate.Family != family || !IsCastable(candidate, buff))
+                continue;
+            if (wantsSelf is { } self && candidate.IsSelfTargeted != self)
                 continue;
             if (candidate.Tier > bestTier)
             {
@@ -190,6 +196,7 @@ public sealed class SpellSelector(
                     family = candidate.Family;
             }
         }
+        bool? wantsSelf = SpellLore.WantsSelf(wanted);
         foreach (IReadOnlyList<PluginSpellInfo> pool in pools)
         {
             foreach (PluginSpellInfo candidate in pool)
@@ -197,7 +204,7 @@ public sealed class SpellSelector(
                 bool inFamily = family != 0u
                     ? candidate.Family == family
                     : SpellLore.IsTierOf(BaseName(candidate.Name), wanted);
-                if (!inFamily)
+                if (!inFamily || (wantsSelf is { } self && candidate.IsSelfTargeted != self))
                     continue;
                 known++;
                 if (!HasComponents(candidate.SpellId))

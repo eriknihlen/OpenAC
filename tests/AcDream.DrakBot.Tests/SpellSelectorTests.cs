@@ -31,6 +31,27 @@ public sealed class SpellSelectorTests
     }
 
     [Fact]
+    public void ASelfBuffNeverResolvesToItsOtherTier()
+    {
+        // Self and Other tiers share a family in the spell table. With the
+        // book holding Strength Other VI and only Strength Self III with
+        // components, "Strength Self" is the third, not the Other - which
+        // wants a target and never lands on the caster.
+        var surface = new FakeAutomationSurface();
+        surface.SelfBuffs.Add(Spell.SelfBuff(3, "Strength Self III", 10, 3));
+        surface.SelfBuffs.Add(Spell.SelfBuff(6, "Strength Self VI", 10, 6));
+        surface.SelfBuffs.Add(Spell.SelfBuff(16, "Strength Other VI", 10, 6) with { IsSelfTargeted = false });
+        surface.MissingComponents.Add(6u);
+        var selector = new SpellSelector(surface, surface);
+
+        Assert.True(selector.TryBestSelfBuff("Strength Self", out PluginSpellInfo spell));
+        Assert.Equal(3u, spell.SpellId);
+        Assert.Equal("casts Strength Self III", selector.Explain("Strength Self"));
+        Assert.True(selector.TryBestSelfBuff("Strength Other", out spell));
+        Assert.Equal(16u, spell.SpellId);
+    }
+
+    [Fact]
     public void TheLoreNamedSeventhAndTheIncantationAreReachedThroughTheFamily()
     {
         // The book holds tiers I-VI under the plain name, the seventh under

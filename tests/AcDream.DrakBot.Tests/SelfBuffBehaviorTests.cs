@@ -143,6 +143,37 @@ public sealed class SelfBuffBehaviorTests
     }
 
     [Fact]
+    public void ABuffThatSucceedsWithoutLandingIsRestedAfterThreeGoes()
+    {
+        // The host called an Other tier sent with no target a success, nine
+        // thousand times in five minutes, with nothing ever in the
+        // registry: three such in a row and the spell is put aside.
+        (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(TwoBuffs);
+
+        for (int go = 0; go < SelfBuffBehavior.NoEffectStrikes; go++)
+        {
+            Assert.Equal(StepResult.Continue, behavior.Execute(Context(surface, clock)).Result);
+            surface.CompleteCast(10);
+            Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);
+            clock.Advance(0.1d);
+        }
+        BehaviorStep step = behavior.Execute(Context(surface, clock));
+
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("never landed", step.Reason);
+        Assert.Equal(SelfBuffBehavior.NoEffectStrikes, surface.Commands.Count(c => c == "cast:10"));
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Endurance Self VI due", reason);
+
+        // A real cast that lands, then the next buff, is no strike at all.
+        Assert.Equal(StepResult.Continue, behavior.Execute(Context(surface, clock)).Result);
+        surface.CompleteCast(11);
+        surface.Enchantments.Add(new PluginActiveEnchantment(11, 101, 6, 1800d));
+        Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+    }
+
+    [Fact]
     public void DisabledSettingsMeanNoInterest()
     {
         (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) =

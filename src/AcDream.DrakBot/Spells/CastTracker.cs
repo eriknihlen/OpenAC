@@ -19,6 +19,10 @@ public sealed class CastCooldowns(IBotClock clock)
 
     public void MarkFailed(uint spellId) =>
         _retryAfter[spellId] = clock.Now + FailureBackoffSeconds;
+
+    /// <summary>Puts a spell aside for a while of the caller's choosing - one that reports success and changes nothing.</summary>
+    public void Rest(uint spellId, double seconds) =>
+        _retryAfter[spellId] = clock.Now + seconds;
 }
 
 /// <summary>
@@ -47,6 +51,9 @@ public sealed class CastTracker(IMagicCommands magic, IBotClock clock, CastCoold
     public bool HasPendingRequest => PendingSpellId != 0u;
 
     public bool IsOnCooldown(uint spellId) => cooldowns.IsOnCooldown(spellId);
+
+    /// <summary>Puts a spell aside for <paramref name="seconds"/>.</summary>
+    public void Rest(uint spellId, double seconds) => cooldowns.Rest(spellId, seconds);
 
     public PluginCastRequestResult Request(uint spellId, uint targetObjectId = 0u)
     {

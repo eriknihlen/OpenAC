@@ -164,7 +164,12 @@ Spells are named the way the game names them, without a tier:
 character knows - and the family's top allowed tier is what is cast,
 whatever it is called, so the lore-named sevenths and the "Incantation
 of" eighths are reached without naming them. A tier without its
-components in the pack is skipped for the next one down. `/drakbot
+components in the pack is skipped for the next one down. Self and
+Other tiers share a family in the spell table, so a name ending in
+Self or Other keeps to its side: "Strength Self" is never Strength
+Other VI, which wants a target and never lands on the caster. A buff
+the host calls cast three times running that is still due straight
+after is rested for two minutes rather than cast for ever. `/drakbot
 spells` shows, for every configured buff, the tier that would be cast
 and whether it is up or due, or what stands in the way.
 
