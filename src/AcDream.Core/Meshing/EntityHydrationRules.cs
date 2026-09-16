@@ -24,4 +24,13 @@ public static class EntityHydrationRules
         int setupLightCount,
         bool hasDefaultScript)
         => meshRefCount > 0 || setupLightCount > 0 || hasDefaultScript;
+
+    /// <summary>
+    /// True when a part belongs in a placement's mesh set: every part that is
+    /// not an editor marker, and an editor marker that has collision. A marker
+    /// draws nothing, but its collision still stands in the world, as the
+    /// invisible ledges and walls some dungeons are built from do.
+    /// </summary>
+    public static bool ShouldKeepPart(bool isEditorMarker, bool hasCollision)
+        => !isEditorMarker || hasCollision;
 }

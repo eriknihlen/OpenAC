@@ -40,4 +40,32 @@ public class EntityHydrationRulesTests
         Assert.True(EntityHydrationRules.ShouldKeepEntity(
             meshRefCount: 0, setupLightCount: 0, hasDefaultScript: true));
     }
+
+    [Fact]
+    public void ShouldKeepPart_OrdinaryPart_True()
+    {
+        Assert.True(EntityHydrationRules.ShouldKeepPart(
+            isEditorMarker: false, hasCollision: false));
+        Assert.True(EntityHydrationRules.ShouldKeepPart(
+            isEditorMarker: false, hasCollision: true));
+    }
+
+    [Fact]
+    public void ShouldKeepPart_MarkerWithoutCollision_False()
+    {
+        Assert.False(EntityHydrationRules.ShouldKeepPart(
+            isEditorMarker: true, hasCollision: false));
+    }
+
+    /// <summary>
+    /// An invisible ledge is authored as a placement whose only part is an
+    /// editor marker with collision. It draws nothing, but a character stands
+    /// on it, so the part must survive hydration.
+    /// </summary>
+    [Fact]
+    public void ShouldKeepPart_MarkerWithCollision_True()
+    {
+        Assert.True(EntityHydrationRules.ShouldKeepPart(
+            isEditorMarker: true, hasCollision: true));
+    }
 }

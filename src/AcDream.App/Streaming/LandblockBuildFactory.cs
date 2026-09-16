@@ -405,7 +405,7 @@ public sealed class LandblockBuildFactory
             foreach (var stab in envCell.StaticObjects)
             {
                 if ((stab.Id & 0xFF000000u) == 0x01000000u
-                    && AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, stab.Id))
+                    && !KeepsInteriorPart(stab.Id))
                     continue;
 
                 var meshRefs = new List<AcDream.Core.World.MeshRef>();
@@ -433,7 +433,7 @@ public sealed class LandblockBuildFactory
                         var flat = AcDream.Core.Meshing.SetupMesh.Flatten(setup);
                         foreach (var mr in flat)
                         {
-                            if (AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, mr.GfxObjId))
+                            if (!KeepsInteriorPart(mr.GfxObjId))
                                 continue;
                             var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(mr.GfxObjId);
                             if (gfx is null)
@@ -480,6 +480,12 @@ public sealed class LandblockBuildFactory
         return result;
     }
 
+
+    private bool KeepsInteriorPart(uint gfxObjId) =>
+        AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepPart(
+            AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, gfxObjId),
+            _dats.Get<DatReaderWriter.DBObjs.GfxObj>(gfxObjId) is { } gfx
+                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics));
 
     private (float MaxZ, float MinZ) ComputeWalkZSlab(byte[] heights)
     {
