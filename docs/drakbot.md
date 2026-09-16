@@ -181,9 +181,13 @@ wielded. The caster is the one the Combat tab names for the magic
 style when the character has it, else whatever caster is in hand, else
 the first in the pack; the combat behaviour swaps the fighting weapon
 back for the next fight. A heal the host calls a success that moved the
-vital by less than a hundredth of its maximum is backed off like a
-failure - a heal of a hundred on a hundred thousand is not worth a cast
-a tick.
+vital by less than a hundredth of its maximum - a heal of a hundred on
+a hundred thousand - puts that vital's spell aside for five minutes,
+and a kit takes its place: with kits on, the vitals behaviour applies
+the first kit in the pack that restores the vital (health, stamina or
+mana kinds, by the kit's booster) whenever the spell cannot be cast. A
+kit heals by the Healing skill, which is what a character with such
+vitals has.
 
 ## Weapons and ammunition
 

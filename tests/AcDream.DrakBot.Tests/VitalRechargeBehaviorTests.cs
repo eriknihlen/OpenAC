@@ -180,9 +180,38 @@ public sealed class VitalRechargeBehaviorTests
 
         Assert.Equal(StepResult.Failed, step.Result);
         Assert.Contains("next to nothing", step.Reason);
-        Assert.False(behavior.WantsControl(Board(surface, clock), out _));
-        clock.Advance(VitalRechargeBehavior.FailRetrySeconds + 1d);
+
+        // The spell is rested, not the vital: with no kit, the vital is
+        // given up on for a while; with a kit, the kit takes over at once.
         Assert.True(behavior.WantsControl(Board(surface, clock), out _));
+        step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("no way to heal", step.Reason);
+        Assert.False(behavior.WantsControl(Board(surface, clock), out _));
+        Assert.DoesNotContain(surface.Commands, c => c.StartsWith("cast:", StringComparison.Ordinal) && surface.Commands.IndexOf(c) > 1);
+    }
+
+    [Fact]
+    public void AKitTakesOverFromASpellThatDidNothing()
+    {
+        // An eternal health kit heals by the healing skill, which on this
+        // character is worth thousands; the spell is worth eighty. Once the
+        // spell has shown that, the kit is what heals, for a stamina kit as
+        // much as a health one.
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build();
+        surface.MaxHealth = 100_000;
+        surface.CurrentHealth = 65_000;
+        surface.OwnedItems.Add(Kit(0x700u) with { BoosterVital = 4 }); // stamina
+        surface.OwnedItems.Add(Kit(0x701u) with { BoosterVital = 2 }); // health
+
+        Assert.Equal(StepResult.Continue, behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock))).Result);
+        surface.CompleteCast(51);
+        surface.CurrentHealth = 65_100;
+        Assert.Equal(StepResult.Failed, behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock))).Result);
+
+        BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Continue, step.Result);
+        Assert.Equal($"apply:{0x701u}@{surface.ObjectId}", surface.Commands[^1]);
     }
 
     [Fact]
