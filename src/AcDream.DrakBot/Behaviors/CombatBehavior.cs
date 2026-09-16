@@ -27,7 +27,13 @@ public sealed class CombatBehavior(
     LineOfSightService lineOfSight,
     Func<CombatSettings> settings) : IBehavior
 {
-    private const double SwingTimeoutSeconds = 10d;
+    /// <summary>
+    /// Shorter than the engine's busy watchdog on purpose: a swing the
+    /// server never answers must time out here, where it is a strike
+    /// against the target (three and it is left alone), before the
+    /// watchdog aborts it and the same target is swung at all over again.
+    /// </summary>
+    private const double SwingTimeoutSeconds = 7d;
 
     /// <summary>
     /// How far the server swings from without moving the character. A
