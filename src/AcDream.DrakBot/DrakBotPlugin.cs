@@ -69,7 +69,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         CastTracker Casts() => new(surface.Magic, clock, cooldowns);
         // Behaviors read the live profile through the engine, which does not
         // exist until they do; the closures resolve it lazily.
-        var navigation = new NavigationBehavior(() => engine.Profile.Navigation);
+        var navigation = new NavigationBehavior(() => engine.Profile.Navigation, new StallLedger(host.Storage));
         Func<string> wand = () => engine.Profile.Combat.Wand;
         var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs, surface, wand);
         var lineOfSight = new LineOfSightService(

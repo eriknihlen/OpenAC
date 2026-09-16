@@ -31,6 +31,9 @@ public sealed class Walker
     private const float TurnProgressDegrees = 5f;
 
     private readonly StuckDetector _stuck = new();
+
+    /// <summary>The stuck detector's last word: the body covered ground since its anchor, or has not.</summary>
+    public bool Progressed => _stuck.Progressed;
     private PluginMovementIntent? _intent;
     private int _steer;
     private bool _turning;

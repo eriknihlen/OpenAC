@@ -14,9 +14,11 @@ namespace AcDream.DrakBot.Behaviors;
 /// a portal walked into, a recall cast by hand - is noticed too, and the
 /// walk settles before it carries on.
 /// </summary>
-public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBehavior
+public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallLedger? stalls = null) : IBehavior
 {
     private readonly Walker _walker = new();
+    /// <summary>Where the walk stands still against something, for how long, how often: the ledger of a dungeon's remaining faults.</summary>
+    public StallLedger Stalls { get; } = stalls ?? new StallLedger(NoOpPluginStorage.Instance);
     private readonly RouteActionRunner _actions = new();
     private RouteFollower? _follower;
     private bool _resumeNearest;
@@ -269,6 +271,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                     return BehaviorStep.Continue;
                 StuckRecovery? recovery = _walker.Toward(
                     host, board.Navigation.Position, step.HeadingDegrees, board.Now, nav.TurnToleranceDegrees);
+                // The ledger hears of a stall when a recovery is first called
+                // for, and of its end when the body covers ground again.
+                bool? progressing = recovery is not null ? false : _walker.Progressed ? true : null;
+                if (Stalls.Observe(board.Navigation.Position, board.Now, progressing, _follower.CurrentIndex, step.HeadingDegrees) is { } stallLine)
+                    context.Log.Info(stallLine);
                 if (board.Now - _lastTraceAt >= 0.5d && context.Log.Debugs())
                 {
                     _lastTraceAt = board.Now;
@@ -279,6 +286,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                 if (recovery is { } move)
                 {
                     context.Log.Info($"nav: stuck near step {_follower.CurrentIndex + 1} ({step.DistanceMeters:0.0}m to go, heading {step.HeadingDegrees:0}); trying {move} at {BotEngine.Describe(board.Navigation.Position)}");
+                    Stalls.NoteAttempt(move.ToString());
                     context.Log.Info($"nav: {CompassProbe(context.Surface, step.HeadingDegrees)}");
                     // A wall square in the way is not something a recovery
                     // move gets around: the route is rejoined by a path, or,
@@ -291,7 +299,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                     if (!DirectlyWalkable(context.Surface, step))
                     {
                         if (TryRejoin(context))
+                        {
+                            if (Stalls.Interrupt(board.Now, "rejoined by a path") is { } rejoinedLine)
+                                context.Log.Info(rejoinedLine);
                             return BehaviorStep.Continue;
+                        }
                         if (_detourStep != _follower.CurrentIndex)
                         {
                             _detourStep = _follower.CurrentIndex;
@@ -322,6 +334,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                             _detours = 0;
                             _walker.Reset(host);
                             _follower.Skip();
+                            if (Stalls.Interrupt(board.Now, "step skipped") is { } skippedLine)
+                                context.Log.Info(skippedLine);
                             return BehaviorStep.Continue;
                         }
                         if (TryDetour(context.Surface, step.HeadingDegrees, out float detour))
@@ -333,6 +347,7 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                             _lastStallAt = board.Navigation.Position;
                             _detours++;
                             context.Log.Info($"nav: detour {_detours} along heading {detour:0} for {DetourSeconds:0.0}s");
+                            Stalls.NoteAttempt($"detour {detour:0}");
                             _walker.BeginDetour(detour, board.Now, DetourSeconds);
                             return BehaviorStep.Continue;
                         }
@@ -504,6 +519,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     public void Interrupt(BehaviorContext context)
     {
         _walker.Reset(context.Surface.Navigation);
+        if (Stalls.Interrupt(context.Board.Now, "interrupted") is { } stallLine)
+            context.Log.Info(stallLine);
         _followMoving = false;
         _rejoinPending = _follower is not null;
         // An action mid-flight is abandoned; the step runs again from the

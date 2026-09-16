@@ -287,6 +287,51 @@ public sealed class NavigationTests
     }
 
     [Fact]
+    public void TheStallLedgerKeepsWhereTheWalkStoodStillAndForHowLong()
+    {
+        // A wall, pressed against: the ledger opens a stall when the first
+        // recovery is called for, closes it when the step is given up, and
+        // remembers the spot with the seconds and what was tried last.
+        var surface = new FakeAutomationSurface();
+        var clock = new TickClock();
+        var settings = new NavigationSettings();
+        var ledger = new StallLedger(NoOpPluginStorage.Instance);
+        var behavior = new NavigationBehavior(() => settings, ledger);
+        behavior.SetRoute(new Route
+        {
+            Name = "wall",
+            Waypoints = [new Waypoint(WaypointKind.Point, 0d, 20d / 240d), new Waypoint(WaypointKind.Point, 20d / 240d, 0d)],
+        });
+        surface.Position = At(0d, 0d, heading: 0f);
+        surface.BlockedWalkHeadings.UnionWith([0, 30, 330]);
+        surface.WalkBlockedByEnvironment = true;
+        behavior.Rejoin = (_, _) => null;
+        var log = new FakeLogger();
+        BehaviorContext Context() => new(surface, log, Blackboard.Capture(surface, clock, 25f, 15f));
+
+        for (int round = 0; round < 40 && behavior.WaypointIndex == 0; round++)
+        {
+            clock.Advance(3.2d);
+            behavior.Execute(Context());
+            clock.Advance(0.1d);
+            behavior.Execute(Context());
+            clock.Advance(3.2d);
+            behavior.Execute(Context());
+            clock.Advance(NavigationBehavior.DetourSeconds + 0.1d);
+            behavior.Execute(Context());
+        }
+
+        Assert.Contains(log.Lines, line => line.Contains("nav: stalled at", StringComparison.Ordinal));
+        Assert.Contains(log.Lines, line => line.Contains("step skipped after", StringComparison.Ordinal) && line.Contains("s stalled at", StringComparison.Ordinal));
+        Assert.Null(ledger.Current);
+        StallSpot spot = Assert.Single(ledger.Worst(surface.Position.CellId));
+        Assert.Equal(1, spot.Count);
+        Assert.True(spot.Seconds > 5d, $"stalled {spot.Seconds:0.0}s");
+        Assert.Equal(1, spot.Step);
+        Assert.NotEmpty(spot.FreedBy);   // what was tried last: a recovery move or a detour
+    }
+
+    [Fact]
     public void AStepDetouredSixTimesWithoutBeingReachedIsSkipped()
     {
         // The step is on the floor above with no ramp from here: sideways and

@@ -196,6 +196,34 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     + $"{FormatCoordinate(position.NorthSouth, 'N', 'S')}, "
                     + $"{FormatCoordinate(position.EastWest, 'E', 'W')}");
                 break;
+            case "stalls":
+            {
+                if (controller.Engine.LastBoard is not { } stallBoard)
+                {
+                    Say("not in world yet");
+                    break;
+                }
+                uint landblock = stallBoard.Navigation.Position.CellId & 0xFFFF0000u;
+                if (args.Length > 1 && args[1].Equals("clear", StringComparison.OrdinalIgnoreCase))
+                {
+                    controller.Navigation.Stalls.Clear(landblock);
+                    Say($"stall ledger cleared for {landblock >> 16:X4}");
+                    break;
+                }
+                int count = args.Length > 1 && int.TryParse(args[1], out int n) ? Math.Clamp(n, 1, 50) : 10;
+                IReadOnlyList<StallSpot> worst = controller.Navigation.Stalls.Worst(landblock, count);
+                if (controller.Navigation.Stalls.Current is { } current)
+                    Say($"stalled now for {stallBoard.Now - current.Since:0}s at {BotEngine.Describe(current.Where)}");
+                if (worst.Count == 0)
+                {
+                    Say($"no stalls recorded in {landblock >> 16:X4}");
+                    break;
+                }
+                Say($"worst stalls in {landblock >> 16:X4} (time lost, times, longest; step, heading, what freed it, last):");
+                foreach (StallSpot spot in worst)
+                    Say($"  {spot.Seconds,6:0}s x{spot.Count,-3} {spot.LongestSeconds,4:0}s  {BotEngine.Describe(spot.Position)}  step {spot.Step} h{spot.Heading:0}  {spot.FreedBy}  {spot.LastAt}");
+                break;
+            }
             case "pause":
                 RequireArgument(args, 1, "nav pause <seconds>");
                 double seconds = double.Parse(args[1], CultureInfo.InvariantCulture);
@@ -264,7 +292,7 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 Say($"{sub} step '{Rest(args, 1)}' added; stand where the route should use it");
                 break;
             default:
-                Say("usage: /drakbot nav add|pause <s>|chat <text>|recall <spell>|portal <name>|npc <name>|clear|use|save <name>|load <name>|list|import <file>|export <file>");
+                Say("usage: /drakbot nav add|pause <s>|chat <text>|recall <spell>|portal <name>|npc <name>|clear|use|save <name>|load <name>|list|import <file>|export <file>|stalls [n|clear]");
                 break;
         }
     }

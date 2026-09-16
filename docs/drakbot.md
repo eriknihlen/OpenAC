@@ -469,7 +469,16 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   above with no ramp from here is not reached by walking at the wall all
   night - and it is remembered, with the cell it was given up from, per
   landblock in the plugin's storage (`givenup/<landblock>.json`), so the
-  next lap and the next session skip it at once. Route points are simplified with height
+  next lap and the next session skip it at once. Every stall - the body
+  standing still while pressing on, from the first recovery called for
+  until it covers ground again, the step changes or the walk is
+  interrupted - is logged at both ends with the seconds, and kept per
+  landblock in `stalls/<landblock>.json` (`StallLedger`): the spot to the
+  metre, how many times, how long in all and at the worst, the step and
+  heading, what freed it last. `/drakbot nav stalls [n]` lists the worst
+  spots of the dungeon the character is in, `/drakbot nav stalls clear`
+  forgets them - the ledger of a dungeon's remaining faults, for weeding
+  them out. Route points are simplified with height
   in mind: a point on the line on the map but off it in height (a ramp's
   landing) is kept, or the walk would go from one floor to the next
   through the wall.
