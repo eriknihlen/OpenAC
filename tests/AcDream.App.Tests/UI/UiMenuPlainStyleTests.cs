@@ -359,9 +359,13 @@ public sealed class UiMenuPlainStyleTests
         var segs = renderer.DebugSpriteSegmentVerts;
 
         Assert.Equal(1, QuadCount(segs, RetailChromeSprites.CenterFill));   // bevel drawn
-        Assert.Equal(1, QuadCount(segs, 0x0600124Cu));   // PopupBgSprite panel fill
-        Assert.Equal(1, QuadCount(segs, 0x0600124Du));   // ItemHighlightSprite (row 1, selected)
-        Assert.Equal(1, QuadCount(segs, 0x0600124Eu));   // ItemNormalSprite (row 0)
+        // The art here is 46 wide under a 191 column: each row and the fill
+        // are the art once plus its tail stretched over the rest, two quads.
+        // Tiling it across put a second column of check boxes on the chat
+        // window's channel list.
+        Assert.Equal(2, QuadCount(segs, 0x0600124Cu));   // PopupBgSprite panel fill
+        Assert.Equal(2, QuadCount(segs, 0x0600124Du));   // ItemHighlightSprite (row 1, selected)
+        Assert.Equal(2, QuadCount(segs, 0x0600124Eu));   // ItemNormalSprite (row 0)
         Assert.Equal(0, QuadCount(segs, 0u));
     }
 }
