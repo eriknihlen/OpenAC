@@ -22,7 +22,9 @@ public sealed class MainWindowViewTests
         ("AccountsScroll", typeof(ScrollViewer)),
         ("AccountsTabButton", typeof(ToggleButton)),
         ("PluginsTabButton", typeof(ToggleButton)),
-        ("PluginsScroll", typeof(ScrollViewer)),
+        ("PluginsPanel", typeof(Grid)),
+        ("InstalledScroll", typeof(ScrollViewer)),
+        ("DiscoverScroll", typeof(ScrollViewer)),
         ("PlayCheckedButton", typeof(Button)),
         ("ProfileTextBox", typeof(TextBox)),
         ("CharacterPluginsPanel", typeof(ScrollViewer)),
@@ -339,7 +341,7 @@ public sealed class MainWindowViewTests
             var accountsTab = (ToggleButton)GetNamedField(window, "AccountsTabButton")!;
             var pluginsTab = (ToggleButton)GetNamedField(window, "PluginsTabButton")!;
             var accountsScroll = window.FindControl<ScrollViewer>("AccountsScroll")!;
-            var pluginsScroll = window.FindControl<ScrollViewer>("PluginsScroll")!;
+            var pluginsScroll = window.FindControl<Grid>("PluginsPanel")!;
 
             Assert.True(viewModel.IsAccountsTabSelected);
             Assert.True(accountsTab.IsChecked);

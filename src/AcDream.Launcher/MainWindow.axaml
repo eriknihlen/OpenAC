@@ -182,12 +182,15 @@
         <TextBlock Text="{Binding Plugins.Error}" Foreground="#FFB0A0" IsVisible="{Binding Plugins.HasError}" TextWrapping="Wrap" />
         <TextBlock Text="{Binding Plugins.StatusText}" Classes="muted" IsVisible="{Binding Plugins.HasStatusText}" TextWrapping="Wrap" />
       </StackPanel>
-      <ScrollViewer Grid.Row="2" x:Name="PluginsScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="10">
-          <StackPanel Spacing="5">
+      <Grid Grid.Row="2" x:Name="PluginsPanel" ColumnDefinitions="*,*" RowDefinitions="*,*" ColumnSpacing="12" RowSpacing="10" SizeChanged="OnPluginsPanelSizeChanged">
+        <Border Classes="well" Grid.Row="{Binding Plugins.InstalledRow}" Grid.Column="{Binding Plugins.InstalledColumn}" Grid.ColumnSpan="{Binding Plugins.InstalledColumnSpan}" Grid.RowSpan="{Binding Plugins.InstalledRowSpan}">
+          <Grid RowDefinitions="Auto,Auto,*" RowSpacing="6">
             <TextBlock Text="Installed" FontWeight="SemiBold" />
-            <TextBlock Text="No plugins are installed yet." Classes="muted" IsVisible="{Binding !Plugins.HasInstalled}" />
-            <ItemsControl ItemsSource="{Binding Plugins.Installed}">
+            <TextBox Grid.Row="1" Text="{Binding Plugins.InstalledFilter, Mode=TwoWay}" PlaceholderText="Search installed" AutomationProperties.Name="Search installed plugins" />
+            <ScrollViewer Grid.Row="2" x:Name="InstalledScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="5">
+              <TextBlock Text="{Binding Plugins.InstalledEmptyText}" Classes="muted" IsVisible="{Binding !Plugins.HasInstalled}" />
+              <ItemsControl ItemsSource="{Binding Plugins.Installed}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PluginInstalledRowViewModel">
                   <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Padding="10,6" Margin="0,0,0,5">
@@ -213,12 +216,19 @@
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-          <StackPanel Spacing="5">
+              </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+        <Border Classes="well" Grid.Row="{Binding Plugins.DiscoverRow}" Grid.Column="{Binding Plugins.DiscoverColumn}" Grid.ColumnSpan="{Binding Plugins.DiscoverColumnSpan}" Grid.RowSpan="{Binding Plugins.DiscoverRowSpan}">
+          <Grid RowDefinitions="Auto,Auto,*" RowSpacing="6">
             <TextBlock Text="Discover" FontWeight="SemiBold" />
-            <TextBlock Text="No listed plugins are available to install." Classes="muted" IsVisible="{Binding !Plugins.HasDiscover}" />
-            <ItemsControl ItemsSource="{Binding Plugins.Discover}">
+            <TextBox Grid.Row="1" Text="{Binding Plugins.DiscoverFilter, Mode=TwoWay}" PlaceholderText="Search the plugin list" AutomationProperties.Name="Search listed plugins" />
+            <ScrollViewer Grid.Row="2" x:Name="DiscoverScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="5">
+              <TextBlock Text="{Binding Plugins.DiscoverEmptyText}" Classes="muted" IsVisible="{Binding !Plugins.HasDiscover}" />
+              <ItemsControl ItemsSource="{Binding Plugins.Discover}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PluginDiscoverRowViewModel">
                   <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Padding="10,6" Margin="0,0,0,5">
@@ -236,10 +246,12 @@
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-        </StackPanel>
-      </ScrollViewer>
+              </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+      </Grid>
     </Grid>
     <Border Grid.Row="4" Background="#172128" Padding="14,8">
       <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">

@@ -151,6 +151,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnPluginsPanelSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is LauncherWindowViewModel viewModel)
+        {
+            viewModel.Plugins.SetPanelWidth(e.NewSize.Width);
+        }
+    }
+
     private void OnModalKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape || DataContext is not LauncherWindowViewModel viewModel)

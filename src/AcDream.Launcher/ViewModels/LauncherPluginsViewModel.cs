@@ -195,6 +195,96 @@ public sealed class LauncherPluginsViewModel : ObservableObject
 
     public bool HasInstalled => Installed.Count > 0;
 
+    private readonly List<PluginInstalledRowViewModel> _allInstalled = [];
+    private readonly List<PluginDiscoverRowViewModel> _allDiscover = [];
+    private string _installedFilter = "";
+    private string _discoverFilter = "";
+
+    public string InstalledFilter
+    {
+        get => _installedFilter;
+        set { if (SetProperty(ref _installedFilter, value ?? "")) ApplyFilters(); }
+    }
+
+    public string DiscoverFilter
+    {
+        get => _discoverFilter;
+        set { if (SetProperty(ref _discoverFilter, value ?? "")) ApplyFilters(); }
+    }
+
+    public string InstalledEmptyText => _installedFilter.Length > 0
+        ? "No installed plugin matches that search."
+        : "No plugins are installed yet.";
+
+    public string DiscoverEmptyText => _discoverFilter.Length > 0
+        ? "No listed plugin matches that search."
+        : "No listed plugins are available to install.";
+
+    private static bool Matches(string filter, params string?[] fields) =>
+        filter.Length == 0
+        || fields.Any(field => field is not null && field.Contains(filter, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Rebuilds the two shown lists from the full ones, keeping only what the searches match.</summary>
+    private void ApplyFilters()
+    {
+        string installedFilter = _installedFilter.Trim();
+        Installed.Clear();
+        foreach (PluginInstalledRowViewModel row in _allInstalled
+            .Where(row => Matches(installedFilter, row.DisplayName, row.Id, row.SourceBadge)))
+        {
+            Installed.Add(row);
+        }
+
+        string discoverFilter = _discoverFilter.Trim();
+        Discover.Clear();
+        foreach (PluginDiscoverRowViewModel row in _allDiscover
+            .Where(row => Matches(discoverFilter, row.Name, row.Id, row.Author, row.Description, row.Repo)))
+        {
+            Discover.Add(row);
+        }
+
+        OnPropertyChanged(nameof(HasInstalled));
+        OnPropertyChanged(nameof(HasDiscover));
+        OnPropertyChanged(nameof(InstalledEmptyText));
+        OnPropertyChanged(nameof(DiscoverEmptyText));
+    }
+
+    /// <summary>
+    /// Wide panels put Discover beside Installed; narrow ones stack them, installed first, so the
+    /// plugins someone already has stay at the top of the scroll.
+    /// </summary>
+    public const double SideBySideWidth = 820;
+
+    private bool _isSideBySide;
+
+    public bool IsSideBySide
+    {
+        get => _isSideBySide;
+        set
+        {
+            if (!SetProperty(ref _isSideBySide, value)) return;
+            OnPropertyChanged(nameof(InstalledColumn));
+            OnPropertyChanged(nameof(InstalledRow));
+            OnPropertyChanged(nameof(InstalledColumnSpan));
+            OnPropertyChanged(nameof(InstalledRowSpan));
+            OnPropertyChanged(nameof(DiscoverColumn));
+            OnPropertyChanged(nameof(DiscoverRow));
+            OnPropertyChanged(nameof(DiscoverColumnSpan));
+            OnPropertyChanged(nameof(DiscoverRowSpan));
+        }
+    }
+
+    public void SetPanelWidth(double width) => IsSideBySide = width >= SideBySideWidth;
+
+    public int InstalledColumn => IsSideBySide ? 1 : 0;
+    public int InstalledRow => 0;
+    public int InstalledColumnSpan => IsSideBySide ? 1 : 2;
+    public int InstalledRowSpan => IsSideBySide ? 2 : 1;
+    public int DiscoverColumn => 0;
+    public int DiscoverRow => IsSideBySide ? 0 : 1;
+    public int DiscoverColumnSpan => IsSideBySide ? 1 : 2;
+    public int DiscoverRowSpan => IsSideBySide ? 2 : 1;
+
     public PluginInstallDialogViewModel InstallDialog { get; }
 
     public AsyncRelayCommand CheckNowCommand { get; }
@@ -367,7 +457,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             Error = "Could not reach the plugin list.";
         }
 
-        Installed.Clear();
+        _allInstalled.Clear();
         foreach (InstalledPluginInfo info in outcome.Installed)
         {
             bool canRemove = info.Source == InstalledPluginSource.Managed;
@@ -380,7 +470,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 ? new RelayCommand(() => OpenRemoveDialog(info), () => _canInteract() && !IsBusy)
                 : null;
             outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
-            Installed.Add(new PluginInstalledRowViewModel(
+            _allInstalled.Add(new PluginInstalledRowViewModel(
                 info.Id,
                 info.DisplayName,
                 info.Version,
@@ -399,7 +489,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 removeCommand));
         }
 
-        Discover.Clear();
+        _allDiscover.Clear();
         foreach (PluginDiscoverEntry entry in outcome.Discover)
         {
             var install = new RelayCommand(
@@ -414,11 +504,10 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 row.CompatibilityIsWarning = cached.CompatibilityIsWarning;
             }
 
-            Discover.Add(row);
+            _allDiscover.Add(row);
         }
 
-        OnPropertyChanged(nameof(HasInstalled));
-        OnPropertyChanged(nameof(HasDiscover));
+        ApplyFilters();
     }
 
     /// <summary>Opening Discover's own request (plan, "Request budget"): one <c>plugin.json</c> per

@@ -487,6 +487,38 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task SearchingDiscoverKeepsOnlyTheMatchingPluginsAndSaysSoWhenNoneMatch()
+    {
+        using var fixture = new PluginPanelFixture();
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : throw new InvalidOperationException("Unexpected request: " + request.RequestUri));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        int listed = viewModel.Plugins.Discover.Count;
+        Assert.True(listed > 0, "The fixture list should offer at least one plugin.");
+
+        viewModel.Plugins.DiscoverFilter = "discoverable";
+        Assert.All(viewModel.Plugins.Discover, row =>
+            Assert.Contains("discoverable", row.Id, StringComparison.OrdinalIgnoreCase));
+
+        viewModel.Plugins.DiscoverFilter = "nothing-matches-this";
+        Assert.Empty(viewModel.Plugins.Discover);
+        Assert.False(viewModel.Plugins.HasDiscover);
+        Assert.Equal("No listed plugin matches that search.", viewModel.Plugins.DiscoverEmptyText);
+
+        viewModel.Plugins.DiscoverFilter = "";
+        Assert.Equal(listed, viewModel.Plugins.Discover.Count);
+        Assert.Equal("No listed plugins are available to install.", viewModel.Plugins.DiscoverEmptyText);
+    }
+
+    [Fact]
     public async Task DiscoverHidesABlockedListedPluginAndMakesNoDetailRequestForIt()
     {
         using var fixture = new PluginPanelFixture();
@@ -1380,5 +1412,23 @@ public sealed partial class LauncherWindowViewModelTests
             Requests.Add(request.RequestUri!);
             return Task.FromResult(respond(request));
         }
+    }
+
+    [Fact]
+    public void AWidePluginsPanelPutsDiscoverBesideInstalledAndANarrowOneStacksThem()
+    {
+        using var core = new FakeLauncherOrchestrator();
+        using var vm = CreateInitialized(core);
+        var plugins = vm.Plugins;
+
+        plugins.SetPanelWidth(LauncherPluginsViewModel.SideBySideWidth);
+        Assert.True(plugins.IsSideBySide);
+        Assert.Equal((0, 0, 1), (plugins.DiscoverRow, plugins.DiscoverColumn, plugins.DiscoverColumnSpan));
+        Assert.Equal((0, 1, 1), (plugins.InstalledRow, plugins.InstalledColumn, plugins.InstalledColumnSpan));
+
+        plugins.SetPanelWidth(LauncherPluginsViewModel.SideBySideWidth - 1);
+        Assert.False(plugins.IsSideBySide);
+        Assert.Equal((0, 0, 2), (plugins.InstalledRow, plugins.InstalledColumn, plugins.InstalledColumnSpan));
+        Assert.Equal((1, 0, 2), (plugins.DiscoverRow, plugins.DiscoverColumn, plugins.DiscoverColumnSpan));
     }
 }
