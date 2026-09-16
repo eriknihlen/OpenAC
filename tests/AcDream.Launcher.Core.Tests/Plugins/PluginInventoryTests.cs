@@ -62,12 +62,12 @@ public sealed class PluginInventoryTests : IDisposable
         Assert.Equal(InstalledPluginSource.Managed, managed.Source);
         Assert.Equal("shaneedwards/openac-plugin-hello", managed.Repo);
         Assert.Equal(PluginInstallSource.Listed, managed.ListedSource);
-        InstalledPluginInfo manual = Assert.Single(
+        InstalledPluginInfo direct = Assert.Single(
             plugins,
             info => info.Id == "someone.manual");
-        Assert.Equal(InstalledPluginSource.Manual, manual.Source);
-        Assert.Null(manual.Repo);
-        Assert.Null(manual.ListedSource);
+        Assert.Equal(InstalledPluginSource.Direct, direct.Source);
+        Assert.Null(direct.Repo);
+        Assert.Null(direct.ListedSource);
     }
 
     [Fact]
@@ -106,6 +106,121 @@ public sealed class PluginInventoryTests : IDisposable
         InstalledPluginInfo info = Assert.Single(plugins);
         Assert.Equal(InstalledPluginSource.Managed, info.Source);
         Assert.True(info.Conflict);
+    }
+
+    [Fact]
+    public void ARecordWhoseOwnFolderManifestIdDiffersFallsThroughToTheDirectScan()
+    {
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "edwards.hello"),
+            "edwards.other",
+            "0.1.0");
+        InstalledPluginRecordStore recordStore = MakeRecordStore();
+        recordStore.Records.Add(new InstalledPluginRecord(
+            "edwards.hello",
+            "shaneedwards/openac-plugin-hello",
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            null));
+        var inventory = new PluginInventory(_paths, recordStore);
+
+        InstalledPluginInfo info = Assert.Single(
+            inventory.Build(clientResolution: null, catalog: null));
+
+        Assert.Equal("edwards.other", info.Id);
+        Assert.Equal(InstalledPluginSource.Direct, info.Source);
+    }
+
+    [Fact]
+    public void AManagedPluginAndAStrayFolderSharingItsIdAreBothFlaggedRegardlessOfSortOrder()
+    {
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "edwards.hello"),
+            "edwards.hello",
+            "0.1.0");
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "aaa-stray"),
+            "edwards.hello",
+            "0.1.0");
+        InstalledPluginRecordStore recordStore = MakeRecordStore();
+        recordStore.Records.Add(new InstalledPluginRecord(
+            "edwards.hello",
+            "shaneedwards/openac-plugin-hello",
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            null));
+        var inventory = new PluginInventory(_paths, recordStore);
+
+        IReadOnlyList<InstalledPluginInfo> plugins = inventory.Build(
+            clientResolution: null,
+            catalog: null);
+
+        InstalledPluginInfo managed = Assert.Single(
+            plugins, info => info.Source == InstalledPluginSource.Managed);
+        Assert.True(managed.HasDuplicate);
+        Assert.Null(managed.Refusal);
+        InstalledPluginInfo stray = Assert.Single(
+            plugins, info => info.Source == InstalledPluginSource.Direct);
+        Assert.Equal("Another copy of this plugin is installed.", stray.Refusal);
+    }
+
+    [Fact]
+    public void TwoDirectFoldersSharingAnIdAreBothRefused()
+    {
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "aaa-copy"),
+            "edwards.hello",
+            "0.1.0");
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "zzz-copy"),
+            "edwards.hello",
+            "0.1.0");
+        var inventory = new PluginInventory(_paths, MakeRecordStore());
+
+        IReadOnlyList<InstalledPluginInfo> plugins = inventory.Build(
+            clientResolution: null,
+            catalog: null);
+
+        Assert.Equal(2, plugins.Count);
+        Assert.All(plugins, info =>
+        {
+            Assert.Equal(InstalledPluginSource.Direct, info.Source);
+            Assert.Equal("Another copy of this plugin is installed.", info.Refusal);
+        });
+    }
+
+    [Fact]
+    public void ADirectFolderSharingAnIdWithABundledPluginIsRefused()
+    {
+        string clientDirectory = Path.Combine(_root, "client");
+        WriteManifest(
+            Path.Combine(_paths.PluginsDirectory, "edwards.hello"),
+            "edwards.hello",
+            "0.1.0");
+        WriteManifest(
+            Path.Combine(clientDirectory, "plugins", "edwards.hello"),
+            "edwards.hello",
+            "0.1.0");
+        var inventory = new PluginInventory(_paths, MakeRecordStore());
+        var clientResolution = new ClientVersionResolution(
+            ClientVersionState.Verified,
+            "ok",
+            LauncherVersion.Parse("0.1.7"),
+            clientDirectory,
+            null,
+            null);
+
+        InstalledPluginInfo info = Assert.Single(
+            inventory.Build(clientResolution, catalog: null));
+
+        Assert.Equal(InstalledPluginSource.Direct, info.Source);
+        Assert.Equal("Another copy of this plugin is installed.", info.Refusal);
     }
 
     [Fact]
@@ -187,6 +302,7 @@ public sealed class PluginInventoryTests : IDisposable
         File.WriteAllText(
             Path.Combine(directory, "plugin.json"),
             ManifestJson(id, version, minHostVersion: "0.1.0", hosts: ["headless"]));
+        File.WriteAllBytes(Path.Combine(directory, $"{id}.dll"), []);
     }
 
     private static string ManifestJson(

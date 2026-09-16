@@ -20,8 +20,8 @@ public sealed class PluginInstaller
 
     /// <summary>The install-time caps from the plan's shared contract (Release contract, "Caps").
     /// The one place they're set, so the zip download cap and the extraction limits it feeds can't
-    /// drift apart.</summary>
-    private static class ContractLimits
+    /// drift apart; <see cref="DirectInstallCheck"/> reuses the same extraction limits.</summary>
+    internal static class ContractLimits
     {
         public const long MaximumZipBytes = 64L * 1024 * 1024;
 
@@ -301,6 +301,55 @@ public sealed class PluginInstaller
         }
     }
 
+    /// <summary>Removes a Direct install by its folder rather than its manifest id, which
+    /// <see cref="LauncherPluginManifest.Parse"/> never validates and so could name anything
+    /// (L-318). Never touches a launcher-managed or bundled plugin.</summary>
+    public void RemoveDirect(string directory, bool deleteStorage)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+        {
+            throw new LauncherUpdateException(SessionLeaseRefusal);
+        }
+
+        using (lease)
+        {
+            InstalledPluginInfo row = _inventory.Build(clientResolution: null, catalog: null)
+                .FirstOrDefault(info => LauncherPathIdentity.Equals(info.Directory, directory))
+                ?? throw new LauncherUpdateException("That plugin is no longer installed.");
+
+            if (row.Source != InstalledPluginSource.Direct)
+            {
+                throw new LauncherUpdateException(
+                    "Only a directly installed plugin can be removed this way.");
+            }
+
+            string? parent = Path.GetDirectoryName(row.Directory);
+            if (parent is null || !LauncherPathIdentity.Equals(parent, _paths.PluginsDirectory))
+            {
+                throw new LauncherUpdateException("That plugin is not under the plugins folder.");
+            }
+
+            string folderName = Path.GetFileName(row.Directory);
+            if (folderName.StartsWith('.'))
+            {
+                throw new LauncherUpdateException("That folder is not a plugin install.");
+            }
+
+            string trashDirectory = CreateTrashPath(folderName);
+            Directory.Move(row.Directory, trashDirectory);
+            SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+
+            if (deleteStorage && LauncherPluginManifest.HasValidInstallId(row.Id))
+            {
+                SafeZipExtractor.TryDeleteDirectory(
+                    Path.Combine(_paths.ConfigDirectory, "plugins", row.Id));
+            }
+        }
+    }
+
     /// <summary>The launch-time Recovery pipeline: reclaims staging/downloads, restores or discards
     /// <c>.trash</c>, and reconciles every <c>pending</c> record. Skips this launch (does nothing) if
     /// the exclusive lease is already held.</summary>
@@ -340,7 +389,9 @@ public sealed class PluginInstaller
                 {
                     string id = IdFromTrashPath(trashDirectory);
                     string original = Path.Combine(_paths.PluginsDirectory, id);
-                    if (!Directory.Exists(original))
+                    // Record-less trash is a Direct removal, never a managed one; resurrecting it
+                    // would undo a removal that already succeeded (L-318).
+                    if (!Directory.Exists(original) && _recordStore.Find(id) is not null)
                     {
                         Directory.Move(trashDirectory, original);
                     }
@@ -561,7 +612,7 @@ public sealed class PluginInstaller
     private static string DescribeSource(InstalledPluginSource source) => source switch
     {
         InstalledPluginSource.Managed => "launcher-installed",
-        InstalledPluginSource.Manual => "manually installed",
+        InstalledPluginSource.Direct => "directly installed",
         InstalledPluginSource.Bundled => "client-bundled",
         _ => source.ToString(),
     };

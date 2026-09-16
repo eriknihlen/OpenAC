@@ -333,7 +333,7 @@ public sealed class PluginInstallerTests
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
             fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
 
-        Assert.Contains("manually installed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("directly installed", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -399,7 +399,7 @@ public sealed class PluginInstallerTests
         LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
             fixture.Installer.InstallOrUpdateAsync(Repo, null, null));
 
-        Assert.Contains("manually installed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("directly installed", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -545,6 +545,16 @@ public sealed class PluginInstallerTests
     public void RecoveryRestoresTrashWhenFolderMissing()
     {
         using var fixture = new Fixture();
+        fixture.RecordStore.Records.Add(new InstalledPluginRecord(
+            Id,
+            Repo,
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            null));
+        fixture.RecordStore.Save();
         string trashDirectory = Path.Combine(fixture.Paths.PluginsDirectory, ".trash", $"{Id}-abc123");
         Directory.CreateDirectory(trashDirectory);
         File.WriteAllText(Path.Combine(trashDirectory, "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
@@ -554,6 +564,20 @@ public sealed class PluginInstallerTests
         string restored = Path.Combine(fixture.Paths.PluginsDirectory, Id);
         Assert.True(Directory.Exists(restored));
         Assert.True(File.Exists(Path.Combine(restored, "plugin.json")));
+        Assert.False(Directory.Exists(trashDirectory));
+    }
+
+    [Fact]
+    public void RecoveryDiscardsRecordLessTrashInsteadOfRestoringIt()
+    {
+        using var fixture = new Fixture();
+        string trashDirectory = Path.Combine(fixture.Paths.PluginsDirectory, ".trash", "someones-copy-abc123");
+        Directory.CreateDirectory(trashDirectory);
+        File.WriteAllText(Path.Combine(trashDirectory, "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+
+        fixture.Installer.Recover();
+
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, "someones-copy")));
         Assert.False(Directory.Exists(trashDirectory));
     }
 
@@ -614,6 +638,111 @@ public sealed class PluginInstallerTests
         using var fixture = new Fixture();
 
         Assert.Throws<LauncherUpdateException>(() => fixture.Installer.Remove(Id, deleteStorage: false));
+    }
+
+    [Fact]
+    public void RemoveDirectDeletesAPassingFolderWhoseNameDiffersFromItsId()
+    {
+        using var fixture = new Fixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, "someones-copy");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "plugin.json"),
+            Fixture.ManifestJson(Id, "0.1.0"));
+        File.WriteAllBytes(Path.Combine(directory, $"{Id}.dll"), []);
+        string storageDirectory = Path.Combine(fixture.Paths.ConfigDirectory, "plugins", Id);
+        Directory.CreateDirectory(storageDirectory);
+        File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
+
+        fixture.Installer.RemoveDirect(directory, deleteStorage: true);
+
+        Assert.False(Directory.Exists(directory));
+        Assert.False(Directory.Exists(storageDirectory));
+    }
+
+    [Fact]
+    public void RemoveDirectDeletesARefusedFolderToo()
+    {
+        using var fixture = new Fixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, "broken-copy");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "plugin.json"),
+            Fixture.ManifestJson(Id, "0.1.0"));
+        // No entry DLL: DirectInstallCheck refuses this folder, but removal must still work.
+
+        fixture.Installer.RemoveDirect(directory, deleteStorage: false);
+
+        Assert.False(Directory.Exists(directory));
+    }
+
+    [Fact]
+    public void RemoveDirectRefusesADirectoryWhoseParentIsNotThePluginsDirectory()
+    {
+        using var fixture = new Fixture();
+        string outsideDirectory = Path.Combine(fixture.Root, "elsewhere", "someones-copy");
+        Directory.CreateDirectory(outsideDirectory);
+        File.WriteAllText(
+            Path.Combine(outsideDirectory, "plugin.json"),
+            Fixture.ManifestJson(Id, "0.1.0"));
+
+        Assert.Throws<LauncherUpdateException>(
+            () => fixture.Installer.RemoveDirect(outsideDirectory, deleteStorage: false));
+        Assert.True(Directory.Exists(outsideDirectory));
+    }
+
+    [Fact]
+    public async Task RemoveDirectRefusesAManagedPluginsFolder()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, null, null);
+
+        Assert.Throws<LauncherUpdateException>(() => fixture.Installer.RemoveDirect(
+            Path.Combine(fixture.Paths.PluginsDirectory, Id), deleteStorage: false));
+    }
+
+    [Fact]
+    public void RemoveDirectDeletesNoStorageWhenTheIdIsNotPatternValid()
+    {
+        using var fixture = new Fixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, "someones-copy");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "plugin.json"),
+            Fixture.ManifestJson("not_a_valid_id", "0.1.0"));
+        string storageDirectory = Path.Combine(
+            fixture.Paths.ConfigDirectory, "plugins", "not_a_valid_id");
+        Directory.CreateDirectory(storageDirectory);
+        File.WriteAllText(Path.Combine(storageDirectory, "settings.json"), "{}");
+
+        fixture.Installer.RemoveDirect(directory, deleteStorage: true);
+
+        Assert.False(Directory.Exists(directory));
+        Assert.True(Directory.Exists(storageDirectory));
+    }
+
+    [Fact]
+    public void RemoveDirectTakesTheExclusiveLease()
+    {
+        using var fixture = new Fixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, "someones-copy");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "plugin.json"),
+            Fixture.ManifestJson(Id, "0.1.0"));
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        Assert.True(barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease));
+        using (lease)
+        {
+            LauncherUpdateException error = Assert.Throws<LauncherUpdateException>(
+                () => fixture.Installer.RemoveDirect(directory, deleteStorage: false));
+            Assert.Equal(PluginInstaller.SessionLeaseRefusal, error.Message);
+        }
+
+        Assert.True(Directory.Exists(directory));
     }
 
     private static async Task WaitForFileAsync(string path, Process process)

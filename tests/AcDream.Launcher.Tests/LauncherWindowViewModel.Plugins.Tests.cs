@@ -142,6 +142,60 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public void ARefusedDirectInstallIsNotOfferedButShowsAsATickedRefusedRowWhenAlreadyEnabled()
+    {
+        using var fixture = new PluginChecklistFixture();
+        string directory = Path.Combine(fixture.PluginsDirectory, "broken-plugin");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "plugin.json"),
+            """
+            {
+              "id": "edwards.broken",
+              "displayName": "edwards.broken",
+              "version": "0.1.0",
+              "entryDll": "edwards.broken.dll",
+              "apiVersion": 1,
+              "minHostVersion": "0.1.0",
+              "hosts": ["headless"]
+            }
+            """);
+        // No entry DLL on disk: this folder is refused, but was enabled before it broke.
+
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount",
+                    [
+                        new LauncherCharacterSnapshot(
+                            "Local ACE",
+                            "testaccount",
+                            "+Acdream",
+                            "0x5000000A",
+                            LaunchMode.Headless,
+                            ["edwards.broken"],
+                            [],
+                            HasRunningSession: false,
+                            SessionStatus: "Ready"),
+                    ],
+                    HasRunningActivity: false,
+                    ActivityStatus: "Ready"),
+                ]),
+            ],
+        };
+        using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
+        SelectCharacter(viewModel);
+
+        CharacterPluginChoiceViewModel choice = Assert.Single(viewModel.CharacterPluginChoices);
+        Assert.Equal("edwards.broken", choice.Id);
+        Assert.True(choice.IsChecked);
+        Assert.EndsWith("(refused)", choice.DisplayName, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EachCharactersChecklistIsFilteredByItsOwnLaunchMode()
     {
         using var fixture = new PluginChecklistFixture();
@@ -256,7 +310,7 @@ public sealed partial class LauncherWindowViewModelTests
 
         public PluginInventory Inventory { get; }
 
-        private string PluginsDirectory { get; }
+        public string PluginsDirectory { get; }
 
         public void WriteManifest(string id, IReadOnlyList<string> hosts)
         {
@@ -272,9 +326,11 @@ public sealed partial class LauncherWindowViewModelTests
                   "version": "0.1.0",
                   "entryDll": "{{id}}.dll",
                   "apiVersion": 1,
+                  "minHostVersion": "0.1.0",
                   "hosts": [{{hostsJson}}]
                 }
                 """);
+            File.WriteAllBytes(Path.Combine(directory, $"{id}.dll"), []);
         }
 
         public void Dispose()

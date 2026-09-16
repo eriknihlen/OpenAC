@@ -97,7 +97,9 @@ public sealed class PluginInstalledRowViewModel(
     bool updateCompatibilityIsWarning,
     string? updateWithheldReason,
     RelayCommand? updateCommand,
-    RelayCommand? removeCommand)
+    RelayCommand? removeCommand,
+    string? refusal,
+    bool hasDuplicate)
     : ObservableObject
 {
     public string Id { get; } = id;
@@ -115,6 +117,11 @@ public sealed class PluginInstalledRowViewModel(
     public string? BlockedText => IsBlocked ? $"Blocked: {Blocked}" : null;
     public bool Conflict { get; } = conflict;
     public bool CanRemove { get; } = canRemove;
+    public string? Refusal { get; } = refusal;
+    public bool IsRefused => !string.IsNullOrWhiteSpace(Refusal);
+    public string? RefusedText => IsRefused ? $"Refused: {Refusal}" : null;
+    public bool HasDuplicate { get; } = hasDuplicate;
+    public bool HasChips => IsRefused || HasDuplicate || IsBlocked;
     public bool UpdateAvailable { get; } = updateAvailable;
     public string? UpdateVersion { get; } = updateVersion;
     public bool HasUpdateChip => UpdateAvailable && !string.IsNullOrWhiteSpace(UpdateVersion);
@@ -155,7 +162,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
     private bool _isRateLimited;
     private string _addFromUrlText = string.Empty;
     private bool _isRemoveDialogOpen;
-    private string _removePluginId = string.Empty;
+    private InstalledPluginInfo? _removeTarget;
     private string _removeDisplayName = string.Empty;
     private bool _removeDeleteStorage;
 
@@ -460,9 +467,9 @@ public sealed class LauncherPluginsViewModel : ObservableObject
         _allInstalled.Clear();
         foreach (InstalledPluginInfo info in outcome.Installed)
         {
-            bool canRemove = info.Source == InstalledPluginSource.Managed;
+            bool canRemove = info.Source is InstalledPluginSource.Managed or InstalledPluginSource.Direct;
             outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
-            bool updateAvailable = canRemove && availability is not null;
+            bool updateAvailable = info.Source == InstalledPluginSource.Managed && availability is not null;
             RelayCommand? updateCommand = updateAvailable
                 ? new RelayCommand(() => OpenUpdateDialog(info), () => _canInteract() && !IsBusy)
                 : null;
@@ -486,7 +493,9 @@ public sealed class LauncherPluginsViewModel : ObservableObject
                 updateAvailable && availability!.CompatibilityIsWarning,
                 withheldReason,
                 updateCommand,
-                removeCommand));
+                removeCommand,
+                info.Refusal,
+                info.HasDuplicate));
         }
 
         _allDiscover.Clear();
@@ -816,7 +825,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
 
     private void OpenRemoveDialog(InstalledPluginInfo info)
     {
-        _removePluginId = info.Id;
+        _removeTarget = info;
         RemoveDisplayName = info.DisplayName;
         RemoveDeleteStorage = false;
         Error = null;
@@ -837,14 +846,21 @@ public sealed class LauncherPluginsViewModel : ObservableObject
 
     private void ConfirmRemove()
     {
-        if (_composition is null)
+        if (_composition is null || _removeTarget is not { } target)
         {
             return;
         }
 
         try
         {
-            _composition.Installer.Remove(_removePluginId, RemoveDeleteStorage);
+            if (target.Source == InstalledPluginSource.Direct)
+            {
+                _composition.Installer.RemoveDirect(target.Directory, RemoveDeleteStorage);
+            }
+            else
+            {
+                _composition.Installer.Remove(target.Id, RemoveDeleteStorage);
+            }
         }
         catch (Exception ex)
         {
@@ -856,7 +872,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
 
         IsRemoveDialogOpen = false;
         _ = CheckNowAsync();
-        StripFromEveryCharacter(_removePluginId);
+        StripFromEveryCharacter(target.Id);
     }
 
     /// <summary>The remove dialog's own profile write (L-312): every character still holding the
@@ -922,7 +938,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject
             InstalledPluginSource.Managed => listedSource == PluginInstallSource.Unlisted
                 ? "Unlisted"
                 : "Listed",
-            InstalledPluginSource.Manual => "Manual",
+            InstalledPluginSource.Direct => "Direct install",
             InstalledPluginSource.Bundled => "Bundled",
             _ => source.ToString(),
         };

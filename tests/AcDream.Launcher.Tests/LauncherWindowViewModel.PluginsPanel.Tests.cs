@@ -78,7 +78,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task UpdateAndRemoveAreOfferedOnlyForLauncherManagedPlugins()
+    public async Task UpdateIsOfferedOnlyForLauncherManagedPluginsButRemoveIsOfferedForDirectToo()
     {
         using var fixture = new PluginPanelFixture();
         fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
@@ -101,10 +101,12 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.True(managed.CanRemove);
         Assert.NotNull(managed.RemoveCommand);
 
-        PluginInstalledRowViewModel manual = Assert.Single(
+        PluginInstalledRowViewModel direct = Assert.Single(
             viewModel.Plugins.Installed, row => row.Id == "someone.manual");
-        Assert.False(manual.CanRemove);
-        Assert.Null(manual.RemoveCommand);
+        Assert.True(direct.CanRemove);
+        Assert.NotNull(direct.RemoveCommand);
+        Assert.False(direct.UpdateAvailable);
+        Assert.Null(direct.UpdateCommand);
     }
 
     [Fact]
@@ -444,8 +446,72 @@ public sealed partial class LauncherWindowViewModelTests
             "Unlisted",
             Assert.Single(viewModel.Plugins.Installed, row => row.Id == "someone.unlisted").SourceBadge);
         Assert.Equal(
-            "Manual",
+            "Direct install",
             Assert.Single(viewModel.Plugins.Installed, row => row.Id == "someone.manual").SourceBadge);
+    }
+
+    [Fact]
+    public async Task ARefusedDirectInstallShowsAChipWithItsReasonAndCanStillBeRemoved()
+    {
+        using var fixture = new PluginPanelFixture();
+        string directory = Path.Combine(fixture.Paths.PluginsDirectory, "broken-plugin");
+        Directory.CreateDirectory(directory);
+        File.WriteAllBytes(
+            Path.Combine(directory, "plugin.json"),
+            PluginPanelFixture.ManifestJson("edwards.broken", "0.1.0", "0.1.0", ["headless"]));
+        // No entry DLL on disk: the manifest declares one, but DirectInstallCheck finds it missing.
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel row = Assert.Single(
+            viewModel.Plugins.Installed, r => r.Id == "edwards.broken");
+        Assert.True(row.IsRefused);
+        Assert.True(row.HasChips);
+        Assert.StartsWith("Refused: ", row.RefusedText);
+        Assert.True(row.CanRemove);
+        Assert.NotNull(row.RemoveCommand);
+    }
+
+    [Fact]
+    public async Task ASecondCopyOfAnInstalledIdIsFlaggedOnBothCardsAndNotOffered()
+    {
+        using var fixture = new PluginPanelFixture();
+        fixture.WriteManifest("edwards.managed", "0.1.0", ["headless"]);
+        fixture.AddRecord("edwards.managed", "shaneedwards/openac-plugin-hello", "0.1.0");
+        string strayDirectory = Path.Combine(fixture.Paths.PluginsDirectory, "aaa-stray");
+        Directory.CreateDirectory(strayDirectory);
+        File.WriteAllBytes(
+            Path.Combine(strayDirectory, "plugin.json"),
+            PluginPanelFixture.ManifestJson("edwards.managed", "0.1.0", "0.1.0", ["headless"]));
+        File.WriteAllBytes(Path.Combine(strayDirectory, "edwards.managed.dll"), []);
+        var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
+            ? Ok(fixture.ListJson())
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+
+        PluginInstalledRowViewModel managed = Assert.Single(
+            viewModel.Plugins.Installed, r => r.SourceBadge != "Direct install");
+        Assert.True(managed.HasDuplicate);
+        Assert.True(managed.HasChips);
+
+        PluginInstalledRowViewModel stray = Assert.Single(
+            viewModel.Plugins.Installed, r => r.SourceBadge == "Direct install");
+        Assert.True(stray.IsRefused);
+        Assert.Equal("Another copy of this plugin is installed.", stray.Refusal);
     }
 
     [Fact]
@@ -1326,6 +1392,7 @@ public sealed partial class LauncherWindowViewModelTests
             File.WriteAllBytes(
                 Path.Combine(directory, "plugin.json"),
                 ManifestJson(id, version, "0.1.0", hosts));
+            File.WriteAllBytes(Path.Combine(directory, $"{id}.dll"), []);
         }
 
         public static byte[] ManifestJson(

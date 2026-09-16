@@ -108,6 +108,7 @@ public sealed partial class LauncherWindowViewModel
         var configured = new HashSet<string>(character.Plugins, StringComparer.OrdinalIgnoreCase);
         var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var wrongHostDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var refusedDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         LauncherPluginHostKind host = character.LaunchMode == LaunchMode.Headless
             ? LauncherPluginHostKind.Headless
             : LauncherPluginHostKind.Graphical;
@@ -125,6 +126,12 @@ public sealed partial class LauncherWindowViewModel
                 if (!hosts.Contains(host))
                 {
                     wrongHostDisplayNames[info.Id] = info.DisplayName;
+                    continue;
+                }
+
+                if (info.Refusal is not null || info.HasDuplicate)
+                {
+                    refusedDisplayNames[info.Id] = info.DisplayName;
                     continue;
                 }
 
@@ -150,7 +157,9 @@ public sealed partial class LauncherWindowViewModel
 
             string displayName = wrongHostDisplayNames.TryGetValue(id, out string? installedName)
                 ? $"{installedName} (not available for this mode)"
-                : $"{id} (missing)";
+                : refusedDisplayNames.TryGetValue(id, out string? refusedName)
+                    ? $"{refusedName} (refused)"
+                    : $"{id} (missing)";
             CharacterPluginChoices.Add(new CharacterPluginChoiceViewModel(
                 id, displayName, isChecked: true, isMissing: true));
         }

@@ -204,6 +204,12 @@
                           <TextBlock Text="{Binding UpdateChipText}" TextWrapping="Wrap" />
                         </Border>
                         <TextBlock Text="{Binding UpdateCompatibilityNote}" IsVisible="{Binding ShowUpdateCompatibilityNote}" Foreground="#DBB573" FontSize="12" TextWrapping="Wrap" />
+                        <Border Classes="chip blocked" IsVisible="{Binding IsRefused}" AutomationProperties.Name="{Binding RefusedText}">
+                          <TextBlock Text="{Binding RefusedText}" TextWrapping="Wrap" />
+                        </Border>
+                        <Border Classes="chip blocked" IsVisible="{Binding HasDuplicate}" AutomationProperties.Name="Duplicate">
+                          <TextBlock Text="Duplicate" TextWrapping="Wrap" />
+                        </Border>
                         <Border Classes="chip blocked" IsVisible="{Binding IsBlocked}" AutomationProperties.Name="{Binding BlockedText}">
                           <TextBlock Text="{Binding BlockedText}" TextWrapping="Wrap" />
                         </Border>

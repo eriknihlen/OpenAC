@@ -358,6 +358,122 @@ public sealed class SessionConfigComposerTests
     }
 
     [Fact]
+    public void ARefusedDirectInstallIsExcludedWithAStatusLineAndNoCatalogOrCache()
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.broken", writeEntryDll: false);
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.broken"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-refused-direct");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Empty(session["plugins"]!.AsArray());
+        Assert.Equal(
+            ["Plugin 'edwards.broken' failed its install checks and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    [Fact]
+    public void ADuplicatedInstallIsExcludedWithAStatusLineAndNoCatalogOrCache()
+    {
+        using var plugins = new TempPluginRoot();
+        plugins.WriteFolder("edwards.hello", writeEntryDll: true);
+        plugins.AddRecord("edwards.hello");
+        plugins.WriteFolder("aaa-stray", writeEntryDll: true, id: "edwards.hello");
+        CharacterProfile character = Character(LaunchMode.Gui);
+        character.Plugins = ["edwards.hello"];
+
+        ComposedSessionConfig composed = SessionConfigComposer.Compose(
+            Server(),
+            Account(),
+            character,
+            Install,
+            plugins.Paths,
+            sessionId: "session-duplicated-install");
+
+        JsonObject session = SingleSession(composed);
+        Assert.Empty(session["plugins"]!.AsArray());
+        Assert.Equal(
+            ["Plugin 'edwards.hello' has more than one copy installed and was not loaded."],
+            composed.PluginStatusLines);
+    }
+
+    /// <summary>A real <see cref="ApplicationPathSet"/> under a fresh temp directory, so a Direct
+    /// install's folder actually exists for <see cref="DirectInstallCheck"/> to walk, and no stray
+    /// <c>plugins.json</c> cache from another test can leak in.</summary>
+    private sealed class TempPluginRoot : IDisposable
+    {
+        private readonly string _root = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-session-config-plugins-tests",
+            Guid.NewGuid().ToString("N"));
+
+        public TempPluginRoot()
+        {
+            Paths = new ApplicationPathSet(
+                Path.Combine(_root, "config"),
+                Path.Combine(_root, "data"),
+                Path.Combine(_root, "cache"),
+                LegacyConfigDirectory: null);
+        }
+
+        public ApplicationPathSet Paths { get; }
+
+        public void WriteFolder(string folderName, bool writeEntryDll, string? id = null)
+        {
+            string directory = Path.Combine(Paths.PluginsDirectory, folderName);
+            Directory.CreateDirectory(directory);
+            string pluginId = id ?? folderName;
+            File.WriteAllText(Path.Combine(directory, "plugin.json"), $$"""
+                {
+                  "id": "{{pluginId}}",
+                  "displayName": "{{pluginId}}",
+                  "version": "0.1.0",
+                  "entryDll": "{{pluginId}}.dll",
+                  "apiVersion": 1,
+                  "minHostVersion": "0.1.0",
+                  "hosts": ["headless", "graphical"]
+                }
+                """);
+            if (writeEntryDll)
+            {
+                File.WriteAllBytes(Path.Combine(directory, $"{pluginId}.dll"), []);
+            }
+        }
+
+        public void AddRecord(string id)
+        {
+            InstalledPluginRecordStore store = InstalledPluginRecordStore.ForApplicationPaths(Paths);
+            store.Load();
+            store.Records.Add(new InstalledPluginRecord(
+                id,
+                "shaneedwards/openac-plugin-hello",
+                PluginInstallSource.Listed,
+                "0.1.0",
+                "v0.1.0",
+                new string('a', 64),
+                DateTimeOffset.UtcNow,
+                null));
+            store.Save();
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ProcessContentCarriesInstallRecordAndPathsIsOmittedByDefault()
     {
         ComposedSessionConfig composed = SessionConfigComposer.Compose(

@@ -7,7 +7,7 @@ namespace AcDream.Launcher.Core.Plugins;
 public enum InstalledPluginSource
 {
     Managed,
-    Manual,
+    Direct,
     Bundled,
 }
 
@@ -24,12 +24,15 @@ public sealed record InstalledPluginInfo(
     bool CompatibilityIsWarning,
     string? Blocked,
     bool Conflict,
-    PluginInstallSource? ListedSource);
+    PluginInstallSource? ListedSource,
+    string? Refusal = null,
+    bool HasDuplicate = false);
 
 /// <summary>Builds the Installed view and the character checklist by scanning
 /// <c>DataDirectory/plugins</c> and, when a client is installed, its bundled
 /// <c>&lt;client&gt;/plugins</c>, cross-referenced against <see cref="InstalledPluginRecordStore"/>
-/// (L-303, L-309).</summary>
+/// (L-303, L-309, L-318). A Direct row (an unzipped folder with no matching record) is checked
+/// against <see cref="DirectInstallCheck"/> every time the inventory is built.</summary>
 public sealed class PluginInventory
 {
     private readonly ApplicationPathSet _paths;
@@ -52,26 +55,62 @@ public sealed class PluginInventory
 
         var results = new List<InstalledPluginInfo>();
         var placedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach ((string ownDirectory, LauncherPluginManifest manifest) in ScanManifests(
-                     _paths.PluginsDirectory))
+        var claimedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // A record's own folder is placed first and unconditionally, so a stray folder sharing its
+        // id can never take the managed row by sorting ahead of it (L-318).
+        foreach (InstalledPluginRecord record in _recordStore.Records)
         {
-            if (!placedIds.Add(manifest.Id))
+            string ownDirectory = Path.Combine(_paths.PluginsDirectory, record.Id);
+            string manifestPath = Path.Combine(ownDirectory, "plugin.json");
+            if (!File.Exists(manifestPath))
             {
                 continue;
             }
 
-            InstalledPluginRecord? record = _recordStore.Find(manifest.Id);
+            LauncherPluginManifest? manifest = TryParseManifest(manifestPath);
+            if (manifest is null
+                || !string.Equals(manifest.Id, record.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            claimedDirectories.Add(ownDirectory);
+            placedIds.Add(manifest.Id);
             results.Add(BuildInfo(
                 manifest,
                 ownDirectory,
-                record is null ? InstalledPluginSource.Manual : InstalledPluginSource.Managed,
-                record?.Repo,
-                record?.Source,
+                InstalledPluginSource.Managed,
+                record.Repo,
+                record.Source,
                 catalog,
-                clientVersion));
+                clientVersion,
+                refusal: null));
+        }
+
+        // Every other folder is a Direct install (today's Manual), checked every time it is read.
+        foreach ((string ownDirectory, LauncherPluginManifest manifest) in ScanManifests(
+                     _paths.PluginsDirectory))
+        {
+            if (claimedDirectories.Contains(ownDirectory))
+            {
+                continue;
+            }
+
+            placedIds.Add(manifest.Id);
+            results.Add(BuildInfo(
+                manifest,
+                ownDirectory,
+                InstalledPluginSource.Direct,
+                repo: null,
+                listedSource: null,
+                catalog,
+                clientVersion,
+                refusal: DirectInstallCheck.Refusal(ownDirectory, manifest)));
         }
 
         var bundledIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unrepresentedBundledIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (bundledDirectory is not null)
         {
             foreach ((string ownDirectory, LauncherPluginManifest manifest) in ScanManifests(
@@ -87,9 +126,26 @@ public sealed class PluginInventory
                         repo: null,
                         listedSource: null,
                         catalog,
-                        clientVersion));
+                        clientVersion,
+                        refusal: null));
+                }
+                else
+                {
+                    unrepresentedBundledIds[manifest.Id] =
+                        unrepresentedBundledIds.GetValueOrDefault(manifest.Id) + 1;
                 }
             }
+        }
+
+        var occurrencesById = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (InstalledPluginInfo info in results)
+        {
+            occurrencesById[info.Id] = occurrencesById.GetValueOrDefault(info.Id) + 1;
+        }
+
+        foreach ((string id, int extra) in unrepresentedBundledIds)
+        {
+            occurrencesById[id] = occurrencesById.GetValueOrDefault(id) + extra;
         }
 
         for (int index = 0; index < results.Count; index++)
@@ -97,8 +153,19 @@ public sealed class PluginInventory
             InstalledPluginInfo info = results[index];
             if (info.Source != InstalledPluginSource.Bundled && bundledIds.Contains(info.Id))
             {
-                results[index] = info with { Conflict = true };
+                info = info with { Conflict = true };
             }
+
+            // The client loads no copy of a duplicated id (L-318): every Direct copy is refused, and
+            // a surviving managed or bundled copy is flagged, because the collision is real either way.
+            if (occurrencesById.GetValueOrDefault(info.Id) > 1)
+            {
+                info = info.Source == InstalledPluginSource.Direct
+                    ? info with { Refusal = info.Refusal ?? "Another copy of this plugin is installed." }
+                    : info with { HasDuplicate = true };
+            }
+
+            results[index] = info;
         }
 
         return results;
@@ -163,7 +230,8 @@ public sealed class PluginInventory
         string? repo,
         PluginInstallSource? listedSource,
         PluginCatalog? catalog,
-        LauncherVersion? clientVersion)
+        LauncherVersion? clientVersion,
+        string? refusal)
     {
         string? blocked = LauncherVersion.TryParse(manifest.Version, out LauncherVersion? version)
             ? FindBlockReason(catalog, manifest.Id, version)
@@ -181,7 +249,9 @@ public sealed class PluginInventory
             compatibility.IsWarning,
             blocked,
             Conflict: false,
-            listedSource);
+            listedSource,
+            refusal,
+            HasDuplicate: false);
     }
 
     private static IEnumerable<(string Directory, LauncherPluginManifest Manifest)> ScanManifests(

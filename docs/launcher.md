@@ -47,10 +47,11 @@ The **Plugins** tab lists what is installed and what is available to install
 from the curated list. **Discover** shows plugins not yet installed, except
 any the curated list blocks; **Install** downloads and unzips one, but never
 runs it. **Installed** shows what is on disk, with a source badge (**Listed**
-or **Unlisted** for a launcher-managed plugin, **Manual** or **Bundled**
-otherwise) and **Update** and **Remove** for plugins the launcher itself
-installed. Removing a plugin also unticks it for every character that had it
-enabled, so reinstalling it always starts from none. **Refresh list** reloads
+or **Unlisted** for a launcher-managed plugin, **Direct install** or
+**Bundled** otherwise), **Update** for plugins the launcher itself installed,
+and **Remove** for those plus a Direct install. Removing a plugin also
+unticks it for every character that had it enabled, so reinstalling it always
+starts from none. **Refresh list** reloads
 both lists; the launcher also checks once at startup, without delaying the
 window. **Add from URL** adds a plugin from a `https://github.com/owner/name`
 repository not on the list. Right after a curated-list release publishes,
@@ -81,6 +82,22 @@ A blocked plugin (listed as unsafe by the curated list) shows a red
 "Blocked: <reason>" badge, cannot be installed or updated to, and is filtered
 out of every character's list at launch, with a status line saying so. A
 blocked plugin not yet installed does not appear in Discover at all.
+
+A plugin folder unzipped by hand into the plugins directory, with no matching
+install record, is a **Direct install**. It is checked against every install
+rule that does not need a GitHub release: no links or reparse points, regular
+files only, safe paths, the size and count limits, the allowed file types, the
+manifest, and the icon rules; Finder and Explorer metadata files
+(`.DS_Store`, `._*`, `Thumbs.db`, `desktop.ini`) are ignored rather than
+refused. A folder that fails shows a red "Refused: <reason>" badge, is never
+offered to a character, and is left out of every session's plugin list even
+if a character had it enabled before it broke. A second copy of an already
+installed id, in any plugin folder, is flagged "Duplicate" on every copy and
+loaded by neither, because the client itself refuses to load a duplicated id.
+Passing or refused, a Direct install can be removed like any other. This
+checking is advisory, not a security boundary: anyone who can write the
+plugins folder can change a plugin's files after it passes, and a
+launcher-managed plugin is never re-checked once installed.
 
 `--plugin-list-uri <https-uri>` overrides the curated list for testing, the
 same way `--update-manifest-uri` overrides the update feed.

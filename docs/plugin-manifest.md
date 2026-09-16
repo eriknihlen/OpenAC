@@ -41,8 +41,10 @@ loads no copy.
 ## Publishing for the launcher
 
 The launcher installs plugins from GitHub releases (`shaneedwards/openac-plugins` lists them for
-now). A plugin author who wants a plugin installable through the launcher follows a stricter
-contract than the fields above:
+now). The same stricter contract applies to a plugin folder unzipped by hand into the plugins
+directory: the launcher checks it the same way, since `minHostVersion` and `hosts` are required for
+any plugin the launcher runs, not only one it downloaded itself. A plugin author who wants a plugin
+installable through the launcher follows a stricter contract than the fields above:
 
 | Field | Launcher install |
 |---|---|
@@ -74,7 +76,11 @@ subfolder is untouched by this rule.
 rejected.
 
 **Caps:** zip at most 64 MiB. Extraction: 2,000 entries, 64 MiB per entry, 256 MiB total,
-compression ratio 200.
+compression ratio 200. A hand-installed folder is limited the same way, counting files rather than
+zip entries.
+
+**Ignored, not refused:** `.DS_Store`, `._*`, `Thumbs.db` and `desktop.ini`, in any case, at any
+depth, on a hand-installed folder.
 
 **Recommended:** enable immutable releases on the repository.
 

@@ -261,7 +261,9 @@ public static class SessionConfigComposer
         Write(ComposeProbe(server, account, install, paths, sessionId));
 
     /// <summary>Blank means none, and always sends an explicit list, so a downloaded plugin never
-    /// loads until a character opts in (L-300, L-302).</summary>
+    /// loads until a character opts in (L-300, L-302). Also enforces the Direct install checks
+    /// (L-318): the client applies none of its own, so this is the only place a refused or
+    /// duplicated id is kept out of a session.</summary>
     private static (List<string> Allowed, IReadOnlyList<string> StatusLines) ComposePluginAllowList(
         IReadOnlyList<string> configured,
         PluginCatalog? catalog,
@@ -276,13 +278,51 @@ public static class SessionConfigComposer
             return ([], []);                                // explicit: load none
         }
 
+        var statusLines = new List<string>();
+        var recordStore = InstalledPluginRecordStore.ForApplicationPaths(paths);
+        try
+        {
+            recordStore.Load();
+        }
+        catch (LauncherUpdateException)
+        {
+            // A corrupted record store only costs this pass its memory of managed plugins; every
+            // folder is still checked as a Direct install rather than blocking the session.
+        }
+
+        var inventory = new PluginInventory(paths, recordStore);
+        Dictionary<string, InstalledPluginInfo> inventoryById = inventory
+            .Build(clientResolution: null, catalog: null)
+            .GroupBy(info => info.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var checkedIds = new List<string>(configured.Count);
+        foreach (string id in configured)
+        {
+            if (inventoryById.TryGetValue(id, out InstalledPluginInfo? info))
+            {
+                if (info.Refusal is not null)
+                {
+                    statusLines.Add($"Plugin '{id}' failed its install checks and was not loaded.");
+                    continue;
+                }
+
+                if (info.HasDuplicate)
+                {
+                    statusLines.Add($"Plugin '{id}' has more than one copy installed and was not loaded.");
+                    continue;
+                }
+            }
+
+            checkedIds.Add(id);
+        }
+
         PluginCatalog? effective = catalog ?? TryLoadCachedCatalog(paths);
         if (effective is null)
-            return ([.. configured], []);
+            return (checkedIds, statusLines);
 
-        var allowed = new List<string>(configured.Count);
-        var statusLines = new List<string>();
-        foreach (string id in configured)
+        var allowed = new List<string>(checkedIds.Count);
+        foreach (string id in checkedIds)
         {
             if (effective.IsBlocked(id, version: null))
             {

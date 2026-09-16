@@ -180,6 +180,10 @@ public sealed record LauncherPluginManifest(
         }
     }
 
+    /// <summary>Whether <paramref name="id"/> matches the namespaced pattern <see cref="ValidateForInstall"/>
+    /// requires, reused wherever an id is trusted enough to name a storage path (L-318).</summary>
+    public static bool HasValidInstallId(string id) => IdPattern.IsMatch(id);
+
     /// <summary>Whether a release tag names this manifest's own version, so "latest" can't drift
     /// between the manifest fetch and the asset downloads that follow it.</summary>
     public bool MatchesTag(string tag) =>
