@@ -99,7 +99,9 @@ and it clears one busy reference through `IRecoveryAutomation`
 seconds while it stays stuck, what `/ub clearbusy` does by hand. An
 attack request the server never answered (a swing cut off by an
 interrupt just as it went out) is aborted the same way after ten
-seconds. The vitals and buff behaviours themselves wait at most eight
+seconds, and if the abort itself goes unanswered the stance is dropped
+to peace ten seconds later - the one thing that resets the client's
+attack state; combat takes the stance up again for its next target. The vitals and buff behaviours themselves wait at most eight
 seconds on a pending action before giving the tick back, so nothing
 else starves meanwhile; and any behaviour that holds control for a
 minute is named in the log, with whether an action or a cast is pending.

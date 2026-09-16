@@ -240,12 +240,14 @@ public sealed class BotEngine
     public const double BusyStuckSeconds = 10d;
     private double _busySince = double.NaN;
     private double _lastBusyClearAt = double.NegativeInfinity;
+    private bool _attackAborted;
 
     private void WatchBusy(in Blackboard board)
     {
         if (!board.IsActionPending)
         {
             _busySince = double.NaN;
+            _attackAborted = false;
             return;
         }
         if (double.IsNaN(_busySince))
@@ -263,8 +265,21 @@ public sealed class BotEngine
         // key would do; the busy count is the other thing to clear.
         if (board.Combat.RequestInProgress || board.Combat.ServerResponsePending)
         {
-            PluginCombatCommandResult abort = _surface.Combat.AbortPhysicalAttack();
-            _log.Warn($"engine: an attack has been pending for {board.Now - _busySince:0}s with nothing to wait for; aborted it ({abort.Status})");
+            if (!_attackAborted)
+            {
+                _attackAborted = true;
+                PluginCombatCommandResult abort = _surface.Combat.AbortPhysicalAttack();
+                _log.Warn($"engine: an attack has been pending for {board.Now - _busySince:0}s with nothing to wait for; aborted it ({abort.Status})");
+            }
+            else if (board.Combat.Mode != PluginCombatMode.Peace)
+            {
+                // The abort is a cancel the server has to answer, and this
+                // one it will not. Only leaving the stance resets the
+                // client's attack state; combat takes the stance up again
+                // for its next target.
+                PluginCombatCommandResult peace = _surface.Combat.EnterMode(PluginCombatMode.Peace);
+                _log.Warn($"engine: the attack is still pending after the abort; dropping to peace to reset it ({peace.Status})");
+            }
         }
         if (board.IsCasting)
         {

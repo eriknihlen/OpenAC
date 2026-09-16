@@ -161,6 +161,13 @@ public sealed class EngineIntegrationTests
         for (int tick = 0; tick < 6; tick++)
             engine.Tick(1d);
         Assert.Contains("abort", surface.Commands);
+
+        // The fake's abort clears the pending flag, as a server that answers
+        // would. One that does not: the stance is dropped to reset it.
+        surface.CombatSnapshot = surface.CombatSnapshot with { ServerResponsePending = true, Mode = PluginCombatMode.Melee };
+        for (int tick = 0; tick < 11; tick++)
+            engine.Tick(1d);
+        Assert.Contains("mode:Peace", surface.Commands);
     }
 
     [Fact]
