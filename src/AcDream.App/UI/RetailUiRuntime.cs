@@ -389,6 +389,7 @@ public sealed class RetailUiRuntime : IDisposable
     private Layout.CharacterTitlesController? _characterTitlesController;
     private ResourceShutdownTransaction? _shutdown;
     private bool _disposed;
+    private int _requestedUiScalePercent = 100;
 
     internal bool IsDisposalComplete => _disposed;
 
@@ -401,7 +402,10 @@ public sealed class RetailUiRuntime : IDisposable
             bindings.Host.HideWindow);
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
-        bindings.Host.Root.GameplayUiScale = Math.Clamp(chatSettings.UiScalePercent, 50, 300) / 100f;
+        _requestedUiScalePercent = Math.Clamp(chatSettings.UiScalePercent, 50, 300);
+        bindings.Host.Root.GameplayUiScale = (bindings.IsGameplayDisplay?.Invoke() ?? true)
+            ? _requestedUiScalePercent / 100f
+            : 1f;
         WindowLockPresentation = new RetailWindowLockPresentationController(
             bindings.Host.Root.WindowManager);
         WindowOpacity = new RetailWindowOpacityController(
@@ -687,7 +691,7 @@ public sealed class RetailUiRuntime : IDisposable
     public void Tick(double deltaSeconds)
     {
         _bindings.SynchronizeDisplayPhase?.Invoke();
-        _persistence?.SetGameplayActive(_bindings.IsGameplayDisplay?.Invoke() ?? true);
+        SyncGameplayUiScale();
         Layout.UiMediaClock.Advance(deltaSeconds);
         FpsController?.Tick();
         _vividTargetIndicator?.Tick();
@@ -731,6 +735,7 @@ public sealed class RetailUiRuntime : IDisposable
 
     public void Draw(System.Numerics.Vector2 screenSize)
     {
+        SyncGameplayUiScale();
         if (screenSize != _lastScreenSize)
         {
             Host.Root.SetScreenSize(screenSize);
@@ -1637,8 +1642,20 @@ public sealed class RetailUiRuntime : IDisposable
 
     private void ApplyUiScale(int percent)
     {
-        Host.Root.GameplayUiScale = Math.Clamp(percent, 50, 300) / 100f;
-        _persistence?.ReflowToScreen();
+        _requestedUiScalePercent = Math.Clamp(percent, 50, 300);
+        SyncGameplayUiScale();
+    }
+
+    private void SyncGameplayUiScale()
+    {
+        bool gameplay = _bindings.IsGameplayDisplay?.Invoke() ?? true;
+        _persistence?.SetGameplayActive(gameplay);
+        float desired = gameplay ? _requestedUiScalePercent / 100f : 1f;
+        if (Host.Root.GameplayUiScale == desired)
+            return;
+        Host.Root.GameplayUiScale = desired;
+        if (gameplay)
+            _persistence?.ReflowToScreen();
     }
 
     private void MountToolbar()

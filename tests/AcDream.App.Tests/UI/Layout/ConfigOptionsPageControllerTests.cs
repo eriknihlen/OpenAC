@@ -978,16 +978,55 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
-    public void UiScaleSlider_SnapsToTenPercent_AndAppliesLive()
+    public void UiScaleSlider_SnapsToTenPercent_ButAppliesOnlyOnApply()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
         var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[39]);
 
         row.SetCurrentValue(154f);
 
-        Assert.Equal(150, bindings.Chat.UiScalePercent);
-        Assert.Equal(150, bindings.UiScaleApplies[^1]);
+        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Empty(bindings.UiScaleApplies);
         Assert.Equal(150f, row.Current);
+        Assert.True(controller.ConfigPage.Changed);
+
+        controller.ConfigPage.Apply();
+
+        Assert.Equal(150, bindings.Chat.UiScalePercent);
+        Assert.Equal([150], bindings.UiScaleApplies);
+        Assert.False(controller.ConfigPage.Changed);
+    }
+
+    [Fact]
+    public void UiScaleSlider_ResetAndDefaults_DoNotResizeUntilApply()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[39]);
+
+        row.SetCurrentValue(230f);
+        controller.ConfigPage.Reset();
+        Assert.Equal(100f, row.Current);
+        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Empty(bindings.UiScaleApplies);
+
+        row.SetCurrentValue(180f);
+        controller.ConfigPage.OnHidden();
+        Assert.Equal(100f, row.Current);
+        Assert.Empty(bindings.UiScaleApplies);
+
+        row.SetCurrentValue(180f);
+        controller.ConfigPage.Apply();
+        Assert.Equal(180, bindings.Chat.UiScalePercent);
+        bindings.UiScaleApplies.Clear();
+
+        controller.ConfigPage.Defaults();
+        Assert.Equal(100f, row.Current);
+        Assert.Equal(180, bindings.Chat.UiScalePercent);
+        Assert.Empty(bindings.UiScaleApplies);
+
+        controller.ConfigPage.Apply();
+        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Equal([100], bindings.UiScaleApplies);
     }
 
     [Fact]

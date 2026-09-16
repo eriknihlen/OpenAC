@@ -1328,6 +1328,14 @@ public static class ConfigOptionsPageController
             storeOnly: false,
             resolveSprite, datFont, debugFont);
 
+        int currentScalePercent = bindings.LoadChat().UiScalePercent;
+        page.BeforeApply += () =>
+        {
+            if (currentScalePercent == bindings.LoadChat().UiScalePercent)
+                return;
+            bindings.SaveChat(bindings.LoadChat() with { UiScalePercent = currentScalePercent });
+            bindings.ApplyUiScale?.Invoke(currentScalePercent);
+        };
         BuildExplicitNumericSliderRow(
             listBox,
             "UI Scale",
@@ -1337,19 +1345,17 @@ public static class ConfigOptionsPageController
             integer: true,
             defaultValue: 100,
             page,
-            read: () => bindings.LoadChat().UiScalePercent,
+            read: () => currentScalePercent = bindings.LoadChat().UiScalePercent,
             apply: value =>
             {
-                int percent = (int)value;
-                bindings.SaveChat(bindings.LoadChat() with { UiScalePercent = percent });
-                bindings.ApplyUiScale?.Invoke(percent);
+                currentScalePercent = (int)value;
                 return true;
             },
             isCurrent: () => true,
-            tooltip: "Scale gameplay frames, text, and controls together.",
+            tooltip: "Scale gameplay frames, text, and controls together after Apply.",
             rangeLowText: "50%",
             rangeHighText: "300%",
-            dynamicLabel: () => $"UI Scale ({bindings.LoadChat().UiScalePercent}%)");
+            dynamicLabel: () => $"UI Scale ({currentScalePercent}%)");
 
         chat = bindings.LoadChat();
     }
