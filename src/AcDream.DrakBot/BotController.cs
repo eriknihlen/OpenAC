@@ -286,18 +286,32 @@ public sealed class BotController : IMetaBot
     /// </summary>
     public bool TryDumpDungeon(out string message)
     {
-        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out string problem);
-        if (graph is null)
-        {
-            message = problem;
+        if (!TryBuildDungeonJson(out string json, out uint landblock, out int cells, out int hazardCount, out int closed, out message))
             return false;
-        }
-        uint landblock = snapshot.Position.CellId & 0xFFFF0000u;
+        string path = Files.WriteDungeonDump($"{landblock >> 16:X4}", json);
+        message = $"dungeon {landblock >> 16:X4}: {cells} cells, {hazardCount} hazards, {closed} closed crossings -> {path}";
+        return true;
+    }
+
+    /// <summary>The dungeon document without the file: what the remote serves at /dungeon.</summary>
+    public bool TryBuildDungeonJson(out string json, out uint landblock, out int cells, out int hazardCount, out int closed, out string problem)
+    {
+        json = string.Empty;
+        landblock = 0u;
+        cells = hazardCount = closed = 0;
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraphCore(out PluginNavigationSnapshot snapshot, out problem);
+        if (graph is null)
+            return false;
+        landblock = snapshot.Position.CellId & 0xFFFF0000u;
         IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
         HashSet<ulong> blocked = BlockedEdges(graph, snapshot.Position.CellId);
+        cells = graph.Count;
+        hazardCount = hazards.Count;
+        closed = blocked.Count;
         var dump = new
         {
             landblock = $"{landblock >> 16:X4}",
+            generated = DateTime.UtcNow.ToString("O"),
             at = new { cell = snapshot.Position.CellId, ew = snapshot.Position.EastWest, ns = snapshot.Position.NorthSouth, z = snapshot.Position.Elevation },
             hazards = hazards.OrderBy(h => h).ToArray(),
             givenUp = Hazards.GivenUpFor(snapshot.Position.CellId).OrderBy(k => k, StringComparer.Ordinal).ToArray(),
@@ -314,10 +328,15 @@ public sealed class BotController : IMetaBot
             patrol = Navigation.Route is { } route
                 ? route.Waypoints.Select(w => new { kind = w.Kind.ToString(), ew = w.EastWest, ns = w.NorthSouth, z = w.Elevation }).ToArray()
                 : [],
+            patrolStep = Navigation.WaypointIndex,
+            stalls = Navigation.Stalls.Worst(landblock, 50).Select(s => new
+            {
+                cell = s.CellId, ew = s.EastWest, ns = s.NorthSouth, z = s.Elevation,
+                count = s.Count, seconds = Math.Round(s.Seconds), longest = Math.Round(s.LongestSeconds),
+                step = s.Step, heading = s.Heading, freedBy = s.FreedBy, last = s.LastAt,
+            }).ToArray(),
         };
-        string json = System.Text.Json.JsonSerializer.Serialize(dump, BotProfile.JsonOptions);
-        string path = Files.WriteDungeonDump($"{landblock >> 16:X4}", json);
-        message = $"dungeon {landblock >> 16:X4}: {graph.Count} cells, {hazards.Count} hazards, {blocked.Count} closed crossings -> {path}";
+        json = System.Text.Json.JsonSerializer.Serialize(dump, BotProfile.JsonOptions);
         return true;
     }
 

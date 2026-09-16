@@ -27,6 +27,9 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
 
     /// <summary>How often the pack and the settings are re-read.</summary>
     public const double DocumentIntervalSeconds = 1d;
+    /// <summary>How often the dungeon document is rebuilt: the graph does not change, the patrol step and the stalls do.</summary>
+    public const double DungeonIntervalSeconds = 10d;
+    private double _dungeonBuiltAt = double.NegativeInfinity;
 
     /// <summary>Icons rendered in one tick at most.</summary>
     public const int IconsPerTick = 8;
@@ -215,6 +218,14 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
                     _lastSettingsJson = settingsText;
                     server.PublishSettings(settings);
                 }
+            }
+            if (now - _dungeonBuiltAt >= DungeonIntervalSeconds)
+            {
+                _dungeonBuiltAt = now;
+                if (_bot.Controller.TryBuildDungeonJson(out string dungeon, out uint landblock, out _, out _, out _, out _))
+                    server.PublishDungeon($"{landblock >> 16:X4}", System.Text.Encoding.UTF8.GetBytes(dungeon));
+                else
+                    server.PublishDungeon(string.Empty, null);
             }
         }
         catch (Exception error) when (error is not OutOfMemoryException)

@@ -23,7 +23,8 @@ public sealed record RemoteCapabilities(
     bool VideoHd = false,
     bool Click = false,
     bool Runs = false,
-    bool Maps = false)
+    bool Maps = false,
+    bool Dungeon = true)
 {
     public static RemoteCapabilities For(RemoteHostServices services)
     {
@@ -51,6 +52,9 @@ public sealed record RemoteCapabilities(
         json.WriteBoolean("click", Click);
         json.WriteBoolean("runs", Runs);
         json.WriteBoolean("maps", Maps);
+        // /dungeon: the dungeon as the bot sees it - cells, doorways, hazards,
+        // closed crossings, the patrol, the stall ledger - for drawing over a map.
+        json.WriteBoolean("dungeon", Dungeon);
         json.WriteEndObject();
     }
 }

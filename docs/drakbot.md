@@ -867,6 +867,16 @@ screens carry over:
   the whole profile still parses.
 - `GET /icon?did=N` - an item's icon as a PNG, rendered by the graphical
   client from its data files on the tick; a headless host has none.
+- `GET /dungeon` (`?lb=6145` to insist on a landblock) - the dungeon the
+  character is in, as the bot sees it: every cell with its position,
+  neighbours and doorways (`floor` marks a hole between floors), the
+  hazard cells, the given-up points and the crossings closed for them,
+  the patrol as built and the step being walked, and the stall ledger's
+  worst spots. Rebuilt every ten seconds on the tick; 404 outdoors. The
+  same document `/drakbot patrol dump` writes to `dungeons/<lb>.json`.
+  Coordinates are map units as everywhere else (times 240 for metres);
+  the layers to draw over a floor plan, and what to look at when a wing
+  is not walked. Capability `dungeon`.
 - `GET /frame?q=55&w=720` and `GET /stream?fps=5&q=55&w=720` - the live
   view: the frame the client just presented as a JPEG, or an MJPEG stream
   of them (`multipart/x-mixed-replace`) at the asked rate, quality and

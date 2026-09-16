@@ -54,6 +54,8 @@ internal sealed class RemoteHttpServer : IDisposable
     private volatile byte[] _status = EmptyStatus;
     private volatile byte[] _inventory = EmptyInventory;
     private volatile byte[] _settings = EmptySettings;
+    private volatile byte[]? _dungeon;
+    private volatile string _dungeonLandblock = string.Empty;
     private long _requests;
 
     /// <param name="enqueue">Takes a command off the request thread; false when the plugin is not taking commands.</param>
@@ -143,6 +145,13 @@ internal sealed class RemoteHttpServer : IDisposable
     {
         ArgumentNullException.ThrowIfNull(json);
         _inventory = json;
+    }
+
+    /// <summary>The dungeon document for the landblock the character is in; null when outdoors.</summary>
+    public void PublishDungeon(string landblock, byte[]? json)
+    {
+        _dungeonLandblock = landblock;
+        _dungeon = json;
     }
 
     public void PublishSettings(byte[] json)
@@ -270,6 +279,20 @@ internal sealed class RemoteHttpServer : IDisposable
                 return Response.Json(200, EmptyMaps);
             case "/map":
                 return Response.Error(404, "map unavailable");
+            case "/dungeon" or "/dungeon.json":
+            {
+                if (request.Method != "GET")
+                    return Response.Error(405, "method not allowed");
+                if (NotThisClient(request))
+                    return Response.Error(404, "no such client");
+                byte[]? dungeon = _dungeon;
+                string? wanted = request.Query("lb");
+                if (dungeon is null)
+                    return Response.Error(404, "not in a dungeon");
+                if (wanted is not null && !string.Equals(wanted, _dungeonLandblock, StringComparison.OrdinalIgnoreCase))
+                    return Response.Error(404, $"the character is in {_dungeonLandblock}, not {wanted}");
+                return Response.Json(200, dungeon);
+            }
             default:
                 return Response.Error(404, "not found");
         }
