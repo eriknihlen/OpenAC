@@ -16,9 +16,10 @@
     <Style Selector="Button">
       <Setter Property="Background" Value="#202C33" />
       <Setter Property="BorderBrush" Value="#405059" />
-      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="Padding" Value="10,6,10,4" />
       <Setter Property="MinHeight" Value="28" />
       <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.primary">
       <Setter Property="Background" Value="#DBB573" />
@@ -32,7 +33,7 @@
     <Style Selector="Button.danger"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
     <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#A9BBC5" /></Style>
     <Style Selector="TextBlock.section"><Setter Property="FontSize" Value="16" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
-    <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,3" /><Setter Property="Background" Value="#131D23" /></Style>
+    <Style Selector="ComboBox"><Setter Property="MinHeight" Value="28" /><Setter Property="Padding" Value="6,4,6,3" /><Setter Property="Background" Value="#131D23" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style>
     <Style Selector="CheckBox"><Setter Property="MinHeight" Value="24" /></Style>
     <Style Selector="Expander"><Setter Property="Padding" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
     <Style Selector="Border.chip">
@@ -47,6 +48,34 @@
     <Style Selector="Border.chip.update TextBlock"><Setter Property="Foreground" Value="#DBB573" /></Style>
     <Style Selector="Border.chip.blocked"><Setter Property="Background" Value="#4A2129" /><Setter Property="BorderBrush" Value="#FFB0A0" /></Style>
     <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="#FFB0A0" /></Style>
+    <Style Selector="Border.well">
+      <Setter Property="Background" Value="#0B1216" />
+      <Setter Property="BorderBrush" Value="#243139" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="10" />
+    </Style>
+    <Style Selector="ToggleButton.tab">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0,0,0,2" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="3,3,0,0" />
+      <Setter Property="Padding" Value="14,8,14,7" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Foreground" Value="#A9BBC5" />
+      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.tab:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#182027" />
+    </Style>
+    <Style Selector="ToggleButton.tab:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#202C33" />
+    </Style>
+    <Style Selector="ToggleButton.tab:checked">
+      <Setter Property="Foreground" Value="#F0E4CD" />
+      <Setter Property="BorderBrush" Value="#DBB573" />
+    </Style>
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <Border Padding="18,10" Background="#152029">
@@ -69,19 +98,20 @@
         </Grid>
       </Border>
     </StackPanel>
-    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="14,0">
-      <ToggleButton x:Name="AccountsTabButton" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
-                    Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
-      <ToggleButton x:Name="PluginsTabButton" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
-                    Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
-    </StackPanel>
+    <Border Grid.Row="2" Margin="14,10,14,0" BorderBrush="#35434B" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Spacing="2">
+        <ToggleButton x:Name="AccountsTabButton" Classes="tab" Content="Accounts" IsChecked="{Binding IsAccountsTabSelected, Mode=OneWay}"
+                      Command="{Binding SelectAccountsTabCommand}" AutomationProperties.Name="Accounts tab" />
+        <ToggleButton x:Name="PluginsTabButton" Classes="tab" Content="Plugins" IsChecked="{Binding IsPluginsTabSelected, Mode=OneWay}"
+                      Command="{Binding SelectPluginsTabCommand}" AutomationProperties.Name="Plugins tab" />
+      </StackPanel>
+    </Border>
     <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsAccountsTabSelected}">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <TextBlock Text="Accounts" Classes="section" />
           <TextBlock Text="{Binding CheckedSelectionSummary}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
         </StackPanel>
-        <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" />
+        <Button Grid.Column="1" Content="Check servers" Command="{Binding CheckServersCommand}" VerticalAlignment="Center" />
       </Grid>
       <Grid Grid.Row="1" ColumnDefinitions="26,*,160,112,85,64,34" Margin="22,0,14,5" ColumnSpacing="6">
         <TextBlock Grid.Column="1" Text="Server · status · players" Classes="muted" FontSize="12" />
@@ -95,22 +125,22 @@
           <ItemsControl ItemsSource="{Binding Accounts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:LauncherAccountGroupViewModel">
-                <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Margin="0,0,0,5">
+                <Border Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Margin="0,0,0,9">
                   <StackPanel>
-                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="#1D2931" Padding="10,4" MinHeight="30"><ToggleButton.Template><ControlTemplate><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" /></Border></ControlTemplate></ToggleButton.Template><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="▾" IsVisible="{Binding IsExpanded}" /><TextBlock Text="▸" IsVisible="{Binding !IsExpanded}" /><TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" /></StackPanel></ToggleButton>
+                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="#1D2931" Padding="10,5,10,4" MinHeight="30"><ToggleButton.Template><ControlTemplate><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" VerticalAlignment="Center" /></Border></ControlTemplate></ToggleButton.Template><StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"><TextBlock Text="▾" IsVisible="{Binding IsExpanded}" /><TextBlock Text="▸" IsVisible="{Binding !IsExpanded}" /><TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" /></StackPanel></ToggleButton>
                     <ItemsControl ItemsSource="{Binding Servers}" IsVisible="{Binding IsExpanded}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:LauncherAccountServerRowViewModel">
                           <Border BorderBrush="#2B3941" BorderThickness="0,1,0,0" Padding="12,3,8,3">
                             <Grid ColumnDefinitions="26,*,160,112,85,64,34" RowDefinitions="Auto,Auto" ColumnSpacing="6">
                               <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Select account and server for batch launch" />
-                              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="0,2,0,0">
                                 <Grid ColumnDefinitions="14,*"><Ellipse Width="7" Height="7" Fill="{Binding ServerDotColor}" ToolTip.Tip="{Binding ServerStatusText}" /><TextBlock Grid.Column="1" Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" /></Grid>
                                 <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
                               </StackPanel>
                               <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
                               <ComboBox Grid.Column="3" ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Launch mode" />
-                              <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
+                              <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,2,0,0" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
                               <Button Grid.Column="5" Content="Play" Classes="primary" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
                               <Button Grid.Column="6" Content="···" Padding="4" Command="{Binding OptionsCommand}" VerticalAlignment="Center" AutomationProperties.Name="Character options" />
@@ -131,7 +161,6 @@
     <Grid Grid.Row="3" Margin="14,10" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsPluginsTabSelected}">
       <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8" ColumnSpacing="8">
         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <TextBlock Text="Plugins" Classes="section" />
           <TextBlock Text="{Binding Plugins.ListAgeText}" Classes="muted" FontSize="12" VerticalAlignment="Center" IsVisible="{Binding Plugins.IsUsingCachedList}" />
         </StackPanel>
         <TextBox Grid.Column="1" Width="280" Text="{Binding Plugins.AddFromUrlText, Mode=TwoWay}"
@@ -206,7 +235,7 @@
     </Grid>
     <Border Grid.Row="4" Background="#172128" Padding="14,8">
       <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding IsAccountsTabSelected}">
           <WrapPanel Orientation="Horizontal">
             <Button Content="Edit accounts" Command="{Binding EditUsersTextCommand}" Margin="0,0,6,3" />
             <Button Content="Edit Servers" Command="{Binding EditServersTextCommand}" Margin="0,0,6,3" />
