@@ -241,10 +241,38 @@ public sealed class BotController : IMetaBot
         Dictionary<uint, PluginDungeonCell>? graph = DungeonGraphCore(out _, out _);
         if (graph is null)
             return null;
-        Route? rejoined = DungeonPathfinder.Rejoin(graph, route, index, position, Hazards.For(position.CellId));
+        Route? rejoined = DungeonPathfinder.Rejoin(graph, route, index, position, Hazards.For(position.CellId), BlockedEdges(graph, position.CellId));
         if (rejoined is not null && route.Name == DraftRoute?.Name)
             DraftRoute = rejoined;
         return rejoined;
+    }
+
+    /// <summary>
+    /// The crossings the walk has given up on in this landblock, as edges of
+    /// the graph: a route point behind a wall was given up from a cell, and
+    /// the doorway of that cell nearest the point is the crossing the body
+    /// could not make. A path that took it again would bring the walk back
+    /// to the same wall - the lead-in did, three times a minute, once.
+    /// </summary>
+    private HashSet<ulong> BlockedEdges(Dictionary<uint, PluginDungeonCell> graph, uint anyCellOfLandblock)
+    {
+        var edges = new HashSet<ulong>();
+        foreach (string key in Hazards.GivenUpFor(anyCellOfLandblock))
+        {
+            // "{cell:X8}:{ew*960}:{ns*960}", as NavigationBehavior.GivenUpKey writes it.
+            string[] parts = key.Split(':');
+            if (parts.Length != 3
+                || !uint.TryParse(parts[0], System.Globalization.NumberStyles.HexNumber, null, out uint cell)
+                || !long.TryParse(parts[1], out long ew) || !long.TryParse(parts[2], out long ns))
+            {
+                continue;
+            }
+            var point = new PluginNavigationPosition(cell, ew / 960d, ns / 960d, 0d, 0f, false);
+            ulong edge = DungeonPathfinder.GivenUpEdge(graph, cell, point);
+            if (edge != 0ul)
+                edges.Add(edge);
+        }
+        return edges;
     }
 
     /// <summary>A new hazard mid-patrol: the same patrol again around it, resumed at the nearest step.</summary>
@@ -263,7 +291,7 @@ public sealed class BotController : IMetaBot
             if (safe != 0u)
                 start = safe;
         }
-        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards);
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards, BlockedEdges(graph, snapshot.Position.CellId));
         if (route.IsEmpty)
         {
             Log.Warn("patrol: nothing left to walk after the new hazard");
@@ -788,7 +816,7 @@ public sealed class BotController : IMetaBot
             if (safe != 0u)
                 start = safe;
         }
-        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards);
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards, BlockedEdges(graph, snapshot.Position.CellId));
         if (route.IsEmpty)
         {
             message = "nothing to patrol here";
@@ -821,7 +849,7 @@ public sealed class BotController : IMetaBot
             : DungeonPathfinder.NearestCell(graph, snapshot.Position);
         var destination = new PluginNavigationPosition(0u, eastWest, northSouth, snapshot.Position.Elevation, 0f, false);
         uint goal = DungeonPathfinder.NearestCell(graph, destination);
-        List<uint> path = DungeonPathfinder.FindPath(graph, start, goal, hazards, Profile.Navigation.CrossHazards);
+        List<uint> path = DungeonPathfinder.FindPath(graph, start, goal, hazards, Profile.Navigation.CrossHazards, BlockedEdges(graph, snapshot.Position.CellId));
         if (path.Count == 0)
         {
             message = "no walkable way there";

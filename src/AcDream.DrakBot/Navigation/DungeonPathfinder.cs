@@ -131,7 +131,8 @@ public static class DungeonPathfinder
     public const double HazardCrossingMeters = 60d;
 
     /// <param name="crossHazards">Hazard cells may be walked through, at <see cref="HazardCrossingMeters"/> each, instead of being closed; for when the only way on is through them.</param>
-    public static List<uint> FindPath(Dictionary<uint, PluginDungeonCell> graph, uint start, uint goal, IReadOnlySet<uint>? hazards = null, bool crossHazards = false)
+    /// <param name="blockedEdges">Crossings between two cells the walk has given up on (<see cref="EdgeKey"/>): a doorway the graph has and the body cannot pass. Never taken.</param>
+    public static List<uint> FindPath(Dictionary<uint, PluginDungeonCell> graph, uint start, uint goal, IReadOnlySet<uint>? hazards = null, bool crossHazards = false, IReadOnlySet<ulong>? blockedEdges = null)
     {
         if (!graph.TryGetValue(start, out PluginDungeonCell startCell) || !graph.TryGetValue(goal, out PluginDungeonCell goalCell))
             return new List<uint>();
@@ -155,6 +156,8 @@ public static class DungeonPathfinder
             foreach (uint next in cell.Neighbors)
             {
                 if (closed.Contains(next) || !graph.TryGetValue(next, out PluginDungeonCell nextCell) || IsDropEdge(cell, nextCell))
+                    continue;
+                if (blockedEdges is not null && blockedEdges.Contains(EdgeKey(current, next)))
                     continue;
                 bool hazard = next != goal && hazards is not null && hazards.Contains(next);
                 if (hazard && !crossHazards)
@@ -199,7 +202,8 @@ public static class DungeonPathfinder
         Route route,
         int index,
         in PluginNavigationPosition position,
-        IReadOnlySet<uint>? hazards = null)
+        IReadOnlySet<uint>? hazards = null,
+        IReadOnlySet<ulong>? blockedEdges = null)
     {
         if (route.IsEmpty || index < 0 || index >= route.Waypoints.Count)
             return null;
@@ -208,7 +212,7 @@ public static class DungeonPathfinder
         uint goal = NearestCell(graph, target.ToPosition());
         if (start == 0u || goal == 0u || start == goal)
             return null;
-        List<uint> path = FindPath(graph, start, goal, hazards);
+        List<uint> path = FindPath(graph, start, goal, hazards, blockedEdges: blockedEdges);
         if (path.Count < 2)
             return null;
 
@@ -258,11 +262,13 @@ public static class DungeonPathfinder
     /// side, but a low character does not survive the crossing; the
     /// profile decides.
     /// </param>
-    public static Route BuildPatrolRoute(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, string name = "patrol", bool crossHazards = false)
+    public static Route BuildPatrolRoute(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, string name = "patrol", bool crossHazards = false, IReadOnlySet<ulong>? blockedEdges = null)
     {
         // A marked cell is never toured - none of its corridors is a corridor
         // to walk for its own sake - and combat never fights from inside one.
-        HashSet<uint> main = MainRouteCells(graph, start, crossHazards ? null : hazards);
+        // A crossing the walk has given up on is not a corridor either: the
+        // graph has the doorway, the body could not pass it.
+        HashSet<uint> main = MainRouteCells(graph, start, crossHazards ? null : hazards, blockedEdges);
         var adjacency = new Dictionary<uint, List<uint>>();
         var edges = new HashSet<ulong>();
         foreach (uint id in main)
@@ -272,6 +278,8 @@ public static class DungeonPathfinder
             foreach (uint next in cell.Neighbors)
             {
                 if (!main.Contains(next) || !graph.TryGetValue(next, out PluginDungeonCell nextCell) || IsDropEdge(cell, nextCell))
+                    continue;
+                if (blockedEdges is not null && blockedEdges.Contains(EdgeKey(id, next)))
                     continue;
                 if (!adjacency.TryGetValue(id, out List<uint>? list))
                     adjacency[id] = list = new List<uint>();
@@ -339,7 +347,7 @@ public static class DungeonPathfinder
         int loopStart = 0;
         if (walkStart != start && graph.ContainsKey(start))
         {
-            List<uint> leadIn = FindPath(graph, start, walkStart, hazards, crossHazards);
+            List<uint> leadIn = FindPath(graph, start, walkStart, hazards, crossHazards, blockedEdges);
             for (int index = 0; index + 1 < leadIn.Count; index++)
             {
                 if (graph.TryGetValue(leadIn[index], out PluginDungeonCell from) && graph.TryGetValue(leadIn[index + 1], out PluginDungeonCell to))
@@ -366,7 +374,7 @@ public static class DungeonPathfinder
     /// dead-end spurs of any depth. Falls back to everything reachable when
     /// the pruning collapses a small or purely linear dungeon.
     /// </summary>
-    public static HashSet<uint> MainRouteCells(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null)
+    public static HashSet<uint> MainRouteCells(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, IReadOnlySet<ulong>? blockedEdges = null)
     {
         var reachable = new HashSet<uint>();
         if (graph.ContainsKey(start))
@@ -383,6 +391,8 @@ public static class DungeonPathfinder
                     if (reachable.Contains(next) || !graph.TryGetValue(next, out PluginDungeonCell nextCell))
                         continue;
                     if (IsDropEdge(cell, nextCell) || (hazards is not null && hazards.Contains(next)))
+                        continue;
+                    if (blockedEdges is not null && blockedEdges.Contains(EdgeKey(current, next)))
                         continue;
                     reachable.Add(next);
                     queue.Enqueue(next);
@@ -516,8 +526,35 @@ public static class DungeonPathfinder
         return path;
     }
 
-    private static ulong EdgeKey(uint a, uint b) =>
+    /// <summary>One crossing between two cells, either way round.</summary>
+    public static ulong EdgeKey(uint a, uint b) =>
         a < b ? ((ulong)a << 32) | b : ((ulong)b << 32) | a;
+
+    /// <summary>
+    /// The crossing a given-up point stands for: from the cell it was given
+    /// up in, to the neighbour whose doorway (or centre) is nearest the
+    /// point. Zero when the cell is not in the graph or has no neighbour.
+    /// </summary>
+    public static ulong GivenUpEdge(Dictionary<uint, PluginDungeonCell> graph, uint cellId, in PluginNavigationPosition point)
+    {
+        if (!graph.TryGetValue(cellId, out PluginDungeonCell cell))
+            return 0ul;
+        uint best = 0u;
+        double bestDistance = double.PositiveInfinity;
+        foreach (uint next in cell.Neighbors)
+        {
+            if (!graph.TryGetValue(next, out PluginDungeonCell nextCell))
+                continue;
+            PluginNavigationPosition at = TryDoorway(cell, nextCell, out PluginDungeonDoorway doorway) ? doorway.Position : nextCell.Position;
+            double distance = at.HorizontalDistanceMeters(point);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = next;
+            }
+        }
+        return best == 0u ? 0ul : EdgeKey(cellId, best);
+    }
 
     private static uint NearestCellWithEdges(Dictionary<uint, PluginDungeonCell> graph, Dictionary<uint, List<uint>> adjacency, uint fromCell, IReadOnlySet<uint>? hazards = null)
     {

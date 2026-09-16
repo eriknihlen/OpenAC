@@ -64,6 +64,33 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void AGivenUpCrossingIsNeitherPathedNorPatrolledAgain()
+    {
+        // Five cells in a row; the graph says 0x301 and 0x302 join, the body
+        // found a wall there and gave the point up. The given-up point maps
+        // to that crossing, a path will not take it, and the patrol keeps
+        // to the near side.
+        var graph = DungeonPathfinder.Graph(
+        [
+            Cell(0x300, 0d, 0d, 0d, 0x301),
+            Cell(0x301, 20d, 0d, 0d, 0x300, 0x302),
+            Cell(0x302, 40d, 0d, 0d, 0x301, 0x303),
+            Cell(0x303, 60d, 0d, 0d, 0x302, 0x304),
+            Cell(0x304, 80d, 0d, 0d, 0x303),
+        ]);
+        // The point given up from 0x301, standing at the cell's edge toward 0x302.
+        var point = new PluginNavigationPosition(Block | 0x301, 30d / 240d, 0d, 0d, 0f, false);
+        ulong edge = DungeonPathfinder.GivenUpEdge(graph, Block | 0x301, point);
+        Assert.Equal(DungeonPathfinder.EdgeKey(Block | 0x301, Block | 0x302), edge);
+        var blocked = new HashSet<ulong> { edge };
+
+        Assert.Equal(5, DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304).Count);
+        Assert.Empty(DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304, blockedEdges: blocked));
+        Route patrol = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x300, blockedEdges: blocked);
+        Assert.DoesNotContain(patrol.Waypoints, w => w.EastWest * 240d > 35d);
+    }
+
+    [Fact]
     public void APatrolCrossesAHazardThatJoinsTwoHalvesButNeverToursIt()
     {
         // Two rooms either side of an acid corridor: a patrol that closed
