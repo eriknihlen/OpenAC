@@ -74,6 +74,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     private const float DetourProbeMeters = 6f;
     private const float DetourClearMeters = 3f;
     private int _detours;
+    /// <summary>Where the last stall on this step was and which way the detour went: the same again from the same spot gained nothing.</summary>
+    private PluginNavigationPosition _lastStallAt;
+    private float _lastDetourHeading = float.NaN;
+    /// <summary>A detour that brought the body back to within this of where it set out from, to detour the same way again, is not tried a third time.</summary>
+    private const float FruitlessDetourMeters = 1.0f;
     /// <summary>The step the detours were for, and how many it may have before it is skipped: a waypoint on the floor above with no ramp from here is not reached by walking at the wall all day.</summary>
     private int _detourStep = -1;
     private const int MaxDetoursPerStep = 6;
@@ -291,15 +296,23 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                         {
                             _detourStep = _follower.CurrentIndex;
                             _detours = 0;
+                            _lastDetourHeading = float.NaN;
                         }
-                        if (_detours >= MaxDetoursPerStep)
+                        // The same detour from the same spot, and back to the
+                        // same spot: a wall with the point behind it, which
+                        // four more of the same will not get round. Two such
+                        // are enough - it once cost a minute a step.
+                        bool fruitless = _detours >= 2
+                            && !float.IsNaN(_lastDetourHeading)
+                            && board.Navigation.Position.HorizontalDistanceMeters(_lastStallAt) < FruitlessDetourMeters;
+                        if (_detours >= MaxDetoursPerStep || fruitless)
                         {
                             // Sideways and back again this many times: the
                             // step is not reachable from here by any short
                             // way round, so it is given up and the next one
                             // aimed for; the route's shape carries the walk
                             // on, and the skipped point comes round again.
-                            context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} not reached after {_detours} detours from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
+                            context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} not reached after {_detours} detours{(fruitless ? " that gained nothing" : string.Empty)} from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
                             if (_follower.Current is { } givenUp)
                             {
                                 string key = GivenUpKey(board.Navigation.Position.CellId, givenUp);
@@ -313,6 +326,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                         }
                         if (TryDetour(context.Surface, step.HeadingDegrees, out float detour))
                         {
+                            // A different way round resets the count of fruitless tries.
+                            if (float.IsNaN(_lastDetourHeading) || Math.Abs(RouteFollower.HeadingDelta(_lastDetourHeading, detour)) > 10f)
+                                _detours = Math.Min(_detours, 1);
+                            _lastDetourHeading = detour;
+                            _lastStallAt = board.Navigation.Position;
                             _detours++;
                             context.Log.Info($"nav: detour {_detours} along heading {detour:0} for {DetourSeconds:0.0}s");
                             _walker.BeginDetour(detour, board.Now, DetourSeconds);

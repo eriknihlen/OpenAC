@@ -290,7 +290,10 @@ public sealed class NavigationTests
     public void AStepDetouredSixTimesWithoutBeingReachedIsSkipped()
     {
         // The step is on the floor above with no ramp from here: sideways and
-        // back, over and over, is not a way to spend the night.
+        // back, over and over, is not a way to spend the night. The body never
+        // moves in this fake, so the detours are the same way from the same
+        // spot: two of those are enough (six, for detours that each gain some
+        // ground and stall somewhere new).
         var surface = new FakeAutomationSurface();
         var clock = new TickClock();
         var settings = new NavigationSettings();
@@ -320,8 +323,8 @@ public sealed class NavigationTests
             behavior.Execute(Context());
         }
         Assert.Equal(1, behavior.WaypointIndex);
-        Assert.Equal(6, log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal)));
-        Assert.Contains(log.Lines, line => line.Contains("skipping it", StringComparison.Ordinal));
+        Assert.Equal(2, log.Lines.Count(line => line.Contains("nav: detour", StringComparison.Ordinal)));
+        Assert.Contains(log.Lines, line => line.Contains("that gained nothing", StringComparison.Ordinal) && line.Contains("skipping it", StringComparison.Ordinal));
 
         // Next lap, same cell, same point: given up at once, no detours.
         behavior.SetRoute(new Route

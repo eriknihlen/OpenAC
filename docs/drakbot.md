@@ -463,7 +463,9 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   side, nearest first), walked for a second and a half before the route
   is aimed at again; the plain back-up and strafe recoveries are the
   fallback when nothing is open. A step detoured six times without being
-  reached is given up and the next one aimed for - a point on the floor
+  reached - or twice the same way from the same spot, the body back where
+  it set out from each time, which four more of the same will not mend -
+  is given up and the next one aimed for - a point on the floor
   above with no ramp from here is not reached by walking at the wall all
   night - and it is remembered, with the cell it was given up from, per
   landblock in the plugin's storage (`givenup/<landblock>.json`), so the
