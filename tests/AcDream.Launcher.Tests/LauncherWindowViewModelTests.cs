@@ -1102,6 +1102,17 @@ public sealed partial class LauncherWindowViewModelTests
             SettingsUpdates.Add((serverName, accountName, characterName, launchMode, plugins));
         }
 
+        public (string? Character, LaunchMode Mode)? SavedRowSelection { get; private set; }
+
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            string? selectedCharacter,
+            LaunchMode selectedLaunchMode)
+        {
+            SavedRowSelection = (selectedCharacter, selectedLaunchMode);
+        }
+
         public void RemoveCharacter(
             string serverName,
             string accountName,

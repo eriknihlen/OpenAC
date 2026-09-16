@@ -18,7 +18,9 @@ public sealed record LauncherAccountSnapshot(
     string AccountName,
     IReadOnlyList<LauncherCharacterSnapshot> Characters,
     bool HasRunningActivity,
-    string ActivityStatus);
+    string ActivityStatus,
+    string? SelectedCharacter = null,
+    LaunchMode? SelectedLaunchMode = null);
 
 public sealed record LauncherServerSnapshot(
     string Name,

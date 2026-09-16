@@ -283,6 +283,24 @@ public sealed class LauncherProfileStore
         }
     }
 
+    /// <summary>Remembers what the account's row is set to launch, so it survives a restart.</summary>
+    public void EditAccountSelection(
+        string serverName,
+        string account,
+        string? selectedCharacter,
+        LaunchMode selectedLaunchMode)
+    {
+        ServerProfile server = FindServerOrThrow(serverName);
+        AccountProfile profile = FindAccountOrThrow(server, account);
+        if (selectedCharacter is not null && FindCharacter(profile, selectedCharacter) is null)
+        {
+            throw new LauncherProfileException(
+                $"Character '{selectedCharacter}' is not on account '{account}'.");
+        }
+        profile.SelectedCharacter = selectedCharacter;
+        profile.SelectedLaunchMode = selectedLaunchMode;
+    }
+
     public void RemoveAccount(string serverName, string account)
     {
         ServerProfile server = FindServerOrThrow(serverName);

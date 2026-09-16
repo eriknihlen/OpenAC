@@ -629,6 +629,14 @@ public sealed class MainWindowViewTests
         {
         }
 
+        public void UpdateAccountSelection(
+            string serverName,
+            string accountName,
+            string? selectedCharacter,
+            LaunchMode selectedLaunchMode)
+        {
+        }
+
         public void RemoveCharacter(string serverName, string accountName, string characterName)
         {
         }

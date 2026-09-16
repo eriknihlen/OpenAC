@@ -90,6 +90,62 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public void PickingACharacterOrLaunchModeIsSavedAsItIsPicked()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+
+        row.SelectedCharacter = "A character";
+        Assert.Equal(("A character", LaunchMode.Gui), core.SavedRowSelection);
+
+        row.SelectedLaunchMode = "Headless";
+        Assert.Equal(("A character", LaunchMode.Headless), core.SavedRowSelection);
+    }
+
+    [Fact]
+    public void ASavedSelectionComesBackWhenTheRowIsBuilt()
+    {
+        using var core = BatchOrchestrator();
+        core.ServersOverride = core.ServersOverride!
+            .Select(server => server with
+            {
+                Accounts = server.Accounts
+                    .Select(account => account with { SelectedCharacter = "A character", SelectedLaunchMode = LaunchMode.Headless })
+                    .ToArray(),
+            }).ToArray();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+        Assert.Equal("A character", row.SelectedCharacter);
+        Assert.Equal("Headless", row.SelectedLaunchMode);
+        Assert.Null(core.SavedRowSelection);
+    }
+
+    [Fact]
+    public void TheCharacterBoxShowsWhoIsInWorldAndReturnsToTheSavedChoiceAfterwards()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+        Assert.Equal(LauncherAccountServerRowViewModel.CharacterSelect, row.DisplayedCharacter);
+
+        core.Session = core.Session with
+        {
+            ServerName = row.ServerName,
+            AccountName = row.AccountName,
+            CharacterName = "A character",
+            State = LauncherActivityState.InWorld,
+        };
+        core.RaiseStateChanged();
+        Assert.Equal("A character", row.DisplayedCharacter);
+        Assert.Equal(LauncherAccountServerRowViewModel.CharacterSelect, row.SelectedCharacter);
+
+        core.Session = core.Session with { State = LauncherActivityState.Exited, ExitCode = 0 };
+        core.RaiseStateChanged();
+        Assert.Equal(LauncherAccountServerRowViewModel.CharacterSelect, row.DisplayedCharacter);
+    }
+
+    [Fact]
     public void ThePingMeterIsEmptyForAServerThatDidNotAnswer()
     {
         using var core = BatchOrchestrator();

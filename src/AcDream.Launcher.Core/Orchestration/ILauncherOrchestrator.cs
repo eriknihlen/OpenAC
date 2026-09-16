@@ -77,6 +77,13 @@ public interface ILauncherOrchestrator : IDisposable
         IReadOnlyList<string> plugins,
         IReadOnlyList<string> loginCommands);
 
+    /// <summary>Remembers the character and launch mode an account's row is set to.</summary>
+    void UpdateAccountSelection(
+        string serverName,
+        string accountName,
+        string? selectedCharacter,
+        LaunchMode selectedLaunchMode);
+
     void RemoveCharacter(
         string serverName,
         string accountName,

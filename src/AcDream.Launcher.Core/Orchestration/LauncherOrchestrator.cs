@@ -370,6 +370,18 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 plugins: plugins,
                 loginCommands: loginCommands));
 
+    public void UpdateAccountSelection(
+        string serverName,
+        string accountName,
+        string? selectedCharacter,
+        LaunchMode selectedLaunchMode) =>
+        MutateProfiles(() =>
+            _profileStore.EditAccountSelection(
+                serverName,
+                accountName,
+                selectedCharacter,
+                selectedLaunchMode));
+
     public void RemoveCharacter(
         string serverName,
         string accountName,
@@ -957,7 +969,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                     {
                         activity.CharacterName = enteredWorld.CharacterName;
                     }
-                    activity.Status = $"In world as {enteredWorld.CharacterName}.";
+                    // The character is shown in its own column; the status column stays short.
+                    activity.Status = "In world.";
                     break;
                 case PluginLoadedStatusEvent loaded:
                     activity.Status = $"Plugin loaded: {loaded.Plugin}.";
@@ -1101,7 +1114,9 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             account.Account,
             characters,
             active is not null,
-            active?.Status ?? "Idle");
+            active?.Status ?? "Idle",
+            account.SelectedCharacter,
+            account.SelectedLaunchMode);
     }
 
     private static string ReadStartupFailure(ManagedActivity activity)

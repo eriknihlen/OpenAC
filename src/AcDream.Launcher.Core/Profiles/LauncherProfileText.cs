@@ -92,10 +92,16 @@ public static class LauncherProfileText
         Require(users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() == users.Count,
             "Each username must appear once. Resolve its passwords in Edit Users first.");
         foreach (var server in document.Servers)
-            server.Accounts = users.Select(user => new AccountProfile
+            server.Accounts = users.Select(user =>
             {
-                Account = user.Account, Password = user.Password,
-                Characters = server.Accounts.Find(account => account.Account == user.Account)?.Characters ?? [],
+                AccountProfile? existing = server.Accounts.Find(account => account.Account == user.Account);
+                return new AccountProfile
+                {
+                    Account = user.Account, Password = user.Password,
+                    Characters = existing?.Characters ?? [],
+                    SelectedCharacter = existing?.SelectedCharacter,
+                    SelectedLaunchMode = existing?.SelectedLaunchMode,
+                };
             }).ToList();
     }
 

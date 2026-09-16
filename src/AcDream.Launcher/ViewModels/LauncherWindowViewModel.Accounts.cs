@@ -38,6 +38,7 @@ public sealed partial class LauncherWindowViewModel
                 row = new LauncherAccountServerRowViewModel(account.AccountName, server.Name,
                     GetRowDisabledReason, NotifyAccountCommands, item => LaunchRowsAsync([item]),
                     StopSessionAsync, OpenRowOptions, () => CanInteract);
+                row.UseSelectionStore(SaveRowSelection);
                 group.Servers.Add(row);
             }
             retained.Add(row);
@@ -49,6 +50,18 @@ public sealed partial class LauncherWindowViewModel
             foreach (LauncherAccountServerRowViewModel row in group.Servers.Where(row => !retained.Contains(row)).ToArray())
                 group.Servers.Remove(row);
             if (group.Servers.Count == 0 && !(snapshot.SharedAccountNames?.Contains(group.AccountName) ?? false)) Accounts.Remove(group);
+        }
+    }
+
+    private void SaveRowSelection(LauncherAccountServerRowViewModel row)
+    {
+        try
+        {
+            _orchestrator.UpdateAccountSelection(row.ServerName, row.AccountName, row.CharacterName, row.Mode);
+        }
+        catch (Exception ex)
+        {
+            LastError = SafeDisplayError(ex, secret: null);
         }
     }
 

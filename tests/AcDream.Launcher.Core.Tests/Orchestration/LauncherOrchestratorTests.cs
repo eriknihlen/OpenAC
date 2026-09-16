@@ -177,7 +177,8 @@ public sealed class LauncherOrchestratorTests : IDisposable
 
         LauncherSessionSnapshot inWorld = Assert.Single(orchestrator.GetSnapshot().Sessions);
         Assert.Equal(LauncherActivityState.InWorld, inWorld.State);
-        Assert.Contains("+Acdream", inWorld.Status, StringComparison.Ordinal);
+        Assert.Equal("+Acdream", inWorld.CharacterName);
+        Assert.Equal("In world.", inWorld.Status);
     }
 
     [Fact]
