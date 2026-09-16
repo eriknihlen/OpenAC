@@ -35,8 +35,11 @@ public sealed class WeaponReadiness
         NoAmmunition,
     }
 
+    // Ammunition carries the missile-weapon item type as well as the bow
+    // does; a quiver of arrows in the ammo slot is not a bow in hand.
     private static bool IsOfStyle(in PluginEquipmentItem item, bool missile) => missile
-        ? item.CombatUse == CombatUseMissile || (item.ItemType & ItemTypeMissileWeapon) != 0u
+        ? item.CombatUse == CombatUseMissile
+            || ((item.ItemType & ItemTypeMissileWeapon) != 0u && item.CombatUse != CombatUseAmmo)
         : item.CombatUse is CombatUseMelee or CombatUseTwoHanded;
 
     private static PluginEquipmentItem? FirstOwned(IReadOnlyList<PluginEquipmentItem> owned, Func<PluginEquipmentItem, bool> match)
