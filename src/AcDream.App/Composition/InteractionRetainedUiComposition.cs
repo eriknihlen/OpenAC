@@ -646,8 +646,7 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 : "[UI] vitals dat-font 0x40000000 unavailable — falling back to debug font.");
             checkpoint(InteractionRetainedUiCompositionPoint.UiAssetsCreated);
 
-            host.Root.Width = d.Window.Size.X;
-            host.Root.Height = d.Window.Size.Y;
+            host.Root.SetScreenSize(new System.Numerics.Vector2(d.Window.Size.X, d.Window.Size.Y));
             var chat = CreateChatViewModel(d);
             AcDream.UI.Abstractions.Panels.Settings.SettingsStore? layoutStore =
                 d.Settings.LayoutStore;
