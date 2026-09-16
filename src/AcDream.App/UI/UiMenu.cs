@@ -324,14 +324,14 @@ public sealed class UiMenu : UiElement
         float inX = Border, inY = outerTop + Border; // interior origin (inside the bevel)
 
         DrawBevel(ctx, resolve, 0f, outerTop, OuterW, OuterH);
-        DrawRowArt(ctx, resolve, PopupBgSprite, inX, inY, InteriorW, InteriorH);  // panel fill behind rows
+        DrawSprite(ctx, resolve, PopupBgSprite, inX, inY, InteriorW, InteriorH);  // panel fill behind rows
 
         for (int i = 0; i < Items.Count; i++)
         {
             int col = i / RowsPerColumn, row = i % RowsPerColumn;
             float x = inX + col * ColumnWidth, y = inY + row * RowHeight;
             bool selected = Equals(Items[i].Payload, Selected);
-            DrawRowArt(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, x, y, ColumnWidth, RowHeight);
+            DrawSprite(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, x, y, ColumnWidth, RowHeight);
         }
 
         float textY = (RowHeight - LineH()) * 0.5f;
@@ -361,7 +361,7 @@ public sealed class UiMenu : UiElement
         float inX = Border, inY = outerTop + Border;
 
         DrawBevel(ctx, resolve, 0f, outerTop, OuterW, OuterH);
-        DrawRowArt(ctx, resolve, PopupBgSprite, inX, inY, ColumnWidth, InteriorH);
+        DrawSprite(ctx, resolve, PopupBgSprite, inX, inY, ColumnWidth, InteriorH);
 
         int start = VisibleTopRow;
         int count = System.Math.Min(EffectiveVisibleRows, Items.Count - start);
@@ -371,7 +371,7 @@ public sealed class UiMenu : UiElement
             int idx = start + i;
             float y = inY + i * RowHeight;
             bool selected = Equals(Items[idx].Payload, Selected);
-            DrawRowArt(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, inX, y, ColumnWidth, RowHeight);
+            DrawSprite(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, inX, y, ColumnWidth, RowHeight);
         }
         for (int i = 0; i < count; i++)
         {
@@ -567,32 +567,6 @@ public sealed class UiMenu : UiElement
         if (tex == 0 || tw == 0 || th == 0) return;
         // Tile at native size (the panel fill is 191×2; rows are 191×17 = 1:1).
         ctx.DrawSprite(tex, x, y, w, h, 0f, 0f, w / tw, h / th, Vector4.One);
-    }
-
-    /// <summary>The right-hand strip of a row's art that is stretched across a column wider than the art.</summary>
-    private const float RowArtTailPx = 4f;
-
-    /// <summary>
-    /// A row's art, or the panel fill behind the rows: tiled vertically at
-    /// native size, but across, drawn once and its last few columns stretched
-    /// over the rest. A row's art carries the check box at its left, and a
-    /// column wider than the art - the chat window's channel list is as wide
-    /// as the window - once tiled it and showed a second column of boxes.
-    /// </summary>
-    private void DrawRowArt(UiRenderContext ctx, Func<uint, (uint tex, int w, int h)> resolve,
-        uint id, float x, float y, float w, float h)
-    {
-        if (id == 0) return;
-        var (tex, tw, th) = resolve(id);
-        if (tex == 0 || tw == 0 || th == 0) return;
-        if (w <= tw)
-        {
-            ctx.DrawSprite(tex, x, y, w, h, 0f, 0f, w / tw, h / th, Vector4.One);
-            return;
-        }
-        ctx.DrawSprite(tex, x, y, tw, h, 0f, 0f, 1f, h / th, Vector4.One);
-        float tail = MathF.Min(RowArtTailPx, tw);
-        ctx.DrawSprite(tex, x + tw, y, w - tw, h, (tw - tail) / tw, 0f, 1f, h / th, Vector4.One);
     }
 
     private void DrawLabel(UiRenderContext ctx, string s, float x, float y, Vector4 color)
