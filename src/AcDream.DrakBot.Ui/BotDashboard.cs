@@ -459,6 +459,33 @@ public sealed class BotDashboard
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip($"Save the live profile as '{_controller.Profile.Name}'");
         ImGui.TableNextColumn();
+        // The bot's files live where the client keeps plugin storage, which
+        // is nowhere anyone remembers: one button, and its menu opens each kind.
+        if (GridButton("Files", PhosphorIcons.FolderOpen, false))
+            ImGui.OpenPopup("drakbot-files");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(_controller.Files.Directory is { } where
+                ? $"Open the bot's files: {where}"
+                : "This host keeps no files on disk");
+        if (ImGui.BeginPopup("drakbot-files"))
+        {
+            if (_controller.Files.Directory is { } root)
+                ImGui.TextDisabled(root);
+            foreach ((string label, string? folder) in new (string, string?)[]
+            {
+                ("Everything", null),
+                ("Profiles", BotFiles.ProfilesFolder),
+                ("Nav routes (.nav)", BotFiles.RoutesFolder),
+                ("Loot profiles (.utl)", BotFiles.LootFolder),
+                ("Metas (.af, .met)", BotFiles.MetasFolder),
+                ("Logs", BotFiles.LogsFolder),
+            })
+            {
+                if (ImGui.MenuItem(label))
+                    _controller.Files.TryOpen(folder, out _);
+            }
+            ImGui.EndPopup();
+        }
         ImGui.EndTable();
     }
 
