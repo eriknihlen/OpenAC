@@ -93,12 +93,13 @@ public sealed partial class LauncherWindowViewModel
                         if (_disposed) return;
                         string count = result.PlayerCount is { } value ? $"{value:N0} players" : "— players";
                         if (result.IsPlayerCountStale) count += " (stale)";
-                        string status = result.IsReachable == true ? "Online" : "Offline · no response";
-                        string latency = result.LatencyMilliseconds is { } ms ? $" · {ms:0} ms" : "";
+                        // The dot beside the server name already says whether it answered.
+                        string status = result.IsReachable == true ? "" : "No response · ";
                         foreach (var row in AllAccountRows.Where(row => row.ServerName == server.Name && row.Endpoint == $"{server.Host}:{server.Port}"))
                         {
                             row.IsServerOnline = result.IsReachable;
-                            row.ServerStatusText = $"{status} · {count}{latency}";
+                            row.ServerStatusText = $"{status}{count}";
+                            row.LatencyMilliseconds = result.LatencyMilliseconds;
                         }
                     });
                 }

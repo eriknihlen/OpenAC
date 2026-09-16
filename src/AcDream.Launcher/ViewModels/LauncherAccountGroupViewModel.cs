@@ -26,7 +26,13 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     private string? _activeSessionId;
     private bool? _isServerOnline;
     private string _serverStatusText = "Not checked";
+    private double? _latencyMilliseconds;
     private string? _launchError;
+
+    // A ping meter fills one bar above this, two above the fair mark, three below it.
+    private const double FairLatencyMilliseconds = 200;
+    private const double GoodLatencyMilliseconds = 80;
+    private const string EmptyBarColor = "#36444C";
 
     public LauncherAccountServerRowViewModel(string accountName, string serverName,
         Func<LauncherAccountServerRowViewModel, string?> disabledReason, Action changed,
@@ -60,8 +66,47 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     public bool HasLaunchError => !string.IsNullOrEmpty(LaunchError);
     public string ServerStatusText { get => _serverStatusText; set => SetProperty(ref _serverStatusText, value); }
     public string HealthText { get => ServerStatusText; set { ServerStatusText = value; OnPropertyChanged(); } }
-    public bool? IsServerOnline { get => _isServerOnline; set { if (SetProperty(ref _isServerOnline, value)) OnPropertyChanged(nameof(ServerDotColor)); } }
+    public bool? IsServerOnline { get => _isServerOnline; set { if (SetProperty(ref _isServerOnline, value)) { OnPropertyChanged(nameof(ServerDotColor)); NotifyPing(); } } }
     public string ServerDotColor => IsServerOnline switch { true => "#65D99B", false => "#F17474", _ => "#89949C" };
+
+    public double? LatencyMilliseconds
+    {
+        get => _latencyMilliseconds;
+        set { if (SetProperty(ref _latencyMilliseconds, value)) NotifyPing(); }
+    }
+
+    public string LatencyText => LatencyMilliseconds is { } ms ? $"{ms:0} ms" : "";
+    public bool HasLatency => LatencyMilliseconds is not null;
+
+    /// <summary>Filled bars in the ping meter: three for a fast reply, one for a slow one.</summary>
+    public int PingBars => IsServerOnline == true && LatencyMilliseconds is { } ms
+        ? ms <= GoodLatencyMilliseconds ? 3 : ms <= FairLatencyMilliseconds ? 2 : 1
+        : 0;
+
+    public string PingColor => PingBars switch { 3 => "#65D99B", 2 => "#DBB573", 1 => "#F17474", _ => EmptyBarColor };
+    public string PingBar1Color => PingBars >= 1 ? PingColor : EmptyBarColor;
+    public string PingBar2Color => PingBars >= 2 ? PingColor : EmptyBarColor;
+    public string PingBar3Color => PingBars >= 3 ? PingColor : EmptyBarColor;
+
+    public string PingTooltip => PingBars switch
+    {
+        3 => $"{LatencyText} · fast",
+        2 => $"{LatencyText} · fair",
+        1 => $"{LatencyText} · slow",
+        _ => "No reply timed",
+    };
+
+    private void NotifyPing()
+    {
+        OnPropertyChanged(nameof(LatencyText));
+        OnPropertyChanged(nameof(HasLatency));
+        OnPropertyChanged(nameof(PingBars));
+        OnPropertyChanged(nameof(PingColor));
+        OnPropertyChanged(nameof(PingBar1Color));
+        OnPropertyChanged(nameof(PingBar2Color));
+        OnPropertyChanged(nameof(PingBar3Color));
+        OnPropertyChanged(nameof(PingTooltip));
+    }
     public bool IsActive => _activeSessionId is not null;
     public bool CanEditSelection => !IsActive && _canInteract();
     public bool CanPlay => DisabledReason.Length == 0;
@@ -77,6 +122,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         {
             IsServerOnline = null;
             ServerStatusText = "Not checked";
+            LatencyMilliseconds = null;
         }
         Endpoint = endpoint;
         string[] choices = [CharacterSelect, .. account.Characters.Select(character => character.Name)];

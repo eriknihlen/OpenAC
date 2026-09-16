@@ -69,6 +69,35 @@ public sealed partial class LauncherWindowViewModelTests
         core.RaiseStateChanged();
         Assert.Null(row.IsServerOnline);
         Assert.Equal("Not checked", row.ServerStatusText);
+        Assert.Equal(0, row.PingBars);
+    }
+
+    [Theory]
+    [InlineData(12, 3)]
+    [InlineData(80, 3)]
+    [InlineData(81, 2)]
+    [InlineData(200, 2)]
+    [InlineData(201, 1)]
+    public void ThePingMeterFillsFewerBarsAsTheReplyGetsSlower(double milliseconds, int bars)
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+        row.IsServerOnline = true;
+        row.LatencyMilliseconds = milliseconds;
+        Assert.Equal(bars, row.PingBars);
+        Assert.True(row.HasLatency);
+    }
+
+    [Fact]
+    public void ThePingMeterIsEmptyForAServerThatDidNotAnswer()
+    {
+        using var core = BatchOrchestrator();
+        using var vm = CreateInitialized(core);
+        var row = vm.Accounts[0].Servers[0];
+        row.LatencyMilliseconds = 15;
+        row.IsServerOnline = false;
+        Assert.Equal(0, row.PingBars);
     }
 
     [Fact]

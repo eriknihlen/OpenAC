@@ -136,7 +136,15 @@
                               <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Select account and server for batch launch" />
                               <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="0,2,0,0">
                                 <Grid ColumnDefinitions="14,*"><Ellipse Width="7" Height="7" Fill="{Binding ServerDotColor}" ToolTip.Tip="{Binding ServerStatusText}" /><TextBlock Grid.Column="1" Text="{Binding ServerName}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" ToolTip.Tip="{Binding Endpoint}" /></Grid>
-                                <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <TextBlock Text="{Binding ServerStatusText}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="Status checks the game endpoint. Player counts are reported by TreeStats, matched by server name." />
+                                  <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" IsVisible="{Binding HasLatency}" ToolTip.Tip="{Binding PingTooltip}">
+                                    <Rectangle Width="3" Height="4" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar1Color}" />
+                                    <Rectangle Width="3" Height="7" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar2Color}" />
+                                    <Rectangle Width="3" Height="10" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom" Fill="{Binding PingBar3Color}" />
+                                  </StackPanel>
+                                  <TextBlock Text="{Binding LatencyText}" Classes="muted" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding HasLatency}" ToolTip.Tip="{Binding PingTooltip}" />
+                                </StackPanel>
                               </StackPanel>
                               <ComboBox Grid.Column="2" ItemsSource="{Binding CharacterChoices}" SelectedItem="{Binding SelectedCharacter, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Character" />
                               <ComboBox Grid.Column="3" ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Center" IsEnabled="{Binding CanEditSelection}" AutomationProperties.Name="Launch mode" />
