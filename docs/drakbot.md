@@ -588,6 +588,7 @@ game's own look.
 ```
 /drakbot start | stop | status | rebuff
 /drakbot spells        (what the character can cast; each configured buff: what would be cast, up or due, or what is in the way)
+/drakbot spells <name> (one spell by name - "Heal Self" - and why it is or is not castable)
 (a file named commands.txt in the bot's folder, one command per line, is read and deleted once a second and each line run as if typed)
 /drakbot folder [profiles|routes|loot|metas|logs]     (where the bot's files are; opens it)
 /drakbot log quiet|info|debug|trace | tail [n] | dump | clear

@@ -52,7 +52,13 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                     Say("rebuffing everything");
                     break;
                 case "spells":
-                    Spells();
+                    if (rest.Length > 0)
+                    {
+                        string name = string.Join(' ', rest);
+                        Say($"{name}: {controller.Buffs.ExplainSpell(name)}");
+                    }
+                    else
+                        Spells();
                     break;
                 case "buffs":
                 case "combat":

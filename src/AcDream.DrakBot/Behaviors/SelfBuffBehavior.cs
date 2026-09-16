@@ -145,6 +145,9 @@ public sealed class SelfBuffBehavior(
     /// One line per configured buff: what would be cast and whether it is
     /// due, or what stands in the way. For the /drakbot spells command.
     /// </summary>
+    /// <summary>Why any spell the user names is, or is not, castable now - a heal as much as a buff.</summary>
+    public string ExplainSpell(string name) => spells.Explain(name);
+
     public IEnumerable<string> Describe(Blackboard board)
     {
         BuffSettings buffs = settings();
