@@ -375,6 +375,11 @@ public sealed class BotSettingsWindow(BotController controller)
         int blacklist = (int)Math.Round(los.BlacklistSeconds);
         if (ImGui.SliderInt("Skip it for (s)", ref blacklist, 5, 300))
             UpdateLineOfSight(p => p with { BlacklistSeconds = blacklist });
+        int environmentHits = los.EnvironmentHitsToDrop;
+        if (ImGui.SliderInt("Give a target up after N shots into the environment", ref environmentHits, 1, 20))
+            UpdateLineOfSight(p => p with { EnvironmentHitsToDrop = environmentHits });
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The server says a shot hit a wall or a door frame. This many in a row at the same target, and it is left alone for a while.");
 
         bool walk = los.CheckWalkPath;
         if (ImGui.Checkbox("Check the ground before walking to a target", ref walk))

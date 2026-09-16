@@ -189,8 +189,9 @@ public sealed class CombatBehavior(
     // running at the same target is a target that cannot be shot from
     // here, and it is given up for another, with a strike toward its
     // blacklist. Six Olthoi at the character's feet once watched it
-    // shoot the same one through a wall for a minute.
-    public const int EnvironmentHitsToDrop = 2;
+    // shoot the same one through a wall for a minute. How many is the
+    // profile's (LineOfSight.EnvironmentHitsToDrop): a fast bow shoots
+    // several times before a monster steps clear of a door frame.
     private uint _environmentHitTarget;
     private int _environmentHits;
     private bool _dropTarget;
@@ -208,8 +209,7 @@ public sealed class CombatBehavior(
             _environmentHits = 0;
         }
         _environmentHits++;
-        lineOfSight.ReportUnreachable(_targetId);
-        if (_environmentHits >= EnvironmentHitsToDrop)
+        if (_environmentHits >= Math.Max(1, settings().LineOfSight.EnvironmentHitsToDrop))
             _dropTarget = true;
     }
 

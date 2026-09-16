@@ -288,6 +288,14 @@ public sealed record LineOfSightSettings
     /// <summary>How long a blacklisted target is skipped.</summary>
     public double BlacklistSeconds { get; init; } = 30d;
 
+    /// <summary>
+    /// A shot the server reports as having hit the environment, this many
+    /// times running at the same target, drops the target and blacklists
+    /// it. A fast bow shoots several times before a monster steps clear
+    /// of a door frame; six is a wall, not a bad moment.
+    /// </summary>
+    public int EnvironmentHitsToDrop { get; init; } = 6;
+
     /// <summary>A verdict is reused for this long before the path is swept again.</summary>
     public double CacheSeconds { get; init; } = 0.75d;
 

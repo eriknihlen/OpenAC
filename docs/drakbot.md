@@ -293,11 +293,12 @@ Ranged styles do not fire blind, and nobody walks into a wall:
 - **Aim heights.** The configured attack height is tried first, then the
   other two. A missile attack uses whichever height was clear. The server has
   the last word: a shot it reports as having *hit the environment* - a
-  door frame the sweep passed, the lip of a floor - is a strike toward
-  the target's blacklist, and two running at the same target drop it
-  and blacklist it outright, for the next one; six Olthoi at the
-  character's feet once watched it shoot the same one through a wall
-  for a minute.
+  door frame the sweep passed, the lip of a floor - counts, and
+  `LineOfSight.EnvironmentHitsToDrop` of them running at the same
+  target (six by default: a fast bow shoots several times before a
+  monster steps clear of a door frame) drop it and blacklist it
+  outright, for the next one; six Olthoi at the character's feet once
+  watched it shoot the same one through a wall for a minute.
 - **Seeing it first.** Before anything else, and for every style, a
   hostile out of reach is looked at: a straight, flat sweep to it at the
   middle height, then the high and the low, cached like a shot. When the
