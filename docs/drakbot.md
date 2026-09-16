@@ -408,7 +408,13 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   marked cell - the walk out comes first. The manual mark stays (the
   Navigation window has Mark / Unmark / Clear buttons).
 - **Patrol on login** (Settings > Navigation) starts a patrol, and the bot,
-  as soon as the character appears in the world inside a dungeon.
+  as soon as the character appears in the world inside a dungeon. The
+  Marketplace and the Town Network are built of cells like any dungeon
+  but are not dungeons to patrol; they are on the profile's no-patrol
+  list (`Navigation.NoPatrolLandblocks`, hex landblock ids) and a patrol
+  is refused there. A character teleported out of its dungeon has its
+  patrol put down (or rebuilt, in another dungeon), and the login patrol
+  re-arms for the next dungeon it enters.
 - `/drakbot goto 41.5N 34.2E` plans a route to a coordinate and follows it.
 
 `/drakbot follow <name>` (or `leader`, for the fellowship's leader) walks

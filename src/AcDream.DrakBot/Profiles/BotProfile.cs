@@ -484,6 +484,14 @@ public sealed record NavigationSettings
     /// <summary>Start a dungeon patrol as soon as the character is in the world inside a dungeon.</summary>
     public bool PatrolOnLogin { get; init; }
 
+    /// <summary>
+    /// Indoor landblocks that are not dungeons to patrol, by hex landblock
+    /// id: the Marketplace is built of cells like any dungeon, and a patrol
+    /// of it is a character walking into players for nothing. The Town
+    /// Network and the Marketplace by default.
+    /// </summary>
+    public IReadOnlyList<string> NoPatrolLandblocks { get; init; } = ["016C", "5F4A", "5F4B", "5F4C", "5F4D", "5F4E", "5F4F"];
+
     /// <summary>Draw the route over the world: a ring at each point, a line to the next, the current one red.</summary>
     public bool ShowMarkers { get; init; } = true;
 

@@ -137,6 +137,21 @@ public sealed class PatrolControllerTests
     }
 
     [Fact]
+    public void TheMarketplaceIsNotADungeonToPatrol()
+    {
+        (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build(out FakeDungeon dungeon);
+        // The fixture's cells, but in the Marketplace's landblock.
+        var cells = dungeon.Cells.Select(c => c with { CellId = 0x016C0000u | (c.CellId & 0xFFFFu), Neighbors = c.Neighbors.Select(n => 0x016C0000u | (n & 0xFFFFu)).ToArray() }).ToArray();
+        dungeon.Cells.Clear();
+        dungeon.Cells.AddRange(cells);
+        surface.Position = new PluginNavigationPosition(0x016C0100u, 0d, 0d, 0d, 0f, false);
+
+        Assert.False(controller.TryStartPatrol(out string message));
+        Assert.Contains("no-patrol list", message);
+        Assert.False(controller.IsPatrolling);
+    }
+
+    [Fact]
     public void PatrolOnLoginStartsTheBotOnceInsideADungeon()
     {
         (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build();

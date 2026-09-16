@@ -205,6 +205,17 @@ public sealed class BotController : IMetaBot
             RebuildPatrol();
     }
 
+    private bool IsNoPatrolLandblock(uint cellId)
+    {
+        string landblock = (cellId >> 16).ToString("X4");
+        foreach (string excluded in Profile.Navigation.NoPatrolLandblocks)
+        {
+            if (string.Equals(excluded.Trim().TrimStart('0', 'x', 'X').PadLeft(4, '0'), landblock, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     private static bool IsHazardName(string name)
     {
         foreach (string pattern in HazardNames)
@@ -761,6 +772,11 @@ public sealed class BotController : IMetaBot
             : DungeonGraph(out snapshot, out message);
         if (graph is null)
             return false;
+        if (IsNoPatrolLandblock(snapshot.Position.CellId))
+        {
+            message = $"landblock 0x{snapshot.Position.CellId >> 16:X4} is on the no-patrol list (a town, not a dungeon)";
+            return false;
+        }
         IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
         uint start = graph.ContainsKey(snapshot.Position.CellId)
             ? snapshot.Position.CellId
