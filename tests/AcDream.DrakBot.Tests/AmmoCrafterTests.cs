@@ -39,6 +39,29 @@ public sealed class AmmoCrafterTests
     }
 
     [Fact]
+    public void APlainBundleOfHeadsNeedsAPlainBundleOfShaftsAndTheWrappedPairComesFirst()
+    {
+        // The game has two sizes of the recipe and they do not mix: a plain
+        // bundle of heads with a wrapped bundle of shafts makes nothing,
+        // which is what a character once carried. With the plain shafts
+        // beside it the hundred is made; with both pairs, the thousand.
+        FakeAutomationSurface surface = Surface(PluginSkillTraining.Specialized);
+        surface.OwnedItems.Add(Item(11, "Wrapped Bundle of Arrowshafts", 5));
+        surface.OwnedItems.Add(Item(12, "Bundle of Deadly Prismatic Arrowheads", 5));
+        Assert.Null(AmmoCrafter.BestCraftable(surface.OwnedItems, AmmoCrafter.WeaponCategory.Bow, PluginSkillTraining.Specialized));
+
+        surface.OwnedItems.Add(Item(13, "Bundle of Arrowshafts", 5));
+        AmmoCrafter.Recipe? recipe = AmmoCrafter.BestCraftable(surface.OwnedItems, AmmoCrafter.WeaponCategory.Bow, PluginSkillTraining.Specialized);
+        Assert.Equal("Bundle of Deadly Prismatic Arrowheads", recipe?.Heads);
+        Assert.Equal("Bundle of Arrowshafts", recipe?.Shafts);
+
+        surface.OwnedItems.Add(Item(14, "Wrapped Bundle of Deadly Prismatic Arrowheads", 5));
+        recipe = AmmoCrafter.BestCraftable(surface.OwnedItems, AmmoCrafter.WeaponCategory.Bow, PluginSkillTraining.Specialized);
+        Assert.Equal("Wrapped Bundle of Deadly Prismatic Arrowheads", recipe?.Heads);
+        Assert.Equal("Wrapped Bundle of Arrowshafts", recipe?.Shafts);
+    }
+
+    [Fact]
     public void TwoCombinesAreMadeEachConfirmedByTheOutputTurningUp()
     {
         FakeAutomationSurface surface = Surface(PluginSkillTraining.Trained);
@@ -69,7 +92,7 @@ public sealed class AmmoCrafterTests
     public void AFailedUseCompletionOrTimeoutGivesUp()
     {
         FakeAutomationSurface surface = Surface(PluginSkillTraining.Specialized);
-        surface.OwnedItems.Add(Item(11, "Wrapped Bundle of Atlatl Dart Shafts", 1));
+        surface.OwnedItems.Add(Item(11, "Wrapped Bundle of Atlatl Dartshafts", 1));
         surface.OwnedItems.Add(Item(12, "Wrapped Bundle of Lethal Prismatic Atlatl Dart Heads", 1));
         var crafter = new AmmoCrafter();
 

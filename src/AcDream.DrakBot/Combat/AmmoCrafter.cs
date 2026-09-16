@@ -218,20 +218,27 @@ public sealed class AmmoCrafter
             ("Frog Crotch", "Frog Crotch", false, 3),
             ("", "", false, 1),
         ];
-        foreach ((WeaponCategory category, string heads, string shafts, string ammo) in new[]
+        // Two sizes of the same recipe: a wrapped bundle of heads with a
+        // wrapped bundle of shafts makes a thousand; a plain bundle of heads
+        // with a plain bundle of shafts makes a hundred. The pairs do not
+        // mix - a wrapped bundle of shafts does nothing with a plain bundle
+        // of heads - so each is a recipe of its own, the thousand first.
+        // (The atlatl's wrapped shafts are one word in the game, its plain ones two.)
+        foreach ((WeaponCategory category, string heads, string wrappedShafts, string plainShafts, string ammo) in new[]
         {
-            (WeaponCategory.Bow, "Arrowheads", "Wrapped Bundle of Arrowshafts", "Arrow"),
-            (WeaponCategory.Crossbow, "Quarrelheads", "Wrapped Bundle of Quarrelshafts", "Quarrel"),
-            (WeaponCategory.Atlatl, "Atlatl Dart Heads", "Wrapped Bundle of Atlatl Dart Shafts", "Atlatl Dart"),
+            (WeaponCategory.Bow, "Arrowheads", "Arrowshafts", "Arrowshafts", "Arrow"),
+            (WeaponCategory.Crossbow, "Quarrelheads", "Quarrelshafts", "Quarrelshafts", "Quarrel"),
+            (WeaponCategory.Atlatl, "Atlatl Dart Heads", "Atlatl Dartshafts", "Atlatl Dart Shafts", "Atlatl Dart"),
         })
         {
             foreach ((string head, string output, bool specialized, int priority) in grades)
             {
                 if (category == WeaponCategory.Atlatl && head == "Frog Crotch")
                     continue;
-                string headName = head.Length == 0 ? $"Wrapped Bundle of {heads}" : $"Wrapped Bundle of {head} {heads}";
                 string outputName = output.Length == 0 ? ammo : $"{output} {ammo}";
-                recipes.Add(new Recipe(headName, shafts, outputName, category, specialized, priority));
+                string headsName = head.Length == 0 ? heads : $"{head} {heads}";
+                recipes.Add(new Recipe($"Wrapped Bundle of {headsName}", $"Wrapped Bundle of {wrappedShafts}", outputName, category, specialized, priority * 2 + 1));
+                recipes.Add(new Recipe($"Bundle of {headsName}", $"Bundle of {plainShafts}", outputName, category, specialized, priority * 2));
             }
         }
         // Highest priority first within a category, so the first craftable match wins.
