@@ -160,6 +160,31 @@ public sealed class BotController : IMetaBot
             }
         }
 
+        // A patrol belongs to its dungeon. Teleported out of it - an admin
+        // command, a portal, a recall - the route is twenty kilometres
+        // away and the walk would detour at the horizon for ever: in a
+        // new dungeon the patrol is rebuilt for it, outdoors it is put
+        // down with a word.
+        if (IsPatrolling && _patrolLandblock != (snapshot.Position.CellId & 0xFFFF0000u))
+        {
+            if (inDungeon)
+            {
+                Log.Warn($"patrol: the character is in another dungeon now (0x{snapshot.Position.CellId & 0xFFFF0000u:X8}); building a patrol for it");
+                if (!TryStartPatrol(out string problem, quiet: true))
+                    Log.Warn($"patrol: could not patrol here ({problem}); route cleared");
+            }
+            else
+            {
+                Log.Warn($"patrol: the character is outdoors at {BotEngine.Describe(snapshot.Position)}, far from its dungeon; patrol stopped");
+                ClearRoute();
+                _patrolLandblock = 0u;
+                // Back in a dungeon later, the login patrol may start again.
+                _patrolOnLoginDone = false;
+                _loginPatrolFirstTryAt = double.NaN;
+            }
+            return;
+        }
+
         if (!inDungeon || ObjectScan is null)
             return;
         bool sighted = false;

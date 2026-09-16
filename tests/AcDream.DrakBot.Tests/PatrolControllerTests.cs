@@ -114,6 +114,29 @@ public sealed class PatrolControllerTests
     }
 
     [Fact]
+    public void ATeleportOutOfTheDungeonPutsThePatrolDownAndLoginPatrolRearms()
+    {
+        (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build();
+        controller.Update(p => p with { Navigation = p.Navigation with { PatrolOnLogin = true } });
+        Assert.True(controller.TryStartPatrol(out _));
+        Assert.True(controller.IsPatrolling);
+
+        // Whisked outdoors, twenty kilometres from the route.
+        surface.Position = new PluginNavigationPosition(0x016C0013u, 0.5d, -0.5d, 0d, 0f, true);
+        clock.Advance(1.5d);
+        controller.Tick(clock.Now);
+        Assert.False(controller.IsPatrolling);
+        Assert.Null(controller.Navigation.Route);
+        Assert.Contains(controller.Log.Snapshot(), line => line.Text.Contains("patrol stopped", StringComparison.Ordinal));
+
+        // Back inside: the login patrol starts over.
+        surface.Position = new PluginNavigationPosition(Block | 0x100, 0d, 0d, 0d, 0f, false);
+        clock.Advance(1.5d);
+        controller.Tick(clock.Now);
+        Assert.True(controller.IsPatrolling);
+    }
+
+    [Fact]
     public void PatrolOnLoginStartsTheBotOnceInsideADungeon()
     {
         (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build();
