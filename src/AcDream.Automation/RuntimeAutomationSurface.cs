@@ -2435,6 +2435,28 @@ public sealed class RuntimeAutomationSurface
     public PluginItemCommandResult Apply(uint objectId, uint targetObjectId)
         => DispatchItem(objectId, targetObjectId);
 
+    public PluginItemCommandResult Appraise(uint objectId)
+    {
+        Func<uint, bool>? identify;
+        GameRuntime? runtime;
+        lock (_gate)
+        {
+            identify = _identifyItem;
+            runtime = _runtime;
+        }
+        if (runtime is null || identify is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        if (!TryGetOwned(objects, playerId, objectId, out _))
+            return new(PluginItemCommandStatus.InvalidItem);
+        if (!runtime.InventoryOwner.Transactions.CanBeginRequest)
+            return new(PluginItemCommandStatus.Busy);
+        return identify(objectId)
+            ? new(PluginItemCommandStatus.Started)
+            : new(PluginItemCommandStatus.Refused);
+    }
+
     public PluginItemCommandResult MoveToContainer(
         uint objectId,
         uint containerObjectId,
@@ -3057,6 +3079,15 @@ public sealed class RuntimeAutomationSurface
             new Dictionary<uint, uint>(source.DataIds),
             new Dictionary<uint, uint>(source.InstanceIds));
 
+    /// <summary>Seconds since the item's last appraisal on the host's clock; negative when it has none, or the host gave no clock.</summary>
+    private double AppraisalAge(ClientObject item)
+    {
+        Func<double>? clientTime = _clientTime;
+        if (clientTime is null || item.LastAppraisalTimeMs == 0)
+            return -1d;
+        return Math.Max(0d, clientTime() - item.LastAppraisalTimeMs / 1000d);
+    }
+
     internal PluginInventoryItem ProjectInventoryItem(
         GameRuntime runtime,
         ClientObject item) =>
@@ -3112,6 +3143,7 @@ public sealed class RuntimeAutomationSurface
             AppraisedSpellIds = item.AppraisedSpellIds.Count == 0
                 ? Array.Empty<uint>()
                 : item.AppraisedSpellIds.ToArray(),
+            AppraisalAgeSeconds = AppraisalAge(item),
             GearDamage = item.Properties.GetInt((uint)PropertyInt.GearDamage),
             GearDamageResistance = item.Properties.GetInt(
                 (uint)PropertyInt.GearDamageResist),

@@ -27,6 +27,24 @@ public sealed class SelfBuffBehavior(
     private uint _pendingFamily;
     private uint _pendingTarget;
 
+    // ── armor ──────────────────────────────────────────────────────────
+    // What a worn piece has on it is only ever learnt by asking the server
+    // about the piece: an item enchantment never reaches the character's
+    // own registry, and the appraisal lists what is on the item without a
+    // time. So a piece is appraised when the answer is older than this,
+    // and judged by the appraisal - present or not - with the client's
+    // own record of what the bot landed on it, which does carry a time,
+    // taking precedence while it lasts. A buff that lapses is seen within
+    // one appraisal and put back; that is the most a retail client can
+    // know, and it is enough.
+    public const double ArmorAppraiseSeconds = 120d;
+    /// <summary>The most an appraisal is waited for before it is asked for again.</summary>
+    public const double AppraiseWaitSeconds = 4d;
+    private uint _appraising;
+    private double _appraiseSentAt = double.NegativeInfinity;
+
+    private enum ArmorNeed { None, Appraise, Cast }
+
     public string Name => "buffs";
 
     private const double PendingWaitSeconds = 8d;
@@ -80,6 +98,11 @@ public sealed class SelfBuffBehavior(
             reason = $"{spell.Name} due";
             return true;
         }
+        if (buffs.BuffArmor && surface is not null && NextArmorNeed(board, buffs, out _, out PluginInventoryItem piece) == ArmorNeed.Appraise)
+        {
+            reason = $"asking about {piece.Name}";
+            return true;
+        }
         return false;
     }
 
@@ -118,7 +141,11 @@ public sealed class SelfBuffBehavior(
         _pendingSince = double.NaN;
 
         if (!TryNextDue(board, buffs, out PluginSpellInfo spell, out uint target))
+        {
+            if (buffs.BuffArmor && surface is not null && NextArmorNeed(board, buffs, out _, out PluginInventoryItem piece) == ArmorNeed.Appraise)
+                return Appraise(board, piece);
             return BehaviorStep.Done;
+        }
         if (spell.SpellId == _lastSucceededSpell && board.Now - _lastSucceededAt < NoEffectWindowSeconds)
         {
             if (++_noEffectStrikes >= NoEffectStrikes)
@@ -147,6 +174,22 @@ public sealed class SelfBuffBehavior(
     {
         casts.Clear();
         _magic.Reset();
+        _appraising = 0u;
+    }
+
+    /// <summary>Asks the server about a worn piece, once, and waits for the answer to arrive.</summary>
+    private BehaviorStep Appraise(Blackboard board, in PluginInventoryItem piece)
+    {
+        if (_appraising == piece.ObjectId && board.Now - _appraiseSentAt < AppraiseWaitSeconds)
+            return BehaviorStep.Continue;
+        PluginItemCommandResult result = surface!.Items.Appraise(piece.ObjectId);
+        if (result.Status == PluginItemCommandStatus.Busy)
+            return BehaviorStep.Continue;
+        if (!result.Accepted)
+            return BehaviorStep.Fail($"cannot ask about {piece.Name}: {result.Status} {result.Notice}".TrimEnd());
+        _appraising = piece.ObjectId;
+        _appraiseSentAt = board.Now;
+        return BehaviorStep.Continue;
     }
 
     /// <summary>
@@ -226,10 +269,22 @@ public sealed class SelfBuffBehavior(
                     }
                     onPiece ??= surface.Enchantments.Capture(item.ObjectId);
                     double remaining = Remaining(onPiece, candidate.Family);
+                    bool fresh = IsAppraisalFresh(item);
+                    bool present = fresh && AppraisalShows(item, candidate);
+                    // On record with a time: that time. Seen on the piece by
+                    // the appraisal, time unknown: up, not due. Not asked yet:
+                    // not due either - asked first.
+                    bool due = remaining >= 0d
+                        ? remaining <= buffs.RebuffWhenRemainingSeconds
+                        : fresh && !present;
+                    string? problem = fresh || remaining >= 0d ? null : "not asked about yet";
                     report.Add(new BuffStatus(
                         name, "armor", candidate.Name, candidate.SpellId, candidate.Family, candidate.Tier,
-                        remaining, remaining <= buffs.RebuffWhenRemainingSeconds, casts.IsOnCooldown(candidate.SpellId), null,
-                        item.Name, item.ObjectId));
+                        remaining, due, casts.IsOnCooldown(candidate.SpellId), problem,
+                        item.Name, item.ObjectId)
+                    {
+                        IsUpUntimed = remaining < 0d && present,
+                    });
                 }
             }
         }
@@ -325,12 +380,31 @@ public sealed class SelfBuffBehavior(
 
     private bool TryDueArmor(Blackboard board, BuffSettings buffs, out PluginSpellInfo spell, out uint target)
     {
-        spell = default;
         target = 0u;
+        if (NextArmorNeed(board, buffs, out spell, out PluginInventoryItem piece) != ArmorNeed.Cast)
+            return false;
+        target = piece.ObjectId;
+        return true;
+    }
+
+    /// <summary>
+    /// The next thing the armor wants: a spell to cast on a piece the
+    /// appraisal and the record agree is without it, else a piece whose
+    /// appraisal is missing or old. Casts come first, so a pass over the
+    /// set is not held up by asking.
+    /// </summary>
+    private ArmorNeed NextArmorNeed(Blackboard board, BuffSettings buffs, out PluginSpellInfo spell, out PluginInventoryItem piece)
+    {
+        spell = default;
+        piece = default;
+        PluginInventoryItem? stale = null;
         foreach (PluginInventoryItem item in surface!.Items.CaptureOwnedItems())
         {
             if (!item.IsEquipped || item.ObjectClass != PluginObjectClass.Armor)
                 continue;
+            bool fresh = IsAppraisalFresh(item);
+            if (!fresh && stale is null && (_appraising != item.ObjectId || board.Now - _appraiseSentAt >= AppraiseWaitSeconds || item.AppraisalAgeSeconds < 0d))
+                stale = item;
             IReadOnlyList<PluginTrackedEnchantment>? landed = null;
             foreach (string name in buffs.ArmorSpells)
             {
@@ -338,10 +412,46 @@ public sealed class SelfBuffBehavior(
                     continue;
                 bool forced = _forceRebuff && !_forcedFamiliesDone.Contains(FamilyOn(candidate.Family, item.ObjectId));
                 landed ??= surface.Enchantments.Capture(item.ObjectId);
-                if (!forced && IsCovered(landed, candidate, buffs.RebuffWhenRemainingSeconds))
-                    continue;
+                if (!forced)
+                {
+                    // The record, when it has the family, decides by time; a
+                    // record that has run out is not a record of absence,
+                    // since it is only what this session cast.
+                    double onRecord = Remaining(landed, candidate.Family);
+                    if (onRecord > buffs.RebuffWhenRemainingSeconds)
+                        continue;
+                    if (onRecord < 0d && (!fresh || AppraisalShows(item, candidate)))
+                        continue;
+                }
                 spell = candidate;
-                target = item.ObjectId;
+                piece = item;
+                return ArmorNeed.Cast;
+            }
+        }
+        if (stale is { } toAsk)
+        {
+            piece = toAsk;
+            return ArmorNeed.Appraise;
+        }
+        return ArmorNeed.None;
+    }
+
+    private static bool IsAppraisalFresh(in PluginInventoryItem item) =>
+        item.AppraisalAgeSeconds >= 0d && item.AppraisalAgeSeconds <= ArmorAppraiseSeconds;
+
+    /// <summary>Whether the last appraisal of the piece listed an enchantment of the spell's family at its tier or better.</summary>
+    private bool AppraisalShows(in PluginInventoryItem item, in PluginSpellInfo candidate)
+    {
+        foreach (uint listed in item.AppraisedSpellIds)
+        {
+            if ((listed & PluginInventoryItem.ActiveEnchantmentMask) == 0u)
+                continue;
+            uint spellId = listed & ~PluginInventoryItem.ActiveEnchantmentMask;
+            if (spellId == candidate.SpellId)
+                return true;
+            if (surface!.Spells.TryGet(spellId, out PluginSpellInfo onPiece)
+                && onPiece.Family == candidate.Family && onPiece.Tier >= candidate.Tier)
+            {
                 return true;
             }
         }
@@ -404,5 +514,8 @@ public sealed record BuffStatus(
     string? ItemName,
     uint ItemId)
 {
-    public bool IsUp => SecondsRemaining >= 0d;
+    /// <summary>Seen on the piece by an appraisal, which carries no time: up, with <see cref="SecondsRemaining"/> negative.</summary>
+    public bool IsUpUntimed { get; init; }
+
+    public bool IsUp => SecondsRemaining >= 0d || IsUpUntimed;
 }

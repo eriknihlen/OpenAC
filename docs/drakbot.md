@@ -198,6 +198,29 @@ mana kinds, by the kit's booster) whenever the spell cannot be cast. A
 kit heals by the Healing skill, which is what a character with such
 vitals has.
 
+### Item buffs
+
+The weapon auras (Blood Drinker, Defender, Heart Seeker, Swift Killer -
+"Aura of ... Self" in the book, named without the prefix in the profile)
+are self-casts that land in the character's own registry, and are kept
+up like any self buff. The armor spells (Impenetrability, the Banes)
+land on the piece, and an item enchantment never reaches the
+character's registry: what a worn piece has on it is only ever learnt
+by asking the server about the piece. The appraisal lists what is on
+the item (`PluginInventoryItem.AppraisedSpellIds`, the enchantments
+marked with `ActiveEnchantmentMask`) but not for how long. So with armor
+buffing on, each worn piece is appraised (`IItemAutomation.Appraise`)
+when its answer is older than two minutes, and judged by it: a family
+the appraisal shows on the piece is up, time unknown; one it does not
+show is due. The client's own record of what the bot landed on the
+piece this session (`IEnchantmentAutomation.Capture`) does carry a
+time, and takes precedence while it lasts, so a buff the bot cast is
+recast just before it lapses; one from before a relogin is recast
+within one appraisal of lapsing. That is the most a retail client can
+know about an item's enchantments, and it is enough. The report's
+armor lines say "up, time unknown" (`IsUpUntimed`) for the former and
+"not asked about yet" before the first appraisal.
+
 ## Weapons and ammunition
 
 The Combat tab names a weapon per style (melee, missile, wand) and a

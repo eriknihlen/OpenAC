@@ -50,8 +50,19 @@ public readonly record struct PluginInventoryItem(
     public int BoosterVital { get; init; }
     public int BoostValue { get; init; }
     public double HealKitModifier { get; init; }
+    /// <summary>
+    /// The spells the last appraisal listed: the item's own, and - with
+    /// <see cref="ActiveEnchantmentMask"/> set - the enchantments on it
+    /// at the time, as the server marks them. Empty until appraised.
+    /// </summary>
     public IReadOnlyList<uint> AppraisedSpellIds { get; init; } =
         Array.Empty<uint>();
+
+    /// <summary>The bit an appraisal sets on a spell id that is an enchantment on the item rather than a spell of the item's own.</summary>
+    public const uint ActiveEnchantmentMask = 0x80000000u;
+
+    /// <summary>Seconds since the last appraisal of this item arrived; negative when it never has.</summary>
+    public double AppraisalAgeSeconds { get; init; } = -1d;
     public int GearDamage { get; init; }
     public int GearDamageResistance { get; init; }
     public int GearCriticalChance { get; init; }
@@ -157,6 +168,16 @@ public interface IItemAutomation
         new(PluginItemCommandStatus.Unavailable);
 
     PluginItemCommandResult Apply(uint objectId, uint targetObjectId) =>
+        new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Asks the server about an item the character owns; the answer lands
+    /// in <see cref="PluginInventoryItem.AppraisedSpellIds"/> and the
+    /// item's properties, and <see cref="PluginInventoryItem.AppraisalAgeSeconds"/>
+    /// starts over. What a wielded piece of armor has on it is only ever
+    /// learnt this way.
+    /// </summary>
+    PluginItemCommandResult Appraise(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
     PluginItemCommandResult MoveToContainer(

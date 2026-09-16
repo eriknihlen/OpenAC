@@ -306,6 +306,29 @@ internal sealed class FakeAutomationSurface
         Commands.Add($"apply:{objectId}@{targetObjectId}");
         return new(PluginItemCommandStatus.Started);
     }
+    /// <summary>What the server would list as on each item when asked; answered at once by <see cref="Appraise"/>.</summary>
+    public Dictionary<uint, uint[]> OnItem { get; } = [];
+    public PluginItemCommandResult Appraise(uint objectId)
+    {
+        Commands.Add($"appraise:{objectId}");
+        int index = OwnedItems.FindIndex(i => i.ObjectId == objectId);
+        if (index < 0)
+            return new(PluginItemCommandStatus.InvalidItem);
+        MarkAppraised(objectId, OnItem.TryGetValue(objectId, out uint[]? on) ? on : []);
+        return new(PluginItemCommandStatus.Started);
+    }
+    /// <summary>The appraisal of an item has just arrived, listing these enchantments as on it.</summary>
+    public void MarkAppraised(uint objectId, params uint[] activeSpellIds)
+    {
+        int index = OwnedItems.FindIndex(i => i.ObjectId == objectId);
+        if (index < 0)
+            return;
+        OwnedItems[index] = OwnedItems[index] with
+        {
+            AppraisalAgeSeconds = 0d,
+            AppraisedSpellIds = activeSpellIds.Select(id => id | PluginInventoryItem.ActiveEnchantmentMask).ToArray(),
+        };
+    }
     public PluginItemCommandResult MoveToContainer(uint objectId, uint containerObjectId, uint amount = 0u, int placement = 0)
     {
         Commands.Add($"move:{objectId}>{containerObjectId}");

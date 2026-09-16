@@ -55,6 +55,7 @@ public sealed class SelfBuffBehaviorTests
         surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 1000d)); // strength up for a while
         surface.Enchantments.Add(new PluginActiveEnchantment(11u, 101u, 6, 30d));   // endurance about to lapse
         surface.OwnedItems.Add(Armor(0x8000_0001u, "Coat"));
+        surface.MarkAppraised(0x8000_0001u); // asked, and nothing on it
 
         IReadOnlyList<BuffStatus> report = behavior.Report(Context(surface, clock).Board);
 
@@ -105,7 +106,13 @@ public sealed class SelfBuffBehaviorTests
         surface.ReportCast(surface.ObjectId, 13u, 1800d);
         behavior.Execute(Context(surface, clock));
 
-        // Then Impenetrability on each piece of armor, once per piece.
+        // The armor is asked about first - what is on a piece is only ever
+        // learnt from the server - then Impenetrability goes on each piece
+        // the answer shows without it, once per piece.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
+        Assert.Equal("asking about Coat", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal("appraise:2147483649", surface.Commands[^1]);
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
         Assert.Contains("Impenetrability", reason);
         behavior.Execute(Context(surface, clock));
@@ -114,12 +121,56 @@ public sealed class SelfBuffBehaviorTests
         surface.ReportCast(0x8000_0001u, 14u, 1800d);
         behavior.Execute(Context(surface, clock));
         behavior.Execute(Context(surface, clock));
+        Assert.Equal("appraise:2147483650", surface.Commands[^1]);
+        behavior.Execute(Context(surface, clock));
         Assert.Equal("cast:14@2147483650", surface.Commands[^1]);
         surface.CompleteCast(14, target: 0x8000_0002u);
         surface.ReportCast(0x8000_0002u, 14u, 1800d);
         behavior.Execute(Context(surface, clock));
 
         Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+    }
+
+    [Fact]
+    public void ArmorAlreadyBuffedByTheAppraisalIsLeftAloneUntilTheAppraisalSaysOtherwise()
+    {
+        // After a relogin the client has no record of what it cast on the
+        // armor, and nothing of it is in the character's registry; the
+        // appraisal shows the buff on the piece, and that is enough. Once
+        // a later appraisal no longer lists it, it is put back.
+        var settings = new BuffSettings
+        {
+            Spells = [],
+            ArmorSpells = ["Impenetrability"],
+            BuffArmor = true,
+            RebuffWhenRemainingSeconds = 60d,
+        };
+        (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(settings);
+        surface.OwnedItems.Add(Armor(0x8000_0001u, "Coat"));
+        surface.OnItem[0x8000_0001u] = [14u];
+
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("asking about Coat", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal(["appraise:2147483649"], surface.Commands);
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        BuffStatus status = behavior.Report(Context(surface, clock).Board).Single();
+        Assert.True(status.IsUp);
+        Assert.True(status.IsUpUntimed);
+        Assert.False(status.Due);
+
+        // Two minutes on, the piece is asked about again; the buff has lapsed.
+        clock.Advance(SelfBuffBehavior.ArmorAppraiseSeconds + 1d);
+        int index = surface.OwnedItems.FindIndex(i => i.ObjectId == 0x8000_0001u);
+        surface.OwnedItems[index] = surface.OwnedItems[index] with { AppraisalAgeSeconds = SelfBuffBehavior.ArmorAppraiseSeconds + 1d };
+        surface.OnItem[0x8000_0001u] = [];
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
+        Assert.Equal("asking about Coat", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
+        Assert.Equal("Impenetrability VI due", reason);
+        behavior.Execute(Context(surface, clock));
+        Assert.Equal("cast:14@2147483649", surface.Commands[^1]);
     }
 
     private static BehaviorContext Context(FakeAutomationSurface surface, TickClock clock) =>

@@ -95,8 +95,13 @@ public static class SpellLore
         ("Bludgeoning", "Bludgeon"),
     ];
 
+    /// <summary>The book's prefix on the weapon auras - "Aura of Blood Drinker Self VI" - which a profile leaves off.</summary>
+    private const string AuraPrefix = "Aura of ";
+
     private static string Normalize(string baseName)
     {
+        if (baseName.StartsWith(AuraPrefix, StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[AuraPrefix.Length..];
         string[] words = baseName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         bool changed = false;
         for (int index = 0; index < words.Length; index++)
@@ -145,8 +150,8 @@ public static class SpellLore
             return false;
         foreach (string name in lore)
         {
-            if (string.Equals(bookBaseName, name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(bookBaseName, name + suffix, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(bookBaseName, Normalize(name), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(bookBaseName, Normalize(name + suffix), StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

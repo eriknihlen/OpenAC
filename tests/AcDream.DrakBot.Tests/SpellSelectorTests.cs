@@ -36,6 +36,8 @@ public sealed class SpellSelectorTests
     [InlineData("Flame Protection Self", "Fire Protection Self VI")]
     [InlineData("Frost Protection Self", "Cold Protection Self VI")]
     [InlineData("Fire Protection Self", "Fire Protection Self VI")]
+    [InlineData("Blood Drinker Self", "Aura of Blood Drinker Self VI")]
+    [InlineData("Swift Killer Self", "Aura of Swift Killer Self VI")]
     public void TheOldNamesForTheProtectionsFindTheBooksSpelling(string asked, string book)
     {
         var surface = new FakeAutomationSurface();

@@ -224,6 +224,8 @@ internal sealed class RemoteStatusBuilder
             json.WriteNumber("family", buff.Family);
             json.WriteNumber("tier", buff.Tier);
             json.WriteNumber("secondsRemaining", buff.IsUp ? Math.Round(buff.SecondsRemaining) : -1d);
+            // An armor buff the appraisal shows on the piece, with no time to it: up, secondsRemaining -1.
+            json.WriteBoolean("upUntimed", buff.IsUpUntimed);
             json.WriteBoolean("due", buff.Due);
             json.WriteBoolean("onCooldown", buff.OnCooldown);
             if (buff.Problem is not null) json.WriteString("problem", buff.Problem); else json.WriteNull("problem");
