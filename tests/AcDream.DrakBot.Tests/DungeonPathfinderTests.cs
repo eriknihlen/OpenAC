@@ -64,6 +64,32 @@ public sealed class DungeonPathfinderTests
     }
 
     [Fact]
+    public void APatrolCrossesAHazardThatJoinsTwoHalvesButNeverToursIt()
+    {
+        // Two rooms either side of an acid corridor: a patrol that closed
+        // the corridor outright would loop one room for ever.
+        var graph = DungeonPathfinder.Graph(
+        [
+            Cell(0x300, 0d, 0d, 0d, 0x301),
+            Cell(0x301, 20d, 0d, 0d, 0x300, 0x302),
+            Cell(0x302, 40d, 0d, 0d, 0x301, 0x303),
+            Cell(0x303, 60d, 0d, 0d, 0x302, 0x304),
+            Cell(0x304, 80d, 0d, 0d, 0x303),
+        ]);
+        var hazards = new HashSet<uint> { Block | 0x302 };
+
+        Route patrol = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x300, hazards);
+        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d > 65d);   // the far room is reached
+        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d < 15d);   // and the near one kept
+
+        // The corridor itself is crossed, not toured: a path may use it at a price ...
+        List<uint> across = DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304, hazards, crossHazards: true);
+        Assert.Equal(5, across.Count);
+        // ... and is closed to a path that has not asked to cross.
+        Assert.Empty(DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304, hazards));
+    }
+
+    [Fact]
     public void HazardsAreRoutedAroundUnlessTheyAreTheGoal()
     {
         Dictionary<uint, PluginDungeonCell> graph = Loop();

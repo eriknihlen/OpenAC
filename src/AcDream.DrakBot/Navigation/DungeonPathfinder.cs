@@ -127,7 +127,11 @@ public static class DungeonPathfinder
     /// A*, doorway to doorway, skipping drops and hazard cells (the goal is
     /// allowed to be one: the caller asked to go there). Empty when unreachable.
     /// </summary>
-    public static List<uint> FindPath(Dictionary<uint, PluginDungeonCell> graph, uint start, uint goal, IReadOnlySet<uint>? hazards = null)
+    /// <summary>What crossing a hazard cell costs in path terms, when crossing is allowed at all: a long way round is taken instead whenever there is one.</summary>
+    public const double HazardCrossingMeters = 60d;
+
+    /// <param name="crossHazards">Hazard cells may be walked through, at <see cref="HazardCrossingMeters"/> each, instead of being closed; for when the only way on is through them.</param>
+    public static List<uint> FindPath(Dictionary<uint, PluginDungeonCell> graph, uint start, uint goal, IReadOnlySet<uint>? hazards = null, bool crossHazards = false)
     {
         if (!graph.TryGetValue(start, out PluginDungeonCell startCell) || !graph.TryGetValue(goal, out PluginDungeonCell goalCell))
             return new List<uint>();
@@ -152,9 +156,10 @@ public static class DungeonPathfinder
             {
                 if (closed.Contains(next) || !graph.TryGetValue(next, out PluginDungeonCell nextCell) || IsDropEdge(cell, nextCell))
                     continue;
-                if (next != goal && hazards is not null && hazards.Contains(next))
+                bool hazard = next != goal && hazards is not null && hazards.Contains(next);
+                if (hazard && !crossHazards)
                     continue;
-                double tentative = soFar + cell.Position.HorizontalDistanceMeters(nextCell.Position);
+                double tentative = soFar + cell.Position.HorizontalDistanceMeters(nextCell.Position) + (hazard ? HazardCrossingMeters : 0d);
                 if (tentative < cost.GetValueOrDefault(next, double.PositiveInfinity))
                 {
                     cameFrom[next] = current;
@@ -247,7 +252,14 @@ public static class DungeonPathfinder
     /// </summary>
     public static Route BuildPatrolRoute(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, string name = "patrol")
     {
-        HashSet<uint> main = MainRouteCells(graph, start, hazards);
+        // The main route is taken over the whole dungeon, hazards and all:
+        // a marked cell is not toured - none of its corridors is a corridor
+        // to walk for its own sake - but it may be crossed on the way from
+        // one safe part to another. Closing it outright once cut a
+        // dungeon in two at an acid pool and left the patrol a 25-step
+        // loop on the far side; the walk crosses in seconds, and combat
+        // never fights from inside a marked cell.
+        HashSet<uint> main = MainRouteCells(graph, start, hazards: null);
         var adjacency = new Dictionary<uint, List<uint>>();
         var edges = new HashSet<ulong>();
         foreach (uint id in main)
@@ -261,14 +273,15 @@ public static class DungeonPathfinder
                 if (!adjacency.TryGetValue(id, out List<uint>? list))
                     adjacency[id] = list = new List<uint>();
                 list.Add(next);
-                edges.Add(EdgeKey(id, next));
+                if (hazards is null || (!hazards.Contains(id) && !hazards.Contains(next)))
+                    edges.Add(EdgeKey(id, next));
             }
         }
 
         var waypoints = new List<Waypoint>();
-        uint walkStart = adjacency.TryGetValue(start, out List<uint>? startList) && startList.Count > 0
+        uint walkStart = adjacency.TryGetValue(start, out List<uint>? startList) && startList.Count > 0 && (hazards is null || !hazards.Contains(start))
             ? start
-            : NearestCellWithEdges(graph, adjacency, start);
+            : NearestCellWithEdges(graph, adjacency, start, hazards);
         if (walkStart == 0u || edges.Count == 0)
             return new Route { Name = name, Mode = RouteMode.Loop, Waypoints = waypoints };
 
@@ -323,7 +336,7 @@ public static class DungeonPathfinder
         int loopStart = 0;
         if (walkStart != start && graph.ContainsKey(start))
         {
-            List<uint> leadIn = FindPath(graph, start, walkStart, hazards);
+            List<uint> leadIn = FindPath(graph, start, walkStart, hazards, crossHazards: true);
             for (int index = 0; index + 1 < leadIn.Count; index++)
             {
                 if (graph.TryGetValue(leadIn[index], out PluginDungeonCell from) && graph.TryGetValue(leadIn[index + 1], out PluginDungeonCell to))
@@ -503,12 +516,12 @@ public static class DungeonPathfinder
     private static ulong EdgeKey(uint a, uint b) =>
         a < b ? ((ulong)a << 32) | b : ((ulong)b << 32) | a;
 
-    private static uint NearestCellWithEdges(Dictionary<uint, PluginDungeonCell> graph, Dictionary<uint, List<uint>> adjacency, uint fromCell)
+    private static uint NearestCellWithEdges(Dictionary<uint, PluginDungeonCell> graph, Dictionary<uint, List<uint>> adjacency, uint fromCell, IReadOnlySet<uint>? hazards = null)
     {
         if (!graph.TryGetValue(fromCell, out PluginDungeonCell from))
         {
             foreach (KeyValuePair<uint, List<uint>> pair in adjacency)
-                if (pair.Value.Count > 0)
+                if (pair.Value.Count > 0 && (hazards is null || !hazards.Contains(pair.Key)))
                     return pair.Key;
             return 0u;
         }
@@ -516,7 +529,7 @@ public static class DungeonPathfinder
         double bestDistance = double.PositiveInfinity;
         foreach (KeyValuePair<uint, List<uint>> pair in adjacency)
         {
-            if (pair.Value.Count == 0 || !graph.TryGetValue(pair.Key, out PluginDungeonCell cell))
+            if (pair.Value.Count == 0 || !graph.TryGetValue(pair.Key, out PluginDungeonCell cell) || (hazards is not null && hazards.Contains(pair.Key)))
                 continue;
             double distance = cell.Position.HorizontalDistanceMeters(from.Position);
             if (distance < bestDistance)
