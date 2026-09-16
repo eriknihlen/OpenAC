@@ -22,6 +22,9 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
     /// <summary>How often a new status goes out to the phone at most.</summary>
     public const double StatusIntervalSeconds = 0.15;
 
+    /// <summary>How long an unchanged status is held back before it goes out anyway, so the feed reads as alive.</summary>
+    public const double StatusHeartbeatSeconds = 3d;
+
     /// <summary>How often the pack and the settings are re-read.</summary>
     public const double DocumentIntervalSeconds = 1d;
 
@@ -42,6 +45,7 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
     private IDisposable? _commandLease;
     private bool _enabled;
     private double _statusPublishedAt = double.NegativeInfinity;
+    private double _statusBuiltAt = double.NegativeInfinity;
     private double _documentsPublishedAt = double.NegativeInfinity;
     private string? _lastSettingsJson;
 
@@ -187,10 +191,17 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
             return;
         try
         {
-            if (now - _statusPublishedAt >= StatusIntervalSeconds)
+            if (now - _statusBuiltAt >= StatusIntervalSeconds)
             {
-                _statusPublishedAt = now;
-                server.PublishStatus(_status.Build(now));
+                _statusBuiltAt = now;
+                byte[] status = _status.Build(now);
+                // Vitals and chat change the document many times a second in a fight; an idle
+                // client's would only differ by its timestamp, and that is not worth a push.
+                if (_status.Changed || now - _statusPublishedAt >= StatusHeartbeatSeconds)
+                {
+                    _statusPublishedAt = now;
+                    server.PublishStatus(status);
+                }
             }
             if (now - _documentsPublishedAt >= DocumentIntervalSeconds)
             {

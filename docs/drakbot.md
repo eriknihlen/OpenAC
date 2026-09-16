@@ -758,8 +758,15 @@ screens carry over:
   and rates, XP and deaths this session (from the character's own
   properties), burden, free slots, scarabs by tier and tapers, the worn
   gear with its appraisal, position and area, the last sixty chat lines,
-  and the last warning. `GET /statusfeed` is the same over a WebSocket,
-  pushed within ~150 ms of a change. The document also states the
+  the last warning, every enchantment in force (`enchantments`, soonest
+  to lapse first, named through the spell catalog) and the bot's own buff
+  list as it stands (`buffPlan`: each configured self buff, weapon aura
+  and armor spell per piece, what it resolved to, time left, whether it
+  is due by the profile's threshold, and why a name could not be cast -
+  `SelfBuffBehavior.Report`). `GET /statusfeed` is the same over a WebSocket,
+  pushed within ~150 ms of a change - and only of a change: a document
+  that differs from the last only by its timestamp is held back, going
+  out every three seconds so the feed still reads as alive. The document also states the
   server's `capabilities` so the app hides what a host cannot do.
 - `POST /command` `{"action":..,"value":..}` - `macro`, `combat`,
   `buffing`, `navigation`, `looting`, `meta` (on/off), `navProfile`,

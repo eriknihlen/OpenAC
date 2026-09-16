@@ -40,6 +40,46 @@ public sealed class SelfBuffBehaviorTests
     };
 
     [Fact]
+    public void TheReportSaysHowEachConfiguredBuffStands()
+    {
+        var settings = new BuffSettings
+        {
+            Spells = ["Strength Self", "Endurance Self", "Fireball Self"],
+            WeaponSpells = ["Blood Drinker Self"],
+            ArmorSpells = ["Impenetrability"],
+            BuffWeapon = true,
+            BuffArmor = true,
+            RebuffWhenRemainingSeconds = 60d,
+        };
+        (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(settings);
+        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 1000d)); // strength up for a while
+        surface.Enchantments.Add(new PluginActiveEnchantment(11u, 101u, 6, 30d));   // endurance about to lapse
+        surface.OwnedItems.Add(Armor(0x8000_0001u, "Coat"));
+
+        IReadOnlyList<BuffStatus> report = behavior.Report(Context(surface, clock).Board);
+
+        BuffStatus strength = report.Single(b => b.Configured == "Strength Self");
+        Assert.Equal("Strength Self VI", strength.SpellName);
+        Assert.Equal(1000d, strength.SecondsRemaining);
+        Assert.True(strength.IsUp);
+        Assert.False(strength.Due);
+        BuffStatus endurance = report.Single(b => b.Configured == "Endurance Self");
+        Assert.True(endurance.IsUp);
+        Assert.True(endurance.Due);
+        BuffStatus unknown = report.Single(b => b.Configured == "Fireball Self");
+        Assert.Null(unknown.SpellName);
+        Assert.NotNull(unknown.Problem);
+        BuffStatus aura = report.Single(b => b.Kind == "weapon");
+        Assert.Equal("Blood Drinker Self VI", aura.SpellName);
+        Assert.False(aura.IsUp);
+        Assert.True(aura.Due);
+        BuffStatus armor = report.Single(b => b.Kind == "armor");
+        Assert.Equal("Coat", armor.ItemName);
+        Assert.Equal("Impenetrability VI", armor.SpellName);
+        Assert.True(armor.Due);
+    }
+
+    [Fact]
     public void WeaponAurasAndArmorSpellsFollowThePlayerBuffs()
     {
         var settings = new BuffSettings

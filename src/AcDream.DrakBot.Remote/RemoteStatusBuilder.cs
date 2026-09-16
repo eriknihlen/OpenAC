@@ -62,6 +62,8 @@ internal sealed class RemoteStatusBuilder
     private IReadOnlyList<string> _navProfiles = [];
     private IReadOnlyList<string> _lootProfiles = [];
     private IReadOnlyList<string> _metaProfiles = [];
+    private IReadOnlyList<BuffStatus> _buffPlan = [];
+    private ulong _lastContentHash;
 
     public RemoteStatusBuilder(
         BotController controller,
@@ -78,6 +80,13 @@ internal sealed class RemoteStatusBuilder
     }
 
     public bool UiHidden { get; set; }
+
+    /// <summary>
+    /// Whether the last <see cref="Build"/> differed from the one before
+    /// it in anything but its timestamp, so a publisher can spare the
+    /// phone a push that says nothing new.
+    /// </summary>
+    public bool Changed { get; private set; } = true;
 
     /// <summary>The profile lists as the phone indexes them, for the picker commands.</summary>
     public IReadOnlyList<string> Profiles => _profiles;
@@ -115,7 +124,12 @@ internal sealed class RemoteStatusBuilder
         json.WriteString("schema", Schema);
         json.WriteString("host", Environment.MachineName);
         json.WriteString("agentVersion", DrakBotRemotePlugin.Version);
-        json.WriteString("generatedAtUtc", DateTimeOffset.UtcNow);
+        json.WritePropertyName("generatedAtUtc");
+        json.Flush();
+        int stampStart = _buffer.WrittenCount;
+        json.WriteStringValue(DateTimeOffset.UtcNow);
+        json.Flush();
+        int stampEnd = _buffer.WrittenCount;
         json.WriteNumber("clientCount", 1);
         json.WritePropertyName("capabilities");
         // The renderer binds after the plugins start, so video is answered live rather than at start-up.
@@ -168,6 +182,56 @@ internal sealed class RemoteStatusBuilder
         json.WriteNumber("selectedLootIdx", IndexOf(_lootProfiles, profile.Loot.UtlProfile));
         json.WriteNumber("selectedMetaIdx", meta is null ? -1 : IndexOf(_metaProfiles, meta.MetaName));
         json.WriteBoolean("forceRebuffPending", _controller.Buffs.IsForceRebuffPending);
+        json.WritePropertyName("buffing");
+        json.WriteStartObject();
+        json.WriteBoolean("enabled", profile.Buffs.Enabled);
+        json.WriteNumber("rebuffWhenRemainingSeconds", profile.Buffs.RebuffWhenRemainingSeconds);
+        json.WriteBoolean("buffWeapon", profile.Buffs.BuffWeapon);
+        json.WriteBoolean("buffArmor", profile.Buffs.BuffArmor);
+        json.WriteBoolean("forcePending", _controller.Buffs.IsForceRebuffPending);
+        json.WriteEndObject();
+        // Everything in force on the character, by time left; the phone counts these down.
+        json.WritePropertyName("enchantments");
+        json.WriteStartArray();
+        if (inWorld)
+        {
+            foreach (PluginActiveEnchantment active in character.ActiveEnchantments.OrderBy(static e => e.SecondsRemaining))
+            {
+                bool known = _surface.Spells.TryGet(active.SpellId, out PluginSpellInfo info);
+                json.WriteStartObject();
+                json.WriteNumber("spellId", active.SpellId);
+                json.WriteString("name", known ? info.Name : "Spell " + active.SpellId.ToString(CultureInfo.InvariantCulture));
+                json.WriteNumber("family", active.Family);
+                json.WriteNumber("tier", active.Tier);
+                json.WriteNumber("secondsRemaining", Math.Round(active.SecondsRemaining));
+                json.WriteBoolean("beneficial", !known || info.IsBeneficial);
+                json.WriteNumber("school", known ? info.School : 0u);
+                json.WriteNumber("iconId", known ? PluginIcons.Normalize(info.IconId) : 0u);
+                json.WriteEndObject();
+            }
+        }
+        json.WriteEndArray();
+        // The bot's own list: each buff the profile asks for and how it stands, refreshed with the pack.
+        json.WritePropertyName("buffPlan");
+        json.WriteStartArray();
+        foreach (BuffStatus buff in _buffPlan)
+        {
+            json.WriteStartObject();
+            json.WriteString("configured", buff.Configured);
+            json.WriteString("kind", buff.Kind);
+            if (buff.SpellName is not null) json.WriteString("spell", buff.SpellName); else json.WriteNull("spell");
+            json.WriteNumber("spellId", buff.SpellId);
+            json.WriteNumber("family", buff.Family);
+            json.WriteNumber("tier", buff.Tier);
+            json.WriteNumber("secondsRemaining", buff.IsUp ? Math.Round(buff.SecondsRemaining) : -1d);
+            json.WriteBoolean("due", buff.Due);
+            json.WriteBoolean("onCooldown", buff.OnCooldown);
+            if (buff.Problem is not null) json.WriteString("problem", buff.Problem); else json.WriteNull("problem");
+            if (buff.ItemName is not null) json.WriteString("item", buff.ItemName); else json.WriteNull("item");
+            json.WriteNumber("itemId", buff.ItemId);
+            json.WriteEndObject();
+        }
+        json.WriteEndArray();
 
         json.WritePropertyName("player");
         json.WriteStartObject();
@@ -242,7 +306,19 @@ internal sealed class RemoteStatusBuilder
         json.WriteEndArray();
         json.WriteEndObject();
         json.Flush();
-        return _buffer.WrittenSpan.ToArray();
+        ReadOnlySpan<byte> written = _buffer.WrittenSpan;
+        ulong hash = Fnv1a(written[..stampStart], Fnv1a(written[stampEnd..], 14695981039346656037ul));
+        Changed = hash != _lastContentHash;
+        _lastContentHash = hash;
+        return written.ToArray();
+    }
+
+    /// <summary>The document's content apart from its timestamp, as one number, for the change check.</summary>
+    private static ulong Fnv1a(ReadOnlySpan<byte> bytes, ulong hash)
+    {
+        foreach (byte value in bytes)
+            hash = (hash ^ value) * 1099511628211ul;
+        return hash;
     }
 
     /// <summary>
@@ -280,8 +356,12 @@ internal sealed class RemoteStatusBuilder
             _scarabTotal = -1;
             _tapers = -1;
             _burdenPercent = 0d;
+            _buffPlan = [];
             return;
         }
+        _buffPlan = _controller.Engine.LastBoard is { } board
+            ? _controller.Buffs.Report(board)
+            : [];
 
         IReadOnlyList<PluginInventoryItem> owned = _surface.Items.CaptureOwnedItems();
         var equipment = new List<GearItem>();

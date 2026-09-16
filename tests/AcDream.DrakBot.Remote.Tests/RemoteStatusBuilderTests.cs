@@ -88,6 +88,59 @@ public sealed class RemoteStatusBuilderTests
     }
 
     [Fact]
+    public void TheDocumentCarriesTheEnchantmentsAndTheBotsBuffPlan()
+    {
+        var host = new RemoteTestHost();
+        FakeAutomationSurface surface = host.Surface;
+        surface.SelfBuffs.Add(Spell.SelfBuff(10, "Strength Self VI", 100, 6));
+        surface.SelfBuffs.Add(Spell.SelfBuff(11, "Endurance Self VI", 101, 6));
+        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 900d));
+        surface.Enchantments.Add(new PluginActiveEnchantment(11u, 101u, 6, 20d));
+        surface.Enchantments.Add(new PluginActiveEnchantment(77u, 500u, 1, 120d)); // something the catalog does not know
+        (DrakBotPlugin bot, DrakBotRemotePlugin remote) = host.Plugins();
+        bot.Enable();
+        remote.Enable();
+        bot.Controller!.Update(p => p with { Buffs = p.Buffs with { Spells = ["Strength Self", "Endurance Self"], RebuffWhenRemainingSeconds = 60d } });
+        bot.Controller.Start();
+        host.Events.FireTick(0.1); // a tick gives the engine a board for the plan
+
+        JsonElement client = Client(remote.Status!.Build(1d), out JsonDocument owner);
+        using (owner)
+        {
+            JsonElement enchantments = client.GetProperty("enchantments");
+            Assert.Equal(3, enchantments.GetArrayLength());
+            Assert.Equal("Endurance Self VI", enchantments[0].GetProperty("name").GetString()); // soonest to lapse first
+            Assert.Equal(20d, enchantments[0].GetProperty("secondsRemaining").GetDouble());
+            Assert.Equal("Spell 77", enchantments[1].GetProperty("name").GetString());
+            Assert.Equal("Strength Self VI", enchantments[2].GetProperty("name").GetString());
+
+            JsonElement plan = client.GetProperty("buffPlan");
+            Assert.Equal(2, plan.GetArrayLength());
+            Assert.Equal("Strength Self", plan[0].GetProperty("configured").GetString());
+            Assert.Equal("Strength Self VI", plan[0].GetProperty("spell").GetString());
+            Assert.False(plan[0].GetProperty("due").GetBoolean());
+            Assert.True(plan[1].GetProperty("due").GetBoolean());
+            Assert.Equal(60d, client.GetProperty("buffing").GetProperty("rebuffWhenRemainingSeconds").GetDouble());
+        }
+    }
+
+    [Fact]
+    public void AnUnchangedDocumentIsNotReportedAsNew()
+    {
+        var host = new RemoteTestHost();
+        (_, DrakBotRemotePlugin remote) = host.Plugins();
+        RemoteStatusBuilder status = remote.Status!;
+
+        status.Build(1d);
+        Assert.True(status.Changed);
+        status.Build(1.2d); // only the timestamp differs
+        Assert.False(status.Changed);
+        host.Surface.CurrentHealth = 50;
+        status.Build(1.4d);
+        Assert.True(status.Changed);
+    }
+
+    [Fact]
     public void StateFollowsTheWorldTheBotAndTheTick()
     {
         Assert.Equal(("loading", true), RemoteStatusBuilder.Classify(inWorld: false, fps: 60, running: true, ticks: 60));

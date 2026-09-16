@@ -189,6 +189,88 @@ public sealed class SelfBuffBehavior(
         }
     }
 
+    /// <summary>
+    /// The state of every buff the profile asks for, as data: what each
+    /// name resolved to, how long it has left (negative when not up),
+    /// whether it is due by the profile's threshold, and why one cannot be
+    /// cast. Self spells, the weapon auras when they are on, and the armor
+    /// spells per worn piece when those are on - what a status window or
+    /// a phone shows beside the raw enchantment list.
+    /// </summary>
+    public IReadOnlyList<BuffStatus> Report(Blackboard board)
+    {
+        ArgumentNullException.ThrowIfNull(board);
+        BuffSettings buffs = settings();
+        var report = new List<BuffStatus>();
+        IReadOnlyList<PluginTrackedEnchantment> landed = surface?.Enchantments.Capture(board.SelfId) ?? [];
+        foreach (string name in buffs.Spells)
+            report.Add(SelfStatus(board, buffs, name, "self", landed));
+        if (buffs.BuffWeapon)
+        {
+            foreach (string name in buffs.WeaponSpells)
+                report.Add(SelfStatus(board, buffs, name, "weapon", landed));
+        }
+        if (buffs.BuffArmor && surface is not null)
+        {
+            foreach (PluginInventoryItem item in surface.Items.CaptureOwnedItems())
+            {
+                if (!item.IsEquipped || item.ObjectClass != PluginObjectClass.Armor)
+                    continue;
+                IReadOnlyList<PluginTrackedEnchantment>? onPiece = null;
+                foreach (string name in buffs.ArmorSpells)
+                {
+                    if (!spells.TryBestKnown(name, out PluginSpellInfo candidate))
+                    {
+                        report.Add(new BuffStatus(name, "armor", null, 0u, 0u, 0, -1d, false, false, spells.Explain(name, buff: false), item.Name, item.ObjectId));
+                        continue;
+                    }
+                    onPiece ??= surface.Enchantments.Capture(item.ObjectId);
+                    double remaining = Remaining(onPiece, candidate.Family);
+                    report.Add(new BuffStatus(
+                        name, "armor", candidate.Name, candidate.SpellId, candidate.Family, candidate.Tier,
+                        remaining, remaining <= buffs.RebuffWhenRemainingSeconds, casts.IsOnCooldown(candidate.SpellId), null,
+                        item.Name, item.ObjectId));
+                }
+            }
+        }
+        return report;
+    }
+
+    private BuffStatus SelfStatus(Blackboard board, BuffSettings buffs, string name, string kind, IReadOnlyList<PluginTrackedEnchantment> landed)
+    {
+        if (!spells.TryBestSelfBuff(name, out PluginSpellInfo spell) && !spells.TryBestKnown(name, out spell))
+            return new BuffStatus(name, kind, null, 0u, 0u, 0, -1d, false, false, spells.Explain(name), null, 0u);
+        double remaining = -1d;
+        int tierUp = 0;
+        foreach (PluginActiveEnchantment active in board.Enchantments)
+        {
+            if (active.Family == spell.Family && active.SecondsRemaining > remaining)
+            {
+                remaining = active.SecondsRemaining;
+                tierUp = active.Tier;
+            }
+        }
+        double onRecord = Remaining(landed, spell.Family);
+        if (onRecord > remaining)
+            remaining = onRecord;
+        // A higher tier already in force outranks what we can cast, as the behavior judges it.
+        bool covered = remaining > buffs.RebuffWhenRemainingSeconds || tierUp > spell.Tier;
+        return new BuffStatus(
+            name, kind, spell.Name, spell.SpellId, spell.Family, spell.Tier,
+            remaining, !covered, casts.IsOnCooldown(spell.SpellId), null, null, 0u);
+    }
+
+    private static double Remaining(IReadOnlyList<PluginTrackedEnchantment> landed, uint family)
+    {
+        double remaining = -1d;
+        foreach (PluginTrackedEnchantment enchantment in landed)
+        {
+            if (enchantment.Family == family && enchantment.SecondsRemaining > remaining)
+                remaining = enchantment.SecondsRemaining;
+        }
+        return remaining;
+    }
+
     /// <summary>Whether any configured buff is missing or expiring, for a meta's NeedToBuff.</summary>
     public bool NeedsAnyBuff(Blackboard board) => TryNextDue(board, settings(), out _, out _);
 
@@ -299,4 +381,28 @@ public sealed class SelfBuffBehavior(
         }
         return false;
     }
+}
+
+/// <summary>
+/// One line of <see cref="SelfBuffBehavior.Report"/>: a buff the profile
+/// asks for (<paramref name="Configured"/>, the name as written), what it
+/// resolved to, and how it stands. <paramref name="SecondsRemaining"/> is
+/// negative when nothing of the family is up; <paramref name="Problem"/>
+/// says why a name could not be resolved. Armor entries name the piece.
+/// </summary>
+public sealed record BuffStatus(
+    string Configured,
+    string Kind,
+    string? SpellName,
+    uint SpellId,
+    uint Family,
+    int Tier,
+    double SecondsRemaining,
+    bool Due,
+    bool OnCooldown,
+    string? Problem,
+    string? ItemName,
+    uint ItemId)
+{
+    public bool IsUp => SecondsRemaining >= 0d;
 }
