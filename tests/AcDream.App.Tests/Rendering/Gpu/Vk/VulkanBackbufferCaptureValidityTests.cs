@@ -83,7 +83,7 @@ public sealed unsafe class VulkanBackbufferCaptureValidityTests
         string configure = MethodBody(
             resources,
             "private void ConfigureBackbufferCapture(",
-            "private readonly bool _retainBackbufferCapture;");
+            "private bool _retainBackbufferCapture;");
         AssertOrdered(
             configure,
             "_captureValidity.Invalidate();",

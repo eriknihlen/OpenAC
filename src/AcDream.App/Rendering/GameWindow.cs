@@ -404,6 +404,7 @@ public sealed class GameWindow :
     internal void RequestClose() => _window?.Close();
 
     private AcDream.App.Plugins.RemoteFrameCapture? _remoteFrames;
+    private Vector2D<int> _lastPresentedSize;
 
     /// <summary>
     /// The phone's live view takes its frames from this window: bound to
@@ -1553,11 +1554,30 @@ public sealed class GameWindow :
             return;
         }
         Vector2D<int> size = _window!.Size;
-        _remoteFrames?.NoteWindowState(_window.WindowState == WindowState.Minimized);
-        if (_vulkanGraphics is { } vulkan && !vulkan.PrepareFrame())
+        bool minimized = _window.WindowState == WindowState.Minimized || size.X <= 0 || size.Y <= 0;
+        _remoteFrames?.NoteWindowState(minimized);
+        if (_vulkanGraphics is { } vulkan)
         {
-            _renderLoopArmed = false;
-            return;
+            bool prepared = vulkan.PrepareFrame();
+            if (!prepared || minimized)
+            {
+                // No surface to present to. A watcher on the phone still gets
+                // the picture: the frame is drawn into offscreen images at the
+                // last size the window had, and only when one is asked for.
+                if (_remoteFrames is not { WantsFrame: true }
+                    || _lastPresentedSize.X <= 0
+                    || !vulkan.PrepareOffscreenFrame((uint)_lastPresentedSize.X, (uint)_lastPresentedSize.Y))
+                {
+                    _remoteFrames?.OnIdle();
+                    _renderLoopArmed = false;
+                    return;
+                }
+                size = _lastPresentedSize;
+            }
+            else
+            {
+                _lastPresentedSize = size;
+            }
         }
         AcDream.App.Rendering.RenderFrameOutcome outcome;
         try

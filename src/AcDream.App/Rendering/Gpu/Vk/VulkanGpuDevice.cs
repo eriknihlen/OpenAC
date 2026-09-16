@@ -24,6 +24,16 @@ internal interface IVulkanBackbuffer
     Semaphore RenderCompleteAt(uint imageIndex);
 
     bool Present(uint imageIndex);
+
+    /// <summary>
+    /// Whether images come from a presentation engine, whose acquire and
+    /// render-complete semaphores order the frame; an offscreen backbuffer
+    /// has neither, and its images are simply ready.
+    /// </summary>
+    bool Presents => true;
+
+    /// <summary>The layout a finished frame is left in: presentable for a swapchain, general otherwise.</summary>
+    ImageLayout FinalLayout => ImageLayout.PresentSrcKhr;
 }
 
 internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineFormatVariantHost
@@ -38,7 +48,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
     private readonly Queue _graphicsQueue;
     private readonly Queue _presentQueue;
     private readonly uint _graphicsFamily;
-    private readonly IVulkanBackbuffer? _backbuffer;
+    private IVulkanBackbuffer? _backbuffer;
 
     private readonly VulkanDeviceMemoryAllocator _allocator;
     private readonly VulkanUploadQueue _uploads;
@@ -419,7 +429,8 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         SemaphoreSubmitInfo waitSemaphore = CreateAcquiredImageWait(_imageAcquired[slot]);
         SemaphoreSubmitInfo* signals = stackalloc SemaphoreSubmitInfo[2];
         int signalCount = 0;
-        if (_acquiredImageIndex is { } presented && _backbuffer is not null)
+        bool presents = _backbuffer?.Presents == true;
+        if (_acquiredImageIndex is { } presented && _backbuffer is not null && presents)
         {
             signals[signalCount++] = new SemaphoreSubmitInfo
             {
@@ -440,8 +451,8 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
         var submit = new SubmitInfo2
         {
             SType = StructureType.SubmitInfo2,
-            WaitSemaphoreInfoCount = _acquiredImageIndex is null ? 0u : 1u,
-            PWaitSemaphoreInfos = _acquiredImageIndex is null ? null : &waitSemaphore,
+            WaitSemaphoreInfoCount = _acquiredImageIndex is null || !presents ? 0u : 1u,
+            PWaitSemaphoreInfos = _acquiredImageIndex is null || !presents ? null : &waitSemaphore,
             CommandBufferInfoCount = 1,
             PCommandBufferInfos = &commandSubmit,
             SignalSemaphoreInfoCount = (uint)signalCount,
@@ -472,6 +483,25 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
     /// <summary>False after a present that reported the swapchain should be rebuilt.</summary>
     internal bool PresentSucceeded { get; private set; } = true;
 
+    /// <summary>
+    /// Points the device at another backbuffer between frames: the window's
+    /// swapchain, or offscreen images while the window has no surface. The
+    /// device is idled first, so nothing in flight still targets the old one;
+    /// the caller configures the attachments for the new size afterwards.
+    /// </summary>
+    internal void SetBackbuffer(IVulkanBackbuffer? backbuffer)
+    {
+        ThrowIfDisposed();
+        if (_openFrame is not null)
+            throw new InvalidOperationException("The backbuffer cannot change while a frame is open.");
+        if (ReferenceEquals(_backbuffer, backbuffer))
+            return;
+        VulkanInterop.Check(_vk.DeviceWaitIdle(_device), "vkDeviceWaitIdle (backbuffer)");
+        _backbuffer = backbuffer;
+        _acquiredImageIndex = null;
+        PresentSucceeded = true;
+    }
+
     private void TransitionBackbufferForPresent(CommandBuffer commands, Image image, ImageLayout currentLayout)
     {
         bool captured = currentLayout == ImageLayout.TransferSrcOptimal;
@@ -487,7 +517,7 @@ internal sealed unsafe partial class VulkanGpuDevice : IGpuDevice, IGpuPipelineF
             DstStageMask = PipelineStageFlags2.BottomOfPipeBit,
             DstAccessMask = AccessFlags2.None,
             OldLayout = currentLayout,
-            NewLayout = ImageLayout.PresentSrcKhr,
+            NewLayout = _backbuffer?.FinalLayout ?? ImageLayout.PresentSrcKhr,
             SrcQueueFamilyIndex = Silk.NET.Vulkan.Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Silk.NET.Vulkan.Vk.QueueFamilyIgnored,
             Image = image,

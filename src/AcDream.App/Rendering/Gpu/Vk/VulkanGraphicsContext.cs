@@ -38,6 +38,9 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
     private IReadOnlyList<string> _instanceExtensions = [];
     private bool _recreateAtFrameBoundary;
     private bool _disposed;
+    private SwapchainBackbuffer? _swapchainBackbuffer;
+    private OffscreenBackbuffer? _offscreen;
+    private bool _offscreenActive;
 
     private VulkanGraphicsContext(
         IWindow window,
@@ -101,18 +104,57 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
     internal bool PrepareFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_recreateAtFrameBoundary && _swapchain!.IsCreated)
+        if (!_recreateAtFrameBoundary && _swapchain!.IsCreated && !_offscreenActive)
             return true;
 
         if (!RecreateSwapchain())
             return false;
 
         VulkanSwapchainConfiguration resized = _swapchain!.Configuration!;
+        if (_offscreenActive)
+        {
+            // The window has a surface again: back to presenting, the offscreen images let go.
+            Device.SetBackbuffer(_swapchainBackbuffer);
+            _offscreenActive = false;
+            _offscreen?.Dispose();
+            _offscreen = null;
+            _log("vulkan: offscreen frames done; presenting again");
+        }
         Device.ConfigureBackbufferAttachments(
             resized.Width,
             resized.Height,
             resized.ImageFormat,
             SampleCount);
+        return true;
+    }
+
+    /// <summary>
+    /// Opens a frame into offscreen images of the given size instead of the
+    /// swapchain, for a window that has no area to present to (minimised;
+    /// its swapchain may or may not have survived) but a watcher who wants
+    /// the picture anyway. The images are the swapchain's format, so every
+    /// pipeline is the one the window uses. <see cref="PrepareFrame"/>
+    /// switches back once the window has area again. Returns false before
+    /// the first swapchain ever existed (no format to match).
+    /// </summary>
+    internal bool PrepareOffscreenFrame(uint width, uint height)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (width == 0 || height == 0 || _swapchain?.Configuration is not { } configuration)
+            return false;
+        if (_offscreen is null || _offscreen.Width != width || _offscreen.Height != height)
+        {
+            VulkanInterop.Check(_vk!.DeviceWaitIdle(_device), "vkDeviceWaitIdle (offscreen)");
+            _offscreen?.Dispose();
+            _offscreen = new OffscreenBackbuffer(_vk!, _device, _physicalDevice, configuration.ImageFormat, width, height);
+            _log($"vulkan: offscreen frames {width}x{height} while the window has no surface");
+        }
+        if (!_offscreenActive)
+        {
+            Device.SetBackbuffer(_offscreen);
+            _offscreenActive = true;
+        }
+        Device.ConfigureBackbufferAttachments(width, height, configuration.ImageFormat, SampleCount);
         return true;
     }
 
@@ -338,7 +380,7 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
             Capabilities.DriverInfo,
             Capabilities.DeviceApiVersion,
             _debugNames,
-            new SwapchainBackbuffer(_swapchain!, _presentQueue),
+            _swapchainBackbuffer = new SwapchainBackbuffer(_swapchain!, _presentQueue),
             ShaderSpirvDirectory(),
             _platform.Paths.CacheDirectory,
             memoryProfile: memoryProfile,
@@ -417,6 +459,120 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
             swapchain.Present(presentQueue, imageIndex) is VulkanSwapchainAction.Continue;
     }
 
+    /// <summary>
+    /// Two colour images of the swapchain's format that stand in for it
+    /// while the window is minimised: acquired in turn, never presented,
+    /// so a watcher on the phone still gets frames. No semaphores: the
+    /// device orders the work through its timeline alone.
+    /// </summary>
+    private sealed class OffscreenBackbuffer : IVulkanBackbuffer, IDisposable
+    {
+        private const int ImageCount = 2;
+        private readonly Silk.NET.Vulkan.Vk _vk;
+        private readonly Device _device;
+        private readonly Image[] _images = new Image[ImageCount];
+        private readonly ImageView[] _views = new ImageView[ImageCount];
+        private readonly DeviceMemory[] _memory = new DeviceMemory[ImageCount];
+        private uint _next;
+        private bool _disposed;
+
+        public OffscreenBackbuffer(Silk.NET.Vulkan.Vk vk, Device device, PhysicalDevice physicalDevice, Format format, uint width, uint height)
+        {
+            _vk = vk;
+            _device = device;
+            ImageFormat = format;
+            Width = width;
+            Height = height;
+            for (int index = 0; index < ImageCount; index++)
+            {
+                var imageInfo = new ImageCreateInfo
+                {
+                    SType = StructureType.ImageCreateInfo,
+                    ImageType = ImageType.Type2D,
+                    Format = format,
+                    Extent = new Extent3D(width, height, 1),
+                    MipLevels = 1,
+                    ArrayLayers = 1,
+                    Samples = SampleCountFlags.Count1Bit,
+                    Tiling = ImageTiling.Optimal,
+                    Usage = VulkanSwapchainConfigurationFactory.RequiredUsage,
+                    SharingMode = SharingMode.Exclusive,
+                    InitialLayout = ImageLayout.Undefined,
+                };
+                VulkanInterop.Check(vk.CreateImage(device, &imageInfo, null, out _images[index]), "vkCreateImage (offscreen)");
+                vk.GetImageMemoryRequirements(device, _images[index], out MemoryRequirements requirements);
+                uint typeIndex = VulkanActiveDeviceProbe.FindMemoryType(vk, physicalDevice, requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+                    ?? VulkanActiveDeviceProbe.FindMemoryType(vk, physicalDevice, requirements.MemoryTypeBits, MemoryPropertyFlags.None)
+                    ?? throw new InvalidOperationException("No memory type can hold an offscreen backbuffer image.");
+                var allocation = new MemoryAllocateInfo
+                {
+                    SType = StructureType.MemoryAllocateInfo,
+                    AllocationSize = requirements.Size,
+                    MemoryTypeIndex = typeIndex,
+                };
+                VulkanInterop.Check(vk.AllocateMemory(device, &allocation, null, out _memory[index]), "vkAllocateMemory (offscreen)");
+                VulkanInterop.Check(vk.BindImageMemory(device, _images[index], _memory[index], 0), "vkBindImageMemory (offscreen)");
+                var viewInfo = new ImageViewCreateInfo
+                {
+                    SType = StructureType.ImageViewCreateInfo,
+                    Image = _images[index],
+                    ViewType = ImageViewType.Type2D,
+                    Format = format,
+                    SubresourceRange = new ImageSubresourceRange
+                    {
+                        AspectMask = ImageAspectFlags.ColorBit,
+                        BaseMipLevel = 0,
+                        LevelCount = 1,
+                        BaseArrayLayer = 0,
+                        LayerCount = 1,
+                    },
+                };
+                VulkanInterop.Check(vk.CreateImageView(device, &viewInfo, null, out _views[index]), "vkCreateImageView (offscreen)");
+            }
+        }
+
+        public Format ImageFormat { get; }
+
+        public uint Width { get; }
+
+        public uint Height { get; }
+
+        public bool Presents => false;
+
+        public ImageLayout FinalLayout => ImageLayout.General;
+
+        public bool TryAcquire(Semaphore acquired, out uint imageIndex)
+        {
+            imageIndex = _next;
+            _next = (_next + 1) % ImageCount;
+            return !_disposed;
+        }
+
+        public Image ImageAt(uint imageIndex) => _images[imageIndex];
+
+        public ImageView ViewAt(uint imageIndex) => _views[imageIndex];
+
+        public Semaphore RenderCompleteAt(uint imageIndex) => default;
+
+        public bool Present(uint imageIndex) => true;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            for (int index = 0; index < ImageCount; index++)
+            {
+                if (_views[index].Handle != 0)
+                    _vk.DestroyImageView(_device, _views[index], null);
+                if (_images[index].Handle != 0)
+                    _vk.DestroyImage(_device, _images[index], null);
+                if (_memory[index].Handle != 0)
+                    _vk.FreeMemory(_device, _memory[index], null);
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -429,6 +585,8 @@ internal sealed unsafe class VulkanGraphicsContext : IDisposable
 
         _gpuDevice?.Dispose();
         _gpuDevice = null;
+        _offscreen?.Dispose();
+        _offscreen = null;
         _swapchain?.Dispose();
         _swapchain = null;
 

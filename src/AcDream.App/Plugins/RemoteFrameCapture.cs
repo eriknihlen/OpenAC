@@ -16,7 +16,9 @@ namespace AcDream.App.Plugins;
 /// on at the first request and off five seconds after the last), so an
 /// idle client pays nothing. Capture happens on the frame thread right
 /// after a frame closes; the resize and JPEG encode run on the pool.
-/// Requests that arrive between two frames share one capture.
+/// Requests that arrive between two frames share one capture. A minimised
+/// window has no surface, so the window draws a frame offscreen for each
+/// request instead, at the size it last had.
 /// </summary>
 internal sealed class RemoteFrameCapture : IRemoteFrameSource
 {
@@ -53,9 +55,12 @@ internal sealed class RemoteFrameCapture : IRemoteFrameSource
     /// <summary>The frame thread's word on the window, each frame.</summary>
     public void NoteWindowState(bool minimized) => _minimized = minimized;
 
+    /// <summary>Whether a frame is wanted right now, for a window with no surface to render one anyway.</summary>
+    public bool WantsFrame => !_requests.IsEmpty;
+
     public Task<byte[]?> CaptureJpegAsync(int quality, int maxWidth, CancellationToken cancellation)
     {
-        if (!_available || _minimized)
+        if (!_available)
             return Task.FromResult<byte[]?>(null);
         var result = new TaskCompletionSource<byte[]?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _requests.Enqueue(new Request(Math.Clamp(quality, 1, 100), Math.Max(0, maxWidth), result));
@@ -77,12 +82,7 @@ internal sealed class RemoteFrameCapture : IRemoteFrameSource
             return;
         if (_requests.IsEmpty)
         {
-            if (_retained && Environment.TickCount64 - Volatile.Read(ref _lastRequestTicks) > IdleReleaseMs)
-            {
-                device.RetainBackbufferCapture(false);
-                _retained = false;
-                _log("[remote] live view idle; backbuffer capture released");
-            }
+            OnIdle();
             return;
         }
         if (!_retained)
@@ -117,6 +117,18 @@ internal sealed class RemoteFrameCapture : IRemoteFrameSource
         while (_requests.TryDequeue(out Request request))
             batch.Add(request);
         ThreadPool.UnsafeQueueUserWorkItem(_ => Encode(rgba, width, height, batch), null);
+    }
+
+    /// <summary>Frame thread, with no frame drawn (a minimised window nobody watches): lets the GPU copy go once idle.</summary>
+    public void OnIdle()
+    {
+        if (_device is { } device && _retained && _requests.IsEmpty
+            && Environment.TickCount64 - Volatile.Read(ref _lastRequestTicks) > IdleReleaseMs)
+        {
+            device.RetainBackbufferCapture(false);
+            _retained = false;
+            _log("[remote] live view idle; backbuffer capture released");
+        }
     }
 
     /// <summary>Pool thread: one image, one JPEG per distinct quality and width, every waiter answered.</summary>

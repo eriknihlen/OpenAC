@@ -765,7 +765,12 @@ screens carry over:
   after the frame closes and encodes on the pool, and requests that
   arrive together share one capture; five seconds after the last request
   the copy is released, so an idle client pays nothing. A minimized
-  window has no frame, and the status says so (`isMinimized`).
+  window has no surface to present to, so while a phone is watching the
+  client draws each requested frame into offscreen images at the size the
+  window last had (`VulkanGraphicsContext.PrepareOffscreenFrame`, an
+  `IVulkanBackbuffer` that never presents) - and only then, so a
+  minimized client nobody watches still renders nothing; the swapchain
+  comes back when the window does. The status still says `isMinimized`.
 - `/runs`, `/maps` and `/video` answer as absent: the run archive, dungeon
   maps and the H.264 stream of the RynthCore agent are not here yet, nor
   is tap-to-click in the live view.

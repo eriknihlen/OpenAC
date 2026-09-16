@@ -8,7 +8,8 @@ namespace AcDream.DrakBot.Remote;
 /// fails: a headless host has no icons or frames, no host lets itself be
 /// closed unless it said so, and the H.264 stream, tap-to-click, the run
 /// archive and the dungeon maps of the RynthCore agent are not here yet.
-/// <c>video</c> is the MJPEG live view (<c>/frame</c>, <c>/stream</c>).
+/// <c>video</c> is the MJPEG live view (<c>/frame</c>, <c>/stream</c>);
+/// <c>videoMinimized</c> says it goes on while the window is minimised.
 /// </summary>
 public sealed record RemoteCapabilities(
     bool Inventory = true,
@@ -18,6 +19,7 @@ public sealed record RemoteCapabilities(
     bool Icons = false,
     bool CloseClient = false,
     bool Video = false,
+    bool VideoMinimized = false,
     bool VideoHd = false,
     bool Click = false,
     bool Runs = false,
@@ -29,7 +31,8 @@ public sealed record RemoteCapabilities(
         return new RemoteCapabilities(
             Icons: services.RenderIconPng is not null,
             CloseClient: services.CloseClient is not null,
-            Video: services.Frames?.IsAvailable == true);
+            Video: services.Frames?.IsAvailable == true,
+            VideoMinimized: services.Frames?.IsAvailable == true);
     }
 
     public void Write(Utf8JsonWriter json)
@@ -43,6 +46,7 @@ public sealed record RemoteCapabilities(
         json.WriteBoolean("icons", Icons);
         json.WriteBoolean("closeClient", CloseClient);
         json.WriteBoolean("video", Video);
+        json.WriteBoolean("videoMinimized", VideoMinimized);
         json.WriteBoolean("videoHd", VideoHd);
         json.WriteBoolean("click", Click);
         json.WriteBoolean("runs", Runs);
