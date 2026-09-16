@@ -78,9 +78,15 @@ public sealed class DungeonPathfinderTests
         ]);
         var hazards = new HashSet<uint> { Block | 0x302 };
 
-        Route patrol = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x300, hazards);
-        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d > 65d);   // the far room is reached
-        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d < 15d);   // and the near one kept
+        // Asked to cross: the far room is reached, and the near one kept.
+        Route patrol = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x300, hazards, crossHazards: true);
+        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d > 65d);
+        Assert.Contains(patrol.Waypoints, w => w.EastWest * 240d < 15d);
+
+        // By default a hazard is never entered - a low character does not
+        // survive the crossing - and the patrol is the near side only.
+        Route closed = DungeonPathfinder.BuildPatrolRoute(graph, Block | 0x300, hazards);
+        Assert.DoesNotContain(closed.Waypoints, w => w.EastWest * 240d > 35d);
 
         // The corridor itself is crossed, not toured: a path may use it at a price ...
         List<uint> across = DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304, hazards, crossHazards: true);

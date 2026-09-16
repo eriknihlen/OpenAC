@@ -414,11 +414,14 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   operator marked as hazards (`/drakbot hazard add` marks the cell the
   character stands in; the marks are kept per landblock in the plugin's
   storage). A patrol never *tours* a hazard cell - none of its corridors
-  is walked for its own sake - but it may *cross* one on the way from one
-  safe part of the dungeon to another, at a stiff path cost, so an acid
-  corridor between two halves does not confine the patrol to one half;
-  the crossing takes seconds and combat never fights from inside a
-  marked cell;
+  is walked for its own sake - and combat never fights from inside one.
+  By default a hazard is never *entered* either: the patrol is what can
+  be reached from the character without one, since a low character does
+  not survive an acid crossing. `Navigation.CrossHazards` (`/drakbot
+  hazard cross on`) lets a patrol or a path *cross* a marked cell on the
+  way from one safe part of the dungeon to another, at a stiff path cost,
+  when there is no way round - for a character who can take it and a
+  dungeon an acid corridor would otherwise cut in two;
 - a path is walked through the doorways themselves - the host reports
   each opening's polygon centre at floor level (`PluginDungeonCell.Doorways`),
   since a cell's origin is its model anchor rather than a point between its

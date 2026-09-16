@@ -250,16 +250,19 @@ public static class DungeonPathfinder
     /// re-trodden only by the shortest way back, closed back to the start.
     /// Empty when the dungeon has nothing to walk.
     /// </summary>
-    public static Route BuildPatrolRoute(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, string name = "patrol")
+    /// <param name="crossHazards">
+    /// A marked cell may be crossed on the way from one safe part of the
+    /// dungeon to another, never toured. Off, it is closed: the patrol is
+    /// what can be reached from the start without one. Closing once cut a
+    /// dungeon in two at an acid pool and left a 25-step loop on the far
+    /// side, but a low character does not survive the crossing; the
+    /// profile decides.
+    /// </param>
+    public static Route BuildPatrolRoute(Dictionary<uint, PluginDungeonCell> graph, uint start, IReadOnlySet<uint>? hazards = null, string name = "patrol", bool crossHazards = false)
     {
-        // The main route is taken over the whole dungeon, hazards and all:
-        // a marked cell is not toured - none of its corridors is a corridor
-        // to walk for its own sake - but it may be crossed on the way from
-        // one safe part to another. Closing it outright once cut a
-        // dungeon in two at an acid pool and left the patrol a 25-step
-        // loop on the far side; the walk crosses in seconds, and combat
-        // never fights from inside a marked cell.
-        HashSet<uint> main = MainRouteCells(graph, start, hazards: null);
+        // A marked cell is never toured - none of its corridors is a corridor
+        // to walk for its own sake - and combat never fights from inside one.
+        HashSet<uint> main = MainRouteCells(graph, start, crossHazards ? null : hazards);
         var adjacency = new Dictionary<uint, List<uint>>();
         var edges = new HashSet<ulong>();
         foreach (uint id in main)
@@ -336,7 +339,7 @@ public static class DungeonPathfinder
         int loopStart = 0;
         if (walkStart != start && graph.ContainsKey(start))
         {
-            List<uint> leadIn = FindPath(graph, start, walkStart, hazards, crossHazards: true);
+            List<uint> leadIn = FindPath(graph, start, walkStart, hazards, crossHazards);
             for (int index = 0; index + 1 < leadIn.Count; index++)
             {
                 if (graph.TryGetValue(leadIn[index], out PluginDungeonCell from) && graph.TryGetValue(leadIn[index + 1], out PluginDungeonCell to))

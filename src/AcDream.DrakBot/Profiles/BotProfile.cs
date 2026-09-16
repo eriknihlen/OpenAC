@@ -492,6 +492,15 @@ public sealed record NavigationSettings
     /// </summary>
     public IReadOnlyList<string> NoPatrolLandblocks { get; init; } = ["016C", "5F4A", "5F4B", "5F4C", "5F4D", "5F4E", "5F4F"];
 
+    /// <summary>
+    /// Whether a patrol or a path may walk through a hazard cell (an acid
+    /// pool) when it is the only way from one part of a dungeon to another.
+    /// Off, a hazard is closed and the patrol keeps to what can be reached
+    /// without one - a low character does not survive the crossing. On, it
+    /// is crossed at a price when there is no way round, never toured.
+    /// </summary>
+    public bool CrossHazards { get; init; }
+
     /// <summary>Draw the route over the world: a ring at each point, a line to the next, the current one red.</summary>
     public bool ShowMarkers { get; init; } = true;
 

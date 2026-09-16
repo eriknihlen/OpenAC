@@ -449,8 +449,21 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 controller.ClearHazards();
                 Say("hazards cleared for this dungeon");
                 break;
+            case "cross":
+            {
+                bool? cross = args.Length > 1 ? args[1].ToLowerInvariant() switch { "on" or "true" or "1" => true, "off" or "false" or "0" => false, _ => null } : null;
+                if (cross is null)
+                {
+                    Say($"hazards are {(controller.Profile.Navigation.CrossHazards ? "crossed when they are the only way" : "never entered")}; /drakbot hazard cross on|off");
+                    break;
+                }
+                controller.Update(profile => profile with { Navigation = profile.Navigation with { CrossHazards = cross.Value } });
+                controller.TryStartPatrol(out string rebuilt);
+                Say($"hazards are now {(cross.Value ? "crossed when they are the only way" : "never entered")}; {rebuilt}");
+                break;
+            }
             default:
-                Say("usage: /drakbot hazard add|remove|clear   (marks the cell you stand in)");
+                Say("usage: /drakbot hazard add|remove|clear|cross on|off   (add/remove mark the cell you stand in)");
                 break;
         }
     }

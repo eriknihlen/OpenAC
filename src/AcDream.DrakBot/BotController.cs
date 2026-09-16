@@ -263,7 +263,7 @@ public sealed class BotController : IMetaBot
             if (safe != 0u)
                 start = safe;
         }
-        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}");
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards);
         if (route.IsEmpty)
         {
             Log.Warn("patrol: nothing left to walk after the new hazard");
@@ -788,7 +788,7 @@ public sealed class BotController : IMetaBot
             if (safe != 0u)
                 start = safe;
         }
-        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}");
+        Route route = DungeonPathfinder.BuildPatrolRoute(graph, start, hazards, $"patrol {snapshot.Position.CellId >> 16:X4}", Profile.Navigation.CrossHazards);
         if (route.IsEmpty)
         {
             message = "nothing to patrol here";
@@ -821,7 +821,7 @@ public sealed class BotController : IMetaBot
             : DungeonPathfinder.NearestCell(graph, snapshot.Position);
         var destination = new PluginNavigationPosition(0u, eastWest, northSouth, snapshot.Position.Elevation, 0f, false);
         uint goal = DungeonPathfinder.NearestCell(graph, destination);
-        List<uint> path = DungeonPathfinder.FindPath(graph, start, goal, hazards);
+        List<uint> path = DungeonPathfinder.FindPath(graph, start, goal, hazards, Profile.Navigation.CrossHazards);
         if (path.Count == 0)
         {
             message = "no walkable way there";
