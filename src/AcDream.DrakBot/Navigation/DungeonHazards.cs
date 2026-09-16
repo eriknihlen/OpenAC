@@ -74,4 +74,49 @@ public sealed class DungeonHazards(IPluginStorage storage)
     }
 
     private static string Key(uint landblock) => $"{Prefix}{landblock >> 16:X4}.json";
+
+    // ── points given up on ──────────────────────────────────────────────
+    // A route point the walk could not reach from a cell - the room above
+    // a hole, a ledge - is remembered with that cell, per landblock, so the
+    // next session skips it at once instead of six detours into the wall.
+
+    private const string GivenUpPrefix = "givenup/";
+    private readonly Dictionary<uint, HashSet<string>> _givenUp = new();
+
+    public IReadOnlySet<string> GivenUpFor(uint landblock) => LoadGivenUp(landblock & 0xFFFF0000u);
+
+    /// <summary>Remembers a point given up on from a cell; true when it is new.</summary>
+    public bool AddGivenUp(uint cellId, string key)
+    {
+        uint landblock = cellId & 0xFFFF0000u;
+        HashSet<string> keys = LoadGivenUp(landblock);
+        if (!keys.Add(key))
+            return false;
+        if (storage.IsAvailable)
+            storage.WriteText(GivenUpKey(landblock), JsonSerializer.Serialize(keys.OrderBy(k => k, StringComparer.Ordinal).ToArray(), BotProfile.JsonOptions));
+        return true;
+    }
+
+    private HashSet<string> LoadGivenUp(uint landblock)
+    {
+        if (_givenUp.TryGetValue(landblock, out HashSet<string>? keys))
+            return keys;
+        keys = new HashSet<string>(StringComparer.Ordinal);
+        string? json = storage.IsAvailable ? storage.ReadText(GivenUpKey(landblock)) : null;
+        if (json is not null)
+        {
+            try
+            {
+                foreach (string key in JsonSerializer.Deserialize<string[]>(json, BotProfile.JsonOptions) ?? [])
+                    keys.Add(key);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        _givenUp[landblock] = keys;
+        return keys;
+    }
+
+    private static string GivenUpKey(uint landblock) => $"{GivenUpPrefix}{landblock >> 16:X4}.json";
 }

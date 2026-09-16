@@ -137,6 +137,18 @@ public sealed class PatrolControllerTests
     }
 
     [Fact]
+    public void APointGivenUpOnIsRememberedForTheNextPatrolOfTheDungeon()
+    {
+        var storage = new MemoryStorage();
+        var hazards = new DungeonHazards(storage);
+        string key = NavigationBehavior.GivenUpKey(Block | 0x100, new Waypoint(WaypointKind.Point, 0d, 20d / 240d));
+        Assert.True(hazards.AddGivenUp(Block | 0x100, key));
+        Assert.False(hazards.AddGivenUp(Block | 0x100, key));
+        // Another instance over the same storage - the next session - reads it back.
+        Assert.Contains(key, new DungeonHazards(storage).GivenUpFor(Block | 0x100));
+    }
+
+    [Fact]
     public void TheMarketplaceIsNotADungeonToPatrol()
     {
         (BotController controller, FakeAutomationSurface surface, TickClock clock) = Build(out FakeDungeon dungeon);

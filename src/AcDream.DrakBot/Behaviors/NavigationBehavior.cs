@@ -45,10 +45,20 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
     public const double WedgeSeconds = 45d;
     private const double WedgeMeters = 0.3d;
     private const double WedgeJumpIntervalSeconds = 60d;
-    /// <summary>Points given up on, by the cell they were given up from: (cell, point to the nearest quarter metre).</summary>
-    private readonly HashSet<(uint Cell, long EastWest, long NorthSouth)> _givenUp = [];
-    private static (uint, long, long) GivenUpKey(uint cellId, Waypoint point) =>
-        (cellId, (long)Math.Round(point.EastWest * 960d), (long)Math.Round(point.NorthSouth * 960d));
+    /// <summary>Points given up on, by the cell they were given up from: "cell:ew:ns", the point to the nearest quarter metre.</summary>
+    private readonly HashSet<string> _givenUp = new(StringComparer.Ordinal);
+    public static string GivenUpKey(uint cellId, Waypoint point) =>
+        $"{cellId:X8}:{(long)Math.Round(point.EastWest * 960d)}:{(long)Math.Round(point.NorthSouth * 960d)}";
+
+    /// <summary>A point given up on, for the controller to remember across sessions.</summary>
+    public event Action<uint, string>? GaveUp;
+
+    /// <summary>Points remembered from earlier sessions, for this landblock.</summary>
+    public void RememberGivenUp(IEnumerable<string> keys)
+    {
+        foreach (string key in keys)
+            _givenUp.Add(key);
+    }
     private PluginNavigationPosition _wedgeAnchor;
     private double _wedgeAnchorAt = double.NaN;
     private double _lastWedgeJumpAt = double.NegativeInfinity;
@@ -291,7 +301,11 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings) : IBeh
                             // on, and the skipped point comes round again.
                             context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} not reached after {_detours} detours from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
                             if (_follower.Current is { } givenUp)
-                                _givenUp.Add(GivenUpKey(board.Navigation.Position.CellId, givenUp));
+                            {
+                                string key = GivenUpKey(board.Navigation.Position.CellId, givenUp);
+                                _givenUp.Add(key);
+                                GaveUp?.Invoke(board.Navigation.Position.CellId, key);
+                            }
                             _detours = 0;
                             _walker.Reset(host);
                             _follower.Skip();

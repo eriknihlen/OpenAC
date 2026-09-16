@@ -402,7 +402,9 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   fallback when nothing is open. A step detoured six times without being
   reached is given up and the next one aimed for - a point on the floor
   above with no ramp from here is not reached by walking at the wall all
-  night - and it comes round again on the next lap. Route points are simplified with height
+  night - and it is remembered, with the cell it was given up from, per
+  landblock in the plugin's storage (`givenup/<landblock>.json`), so the
+  next lap and the next session skip it at once. Route points are simplified with height
   in mind: a point on the line on the map but off it in height (a ramp's
   landing) is kept, or the walk would go from one floor to the next
   through the wall.

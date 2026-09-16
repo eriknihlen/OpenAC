@@ -48,6 +48,7 @@ public sealed class BotController : IMetaBot
             if (behavior is CombatBehavior combat)
                 combat.IsHazardCell = cell => Hazards.For(cell).Contains(cell);
         }
+        Navigation.GaveUp += (cell, key) => Hazards.AddGivenUp(cell, key);
     }
 
     public DungeonHazards Hazards { get; }
@@ -800,6 +801,7 @@ public sealed class BotController : IMetaBot
         DraftRoute = route;
         Navigation.SetRoute(route);
         _patrolLandblock = snapshot.Position.CellId & 0xFFFF0000u;
+        Navigation.RememberGivenUp(Hazards.GivenUpFor(_patrolLandblock));
         if (!Profile.Navigation.Enabled)
             Update(p => p with { Navigation = p.Navigation with { Enabled = true } });
         message = $"patrolling {graph.Count} cells over {route.Waypoints.Count} steps"
