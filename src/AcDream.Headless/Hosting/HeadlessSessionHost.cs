@@ -312,7 +312,8 @@ internal sealed class HeadlessSessionHost : IDisposable
             automation.Bind(
                 runtime,
                 runtime.CharacterOwner,
-                runtime.ActionOwner.SpellCast);
+                runtime.ActionOwner.SpellCast,
+                () => runtime.Clock.SimulationTimeSeconds);
             if (runtime.EntityObjects is { } entityObjects)
                 automation.BindProjectileCollision(entityObjects.Physics.Engine);
             if (contentLease is { } automationContent)

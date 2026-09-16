@@ -87,6 +87,8 @@ public sealed class RuntimeAutomationSurface
         Array.Empty<PluginSpellInfo>();
     private IReadOnlyList<PluginSpellInfo> _knownCombatSpells =
         Array.Empty<PluginSpellInfo>();
+    private IReadOnlyList<double> _enchantmentExpiries = Array.Empty<double>();
+    private Func<double>? _clientTime;
     private IReadOnlyList<PluginActiveEnchantment> _enchantments =
         Array.Empty<PluginActiveEnchantment>();
 
@@ -310,8 +312,15 @@ public sealed class RuntimeAutomationSurface
         .Replace("AndHalf", "-and-Half", StringComparison.Ordinal);
 
     /// <summary>Bind the surface to the runtime's gameplay owners.</summary>
+    /// <param name="clientTime">
+    /// The clock the host stamps enchantments with when they arrive (the
+    /// wiring's clientTime), so a plugin can be told how long each has
+    /// left rather than how long it was cast for. Without it, the
+    /// duration is reported.
+    /// </param>
     public void Bind(
-        GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast)
+        GameRuntime runtime, RuntimeCharacterState character, RuntimeSpellCastState cast,
+        Func<double>? clientTime = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(character);
@@ -323,6 +332,7 @@ public sealed class RuntimeAutomationSurface
             if (_disposed)
                 return;
             DetachLocked();
+            _clientTime = clientTime;
             _runtime = runtime;
             _communication = runtime.CommunicationOwner;
             _communicationSubscription =
@@ -676,6 +686,7 @@ public sealed class RuntimeAutomationSurface
         IReadOnlyList<ActiveEnchantmentRecord> active =
             spellbook.EnchantmentsInEffectSnapshot;
         var built = new List<PluginActiveEnchantment>(active.Count);
+        var expiries = new List<double>(active.Count);
         foreach (ActiveEnchantmentRecord record in active)
         {
             uint family = 0;
@@ -687,8 +698,37 @@ public sealed class RuntimeAutomationSurface
             }
             built.Add(new PluginActiveEnchantment(
                 record.SpellId, family, tier, record.Duration));
+            // A timed enchantment ends at start + duration on the clock it
+            // was stamped with; -1 is for ever, and stays -1.
+            expiries.Add(record.Duration < 0d ? double.NaN : record.StartTime + record.Duration);
         }
         _enchantments = built;
+        _enchantmentExpiries = expiries;
+    }
+
+    /// <summary>
+    /// The enchantments with what each has left on the host's clock, when
+    /// the host gave one; the registry only speaks when something is
+    /// added or removed, so the duration alone would stand at its full
+    /// value until the spell fell off.
+    /// </summary>
+    private IReadOnlyList<PluginActiveEnchantment> EnchantmentsWithRemaining()
+    {
+        IReadOnlyList<PluginActiveEnchantment> enchantments = _enchantments;
+        IReadOnlyList<double> expiries = _enchantmentExpiries;
+        Func<double>? clientTime = _clientTime;
+        if (clientTime is null || expiries.Count != enchantments.Count)
+            return enchantments;
+        double now = clientTime();
+        var withRemaining = new PluginActiveEnchantment[enchantments.Count];
+        for (int index = 0; index < withRemaining.Length; index++)
+        {
+            double expiry = expiries[index];
+            withRemaining[index] = double.IsNaN(expiry)
+                ? enchantments[index]
+                : enchantments[index] with { SecondsRemaining = Math.Max(0d, expiry - now) };
+        }
+        return withRemaining;
     }
 
     private static PluginSpellInfo Project(SpellMetadata meta) => new(
@@ -874,7 +914,7 @@ public sealed class RuntimeAutomationSurface
         return (vital.Current, vital.Maximum);
     }
 
-    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => _enchantments;
+    public IReadOnlyList<PluginActiveEnchantment> ActiveEnchantments => EnchantmentsWithRemaining();
 
     public IReadOnlyList<PluginSkillInfo> Skills
     {

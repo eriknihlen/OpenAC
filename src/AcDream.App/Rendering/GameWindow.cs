@@ -501,7 +501,7 @@ public sealed class GameWindow :
                 options.DumpSky ? Console.WriteLine : null));
         _runtimeHostLease = _runtime.AcquireHostLease(
             "graphical GameWindow");
-        _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast);
+        _automation?.Bind(_runtime, _runtime.CharacterOwner, _runtime.ActionOwner.SpellCast, ClientTimerNow);
         _automation?.BindProjectileCollision(_physicsEngine);
         _localPlayerIdentity = new AcDream.App.Input.LocalPlayerIdentityState(
             _runtime.PlayerIdentity);

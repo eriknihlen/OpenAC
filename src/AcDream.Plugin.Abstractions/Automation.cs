@@ -58,6 +58,11 @@ public readonly record struct PluginSpellComponentSet(
     uint Potion,
     uint Talisman);
 
+/// <summary>
+/// An enchantment on the character. <paramref name="SecondsRemaining"/>
+/// counts down from the host's clock (a permanent one is -1); a host
+/// without a clock for it reports the full duration instead.
+/// </summary>
 public readonly record struct PluginActiveEnchantment(
     uint SpellId,
     uint Family,
