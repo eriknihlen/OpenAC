@@ -13,14 +13,19 @@ public static class WarSpellNames
     /// <summary>War magic: [Arc, Ring, Streak, Bolt] per element.</summary>
     private static readonly Dictionary<string, string[]> War = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Fire"] = ["Flame Arc", "Ring of Fire", "Flame Streak", "Flame Bolt"],
-        ["Cold"] = ["Frost Arc", "Frost Ring", "Frost Streak", "Frost Bolt"],
-        ["Lightning"] = ["Lightning Arc", "Shock Ring", "Lightning Streak", "Shock Wave"],
+        // As the spell table names them (Aeshnidae's world database, retail's
+        // names): Shock Wave is the bludgeoning bolt, Lightning Bolt the
+        // lightning one; rings are Flame, Glacial, Lightning, Acid and Force
+        // - there is no blade or bludgeoning ring, and an empty name is
+        // simply never found.
+        ["Fire"] = ["Flame Arc", "Flame Ring", "Flame Streak", "Flame Bolt"],
+        ["Cold"] = ["Frost Arc", "Glacial Ring", "Frost Streak", "Frost Bolt"],
+        ["Lightning"] = ["Lightning Arc", "Lightning Ring", "Lightning Streak", "Lightning Bolt"],
         ["Acid"] = ["Acid Arc", "Acid Ring", "Acid Streak", "Acid Stream"],
-        ["Blade"] = ["Blade Arc", "Blade Ring", "Blade Streak", "Whirling Blade"],
-        ["Slash"] = ["Blade Arc", "Blade Ring", "Blade Streak", "Whirling Blade"],
+        ["Blade"] = ["Blade Arc", "", "Blade Streak", "Whirling Blade"],
+        ["Slash"] = ["Blade Arc", "", "Blade Streak", "Whirling Blade"],
         ["Pierce"] = ["Force Arc", "Force Ring", "Force Streak", "Force Bolt"],
-        ["Bludgeon"] = ["Bludgeoning Arc", "Bludgeoning Ring", "Bludgeoning Streak", "Shock Wave"],
+        ["Bludgeon"] = ["Shock Arc", "", "Shock Wave Streak", "Shock Wave"],
     };
 
     /// <summary>Void magic: only nether does damage; a corrosion line stands in for fire.</summary>
@@ -55,7 +60,7 @@ public static class WarSpellNames
             _ => 3,
         };
         bool nether = element.Equals("Nether", StringComparison.OrdinalIgnoreCase);
-        if (!nether && War.TryGetValue(element, out string[]? war))
+        if (!nether && War.TryGetValue(element, out string[]? war) && war[index].Length > 0)
             yield return war[index];
         if (Void.TryGetValue(element, out string[]? voidLine))
             yield return voidLine[index];

@@ -111,8 +111,10 @@ minute is named in the log, with whether an action or a cast is pending.
 The Combat tab's element keyword fights everything the same way. The
 Monsters tab is the VTank-style list instead: one rule per kind of monster
 (a regular expression over the name, or a substring when it is not one),
-with a priority (higher first, zero never fought), an element (or Auto for
-the profile's), the war spell's shape (bolt, arc, streak) and whether to
+with a priority (higher first, zero never fought), an element - or a
+list of them in order of preference, "Bludgeon, Pierce, Cold" for an
+Olthoi, the first the character can cast winning, or Auto for the
+profile's - the war spell's shape (bolt, arc, streak) and whether to
 ring instead once the profile's minimum number of hostiles stand within
 ring range, and the debuffs to land first - imperil, the element's
 vulnerability, a second vulnerability, fester, yield, broadside, gravity
