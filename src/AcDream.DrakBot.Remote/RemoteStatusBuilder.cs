@@ -63,6 +63,7 @@ internal sealed class RemoteStatusBuilder
     private IReadOnlyList<string> _lootProfiles = [];
     private IReadOnlyList<string> _metaProfiles = [];
     private IReadOnlyList<BuffStatus> _buffPlan = [];
+    private IReadOnlyList<GearEnchantment> _gearEnchantments = [];
     private ulong _lastContentHash;
 
     public RemoteStatusBuilder(
@@ -281,6 +282,22 @@ internal sealed class RemoteStatusBuilder
         foreach (GearItem gear in _equipment)
             gear.Write(json);
         json.WriteEndArray();
+        json.WritePropertyName("gearEnchantments");
+        json.WriteStartArray();
+        foreach (GearEnchantment g in _gearEnchantments)
+        {
+            json.WriteStartObject();
+            json.WriteNumber("itemId", g.ItemId);
+            json.WriteString("item", g.ItemName);
+            json.WriteNumber("slot", g.Slot);
+            json.WriteNumber("spellId", g.SpellId);
+            json.WriteString("name", g.SpellName);
+            json.WriteNumber("family", g.Family);
+            json.WriteNumber("secondsRemaining", Math.Round(g.SecondsRemaining));
+            json.WriteNumber("iconId", g.IconId);
+            json.WriteEndObject();
+        }
+        json.WriteEndArray();
         json.WriteNumber("scanTotal", engine.LastBoard?.Hostiles.Count ?? -1);
         json.WriteNumber("scanRing", -1);
         json.WriteNumber("scanPossible", -1);
@@ -360,6 +377,7 @@ internal sealed class RemoteStatusBuilder
             _tapers = -1;
             _burdenPercent = 0d;
             _buffPlan = [];
+            _gearEnchantments = [];
             return;
         }
         _buffPlan = _controller.Engine.LastBoard is { } board
@@ -367,6 +385,28 @@ internal sealed class RemoteStatusBuilder
             : [];
 
         IReadOnlyList<PluginInventoryItem> owned = _surface.Items.CaptureOwnedItems();
+        // What the client has on record as landed on each worn item - the bot's casts and the player's
+        // own - whatever the bot's armor and weapon switches say.
+        var gear = new List<GearEnchantment>();
+        foreach (PluginInventoryItem item in owned)
+        {
+            if (!item.IsEquipped)
+                continue;
+            foreach (PluginTrackedEnchantment tracked in _surface.Enchantments.Capture(item.ObjectId))
+            {
+                bool known = _surface.Spells.TryGet(tracked.SpellId, out PluginSpellInfo info);
+                gear.Add(new GearEnchantment(
+                    item.ObjectId,
+                    item.Name,
+                    (int)item.EquippedLocation,
+                    tracked.SpellId,
+                    known ? info.Name : "Spell " + tracked.SpellId.ToString(CultureInfo.InvariantCulture),
+                    tracked.Family,
+                    tracked.SecondsRemaining,
+                    known ? PluginIcons.Normalize(info.IconId) : 0u));
+            }
+        }
+        _gearEnchantments = gear;
         var equipment = new List<GearItem>();
         var scarabs = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int tapers = 0;
@@ -481,6 +521,17 @@ internal sealed class RemoteStatusBuilder
 
     private static string Capitalize(string value) =>
         value.Length == 0 ? value : char.ToUpperInvariant(value[0]) + value[1..];
+
+    /// <summary>One spell the client has on record as landed on a worn item.</summary>
+    internal sealed record GearEnchantment(
+        uint ItemId,
+        string ItemName,
+        int Slot,
+        uint SpellId,
+        string SpellName,
+        uint Family,
+        double SecondsRemaining,
+        uint IconId);
 
     /// <summary>One worn item with what its appraisal says, as the phone's gear card shows it.</summary>
     internal sealed record GearItem(

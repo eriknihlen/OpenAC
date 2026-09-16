@@ -809,7 +809,11 @@ screens carry over:
   list as it stands (`buffPlan`: each configured self buff, weapon aura
   and armor spell per piece, what it resolved to, time left, whether it
   is due by the profile's threshold, and why a name could not be cast -
-  `SelfBuffBehavior.Report`). `GET /statusfeed` is the same over a WebSocket,
+  `SelfBuffBehavior.Report`), and what the client has on record as landed
+  on each worn item (`gearEnchantments`: the character's own casts, the
+  bot's or the player's, with their time left - the game sends no timers
+  for item enchantments, so a spell cast before the client started is not
+  known to it). `GET /statusfeed` is the same over a WebSocket,
   pushed within ~150 ms of a change - and only of a change: a document
   that differs from the last only by its timestamp is held back, going
   out every three seconds so the feed still reads as alive. The document also states the

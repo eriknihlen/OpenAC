@@ -126,6 +126,31 @@ public sealed class RemoteStatusBuilderTests
     }
 
     [Fact]
+    public void WhatLandedOnWornGearIsListedWhateverTheBotsSwitchesSay()
+    {
+        var host = new RemoteTestHost();
+        FakeAutomationSurface surface = host.Surface;
+        surface.CombatSpells.Add(Spell.Debuff(14, "Impenetrability VI", 104, 6));
+        surface.OwnedItems.Add(Item(0x80000010u, "Coat", equipped: 0x400u, objectClass: PluginObjectClass.Armor));
+        surface.OwnedItems.Add(Item(0x80000011u, "Spare Coat", objectClass: PluginObjectClass.Armor)); // in the pack, not worn
+        surface.Landed.Add(new PluginTrackedEnchantment(0x80000010u, 14u, 104u, 1, false, 1200d));
+        surface.Landed.Add(new PluginTrackedEnchantment(0x80000011u, 14u, 104u, 1, false, 1200d));
+        (DrakBotPlugin bot, DrakBotRemotePlugin remote) = host.Plugins();
+        bot.Controller!.Update(p => p with { Buffs = p.Buffs with { BuffArmor = false } });
+
+        JsonElement client = Client(remote.Status!.Build(1d), out JsonDocument owner);
+        using (owner)
+        {
+            JsonElement gear = client.GetProperty("gearEnchantments");
+            JsonElement only = Assert.Single(gear.EnumerateArray());
+            Assert.Equal("Coat", only.GetProperty("item").GetString());
+            Assert.Equal("Impenetrability VI", only.GetProperty("name").GetString());
+            Assert.Equal(1200d, only.GetProperty("secondsRemaining").GetDouble());
+            Assert.DoesNotContain(client.GetProperty("buffPlan").EnumerateArray(), p => p.GetProperty("kind").GetString() == "armor");
+        }
+    }
+
+    [Fact]
     public void AnUnchangedDocumentIsNotReportedAsNew()
     {
         var host = new RemoteTestHost();
