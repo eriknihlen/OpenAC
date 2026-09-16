@@ -86,6 +86,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
     /// <summary>The step the detours were for, and how many it may have before it is skipped: a waypoint on the floor above with no ramp from here is not reached by walking at the wall all day.</summary>
     private int _detourStep = -1;
     private const int MaxDetoursPerStep = 6;
+    /// <summary>A step this many physics units above or below the body is on another floor.</summary>
+    private const double OtherFloorUnits = 3d;
     private int _loggedIndex = -1;
     private double _lastTraceAt = double.NegativeInfinity;
     private bool _followMoving;
@@ -322,6 +324,24 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
                         {
                             if (Stalls.Interrupt(board.Now, "rejoined by a path") is { } rejoinedLine)
                                 context.Log.Info(rejoinedLine);
+                            return BehaviorStep.Continue;
+                        }
+                        // A point on another floor - three units up or down -
+                        // is reached by a ramp or not at all; no detour along
+                        // this floor finds it, and the route comes round to it
+                        // from its own floor next lap. Skipped at once, and
+                        // remembered from here.
+                        if (_follower.Current is { } aimed && Math.Abs(aimed.Elevation - board.Navigation.Position.Elevation) * 240d > OtherFloorUnits)
+                        {
+                            context.Log.Warn($"nav: step {_follower.CurrentIndex + 1} is on another floor ({(aimed.Elevation - board.Navigation.Position.Elevation) * 240d:+0;-0} units) with no path to it from {BotEngine.Describe(board.Navigation.Position)}; skipping it");
+                            string key = GivenUpKey(board.Navigation.Position.CellId, aimed);
+                            _givenUp.Add(key);
+                            GaveUp?.Invoke(board.Navigation.Position.CellId, key);
+                            _detours = 0;
+                            _walker.Reset(host);
+                            _follower.Skip();
+                            if (Stalls.Interrupt(board.Now, "step on another floor skipped") is { } floorLine)
+                                context.Log.Info(floorLine);
                             return BehaviorStep.Continue;
                         }
                         if (_detourStep != _follower.CurrentIndex)

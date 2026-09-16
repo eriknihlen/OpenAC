@@ -20,8 +20,14 @@ public static class DungeonPathfinder
     /// <summary>An edge steeper than this, centre to centre, is a drop.</summary>
     public const double DropAngleDegrees = 45d;
 
-    /// <summary>Cells within this many physics units of the character's height count as the same floor.</summary>
-    private const double SameFloorBand = 8d;
+    /// <summary>
+    /// Cells within this many physics units of the character's height count
+    /// as the same floor. Floors in a dungeon are six units apart as often
+    /// as not, so the band is under half that: eight once took a room six
+    /// units down for the floor a doorway was on, and a rejoin pathed to the
+    /// room below the point instead of up the ramp to it.
+    /// </summary>
+    private const double SameFloorBand = 2.5d;
 
     private const int PatrolMinKeepNodes = 8;
     private const double PatrolMinKeepFraction = 0.2;
@@ -530,24 +536,37 @@ public static class DungeonPathfinder
     public static ulong EdgeKey(uint a, uint b) =>
         a < b ? ((ulong)a << 32) | b : ((ulong)b << 32) | a;
 
+    /// <summary>A given-up point this close to one of its cell's doorways is that doorway.</summary>
+    public const double GivenUpDoorwayMeters = 2d;
+
     /// <summary>
-    /// The crossing a given-up point stands for: from the cell it was given
-    /// up in, to the neighbour whose doorway (or centre) is nearest the
-    /// point. Zero when the cell is not in the graph or has no neighbour.
+    /// The crossing a given-up point stands for: the doorway of the cell it
+    /// was given up in that the point sits on. A point that is not one of
+    /// the cell's doorways - a doorway on the floor above, aimed at from
+    /// below after a fight dragged the body there - stands for no crossing
+    /// at all: closing the nearest doorway for it once shut a wing of
+    /// twenty-eight cells behind two perfectly good doors. Zero then.
     /// </summary>
     public static ulong GivenUpEdge(Dictionary<uint, PluginDungeonCell> graph, uint cellId, in PluginNavigationPosition point)
     {
         if (!graph.TryGetValue(cellId, out PluginDungeonCell cell))
             return 0ul;
         uint best = 0u;
-        double bestDistance = double.PositiveInfinity;
+        double bestDistance = GivenUpDoorwayMeters;
         foreach (uint next in cell.Neighbors)
         {
             if (!graph.TryGetValue(next, out PluginDungeonCell nextCell))
                 continue;
-            PluginNavigationPosition at = TryDoorway(cell, nextCell, out PluginDungeonDoorway doorway) ? doorway.Position : nextCell.Position;
+            // A host that reports no doorways at all has the crossing at the midpoint of the two cells.
+            PluginNavigationPosition at;
+            if (TryDoorway(cell, nextCell, out PluginDungeonDoorway doorway))
+                at = doorway.Position;
+            else if (cell.Doorways.Count == 0)
+                at = new PluginNavigationPosition(0u, (cell.EastWest + nextCell.EastWest) / 2d, (cell.NorthSouth + nextCell.NorthSouth) / 2d, (cell.Elevation + nextCell.Elevation) / 2d, 0f, false);
+            else
+                continue;
             double distance = at.HorizontalDistanceMeters(point);
-            if (distance < bestDistance)
+            if (distance < bestDistance && Math.Abs(at.Elevation - point.Elevation) * 240d < 3d)
             {
                 bestDistance = distance;
                 best = next;

@@ -267,7 +267,10 @@ public sealed class BotController : IMetaBot
             {
                 continue;
             }
-            var point = new PluginNavigationPosition(cell, ew / 960d, ns / 960d, 0d, 0f, false);
+            // The key carries no height; the cell's is taken, since a point
+            // on another floor is no doorway of this cell anyway.
+            double z = graph.TryGetValue(cell, out PluginDungeonCell givenUpIn) ? givenUpIn.Elevation : 0d;
+            var point = new PluginNavigationPosition(cell, ew / 960d, ns / 960d, z, 0f, false);
             ulong edge = DungeonPathfinder.GivenUpEdge(graph, cell, point);
             if (edge != 0ul)
                 edges.Add(edge);

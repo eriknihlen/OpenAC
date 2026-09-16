@@ -475,14 +475,17 @@ through a wall). `DungeonPathfinder` plans on it the way RynthAi's does:
   above with no ramp from here is not reached by walking at the wall all
   night - and it is remembered, with the cell it was given up from, per
   landblock in the plugin's storage (`givenup/<landblock>.json`), so the
-  next lap and the next session skip it at once. A given-up point also
-  closes the crossing it stands for - from the cell it was given up in
-  to the neighbour whose doorway is nearest it - to every path and
-  patrol built after (`DungeonPathfinder.GivenUpEdge`, the graph's
-  doorway the body could not pass), so a lead-in never brings the walk
-  back to the same wall and a patrol does not route through it; a room
-  only reachable through such a crossing is left out, as one behind an
-  acid pool is. Every stall - the body
+  next lap and the next session skip it at once. A given-up point that
+  is one of its cell's own doorways also closes that crossing to every
+  path and patrol built after (`DungeonPathfinder.GivenUpEdge`, the
+  graph's doorway the body could not pass), so a lead-in never brings
+  the walk back to the same wall and a patrol does not route through
+  it; a room only reachable through such a crossing is left out, as one
+  behind an acid pool is. A point on another floor - three units up or
+  down, a doorway of the room above aimed at from below after a fight
+  dragged the body there - is no doorway of the cell and closes nothing:
+  it is skipped at once rather than detoured along the wrong floor, and
+  the route comes round to it from its own floor next lap. Every stall - the body
   standing still while pressing on, from the first recovery called for
   until it covers ground again, the step changes or the walk is
   interrupted - is logged at both ends with the seconds, and kept per

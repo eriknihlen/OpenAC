@@ -78,10 +78,13 @@ public sealed class DungeonPathfinderTests
             Cell(0x303, 60d, 0d, 0d, 0x302, 0x304),
             Cell(0x304, 80d, 0d, 0d, 0x303),
         ]);
-        // The point given up from 0x301, standing at the cell's edge toward 0x302.
+        // The point given up from 0x301 is its doorway toward 0x302.
         var point = new PluginNavigationPosition(Block | 0x301, 30d / 240d, 0d, 0d, 0f, false);
         ulong edge = DungeonPathfinder.GivenUpEdge(graph, Block | 0x301, point);
         Assert.Equal(DungeonPathfinder.EdgeKey(Block | 0x301, Block | 0x302), edge);
+        // A point that is no doorway of the cell - the room above, say - closes nothing.
+        var elsewhere = new PluginNavigationPosition(Block | 0x301, 20d / 240d, 5d / 240d, 6d / 240d, 0f, false);
+        Assert.Equal(0ul, DungeonPathfinder.GivenUpEdge(graph, Block | 0x301, elsewhere));
         var blocked = new HashSet<ulong> { edge };
 
         Assert.Equal(5, DungeonPathfinder.FindPath(graph, Block | 0x300, Block | 0x304).Count);
