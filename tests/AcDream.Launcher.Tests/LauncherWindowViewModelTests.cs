@@ -151,7 +151,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task StartupStatusReportsAnAvailableUpdate()
+    public async Task StartupStatusLeavesAnAvailableUpdateToTheBanner()
     {
         using var orchestrator = new FakeLauncherOrchestrator
         {
@@ -170,7 +170,8 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.Initialize();
         await viewModel.StartBackgroundInitializationAsync();
 
-        Assert.Equal("Update available.", viewModel.OperationStatus);
+        Assert.Equal("", viewModel.OperationStatus);
+        Assert.True(viewModel.ShowUpdateBanner);
     }
 
     [Fact]

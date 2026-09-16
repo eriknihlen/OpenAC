@@ -468,8 +468,10 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
             return "Update check unavailable; the launcher works offline.";
         }
 
+        // An available update gets its own banner at the top of the window; saying so again
+        // in the status line is noise.
         return UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable
-            ? "Update available."
+            ? ""
             : "Up to date.";
     }
 
