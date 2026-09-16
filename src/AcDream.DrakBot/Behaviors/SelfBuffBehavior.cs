@@ -45,6 +45,17 @@ public sealed class SelfBuffBehavior(
 
     private enum ArmorNeed { None, Appraise, Cast }
 
+    // ── one pass, not one buff at a time ─────────────────────────────────
+    // A buff crossing the minute brings the wand out; once it is out, every
+    // buff that would cross it in the next twenty minutes goes in the same
+    // pass, and the sword comes back once. The pass is open from the first
+    // cast until nothing is due at the wide threshold.
+    private bool _passOpen;
+
+    /// <summary>The seconds-left threshold a buff is due at: the profile's, or the wide one while a pass is open.</summary>
+    private double DueThreshold(BuffSettings buffs) =>
+        _passOpen ? Math.Max(buffs.RebuffWhenRemainingSeconds, buffs.RebuffTogetherWithinSeconds) : buffs.RebuffWhenRemainingSeconds;
+
     public string Name => "buffs";
 
     private const double PendingWaitSeconds = 8d;
@@ -144,6 +155,7 @@ public sealed class SelfBuffBehavior(
         {
             if (buffs.BuffArmor && surface is not null && NextArmorNeed(board, buffs, out _, out PluginInventoryItem piece) == ArmorNeed.Appraise)
                 return Appraise(board, piece);
+            _passOpen = false;
             return BehaviorStep.Done;
         }
         if (spell.SpellId == _lastSucceededSpell && board.Now - _lastSucceededAt < NoEffectWindowSeconds)
@@ -164,6 +176,7 @@ public sealed class SelfBuffBehavior(
         _pendingSpell = spell.SpellId;
         _pendingFamily = spell.Family;
         _pendingTarget = target;
+        _passOpen = true;
         PluginCastRequestResult result = casts.Request(spell.SpellId, target);
         return result == PluginCastRequestResult.Sent
             ? BehaviorStep.Continue
@@ -368,11 +381,11 @@ public sealed class SelfBuffBehavior(
         if (casts.IsOnCooldown(candidate.SpellId))
             return false;
         bool forced = _forceRebuff && !_forcedFamiliesDone.Contains(candidate.Family);
-        if (!forced && IsCovered(board.Enchantments, candidate, buffs.RebuffWhenRemainingSeconds))
+        if (!forced && IsCovered(board.Enchantments, candidate, DueThreshold(buffs)))
             return false;
         // An aura the registry does not list may still be on record as landed on the character.
         if (!forced && surface is not null
-            && IsCovered(surface.Enchantments.Capture(board.SelfId), candidate, buffs.RebuffWhenRemainingSeconds))
+            && IsCovered(surface.Enchantments.Capture(board.SelfId), candidate, DueThreshold(buffs)))
             return false;
         spell = candidate;
         return true;
@@ -418,7 +431,7 @@ public sealed class SelfBuffBehavior(
                     // record that has run out is not a record of absence,
                     // since it is only what this session cast.
                     double onRecord = Remaining(landed, candidate.Family);
-                    if (onRecord > buffs.RebuffWhenRemainingSeconds)
+                    if (onRecord > DueThreshold(buffs))
                         continue;
                     if (onRecord < 0d && (!fresh || AppraisalShows(item, candidate)))
                         continue;

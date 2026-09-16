@@ -106,6 +106,13 @@ public sealed record BuffSettings
     /// <summary>Recast a buff when less than this many seconds remain.</summary>
     public double RebuffWhenRemainingSeconds { get; init; } = 60d;
 
+    /// <summary>
+    /// Once one buff is due and the wand is out, every buff with less than
+    /// this many seconds left is recast in the same pass, so the wand is
+    /// not swapped in and out every time another buff crosses the minute.
+    /// </summary>
+    public double RebuffTogetherWithinSeconds { get; init; } = 1200d;
+
     /// <summary>Spell families to keep up, by game name without tier.</summary>
     public IReadOnlyList<string> Spells { get; init; } =
     [

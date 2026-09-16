@@ -93,7 +93,7 @@ public sealed class SelfBuffBehaviorTests
             RebuffWhenRemainingSeconds = 60d,
         };
         (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(settings);
-        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 1000d)); // strength already up
+        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 1800d)); // strength up for longer than a pass reaches
         surface.OwnedItems.Add(Armor(0x8000_0001u, "Coat"));
         surface.OwnedItems.Add(Armor(0x8000_0002u, "Leggings"));
 
@@ -175,6 +175,47 @@ public sealed class SelfBuffBehaviorTests
 
     private static BehaviorContext Context(FakeAutomationSurface surface, TickClock clock) =>
         new(surface, new FakeLogger(), Blackboard.Capture(surface, clock, 25f, 15f));
+
+    [Fact]
+    public void OnceTheWandIsOutEverythingExpiringSoonGoesInTheSamePass()
+    {
+        // Endurance crosses the minute and brings the wand out; Strength
+        // has fifteen minutes left, which on its own is not due - but the
+        // wand is out, so it goes in the same pass rather than bringing the
+        // wand out again in fourteen minutes. Coordination, with an hour
+        // left, waits.
+        var settings = new BuffSettings
+        {
+            Spells = ["Strength Self", "Endurance Self", "Focus Self"],
+            RebuffWhenRemainingSeconds = 60d,
+            RebuffTogetherWithinSeconds = 1200d,
+        };
+        (FakeAutomationSurface surface, SelfBuffBehavior behavior, TickClock clock) = Build(settings);
+        surface.Enchantments.Add(new PluginActiveEnchantment(10u, 100u, 6, 900d));   // strength: 15 min
+        surface.Enchantments.Add(new PluginActiveEnchantment(11u, 101u, 6, 30d));    // endurance: due
+        surface.Enchantments.Add(new PluginActiveEnchantment(12u, 102u, 6, 3600d));  // focus: an hour
+
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out string reason));
+        Assert.Equal("Endurance Self VI due", reason);
+        Assert.Equal(StepResult.Continue, behavior.Execute(Context(surface, clock)).Result);
+        surface.CompleteCast(11);
+        surface.Enchantments[1] = new PluginActiveEnchantment(11u, 101u, 6, 1800d);
+        Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);
+
+        // The pass is open: strength is due now, focus is not.
+        Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
+        Assert.Equal("Strength Self VI due", reason);
+        Assert.Equal(StepResult.Continue, behavior.Execute(Context(surface, clock)).Result);
+        surface.CompleteCast(10);
+        surface.Enchantments[0] = new PluginActiveEnchantment(10u, 100u, 6, 1800d);
+        Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);
+        Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);   // nothing left: the pass closes
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+
+        // With the pass closed, fifteen minutes left is not due on its own.
+        surface.Enchantments[2] = new PluginActiveEnchantment(12u, 102u, 6, 900d);
+        Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+    }
 
     [Fact]
     public void CastsConfiguredBuffsInOrderAndOnlyThose()

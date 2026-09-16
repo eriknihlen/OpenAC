@@ -182,6 +182,12 @@ has its busy count cleared and, failing that, its pending request given
 up (`IRecoveryAutomation.AbandonPendingInventoryRequest`), since it
 blocks every wield, use and loot.
 
+A buff is due when less than `RebuffWhenRemainingSeconds` (a minute)
+are left; but once one is due and the wand is out, every buff with less
+than `RebuffTogetherWithinSeconds` (twenty minutes) left goes in the
+same pass, and the sword comes back once - not out and in again each
+time another buff crosses the minute.
+
 Before any cast - a buff or a vital - the bot puts a caster in hand and
 the character in magic mode (`MagicModeGate`): the server drops a cast
 sent from melee, missile or peace mode with a use-done that looks like

@@ -23,6 +23,8 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
     private RouteFollower? _follower;
     private bool _resumeNearest;
     private bool _rejoinPending;
+    private int _probedStep = -1;
+    private RouteFollower? _probedRoute;
     private double _lastRejoinAt = double.NegativeInfinity;
 
     /// <summary>
@@ -258,12 +260,19 @@ public sealed class NavigationBehavior(Func<NavigationSettings> settings, StallL
                 return RunAction(context, nav);
 
             default:
-                if (_rejoinPending)
+                // A step just taken up - the next of the route, the one after
+                // a skipped point, or the same one back from a fight or a
+                // heal that dragged the body into another room - is probed
+                // once before it is walked at: a wall between here and it
+                // is a path back to the route, not three seconds of running
+                // at the wall until the stuck detector says so. A probe
+                // costs nothing; the run at the wall cost the night's worst
+                // stalls.
+                if (_rejoinPending || _probedStep != _follower.CurrentIndex || _probedRoute != _follower)
                 {
-                    // Back from a fight or a heal, possibly dragged into
-                    // another room: if the step is not straight ahead any
-                    // more, path back to it instead of walking at the wall.
                     _rejoinPending = false;
+                    _probedStep = _follower.CurrentIndex;
+                    _probedRoute = _follower;
                     if (!DirectlyWalkable(context.Surface, step) && TryRejoin(context))
                         return BehaviorStep.Continue;
                 }
