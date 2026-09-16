@@ -186,7 +186,9 @@ A buff is due when less than `RebuffWhenRemainingSeconds` (a minute)
 are left; but once one is due and the wand is out, every buff with less
 than `RebuffTogetherWithinSeconds` (twenty minutes) left goes in the
 same pass, and the sword comes back once - not out and in again each
-time another buff crosses the minute.
+time another buff crosses the minute. A family cast in the pass is
+judged at the minute again, not the twenty, so a short buff's fresh
+duration is not "due" in the pass it was cast in.
 
 Before any cast - a buff or a vital - the bot puts a caster in hand and
 the character in magic mode (`MagicModeGate`): the server drops a cast
@@ -210,9 +212,12 @@ The weapon auras (Blood Drinker, Defender, Heart Seeker, Swift Killer -
 "Aura of ... Self" in the book, named without the prefix in the profile)
 are self-casts that land in the character's own registry, and are kept
 up like any self buff. The armor spells (Impenetrability, the Banes)
-land on the piece, and an item enchantment never reaches the
-character's registry: what a worn piece has on it is only ever learnt
-by asking the server about the piece. The appraisal lists what is on
+are cast on the character, once each: the server redirects an item
+spell cast at a creature to every equipped item of the spell's kind -
+armor and clothing alike - so one cast dresses the whole set, as a
+player's does. An item enchantment never reaches the character's
+registry: what a worn piece has on it is only ever learnt by asking the
+server about the piece. The appraisal lists what is on
 the item (`PluginInventoryItem.AppraisedSpellIds`, the enchantments
 marked with `ActiveEnchantmentMask`) but not for how long. So with armor
 buffing on, each worn piece is appraised (`IItemAutomation.Appraise`)

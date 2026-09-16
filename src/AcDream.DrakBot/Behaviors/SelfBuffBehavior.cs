@@ -26,6 +26,8 @@ public sealed class SelfBuffBehavior(
     private uint _pendingSpell;
     private uint _pendingFamily;
     private uint _pendingTarget;
+    /// <summary>The cast in flight is an armor spell, cast on the character for every worn piece.</summary>
+    private bool _pendingArmor;
 
     // ── armor ──────────────────────────────────────────────────────────
     // What a worn piece has on it is only ever learnt by asking the server
@@ -45,12 +47,28 @@ public sealed class SelfBuffBehavior(
 
     private enum ArmorNeed { None, Appraise, Cast }
 
+    /// <summary>
+    /// An armor spell is cast on the character, not on a piece: the server
+    /// redirects an item spell cast at a creature to every equipped item
+    /// of the spell's kind - armor and clothing alike for Impenetrability
+    /// and the Banes - so one cast dresses the whole set, as a player's
+    /// does. What each piece then has on it is read off its appraisal.
+    /// </summary>
+    private static bool IsWornVestment(in PluginInventoryItem item) =>
+        item.IsEquipped && item.ObjectClass is PluginObjectClass.Armor or PluginObjectClass.Clothing;
+
     // ── one pass, not one buff at a time ─────────────────────────────────
     // A buff crossing the minute brings the wand out; once it is out, every
     // buff that would cross it in the next twenty minutes goes in the same
     // pass, and the sword comes back once. The pass is open from the first
     // cast until nothing is due at the wide threshold.
     private bool _passOpen;
+    /// <summary>Families cast this pass: judged at the profile's own threshold, not the wide one, so a short buff's fresh duration is not "due" again in the pass it was cast in.</summary>
+    private readonly HashSet<uint> _castThisPass = [];
+
+    /// <summary>The seconds-left threshold a family is due at: the pass's wide one, unless the family was cast in this pass.</summary>
+    private double DueThreshold(BuffSettings buffs, uint family) =>
+        _castThisPass.Contains(family) ? buffs.RebuffWhenRemainingSeconds : DueThreshold(buffs);
 
     /// <summary>The seconds-left threshold a buff is due at: the profile's, or the wide one while a pass is open.</summary>
     private double DueThreshold(BuffSettings buffs) =>
@@ -130,9 +148,21 @@ public sealed class SelfBuffBehavior(
             if (outcome == CastOutcome.Succeeded)
             {
                 if (_forceRebuff)
-                    _forcedFamiliesDone.Add(_pendingTarget == 0u ? _pendingFamily : FamilyOn(_pendingFamily, _pendingTarget));
+                    _forcedFamiliesDone.Add(_pendingFamily);
                 _lastSucceededSpell = _pendingSpell;
                 _lastSucceededAt = board.Now;
+                // An armor spell landed on the character: the record says so
+                // for every worn piece, with the spell's own duration, until
+                // the next appraisal of each says what really took.
+                if (_pendingArmor && surface is not null && surface.Spells.TryGet(_pendingSpell, out PluginSpellInfo cast))
+                {
+                    foreach (PluginInventoryItem item in surface.Items.CaptureOwnedItems())
+                    {
+                        if (IsWornVestment(item))
+                            surface.Enchantments.ReportCast(item.ObjectId, _pendingSpell, cast.DurationSeconds);
+                    }
+                }
+                _pendingArmor = false;
             }
             return BehaviorStep.Done;
         }
@@ -156,6 +186,7 @@ public sealed class SelfBuffBehavior(
             if (buffs.BuffArmor && surface is not null && NextArmorNeed(board, buffs, out _, out PluginInventoryItem piece) == ArmorNeed.Appraise)
                 return Appraise(board, piece);
             _passOpen = false;
+            _castThisPass.Clear();
             return BehaviorStep.Done;
         }
         if (spell.SpellId == _lastSucceededSpell && board.Now - _lastSucceededAt < NoEffectWindowSeconds)
@@ -176,7 +207,10 @@ public sealed class SelfBuffBehavior(
         _pendingSpell = spell.SpellId;
         _pendingFamily = spell.Family;
         _pendingTarget = target;
+        _pendingArmor = _armorCast;
+        _armorCast = false;
         _passOpen = true;
+        _castThisPass.Add(spell.Family);
         PluginCastRequestResult result = casts.Request(spell.SpellId, target);
         return result == PluginCastRequestResult.Sent
             ? BehaviorStep.Continue
@@ -270,7 +304,7 @@ public sealed class SelfBuffBehavior(
         {
             foreach (PluginInventoryItem item in surface.Items.CaptureOwnedItems())
             {
-                if (!item.IsEquipped || item.ObjectClass != PluginObjectClass.Armor)
+                if (!IsWornVestment(item))
                     continue;
                 IReadOnlyList<PluginTrackedEnchantment>? onPiece = null;
                 foreach (string name in buffs.ArmorSpells)
@@ -381,22 +415,26 @@ public sealed class SelfBuffBehavior(
         if (casts.IsOnCooldown(candidate.SpellId))
             return false;
         bool forced = _forceRebuff && !_forcedFamiliesDone.Contains(candidate.Family);
-        if (!forced && IsCovered(board.Enchantments, candidate, DueThreshold(buffs)))
+        if (!forced && IsCovered(board.Enchantments, candidate, DueThreshold(buffs, candidate.Family)))
             return false;
         // An aura the registry does not list may still be on record as landed on the character.
         if (!forced && surface is not null
-            && IsCovered(surface.Enchantments.Capture(board.SelfId), candidate, DueThreshold(buffs)))
+            && IsCovered(surface.Enchantments.Capture(board.SelfId), candidate, DueThreshold(buffs, candidate.Family)))
             return false;
         spell = candidate;
         return true;
     }
 
+    private bool _armorCast;
+
     private bool TryDueArmor(Blackboard board, BuffSettings buffs, out PluginSpellInfo spell, out uint target)
     {
         target = 0u;
-        if (NextArmorNeed(board, buffs, out spell, out PluginInventoryItem piece) != ArmorNeed.Cast)
+        if (NextArmorNeed(board, buffs, out spell, out _) != ArmorNeed.Cast)
             return false;
-        target = piece.ObjectId;
+        // Cast on the character: the server dresses every worn piece with it.
+        target = board.SelfId;
+        _armorCast = true;
         return true;
     }
 
@@ -411,33 +449,42 @@ public sealed class SelfBuffBehavior(
         spell = default;
         piece = default;
         PluginInventoryItem? stale = null;
+        var worn = new List<PluginInventoryItem>();
         foreach (PluginInventoryItem item in surface!.Items.CaptureOwnedItems())
         {
-            if (!item.IsEquipped || item.ObjectClass != PluginObjectClass.Armor)
+            if (!IsWornVestment(item))
                 continue;
+            worn.Add(item);
             bool fresh = IsAppraisalFresh(item);
             if (!fresh && stale is null && (_appraising != item.ObjectId || board.Now - _appraiseSentAt >= AppraiseWaitSeconds || item.AppraisalAgeSeconds < 0d))
                 stale = item;
-            IReadOnlyList<PluginTrackedEnchantment>? landed = null;
+        }
+        if (worn.Count > 0)
+        {
             foreach (string name in buffs.ArmorSpells)
             {
                 if (!spells.TryBestKnown(name, out PluginSpellInfo candidate) || casts.IsOnCooldown(candidate.SpellId))
                     continue;
-                bool forced = _forceRebuff && !_forcedFamiliesDone.Contains(FamilyOn(candidate.Family, item.ObjectId));
-                landed ??= surface.Enchantments.Capture(item.ObjectId);
-                if (!forced)
+                bool forced = _forceRebuff && !_forcedFamiliesDone.Contains(candidate.Family);
+                // One cast dresses every piece; it is due when any worn piece
+                // is without the family - by the record's time where the record
+                // has it, else by what the appraisal showed on the piece.
+                bool due = forced;
+                foreach (PluginInventoryItem item in worn)
                 {
-                    // The record, when it has the family, decides by time; a
-                    // record that has run out is not a record of absence,
-                    // since it is only what this session cast.
-                    double onRecord = Remaining(landed, candidate.Family);
-                    if (onRecord > DueThreshold(buffs))
+                    if (due)
+                        break;
+                    double onRecord = Remaining(surface.Enchantments.Capture(item.ObjectId), candidate.Family);
+                    if (onRecord > DueThreshold(buffs, candidate.Family))
                         continue;
-                    if (onRecord < 0d && (!fresh || AppraisalShows(item, candidate)))
+                    if (onRecord < 0d && (!IsAppraisalFresh(item) || AppraisalShows(item, candidate)))
                         continue;
+                    due = true;
+                    piece = item;
                 }
+                if (!due)
+                    continue;
                 spell = candidate;
-                piece = item;
                 return ArmorNeed.Cast;
             }
         }
@@ -470,9 +517,6 @@ public sealed class SelfBuffBehavior(
         }
         return false;
     }
-
-    /// <summary>A forced pass tracks armor spells per piece, not per family.</summary>
-    private static uint FamilyOn(uint family, uint objectId) => unchecked(family * 2654435761u ^ objectId);
 
     private static bool IsCovered(
         IReadOnlyList<PluginTrackedEnchantment> landed,

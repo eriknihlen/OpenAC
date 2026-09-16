@@ -107,8 +107,9 @@ public sealed class SelfBuffBehaviorTests
         behavior.Execute(Context(surface, clock));
 
         // The armor is asked about first - what is on a piece is only ever
-        // learnt from the server - then Impenetrability goes on each piece
-        // the answer shows without it, once per piece.
+        // learnt from the server - then Impenetrability is cast once, on
+        // the character: the server dresses every worn piece with it, and
+        // the record says so for each until its next appraisal.
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
         Assert.Equal("asking about Coat", reason);
         behavior.Execute(Context(surface, clock));
@@ -116,19 +117,15 @@ public sealed class SelfBuffBehaviorTests
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
         Assert.Contains("Impenetrability", reason);
         behavior.Execute(Context(surface, clock));
-        Assert.Equal("cast:14@2147483649", surface.Commands[^1]);
-        surface.CompleteCast(14, target: 0x8000_0001u);
-        surface.ReportCast(0x8000_0001u, 14u, 1800d);
+        Assert.Equal($"cast:14@{surface.ObjectId}", surface.Commands[^1]);
+        surface.CompleteCast(14, target: surface.ObjectId);
         behavior.Execute(Context(surface, clock));
+        Assert.Equal(2, surface.Landed.Count(l => l.SpellId == 14u));   // the Coat and the Leggings both on record
         behavior.Execute(Context(surface, clock));
-        Assert.Equal("appraise:2147483650", surface.Commands[^1]);
-        behavior.Execute(Context(surface, clock));
-        Assert.Equal("cast:14@2147483650", surface.Commands[^1]);
-        surface.CompleteCast(14, target: 0x8000_0002u);
-        surface.ReportCast(0x8000_0002u, 14u, 1800d);
-        behavior.Execute(Context(surface, clock));
+        Assert.Equal("appraise:2147483650", surface.Commands[^1]);   // the Leggings still get asked about
 
         Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
+        Assert.DoesNotContain("cast:14@2147483649", surface.Commands);
     }
 
     [Fact]
@@ -170,7 +167,7 @@ public sealed class SelfBuffBehaviorTests
         Assert.True(behavior.WantsControl(Context(surface, clock).Board, out reason));
         Assert.Equal("Impenetrability VI due", reason);
         behavior.Execute(Context(surface, clock));
-        Assert.Equal("cast:14@2147483649", surface.Commands[^1]);
+        Assert.Equal($"cast:14@{surface.ObjectId}", surface.Commands[^1]);   // on the character, for every piece
     }
 
     private static BehaviorContext Context(FakeAutomationSurface surface, TickClock clock) =>
