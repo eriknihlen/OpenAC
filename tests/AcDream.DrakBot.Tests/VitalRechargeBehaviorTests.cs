@@ -163,6 +163,32 @@ public sealed class VitalRechargeBehaviorTests
     }
 
     [Fact]
+    public void AWieldBehindABusyInventoryIsNotWaitedOnForEver()
+    {
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build();
+        surface.CurrentHealth = 40;
+        surface.Equipment.Add(new PluginEquipmentItem(0x9000_0002u, "Wand", 0x8000u, 0x1000000u, 0u, 1u, 0u, 0, 0, 0, 0, 0d));
+        surface.EquipmentBusy = true;
+
+        BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Continue, step.Result);
+        clock.Advance(MagicModeGate.EquipTimeoutSeconds / 2d);
+        step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Continue, step.Result);
+        clock.Advance(MagicModeGate.EquipTimeoutSeconds);
+        step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("busy too long", step.Reason);
+        Assert.Empty(surface.Commands);
+
+        // Freed: the wand goes on, and the cast follows.
+        surface.EquipmentBusy = false;
+        Assert.Equal(StepResult.Continue, behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock))).Result);
+        Assert.Equal(["equip:2415919106"], surface.Commands);
+    }
+
+    [Fact]
     public void AHealThatMovesNothingIsNotCastAgainAtOnce()
     {
         // A heal of a hundred on a hundred thousand: the host calls the

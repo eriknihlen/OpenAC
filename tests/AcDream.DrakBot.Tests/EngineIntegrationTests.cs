@@ -137,6 +137,32 @@ public sealed class EngineIntegrationTests
     }
 
     [Fact]
+    public void AnInventoryLeftBusyWithNothingInFlightIsFreedAfterTheWindow()
+    {
+        // A request the server never answered, from before the bot was
+        // even started: the host says the inventory is busy and no action
+        // of the bot's is pending. The buffs once waited six minutes on
+        // that to wield a wand. The busy count is tried first; it was not
+        // that, so the pending request is given up.
+        var profile = new BotProfile
+        {
+            Buffs = new BuffSettings { Enabled = false },
+            Loot = new LootSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, BotEngine engine) = Build(profile);
+        surface.LootBusy = true;
+
+        for (int tick = 0; tick < 5; tick++)
+            engine.Tick(1d);
+        Assert.Equal(0, surface.RequestsAbandoned);
+
+        engine.Tick(BotEngine.BusyStuckSeconds);
+        Assert.Equal(1, surface.BusyClears);
+        Assert.Equal(1, surface.RequestsAbandoned);
+        Assert.False(surface.LootBusy);
+    }
+
+    [Fact]
     public void AnAttackTheServerNeverAnsweredIsAbortedAfterTheWindowAndVitalsStopWaitingOnIt()
     {
         // Vitals took the tick sixty milliseconds after a swing went out;

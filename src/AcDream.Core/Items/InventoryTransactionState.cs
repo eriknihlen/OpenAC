@@ -230,6 +230,16 @@ public sealed class InventoryTransactionState : IDisposable
         DispatchStateChanged();
     }
 
+    /// <summary>Drops a pending request the server never answered; true when there was one.</summary>
+    public bool AbandonPendingRequest()
+    {
+        if (_pendingRequest is null)
+            return false;
+        _pendingRequest = null;
+        DispatchStateChanged();
+        return true;
+    }
+
     public void ClearBusy()
     {
         if (_busyCount == 0)

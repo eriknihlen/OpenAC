@@ -12,4 +12,13 @@ public interface IRecoveryAutomation
     PluginRecoveryResult ClearOneBusyReference() => new(
         Accepted: false,
         Message: "Action recovery is unavailable on this host.");
+
+    /// <summary>
+    /// Gives up an inventory request the server never answered - a use,
+    /// a wield, a move - so another can begin. The count fields carry
+    /// one while a request was pending, zero when there was none.
+    /// </summary>
+    PluginRecoveryResult AbandonPendingInventoryRequest() => new(
+        Accepted: false,
+        Message: "Action recovery is unavailable on this host.");
 }

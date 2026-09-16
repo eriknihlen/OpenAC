@@ -175,6 +175,13 @@ after is rested for two minutes rather than cast for ever. `/drakbot
 spells` shows, for every configured buff, the tier that would be cast
 and whether it is up or due, or what stands in the way.
 
+The engine watches the client's busy state as well: an inventory that
+stays busy for ten seconds with no action of the bot's in flight - a
+request the server never answered, or a busy count left over from one -
+has its busy count cleared and, failing that, its pending request given
+up (`IRecoveryAutomation.AbandonPendingInventoryRequest`), since it
+blocks every wield, use and loot.
+
 Before any cast - a buff or a vital - the bot puts a caster in hand and
 the character in magic mode (`MagicModeGate`): the server drops a cast
 sent from melee, missile or peace mode with a use-done that looks like

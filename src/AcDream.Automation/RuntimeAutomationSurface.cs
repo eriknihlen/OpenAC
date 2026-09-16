@@ -190,6 +190,30 @@ public sealed class RuntimeAutomationSurface
                 : "Cleared one action busy reference.");
     }
 
+    PluginRecoveryResult IRecoveryAutomation.AbandonPendingInventoryRequest()
+    {
+        GameRuntime? runtime;
+        lock (_gate)
+        {
+            if (_disposed)
+                return new(false, Message: "The plugin host is disposed.");
+            runtime = _runtime;
+        }
+        if (runtime is null)
+            return new(false, Message: "No game session is bound.");
+
+        InventoryTransactionState transactions =
+            runtime.InventoryOwner.Transactions;
+        bool abandoned = transactions.AbandonPendingRequest();
+        return new(
+            Accepted: true,
+            PreviousCount: abandoned ? 1 : 0,
+            CurrentCount: 0,
+            Message: abandoned
+                ? "Abandoned the pending inventory request."
+                : "No inventory request was pending.");
+    }
+
     bool INetworkAutomation.IsAvailable
     {
         get

@@ -20,9 +20,12 @@ public sealed class MagicModeGate(Func<string> wandName)
 {
     public const double ModeTimeoutSeconds = 4d;
     public const double EquipRetrySeconds = 2d;
+    /// <summary>The most a wield is waited for - the inventory busy, or the wield unanswered - before the behaviour gives the tick back.</summary>
+    public const double EquipTimeoutSeconds = 8d;
 
     private double _modeRequestedAt = double.NegativeInfinity;
     private double _equipRequestedAt = double.NegativeInfinity;
+    private double _equipWaitingSince = double.NegativeInfinity;
 
     /// <summary>
     /// True when a caster is wielded and the character is in magic mode,
@@ -118,11 +121,26 @@ public sealed class MagicModeGate(Func<string> wandName)
         if (wand.Value.IsEquipped)
         {
             _equipRequestedAt = double.NegativeInfinity;
+            _equipWaitingSince = double.NegativeInfinity;
             return true;
         }
-        if (equipment.IsBusy || context.Board.Now - _equipRequestedAt < EquipRetrySeconds)
+        double now = context.Board.Now;
+        if (double.IsNegativeInfinity(_equipWaitingSince))
+            _equipWaitingSince = now;
+        if (now - _equipWaitingSince > EquipTimeoutSeconds)
+        {
+            // Not waited on for ever: the engine clears a stuck inventory
+            // meanwhile, and the next try finds it free.
+            _equipWaitingSince = double.NegativeInfinity;
+            _equipRequestedAt = double.NegativeInfinity;
+            step = BehaviorStep.Fail(equipment.IsBusy
+                ? $"cannot wield {wand.Value.Name}: the inventory has been busy too long"
+                : $"{wand.Value.Name} was not wielded in time");
             return false;
-        _equipRequestedAt = context.Board.Now;
+        }
+        if (equipment.IsBusy || now - _equipRequestedAt < EquipRetrySeconds)
+            return false;
+        _equipRequestedAt = now;
         PluginEquipmentCommandResult result = equipment.Equip(wand.Value.ObjectId);
         if (result.Status is PluginEquipmentCommandStatus.Refused or PluginEquipmentCommandStatus.InvalidItem)
         {
@@ -136,5 +154,6 @@ public sealed class MagicModeGate(Func<string> wandName)
     {
         _modeRequestedAt = double.NegativeInfinity;
         _equipRequestedAt = double.NegativeInfinity;
+        _equipWaitingSince = double.NegativeInfinity;
     }
 }

@@ -22,14 +22,26 @@ internal sealed class FakeAutomationSurface
     {
         BusyClears++;
         Commands.Add("clearbusy");
+        bool had = IsCasting;
         IsCasting = false;
-        return new PluginRecoveryResult(true, PreviousCount: 1, CurrentCount: 0);
+        return new PluginRecoveryResult(true, PreviousCount: had ? 1 : 0, CurrentCount: 0);
+    }
+
+    public int RequestsAbandoned { get; private set; }
+    public PluginRecoveryResult AbandonPendingInventoryRequest()
+    {
+        RequestsAbandoned++;
+        Commands.Add("abandon");
+        bool had = LootBusy;
+        LootBusy = false;
+        return new PluginRecoveryResult(true, PreviousCount: had ? 1 : 0, CurrentCount: 0);
     }
 
     // ── equipment ─────────────────────────────────────────────────────────
     public List<PluginEquipmentItem> Equipment { get; } = [];
     bool IEquipmentAutomation.IsAvailable => IsAvailable;
-    bool IEquipmentAutomation.IsBusy => false;
+    public bool EquipmentBusy { get; set; }
+    bool IEquipmentAutomation.IsBusy => EquipmentBusy;
     public IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment() => Equipment.ToArray();
     /// <summary>Wields the item at once, unwielding anything in the same slot.</summary>
     public PluginEquipmentCommandResult Equip(uint objectId, uint requestedLocation = 0u)

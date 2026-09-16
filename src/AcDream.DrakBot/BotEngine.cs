@@ -248,8 +248,10 @@ public sealed class BotEngine
         {
             _busySince = double.NaN;
             _attackAborted = false;
+            WatchInventoryBusy(board);
             return;
         }
+        _inventoryBusySince = double.NaN;
         if (double.IsNaN(_busySince))
         {
             _busySince = board.Now;
@@ -288,6 +290,43 @@ public sealed class BotEngine
                 ? $"engine: busy for {board.Now - _busySince:0}s with nothing to wait for; cleared one busy reference ({result.PreviousCount} -> {result.CurrentCount})"
                 : $"engine: busy for {board.Now - _busySince:0}s and the host would not clear it: {result.Message}");
         }
+    }
+
+    private double _inventoryBusySince = double.NaN;
+
+    /// <summary>
+    /// The inventory busy with no action of the bot's in flight - a
+    /// request the server never answered, or a busy count left over from
+    /// one - blocks every wield, use and loot; the buffs once stood six
+    /// minutes waiting to wield a wand behind it. After ten seconds the
+    /// busy count is cleared, and if that was not it, the pending request
+    /// is given up.
+    /// </summary>
+    private void WatchInventoryBusy(in Blackboard board)
+    {
+        if (!board.LootBusy)
+        {
+            _inventoryBusySince = double.NaN;
+            return;
+        }
+        if (double.IsNaN(_inventoryBusySince))
+        {
+            _inventoryBusySince = board.Now;
+            return;
+        }
+        if (board.Now - _inventoryBusySince < BusyStuckSeconds || board.Now - _lastBusyClearAt < BusyStuckSeconds)
+            return;
+        _lastBusyClearAt = board.Now;
+        PluginRecoveryResult cleared = _surface.Recovery.ClearOneBusyReference();
+        if (cleared.Accepted && cleared.PreviousCount > 0)
+        {
+            _log.Warn($"engine: the inventory has been busy for {board.Now - _inventoryBusySince:0}s with nothing in flight; cleared one busy reference ({cleared.PreviousCount} -> {cleared.CurrentCount})");
+            return;
+        }
+        PluginRecoveryResult abandoned = _surface.Recovery.AbandonPendingInventoryRequest();
+        _log.Warn(abandoned.Accepted
+            ? $"engine: the inventory has been busy for {board.Now - _inventoryBusySince:0}s with nothing in flight; {abandoned.Message}"
+            : $"engine: the inventory has been busy for {board.Now - _inventoryBusySince:0}s and the host would not clear it: {abandoned.Message}");
     }
 
     /// <summary>A position as the game prints it, with the cell, for log lines.</summary>
