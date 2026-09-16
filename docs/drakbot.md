@@ -96,7 +96,13 @@ leave the character busy for good - the bot standing in peace mode while
 monsters circle - so the engine watches it: busy for ten seconds straight
 and it clears one busy reference through `IRecoveryAutomation`
 (`BotEngine.BusyStuckSeconds`, logged as a warning), and another every ten
-seconds while it stays stuck, what `/ub clearbusy` does by hand.
+seconds while it stays stuck, what `/ub clearbusy` does by hand. An
+attack request the server never answered (a swing cut off by an
+interrupt just as it went out) is aborted the same way after ten
+seconds. The vitals and buff behaviours themselves wait at most eight
+seconds on a pending action before giving the tick back, so nothing
+else starves meanwhile; and any behaviour that holds control for a
+minute is named in the log, with whether an action or a cast is pending.
 
 ## The monster list
 

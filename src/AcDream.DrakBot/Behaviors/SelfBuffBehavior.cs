@@ -26,6 +26,9 @@ public sealed class SelfBuffBehavior(
 
     public string Name => "buffs";
 
+    private const double PendingWaitSeconds = 8d;
+    private double _pendingSince = double.NaN;
+
     /// <summary>Recast every configured buff once, regardless of time remaining.</summary>
     public void ForceRebuff()
     {
@@ -78,7 +81,19 @@ public sealed class SelfBuffBehavior(
             return BehaviorStep.Done;
         }
         if (board.IsActionPending)
-            return BehaviorStep.Continue;
+        {
+            // A hand that never comes free is not waited on for ever: the
+            // engine's watchdog clears the stuck action at ten seconds,
+            // and the tick is given back before that so nothing else
+            // starves meanwhile.
+            if (double.IsNaN(_pendingSince))
+                _pendingSince = board.Now;
+            if (board.Now - _pendingSince < PendingWaitSeconds)
+                return BehaviorStep.Continue;
+            _pendingSince = double.NaN;
+            return BehaviorStep.Fail("the client has had an action pending too long to wait on");
+        }
+        _pendingSince = double.NaN;
 
         if (!TryNextDue(board, buffs, out PluginSpellInfo spell, out uint target))
             return BehaviorStep.Done;

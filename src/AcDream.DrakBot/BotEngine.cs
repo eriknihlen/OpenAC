@@ -243,7 +243,7 @@ public sealed class BotEngine
 
     private void WatchBusy(in Blackboard board)
     {
-        if (!board.IsCasting)
+        if (!board.IsActionPending)
         {
             _busySince = double.NaN;
             return;
@@ -256,10 +256,23 @@ public sealed class BotEngine
         if (board.Now - _busySince < BusyStuckSeconds || board.Now - _lastBusyClearAt < BusyStuckSeconds)
             return;
         _lastBusyClearAt = board.Now;
-        PluginRecoveryResult result = _surface.Recovery.ClearOneBusyReference();
-        _log.Warn(result.Accepted
-            ? $"engine: busy for {board.Now - _busySince:0}s with nothing to wait for; cleared one busy reference ({result.PreviousCount} -> {result.CurrentCount})"
-            : $"engine: busy for {board.Now - _busySince:0}s and the host would not clear it: {result.Message}");
+        // An attack the server never answered - a swing cut off by an
+        // interrupt sixty milliseconds after it went out, once - holds
+        // the host's request state up for ever, and every behaviour that
+        // waits for a free hand with it. Aborting it is what the cancel
+        // key would do; the busy count is the other thing to clear.
+        if (board.Combat.RequestInProgress || board.Combat.ServerResponsePending)
+        {
+            PluginCombatCommandResult abort = _surface.Combat.AbortPhysicalAttack();
+            _log.Warn($"engine: an attack has been pending for {board.Now - _busySince:0}s with nothing to wait for; aborted it ({abort.Status})");
+        }
+        if (board.IsCasting)
+        {
+            PluginRecoveryResult result = _surface.Recovery.ClearOneBusyReference();
+            _log.Warn(result.Accepted
+                ? $"engine: busy for {board.Now - _busySince:0}s with nothing to wait for; cleared one busy reference ({result.PreviousCount} -> {result.CurrentCount})"
+                : $"engine: busy for {board.Now - _busySince:0}s and the host would not clear it: {result.Message}");
+        }
     }
 
     /// <summary>A position as the game prints it, with the cell, for log lines.</summary>

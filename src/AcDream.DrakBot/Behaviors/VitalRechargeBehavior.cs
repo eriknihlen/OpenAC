@@ -39,6 +39,9 @@ public sealed class VitalRechargeBehavior(
 
     public string Name => "vitals";
 
+    private const double PendingWaitSeconds = 8d;
+    private double _pendingSince = double.NaN;
+
     public BehaviorPriority Priority => BehaviorPriority.Survival;
 
     public bool WantsControl(Blackboard board, out string reason)
@@ -102,7 +105,19 @@ public sealed class VitalRechargeBehavior(
         if (outcome is CastOutcome.Succeeded)
             return BehaviorStep.Done;
         if (board.IsActionPending)
-            return BehaviorStep.Continue;
+        {
+            // A hand that never comes free is not waited on for ever: the
+            // engine's watchdog clears the stuck action at ten seconds,
+            // and the tick is given back before that so nothing else
+            // starves meanwhile.
+            if (double.IsNaN(_pendingSince))
+                _pendingSince = board.Now;
+            if (board.Now - _pendingSince < PendingWaitSeconds)
+                return BehaviorStep.Continue;
+            _pendingSince = double.NaN;
+            return BehaviorStep.Fail("the client has had an action pending too long to wait on");
+        }
+        _pendingSince = double.NaN;
 
         if (Wanted(Vital.Health, board) && board.Vitals.HealthFraction < HealBelow(board, vitals))
         {

@@ -137,6 +137,33 @@ public sealed class EngineIntegrationTests
     }
 
     [Fact]
+    public void AnAttackTheServerNeverAnsweredIsAbortedAfterTheWindowAndVitalsStopWaitingOnIt()
+    {
+        // Vitals took the tick sixty milliseconds after a swing went out;
+        // the server never answered, the attack stayed pending, and vitals
+        // waited on it for twenty minutes. Now vitals gives the tick back
+        // and the watchdog aborts the attack.
+        var profile = new BotProfile
+        {
+            Buffs = new BuffSettings { Enabled = false },
+            Loot = new LootSettings { Enabled = false },
+            Vitals = new VitalSettings { IdleHealthBelow = 0.95, HealBelow = 0.5 },
+        };
+        (FakeAutomationSurface surface, BotEngine engine) = Build(profile);
+        surface.CurrentHealth = 64;
+        surface.CombatSnapshot = surface.CombatSnapshot with { RequestInProgress = false, ServerResponsePending = true };
+
+        for (int tick = 0; tick < 5; tick++)
+            engine.Tick(1d);
+        Assert.Equal("vitals", engine.ActiveBehaviorName);
+        Assert.DoesNotContain("abort", surface.Commands);
+
+        for (int tick = 0; tick < 6; tick++)
+            engine.Tick(1d);
+        Assert.Contains("abort", surface.Commands);
+    }
+
+    [Fact]
     public void LowHealthInterruptsAnApproachStopsTheWalkAndHeals()
     {
         var profile = new BotProfile
