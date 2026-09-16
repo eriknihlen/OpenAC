@@ -275,6 +275,49 @@ public sealed class BotController : IMetaBot
         return edges;
     }
 
+    /// <summary>
+    /// The dungeon as the bot sees it, to a file: every cell with its
+    /// position, neighbours and doorways, the hazards, the given-up
+    /// crossings, and the patrol as built - for working out, away from the
+    /// client, why a wing is not walked.
+    /// </summary>
+    public bool TryDumpDungeon(out string message)
+    {
+        Dictionary<uint, PluginDungeonCell>? graph = DungeonGraph(out PluginNavigationSnapshot snapshot, out string problem);
+        if (graph is null)
+        {
+            message = problem;
+            return false;
+        }
+        uint landblock = snapshot.Position.CellId & 0xFFFF0000u;
+        IReadOnlySet<uint> hazards = Hazards.For(snapshot.Position.CellId);
+        HashSet<ulong> blocked = BlockedEdges(graph, snapshot.Position.CellId);
+        var dump = new
+        {
+            landblock = $"{landblock >> 16:X4}",
+            at = new { cell = snapshot.Position.CellId, ew = snapshot.Position.EastWest, ns = snapshot.Position.NorthSouth, z = snapshot.Position.Elevation },
+            hazards = hazards.OrderBy(h => h).ToArray(),
+            givenUp = Hazards.GivenUpFor(snapshot.Position.CellId).OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+            blockedEdges = blocked.Select(e => new { a = (uint)(e >> 32), b = (uint)(e & 0xFFFFFFFFu) }).ToArray(),
+            cells = graph.Values.OrderBy(c => c.CellId).Select(c => new
+            {
+                id = c.CellId,
+                ew = c.EastWest,
+                ns = c.NorthSouth,
+                z = c.Elevation,
+                neighbors = c.Neighbors,
+                doorways = c.Doorways.Select(d => new { to = d.OtherCellId, ew = d.EastWest, ns = d.NorthSouth, z = d.Elevation, floor = d.IsFloorOpening }).ToArray(),
+            }).ToArray(),
+            patrol = Navigation.Route is { } route
+                ? route.Waypoints.Select(w => new { kind = w.Kind.ToString(), ew = w.EastWest, ns = w.NorthSouth, z = w.Elevation }).ToArray()
+                : [],
+        };
+        string json = System.Text.Json.JsonSerializer.Serialize(dump, BotProfile.JsonOptions);
+        string path = Files.WriteDungeonDump($"{landblock >> 16:X4}", json);
+        message = $"dungeon {landblock >> 16:X4}: {graph.Count} cells, {hazards.Count} hazards, {blocked.Count} closed crossings -> {path}";
+        return true;
+    }
+
     /// <summary>A new hazard mid-patrol: the same patrol again around it, resumed at the nearest step.</summary>
     private void RebuildPatrol()
     {

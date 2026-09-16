@@ -138,6 +138,15 @@ public sealed class BotFiles(IPluginStorage storage, IPluginStorage? vtank = nul
         return PathOf(LogsFolder) is { } folder ? Path.Combine(folder, LogDumpFile) : key;
     }
 
+    /// <summary>Writes a dungeon dump (`dungeons/<landblock>.json`); returns its path for the message.</summary>
+    public string WriteDungeonDump(string landblock, string json)
+    {
+        string key = $"dungeons/{landblock}.json";
+        if (storage.IsAvailable)
+            storage.WriteText(key, json);
+        return PathOf("dungeons") is { } folder ? Path.Combine(folder, $"{landblock}.json") : key;
+    }
+
     // ── shared ───────────────────────────────────────────────────────────
 
     /// <summary>VTank kept everything in one folder; RynthAi and players sort into <c>metas</c> and <c>navs</c>. All three are looked in.</summary>

@@ -81,6 +81,11 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                         Say("patrol stopped");
                         break;
                     }
+                    if (rest.Length > 0 && rest[0].Equals("dump", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Say(controller.TryDumpDungeon(out string dumped) ? dumped : $"cannot dump: {dumped}");
+                        break;
+                    }
                     Say(controller.TryStartPatrol(out string patrol) ? patrol : $"cannot patrol: {patrol}");
                     break;
                 case "goto":
