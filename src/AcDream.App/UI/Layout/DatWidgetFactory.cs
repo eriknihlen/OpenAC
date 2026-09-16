@@ -128,10 +128,8 @@ public static class DatWidgetFactory
 
         if (label is { Height: > 0f })
             menu.RowHeight = label.Height;
-        // The layout's width is the open list's as a whole; a list that lays
-        // out as several columns divides it between them.
         if (info.Width > 0f)
-            menu.PopupWidth = info.Width;
+            menu.ColumnWidth = info.Width;
         return menu;
     }
 

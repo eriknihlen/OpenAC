@@ -41,25 +41,7 @@ public sealed class UiMenu : UiElement
     public int   RowsPerColumn { get; set; } = 7;
                                                        // ALSO the visible-row window height when Scrollable
     public float RowHeight     { get; set; } = 17f;
-    private float _columnWidth = 191f;  // dat item template W=191
-
-    /// <summary>
-    /// One column of the open list. With <see cref="PopupWidth"/> pinned and
-    /// the list laid out as a grid, the columns share that width between
-    /// them - the chat window's channel list is two columns of seven across
-    /// the width of the window - and this reads as their share; otherwise
-    /// it is whatever was set.
-    /// </summary>
-    public float ColumnWidth
-    {
-        get => PopupWidth > 0f && !Scrollable
-            ? System.MathF.Max(1f, PopupWidth / System.Math.Max(1, ColumnCount))
-            : _columnWidth;
-        set => _columnWidth = value;
-    }
-
-    /// <summary>The width the layout authored for the open list as a whole; zero leaves the columns at <see cref="ColumnWidth"/>.</summary>
-    public float PopupWidth { get; set; }
+    public float ColumnWidth   { get; set; } = 191f;  // dat item template W=191
 
     public bool Scrollable { get; set; }
 
