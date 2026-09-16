@@ -1251,6 +1251,20 @@ public static class ConfigOptionsPageController
     {
         BuildHeaderRow(listBox, "ID_Input_InputSection", resolveString);
 
+        BuildExplicitToggleRow(
+            listBox, "Modern Mouse Turning", defaultValue: false, page,
+            read: () => bindings.LoadCameraTurning().ModernMouseTurning,
+            apply: value =>
+            {
+                bindings.SaveCameraTurning(bindings.LoadCameraTurning() with
+                {
+                    ModernMouseTurning = value,
+                });
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip: "RMB drag over the world turns the view and character; turn keys take character control while held.");
+
         BuildSliderRow(
             listBox, SimpleSliderTemplateIndex, "ID_Input_MouseLookSensitivity",
             min: 0.00999999978f, max: 1f, defaultValue: 0.55f, page, resolveString,
@@ -1267,8 +1281,32 @@ public static class ConfigOptionsPageController
         BuildToggleRow(
             listBox, "ID_Input_UseMouseTurning", defaultValue: false, page, resolveString,
             read: () => bindings.LoadCameraTurning().UseMouseTurning,
-            apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { UseMouseTurning = value }),
-            storeOnly: true);
+            apply: value =>
+            {
+                if (!bindings.LoadCameraTurning().ModernMouseTurning)
+                    bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { UseMouseTurning = value });
+            },
+            storeOnly: true,
+            enabled: () => !bindings.LoadCameraTurning().ModernMouseTurning);
+
+        UiButton? bothButtons = BuildExplicitToggleRow(
+            listBox, "Both Mouse Buttons Run Forward", defaultValue: false, page,
+            read: () => bindings.LoadCameraTurning().BothMouseButtonsRunForward,
+            apply: value =>
+            {
+                if (!bindings.LoadCameraTurning().ModernMouseTurning)
+                    return false;
+                bindings.SaveCameraTurning(bindings.LoadCameraTurning() with
+                {
+                    BothMouseButtonsRunForward = value,
+                });
+                return true;
+            },
+            isCurrent: () => bindings.LoadCameraTurning().ModernMouseTurning,
+            tooltip: "Hold both mouse buttons after pressing on the world to run forward. Backward cancels the movement.",
+            dimmed: () => !bindings.LoadCameraTurning().ModernMouseTurning);
+        if (bothButtons is not null)
+            bothButtons.EnabledSource = () => bindings.LoadCameraTurning().ModernMouseTurning;
 
         cameraTurning = bindings.LoadCameraTurning();
     }
@@ -1386,7 +1424,8 @@ public static class ConfigOptionsPageController
         Func<uint, uint, string?> resolveString,
         Func<bool> read,
         Action<bool> apply,
-        bool storeOnly)
+        bool storeOnly,
+        Func<bool>? enabled = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(ToggleTemplateIndex);
         if (row is null)
@@ -1407,6 +1446,12 @@ public static class ConfigOptionsPageController
         }
 
         ApplyLabelAndTooltip(checkbox, labelKey, resolveString, storeOnly);
+        if (enabled is not null)
+        {
+            checkbox.EnabledSource = enabled;
+            checkbox.LabelColorProvider = () => enabled()
+                ? checkbox.LabelColor : UiRenderContext.StoreOnlyCaptionColor;
+        }
 
         bool initial = read();
         checkbox.Selected = initial;
@@ -1423,7 +1468,11 @@ public static class ConfigOptionsPageController
             refresh: value => checkbox.Selected = value);
         page.Register(row_);
 
-        checkbox.OnClick = () => row_.SetCurrentValue(checkbox.Selected);
+        checkbox.OnClick = () =>
+        {
+            if (enabled?.Invoke() != false)
+                row_.SetCurrentValue(checkbox.Selected);
+        };
     }
 
     private static void BuildSliderRow(

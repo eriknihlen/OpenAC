@@ -174,6 +174,40 @@ public sealed class CameraFrameControllerTests
     }
 
     [Fact]
+    public void ModernRmb_KeepsViewHeadingIndependentUntilReleaseThenFollowsPlayer()
+    {
+        PlayerMovementController controller = CreatePlayer();
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        var chase = new ChaseCameraInputState
+        {
+            Legacy = legacy,
+            Retail = retail,
+            ModernMouseTurning = true,
+            RmbOrbitHeld = true,
+            ModernViewYaw = 1f,
+        };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), new InputSource(), runtime,
+            chase, localFrame, new Reconciler([]), new CombatTargetSource());
+        var timing = new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0);
+
+        controller.Yaw = 0.3f; // Character turn does not drag the held RMB view.
+        frame.Tick(timing);
+        Assert.Equal(0.7f, legacy.YawOffset, 5);
+        Assert.Equal(0.7f, retail.YawOffset, 5);
+
+        chase.RmbOrbitHeld = false;
+        frame.Tick(timing);
+        Assert.Equal(0f, legacy.YawOffset);
+        Assert.Equal(0f, retail.YawOffset);
+    }
+
+    [Fact]
     public void PreNetworkAdvancedPlayer_DoesNotRunTheInboundCreationReconcile()
     {
         PlayerMovementController controller = CreatePlayer();

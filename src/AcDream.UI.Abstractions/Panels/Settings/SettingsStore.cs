@@ -234,7 +234,10 @@ public sealed class SettingsStore
                 MouseLookSensitivity:  ReadFloat(ct, "mouseLookSensitivity",  d.MouseLookSensitivity),
                 AlignToSlope:          ReadBool (ct, "alignToSlope",          d.AlignToSlope),
                 InvertMouseLookYAxis:  ReadBool (ct, "invertMouseLookYAxis",  d.InvertMouseLookYAxis),
-                UseMouseTurning:       ReadBool (ct, "useMouseTurning",       d.UseMouseTurning));
+                UseMouseTurning:       ReadBool (ct, "useMouseTurning",       d.UseMouseTurning),
+                ModernMouseTurning:    ReadBool (ct, "modernMouseTurning",    d.ModernMouseTurning),
+                BothMouseButtonsRunForward: ReadBool(ct, "bothMouseButtonsRunForward",
+                    d.BothMouseButtonsRunForward));
         }
         catch (Exception ex)
         {
@@ -749,6 +752,8 @@ public sealed class SettingsStore
             ["alignToSlope"]         = c.AlignToSlope,
             ["invertMouseLookYAxis"] = c.InvertMouseLookYAxis,
             ["mouseLookSensitivity"] = c.MouseLookSensitivity,
+            ["modernMouseTurning"]    = c.ModernMouseTurning,
+            ["bothMouseButtonsRunForward"] = c.BothMouseButtonsRunForward,
             ["stiffness"]            = c.Stiffness,
             ["useMouseTurning"]      = c.UseMouseTurning,
         };

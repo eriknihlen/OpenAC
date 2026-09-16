@@ -233,6 +233,29 @@ public sealed class CameraPointerInputControllerTests
         }
     }
 
+    [Fact]
+    public void ModernRmb_UsesStableViewYawAndKeepsDragThroughUi()
+    {
+        var surface = new RawSurface();
+        Fixture fixture = Create([surface]);
+        var legacy = new ChaseCamera();
+        fixture.Mode.IsPlayerMode = true;
+        fixture.Chase.Legacy = legacy;
+        fixture.Chase.ModernMouseTurning = true;
+        fixture.Chase.RmbOrbitHeld = true;
+        fixture.Chase.IgnoreNextMouseMove = true;
+        fixture.Camera.EnterChaseMode(legacy, new RetailChaseCamera());
+        fixture.Owner.AttachRaw();
+
+        surface.Raise(new Vector2(100f, 100f));
+        Assert.Equal(0f, fixture.Chase.ModernViewYaw);
+        fixture.Capture.Mouse = true;
+        surface.Raise(new Vector2(110f, 100f));
+
+        Assert.True(fixture.Chase.ModernViewYaw < 0f);
+        Assert.Equal(0f, legacy.YawOffset);
+    }
+
     private static (float PitchDelta, float YawDelta) DeltasAfterRmbOrbit(
         bool retailCamera, bool invert, float dx, float dy)
     {
