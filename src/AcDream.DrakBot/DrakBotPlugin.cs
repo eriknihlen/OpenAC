@@ -70,7 +70,8 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         // Behaviors read the live profile through the engine, which does not
         // exist until they do; the closures resolve it lazily.
         var navigation = new NavigationBehavior(() => engine.Profile.Navigation);
-        var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs, surface);
+        Func<string> wand = () => engine.Profile.Combat.Wand;
+        var buffs = new SelfBuffBehavior(spells, Casts(), () => engine.Profile.Buffs, surface, wand);
         var lineOfSight = new LineOfSightService(
             surface.Projectiles,
             surface.MovementProbe,
@@ -95,7 +96,7 @@ public sealed class DrakBotPlugin(DrakBotWindowsFactory? windows = null) : IAcDr
         navigation.ItemsToSell = () => loot.ItemsToSell(surface, engine.Profile.Loot);
         IBehavior[] behaviors =
         [
-            new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship),
+            new VitalRechargeBehavior(spells, Casts(), () => engine.Profile.Vitals, surface.Fellowship, wand),
             buffs,
             new PetBehavior(() => engine.Profile.Pets),
             new ManaStoneBehavior(() => engine.Profile.ManaStones),

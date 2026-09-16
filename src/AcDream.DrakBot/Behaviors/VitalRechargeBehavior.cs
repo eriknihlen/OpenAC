@@ -16,9 +16,11 @@ public sealed class VitalRechargeBehavior(
     SpellSelector spells,
     CastTracker casts,
     Func<VitalSettings> settings,
-    IFellowshipAutomation? fellowship = null) : IBehavior
+    IFellowshipAutomation? fellowship = null,
+    Func<string>? wandName = null) : IBehavior
 {
     private const double KitRetrySeconds = 3d;
+    private readonly MagicModeGate _magic = new(wandName ?? (() => string.Empty));
     private double _kitRetryAfter = double.NegativeInfinity;
 
     /// <summary>
@@ -27,7 +29,7 @@ public sealed class VitalRechargeBehavior(
     /// Without it a melee character at low mana with no mana spell asked
     /// for control sixty times a second and nothing else ever ran.
     /// </summary>
-    private const double FailRetrySeconds = 15d;
+    public const double FailRetrySeconds = 15d;
     /// <summary>The same failure again doubles the wait, up to this: no components is not going to change in a hurry, and every try interrupts the walk.</summary>
     private const double FailRetryCeilingSeconds = 300d;
 
@@ -103,7 +105,19 @@ public sealed class VitalRechargeBehavior(
         if (casts.HasPendingRequest)
             return BehaviorStep.Continue;
         if (outcome is CastOutcome.Succeeded)
+        {
+            // A cast the host calls a success that moved the vital by
+            // nothing worth the name - a heal of a hundred on a hundred
+            // thousand, or a spell that was never a heal - is not cast
+            // again at once: that stood the bot still casting for ever.
+            if (_castVital is { } vital && FractionOf(vital, board) - _fractionAtCast < NoEffectFraction)
+            {
+                _castVital = null;
+                return GiveUp(vital, board, $"{_castName} did next to nothing for {vital.ToString().ToLowerInvariant()}");
+            }
+            _castVital = null;
             return BehaviorStep.Done;
+        }
         if (board.IsActionPending)
         {
             // A hand that never comes free is not waited on for ever: the
@@ -121,10 +135,14 @@ public sealed class VitalRechargeBehavior(
 
         if (Wanted(Vital.Health, board) && board.Vitals.HealthFraction < HealBelow(board, vitals))
         {
-            if (TryCast(vitals.HealSpell, 0u, out PluginCastRequestResult result))
+            if (TryCast(context, vitals.HealSpell, 0u, out PluginCastRequestResult result, out BehaviorStep step, out bool sent))
             {
-                Recovered(Vital.Health);
-                return BehaviorStep.Continue;
+                if (sent)
+                {
+                    NoteCast(Vital.Health, vitals.HealSpell, board);
+                    Recovered(Vital.Health);
+                }
+                return step;
             }
             if (vitals.UseHealingKits && TryUseHealingKit(context))
             {
@@ -135,29 +153,44 @@ public sealed class VitalRechargeBehavior(
         }
         if (Wanted(Vital.Stamina, board) && board.Vitals.StaminaFraction < StaminaBelow(board, vitals))
         {
-            if (!TryCast(vitals.StaminaSpell, 0u, out PluginCastRequestResult result))
+            if (!TryCast(context, vitals.StaminaSpell, 0u, out PluginCastRequestResult result, out BehaviorStep step, out bool sent))
                 return GiveUp(Vital.Stamina, board, $"cannot cast {vitals.StaminaSpell} ({result})");
-            Recovered(Vital.Stamina);
-            return BehaviorStep.Continue;
+            if (sent)
+            {
+                NoteCast(Vital.Stamina, vitals.StaminaSpell, board);
+                Recovered(Vital.Stamina);
+            }
+            return step;
         }
         if (Wanted(Vital.Mana, board) && board.Vitals.ManaFraction < ManaBelow(board, vitals))
         {
-            if (!TryCast(vitals.ManaSpell, 0u, out PluginCastRequestResult result))
+            if (!TryCast(context, vitals.ManaSpell, 0u, out PluginCastRequestResult result, out BehaviorStep step, out bool sent))
                 return GiveUp(Vital.Mana, board, $"cannot cast {vitals.ManaSpell} ({result})");
-            Recovered(Vital.Mana);
-            return BehaviorStep.Continue;
+            if (sent)
+            {
+                NoteCast(Vital.Mana, vitals.ManaSpell, board);
+                Recovered(Vital.Mana);
+            }
+            return step;
         }
         if (Wanted(Vital.Fellow, board) && TryFindHurtFellow(board, vitals, out PluginFellowMember fellow))
         {
-            if (!TryCast(vitals.HealOtherSpell, fellow.ObjectId, out PluginCastRequestResult result))
+            _castVital = null;
+            if (!TryCast(context, vitals.HealOtherSpell, fellow.ObjectId, out PluginCastRequestResult result, out BehaviorStep step, out bool sent))
                 return GiveUp(Vital.Fellow, board, $"cannot cast {vitals.HealOtherSpell} on {fellow.Name} ({result})");
-            Recovered(Vital.Fellow);
-            return BehaviorStep.Continue;
+            if (sent)
+                Recovered(Vital.Fellow);
+            return step;
         }
         return BehaviorStep.Done;
     }
 
-    public void Interrupt(BehaviorContext context) => casts.Clear();
+    public void Interrupt(BehaviorContext context)
+    {
+        casts.Clear();
+        _castVital = null;
+        _magic.Reset();
+    }
 
     private static bool IsIdle(Blackboard board)
     {
@@ -203,8 +236,37 @@ public sealed class VitalRechargeBehavior(
         return found;
     }
 
-    private bool TryCast(string spellName, uint target, out PluginCastRequestResult result)
+    /// <summary>The least a cast must raise its vital by, as a fraction of the maximum, to have been worth casting.</summary>
+    public const double NoEffectFraction = 0.01d;
+    private Vital? _castVital;
+    private string _castName = string.Empty;
+    private double _fractionAtCast;
+
+    private void NoteCast(Vital vital, string name, Blackboard board)
     {
+        _castVital = vital;
+        _castName = name;
+        _fractionAtCast = FractionOf(vital, board);
+    }
+
+    private static double FractionOf(Vital vital, Blackboard board) => vital switch
+    {
+        Vital.Health => board.Vitals.HealthFraction,
+        Vital.Stamina => board.Vitals.StaminaFraction,
+        Vital.Mana => board.Vitals.ManaFraction,
+        _ => 1d,
+    };
+
+    /// <summary>
+    /// Casts the best known tier of a vital spell, once a caster is in
+    /// hand and the character in magic mode. False with a result when it
+    /// cannot be cast at all; true with <paramref name="step"/> set when
+    /// the cast went out, or the gate is still getting ready.
+    /// </summary>
+    private bool TryCast(BehaviorContext context, string spellName, uint target, out PluginCastRequestResult result, out BehaviorStep step, out bool sent)
+    {
+        step = BehaviorStep.Continue;
+        sent = false;
         result = PluginCastRequestResult.UnknownSpell;
         if (!spells.TryBestKnown(spellName, out PluginSpellInfo spell))
             return false;
@@ -213,8 +275,13 @@ public sealed class VitalRechargeBehavior(
             result = PluginCastRequestResult.Unavailable;
             return false;
         }
+        if (!_magic.TryEnsure(context, out step))
+            return true;
         result = casts.Request(spell.SpellId, target);
-        return result == PluginCastRequestResult.Sent;
+        if (result != PluginCastRequestResult.Sent)
+            return false;
+        sent = true;
+        return true;
     }
 
     private bool TryUseHealingKit(BehaviorContext context)

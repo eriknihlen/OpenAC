@@ -173,6 +173,18 @@ after is rested for two minutes rather than cast for ever. `/drakbot
 spells` shows, for every configured buff, the tier that would be cast
 and whether it is up or due, or what stands in the way.
 
+Before any cast - a buff or a vital - the bot puts a caster in hand and
+the character in magic mode (`MagicModeGate`): the server drops a cast
+sent from melee, missile or peace mode with a use-done that looks like
+success, and will not enter magic mode with no wand, orb or staff
+wielded. The caster is the one the Combat tab names for the magic
+style when the character has it, else whatever caster is in hand, else
+the first in the pack; the combat behaviour swaps the fighting weapon
+back for the next fight. A heal the host calls a success that moved the
+vital by less than a hundredth of its maximum is backed off like a
+failure - a heal of a hundred on a hundred thousand is not worth a cast
+a tick.
+
 ## Weapons and ammunition
 
 The Combat tab names a weapon per style (melee, missile, wand) and a

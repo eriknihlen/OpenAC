@@ -31,6 +31,27 @@ public sealed class SpellSelectorTests
     }
 
     [Fact]
+    public void ANumberedSiblingUnderAnotherNameIsNotATierOfTheFamily()
+    {
+        // Healing Mastery Self VI shares Heal Self's family in the spell
+        // table and is not a heal. "Heal Self" is the heal; the family
+        // reach is for the lore-named seventh, which carries no numeral.
+        var surface = new FakeAutomationSurface();
+        surface.SelfBuffs.Add(Spell.SelfBuff(5, "Heal Self V", 20, 5));
+        surface.SelfBuffs.Add(Spell.SelfBuff(6, "Healing Mastery Self VI", 20, 6));
+        surface.SelfBuffs.Add(Spell.SelfBuff(7, "Adja's Intervention", 20, 7));
+        var selector = new SpellSelector(surface, surface);
+
+        Assert.True(selector.TryBestSelfBuff("Heal Self", out PluginSpellInfo spell));
+        Assert.Equal(7u, spell.SpellId);
+        surface.MissingComponents.Add(7u);
+        selector = new SpellSelector(surface, surface);
+        Assert.True(selector.TryBestSelfBuff("Heal Self", out spell));
+        Assert.Equal(5u, spell.SpellId);
+        Assert.Equal("casts Heal Self V", selector.Explain("Heal Self"));
+    }
+
+    [Fact]
     public void ASelfBuffNeverResolvesToItsOtherTier()
     {
         // Self and Other tiers share a family in the spell table. With the

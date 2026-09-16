@@ -90,7 +90,7 @@ public sealed class EngineIntegrationTests
 
         engine.Tick(0.1);
         Assert.Equal("buffs", engine.ActiveBehaviorName);
-        Assert.Equal(["cast:10"], surface.Commands);
+        Assert.Equal(["mode:Magic", "cast:10"], surface.Commands);
 
         surface.CompleteCast(10);
         surface.Enchantments.Add(new PluginActiveEnchantment(10, 100, 6, 1800d));
@@ -191,7 +191,7 @@ public sealed class EngineIntegrationTests
         surface.CurrentHealth = 30;
         engine.Tick(0.1);
         Assert.Equal("vitals", engine.ActiveBehaviorName);
-        Assert.Equal(["move:forward", "move:clear", "cast:51"], surface.Commands);
+        Assert.Equal(["move:forward", "move:clear", "mode:Magic", "cast:51"], surface.Commands);
         Assert.Null(surface.Intent);
     }
 }

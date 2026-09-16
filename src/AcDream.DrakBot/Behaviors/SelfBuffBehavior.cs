@@ -17,8 +17,10 @@ public sealed class SelfBuffBehavior(
     SpellSelector spells,
     CastTracker casts,
     Func<BuffSettings> settings,
-    IAutomationSurface? surface = null) : IBehavior
+    IAutomationSurface? surface = null,
+    Func<string>? wandName = null) : IBehavior
 {
+    private readonly MagicModeGate _magic = new(wandName ?? (() => string.Empty));
     private bool _forceRebuff;
     private readonly HashSet<uint> _forcedFamiliesDone = [];
     private uint _pendingSpell;
@@ -130,6 +132,8 @@ public sealed class SelfBuffBehavior(
         {
             _noEffectStrikes = 0;
         }
+        if (!_magic.TryEnsure(context, out BehaviorStep mode))
+            return mode;
         _pendingSpell = spell.SpellId;
         _pendingFamily = spell.Family;
         _pendingTarget = target;
@@ -139,7 +143,11 @@ public sealed class SelfBuffBehavior(
             : BehaviorStep.Fail($"{spell.Name}: {result}");
     }
 
-    public void Interrupt(BehaviorContext context) => casts.Clear();
+    public void Interrupt(BehaviorContext context)
+    {
+        casts.Clear();
+        _magic.Reset();
+    }
 
     /// <summary>
     /// One line per configured buff: what would be cast and whether it is

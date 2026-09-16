@@ -160,7 +160,7 @@ public sealed class SpellSelector(
         int bestTier = int.MinValue;
         foreach (PluginSpellInfo candidate in pool)
         {
-            if (candidate.Family != family || !IsCastable(candidate, buff))
+            if (candidate.Family != family || !IsCastable(candidate, buff) || !IsTierOrLoreOf(candidate, wanted))
                 continue;
             if (wantsSelf is { } self && candidate.IsSelfTargeted != self)
                 continue;
@@ -171,6 +171,21 @@ public sealed class SpellSelector(
             }
         }
         return bestTier != int.MinValue;
+    }
+
+    /// <summary>
+    /// Whether a spell of the family is a tier of what was asked for: one
+    /// named as such, or one with no numeral in its name at all - the
+    /// lore-named seventh and the Incantation eighth, which is what the
+    /// family reach is for. A numbered sibling under another name is a
+    /// different spell that happens to share the family: Healing Mastery
+    /// Self VI sits in Heal Self's, and is not a heal.
+    /// </summary>
+    private static bool IsTierOrLoreOf(in PluginSpellInfo candidate, string wanted)
+    {
+        string name = candidate.Name.Trim();
+        string baseName = BaseName(name);
+        return SpellLore.IsTierOf(baseName, wanted) || baseName.Length == name.Length;
     }
 
     /// <summary>
@@ -202,7 +217,7 @@ public sealed class SpellSelector(
             foreach (PluginSpellInfo candidate in pool)
             {
                 bool inFamily = family != 0u
-                    ? candidate.Family == family
+                    ? candidate.Family == family && IsTierOrLoreOf(candidate, wanted)
                     : SpellLore.IsTierOf(BaseName(candidate.Name), wanted);
                 if (!inFamily || (wantsSelf is { } self && candidate.IsSelfTargeted != self))
                     continue;

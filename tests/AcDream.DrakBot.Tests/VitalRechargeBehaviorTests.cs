@@ -78,12 +78,12 @@ public sealed class VitalRechargeBehaviorTests
 
         BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
         Assert.Equal(StepResult.Continue, step.Result);
-        Assert.Equal(["cast:51"], surface.Commands);
+        Assert.Equal(["mode:Magic", "cast:51"], surface.Commands);
 
         // Still casting: no second request.
         step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
         Assert.Equal(StepResult.Continue, step.Result);
-        Assert.Single(surface.Commands);
+        Assert.Equal(2, surface.Commands.Count);
 
         surface.CompleteCast(51);
         surface.CurrentHealth = 90;
@@ -100,7 +100,7 @@ public sealed class VitalRechargeBehaviorTests
 
         behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
 
-        Assert.Equal(["cast:51"], surface.Commands);
+        Assert.Equal(["mode:Magic", "cast:51"], surface.Commands);
     }
 
     [Fact]
@@ -141,6 +141,51 @@ public sealed class VitalRechargeBehaviorTests
     }
 
     [Fact]
+    public void AWandIsWieldedAndMagicModeEnteredBeforeTheCast()
+    {
+        // The server drops a cast sent from any other mode with a use-done
+        // that looks like success, and will not enter magic mode with no
+        // caster in hand: the sword goes down, the wand comes up, the mode
+        // is asked for, and the heal goes out.
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build();
+        surface.CurrentHealth = 40;
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Melee };
+        surface.Equipment.Add(new PluginEquipmentItem(0x9000_0001u, "Sword", 0x1u, 0x100000u, 0x100000u, 0u, 1u, 1, 0, 0, 0, 0d));
+        surface.Equipment.Add(new PluginEquipmentItem(0x9000_0002u, "Wand", 0x8000u, 0x1000000u, 0u, 1u, 0u, 0, 0, 0, 0, 0d));
+
+        BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Continue, step.Result);
+        Assert.Equal(["equip:2415919106"], surface.Commands);
+
+        step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+        Assert.Equal(StepResult.Continue, step.Result);
+        Assert.Equal(["equip:2415919106", "mode:Magic", "cast:51"], surface.Commands);
+    }
+
+    [Fact]
+    public void AHealThatMovesNothingIsNotCastAgainAtOnce()
+    {
+        // A heal of a hundred on a hundred thousand: the host calls the
+        // cast a success and the vital stands where it was. Cast again at
+        // once it stood the bot still casting for ever; it backs off like
+        // a failure instead.
+        (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build();
+        surface.MaxHealth = 100_000;
+        surface.CurrentHealth = 65_000;
+
+        Assert.Equal(StepResult.Continue, behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock))).Result);
+        surface.CompleteCast(51);
+        surface.CurrentHealth = 65_100;
+        BehaviorStep step = behavior.Execute(new BehaviorContext(surface, new FakeLogger(), Board(surface, clock)));
+
+        Assert.Equal(StepResult.Failed, step.Result);
+        Assert.Contains("next to nothing", step.Reason);
+        Assert.False(behavior.WantsControl(Board(surface, clock), out _));
+        clock.Advance(VitalRechargeBehavior.FailRetrySeconds + 1d);
+        Assert.True(behavior.WantsControl(Board(surface, clock), out _));
+    }
+
+    [Fact]
     public void AFailedCastBacksOffBeforeRetrying()
     {
         (FakeAutomationSurface surface, VitalRechargeBehavior behavior, TickClock clock) = Build();
@@ -152,7 +197,7 @@ public sealed class VitalRechargeBehaviorTests
 
         // Tier VI is on cooldown; the selector still has tier V.
         Assert.Equal(StepResult.Continue, step.Result);
-        Assert.Equal(["cast:51", "cast:50"], surface.Commands);
+        Assert.Equal(["mode:Magic", "cast:51", "cast:50"], surface.Commands);
     }
 
     [Fact]

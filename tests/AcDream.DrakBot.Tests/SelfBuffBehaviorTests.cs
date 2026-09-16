@@ -104,7 +104,7 @@ public sealed class SelfBuffBehaviorTests
         Assert.Equal(StepResult.Done, behavior.Execute(Context(surface, clock)).Result);
 
         Assert.False(behavior.WantsControl(Context(surface, clock).Board, out _));
-        Assert.Equal(["cast:10", "cast:11"], surface.Commands);
+        Assert.Equal(["mode:Magic", "cast:10", "cast:11"], surface.Commands);
     }
 
     [Fact]
