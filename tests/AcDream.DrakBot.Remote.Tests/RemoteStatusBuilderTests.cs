@@ -84,6 +84,7 @@ public sealed class RemoteStatusBuilderTests
 
             JsonElement line = Assert.Single(client.GetProperty("recentChat").EnumerateArray());
             Assert.Equal("Bob: hello there", line.GetProperty("t").GetString());
+            Assert.Equal(1ul, line.GetProperty("s").GetUInt64());
         }
     }
 

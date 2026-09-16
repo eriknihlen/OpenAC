@@ -293,6 +293,7 @@ internal sealed class RemoteStatusBuilder
         foreach (PluginChatMessage line in _chat)
         {
             json.WriteStartObject();
+            json.WriteNumber("s", line.Sequence);   // so a phone can append only what it has not seen
             json.WriteString("t", string.IsNullOrEmpty(line.Sender) ? line.Text : line.Sender + ": " + line.Text);
             json.WriteNumber("c", line.Kind);
             json.WriteEndObject();
