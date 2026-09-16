@@ -24,6 +24,14 @@ public sealed record RemoteHostServices
     public IRemoteFrameSource? Frames { get; init; }
 
     /// <summary>
+    /// Reads a dungeon's floors and walls from the host's data files, for
+    /// the phone's floor plans. Called on the plugin tick, never from a
+    /// request thread. Null when the landblock has no cells; a null
+    /// service means the host has no data files to read.
+    /// </summary>
+    public Func<uint, RemoteDungeonGeometry?>? DungeonGeometry { get; init; }
+
+    /// <summary>
     /// Asks the host to leave the world and close, for the phone's
     /// close-client command. Null when the host would rather not be closed
     /// remotely.

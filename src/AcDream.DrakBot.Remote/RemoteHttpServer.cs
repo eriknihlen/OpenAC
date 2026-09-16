@@ -56,6 +56,7 @@ internal sealed class RemoteHttpServer : IDisposable
     private volatile byte[] _settings = EmptySettings;
     private volatile byte[]? _dungeon;
     private volatile string _dungeonLandblock = string.Empty;
+    private volatile MapsDocument _maps = MapsDocument.None;
     private long _requests;
 
     /// <param name="enqueue">Takes a command off the request thread; false when the plugin is not taking commands.</param>
@@ -152,6 +153,13 @@ internal sealed class RemoteHttpServer : IDisposable
     {
         _dungeonLandblock = landblock;
         _dungeon = json;
+    }
+
+    /// <summary>The floor plans drawn so far: /maps lists them, /map?lb=&amp;layer= serves one.</summary>
+    public void PublishMaps(IReadOnlyList<RemoteDungeonMaps> maps)
+    {
+        ArgumentNullException.ThrowIfNull(maps);
+        _maps = MapsDocument.From(maps);
     }
 
     public void PublishSettings(byte[] json)
@@ -276,9 +284,9 @@ internal sealed class RemoteHttpServer : IDisposable
             case "/runs" or "/runs.json":
                 return Response.Json(200, EmptyRuns);
             case "/maps" or "/maps.json":
-                return Response.Json(200, EmptyMaps);
+                return request.Method == "GET" ? Response.Json(200, _maps.Json) : Response.Error(405, "method not allowed");
             case "/map":
-                return Response.Error(404, "map unavailable");
+                return request.Method == "GET" ? HandleMap(request) : Response.Error(405, "method not allowed");
             case "/dungeon" or "/dungeon.json":
             {
                 if (request.Method != "GET")
@@ -433,6 +441,40 @@ internal sealed class RemoteHttpServer : IDisposable
         if (png is null)
             return Response.Error(404, "icon unavailable");
         return new Response(200, "image/png", png) { ETag = etag, CacheControl = "public, max-age=31536000, immutable" };
+    }
+
+    /// <summary>
+    /// One floor plan. The landblock is hex, as the status document and the
+    /// dungeon document both write it ("61450000" or "6145"); the layer is
+    /// the band's index from /maps, the lowest first.
+    /// </summary>
+    private Response HandleMap(Request request)
+    {
+        if (!TryParseLandblock(request.Query("lb"), out uint landblock))
+            return Response.Error(400, "lb required (hex landblock)");
+        string? layerText = request.Query("layer");
+        int layer = 0;
+        if (layerText is not null && !int.TryParse(layerText, NumberStyles.Integer, CultureInfo.InvariantCulture, out layer))
+            return Response.Error(400, "layer must be a number");
+        if (!_maps.Layers.TryGetValue((landblock, layer), out RemoteDungeonMapLayer? map))
+            return Response.Error(404, _maps.Layers.Count == 0 ? "no floor plans drawn yet" : "no such floor plan");
+        if (string.Equals(request.Header("If-None-Match"), map.ETag, StringComparison.Ordinal))
+            return Response.Empty(304) with { ETag = map.ETag };
+        return new Response(200, "image/png", map.Png) { ETag = map.ETag, CacheControl = "no-cache" };
+    }
+
+    /// <summary>A landblock as the phone writes it: eight hex digits with the cell half zero, or the top four alone.</summary>
+    internal static bool TryParseLandblock(string? text, out uint landblock)
+    {
+        landblock = 0u;
+        if (string.IsNullOrWhiteSpace(text)
+            || !uint.TryParse(text.Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint value)
+            || value == 0u)
+        {
+            return false;
+        }
+        landblock = value > 0xFFFFu ? value & 0xFFFF0000u : value << 16;
+        return true;
     }
 
     private bool Authorized(Request request)
@@ -753,6 +795,61 @@ internal sealed class RemoteHttpServer : IDisposable
                 && string.Equals(Header("Upgrade"), "websocket", StringComparison.OrdinalIgnoreCase)
                 && (Header("Connection") ?? string.Empty).Contains("upgrade", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrEmpty(key);
+        }
+    }
+
+    /// <summary>The /maps listing and the floor plans behind it, swapped in whole so a request never sees half a set.</summary>
+    private sealed class MapsDocument
+    {
+        public static MapsDocument None { get; } = new(EmptyMaps, new Dictionary<(uint, int), RemoteDungeonMapLayer>());
+
+        private MapsDocument(byte[] json, IReadOnlyDictionary<(uint Landblock, int Layer), RemoteDungeonMapLayer> layers)
+        {
+            Json = json;
+            Layers = layers;
+        }
+
+        public byte[] Json { get; }
+
+        public IReadOnlyDictionary<(uint Landblock, int Layer), RemoteDungeonMapLayer> Layers { get; }
+
+        public static MapsDocument From(IReadOnlyList<RemoteDungeonMaps> maps)
+        {
+            var layers = new Dictionary<(uint, int), RemoteDungeonMapLayer>();
+            using var buffer = new MemoryStream();
+            using (var json = new Utf8JsonWriter(buffer))
+            {
+                json.WriteStartObject();
+                json.WriteString("schema", "acdream.drakbot.maps/1");
+                int count = 0;
+                foreach (RemoteDungeonMaps set in maps)
+                    count += set.Layers.Count;
+                json.WriteNumber("count", count);
+                json.WritePropertyName("maps");
+                json.WriteStartArray();
+                foreach (RemoteDungeonMaps set in maps)
+                {
+                    string landblock = set.LandblockId.ToString("X8", CultureInfo.InvariantCulture);
+                    foreach (RemoteDungeonMapLayer layer in set.Layers)
+                    {
+                        layers[(set.LandblockId, layer.Layer)] = layer;
+                        json.WriteStartObject();
+                        json.WriteString("landblock", landblock);
+                        json.WriteNumber("layer", layer.Layer);
+                        json.WriteNumber("bytes", layer.Png.Length);
+                        json.WriteString("mtime", set.BuiltUtc.ToString("o", CultureInfo.InvariantCulture));
+                        json.WriteNumber("w", layer.Width);
+                        json.WriteNumber("h", layer.Height);
+                        json.WriteNumber("xMin", layer.XMin);
+                        json.WriteNumber("yMin", layer.YMin);
+                        json.WriteNumber("z", Math.Round(layer.Z, 2));
+                        json.WriteEndObject();
+                    }
+                }
+                json.WriteEndArray();
+                json.WriteEndObject();
+            }
+            return new MapsDocument(buffer.ToArray(), layers);
         }
     }
 

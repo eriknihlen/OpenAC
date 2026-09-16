@@ -196,6 +196,83 @@ public sealed class RemoteHttpServerTests
     }
 
     [Fact]
+    public async Task FloorPlansAreListedAndServedOncePublished()
+    {
+        (RemoteHttpServer server, _, _) = Start();
+        using (server)
+        using (HttpClient client = Client(server))
+        {
+            using JsonDocument none = JsonDocument.Parse(await client.GetStringAsync("maps"));
+            Assert.Equal(0, none.RootElement.GetProperty("count").GetInt32());
+            using HttpResponseMessage nothingYet = await client.GetAsync("map?lb=6145&layer=0");
+            Assert.Equal(HttpStatusCode.NotFound, nothingYet.StatusCode);
+
+            var geometry = new RemoteDungeonGeometry(0x61450000u,
+            [
+                new RemoteDungeonPolygon(RemoteDungeonSurface.Floor, [new(0f, 0f), new(10f, 0f), new(10f, 10f), new(0f, 10f)], 0f, 0f),
+                new RemoteDungeonPolygon(RemoteDungeonSurface.Floor, [new(20f, 0f), new(30f, 0f), new(30f, 10f), new(20f, 10f)], -6f, -6f),
+            ]);
+            RemoteDungeonMaps maps = RemoteDungeonMapRasterizer.Render(geometry, new DateTime(2026, 9, 16, 17, 0, 0, DateTimeKind.Utc))!;
+            server.PublishMaps([maps]);
+
+            using JsonDocument listed = JsonDocument.Parse(await client.GetStringAsync("maps"));
+            Assert.Equal("acdream.drakbot.maps/1", listed.RootElement.GetProperty("schema").GetString());
+            Assert.Equal(2, listed.RootElement.GetProperty("count").GetInt32());
+            JsonElement first = listed.RootElement.GetProperty("maps")[0];
+            Assert.Equal("61450000", first.GetProperty("landblock").GetString());
+            Assert.Equal(0, first.GetProperty("layer").GetInt32());
+            Assert.Equal(-6d, first.GetProperty("z").GetDouble());
+            Assert.Equal(maps.Layers[0].Width, first.GetProperty("w").GetInt32());
+            Assert.Equal(maps.Layers[0].Height, first.GetProperty("h").GetInt32());
+            Assert.Equal(maps.Layers[0].XMin, first.GetProperty("xMin").GetInt32());
+            Assert.Equal(maps.Layers[0].YMin, first.GetProperty("yMin").GetInt32());
+            Assert.Equal(maps.Layers[0].Png.Length, first.GetProperty("bytes").GetInt32());
+            Assert.Equal("2026-09-16T17:00:00.0000000Z", first.GetProperty("mtime").GetString());
+            Assert.Equal(0d, listed.RootElement.GetProperty("maps")[1].GetProperty("z").GetDouble());
+
+            // The phone writes the landblock either way round: the status document's eight digits or the top four.
+            using HttpResponseMessage upper = await client.GetAsync("map?lb=61450000&layer=1");
+            Assert.Equal(HttpStatusCode.OK, upper.StatusCode);
+            Assert.Equal("image/png", upper.Content.Headers.ContentType?.MediaType);
+            Assert.Equal(maps.Layers[1].Png, await upper.Content.ReadAsByteArrayAsync());
+            Assert.Equal(maps.Layers[1].ETag, upper.Headers.ETag?.Tag);
+            using HttpResponseMessage lower = await client.GetAsync("map?lb=6145");
+            Assert.Equal(maps.Layers[0].Png, await lower.Content.ReadAsByteArrayAsync());
+
+            using var conditional = new HttpRequestMessage(HttpMethod.Get, "map?lb=6145&layer=1");
+            conditional.Headers.IfNoneMatch.Add(new EntityTagHeaderValue(maps.Layers[1].ETag));
+            using HttpResponseMessage unchanged = await client.SendAsync(conditional);
+            Assert.Equal(HttpStatusCode.NotModified, unchanged.StatusCode);
+
+            using HttpResponseMessage noSuchLayer = await client.GetAsync("map?lb=6145&layer=2");
+            Assert.Equal(HttpStatusCode.NotFound, noSuchLayer.StatusCode);
+            using HttpResponseMessage elsewhere = await client.GetAsync("map?lb=A9B4&layer=0");
+            Assert.Equal(HttpStatusCode.NotFound, elsewhere.StatusCode);
+            using HttpResponseMessage bad = await client.GetAsync("map?layer=0");
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        }
+    }
+
+    [Theory]
+    [InlineData("6145", 0x61450000u)]
+    [InlineData("61450000", 0x61450000u)]
+    [InlineData("61450103", 0x61450000u)]
+    [InlineData("a9b4", 0xA9B40000u)]
+    public void ALandblockReadsEitherWayRound(string text, uint expected)
+    {
+        Assert.True(RemoteHttpServer.TryParseLandblock(text, out uint landblock));
+        Assert.Equal(expected, landblock);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("dungeon")]
+    public void ALandblockThatIsNotOneIsRefused(string? text) =>
+        Assert.False(RemoteHttpServer.TryParseLandblock(text, out _));
+
+    [Fact]
     public void ABusyPortIsWalkedPast()
     {
         int port = FreePort();

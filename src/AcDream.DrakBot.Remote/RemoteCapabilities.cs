@@ -33,7 +33,8 @@ public sealed record RemoteCapabilities(
             Icons: services.RenderIconPng is not null,
             CloseClient: services.CloseClient is not null,
             Video: services.Frames?.IsAvailable == true,
-            VideoMinimized: services.Frames?.IsAvailable == true);
+            VideoMinimized: services.Frames?.IsAvailable == true,
+            Maps: services.DungeonGeometry is not null);
     }
 
     public void Write(Utf8JsonWriter json)

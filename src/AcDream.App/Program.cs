@@ -212,6 +212,7 @@ GraphicalPluginSession pluginSession = GraphicalPluginSession.Create(
                 new AcDream.DrakBot.Remote.RemoteHostServices
                 {
                     RenderIconPng = iconId => AcDream.App.Plugins.RemoteIconRenderer.RenderPng(window.Dats, iconId),
+                    DungeonGeometry = landblock => AcDream.App.Plugins.RemoteDungeonGeometryLoader.Load(window.Dats, landblock),
                     CloseClient = window.RequestClose,
                     Frames = remoteFrames,
                 })),

@@ -893,9 +893,27 @@ screens carry over:
   `IVulkanBackbuffer` that never presents) - and only then, so a
   minimized client nobody watches still renders nothing; the swapchain
   comes back when the window does. The status still says `isMinimized`.
-- `/runs`, `/maps` and `/video` answer as absent: the run archive, dungeon
-  maps and the H.264 stream of the RynthCore agent are not here yet, nor
-  is tap-to-click in the live view.
+- `GET /maps` and `GET /map?lb=61450000&layer=0` - floor plans of the
+  dungeons the character has been in this session (`RemoteMapKeeper`,
+  twelve at most). Once a second the tick looks at the character's
+  landblock; a dungeon not drawn yet is read from the client's data
+  files on the tick (`RemoteDungeonGeometryLoader` in the client: every
+  environment cell's collision polygons placed by its frame, sorted into
+  floors, ramps and walls by their normals) and drawn on the pool
+  (`RemoteDungeonMapRasterizer`): one PNG per storey, north up, half a
+  metre a pixel, floors light, ramps a shade darker, walls dark and
+  only where they stand beside a floor of their storey. A storey is a
+  height where at least a room's worth of floor area sits (a metre's
+  binning, peaks three metres apart); every polygon goes to the nearest.
+  `/maps` lists each layer with its frame (`w`, `h`, `xMin`, `yMin`; a
+  point at metres `wx`, `wy` is pixel `wx / 0.5 - xMin`,
+  `(h - 1) - (wy / 0.5 - yMin)`) and its height `z` (metres) so the app
+  can put the dot and the dungeon document's layers on the right
+  storey; the landblock is written as the status writes it and read
+  either way round. Capability `maps`; a headless host has none.
+- `/runs` and `/video` answer as absent: the run archive and the H.264
+  stream of the RynthCore agent are not here yet, nor is tap-to-click in
+  the live view.
 
 `tests/AcDream.DrakBot.Remote.Tests` drives the document builders and the
 command routing against the bot's fake surface, and the listener with a
@@ -931,6 +949,6 @@ In rough priority order:
 - **Terrain passability overlays and the radar wall renderer** - the
   route markers are drawn now; those two need cell surface data the
   contract does not carry.
-- **The remote's H.264 stream, tap-to-click, run archive and dungeon
-  maps** - the RynthCore agent had them; the remote serves an MJPEG live
-  view and answers the rest as absent for now.
+- **The remote's H.264 stream, tap-to-click and run archive** - the
+  RynthCore agent had them; the remote serves an MJPEG live view and
+  floor plans and answers the rest as absent for now.

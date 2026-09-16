@@ -43,6 +43,8 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
     private RemoteTelemetry? _telemetry;
     private RemoteStatusBuilder? _status;
     private RemoteInventoryBuilder? _inventory;
+    private RemoteMapKeeper? _maps;
+    private IAutomationSurface? _surface;
     private RemoteCommandApplier? _commands;
     private RemoteHttpServer? _server;
     private IDisposable? _commandLease;
@@ -75,10 +77,18 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
             Environment.GetEnvironmentVariable,
             host.Log.Warn);
         IAutomationSurface surface = host.Automation;
+        _surface = surface;
         _telemetry = new RemoteTelemetry();
         var capabilities = RemoteCapabilities.For(_services);
         _status = new RemoteStatusBuilder(controller, surface, _telemetry, _services, capabilities);
         _inventory = new RemoteInventoryBuilder(surface);
+        _maps = _services.DungeonGeometry is { } geometry
+            ? new RemoteMapKeeper(
+                geometry,
+                dungeon => RemoteDungeonMapRasterizer.Render(dungeon, DateTime.UtcNow),
+                () => DateTime.UtcNow,
+                host.Log)
+            : null;
         _commands = new RemoteCommandApplier(controller, surface, _status, _services, host.Log);
     }
 
@@ -218,6 +228,12 @@ public sealed class DrakBotRemotePlugin(DrakBotPlugin bot, RemoteHostServices? s
                     _lastSettingsJson = settingsText;
                     server.PublishSettings(settings);
                 }
+            }
+            if (_maps is not null && _surface is not null)
+            {
+                _maps.Tick(now, _surface.Navigation.Snapshot);
+                if (_maps.Changed)
+                    server.PublishMaps(_maps.Snapshot());
             }
             if (now - _dungeonBuiltAt >= DungeonIntervalSeconds)
             {

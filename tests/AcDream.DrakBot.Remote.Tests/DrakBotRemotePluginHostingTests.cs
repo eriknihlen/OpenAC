@@ -10,13 +10,13 @@ namespace AcDream.DrakBot.Remote.Tests;
 /// <summary>The remote hosted the way the client hosts it: a built-in beside the bot, through <see cref="PluginSession"/>.</summary>
 public sealed class DrakBotRemotePluginHostingTests
 {
-    private static (RemoteTestHost Host, PluginSession Session, DrakBotPlugin Bot, DrakBotRemotePlugin Remote) Host(Action<RemoteTestHost>? configure = null)
+    private static (RemoteTestHost Host, PluginSession Session, DrakBotPlugin Bot, DrakBotRemotePlugin Remote) Host(Action<RemoteTestHost>? configure = null, RemoteHostServices? services = null)
     {
         var host = new RemoteTestHost();
         configure?.Invoke(host);
         var session = new PluginSession(host);
         var bot = new DrakBotPlugin();
-        var remote = new DrakBotRemotePlugin(bot);
+        var remote = new DrakBotRemotePlugin(bot, services);
         session.AddBuiltIn(new BuiltInPlugin(DrakBotPlugin.Id, DrakBotPlugin.DisplayName, DrakBotPlugin.Version, bot));
         session.AddBuiltIn(new BuiltInPlugin(DrakBotRemotePlugin.Id, DrakBotRemotePlugin.DisplayName, DrakBotRemotePlugin.Version, remote));
         session.Start([], allowList: null);
@@ -83,6 +83,52 @@ public sealed class DrakBotRemotePluginHostingTests
             Assert.Contains(host.Surface.SystemMessages, message => message.Contains("listening on", StringComparison.Ordinal));
             Assert.True(host.Commands.TryHandle("/remote off"));
             Assert.False(remote.IsListening);
+        }
+    }
+
+    [Fact]
+    public async Task AHostThatReadsDungeonsGetsFloorPlansDrawnForWhereTheCharacterIs()
+    {
+        int port = RemoteHttpServerTests.FreePort();
+        var asked = new List<uint>();
+        var services = new RemoteHostServices
+        {
+            DungeonGeometry = landblock =>
+            {
+                asked.Add(landblock);
+                return new RemoteDungeonGeometry(landblock,
+                [
+                    new RemoteDungeonPolygon(RemoteDungeonSurface.Floor, [new(-5720f, -11400f), new(-5710f, -11400f), new(-5710f, -11390f), new(-5720f, -11390f)], -6f, -6f),
+                ]);
+            },
+        };
+        (RemoteTestHost host, PluginSession session, _, DrakBotRemotePlugin remote) = Host(h =>
+        {
+            h.SessionSettings["port"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            h.Surface.Position = new AcDream.Plugin.Abstractions.PluginNavigationPosition(0x61450103u, -23.8d, -47.4d, -0.025d, 0f, IsOutdoor: false);
+        }, services);
+        using (session)
+        {
+            using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{remote.Port}/") };
+            host.Events.FireTick(0.2);
+            using JsonDocument status = JsonDocument.Parse(await client.GetStringAsync("status"));
+            Assert.True(status.RootElement.GetProperty("capabilities").GetProperty("maps").GetBoolean());
+
+            // The tick reads the dungeon, the pool draws it, a later tick publishes it.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            int count = 0;
+            while (count == 0 && DateTime.UtcNow < deadline)
+            {
+                host.Events.FireTick(1.0);
+                await Task.Delay(10);
+                using JsonDocument maps = JsonDocument.Parse(await client.GetStringAsync("maps"));
+                count = maps.RootElement.GetProperty("count").GetInt32();
+            }
+            Assert.Equal(1, count);
+            Assert.Equal([0x61450000u], asked);
+            using HttpResponseMessage png = await client.GetAsync("map?lb=61450000&layer=0");
+            Assert.Equal(HttpStatusCode.OK, png.StatusCode);
+            Assert.Equal("image/png", png.Content.Headers.ContentType?.MediaType);
         }
     }
 
