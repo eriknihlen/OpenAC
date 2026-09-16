@@ -129,12 +129,69 @@ public sealed class CombatBehavior(
     /// <summary>Whether a cell is a marked hazard; set by the controller. No fighting from inside one.</summary>
     public Func<uint, bool>? IsHazardCell { get; set; }
 
+    // ── out of ammunition ──────────────────────────────────────────────
+    // An archer with an empty quiver and nothing to fletch from once asked
+    // for the fight every tick and failed it every tick, seventy thousand
+    // warnings in twenty minutes. Now the quiver is looked at again every
+    // so often, and meanwhile the fight goes on in melee with whatever
+    // melee weapon the character has - or, with none, is left alone until
+    // the next look.
+    public const double AmmunitionRetrySeconds = 30d;
+    private bool _outOfAmmunition;
+    private double _ammunitionRetryAt = double.NegativeInfinity;
+    private double _outOfAmmunitionSaidAt = double.NegativeInfinity;
+
+    /// <summary>The settings as fought with now: the missile style falls back to melee while the quiver is empty.</summary>
+    private CombatSettings Effective(CombatSettings combat, Blackboard board, IAutomationSurface surface)
+    {
+        if (!_outOfAmmunition || combat.Style != CombatStyle.Missile)
+            return combat;
+        if (board.Now >= _ammunitionRetryAt)
+        {
+            _outOfAmmunition = false;   // the quiver is looked at again this tick
+            return combat;
+        }
+        return HasMeleeWeapon(surface) ? combat with { Style = CombatStyle.Melee } : combat;
+    }
+
+    private static bool HasMeleeWeapon(IAutomationSurface surface)
+    {
+        if (!surface.Equipment.IsAvailable)
+            return false;
+        foreach (PluginEquipmentItem item in surface.Equipment.CaptureOwnedEquipment())
+        {
+            if (WeaponReadiness.IsMelee(item))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Nothing to shoot and nothing to fletch: melee if there is a melee weapon, else the quiver is looked at again later.</summary>
+    private BehaviorStep OutOfAmmunition(BehaviorContext context, string detail)
+    {
+        Blackboard board = context.Board;
+        _outOfAmmunition = true;
+        _ammunitionRetryAt = board.Now + AmmunitionRetrySeconds;
+        bool melee = HasMeleeWeapon(context.Surface);
+        if (board.Now - _outOfAmmunitionSaidAt > 300d)
+        {
+            _outOfAmmunitionSaidAt = board.Now;
+            context.Log.Warn(melee
+                ? $"combat: {detail}; fighting in melee until there is some (looked for every {AmmunitionRetrySeconds:0}s)"
+                : $"combat: {detail}, and no melee weapon to fall back on; looking again in {AmmunitionRetrySeconds:0}s");
+        }
+        return BehaviorStep.Continue;
+    }
+
     public bool WantsControl(Blackboard board, out string reason)
     {
         reason = string.Empty;
         CombatSettings combat = settings();
         if (!combat.Enabled)
             return false;
+        if (_outOfAmmunition && combat.Style == CombatStyle.Missile && board.Now < _ammunitionRetryAt && !HasMeleeWeapon(surface))
+            return false;
+        combat = Effective(combat, board, surface);
         // The last swing's target goes down while something else has the
         // tick as often as not; the kill is noted from here too.
         if (_log is { } log)
@@ -197,7 +254,7 @@ public sealed class CombatBehavior(
     public BehaviorStep Execute(BehaviorContext context)
     {
         Blackboard board = context.Board;
-        CombatSettings combat = settings();
+        CombatSettings combat = Effective(settings(), board, context.Surface);
         ICombatAutomation host = context.Surface.Combat;
         _log = context.Log;
         NoteKill(board, context.Log);
@@ -381,7 +438,10 @@ public sealed class CombatBehavior(
             case WeaponReadiness.Verdict.Missing:
                 return BehaviorStep.Fail(weaponDetail);
             case WeaponReadiness.Verdict.NoAmmunition:
-                return Fletch(context, weaponDetail);
+            {
+                BehaviorStep fletching = Fletch(context, weaponDetail);
+                return fletching.Result == StepResult.Failed ? OutOfAmmunition(context, fletching.Reason ?? weaponDetail) : fletching;
+            }
         }
 
         PluginCombatMode desired = DesiredMode(combat.Style);

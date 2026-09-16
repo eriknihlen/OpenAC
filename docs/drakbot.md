@@ -223,6 +223,13 @@ armor lines say "up, time unknown" (`IsUpUntimed`) for the former and
 
 ## Weapons and ammunition
 
+An archer whose quiver runs empty fletches more when there is something
+to fletch from; with nothing, the fight goes on in melee with whatever
+melee weapon the character has (the Combat tab's, or any), and the
+quiver is looked at again every thirty seconds. With no melee weapon
+either, the fight is left alone until the next look. One line says so,
+every five minutes at most.
+
 The Combat tab names a weapon per style (melee, missile, wand) and a
 monster rule may name another; before an attack the bot wields the named
 one through `IEquipmentAutomation`, dropping to peace mode while the swap

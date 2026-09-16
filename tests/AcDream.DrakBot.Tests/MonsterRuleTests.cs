@@ -155,6 +155,47 @@ public sealed class MonsterRuleTests
         };
 
     [Fact]
+    public void AnArcherOutOfArrowsWithNothingToFletchFightsOnInMelee()
+    {
+        // The quiver is empty and there is nothing to fletch from: the fight
+        // goes on with the sword, and the quiver is looked at again later -
+        // once the bot asked for missile mode and failed it every tick.
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Missile,
+            MeleeWeapon = "Spadone",
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Peace };
+        surface.Hostiles.Add(Hostile(7, "Drudge", 2f));
+        surface.Equipment.Add(Gear(2, "Shou-jen Yumi", 2, 1u, equipped: true));
+        surface.Equipment.Add(Gear(1, "Spadone", 1, 0u, equipped: false));
+
+        BehaviorStep step = Step(behavior, surface, clock);
+        Assert.Equal(StepResult.Continue, step.Result);
+        Assert.True(behavior.WantsControl(Blackboard.Capture(surface, clock, 25f, 15f), out _));
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:1", surface.Commands);   // the sword comes out
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("mode:Melee", surface.Commands);
+        Assert.DoesNotContain("mode:Missile", surface.Commands);
+
+        // Arrows again, after the next look: the quiver is filled and the bow (still in hand) is used.
+        surface.Equipment.Add(Gear(3, "Deadly Broad Arrow", 3, 1u, equipped: false, stack: 250));
+        clock.Advance(CombatBehavior.AmmunitionRetrySeconds + 1d);
+        Step(behavior, surface, clock);
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("equip:3", surface.Commands);
+        clock.Advance(2.5d);
+        Step(behavior, surface, clock);
+        Assert.Contains("mode:Missile", surface.Commands);
+    }
+
+    [Fact]
     public void AnArcherWieldsTheNamedBowAndAQuiverOfItsArrowsBeforeShooting()
     {
         var settings = new CombatSettings
