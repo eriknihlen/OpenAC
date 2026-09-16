@@ -1,10 +1,11 @@
 using System.Collections.Generic;
 using AcDream.App.UI;
+using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.App.Plugins;
 
-public sealed class BufferedUiRegistry : IScopedUiRegistry
+public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRegistry
 {
     public readonly record struct Pending(
         PluginUiOwner Owner,
@@ -14,6 +15,7 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
     {
         internal long RegistrationId { get; init; }
         internal string? MarkupContent { get; init; }
+        internal string? PluginDirectory { get; init; }
 
         /// <summary>Stable, manifest-scoped retained-window persistence key.</summary>
         public string WindowName =>
@@ -25,13 +27,15 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
         PluginPanelDescriptor descriptor,
         string markupPath,
         object binding,
-        string? markupContent = null)
+        string? markupContent = null,
+        string? pluginDirectory = null)
     {
         internal PluginUiOwner Owner { get; } = owner;
         internal PluginPanelDescriptor Descriptor { get; } = descriptor;
         internal string MarkupPath { get; } = markupPath;
         internal object Binding { get; } = binding;
         internal string? MarkupContent { get; } = markupContent;
+        internal string? PluginDirectory { get; } = pluginDirectory;
         internal bool Drained { get; set; }
         internal UiRoot? Root { get; set; }
         internal UiElement? Element { get; set; }
@@ -108,6 +112,13 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
         PluginUiOwner owner,
         PluginPanelDescriptor descriptor,
         string markupPath,
+        object binding) => RegisterPanel(owner, pluginDirectory: null, descriptor, markupPath, binding);
+
+    public IDisposable RegisterPanel(
+        PluginUiOwner owner,
+        string? pluginDirectory,
+        PluginPanelDescriptor descriptor,
+        string markupPath,
         object binding)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner.Id);
@@ -123,13 +134,26 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
             id = checked(++_nextRegistrationId);
             _registrations.Add(
                 id,
-                new Registration(owner, descriptor, markupPath, binding));
+                new Registration(
+                    owner,
+                    descriptor,
+                    markupPath,
+                    binding,
+                    pluginDirectory: pluginDirectory));
         }
         return new RegistrationToken(this, id);
     }
 
     public IDisposable RegisterPanelContent(
         PluginUiOwner owner,
+        PluginPanelDescriptor descriptor,
+        string markupContent,
+        object binding) =>
+        RegisterPanelContent(owner, pluginDirectory: null, descriptor, markupContent, binding);
+
+    public IDisposable RegisterPanelContent(
+        PluginUiOwner owner,
+        string? pluginDirectory,
         PluginPanelDescriptor descriptor,
         string markupContent,
         object binding)
@@ -152,7 +176,8 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
                     descriptor,
                     $"<inline:{descriptor.WindowId}>",
                     binding,
-                    markupContent));
+                    markupContent,
+                    pluginDirectory));
         }
         return new RegistrationToken(this, id);
     }
@@ -176,6 +201,7 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry
                 {
                     RegistrationId = id,
                     MarkupContent = registration.MarkupContent,
+                    PluginDirectory = registration.PluginDirectory,
                 });
             }
             return pending;

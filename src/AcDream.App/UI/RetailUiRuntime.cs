@@ -12,9 +12,11 @@ using AcDream.Core.Combat;
 using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Plugins;
 using AcDream.Core.Properties;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.Core.Textures;
 using AcDream.Runtime;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Session;
@@ -384,6 +386,7 @@ public sealed class RetailUiRuntime : IDisposable
     private CreditsUiController? _creditsController;
     private CharacterCreationUiMountCoordinator? _characterCreationMount;
     private PluginSidePanel? _pluginSidePanel;
+    private readonly Dictionary<string, (uint Texture, int Width, int Height)?> _pluginIcons = [];
     private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
@@ -4006,7 +4009,11 @@ public sealed class RetailUiRuntime : IDisposable
                             _pluginSidePanel,
                             controller: _pluginSidePanel);
                     }
-                    _pluginSidePanel.Add(panel.Owner, panel.Descriptor, handle);
+                    _pluginSidePanel.Add(
+                        panel.Owner,
+                        panel.Descriptor,
+                        handle,
+                        ResolvePluginFileIcon(panel.Owner.Id, panel.PluginDirectory));
                 }
 
                 Console.WriteLine(
@@ -4019,6 +4026,27 @@ public sealed class RetailUiRuntime : IDisposable
                 Console.WriteLine($"[UI] plugin UI panel '{panel.MarkupPath}' failed to load: {ex.Message}");
             }
         }
+    }
+
+    // Uploaded once per plugin id and cached, so a re-run of MountPlugins for a
+    // plugin with more than one panel never uploads the same icon.png twice.
+    private (uint Texture, int Width, int Height)? ResolvePluginFileIcon(
+        string pluginId,
+        string? pluginDirectory)
+    {
+        if (_pluginIcons.TryGetValue(pluginId, out var cached))
+            return cached;
+
+        (uint, int, int)? icon = null;
+        if (pluginDirectory is not null && PluginIconFile.TryLoad(pluginDirectory, out DecodedTexture? decoded))
+        {
+            uint texture = _bindings.Assets.TextureCache.UploadRgba8(
+                decoded.Rgba8, decoded.Width, decoded.Height);
+            icon = (texture, decoded.Width, decoded.Height);
+        }
+
+        _pluginIcons[pluginId] = icon;
+        return icon;
     }
 
     private void MountInventory()

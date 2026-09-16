@@ -104,7 +104,8 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
     public void Add(
         PluginUiOwner owner,
         PluginPanelDescriptor descriptor,
-        RetailWindowHandle handle)
+        RetailWindowHandle handle,
+        (uint Texture, int Width, int Height)? fileIcon = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(owner.Id);
@@ -121,7 +122,8 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             owner.DisplayName,
             handle,
             _resolve,
-            _font)
+            _font,
+            fileIcon)
         {
             Width = ButtonExtent,
             Height = ButtonExtent,
@@ -430,6 +432,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
         private readonly RetailWindowHandle _handle;
         private readonly Func<uint, (uint tex, int width, int height)> _resolve;
+        private readonly (uint Texture, int Width, int Height)? _fileIcon;
         private readonly uint _iconSurfaceId;
         private readonly string _tooltip;
         private readonly string _initialsFallback;
@@ -442,17 +445,19 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             string ownerDisplayName,
             RetailWindowHandle handle,
             Func<uint, (uint tex, int width, int height)> resolve,
-            UiDatFont? font)
+            UiDatFont? font,
+            (uint Texture, int Width, int Height)? fileIcon = null)
         {
             _handle = handle;
             _resolve = resolve;
+            _fileIcon = fileIcon;
             _iconSurfaceId = PluginIcons.Normalize(descriptor.IconSurfaceId);
             _tooltip = string.Equals(descriptor.Title, ownerDisplayName,
                     StringComparison.Ordinal)
                 ? descriptor.Title
                 : $"{ownerDisplayName} — {descriptor.Title}";
             _initialsFallback = Initials(descriptor.IconText, descriptor.Title);
-            Text = _iconSurfaceId == 0 ? _initialsFallback : string.Empty;
+            Text = _fileIcon is null && _iconSurfaceId == 0 ? _initialsFallback : string.Empty;
             DatFont = font;
             Outline = true;
             BorderThickness = 1f;
@@ -472,7 +477,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
         protected override void OnDraw(UiRenderContext ctx)
         {
-            if (!_iconResolveAttempted && _iconSurfaceId != 0)
+            if (_fileIcon is null && !_iconResolveAttempted && _iconSurfaceId != 0)
             {
                 _iconResolveAttempted = true;
                 (uint tex, int w, int h) = _resolve(_iconSurfaceId);
@@ -483,10 +488,16 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
             base.OnDraw(ctx);
 
-            if (_iconSurfaceId == 0 || !_iconAvailable)
+            uint texture;
+            int width;
+            int height;
+            if (_fileIcon is { } file)
+                (texture, width, height) = file;
+            else if (_iconSurfaceId != 0 && _iconAvailable)
+                (texture, width, height) = _resolve(_iconSurfaceId);
+            else
                 return;
 
-            (uint texture, int width, int height) = _resolve(_iconSurfaceId);
             if (texture == 0 || width <= 0 || height <= 0)
                 return;
             float extent = MathF.Min(Width - 6f, Height - 6f);

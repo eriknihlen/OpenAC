@@ -28,6 +28,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Fixtures\plugin-icons\PngTestData.cs"
+             Link="Fixtures\PngTestData.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Build ordering only — do NOT reference at runtime. The tests locate the
          fixture DLL by path and load it into a separate ALC. -->
     <ProjectReference Include="..\AcDream.Core.Tests.Fixtures.HelloPlugin\AcDream.Core.Tests.Fixtures.HelloPlugin.csproj">

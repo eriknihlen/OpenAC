@@ -23,7 +23,7 @@ public sealed class GraphicalPluginSessionTests
     {
         using var temporary = new TemporaryDirectory();
         ApplicationPathSet paths = Paths(temporary.Path);
-        InstallFixture(paths.PluginsDirectory, FixtureId);
+        string pluginDirectory = InstallFixture(paths.PluginsDirectory, FixtureId);
         string statusPath = Path.Combine(temporary.Path, "status.jsonl");
         var logger = new CapturingLogger();
         var state = new WorldGameState();
@@ -43,7 +43,7 @@ public sealed class GraphicalPluginSessionTests
 
         Assert.Equal(1, plugins.LoadedCount);
         Assert.True(host.HasUi);
-        AssertPanelWasRegisteredAndReleaseBinding(ui);
+        AssertPanelWasRegisteredAndReleaseBinding(ui, pluginDirectory);
         Assert.Contains(
             logger.Messages,
             message => message.Contains("fixture-enabled:hasUi=True", StringComparison.Ordinal));
@@ -259,7 +259,8 @@ public sealed class GraphicalPluginSessionTests
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AssertPanelWasRegisteredAndReleaseBinding(
-        BufferedUiRegistry ui)
+        BufferedUiRegistry ui,
+        string pluginDirectory)
     {
         BufferedUiRegistry.Pending panel = Assert.Single(ui.Drain());
         Assert.EndsWith(
@@ -273,6 +274,7 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(
             "AcDream.Plugin.Tests.Fixtures.HostPlugin",
             panel.Binding.GetType().Assembly.GetName().Name);
+        Assert.Equal(pluginDirectory, panel.PluginDirectory);
     }
 
     private static JsonElement[] ReadStatuses(string path) =>

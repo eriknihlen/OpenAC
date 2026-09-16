@@ -981,4 +981,88 @@ public sealed class PluginSidePanelTests
         root.Tick(0.016d, 32L);
         Assert.Equal(left, shelf.Left);
         Assert.Equal(top, shelf.Top);
+    }
+
+    [Fact]
+    public void ShelfButton_WithAFileIcon_DrawsItAndNeverCallsTheResolver()
+    {
+        var root = new UiRoot { Width = 800f, Height = 600f };
+        using var shelf = new PluginSidePanel(
+            root.WindowManager,
+            _ => throw new InvalidOperationException("the DAT resolver must not run"),
+            font: null);
+        root.AddChild(shelf);
+
+        var frame = new UiPanel { Width = 200f, Height = 100f };
+        root.AddChild(frame);
+        RetailWindowHandle handle = root.WindowManager.Register(
+            "plugin:acdream.test:main", frame);
+        shelf.Add(
+            new PluginUiOwner("acdream.test", "Test Plugin"),
+            new PluginPanelDescriptor("main", "Test Plugin") { IconSurfaceId = 0x165u },
+            handle,
+            fileIcon: (7u, 64, 64));
+
+        PluginSidePanel.PluginShelfButton button = Assert.Single(
+            shelf.Children.OfType<PluginSidePanel.PluginShelfButton>());
+        Assert.Equal(string.Empty, button.Text);
+
+        button.DrawSelfAndChildren(TestUiRenderContext());
+
+        Assert.Equal(string.Empty, button.Text);
+    }
+
+    [Fact]
+    public void ShelfButton_WithNoFileIcon_StillResolvesTheSurfaceIcon()
+    {
+        var resolvedIds = new List<uint>();
+        var root = new UiRoot { Width = 800f, Height = 600f };
+        using var shelf = new PluginSidePanel(
+            root.WindowManager,
+            id => { resolvedIds.Add(id); return (7u, 32, 32); },
+            font: null);
+        root.AddChild(shelf);
+
+        var frame = new UiPanel { Width = 200f, Height = 100f };
+        root.AddChild(frame);
+        RetailWindowHandle handle = root.WindowManager.Register(
+            "plugin:acdream.test:main", frame);
+        shelf.Add(
+            new PluginUiOwner("acdream.test", "Test Plugin"),
+            new PluginPanelDescriptor("main", "Test Plugin") { IconSurfaceId = 0x165u },
+            handle);
+
+        PluginSidePanel.PluginShelfButton button = Assert.Single(
+            shelf.Children.OfType<PluginSidePanel.PluginShelfButton>());
+        button.DrawSelfAndChildren(TestUiRenderContext());
+
+        Assert.NotEmpty(resolvedIds);
+    }
+
+    [Fact]
+    public void ShelfButton_WithNeitherFileIconNorSurfaceIcon_ShowsInitials()
+    {
+        var root = new UiRoot { Width = 800f, Height = 600f };
+        using var shelf = new PluginSidePanel(
+            root.WindowManager,
+            _ => throw new InvalidOperationException("the DAT resolver must not run"),
+            font: null);
+        root.AddChild(shelf);
+
+        var frame = new UiPanel { Width = 200f, Height = 100f };
+        root.AddChild(frame);
+        RetailWindowHandle handle = root.WindowManager.Register(
+            "plugin:acdream.test:main", frame);
+        shelf.Add(
+            new PluginUiOwner("acdream.test", "Test Plugin"),
+            new PluginPanelDescriptor("main", "Test Plugin") { IconText = "TP" },
+            handle);
+
+        PluginSidePanel.PluginShelfButton button = Assert.Single(
+            shelf.Children.OfType<PluginSidePanel.PluginShelfButton>());
+        Assert.Equal("TP", button.Text);
+
+        button.DrawSelfAndChildren(TestUiRenderContext());
+
+        Assert.Equal("TP", button.Text);
     }}

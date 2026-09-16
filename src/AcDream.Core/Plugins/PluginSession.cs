@@ -271,7 +271,8 @@ public sealed class PluginSession : IDisposable
                 var scope = new ScopedPluginHost(
                     _host,
                     candidate.Manifest!.Id,
-                    candidate.Manifest.DisplayName);
+                    candidate.Manifest.DisplayName,
+                    candidate.PluginDirectory);
                 ScopedRenderPackRegistry? renderPackScope =
                     candidate.Manifest!.Declares(PluginKind.RenderPack)
                     && _renderPacks is not null

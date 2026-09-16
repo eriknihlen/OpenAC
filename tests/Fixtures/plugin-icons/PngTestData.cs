@@ -80,6 +80,16 @@ internal static class PngTestData
 
     internal static byte[] InflateBomb() => Build(Extent, Extent, rawOverride: new byte[4_000_000]);
 
+    /// <summary>Inflates to exactly the declared raw size, so the header rules accept it, but its
+    /// first scanline filter byte is outside the 0-4 the PNG specification allows, which only a
+    /// real decoder notices.</summary>
+    internal static byte[] CorruptPixelData()
+    {
+        byte[] raw = BuildRawScanlines(Extent, Extent);
+        raw[0] = 250;
+        return Build(Extent, Extent, raw);
+    }
+
     /// <summary>A 64x64 PNG with the given header fields and a zero-filled pixel stream of
     /// <paramref name="rawLength"/> bytes.</summary>
     internal static byte[] WithHeader(

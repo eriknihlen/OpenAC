@@ -17,7 +17,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     internal ScopedPluginHost(
         IPluginHost inner,
         string pluginId,
-        string pluginDisplayName)
+        string pluginDisplayName,
+        string? pluginDirectory = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
@@ -27,7 +28,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _selection = new ScopedSelectionService(inner.Selection);
         _ui = new ScopedUiRegistry(
             inner.Ui,
-            new PluginUiOwner(pluginId, pluginDisplayName));
+            new PluginUiOwner(pluginId, pluginDisplayName),
+            pluginDirectory);
         _storage = new ScopedPluginStorage(inner.Storage, pluginId);
         _commands = new ScopedPluginCommandRegistry(inner.Commands);
         _lootClassifiers = new ScopedLootClassifierRegistry(
@@ -458,23 +460,29 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private sealed class ScopedUiRegistry : IUiRegistry, IDisposable
     {
         private readonly IScopedUiRegistry _inner;
+        private readonly IPluginDirectoryUiRegistry? _directoryInner;
         private readonly PluginUiOwner _owner;
+        private readonly string? _pluginDirectory;
         private readonly object _gate = new();
         private readonly List<IDisposable> _registrations = [];
         private bool _disposed;
 
-        internal ScopedUiRegistry(IUiRegistry inner, PluginUiOwner owner)
+        internal ScopedUiRegistry(
+            IUiRegistry inner,
+            PluginUiOwner owner,
+            string? pluginDirectory)
         {
             _inner = inner as IScopedUiRegistry
                 ?? throw new InvalidOperationException(
                     "Plugin hosts must expose an IScopedUiRegistry so UI registrations can be rolled back.");
+            _directoryInner = inner as IPluginDirectoryUiRegistry;
             _owner = owner;
+            _pluginDirectory = pluginDirectory;
         }
 
         public void AddMarkupPanel(string markupPath, object binding)
         {
-            AddRegistration(_inner.RegisterPanel(
-                _owner,
+            AddRegistration(RegisterPanelWithInner(
                 new PluginPanelDescriptor(
                     Path.GetFileNameWithoutExtension(markupPath),
                     _owner.DisplayName),
@@ -488,11 +496,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             object binding)
         {
             ArgumentNullException.ThrowIfNull(descriptor);
-            AddRegistration(_inner.RegisterPanel(
-                _owner,
-                descriptor,
-                markupPath,
-                binding));
+            AddRegistration(RegisterPanelWithInner(descriptor, markupPath, binding));
         }
 
         public IDisposable RegisterPanel(
@@ -501,11 +505,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             object binding)
         {
             ArgumentNullException.ThrowIfNull(descriptor);
-            return TrackRegistration(_inner.RegisterPanel(
-                _owner,
-                descriptor,
-                markupPath,
-                binding));
+            return TrackRegistration(RegisterPanelWithInner(descriptor, markupPath, binding));
         }
 
         public IDisposable RegisterPanelContent(
@@ -514,12 +514,22 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             object binding)
         {
             ArgumentNullException.ThrowIfNull(descriptor);
-            return TrackRegistration(_inner.RegisterPanelContent(
-                _owner,
-                descriptor,
-                markupContent,
-                binding));
+            return TrackRegistration(RegisterPanelContentWithInner(descriptor, markupContent, binding));
         }
+
+        private IDisposable RegisterPanelWithInner(
+            PluginPanelDescriptor descriptor,
+            string markupPath,
+            object binding) => _directoryInner is not null
+                ? _directoryInner.RegisterPanel(_owner, _pluginDirectory, descriptor, markupPath, binding)
+                : _inner.RegisterPanel(_owner, descriptor, markupPath, binding);
+
+        private IDisposable RegisterPanelContentWithInner(
+            PluginPanelDescriptor descriptor,
+            string markupContent,
+            object binding) => _directoryInner is not null
+                ? _directoryInner.RegisterPanelContent(_owner, _pluginDirectory, descriptor, markupContent, binding)
+                : _inner.RegisterPanelContent(_owner, descriptor, markupContent, binding);
 
         public bool ViewExists(string viewName) =>
             _inner.ViewExists(_owner, viewName);

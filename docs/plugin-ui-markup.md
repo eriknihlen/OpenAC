@@ -12,7 +12,7 @@ depend on `AcDream.App`.
 host.Ui.AddPanel(
     new PluginPanelDescriptor("main", "My Plugin")
     {
-        IconText = "MP",             // shelf button initials, used when IconSurfaceId is 0
+        IconText = "MP",             // shelf button initials, the last resort
         IconSurfaceId = 0x06002C41,  // an icon id (see "Icon ids")
         StartVisible = true,
         ShowInSidePanel = true,      // default: a button in the plugin shelf
@@ -26,6 +26,10 @@ host.Ui.AddPanel(
 - `RegisterPanel` has the same signature and returns an `IDisposable` that
   removes the window on its own.
 - `RegisterPanelContent` takes the markup as a string instead of a file path.
+
+The plugin shelf picks a button's icon in order: the plugin's own `icon.png`
+(one per plugin, at the root of its install folder), else `IconSurfaceId`,
+else the initials from `IconText`.
 
 Every window gets drag, an optional resize, the global UI lock, and a
 persisted position keyed `plugin:{pluginId}:{windowId}`. Hiding a window never
