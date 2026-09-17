@@ -297,9 +297,14 @@ internal sealed class HeadlessCollisionNeighborhood
         uint currentCellId,
         bool required)
     {
-        LoadedLandblock? source =
-            LandblockLoader.Load(_content.Dats, landblockId);
-        if (source is null)
+        if (!LandblockPhysicsContentBuilder.TryLoadCollisionLandblock(
+                _content.Dats,
+                _content.PreparedCollision,
+                _content.HeightTable.AsSpan(),
+                landblockId,
+                origin,
+                out LoadedLandblock landblock,
+                out LandblockCollisionBuild collisions))
         {
             if (required)
             {
@@ -308,39 +313,6 @@ internal sealed class HeadlessCollisionNeighborhood
             }
             return null;
         }
-
-        IReadOnlyList<WorldEntity> staticEntities =
-            LandblockPhysicsContentBuilder.HydrateStaticEntities(
-                _content.Dats,
-                source,
-                origin,
-                includeVisualBounds: false);
-        IReadOnlyList<WorldEntity> scenery =
-            LandblockPhysicsContentBuilder.HydrateProceduralScenery(
-                _content.Dats,
-                source,
-                origin,
-                _content.HeightTable.AsSpan(),
-                includeVisualBounds: false);
-        var entities = new List<WorldEntity>(
-            staticEntities.Count + scenery.Count);
-        entities.AddRange(staticEntities);
-        entities.AddRange(scenery);
-        PhysicsDatBundle dats =
-            LandblockPhysicsContentBuilder.BuildDatBundle(
-                _content.Dats,
-                landblockId,
-                entities);
-        var landblock = new LoadedLandblock(
-            source.LandblockId,
-            source.Heightmap,
-            entities,
-            dats);
-        LandblockCollisionBuild collisions =
-            LandblockPhysicsContentBuilder
-                .BuildPreparedCollisionClosure(
-                    _content.PreparedCollision,
-                    landblock);
 
         RuntimePhysicsState physics = _runtime.EntityObjects.Physics;
         return HeadlessCollisionGenerationTransaction.Begin(
@@ -561,6 +533,7 @@ internal sealed class HeadlessSessionWorldProjection
             && record.Snapshot.Position is { LandblockId: not 0u } position)
         {
             _requestedLocalPlayerCell = position.LandblockId;
+            PrepareLocalPlacementBeforeCenterOn();
             _collision.CenterOn(position.LandblockId);
         }
         else if (!isLocalPlayer
@@ -590,6 +563,7 @@ internal sealed class HeadlessSessionWorldProjection
             if (record.Snapshot.Position is { LandblockId: not 0u } position)
             {
                 _requestedLocalPlayerCell = position.LandblockId;
+                PrepareLocalPlacementBeforeCenterOn();
                 _collision.CenterOn(position.LandblockId);
             }
             if (!_collision.IsQuiescent)
@@ -608,7 +582,18 @@ internal sealed class HeadlessSessionWorldProjection
         }
 
         _requestedLocalPlayerCell = position.LandblockId;
+        PrepareLocalPlacementBeforeCenterOn();
         _collision.CenterOn(position.LandblockId);
+    }
+
+    // Committing a landblock's collision generation cancels any of the local
+    // player's own still-unprepared placements, so drive one first.
+    private void PrepareLocalPlacementBeforeCenterOn()
+    {
+        if (!_collision.IsQuiescent)
+            return;
+        _firstEntry?.DriveAll();
+        _acceptedPositionDrive?.Advance();
     }
 
     internal void PumpFirstEntry()

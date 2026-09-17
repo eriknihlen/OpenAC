@@ -18,6 +18,7 @@ using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
 using AcDream.Headless.Hosting;
 using AcDream.Headless.Platform;
+using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Gameplay;
@@ -113,6 +114,247 @@ public sealed class HeadlessSessionHostTests
         Assert.Equal(
             0x00000002u,
             BinaryPrimitives.ReadUInt32LittleEndian(captured[3].AsSpan(12)));
+    }
+
+    [Fact]
+    public void PluginDrivenLogoutRoutesThroughTheHostsOwnStopAndClearsTheSession()
+    {
+        // ILoginAutomation.Logout() is the forwarding alias for
+        // RequestLogout(): a plugin calling it gets the same server logoff,
+        // confirmation wait, and session end as the graphical client's
+        // logout control, never a raw host stop.
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-plugin-logout-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            bool confirmed = false;
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations,
+                logoutConfirmedOverride: () => confirmed);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+            Assert.True(host.Runtime.Session.IsInWorld);
+
+            bool logoutAccepted = host.Plugins.Host.Automation.Login.Logout();
+
+            Assert.True(logoutAccepted);
+            Assert.True(host.Runtime.TransitOwner.IsLogoutActive);
+            Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+            Assert.False(host.Plugins.Host.Automation.Login.Logout());
+
+            confirmed = true;
+            host.Tick(0.015d);
+
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+            Assert.False(host.Runtime.Session.IsInWorld);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.IsFaulted);
+
+            host.Dispose();
+            JsonElement[] events = File.ReadAllLines(statusPath)
+                .Select(static line =>
+                    JsonDocument.Parse(line).RootElement.Clone())
+                .ToArray();
+            JsonElement exited = Assert.Single(
+                events,
+                static item => item.GetProperty("e").GetString() == "exited");
+            Assert.Equal(
+                (int)HeadlessExitCode.Success,
+                exited.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void ConfirmationDoneClearsThePendingConfirmationForTheMatchingContext()
+    {
+        // The server can resolve or cancel a confirmation on its own (a
+        // different client answered it, the request timed out) without our
+        // own RespondToConfirmation call ever running. Before this fix,
+        // OnConfirmationDone was wired to null, so a completed confirmation
+        // left the stale request sitting in _pendingConfirmation forever.
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations());
+
+        FieldInfo pendingField = typeof(HeadlessSessionHost)
+            .GetField(
+                "_pendingConfirmation",
+                BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var request = new GameEvents.CharacterConfirmationRequest(
+            5u,
+            77u,
+            "continue?");
+        pendingField.SetValue(host, request);
+        Assert.Equal(request, host.PendingConfirmation);
+
+        // A done for a different, already-superseded context id must not
+        // clear a newer pending request.
+        host.HandleConfirmationDone(
+            new GameEvents.CharacterConfirmationDone(5u, 78u));
+        Assert.Equal(request, host.PendingConfirmation);
+
+        host.HandleConfirmationDone(
+            new GameEvents.CharacterConfirmationDone(5u, 77u));
+        Assert.Null(host.PendingConfirmation);
+    }
+
+    [Fact]
+    public void AConfirmationDoneOnTheWireClearsThePendingConfirmationThroughProductionRouting()
+    {
+        // Unlike the direct-call test above, this drives an actual
+        // CharacterConfirmationDone game-event envelope through the live
+        // session's GameEventWiring so the character.OnConfirmationDone ->
+        // HeadlessSessionHost.HandleConfirmationDone route is exercised end
+        // to end, not just the handler in isolation.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        FieldInfo pendingField = typeof(HeadlessSessionHost)
+            .GetField(
+                "_pendingConfirmation",
+                BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var request = new GameEvents.CharacterConfirmationRequest(5u, 77u, "continue?");
+        pendingField.SetValue(host, request);
+        Assert.Equal(request, host.PendingConfirmation);
+
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapCharacterConfirmationDoneEnvelope(type: 5u, contextId: 77u))!
+                .Value);
+
+        Assert.Null(host.PendingConfirmation);
+    }
+
+    [Fact]
+    public void RegisterTradeGameEventReachesTradeOwnerThroughTheRealWireRouter()
+    {
+        // HeadlessSessionHost never passed Trade: Runtime.TradeOwner into
+        // LiveSocialSessionBindings, so LiveSessionEventRouter's
+        // onTradeRegister/onTradeAdd/onTradeAccept delegate holes were all
+        // null and every inbound trade wire message was silently dropped
+        // on the headless host -- a trade opened by a real partner never
+        // became visible to TradeOwner at all, regardless of plugin-surface
+        // identity, object lookup, or settings storage.
+        //
+        // ACE's real wire landmine: RegisterTrade carries the partner's
+        // guid in BOTH the Initiator and Partner fields (the true
+        // initiator is never actually on the wire) -- this is that exact
+        // shape.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        Assert.False(host.Runtime.Trade.Snapshot.IsOpen);
+
+        const uint partnerGuid = 0x50000B0Bu;
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: partnerGuid,
+                    partner: partnerGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(partnerGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
+    }
+
+    [Fact]
+    public void RegisterTradeWithDistinctInitiatorAndPartnerGuidsResolvesToTheInitiator()
+    {
+        // A non-landmine RegisterTrade (Initiator and Partner genuinely
+        // distinct, neither the bot's own guid) still routes -- RuntimeTradeState.
+        // ApplyRegister's own rule ("initiator wins unless it's the local
+        // player or zero") is exercised end to end, not just directly.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+
+        const uint initiatorGuid = 0x50000B0Bu;
+        const uint otherPartyGuid = 0x50000C0Cu;
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: initiatorGuid,
+                    partner: otherPartyGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(initiatorGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
+    }
+
+    [Fact]
+    public void RegisterTradeWhereTheBotIsTheInitiatorResolvesPartnerFromTheOtherField()
+    {
+        // When the headless bot itself opened the trade, ACE's Initiator
+        // field is the bot's own guid -- RuntimeTradeState.ApplyRegister
+        // must fall back to the Partner field for the actual partner
+        // rather than mistaking the bot for its own trade partner.
+        var operations = new FixtureSessionOperations();
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+
+        WorldSession session = operations.Sessions[^1];
+        uint botGuid = host.Runtime.PlayerIdentity.ServerGuid;
+        const uint otherPartyGuid = 0x50000C0Cu;
+
+        session.GameEvents.Dispatch(
+            GameEventEnvelope.TryParse(
+                WrapRegisterTradeEnvelope(
+                    initiator: botGuid,
+                    partner: otherPartyGuid,
+                    stamp: 0uL))!.Value);
+
+        Assert.True(host.Runtime.Trade.Snapshot.IsOpen);
+        Assert.Equal(otherPartyGuid, host.Runtime.Trade.Snapshot.PartnerGuid);
     }
 
     [Fact]
@@ -383,6 +625,254 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void LoginAutomationRefusesLogoutOutsideTheWorld()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void TransitGuardRefusesLogoutDuringAPendingTeleport()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        host.Runtime.TransitOwner.TryQueueTeleportStart(1);
+
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(0, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutSendsOneLogoffAndCanRequestLogoutGoesFalseWhilePending()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        Assert.True(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+        Assert.False(host.Plugins.Host.Automation.Login.CanRequestLogout);
+        Assert.False(host.IsPolicyComplete);
+    }
+
+    [Fact]
+    public void SecondRequestLogoutSendsNothing()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.False(host.Plugins.Host.Automation.Login.RequestLogout());
+
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void RequestLogoutAfterAReconnectSendsAFreshLogoff()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Reconnect().Status);
+
+        Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+        Assert.Equal(2, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
+    public void ConfirmationCompletesTheLogoffOnceAndEndsTheSessionSuccessfully()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-confirmed-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            bool confirmed = false;
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                logoutConfirmedOverride: () => confirmed);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            confirmed = true;
+            host.Tick(0.015d);
+
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.IsFaulted);
+
+            // CompleteCharacterLogOff fires exactly once, even if the scheduler ticks it again.
+            host.Tick(0.015d);
+            Assert.Equal(1, operations.ReturnToCharacterSelectCount);
+
+            // Nothing re-enters the world once the session's logout policy is complete.
+            int enterWorldCalls = operations.EnterWorldCallCount;
+            host.Tick(0.015d);
+            Assert.Equal(enterWorldCalls, operations.EnterWorldCallCount);
+            Assert.True(host.IsPolicyComplete);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.Success,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void LogoutNeverConfirmedByTheDeadlineFaultsTheSessionWithARuntimeErrorExitCode()
+    {
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-logout-timeout-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            var time = new ManualTimeProvider();
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(new StringWriter()),
+                operations,
+                timeProvider: time,
+                logoutConfirmedOverride: () => false);
+            host.Start();
+            Assert.True(host.Plugins.Host.Automation.Login.RequestLogout());
+
+            host.Tick(0.015d);
+            Assert.False(host.IsPolicyComplete);
+
+            time.Advance(HeadlessLogoutAutomation.DefaultConfirmationDeadline
+                + TimeSpan.FromSeconds(1));
+            host.Tick(0.015d);
+
+            Assert.True(host.IsFaulted);
+            Assert.True(host.IsPolicyComplete);
+            Assert.IsType<TimeoutException>(host.Fault);
+            Assert.Equal(0, operations.ReturnToCharacterSelectCount);
+
+            host.Dispose();
+            string exitedLine = File.ReadAllLines(statusPath)
+                .Single(static line =>
+                    JsonDocument.Parse(line).RootElement.GetProperty("e").GetString()
+                        == "exited");
+            using JsonDocument exited = JsonDocument.Parse(exitedLine);
+            Assert.Equal(
+                (int)HeadlessExitCode.RuntimeError,
+                exited.RootElement.GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void RequestLogoutFromANestedTickHandlerIsRetriedLaterInTheSameTick()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            operations);
+        host.Start();
+
+        bool requested = false;
+        bool? acceptedDuringNestedCall = null;
+        int? sentCountDuringNestedCall = null;
+        operations.OnTick = () =>
+        {
+            if (requested)
+                return;
+            requested = true;
+            acceptedDuringNestedCall =
+                host.Plugins.Host.Automation.Login.RequestLogout();
+            sentCountDuringNestedCall = operations.RequestCharacterLogOffCount;
+        };
+
+        host.Tick(0.015d);
+
+        Assert.True(acceptedDuringNestedCall);
+        // Refused inside the nested operations.Tick call (operation depth != 0); not sent yet.
+        Assert.Equal(0, sentCountDuringNestedCall);
+        // The sequencer's own Tick, later in the same host.Tick, retried it at depth 0.
+        Assert.Equal(1, operations.RequestCharacterLogOffCount);
+    }
+
+    [Fact]
     public void ReconnectPublishesDisconnectedBeforeTheSecondConnectedEdge()
     {
         string statusPath = Path.Combine(
@@ -443,6 +933,143 @@ public sealed class HeadlessSessionHostTests
         }
     }
 
+    [Fact]
+    public void PluginRequestCloseEndsOnlyThisSessionAndRecordsTheNormalTerminalEvent()
+    {
+        // IHostWindow.RequestClose on a headless host never touches the
+        // process-wide quit token: it ends this session's own connection
+        // through the same Stop()+terminal-status path a policy deciding
+        // it is complete already leaves for the process's final disposal.
+        // The status file records the normal "exited"/"graceful" event
+        // right away, and IsPolicyComplete flips true immediately so the
+        // scheduler excludes this session from further ticks -- all while
+        // the session's own objects are not disposed yet (that still
+        // happens later, at the process's own final disposal, unchanged
+        // from how a policy-completed session already behaves today).
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-status-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations();
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+            Assert.False(host.IsPolicyComplete);
+
+            HostWindowResult result = host.Plugins.Host.Window.RequestClose();
+
+            Assert.Equal(HostWindowStatus.Done, result.Status);
+            Assert.True(host.IsPolicyComplete);
+            Assert.False(host.Runtime.Session.IsInWorld);
+
+            // A second call is a harmless no-op, not a second "exited"
+            // write (SessionStatusWriter itself latches off further
+            // writes once "exited" has landed, but this also proves the
+            // session-side idempotency guard does not throw or re-stop).
+            HostWindowResult secondResult =
+                host.Plugins.Host.Window.RequestClose();
+            Assert.Equal(HostWindowStatus.Done, secondResult.Status);
+
+            JsonElement[] events = File.ReadAllLines(statusPath)
+                .Select(static line => JsonDocument.Parse(line).RootElement.Clone())
+                .ToArray();
+            JsonElement exited = Assert.Single(
+                events,
+                static item => item.GetProperty("e").GetString() == "exited");
+            Assert.Equal(0, exited.GetProperty("code").GetInt32());
+            Assert.Equal("graceful", exited.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
+
+    [Fact]
+    public void PluginRequestCloseIsUnavailableAndQuarantinesWhenTeardownDoesNotConverge()
+    {
+        // A session whose live-session teardown throws (DisposeSession
+        // failing here models a stuck transport) must not report success
+        // and must not write a "graceful" exited event: every other
+        // caller of Stop() (Dispose, Quarantine) treats a non-complete
+        // RuntimeTeardownAcknowledgement as fatal, and RequestOwnGracefulStop
+        // has to follow the same rule -- otherwise the status file would
+        // claim a clean exit while the session is still actually stuck,
+        // and the eventual real Dispose() would throw during process
+        // shutdown after that false-positive status line.
+        string statusPath = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-nonconverge-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            var operations = new FixtureSessionOperations
+            {
+                ThrowOnDisposeSession = true,
+            };
+            using var diagnosticsOutput = new StringWriter();
+            using var credential = new HeadlessCredentialSecret(
+                "fixture",
+                "password");
+            using var host = new HeadlessSessionHost(
+                Descriptor(statusFile: statusPath),
+                credential,
+                new HeadlessDiagnosticWriter(diagnosticsOutput),
+                operations);
+
+            Assert.Equal(
+                RuntimeSessionStartStatus.Connected,
+                host.Start().Status);
+
+            HostWindowResult result = host.Plugins.Host.Window.RequestClose();
+
+            Assert.Equal(HostWindowStatus.Unavailable, result.Status);
+            Assert.True(host.IsFaulted);
+            Assert.NotNull(host.Fault);
+            // IsPolicyComplete is still true here -- through _faulted, the
+            // same mechanism any other quarantined session already uses to
+            // stop the scheduler from retrying it, not through the
+            // graceful-stop flag this call failed to earn.
+            Assert.True(host.IsPolicyComplete);
+
+            if (File.Exists(statusPath))
+            {
+                JsonElement[] events = File.ReadAllLines(statusPath)
+                    .Select(static line =>
+                        JsonDocument.Parse(line).RootElement.Clone())
+                    .ToArray();
+                Assert.DoesNotContain(
+                    events,
+                    static item =>
+                        item.GetProperty("e").GetString() == "exited"
+                            && item.GetProperty("reason").GetString()
+                                == "graceful");
+            }
+
+            // Let the underlying teardown succeed once the test has
+            // observed the stuck state, so this test's own `using host`
+            // disposal at scope exit converges cleanly instead of
+            // exercising the (separately expected) Dispose()-throws path
+            // for a session that never recovers.
+            operations.ThrowOnDisposeSession = false;
+        }
+        finally
+        {
+            if (File.Exists(statusPath))
+                File.Delete(statusPath);
+        }
+    }
     [Fact]
     public void StatusFileReceivesThePinnedLifecycleEventsInOrder()
     {
@@ -593,8 +1220,7 @@ public sealed class HeadlessSessionHostTests
                     credentialReference: "probe-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -619,6 +1245,7 @@ public sealed class HeadlessSessionHostTests
         string statusPath = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-probe-no-roster-{Guid.NewGuid():N}.jsonl");
+        string dataDirectory = CreateIsolatedDataDirectory();
         try
         {
             var configuration = new HeadlessConfiguration
@@ -639,7 +1266,7 @@ public sealed class HeadlessSessionHostTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+                IsolatedHeadlessPaths.Create(),
                 new System.IO.StringReader(
                     "probe-password" + Environment.NewLine),
                 diagnostics,
@@ -682,6 +1309,7 @@ public sealed class HeadlessSessionHostTests
         {
             if (File.Exists(statusPath))
                 File.Delete(statusPath);
+            DeleteIsolatedDataDirectory(dataDirectory);
         }
     }
 
@@ -702,8 +1330,7 @@ public sealed class HeadlessSessionHostTests
                     "play-password"),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -738,6 +1365,7 @@ public sealed class HeadlessSessionHostTests
         string statusPath = Path.Combine(
             Path.GetTempPath(),
             $"acdream-headless-idle-status-{Guid.NewGuid():N}.jsonl");
+        string dataDirectory = CreateIsolatedDataDirectory();
         try
         {
             var configuration = new HeadlessConfiguration
@@ -751,8 +1379,7 @@ public sealed class HeadlessSessionHostTests
                         statusFile: statusPath),
                 ],
             };
-            HeadlessPathSet paths = HeadlessPathSet.Resolve(
-                new HeadlessPathOverrides());
+            HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
             using var diagnostics = new StringWriter();
             var operations = new FixtureSessionOperations();
             using var host = new HeadlessProcessHost(
@@ -836,6 +1463,7 @@ public sealed class HeadlessSessionHostTests
         {
             if (File.Exists(statusPath))
                 File.Delete(statusPath);
+            DeleteIsolatedDataDirectory(dataDirectory);
         }
     }
 
@@ -847,8 +1475,7 @@ public sealed class HeadlessSessionHostTests
             Version = 1,
             Sessions = [Descriptor()],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -888,8 +1515,7 @@ public sealed class HeadlessSessionHostTests
                 }),
             ],
         };
-        HeadlessPathSet paths = HeadlessPathSet.Resolve(
-            new HeadlessPathOverrides());
+        HeadlessPathSet paths = IsolatedHeadlessPaths.Create();
         using var diagnostics = new StringWriter();
         var operations = new FixtureSessionOperations();
         using var host = new HeadlessProcessHost(
@@ -2432,6 +3058,141 @@ public sealed class HeadlessSessionHostTests
     }
 
     [Fact]
+    public void ProjectSpawnCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000014u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // CenterOn commits the destination landblock's collision generation, the
+        // same as production; that commit races the local player's own just-begun
+        // placement while it is still unprepared.
+        projection.ProjectSpawn(record, isLocalPlayer: true);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    [Fact]
+    public void ProjectPositionCommittingCollisionGenerationDoesNotCancelTheLocalPlayersOwnFreshPlacement()
+    {
+        var operations = new FixtureSessionOperations();
+        using var credential = new HeadlessCredentialSecret(
+            "fixture",
+            "password");
+        using var host = new HeadlessSessionHost(
+            Descriptor(),
+            credential,
+            new HeadlessDiagnosticWriter(TextWriter.Null),
+            operations);
+        GameRuntime runtime = host.Runtime;
+        Assert.Equal(
+            RuntimeSessionStartStatus.Connected,
+            host.Start().Status);
+        const uint player = 0x50000015u;
+        runtime.PlayerIdentity.ServerGuid = player;
+        AcDream.Runtime.Session.RuntimeFirstEntryDriveController firstEntry =
+            CreateFirstEntryDrive(runtime);
+        RuntimeEntityRecord record = runtime.EntityObjects
+            .RegisterEntityWithInitialResidence(Spawn(player), isLocalPlayer: true)
+            .Canonical!;
+        Assert.True(runtime.EntityObjects.ApplyAcceptedSpawn(
+            record,
+            record.CreateIntegrationVersion,
+            record.Snapshot,
+            replaceGeneration: false));
+
+        var collision = new CollisionGenerationCommittingNeighborhood(runtime);
+        var projection = new HeadlessSessionWorldProjection(
+            runtime,
+            collision,
+            firstEntry);
+
+        // ProjectPosition's own CenterOn call races the same still-unprepared
+        // placement while the movement controller has not yet been created.
+        projection.ProjectPosition(
+            record,
+            isLocalPlayer: true,
+            PositionTimestampDisposition.Apply);
+
+        Assert.NotNull(runtime.MovementOwner.Controller);
+    }
+
+    private sealed class CollisionGenerationCommittingNeighborhood(
+        GameRuntime runtime) : IHeadlessCollisionNeighborhood
+    {
+        public void CenterOn(uint fullCellId) =>
+            CommitSyntheticCollisionGeneration(
+                runtime,
+                (fullCellId & 0xFFFF0000u) | 0xFFFFu);
+
+        public bool IsReady(uint fullCellId) => true;
+
+        public bool IsWithinServiceWindow(uint fullCellId) => true;
+
+        public bool IsQuiescent => true;
+    }
+
+    private static void CommitSyntheticCollisionGeneration(
+        GameRuntime runtime,
+        uint landblockId)
+    {
+        HeadlessCollisionGenerationTransaction transaction =
+            HeadlessCollisionGenerationTransaction.Begin(
+                runtime.EntityObjects.Physics,
+                landblockId,
+                afterAdmission: null,
+                (admission, prepared) =>
+                {
+                    prepared.SetAssetClosure([], []);
+                    runtime.EntityObjects.Physics.StageCollisionAssets(
+                        admission,
+                        prepared,
+                        new RuntimeLandblockCollisionAssets(
+                            landblockId,
+                            new TerrainSurface(new byte[81], new float[256]),
+                            [],
+                            [],
+                            WorldOffsetX: 0f,
+                            WorldOffsetY: 0f,
+                            CurrentCellId: landblockId));
+                });
+        HeadlessCollisionGenerationAdvance advance;
+        do
+        {
+            advance = transaction.Advance();
+        } while (!advance.Completed && advance.Progressed);
+        Assert.True(advance.Completed);
+    }
+
+    [Fact]
     public void CanAdvancePlayerReflectsControllerPublicationLifecycle()
     {
         var operations = new FixtureSessionOperations();
@@ -2538,7 +3299,7 @@ public sealed class HeadlessSessionHostTests
             throw new NotSupportedException();
     }
 
-    private static HeadlessSessionDescriptor Descriptor(
+    internal static HeadlessSessionDescriptor Descriptor(
         HeadlessCredentialProviderKind provider =
             HeadlessCredentialProviderKind.Environment,
         string credentialReference = "BOT_PASSWORD",
@@ -2604,6 +3365,27 @@ public sealed class HeadlessSessionHostTests
                 return document.RootElement.GetProperty("e").GetString()!;
             })
             .ToArray();
+
+    // A default HeadlessPathOverrides() resolves to the real machine data
+    // directory, whose plugins/ folder a developer may have populated for
+    // manual testing. A test that asserts the EXACT status-event shape must
+    // not let a real installed plugin add an event the fixture host never
+    // produces, so it resolves paths against a private, empty temp
+    // directory instead.
+    private static string CreateIsolatedDataDirectory()
+    {
+        string path = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-data-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static void DeleteIsolatedDataDirectory(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+    }
 
     private static void HydrateGroundedPlayer(GameRuntime runtime)
     {
@@ -3183,6 +3965,39 @@ public sealed class HeadlessSessionHostTests
             _timestamp = checked(_timestamp + duration.Ticks);
     }
 
+    private static byte[] WrapRegisterTradeEnvelope(
+        uint initiator, uint partner, ulong stamp)
+    {
+        byte[] payload = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, initiator);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), partner);
+        BinaryPrimitives.WriteUInt64LittleEndian(payload.AsSpan(8), stamp);
+
+        byte[] body = new byte[GameEventEnvelope.HeaderSize + payload.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(body,            GameEventEnvelope.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(12), (uint)GameEventType.RegisterTrade);
+        Array.Copy(payload, 0, body, GameEventEnvelope.HeaderSize, payload.Length);
+        return body;
+    }
+    private static byte[] WrapCharacterConfirmationDoneEnvelope(uint type, uint contextId)
+    {
+        byte[] payload = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, type);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), contextId);
+
+        byte[] body = new byte[GameEventEnvelope.HeaderSize + payload.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(body,            GameEventEnvelope.Opcode);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8),  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(12), (uint)GameEventType.CharacterConfirmationDone);
+        Array.Copy(payload, 0, body, GameEventEnvelope.HeaderSize, payload.Length);
+        return body;
+    }
+
     private static byte[] WrapPlayerDescriptionEnvelope(
         uint options1,
         uint options2)
@@ -3215,7 +4030,7 @@ public sealed class HeadlessSessionHostTests
         return body;
     }
 
-    private sealed class FixtureSessionOperations : ILiveSessionOperations
+    internal sealed class FixtureSessionOperations : ILiveSessionOperations
     {
         private int _enterWorldCallCount;
         private int _tickCallCount;
@@ -3226,6 +4041,7 @@ public sealed class HeadlessSessionHostTests
         public string? LastUser { get; private set; }
         public string? LastPassword { get; private set; }
         public Action<byte[]>? GameActionCapture { get; init; }
+        public bool ThrowOnDisposeSession { get; set; }
         public int EnterWorldCallCount =>
             Volatile.Read(ref _enterWorldCallCount);
         public int TickCallCount => Volatile.Read(ref _tickCallCount);
@@ -3278,16 +4094,30 @@ public sealed class HeadlessSessionHostTests
             Interlocked.Increment(ref _enterWorldCallCount);
         }
 
+        public Action? OnTick { get; set; }
+
         public void Tick(WorldSession session)
         {
             Interlocked.Increment(ref _tickCallCount);
+            OnTick?.Invoke();
         }
 
         public void DisposeSession(WorldSession session)
         {
             DisposedSessionCount++;
+            if (ThrowOnDisposeSession)
+                throw new InvalidOperationException("fixture teardown failure");
             session.Dispose();
         }
+
+        public int RequestCharacterLogOffCount { get; private set; }
+        public int ReturnToCharacterSelectCount { get; private set; }
+
+        public void RequestCharacterLogOff(WorldSession session) =>
+            RequestCharacterLogOffCount++;
+
+        public void ReturnToCharacterSelect(WorldSession session) =>
+            ReturnToCharacterSelectCount++;
     }
 
     private sealed class FailOnceTextWriter : StringWriter

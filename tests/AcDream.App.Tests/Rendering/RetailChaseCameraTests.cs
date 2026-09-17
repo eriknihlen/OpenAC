@@ -49,6 +49,57 @@ public class RetailChaseCameraTests
         }
     }
 
+    [Fact]
+    public void ResetViewerToPlayer_PrefilledVelocityRing_DoesNotPitchStationaryCameraAtSlopedDestination()
+    {
+        bool savedColl = CameraDiagnostics.CollideCamera;
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.CollideCamera = false;
+            CameraDiagnostics.AlignToSlope = true;
+
+            var camera = new RetailChaseCamera();
+
+            // Fill the velocity ring with horizontal movement before teleport.
+            var runningVelocity = new Vector3(5f, 5f, 0f);
+            for (int i = 0; i < 5; i++)
+            {
+                camera.Update(
+                    Vector3.Zero, 0f, runningVelocity, inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+            }
+
+            // Teleport to sloped terrain facing along +X (yaw = 0).
+            var destination = new Vector3(200f, -300f, 12f);
+            float yaw = 0f;
+            camera.ResetViewerToPlayer(destination, yaw);
+
+            // First frame at destination: player is stationary on a slope pitched along X.
+            var slopedNormal = Vector3.Normalize(new Vector3(-0.5f, 0f, 0.866f));
+            camera.Update(
+                destination, yaw, Vector3.Zero, inContact: true, contactPlaneNormal: slopedNormal, dt: 1f / 60f);
+
+            // Since the player is stationary at the destination and the ring was cleared,
+            // the heading must be the flat yaw vector rather than tilted by pre-teleport velocity.
+            Vector3 pivot = destination + new Vector3(0f, 0f, camera.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, camera.Distance, camera.Pitch, viewerYawOffset: 0f);
+
+            float tAlpha = RetailChaseCamera.ComputeDampingAlpha(CameraDiagnostics.TranslationStiffness, 1f / 60f);
+            Vector3 expectedFirstStepEye = Vector3.Lerp(destination, expectedEye, tAlpha);
+
+            Assert.Equal(expectedFirstStepEye.X, camera.Position.X, 4);
+            Assert.Equal(expectedFirstStepEye.Y, camera.Position.Y, 4);
+            Assert.Equal(expectedFirstStepEye.Z, camera.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.CollideCamera = savedColl;
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
     // ── Heading source ────────────────────────────────────────────────
 
     [Fact]
@@ -59,7 +110,7 @@ public class RetailChaseCameraTests
 
         var h = RetailChaseCamera.ComputeHeading(
             avgVel, yaw,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ,
             alignToSlope: true);
 
         Assert.Equal(MathF.Cos(yaw), h.X, 5);
@@ -70,13 +121,11 @@ public class RetailChaseCameraTests
     [Fact]
     public void Heading_MovingOnFlatGround_HeadingIsHorizontalFacing()
     {
-        // Player moving forward (yaw=0 = +X), on flat ground. Heading
-        // should be the yaw vector — the projection onto (0,0,1)-normal
-        // plane is a no-op since the base is already horizontal.
-        var avgVel = new Vector3(3f, 0f, 0f);
+        // Diagonal velocity passes the per-axis gate, so the flat facing goes through the projection.
+        var avgVel = new Vector3(3f, 3f, 0f);
         var h = RetailChaseCamera.ComputeHeading(
             avgVel, yaw: 0f,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ,
             alignToSlope: true);
         Assert.Equal(1f, h.X, 5);
         Assert.Equal(0f, h.Y, 5);
@@ -92,11 +141,11 @@ public class RetailChaseCameraTests
         //   dot = 1*(-0.5) = -0.5
         //   projected = (0,1,0) - (0,-0.5,0.866)*(-0.5) = (0, 0.75, 0.433)
         //   normalized → (0, 0.866, 0.5) — slope-aligned heading with +Z tilt.
-        var avgVel = new Vector3(0f, 3f, 1.5f);   // moving up the slope
+        var avgVel = new Vector3(0.5f, 3f, 1.5f); // small +X clears the per-axis gate
         var normal = new Vector3(0f, -0.5f, 0.866f);
         var h = RetailChaseCamera.ComputeHeading(
             avgVel, yaw: MathF.PI / 2f,
-            isOnGround: true, contactPlaneNormal: normal,
+            inContact: true, contactPlaneNormal: normal,
             alignToSlope: true);
         Assert.True(h.Z > 0.4f, $"expected slope-aligned +Z tilt, got Z={h.Z}");
         Assert.Equal(1f, h.Length(), 4);
@@ -108,7 +157,7 @@ public class RetailChaseCameraTests
         var avgVel = new Vector3(0f, 0f, 5f);
         var h = RetailChaseCamera.ComputeHeading(
             avgVel, yaw: 0f,
-            isOnGround: false, contactPlaneNormal: Vector3.Zero,
+            inContact: false, contactPlaneNormal: Vector3.Zero,
             alignToSlope: true);
         Assert.Equal(1f, h.X, 5);
         Assert.Equal(0f, h.Y, 5);
@@ -116,16 +165,29 @@ public class RetailChaseCameraTests
     }
 
     [Fact]
-    public void Heading_AirborneRunningJump_StaysHorizontal()
+    public void Heading_AirborneDiagonalJump_TiltsToTheVelocityDerivedPlane()
     {
-        var avgVel = new Vector3(3f, 0f, 4f);
+        var avgVel = new Vector3(3f, 4f, 2f);
+        float yaw = 0f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        Vector3 normAvg = Vector3.Normalize(avgVel);
+        Vector3 t = new(normAvg.X, normAvg.Y, 0.1f * normAvg.Z);
+        Vector3 tForward = Vector3.Normalize(t);
+        Vector3 tRight = Vector3.Normalize(new Vector3(tForward.Y, -tForward.X, 0f));
+        Vector3 expectedNormal = Vector3.Normalize(Vector3.Cross(tRight, tForward));
+        Vector3 expected = Vector3.Normalize(
+            baseHeading - expectedNormal * Vector3.Dot(baseHeading, expectedNormal));
+
         var h = RetailChaseCamera.ComputeHeading(
-            avgVel, yaw: 0f,
-            isOnGround: false, contactPlaneNormal: Vector3.Zero,
+            avgVel, yaw,
+            inContact: false, contactPlaneNormal: Vector3.Zero,
             alignToSlope: true);
-        Assert.Equal(1f, h.X, 5);
-        Assert.Equal(0f, h.Y, 5);
-        Assert.Equal(0f, h.Z, 5);
+
+        Assert.Equal(expected.X, h.X, 4);
+        Assert.Equal(expected.Y, h.Y, 4);
+        Assert.Equal(expected.Z, h.Z, 4);
+        Assert.NotEqual(baseHeading, h);
     }
 
     [Fact]
@@ -136,12 +198,161 @@ public class RetailChaseCameraTests
 
         var h = RetailChaseCamera.ComputeHeading(
             avgVel, yaw: 0f,
-            isOnGround: true, contactPlaneNormal: tiltedNormal,
+            inContact: true, contactPlaneNormal: tiltedNormal,
             alignToSlope: false);
 
         Assert.Equal(1f, h.X, 5);   // (cos 0, sin 0, 0) = (1, 0, 0)
         Assert.Equal(0f, h.Y, 5);
         Assert.Equal(0f, h.Z, 5);
+    }
+
+    [Fact]
+    public void Heading_VelocityExactlyOnAWorldAxis_DoesNotTilt()
+    {
+        float yaw = MathF.PI / 2f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+        var normal = new Vector3(0f, -0.5f, 0.866f);
+
+        var exactlyX = RetailChaseCamera.ComputeHeading(
+            new Vector3(5f, 0f, 0f), yaw,
+            inContact: true, contactPlaneNormal: normal,
+            alignToSlope: true);
+        var exactlyY = RetailChaseCamera.ComputeHeading(
+            new Vector3(0f, 5f, 0f), yaw,
+            inContact: true, contactPlaneNormal: normal,
+            alignToSlope: true);
+
+        Assert.Equal(baseHeading, exactlyX);
+        Assert.Equal(baseHeading, exactlyY);
+    }
+
+    [Fact]
+    public void Heading_SmallDiagonalVelocity_TiltsBelowTheOldMagnitudeFloor()
+    {
+        var avgVel = new Vector3(0.005f, 0.005f, 0f);
+        var normal = new Vector3(0f, -0.5f, 0.866f);
+        float yaw = MathF.PI / 4f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        var h = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw,
+            inContact: true, contactPlaneNormal: normal,
+            alignToSlope: true);
+
+        Assert.NotEqual(baseHeading, h);
+    }
+
+    [Fact]
+    public void Heading_TinyVelocityNoise_NeverTilts()
+    {
+        var avgVel = new Vector3(1e-5f, 1e-5f, 1e-5f);
+        var normal = new Vector3(0f, -0.5f, 0.866f);
+
+        var h = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw: 0f,
+            inContact: true, contactPlaneNormal: normal,
+            alignToSlope: true);
+
+        Assert.Equal(new Vector3(1f, 0f, 0f), h);
+    }
+
+    [Fact]
+    public void Heading_AirborneNormalForDiagonalVelocity_MatchesHeadingFrameUpAxis()
+    {
+        var avgVel = new Vector3(3f, 4f, -6f);
+        float yaw = MathF.PI / 4f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        Vector3 normAvg = Vector3.Normalize(avgVel);
+        Vector3 t = new(normAvg.X, normAvg.Y, 0.1f * normAvg.Z);
+        Vector3 tForward = Vector3.Normalize(t);
+        Vector3 tRight = Vector3.Normalize(new Vector3(tForward.Y, -tForward.X, 0f));
+        Vector3 expectedNormal = Vector3.Normalize(Vector3.Cross(tRight, tForward));
+        Vector3 expected = Vector3.Normalize(
+            baseHeading - expectedNormal * Vector3.Dot(baseHeading, expectedNormal));
+
+        var h = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw,
+            inContact: false, contactPlaneNormal: Vector3.Zero,
+            alignToSlope: true);
+
+        Assert.Equal(expected.X, h.X, 4);
+        Assert.Equal(expected.Y, h.Y, 4);
+        Assert.Equal(expected.Z, h.Z, 4);
+    }
+
+    [Fact]
+    public void Heading_InContactUsesContactPlane_NotInContactUsesVelocityPlane()
+    {
+        var avgVel = new Vector3(3f, 4f, -6f);
+        var contactNormal = Vector3.Normalize(new Vector3(-0.5f, 0f, 0.866f));
+        float yaw = MathF.PI / 4f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        var onContact = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw, inContact: true, contactPlaneNormal: contactNormal, alignToSlope: true);
+        var airborne = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw, inContact: false, contactPlaneNormal: contactNormal, alignToSlope: true);
+
+        Vector3 expectedOnContact = Vector3.Normalize(
+            baseHeading - contactNormal * Vector3.Dot(baseHeading, contactNormal));
+
+        Vector3 normAvg = Vector3.Normalize(avgVel);
+        Vector3 t = new(normAvg.X, normAvg.Y, 0.1f * normAvg.Z);
+        Vector3 tForward = Vector3.Normalize(t);
+        Vector3 tRight = Vector3.Normalize(new Vector3(tForward.Y, -tForward.X, 0f));
+        Vector3 expectedAirborneNormal = Vector3.Normalize(Vector3.Cross(tRight, tForward));
+        Vector3 expectedAirborne = Vector3.Normalize(
+            baseHeading - expectedAirborneNormal * Vector3.Dot(baseHeading, expectedAirborneNormal));
+
+        Assert.Equal(expectedOnContact.X, onContact.X, 4);
+        Assert.Equal(expectedOnContact.Y, onContact.Y, 4);
+        Assert.Equal(expectedOnContact.Z, onContact.Z, 4);
+        Assert.Equal(expectedAirborne.X, airborne.X, 4);
+        Assert.Equal(expectedAirborne.Y, airborne.Y, 4);
+        Assert.Equal(expectedAirborne.Z, airborne.Z, 4);
+        Assert.True(MathF.Abs(onContact.Z - airborne.Z) > 0.05f,
+            $"contact and airborne planes should diverge, got onContact.Z={onContact.Z} airborne.Z={airborne.Z}");
+    }
+
+    [Fact]
+    public void Heading_InContactWithZeroNormal_StaysFlat()
+    {
+        var avgVel = new Vector3(3f, 4f, -6f);
+        float yaw = MathF.PI / 4f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        var h = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw,
+            inContact: true, contactPlaneNormal: Vector3.Zero,
+            alignToSlope: true);
+
+        Assert.Equal(baseHeading.X, h.X, 5);
+        Assert.Equal(baseHeading.Y, h.Y, 5);
+        Assert.Equal(baseHeading.Z, h.Z, 5);
+    }
+
+    [Fact]
+    public void Heading_NearParallelNormalAboveNewFloor_TiltsInsteadOfFallingBackFlat()
+    {
+        var avgVel = new Vector3(5f, 5f, 0f);
+        float yaw = 0f;
+        Vector3 baseHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+
+        // Normal tilted 0.005 rad off the base heading lands the projection length between the two floors.
+        Vector3 normal = Vector3.Normalize(new Vector3(1f, 0f, 0.005f));
+        Vector3 projected = baseHeading - normal * Vector3.Dot(baseHeading, normal);
+        Assert.InRange(projected.Length(), 2e-4f, 0.01f);
+        Vector3 expected = Vector3.Normalize(projected);
+
+        var h = RetailChaseCamera.ComputeHeading(
+            avgVel, yaw,
+            inContact: true, contactPlaneNormal: normal,
+            alignToSlope: true);
+
+        Assert.Equal(expected.X, h.X, 4);
+        Assert.Equal(expected.Y, h.Y, 4);
+        Assert.Equal(expected.Z, h.Z, 4);
     }
 
     // ── Basis from heading ────────────────────────────────────────────
@@ -427,6 +638,69 @@ public class RetailChaseCameraTests
     // ── Update() integration ─────────────────────────────────────────
 
     [Fact]
+    public void Update_RingFreezesWhileAlignmentDisallowed_ThenResumesWithOldSamples()
+    {
+        bool  savedAlign = CameraDiagnostics.AlignToSlope;
+        float savedT     = CameraDiagnostics.TranslationStiffness;
+        float savedR     = CameraDiagnostics.RotationStiffness;
+        try
+        {
+            // Alpha clamps to 1 (ComputeDampingAlpha), so the published pose tracks the target with no lag.
+            CameraDiagnostics.TranslationStiffness = 100f;
+            CameraDiagnostics.RotationStiffness    = 100f;
+
+            // Pitch=0 keeps the boom purely along the heading, so pivot-to-eye reveals the heading itself.
+            var cam = new RetailChaseCamera { Pitch = 0f };
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            var oldVelocity = new Vector3(3f, 4f, -6f);
+            var resumeVelocity = new Vector3(-4f, 3f, 5f);
+
+            CameraDiagnostics.AlignToSlope = true;
+            for (int i = 0; i < 5; i++)
+                cam.Update(Vector3.Zero, 0f, oldVelocity, inContact: false,
+                    contactPlaneNormal: Vector3.Zero, dt: 1f / 60f);
+
+            CameraDiagnostics.AlignToSlope = false;
+            for (int i = 0; i < 5; i++)
+                cam.Update(Vector3.Zero, 0f, new Vector3(1000f, 1000f, 1000f), inContact: false,
+                    contactPlaneNormal: Vector3.Zero, dt: 1f / 60f);
+
+            CameraDiagnostics.AlignToSlope = true;
+            cam.Update(Vector3.Zero, 0f, resumeVelocity, inContact: false,
+                contactPlaneNormal: Vector3.Zero, dt: 1f / 60f);
+
+            Vector3 forward = Vector3.Normalize(pivot - cam.Position);
+
+            // Resuming shifts one old sample out and averages the remaining four with the new one.
+            var expectedRing = new Vector3[5];
+            int expectedCount = 0;
+            for (int i = 0; i < 5; i++)
+                RetailChaseCamera.PushVelocity(expectedRing, ref expectedCount, oldVelocity);
+            RetailChaseCamera.PushVelocity(expectedRing, ref expectedCount, resumeVelocity);
+            Vector3 avgVel = RetailChaseCamera.AverageVelocity(expectedRing, expectedCount);
+
+            Vector3 normAvg = Vector3.Normalize(avgVel);
+            Vector3 t = new(normAvg.X, normAvg.Y, 0.1f * normAvg.Z);
+            Vector3 tForward = Vector3.Normalize(t);
+            Vector3 tRight = Vector3.Normalize(new Vector3(tForward.Y, -tForward.X, 0f));
+            Vector3 expectedNormal = Vector3.Normalize(Vector3.Cross(tRight, tForward));
+            Vector3 baseHeading = new(1f, 0f, 0f);
+            Vector3 expectedForward = Vector3.Normalize(
+                baseHeading - expectedNormal * Vector3.Dot(baseHeading, expectedNormal));
+
+            Assert.Equal(expectedForward.X, forward.X, 3);
+            Assert.Equal(expectedForward.Y, forward.Y, 3);
+            Assert.Equal(expectedForward.Z, forward.Z, 3);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope         = savedAlign;
+            CameraDiagnostics.TranslationStiffness = savedT;
+            CameraDiagnostics.RotationStiffness    = savedR;
+        }
+    }
+
+    [Fact]
     public void FirstUpdate_SnapsToTarget()
     {
         bool savedAlign = CameraDiagnostics.AlignToSlope;
@@ -439,7 +713,7 @@ public class RetailChaseCameraTests
                 playerPosition:      new Vector3(10f, 20f, 30f),
                 playerYaw:           0f,             // forward = +X
                 playerVelocity:      Vector3.Zero,
-                isOnGround:          true,
+                inContact:          true,
                 contactPlaneNormal:  Vector3.UnitZ,  // flat
                 dt:                  1f / 60f);
 
@@ -476,7 +750,7 @@ public class RetailChaseCameraTests
 
             // First update at origin: dampedEye = (-5, 0, 1.5).
             cam.Update(Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
             var firstEye = cam.Position;
 
             // Teleport the player one frame later. Target eye now at (10-5, 0, 1.5) = (5, 0, 1.5).
@@ -486,7 +760,7 @@ public class RetailChaseCameraTests
             //         = (-5,0,1.5) + 0.075 * (10,0,0)
             //         = (-4.25, 0, 1.5)
             cam.Update(new Vector3(10f, 0f, 0f), playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
 
             Assert.Equal(-4.25f, cam.Position.X, 3);
             Assert.Equal(0f,     cam.Position.Y, 4);
@@ -515,13 +789,13 @@ public class RetailChaseCameraTests
             CameraDiagnostics.RotationStiffness    = 0.02f;
 
             cam.Update(Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
 
             // Teleport the player one frame later. Retail's Camera Stiffness sets
             // rotation only in first person, so the eye follows the pivot exactly
             // regardless of the (low) translation stiffness.
             cam.Update(new Vector3(5f, 0f, 0f), playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
 
             Assert.Equal(5f + 0.18f, cam.Position.X, 4);
             Assert.Equal(0f,         cam.Position.Y, 4);
@@ -546,7 +820,7 @@ public class RetailChaseCameraTests
 
             // Far from pivot — translucency should be 0.
             cam.Update(Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
             Assert.Equal(0f, cam.PlayerTranslucency, 5);
         }
         finally
@@ -612,7 +886,7 @@ public class RetailChaseCameraTests
             playerPosition: Vector3.Zero,
             playerYaw: 0f,
             playerVelocity: Vector3.Zero,
-            isOnGround: true,
+            inContact: true,
             contactPlaneNormal: Vector3.UnitZ,
             dt: 1f / 60f);
 
@@ -660,7 +934,7 @@ public class RetailChaseCameraTests
             playerPosition: Vector3.Zero,
             playerYaw: 0f,
             playerVelocity: Vector3.Zero,
-            isOnGround: true,
+            inContact: true,
             contactPlaneNormal: Vector3.UnitZ,
             dt: 1f / 60f);
 
@@ -678,7 +952,7 @@ public class RetailChaseCameraTests
             playerPosition: Vector3.Zero,
             playerYaw: 0f,
             playerVelocity: Vector3.Zero,
-            isOnGround: true,
+            inContact: true,
             contactPlaneNormal: Vector3.UnitZ,
             dt: 1f);
         forward = Vector3.Normalize(new Vector3(
@@ -721,6 +995,313 @@ public class RetailChaseCameraTests
         Assert.Equal(RetailChaseCamera.OffsetAngleRadians, cam.YawOffset, 6);
     }
 
+    // ── View rules and orbit ──────────────────────────────────────────
+
+    [Fact]
+    public void LookDown_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.ToggleRetailLookDownView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeTargetDirectionPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, new Vector3(0f, 0.5f, -1.8f));
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void MapMode_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.ToggleRetailMapModeView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeTargetDirectionPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, new Vector3(0f, 0.5f, -1.8f));
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_JustPastAlignmentThreshold_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            float threshold = MathF.Asin(1f / (cam.Distance * MathF.Cos(cam.Pitch)));
+            cam.YawOffset = threshold + 0.02f;
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_PastNinetyDegrees_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = 170f * MathF.PI / 180f };
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 flatHeading = new(MathF.Cos(yaw), MathF.Sin(yaw), 0f);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, flatHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_WithinThresholdAndYawOffset_PlacesEyeAtTiltedBoomRotatedInTiltedFrame()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = 0.2f };
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, tiltedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void Orbit_JustInsideAlignmentThreshold_Tilts()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            float threshold = MathF.Asin(1f / (cam.Distance * MathF.Cos(cam.Pitch)));
+            cam.YawOffset = threshold - 0.02f;
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, tiltedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void FirstPerson_OnASlopeWithRealizedVelocity_Tilts()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+            cam.SetRetailFirstPersonView();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 tiltedHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw, inContact: true, contactPlaneNormal: normal, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeInHeadPose(pivot, tiltedHeading);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
+    public void TrackedTarget_OnASlopeWithRealizedVelocity_DoesNotTilt()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera();
+
+            float yaw = MathF.PI / 2f;
+            var velocity = new Vector3(0.5f, 3f, 1.5f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            var targetPoint = new Vector3(10f, 0f, cam.PivotHeight);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f,
+                trackedTargetPoint: targetPoint);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 trackedHeading = RetailChaseCamera.ComputeTrackedHeading(pivot, targetPoint)!.Value;
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, trackedHeading, cam.Distance, cam.Pitch, cam.YawOffset);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 4);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 4);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 4);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public void DefaultPose_OptionOff_MatchesTheOldOrbitFormula(float yawOffset)
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = false;
+            var cam = new RetailChaseCamera { YawOffset = yawOffset };
+
+            float yaw = MathF.PI / 3f;
+            var velocity = new Vector3(3f, 4f, -2f);
+            var normal = new Vector3(0f, -0.5f, 0.866f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: normal, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 oldHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw + yawOffset, inContact: true, contactPlaneNormal: normal, alignToSlope: false);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, oldHeading, cam.Distance, cam.Pitch, viewerYawOffset: 0f);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 5);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 5);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public void DefaultPose_FlatGround_MatchesTheOldOrbitFormula(float yawOffset)
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var cam = new RetailChaseCamera { YawOffset = yawOffset };
+
+            float yaw = MathF.PI / 3f;
+            var velocity = new Vector3(3f, 4f, -2f);
+            cam.Update(Vector3.Zero, yaw, velocity, inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f);
+
+            Vector3 pivot = new(0f, 0f, cam.PivotHeight);
+            Vector3 oldHeading = RetailChaseCamera.ComputeHeading(
+                velocity, yaw + yawOffset, inContact: true, contactPlaneNormal: Vector3.UnitZ, alignToSlope: true);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, oldHeading, cam.Distance, cam.Pitch, viewerYawOffset: 0f);
+
+            Assert.Equal(expectedEye.X, cam.Position.X, 5);
+            Assert.Equal(expectedEye.Y, cam.Position.Y, 5);
+            Assert.Equal(expectedEye.Z, cam.Position.Z, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
 
     private sealed class FakeProbe : ICameraCollisionProbe
     {
@@ -744,7 +1325,7 @@ public class RetailChaseCameraTests
 
         cam.Update(
             playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
             cellId: 0x100, selfEntityId: 0x5);
 
         Assert.Equal(1, probe.Calls);
@@ -760,7 +1341,7 @@ public class RetailChaseCameraTests
 
         cam.Update(
             playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
             cellId: 0xA9B40171u, selfEntityId: 0x5);
 
         Assert.Equal(0xA9B40170u, cam.ViewerCellId);
@@ -775,7 +1356,7 @@ public class RetailChaseCameraTests
             var cam = new RetailChaseCamera { CollisionProbe = new FakeProbe { ReturnCell = 0xDEADu } };
             cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0xA9B40171u, selfEntityId: 0x5);
 
             Assert.Equal(0xA9B40171u, cam.ViewerCellId);
@@ -794,7 +1375,7 @@ public class RetailChaseCameraTests
 
             cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0x100, selfEntityId: 0x5);
 
             Assert.Equal(0, probe.Calls);
@@ -814,7 +1395,7 @@ public class RetailChaseCameraTests
 
         cam.Update(
             playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
             cellId: 0x100, selfEntityId: 0x5);
 
         Assert.NotEqual(default, cam.View);
@@ -829,7 +1410,7 @@ public class RetailChaseCameraTests
 
         cam.Update(
             playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-            isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+            inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
             cellId: 0x100, selfEntityId: 0x5);
 
         Assert.Equal(pulledIn, cam.Position);
@@ -864,7 +1445,7 @@ public class RetailChaseCameraTests
 
             void Step() => cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0x100, selfEntityId: 0x5);
 
             Step();
@@ -914,7 +1495,7 @@ public class RetailChaseCameraTests
 
             void Step() => cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0x100, selfEntityId: 0x5);
 
             Step();
@@ -968,7 +1549,7 @@ public class RetailChaseCameraTests
 
             void Step() => cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0x100, selfEntityId: 0x5);
 
             Step();  // frame 1: total fallback — viewer snaps to the player
@@ -1016,7 +1597,7 @@ public class RetailChaseCameraTests
 
             void Step() => cam.Update(
                 playerPosition: Vector3.Zero, playerYaw: 0f, playerVelocity: Vector3.Zero,
-                isOnGround: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
+                inContact: true, contactPlaneNormal: Vector3.UnitZ, dt: 1f / 60f,
                 cellId: 0x100, selfEntityId: 0x5);
 
             // Settle a few frames, then watch 30 frames for per-frame jumps.

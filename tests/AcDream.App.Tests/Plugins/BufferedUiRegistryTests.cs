@@ -151,4 +151,88 @@ public class BufferedUiRegistryTests
         Assert.False(registry.ViewExists(
             new PluginUiOwner("another.plugin", "Other"), "Status View"));
     }
+
+    [Fact]
+    public void ClientWindowControlIsUnavailableUntilBound()
+    {
+        var registry = new BufferedUiRegistry();
+
+        Assert.False(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.ShowClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.HideClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.IsClientWindowVisible(PluginClientWindow.Inventory));
+    }
+
+    [Fact]
+    public void ClientWindowControlForwardsToTheBoundRetailSeamOnceBound()
+    {
+        var registry = new BufferedUiRegistry();
+        var visible = new Dictionary<PluginClientWindow, bool>();
+
+        registry.BindClientWindowControl(
+            toggle: w =>
+            {
+                visible[w] = !visible.GetValueOrDefault(w);
+                return visible[w];
+            },
+            show: w =>
+            {
+                visible[w] = true;
+                return true;
+            },
+            hide: w =>
+            {
+                visible[w] = false;
+                return true;
+            },
+            isVisible: w => visible.GetValueOrDefault(w));
+
+        // Mirrors the input action's ToggleInventory: the first press shows
+        // the window, the second hides it.
+        Assert.True(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+        Assert.True(registry.IsClientWindowVisible(PluginClientWindow.Inventory));
+        Assert.False(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.IsClientWindowVisible(PluginClientWindow.Inventory));
+
+        Assert.True(registry.ShowClientWindow(PluginClientWindow.Character));
+        Assert.True(registry.IsClientWindowVisible(PluginClientWindow.Character));
+        Assert.True(registry.HideClientWindow(PluginClientWindow.Character));
+        Assert.False(registry.IsClientWindowVisible(PluginClientWindow.Character));
+    }
+
+    [Fact]
+    public void BindClientWindowControlRejectsNullDelegates()
+    {
+        var registry = new BufferedUiRegistry();
+        bool True(PluginClientWindow _) => true;
+
+        Assert.Throws<ArgumentNullException>(() =>
+            registry.BindClientWindowControl(null!, True, True, True));
+        Assert.Throws<ArgumentNullException>(() =>
+            registry.BindClientWindowControl(True, null!, True, True));
+        Assert.Throws<ArgumentNullException>(() =>
+            registry.BindClientWindowControl(True, True, null!, True));
+        Assert.Throws<ArgumentNullException>(() =>
+            registry.BindClientWindowControl(True, True, True, null!));
+    }
+
+    [Fact]
+    public void UnbindClientWindowControl_ClearsAllFourDelegates()
+    {
+        var registry = new BufferedUiRegistry();
+        registry.BindClientWindowControl(
+            toggle: _ => true,
+            show: _ => true,
+            hide: _ => true,
+            isVisible: _ => true);
+
+        Assert.True(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+
+        registry.UnbindClientWindowControl();
+
+        Assert.False(registry.ToggleClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.ShowClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.HideClientWindow(PluginClientWindow.Inventory));
+        Assert.False(registry.IsClientWindowVisible(PluginClientWindow.Inventory));
+    }
 }

@@ -16,6 +16,47 @@ public static class LandblockPhysicsContentBuilder
         int SetupOwnerCount,
         int NoCollisionCount);
 
+    /// <summary>
+    /// One landblock's collision content as a host with no renderer loads it: its static
+    /// objects, procedural scenery and the objects inside its cells, the game data they need,
+    /// and their prepared collision.
+    /// False when the game data has no such landblock.
+    /// </summary>
+    public static bool TryLoadCollisionLandblock(
+        IDatReaderWriter dats,
+        IPreparedCollisionSource prepared,
+        ReadOnlySpan<float> heightTable,
+        uint landblockId,
+        Vector3 origin,
+        out LoadedLandblock landblock,
+        out LandblockCollisionBuild collisions)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+        ArgumentNullException.ThrowIfNull(prepared);
+        landblock = null!;
+        collisions = null!;
+        if (LandblockLoader.Load(dats, landblockId) is not { } source)
+            return false;
+
+        IReadOnlyList<WorldEntity> staticEntities =
+            HydrateStaticEntities(dats, source, origin, includeVisualBounds: false);
+        IReadOnlyList<WorldEntity> scenery =
+            HydrateProceduralScenery(dats, source, origin, heightTable, includeVisualBounds: false);
+        IReadOnlyList<WorldEntity> interior =
+            HydrateInteriorEntities(dats, landblockId, origin, includeVisualBounds: false);
+        var entities = new List<WorldEntity>(staticEntities.Count + scenery.Count + interior.Count);
+        entities.AddRange(staticEntities);
+        entities.AddRange(scenery);
+        entities.AddRange(interior);
+        landblock = new LoadedLandblock(
+            source.LandblockId,
+            source.Heightmap,
+            entities,
+            BuildDatBundle(dats, landblockId, entities));
+        collisions = BuildPreparedCollisionClosure(prepared, landblock);
+        return true;
+    }
+
     public static IReadOnlyList<WorldEntity> HydrateStaticEntities(
         IDatReaderWriter dats,
         LoadedLandblock source,
@@ -92,6 +133,104 @@ public static class LandblockPhysicsContentBuilder
         }
         return hydrated;
     }
+
+    /// <summary>
+    /// The objects placed inside a landblock's cells, such as a dungeon's furniture and the
+    /// marker parts that carry collision: each with the parts it draws or collides with, in
+    /// cell order, with ids from <see cref="InteriorEntityIdAllocator"/>.
+    /// </summary>
+    public static IReadOnlyList<WorldEntity> HydrateInteriorEntities(
+        IDatReaderWriter dats,
+        uint landblockId,
+        Vector3 worldOffset,
+        bool includeVisualBounds = true)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+
+        var result = new List<WorldEntity>();
+        LandBlockInfo? info = dats.Get<LandBlockInfo>((landblockId & 0xFFFF0000u) | 0xFFFEu);
+        if (info is null || info.NumCells == 0)
+            return result;
+
+        uint landblockX = (landblockId >> 24) & 0xFFu;
+        uint landblockY = (landblockId >> 16) & 0xFFu;
+        uint localCounter = 0;
+        uint firstCellId = (landblockId & 0xFFFF0000u) | 0x0100u;
+        for (uint offset = 0; offset < info.NumCells; offset++)
+        {
+            uint envCellId = firstCellId + offset;
+            if (dats.Get<EnvCell>(envCellId) is not { } envCell)
+                continue;
+
+            foreach (Stab stab in envCell.StaticObjects)
+            {
+                if ((stab.Id & 0xFF000000u) == 0x01000000u
+                    && !KeepsInteriorPart(dats, stab.Id))
+                {
+                    continue;
+                }
+
+                var meshRefs = new List<MeshRef>();
+                var bounds = new LocalBoundsAccumulator();
+                int lightCount = 0;
+                bool hasDefaultScript = false;
+                if ((stab.Id & 0xFF000000u) == 0x01000000u)
+                {
+                    if (dats.Get<GfxObj>(stab.Id) is { } gfx)
+                    {
+                        if (includeVisualBounds && GfxObjBounds.Get(gfx) is { } partBounds)
+                            bounds.Add(Matrix4x4.Identity, partBounds);
+                        meshRefs.Add(new MeshRef(stab.Id, Matrix4x4.Identity));
+                    }
+                }
+                else if ((stab.Id & 0xFF000000u) == 0x02000000u)
+                {
+                    if (dats.Get<Setup>(stab.Id) is { } setup)
+                    {
+                        lightCount = setup.Lights.Count;
+                        hasDefaultScript = setup.DefaultScript.DataId != 0
+                            || (uint)setup.DefaultScriptTable != 0;
+                        foreach (MeshRef meshRef in SetupMesh.Flatten(setup))
+                        {
+                            if (!KeepsInteriorPart(dats, meshRef.GfxObjId))
+                                continue;
+                            if (dats.Get<GfxObj>(meshRef.GfxObjId) is not { } gfx)
+                                continue;
+                            if (includeVisualBounds && GfxObjBounds.Get(gfx) is { } partBounds)
+                                bounds.Add(meshRef.PartTransform, partBounds);
+                            meshRefs.Add(meshRef);
+                        }
+                    }
+                }
+
+                if (!EntityHydrationRules.ShouldKeepEntity(meshRefs.Count, lightCount, hasDefaultScript))
+                    continue;
+
+                var entity = new WorldEntity
+                {
+                    Id = InteriorEntityIdAllocator.Allocate(landblockX, landblockY, ref localCounter),
+                    SourceGfxObjOrSetupId = stab.Id,
+                    Position = stab.Frame.Origin + worldOffset,
+                    Rotation = stab.Frame.Orientation,
+                    MeshRefs = meshRefs,
+                    ParentCellId = envCellId,
+                };
+                if (bounds.TryGet(out Vector3 min, out Vector3 max))
+                    entity.SetLocalBounds(min, max);
+                result.Add(entity);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Whether an interior part is kept: never an editor marker, unless it carries collision.</summary>
+    private static bool KeepsInteriorPart(IDatReaderWriter dats, uint gfxObjId) =>
+        EntityHydrationRules.ShouldKeepPart(
+            GfxObjDegradeResolver.IsRuntimeHiddenMarker(dats, gfxObjId),
+            dats.Get<GfxObj>(gfxObjId) is { } gfx
+                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics)
+                && gfx.PhysicsBSP?.Root is not null
+                && gfx.VertexArray is not null);
 
     public static IReadOnlyList<WorldEntity> HydrateProceduralScenery(
         IDatReaderWriter dats,

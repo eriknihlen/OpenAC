@@ -3,6 +3,38 @@ using System.Collections.Generic;
 
 namespace AcDream.Core.Items;
 
+/// <summary>
+/// Melee/missile weapon statistics carried by an appraisal response's
+/// WeaponProfile blob. Retained verbatim on <see cref="ClientObject"/> so a
+/// weapon's real damage/offense numbers survive past the single appraisal
+/// event that delivered them.
+/// </summary>
+public readonly record struct ClientWeaponProfile(
+    uint DamageType,
+    uint WeaponTime,
+    uint WeaponSkill,
+    uint Damage,
+    double DamageVariance,
+    double DamageMod,
+    double WeaponLength,
+    double MaxVelocity,
+    double WeaponOffense,
+    uint MaxVelocityEstimated);
+
+/// <summary>
+/// Per-damage-type protection modifiers carried by an appraisal response's
+/// ArmorProfile blob. Retained verbatim on <see cref="ClientObject"/>.
+/// </summary>
+public readonly record struct ClientArmorProfile(
+    float SlashingProtection,
+    float PiercingProtection,
+    float BludgeoningProtection,
+    float ColdProtection,
+    float FireProtection,
+    float AcidProtection,
+    float NetherProtection,
+    float LightningProtection);
+
 
 [Flags]
 public enum ItemType : uint
@@ -176,6 +208,18 @@ public sealed class ClientObject
     public IReadOnlyList<uint> AppraisedSpellIds { get; internal set; } =
         Array.Empty<uint>();
     public int LastAppraisalTimeMs { get; internal set; }
+    /// <summary>
+    /// The most recent appraisal's WeaponProfile blob, if the object is a
+    /// weapon and has ever been successfully appraised. Cleared/replaced by
+    /// each new appraisal; untouched by non-appraisal property updates.
+    /// </summary>
+    public ClientWeaponProfile? WeaponProfile { get; internal set; }
+    /// <summary>
+    /// The most recent appraisal's ArmorProfile blob, if the object is armor
+    /// and has ever been successfully appraised. Cleared/replaced by each
+    /// new appraisal; untouched by non-appraisal property updates.
+    /// </summary>
+    public ClientArmorProfile? ArmorProfile { get; internal set; }
     public uint? CooldownId { get; set; }
     public double? CooldownDuration { get; set; }
     public int TradeState { get; set; }

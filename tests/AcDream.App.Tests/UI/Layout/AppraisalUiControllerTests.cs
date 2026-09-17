@@ -1301,6 +1301,150 @@ public sealed class AppraisalUiControllerTests
     }
 
     [Fact]
+    public void PluginOriginatedIdentify_DoesNotOpenTheWindow()
+    {
+        // Live finding: a plugin's background Identify(objectId) used to
+        // pop the examination window open exactly like a user assess.
+        // Plugins identify constantly (trackers, loot scanning), so an
+        // automation-origin response must be accepted (properties/profiles
+        // still update -- see RuntimeInteractionTransactionState) without
+        // ever calling the window's show action.
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Chainmail Basinet",
+            Type = ItemType.Clothing,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => { })!;
+
+        Assert.True(interaction.TryAppraiseForAutomation(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+
+        Assert.Equal(0, shown);
+        Assert.Equal(0u, controller.CurrentObjectId);
+    }
+
+    [Fact]
+    public void UserOriginatedIdentify_OpensTheWindow()
+    {
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Chainmail Basinet",
+            Type = ItemType.Clothing,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => { })!;
+
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+        Assert.True(controller.Apply(Parsed(new PropertyBundle())));
+
+        Assert.Equal(1, shown);
+        Assert.Equal(ObjectId, controller.CurrentObjectId);
+    }
+
+    [Fact]
+    public void UserAssessDuringAnInFlightPluginAppraisal_StillOpensForTheUsersObject()
+    {
+        const uint PluginObjectId = 0x50000003u;
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Chainmail Basinet",
+            Type = ItemType.Clothing,
+        });
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = PluginObjectId,
+            Name = "A Corpse",
+            Type = ItemType.Container,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => { })!;
+
+        Assert.True(interaction.TryAppraiseForAutomation(PluginObjectId));
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+
+        Assert.True(controller.Apply(Parsed(new PropertyBundle(), guid: ObjectId)));
+        Assert.Equal(1, shown);
+        Assert.Equal(ObjectId, controller.CurrentObjectId);
+
+        // The superseded plugin request's late response is dropped by the
+        // pre-existing single-appraisal-slot semantics -- unrelated to the
+        // origin fix, but worth pinning so a future change to that
+        // mechanism does not silently reopen the window for it instead.
+        Assert.False(controller.Apply(
+            Parsed(new PropertyBundle(), guid: PluginObjectId)));
+        Assert.Equal(1, shown);
+        Assert.Equal(ObjectId, controller.CurrentObjectId);
+    }
+
+    [Fact]
+    public void PluginIdentifyOfTheCurrentlyShownObject_RefreshesContentWithoutReopening()
+    {
+        // The user is looking at an item; a plugin's background re-identify
+        // of that SAME item (a tracker polling durability/stack count) is
+        // exactly what the user would expect to see update live -- it just
+        // must not call show() again (no reopen, no refocus).
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Atlan Weapon",
+            Type = ItemType.MeleeWeapon,
+        });
+        var sent = new List<uint>();
+        using var interaction = NewInteraction(objects, sent);
+        int shown = 0;
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => shown++, () => { })!;
+
+        Assert.True(interaction.ExamineSelectedOrEnterMode(ObjectId));
+        var firstProperties = new PropertyBundle();
+        firstProperties.Ints[19u] = 1_250;
+        Assert.True(controller.Apply(Parsed(firstProperties)));
+        Assert.Equal(1, shown);
+
+        UiText itemText = Assert.IsType<UiText>(
+            layout.FindElement(AppraisalUiController.ItemTextId));
+        Assert.Contains(
+            "Value: 1,250",
+            string.Join("\n", itemText.LinesProvider().Select(line => line.Text)));
+
+        Assert.True(interaction.TryAppraiseForAutomation(ObjectId));
+        var refreshedProperties = new PropertyBundle();
+        refreshedProperties.Ints[19u] = 9_999;
+        Assert.True(controller.Apply(Parsed(refreshedProperties)));
+
+        Assert.Equal(1, shown);
+        Assert.Equal(ObjectId, controller.CurrentObjectId);
+        Assert.Contains(
+            "Value: 9,999",
+            string.Join("\n", itemText.LinesProvider().Select(line => line.Text)));
+    }
+
+    [Fact]
     public void EmptyOwnedInscription_FocusEditAndBlur_SendsRetailTransactionOnce()
     {
         ImportedLayout layout = FixtureLoader.LoadExamination();

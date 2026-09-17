@@ -9,6 +9,8 @@ public sealed class MossTankPlugin : IAcDreamPlugin
     private Action<double>? _tick;
     private Action<double>? _autostartTick;
     private IDisposable? _commandRegistration;
+    private IDisposable? _goToPause;
+    private IDisposable? _lootClassifierRegistration;
 
     public void Initialize(IPluginHost host)
     {
@@ -80,8 +82,16 @@ public sealed class MossTankPlugin : IAcDreamPlugin
             "vt",
             _panel.ExecuteVtankCommand);
 
+        _lootClassifierRegistration = _host.LootClassifiers.Register(
+            "moss-tank",
+            "MossTank",
+            new MossTankLootClassifier(_host, () => _panel.LiveLootRules));
+
         _tick = _panel.OnTick;
         _host.Events.Tick += _tick;
+
+        MossTankPanel panel = _panel;
+        _goToPause = _host.Automation.Navigation.PauseGoToWhile(() => panel.WalkPauseReason);
 
         _autostartTick = _ => _panel.TickAutostart();
         _host.Events.Tick += _autostartTick;
@@ -101,6 +111,10 @@ public sealed class MossTankPlugin : IAcDreamPlugin
             _host.Events.Tick -= _autostartTick;
         _commandRegistration?.Dispose();
         _commandRegistration = null;
+        _goToPause?.Dispose();
+        _goToPause = null;
+        _lootClassifierRegistration?.Dispose();
+        _lootClassifierRegistration = null;
         _tick = null;
         _autostartTick = null;
         _panel?.Disable();

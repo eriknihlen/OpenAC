@@ -270,10 +270,40 @@ public sealed class PlayerMovementController
 
     public bool IsAirborne => !_body.OnWalkable;
 
+    /// <summary>How fast the character runs, in meters a second, at its run skill and burden.</summary>
+    public float RunSpeed =>
+        AcDream.Core.Physics.MotionInterpreter.RunAnimSpeed * (_weenie.InqRunRate(out float rate) ? rate : 1f);
+
+    /// <summary>
+    /// How high a jump at full power lifts the character, at its jump skill, burden
+    /// and stamina, or zero when it is too loaded down to jump.
+    /// </summary>
+    public float FullJumpHeight =>
+        _weenie.CanJump(1f) && _weenie.InqJumpVelocity(1f, out float rise) ? rise * rise / 19.6f : 0f;
+
+    /// <summary>How much of its speed along the ground the body loses each second while it slides on the ground, from 0 to 1.</summary>
+    public float GroundFriction => _body.Friction;
+
+    /// <summary>How much of the speed it strikes a surface at the body bounces back with, from 0 to 1.</summary>
+    public float Elasticity => _body.Elasticity;
+
+    /// <summary>
+    /// How long the physics steps the body lately moved in were, in seconds, on average. A step
+    /// runs once the frames since the last one add up to more than <see cref="PhysicsBody.MinQuantum"/>,
+    /// so steps run longer at lower frame rates. Each step moves the average
+    /// <see cref="PhysicsStepAveraging"/> of the way to its own length.
+    /// </summary>
+    public float PhysicsStepSeconds { get; private set; } = PhysicsBody.MinQuantum;
+
+    private const float PhysicsStepAveraging = 0.1f;
+
     public float VerticalVelocity => _body.Velocity.Z;
 
     /// <summary>Full 3D world-space velocity of the physics body. Exposed for diagnostic logging.</summary>
     public Vector3 BodyVelocity => _body.Velocity;
+
+    /// <summary>The realized world-space velocity of the last physics quantum.</summary>
+    public Vector3 CachedVelocity => _body.CachedVelocity;
 
     public System.Numerics.Plane ContactPlane => _body.ContactPlane;
 
@@ -1769,6 +1799,8 @@ public sealed class PlayerMovementController
             ? default
             : _objectClock.Advance(dt);
         AdvancedObjectQuantumLastTick = quantumBatch.Count > 0;
+        if (quantumBatch.Remainder > 0f)
+            PhysicsStepSeconds += (quantumBatch.Remainder - PhysicsStepSeconds) * PhysicsStepAveraging;
         PresentedDeltaSeconds =
             ComputePresentedDelta(dt, pendingBeforeSeconds, in quantumBatch);
         bool justLanded = false;

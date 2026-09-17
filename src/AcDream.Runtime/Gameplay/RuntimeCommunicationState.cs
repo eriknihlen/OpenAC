@@ -1,5 +1,6 @@
 using AcDream.Core.Chat;
 using AcDream.Core.Social;
+using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Gameplay;
 
@@ -136,6 +137,19 @@ public sealed class RuntimeCommunicationState : IDisposable
 
     public void ResetSpewBox() => SpewBox.Reset();
 
+    /// <summary>
+    /// Raised with the server's death message when the local player dies.
+    /// </summary>
+    public event Action<string>? LocalPlayerDied;
+
+    public void ReportLocalPlayerDeath(string deathMessage)
+    {
+        ArgumentNullException.ThrowIfNull(deathMessage);
+        if (_disposed)
+            return;
+        LocalPlayerDied?.Invoke(deathMessage);
+    }
+
     public void AddText(string text, RetailLogTextType type, uint windowId = 0)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -144,6 +158,23 @@ public sealed class RuntimeCommunicationState : IDisposable
 
         if (type == RetailLogTextType.ClientLocal)
         {
+            // A status notice never enters the log, so it would otherwise
+            // escape the filters entirely. Offer it under its own kind.
+            if (Chat.Filters.ShouldSuppress(new PluginChatMessage(
+                    0UL,
+                    0u,
+                    PluginChatMessage.StatusTextKind,
+                    string.Empty,
+                    text,
+                    string.Empty)
+                {
+                    LogTextType = (int)type,
+                    Received = DateTimeOffset.UtcNow,
+                }))
+            {
+                return;
+            }
+
             SpewBox.Enqueue(text);
             return;
         }
@@ -311,6 +342,23 @@ internal sealed class RuntimeCommunicationEventStream
         }
     }
 
+    private static RuntimeChatEntry Project(long revision, in ChatEntry entry)
+    {
+        PluginChatMessage projection = ChatLog.ToFilterCandidate(in entry);
+        return new RuntimeChatEntry(
+            revision,
+            entry.SenderGuid,
+            (int)entry.Kind,
+            entry.Sender,
+            entry.Text,
+            entry.ChannelName)
+        {
+            LogTextType = projection.LogTextType,
+            CombatKind = projection.CombatKind,
+            Received = projection.Received,
+        };
+    }
+
     private void OnEntryAppended(ChatEntry entry)
     {
         lock (_gate)
@@ -320,13 +368,7 @@ internal sealed class RuntimeCommunicationEventStream
             ulong sequence = unchecked((ulong)++_sequence);
             _pendingDispatch.Add(new RuntimeCommunicationEvent(
                 sequence,
-                new RuntimeChatEntry(
-                    _chat.Revision,
-                    entry.SenderGuid,
-                    (int)entry.Kind,
-                    entry.Sender,
-                    entry.Text,
-                    entry.ChannelName)));
+                Project(_chat.Revision, in entry)));
             if (_dispatching)
                 return;
             _dispatching = true;

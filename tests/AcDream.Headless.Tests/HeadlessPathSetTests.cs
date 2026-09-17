@@ -94,10 +94,46 @@ public sealed class HeadlessPathSetTests
             paths.CacheDirectory);
     }
 
-    private sealed class FixturePlatform(bool isWindows)
+    [Fact]
+    public void MacOSUsesApplicationSupportLikeTheGraphicalClient()
+    {
+        string root = Path.GetFullPath(
+            Path.Combine(Path.GetTempPath(), "acdream-macos"));
+        var platform = new FixturePlatform(isWindows: false, isMacOS: true)
+        {
+            CurrentDirectoryValue = Path.Combine(root, "work"),
+            UserProfile = Path.Combine(root, "Users", "bot"),
+        };
+
+        HeadlessPathSet paths = HeadlessPathSet.Resolve(
+            new HeadlessPathOverrides(),
+            platform);
+
+        Assert.Equal(
+            Path.Combine(root, "Users", "bot", "Library", "Application Support", "acdream", "config"),
+            paths.ConfigDirectory);
+        Assert.Equal(
+            Path.Combine(root, "Users", "bot", "Library", "Application Support", "acdream"),
+            paths.DataDirectory);
+        Assert.Equal(
+            Path.Combine(root, "Users", "bot", "Library", "Caches", "acdream"),
+            paths.CacheDirectory);
+    }
+
+    [Fact]
+    public void HostEnvironmentReportsTheRunningOperatingSystem()
+    {
+        IHeadlessPlatformEnvironment platform = HeadlessPlatformEnvironment.Instance;
+
+        Assert.Equal(OperatingSystem.IsWindows(), platform.IsWindows);
+        Assert.Equal(OperatingSystem.IsMacOS(), platform.IsMacOS);
+    }
+
+    private sealed class FixturePlatform(bool isWindows, bool isMacOS = false)
         : IHeadlessPlatformEnvironment
     {
         public bool IsWindows { get; } = isWindows;
+        public bool IsMacOS { get; } = isMacOS;
         public string CurrentDirectoryValue { get; init; } =
             Environment.CurrentDirectory;
         public string CurrentDirectory => CurrentDirectoryValue;

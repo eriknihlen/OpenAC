@@ -249,7 +249,7 @@ public sealed class WorldRenderCompositionTests
             Resource<SceneLightingUboBinding>("scene lighting");
 
         public DebugLineRenderer CreateDebugLines(
-            IGpuDevice device, ICurrentGpuFrameSource frameSource, string shadersDirectory) =>
+            IGpuDevice device, ICurrentGpuFrameSource frameSource, string shadersDirectory, IWorldPassScope worldPass) =>
             Resource<DebugLineRenderer>("debug lines");
 
         public byte[]? TryLoadDebugFont() => hasFont ? [1] : null;

@@ -1278,6 +1278,11 @@ public sealed class LocalPlayerTeleportControllerTests
         public void ArmLoginTunnel() => LoginTunnelArms++;
         public int LogoutRequests;
         public void RequestLogout() => LogoutRequests++;
+        public bool TryRequestLogout()
+        {
+            LogoutRequests++;
+            return true;
+        }
         public void ResetSession()
         {
         }

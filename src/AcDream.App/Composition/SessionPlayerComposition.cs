@@ -129,7 +129,8 @@ internal sealed record SessionPlayerResult(
     RuntimePlacementProjectionRetrySlot PlacementProjectionRetry,
     CurrentGameRuntimeAdapter GameRuntime,
     GameplayInputActionRouter? GameplayActions,
-    SessionPlayerRuntimeBindings RuntimeBindings);
+    SessionPlayerRuntimeBindings RuntimeBindings,
+    ISealedDungeonCellClassifier? SealedDungeonCells = null);
 
 internal interface IGameWindowSessionPlayerPublication
 {
@@ -1120,6 +1121,7 @@ internal sealed class SessionPlayerCompositionPhase
                 live.WorldState,
                 d.PhysicsEngine),
             d.Log);
+        d.WorldSceneDebugState.NavigationReport = debugToast;
         var runtimeDiagnostics = new RuntimeDiagnosticCommandController(
             d.WorldEnvironment,
             d.WorldSceneDebugState,
@@ -1213,7 +1215,8 @@ internal sealed class SessionPlayerCompositionPhase
             placementProjectionRetry,
             gameRuntime,
             gameplayActionsLease?.Resource,
-            bindings);
+            bindings,
+            sealedDungeonCells);
         _publication.PublishSessionPlayer(result);
 
         streamerLease.Transfer();

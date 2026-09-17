@@ -30,11 +30,13 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
         string user = "runtime-user",
         string password = "runtime-password",
         uint characterId = 0x50000001u,
-        string characterName = "Runtime")
+        string characterName = "Runtime",
+        int deferredConnectTickCount = 0)
     {
         _operations = new FixtureOperations(
             characterId,
-            characterName);
+            characterName,
+            deferredConnectTickCount);
         _gameplay = new GameplayOperations();
         Runtime = new GameRuntime(new GameRuntimeDependencies(
             _gameplay,
@@ -81,13 +83,23 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
                 "127.0.0.1",
                 9000,
                 user,
-                password));
+                password,
+                PollConnectionDuringTicks: deferredConnectTickCount > 0),
+            runtime: Runtime);
     }
 
     public GameRuntime Runtime { get; }
     public LiveSessionHost Session { get; }
     public RuntimeTraceRecorder Trace { get; }
     public IReadOnlyList<string> LifecycleTrace => _operations.Trace;
+
+    // Re-arms the deferred-connect poll countdown for a fresh Start/
+    // Reconnect sequence -- the fixture's PollConnect only defers the
+    // FIRST connect by default; a test proving the async in-world edge
+    // survives a reconnect needs the countdown reset before calling
+    // Reconnect() again.
+    public void RearmDeferredConnectTicks(int count) =>
+        _operations.RearmPollTicks(count);
     public IReadOnlyList<string> GameplayTrace => _gameplay.Trace;
     public int ProjectionRetirementCount =>
         _resetHost.ProjectionRetirementCount;
@@ -107,34 +119,25 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
 
     public RuntimeSessionStartResult Start()
     {
-        RuntimeLifecycleState previous = Runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             Session.Start(Runtime.Generation);
-        Runtime.EventSink.EmitLifecycle(
-            previous,
-            Runtime.Lifecycle.State);
+        Runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeSessionStartResult Reconnect()
     {
-        RuntimeLifecycleState previous = Runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             Session.Reconnect(Runtime.Generation);
-        Runtime.EventSink.EmitLifecycle(
-            previous,
-            Runtime.Lifecycle.State);
+        Runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeTeardownAcknowledgement Stop()
     {
-        RuntimeLifecycleState previous = Runtime.Lifecycle.State;
         RuntimeTeardownAcknowledgement result =
             Session.Stop(Runtime.Generation);
-        Runtime.EventSink.EmitLifecycle(
-            previous,
-            Runtime.Lifecycle.State);
+        Runtime.SyncLifecycleEmission();
         return result;
     }
 
@@ -638,8 +641,11 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
 
     private sealed class FixtureOperations(
         uint characterId,
-        string characterName) : ILiveSessionOperations
+        string characterName,
+        int deferredConnectTickCount = 0) : ILiveSessionOperations
     {
+        private int _pollTicksRemaining = deferredConnectTickCount;
+        public void RearmPollTicks(int count) => _pollTicksRemaining = count;
         public List<string> Trace { get; } = [];
 
         public IPEndPoint ResolveEndpoint(string host, int port)
@@ -659,6 +665,20 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
             string user,
             string password) =>
             Trace.Add($"connect:{user}");
+
+        public void BeginConnect(
+            WorldSession session,
+            string user,
+            string password) =>
+            Trace.Add($"begin-connect:{user}");
+
+        public bool PollConnect(WorldSession session)
+        {
+            if (_pollTicksRemaining <= 0)
+                return true;
+            _pollTicksRemaining--;
+            return _pollTicksRemaining <= 0;
+        }
 
         public CharacterList.Parsed GetCharacters(WorldSession session)
         {

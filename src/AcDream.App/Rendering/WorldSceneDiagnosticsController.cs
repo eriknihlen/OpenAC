@@ -28,6 +28,7 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
     private readonly IRuntimeLocalPlayerControllerSource _player;
     private readonly DebugVmRenderFactsPublisher _debugVm;
     private readonly bool _debugVmConsumerActive;
+    private readonly NavMeshDebugOverlay? _navMesh;
     private int _debugDrawLogCount;
 
     public WorldSceneDiagnosticsController(
@@ -38,7 +39,8 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
         ILocalPlayerModeSource mode,
         IRuntimeLocalPlayerControllerSource player,
         DebugVmRenderFactsPublisher debugVm,
-        bool debugVmConsumerActive)
+        bool debugVmConsumerActive,
+        NavMeshDebugOverlay? navMesh = null)
     {
         _pview = pview ?? throw new ArgumentNullException(nameof(pview));
         _state = state ?? throw new ArgumentNullException(nameof(state));
@@ -48,6 +50,7 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
         _player = player ?? throw new ArgumentNullException(nameof(player));
         _debugVm = debugVm ?? throw new ArgumentNullException(nameof(debugVm));
         _debugVmConsumerActive = debugVmConsumerActive;
+        _navMesh = navMesh;
     }
 
     public CameraCellResolution CameraCellResolution => _pview.CameraCellResolution;
@@ -57,7 +60,7 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
         IReadOnlyList<(uint LandblockId, Vector3 AabbMin, Vector3 AabbMax)> bounds)
     {
         ArgumentNullException.ThrowIfNull(bounds);
-        DrawCollisionWireframes(in camera);
+        DrawDebugLines(in camera);
 
         int visible = 0;
         int total = bounds.Count;
@@ -89,12 +92,24 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
         return new WorldSceneDiagnosticOutcome(visible, total);
     }
 
-    private void DrawCollisionWireframes(in WorldCameraFrame camera)
+    private void DrawDebugLines(in WorldCameraFrame camera)
     {
-        if (!_state.CollisionWireframesVisible || _lines is null)
+        bool wireframes = _state.CollisionWireframesVisible;
+        bool navMesh = _navMesh is not null && _state.NavMeshVisible;
+        bool route = _navMesh is not null && _navMesh.HasRouteToShow;
+        if ((!wireframes && !navMesh && !route) || _lines is null)
             return;
 
         _lines.Begin();
+        if (wireframes)
+            AddCollisionWireframes(_lines);
+        if (navMesh || route)
+            _navMesh!.Draw(_lines, _player.Controller, showGrid: navMesh);
+        _lines.Flush(camera.Camera.View, camera.Projection);
+    }
+
+    private void AddCollisionWireframes(DebugLineRenderer lines)
+    {
         int drawn = 0;
         foreach (ShadowEntry shadow in _physics.ShadowObjects.AllEntriesForDebug())
         {
@@ -103,7 +118,7 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
                 float height = shadow.CylHeight > 0f
                     ? shadow.CylHeight
                     : shadow.Radius * 2f;
-                _lines.AddCylinder(
+                lines.AddCylinder(
                     shadow.Position,
                     shadow.Radius,
                     height,
@@ -111,7 +126,7 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
             }
             else
             {
-                _lines.AddCylinder(
+                lines.AddCylinder(
                     shadow.Position - new Vector3(0f, 0f, shadow.Radius),
                     shadow.Radius,
                     shadow.Radius * 2f,
@@ -123,15 +138,13 @@ internal sealed class WorldSceneDiagnosticsController : IWorldSceneDiagnostics
         if (_mode.IsPlayerMode && _player.Controller is { } localPlayer)
         {
             Vector3 position = localPlayer.Position;
-            _lines.AddCylinder(
+            lines.AddCylinder(
                 new Vector3(position.X, position.Y, position.Z),
                 DebugVmRenderFactsPublisher.PlayerCollisionRadius,
                 1.8f,
                 new Vector3(1f, 0f, 0f));
             LogNearbyCollisionObjects(position, drawn);
         }
-
-        _lines.Flush(camera.Camera.View, camera.Projection);
     }
 
     private void LogNearbyCollisionObjects(Vector3 playerPosition, int drawn)

@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using AcDream.App.Interaction;
 using AcDream.App.UI;
@@ -88,12 +89,16 @@ public sealed class SelectionInteractionControllerTests
     {
         private uint _sequence;
         public bool IsInWorld { get; set; } = true;
+        public bool RefuseSend { get; set; }
+        public Exception? ThrowOnSend { get; set; }
         public List<uint> Uses { get; } = new();
         public List<(uint Item, uint Container, int Placement)> Pickups { get; } = new();
 
         public bool TrySendUse(uint serverGuid, out uint sequence)
         {
-            if (!IsInWorld)
+            if (ThrowOnSend is not null)
+                throw ThrowOnSend;
+            if (!IsInWorld || RefuseSend)
             {
                 sequence = 0u;
                 return false;
@@ -126,6 +131,9 @@ public sealed class SelectionInteractionControllerTests
         public List<InteractionApproach> Approaches { get; } = new();
         public bool Starts { get; set; } = true;
         public Action? AfterArm { get; set; }
+        public uint? FailProgressCount { get; set; }
+        public int CancelCount { get; private set; }
+
         public bool BeginApproach(
             InteractionApproach approach,
             Action<PlayerApproachToken>? armAfterCancel = null)
@@ -137,6 +145,10 @@ public sealed class SelectionInteractionControllerTests
             AfterArm?.Invoke();
             return true;
         }
+
+        public uint? CurrentApproachFailProgressCount() => FailProgressCount;
+
+        public void CancelApproach() => CancelCount++;
     }
 
     private sealed class CombatTargetOperations(SelectionState selection)
@@ -175,6 +187,7 @@ public sealed class SelectionInteractionControllerTests
         public readonly RuntimeCombatTargetState CombatTarget;
         public readonly SelectionInteractionController Controller;
         public uint GroundObjectId { get; set; }
+        public uint? RequestedExternalContainerId { get; private set; }
 
         public Harness()
         {
@@ -212,7 +225,8 @@ public sealed class SelectionInteractionControllerTests
                 placeInBackpack: (item, container, placement) =>
                     controller!.SendPickup(item, container, placement),
                 requestUse: (guid, reservation) =>
-                    controller!.RequestUse(guid, reservation));
+                    controller!.RequestUse(guid, reservation),
+                requestExternalContainer: guid => RequestedExternalContainerId = guid);
             CombatTargetOperations = new CombatTargetOperations(Selection);
             CombatTarget = new RuntimeCombatTargetState(
                 Combat,
@@ -519,6 +533,405 @@ public sealed class SelectionInteractionControllerTests
         h.Items.CompleteUse(0u);
 
         Assert.Equal(0, h.Items.BusyCount);
+    }
+
+    [Fact]
+    public void AutomationUseOfAFarWorldObjectWalksThenDispatchesOnArrival()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
+        // Armed, not yet sent -- the plugin surface reports Started for the
+        // walk, and the actual use dispatches once the player arrives.
+        Assert.Empty(h.Transport.Uses);
+
+        h.Controller.OnNaturalMoveToComplete();
+
+        Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+
+    [Fact]
+    public void StalledApproachExpiresTheReservationOnceTheFailCounterCrossesTheThreshold()
+    {
+        // A live-verified root cause: an obstruction (a closed door, a
+        // wall) in the straight-line approach path can stop the local
+        // physics from ever calling MoveToComplete or MoveToCancelled at
+        // all -- not just report a bad arrival. A live repro against a
+        // real ACE vendor left the character frozen at a closed door for
+        // 40+ seconds with zero HandleUseApproachCompletion calls.
+        // Without a bound, the reservation and HasPendingUse would stay
+        // held for the rest of the session; every later Use, from a
+        // click or a plugin, would report Busy forever. The give-up
+        // reads the move-to's own per-tick progress-failure counter
+        // (see StalledApproachGiveUpTicks) rather than a wall clock.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(1, h.Items.BusyCount);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        // Short of the threshold: the fail counter is climbing (the move
+        // is stalled) but hasn't crossed the line yet, so nothing changes.
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
+        h.Controller.DrainOutbound();
+
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(1, h.Items.BusyCount);
+        Assert.Equal(0, h.Movement.CancelCount);
+
+        // At the threshold: the host gives up, frees the gate, and cancels
+        // the underlying move-to so the player stops walking into it.
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.False(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(0, h.Items.BusyCount);
+        Assert.True(h.Items.EnsureInventoryRequestReady());
+        Assert.Empty(h.Transport.Uses);
+        Assert.Equal(1, h.Movement.CancelCount);
+    }
+
+    [Fact]
+    public void AutomationRouteDoesNotToastWhenAnApproachStalls()
+    {
+        // The automation route's toast: false contract must survive to
+        // the expiry path too -- a plugin's Use should not pop a message
+        // in the user's chat window the same way a click's would.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.TryUseForAutomation(Target);
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.Empty(h.Toasts);
+    }
+
+    [Fact]
+    public void ClickRouteDoesToastWhenAnApproachStalls()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.SendUse(Target);
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.Single(h.Toasts);
+    }
+
+    [Fact]
+    public void ASlowButProgressingApproachIsNeverCutOff()
+    {
+        // The give-up must never punish a walk that is merely slow. The
+        // move-to's fail counter resets to 0 the instant it makes
+        // progress (MoveToManager.CheckProgressMade); simulate that by
+        // never letting the counter reach the threshold, no matter how
+        // many drain cycles pass.
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        for (int i = 0; i < 500; i++)
+        {
+            // Climbs partway, then progress resets it, over and over --
+            // it never accumulates to the threshold.
+            h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks - 1;
+            h.Controller.DrainOutbound();
+            h.Movement.FailProgressCount = 0;
+            h.Controller.DrainOutbound();
+        }
+
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Equal(0, h.Movement.CancelCount);
+    }
+
+    [Fact]
+    public void StalledPickupApproachExpiresTheSameWay()
+    {
+        // MEDIUM: walk-then-pickup has the identical unbounded wedge as
+        // walk-then-use -- SendPickup arms TryArmPostArrivalPickup the
+        // same way PerformUse arms TryArmPostArrivalUse, and nothing
+        // released it if the move-to never completed or cancelled.
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        Assert.True(h.Items.PlaceWorldItemInBackpack(Target));
+        Assert.True(h.Items.RuntimeTransactions.HasPendingPickup);
+
+        h.Movement.FailProgressCount = SelectionInteractionController.StalledApproachGiveUpTicks;
+        h.Controller.DrainOutbound();
+
+        Assert.False(h.Items.RuntimeTransactions.HasPendingPickup);
+        Assert.Equal(1, h.Movement.CancelCount);
+    }
+
+    [Fact]
+    public void AutomationUseOfACloseWorldObjectDispatchesImmediately()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Empty(h.Movement.Approaches);
+        Assert.Equal(new[] { Target }, h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseOfANonOwnedContainerArmsTheExternalContainerRequest()
+    {
+        // HIGH root-cause fix: a click on a landscape container arms
+        // ExternalContainers.RequestOpen as one of the SAME policy
+        // actions that decides to send Use (SetGroundObject, alongside
+        // SendUse, both produced by ItemInteractionPolicy.DecideUse). The
+        // automation route dispatches Use through a different seam
+        // (PerformUse -> TryDispatchUse) that bypassed that policy
+        // entirely, so RequestedContainerId stayed 0 and the server's
+        // ViewContents response for a freshly opened corpse/chest was
+        // silently dropped -- Started, and nothing opened. Live-verified
+        // on a real ACE chest.
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "Chest",
+            Type = ItemType.Container,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(Target, h.RequestedExternalContainerId);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnOwnedItemDoesNotArmTheExternalContainerRequest()
+    {
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "MyBag",
+            Type = ItemType.Container,
+            ContainerId = Player,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        Assert.Null(h.RequestedExternalContainerId);
+    }
+
+    [Fact]
+    public void AutomationUseOfATargetedContainerDoesNotArmTheExternalContainerRequest()
+    {
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Target,
+            Name = "LockedChest",
+            Type = ItemType.Container,
+            // A target-mode bit (Contained, shifted into the target half)
+            // means this needs a key/tool used ON it, not a bare Use --
+            // the same reason ItemInteractionPolicy never emits
+            // SetGroundObject for it.
+            Useability = ItemUseability.Contained << 16,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: true);
+
+        h.Controller.TryUseForAutomation(Target);
+
+        Assert.Null(h.RequestedExternalContainerId);
+    }
+
+    [Fact]
+    public void ABusyRefusedAutomationUseDoesNotArmTheExternalContainerRequest()
+    {
+        // MEDIUM-1: arming must happen only where Use is actually
+        // dispatched (immediately, or on arrival), never earlier where a
+        // Busy refusal would still return without ever sending anything.
+        // A plugin Use(B) refused Busy while A's own walk-then-use is
+        // still in flight must not call ExternalContainers.RequestOpen
+        // for B -- that would close whatever container the user already
+        // has open (ExternalContainerState's ReplacementRequested
+        // transition) and repoint RequestedContainerId at a container
+        // whose Use never actually went anywhere.
+        const uint otherContainer = 0x7000_0099u;
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = otherContainer,
+            Name = "OtherChest",
+            Type = ItemType.Container,
+            Useability = ItemUseability.Remote,
+            ItemsCapacity = 6,
+        });
+        h.SetApproach(closeRange: false);
+        h.Controller.SendUse(Target);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        h.SetApproach(closeRange: true, serverGuid: otherContainer);
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherContainer);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        Assert.Null(h.RequestedExternalContainerId);
+        // The original approach is still the one armed.
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+    }
+
+    [Fact]
+    public void AutomationUseOfANotUseableFarTargetIsRejectedWithoutApproaching()
+    {
+        var h = new Harness();
+        h.Query.Useable = false;
+        h.SetApproach(closeRange: false);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
+        Assert.Empty(h.Movement.Approaches);
+        Assert.Empty(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseThrottleRefusesASecondCallWithinTheWindow()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome first = h.Controller.TryUseForAutomation(Target);
+        Assert.Equal(AutomationUseOutcome.Started, first);
+        Assert.Single(h.Transport.Uses);
+
+        // A second automation call made immediately after (well inside
+        // RuntimeInteractionTransactionState.RetailUseThrottleMs) must be
+        // refused by the same throttle a click is held to, not bypass it.
+        AutomationUseOutcome second = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, second);
+        Assert.Single(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseIsBusyWhenAnInventoryRequestIsAlreadyInFlight()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        // Occupy the one-request-at-a-time inventory gate directly (not
+        // through TryUseForAutomation), so this isolates the inventory
+        // gate from the use-throttle gate above.
+        ItemUseRequestReservation blocking =
+            h.Items.RuntimeTransactions.BeginUseRequestReservation();
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        Assert.Empty(h.Transport.Uses);
+
+        blocking.CancelBeforeDispatch();
+    }
+
+    [Fact]
+    public void AutomationUseReleasesTheReservationWhenTheSendThrows()
+    {
+        // The reservation increments the busy count the moment it is
+        // taken; a throw anywhere downstream (a transport fault, a reset
+        // mid-call) must give it back or the one-request-at-a-time gate is
+        // wedged for the rest of the session.
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        h.Transport.ThrowOnSend = new InvalidOperationException("transport fault");
+
+        Assert.Throws<InvalidOperationException>(() => h.Controller.TryUseForAutomation(Target));
+
+        Assert.Equal(0, h.Items.BusyCount);
+        Assert.True(h.Items.EnsureInventoryRequestReady());
+    }
+
+    [Fact]
+    public void AutomationUseIncrementsBusyCountUntilTheServerConfirmsCompletion()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Equal(1, h.Items.BusyCount);
+
+        h.Items.CompleteUse(0u);
+
+        Assert.Equal(0, h.Items.BusyCount);
+    }
+
+    [Fact]
+    public void AutomationUseReportsBusyInsteadOfCancellingAnInFlightApproach()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: false);
+        h.Controller.SendUse(Target);
+        PlayerInteractionMovementSinkAssertSingleApproach(h, Target);
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Busy, outcome);
+        // The original click-driven approach is still armed, not
+        // cancelled by the automation call.
+        Assert.True(h.Items.RuntimeTransactions.HasPendingUse);
+        Assert.Single(h.Movement.Approaches);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnotherPlayerIsRefusedInsteadOfOpeningASecureTrade()
+    {
+        var h = new Harness();
+        const uint otherPlayer = 0x5000_0099u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = otherPlayer,
+            Type = ItemType.Creature,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+        });
+        var tradesRequested = new List<uint>();
+        h.Items.SecureTradeRequested += (guid, _) => tradesRequested.Add(guid);
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(otherPlayer);
+
+        Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
+        Assert.Empty(tradesRequested);
+        Assert.Empty(h.Transport.Uses);
+    }
+
+    [Fact]
+    public void AutomationUseMapsATransportSendRejectionToUnavailableNotBusy()
+    {
+        var h = new Harness();
+        h.SetApproach(closeRange: true);
+        // In-world, but the transport itself refuses to send -- distinct
+        // from NotInWorld and from the busy gates above.
+        h.Transport.RefuseSend = true;
+
+        AutomationUseOutcome outcome = h.Controller.TryUseForAutomation(Target);
+
+        Assert.Equal(AutomationUseOutcome.Unavailable, outcome);
+        Assert.Empty(h.Transport.Uses);
     }
 
     [Fact]

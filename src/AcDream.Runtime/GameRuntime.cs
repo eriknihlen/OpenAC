@@ -146,6 +146,7 @@ public sealed class GameRuntime
     private int _disposeStage;
     private bool _disposeRequested;
     private bool _disposeDrainActive;
+    private RuntimeLifecycleState _lastEmittedLifecycleState = RuntimeLifecycleState.Constructed;
     private bool _disposed;
 
     public GameRuntime(GameRuntimeDependencies dependencies)
@@ -490,6 +491,27 @@ public sealed class GameRuntime
         }
     }
 
+    /// <summary>
+    /// The single lifecycle-emission gate: compares the live Lifecycle.State
+    /// against the last state this call itself emitted and raises exactly
+    /// one EmitLifecycle for any observed change, deduped by
+    /// previous == current. Callable from a command boundary (Start/
+    /// Reconnect/Stop, where the change is usually already visible by the
+    /// time the call returns) and from the per-frame session tick (where
+    /// the async connect-to-in-world edge, and any other edge a command
+    /// boundary did not just observe, actually lands) without double-
+    /// firing when both paths converge on the same state in one frame.
+    /// </summary>
+    internal void SyncLifecycleEmission()
+    {
+        RuntimeLifecycleState current = Lifecycle.State;
+        RuntimeLifecycleState previous = _lastEmittedLifecycleState;
+        if (previous == current)
+            return;
+        _lastEmittedLifecycleState = current;
+        _events.EmitLifecycle(previous, current);
+    }
+
     IGameRuntimeClock IGameRuntimeView.Clock => Clock;
     public IRuntimeEntityView Entities => EntityObjects.EntityView;
     public IRuntimeInventoryView Inventory => EntityObjects.InventoryView;
@@ -546,7 +568,7 @@ public sealed class GameRuntime
         ObjectDisposedException.ThrowIf(_disposeRequested || _disposed, this);
         return new RuntimeLocalPlayerFrameController(
             host,
-            input,
+            new RuntimeScriptedMovementInputSource(MovementOwner, input),
             () =>
             {
                 _events.EmitMovement(MovementOwner.Snapshot);

@@ -214,8 +214,36 @@ public sealed class ChatLog
         });
     }
 
+    /// <summary>
+    /// Predicates that can drop a line before it is appended. Because the drop
+    /// happens here, a rejected line reaches nothing downstream of the log.
+    /// </summary>
+    public ChatSuppressionFilters Filters { get; } = new();
+
+    /// <summary>
+    /// Projects an entry into the shape filters are written against. The
+    /// sequence is zero: the entry has not been appended yet, so it has none.
+    /// </summary>
+    public static Plugin.Abstractions.PluginChatMessage ToFilterCandidate(
+        in ChatEntry entry) =>
+        new(
+            0UL,
+            entry.SenderGuid,
+            (int)entry.Kind,
+            entry.Sender,
+            entry.Text,
+            entry.ChannelName)
+        {
+            LogTextType = unchecked((int)entry.LogTextType),
+            CombatKind = entry.CombatKind is { } combat ? (int)combat + 1 : 0,
+            Received = new DateTimeOffset(
+                DateTime.SpecifyKind(entry.Received, DateTimeKind.Utc)),
+        };
+
     private void Append(ChatEntry entry)
     {
+        if (Filters.ShouldSuppress(ToFilterCandidate(in entry)))
+            return;
         if (FilterLanguageSource?.Invoke() == true)
             entry = entry with { Text = ChatLanguageFilter.Censor(entry.Text, FilterLanguagePatterns) };
 

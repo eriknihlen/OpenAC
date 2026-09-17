@@ -37,6 +37,7 @@ internal sealed class CurrentGameRuntimeCommandAdapter
     private readonly RuntimeFellowshipState _fellowship;
     private readonly SelectionInteractionController _selection;
     private readonly IGameRuntimeEventSink _events;
+    private readonly GameRuntime _runtime;
 
     public CurrentGameRuntimeCommandAdapter(
         LiveSessionController session,
@@ -49,7 +50,8 @@ internal sealed class CurrentGameRuntimeCommandAdapter
         RuntimeLocalPlayerMovementState movement,
         RuntimeFellowshipState fellowship,
         SelectionInteractionController selection,
-        IGameRuntimeEventSink events)
+        IGameRuntimeEventSink events,
+        GameRuntime runtime)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _sessionHost = sessionHost ?? throw new ArgumentNullException(nameof(sessionHost));
@@ -65,12 +67,12 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             ?? throw new ArgumentNullException(nameof(fellowship));
         _selection = selection ?? throw new ArgumentNullException(nameof(selection));
         _events = events ?? throw new ArgumentNullException(nameof(events));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
     }
 
     public RuntimeSessionStartResult Start(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _view.Lifecycle.State;
         RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: false);
         if (gate != RuntimeCommandStatus.Accepted)
             return RejectedStart(gate);
@@ -83,14 +85,13 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             ToCommandStatus(result.Status),
             result.CharacterId,
             result.CharacterName);
-        _events.EmitLifecycle(previous, _view.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeSessionStartResult Reconnect(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _view.Lifecycle.State;
         RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: false);
         if (gate != RuntimeCommandStatus.Accepted)
             return RejectedStart(gate);
@@ -103,14 +104,13 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             ToCommandStatus(result.Status),
             result.CharacterId,
             result.CharacterName);
-        _events.EmitLifecycle(previous, _view.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeTeardownAcknowledgement Stop(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _view.Lifecycle.State;
         RuntimeCommandStatus gate = Validate(expectedGeneration, requireWorld: false);
         if (gate != RuntimeCommandStatus.Accepted)
         {
@@ -128,7 +128,7 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             operation: 2,
             acknowledgement.Status,
             text: acknowledgement.Error?.GetType().Name ?? string.Empty);
-        _events.EmitLifecycle(previous, _view.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return acknowledgement;
     }
 
@@ -361,6 +361,81 @@ internal sealed class CurrentGameRuntimeCommandAdapter
             operation: 0x101,
             RuntimeCommandStatus.Accepted);
         return Result(RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult BeginMove(
+        RuntimeGenerationToken expectedGeneration,
+        in RuntimeMoveRequest request)
+    {
+        RuntimeCommandStatus gate = Validate(
+            expectedGeneration,
+            requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _movement.BeginMove(request)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        _events.EmitCommand(
+            RuntimeCommandDomain.Movement,
+            operation: 0x104,
+            status);
+        return Result(status);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration)
+    {
+        RuntimeCommandStatus gate = Validate(
+            expectedGeneration,
+            requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        _movement.StopMove();
+        _events.EmitCommand(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            RuntimeCommandStatus.Accepted);
+        return Result(RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration,
+        RuntimeMoveChannel channel)
+    {
+        RuntimeCommandStatus gate = Validate(
+            expectedGeneration,
+            requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = Enum.IsDefined(channel)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        if (status == RuntimeCommandStatus.Accepted)
+            _movement.StopMove(channel);
+        _events.EmitCommand(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            status);
+        return Result(status);
+    }
+
+    public RuntimeCommandResult Jump(
+        RuntimeGenerationToken expectedGeneration,
+        float power)
+    {
+        RuntimeCommandStatus gate = Validate(
+            expectedGeneration,
+            requireWorld: true);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _movement.BeginJump(power)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        _events.EmitCommand(
+            RuntimeCommandDomain.Movement,
+            operation: 0x106,
+            status);
+        return Result(status);
     }
 
     public RuntimeCommandResult TurnToHeading(

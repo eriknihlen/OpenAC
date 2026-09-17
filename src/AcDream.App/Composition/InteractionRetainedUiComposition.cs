@@ -75,7 +75,7 @@ internal sealed record InteractionRetainedUiDependencies(
     Func<AcDream.App.Rendering.Packs.RenderPackDiagnosticsSnapshot>?
         RenderPackDiagnostics = null,
     string? ScreenshotsDirectory = null,
-    AppAutomationSurface? Automation = null,
+    AcDream.Runtime.Plugins.RuntimeAutomationSurface? Automation = null,
     Func<GameplayInputFrameController?>? GameplayInputFrame = null)
 {
     public RuntimeActionState Actions => Runtime.ActionOwner;

@@ -53,6 +53,10 @@ public sealed class RuntimeLocalPlayerMovementState
     private bool _hasCommandInput;
     private bool _commandInterpreterDisabled;
     private MovementInput _commandInput;
+    private readonly RuntimeScriptedMovement _scripted = new();
+    private long _playerMovementInputFrames;
+    private Position _scriptStart;
+    private bool _scriptStartKnown;
     private bool _disposed;
     private long _revision;
     private Action<string, RetailLogTextType>? _onInterfaceText;
@@ -77,6 +81,7 @@ public sealed class RuntimeLocalPlayerMovementState
             if (ReferenceEquals(_controller, value))
                 return;
             _controller?.RetireRuntimePublication();
+            _scripted.Lose();
             _controller = value;
             if (_controller is not null)
                 _controller.OnInterfaceText = _onInterfaceText;
@@ -122,7 +127,8 @@ public sealed class RuntimeLocalPlayerMovementState
                     Revision,
                     _autoRunActive,
                     _hasCommandInput,
-                    _commandInput)
+                    _commandInput,
+                    _scripted.Snapshot)
                 : new RuntimeMovementSnapshot(
                     true,
                     controller.LocalEntityId,
@@ -133,7 +139,8 @@ public sealed class RuntimeLocalPlayerMovementState
                     Revision,
                     _autoRunActive,
                     _hasCommandInput,
-                    _commandInput);
+                    _commandInput,
+                    _scripted.Snapshot);
         }
     }
 
@@ -221,6 +228,133 @@ public sealed class RuntimeLocalPlayerMovementState
             == true;
     }
 
+    /// <summary>The most recent scripted move on each channel, and the most recent jump.</summary>
+    public RuntimeScriptedMoveSnapshot ScriptedMove => _scripted.Snapshot;
+
+    /// <summary>
+    /// How many frames the player's own movement input has asked the character to move,
+    /// whether or not a scripted move was running: a walk that sees it grow knows the player
+    /// took the character. A plugin's held intent does not count.
+    /// </summary>
+    public long PlayerMovementInputFrames => Interlocked.Read(ref _playerMovementInputFrames);
+
+    /// <summary>
+    /// Begins a scripted move on its channel, replacing only a move already on
+    /// that channel. The player's own movement ends every scripted move.
+    /// </summary>
+    public bool BeginMove(in RuntimeMoveRequest request)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_controller is null || _commandInterpreterDisabled || !_scripted.Begin(request))
+            return false;
+        CancelAutoRun();
+        Interlocked.Increment(ref _revision);
+        return true;
+    }
+
+    /// <summary>Ends every scripted move in progress.</summary>
+    public bool StopMove()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_scripted.Stop())
+            return false;
+        Interlocked.Increment(ref _revision);
+        return true;
+    }
+
+    /// <summary>Ends the scripted move on one channel, if there is one.</summary>
+    public bool StopMove(RuntimeMoveChannel channel)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_scripted.Stop(channel))
+            return false;
+        Interlocked.Increment(ref _revision);
+        return true;
+    }
+
+    /// <summary>
+    /// Charges a jump for part of a full charge, from 0 to 1, then releases it; with a pace to
+    /// leave at, the body charges standing and presses forward at that pace as the jump releases.
+    /// </summary>
+    public bool BeginJump(float power, RuntimeMovePace? leaveAt = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_controller is null || _commandInterpreterDisabled || !_scripted.BeginJump(power, leaveAt))
+            return false;
+        Interlocked.Increment(ref _revision);
+        return true;
+    }
+
+    /// <summary>Whether a frame's input is the player's own asking the character to move or turn, rather than a plugin's held intent.</summary>
+    private static bool IsPlayerMovement(in MovementInput frameInput) =>
+        !frameInput.IsPersistentCommand
+        && (frameInput.Forward
+            || frameInput.Backward
+            || frameInput.StrafeLeft
+            || frameInput.StrafeRight
+            || frameInput.TurnLeft
+            || frameInput.TurnRight);
+
+    /// <summary>
+    /// Advances any scripted moves or jump by one frame and returns the input
+    /// the body should act on instead of <paramref name="frameInput"/>, or
+    /// <see langword="null"/> when nothing scripted is in progress. A turn that
+    /// has just passed its angle sets the body's heading to land on it. The
+    /// player's own movement input is counted either way.
+    /// </summary>
+    internal MovementInput? CaptureScriptedInput(in MovementInput frameInput)
+    {
+        if (!_disposed && IsPlayerMovement(frameInput))
+            Interlocked.Increment(ref _playerMovementInputFrames);
+        if (_disposed || !_scripted.IsActive)
+            return null;
+        RuntimeScriptedMoveSnapshot before = _scripted.Snapshot;
+        MovementInput? input;
+        if (_controller is not { } controller)
+        {
+            _scripted.Lose();
+            input = null;
+        }
+        else
+        {
+            Position now = controller.CurrentCellPosition;
+            if (!_scriptStartKnown)
+            {
+                _scriptStart = now;
+                _scriptStartKnown = true;
+            }
+            System.Numerics.Vector3 offset =
+                LandDefs.GetBlockOffset(_scriptStart.ObjCellId, now.ObjCellId)
+                + now.Frame.Origin
+                - _scriptStart.Frame.Origin;
+            bool manual = IsPlayerMovement(frameInput);
+            input = _scripted.Advance(
+                new RuntimeScriptedMoveSample(
+                    offset,
+                    AcDream.Core.Physics.Motion.MoveToMath.HeadingFromYaw(controller.Yaw),
+                    controller.SimTimeSeconds,
+                    controller.State == PlayerState.PortalSpace,
+                    manual),
+                out float? heading);
+            if (heading is { } landed && controller.CanExecuteLiveMovement)
+                controller.Yaw = AcDream.Core.Physics.Motion.MoveToMath.YawFromHeading(landed);
+        }
+        if (!_scripted.IsActive)
+            _scriptStartKnown = false;
+        if (Changed(before, _scripted.Snapshot))
+            Interlocked.Increment(ref _revision);
+        return input;
+    }
+
+    private static bool Changed(in RuntimeScriptedMoveSnapshot before, in RuntimeScriptedMoveSnapshot after) =>
+        Changed(before.Travel, after.Travel)
+        || Changed(before.Strafe, after.Strafe)
+        || Changed(before.Turn, after.Turn)
+        || before.JumpCharging != after.JumpCharging;
+
+    private static bool Changed(in RuntimeMoveChannelSnapshot before, in RuntimeMoveChannelSnapshot after) =>
+        before.State != after.State || before.Sequence != after.Sequence;
+
     public bool CancelAutoRun()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -307,18 +441,20 @@ public sealed class RuntimeLocalPlayerMovementState
         _autoRunActive = false;
         _hasCommandInput = false;
         _commandInput = default;
+        _scripted.Lose();
         Interlocked.Increment(ref _revision);
     }
 
     public void ResetInputIntent()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_autoRunActive && !_hasCommandInput && !_commandInterpreterDisabled)
+        if (!_autoRunActive && !_hasCommandInput && !_commandInterpreterDisabled && !_scripted.IsActive)
             return;
         _autoRunActive = false;
         _hasCommandInput = false;
         _commandInterpreterDisabled = false;
         _commandInput = default;
+        _scripted.Lose();
         Interlocked.Increment(ref _revision);
     }
 
@@ -327,7 +463,8 @@ public sealed class RuntimeLocalPlayerMovementState
         ObjectDisposedException.ThrowIf(_disposed, this);
         _physicsPublication?.ResetSession();
         bool changed =
-            _autoRunActive
+            _scripted.IsActive
+            || _autoRunActive
             || _hasCommandInput
             || _commandInterpreterDisabled
             || _controller is not null
@@ -336,6 +473,7 @@ public sealed class RuntimeLocalPlayerMovementState
         _hasCommandInput = false;
         _commandInterpreterDisabled = false;
         _commandInput = default;
+        _scripted.Lose();
         if (_controller is not null)
         {
             _controller.RetireRuntimePublication();
@@ -365,6 +503,7 @@ public sealed class RuntimeLocalPlayerMovementState
         _autoRunActive = false;
         _hasCommandInput = false;
         _commandInput = default;
+        _scripted.Lose();
         _physicsPublication?.Dispose();
         if (_controller is not null)
         {
@@ -400,6 +539,7 @@ public sealed class RuntimeLocalPlayerMovementState
     internal void CommitRuntimeOwnedController(PlayerMovementController controller)
     {
         _controller?.RetireRuntimePublication();
+        _scripted.Lose();
         _controller = controller;
         controller.OnInterfaceText = _onInterfaceText;
         ControllerOwnershipEpoch++;

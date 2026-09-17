@@ -83,6 +83,11 @@ public readonly record struct RuntimeCharacterSelectionSnapshot(
     RuntimeCharacterSelectionError? Error,
     RuntimeCharacterSelectionButtons Buttons)
 {
+    /// <summary>
+    /// Players the server reports as connected, or null before it has said.
+    /// </summary>
+    public int? ServerPopulation { get; init; }
+
     public bool IsActive =>
         Lifecycle is RuntimeCharacterSelectionLifecycle.AwaitingSelection
             or RuntimeCharacterSelectionLifecycle.EnteringWorld;
@@ -189,6 +194,7 @@ public sealed class RuntimeCharacterSelectionState : IDisposable
     private string _accountName = string.Empty;
     private int _slotCount;
     private string _worldName = string.Empty;
+    private int? _serverPopulation;
     private uint _highlightedCharacterId;
     private uint _pendingDeleteCharacterId;
     private uint _lastRestoreRequestedCharacterId;
@@ -230,7 +236,10 @@ public sealed class RuntimeCharacterSelectionState : IDisposable
                     _lastRestoreRequestedCharacterId,
                     _operation,
                     _error,
-                    buttons);
+                    buttons)
+                {
+                    ServerPopulation = _serverPopulation,
+                };
             }
         }
     }
@@ -329,14 +338,21 @@ public sealed class RuntimeCharacterSelectionState : IDisposable
         Publish(RuntimeCharacterSelectionDeltaKind.RosterChanged, characterId);
     }
 
-    internal void ApplyWorldName(string worldName)
+    internal void ApplyWorldName(string worldName, int? serverPopulation = null)
     {
         ArgumentNullException.ThrowIfNull(worldName);
         lock (_gate)
         {
-            if (_disposed || _worldName == worldName)
+            if (_disposed
+                || (_worldName == worldName
+                    && (serverPopulation is null
+                        || _serverPopulation == serverPopulation)))
+            {
                 return;
+            }
             _worldName = worldName;
+            if (serverPopulation is not null)
+                _serverPopulation = serverPopulation;
             _revision++;
         }
         Publish(RuntimeCharacterSelectionDeltaKind.WorldNameChanged);
@@ -915,6 +931,7 @@ public sealed class RuntimeCharacterSelectionState : IDisposable
         _accountName = string.Empty;
         _slotCount = 0;
         _worldName = string.Empty;
+        _serverPopulation = null;
         _highlightedCharacterId = 0u;
         _pendingDeleteCharacterId = 0u;
         _lastRestoreRequestedCharacterId = 0u;

@@ -824,7 +824,9 @@ public sealed class LiveSessionController
 
         if (IsCurrent(scope, generation)
             && _operations.GetServerInfo(session) is { } serverInfo)
-            CharacterSelectionState.ApplyWorldName(serverInfo.WorldName);
+            CharacterSelectionState.ApplyWorldName(
+                serverInfo.WorldName,
+                serverInfo.CurrentConnections);
 
         if (options.Probe && characters is not null)
         {
@@ -958,7 +960,9 @@ public sealed class LiveSessionController
                 lock (_gate)
                 {
                     if (IsCurrent(scope, generation))
-                        CharacterSelectionState.ApplyWorldName(worldName.WorldName);
+                        CharacterSelectionState.ApplyWorldName(
+                            worldName.WorldName,
+                            worldName.CurrentConnections);
                 }
             },
             created =>
@@ -1239,7 +1243,9 @@ public sealed class LiveSessionController
                 host.ReportRoster(roster);
             }
             if (_operations.GetServerInfo(session) is { } serverInfo)
-                CharacterSelectionState.ApplyWorldName(serverInfo.WorldName);
+                CharacterSelectionState.ApplyWorldName(
+                    serverInfo.WorldName,
+                    serverInfo.CurrentConnections);
 
             uint nextLogin = _nextLoginCharacterId;
             if (nextLogin != 0u

@@ -75,7 +75,8 @@ public readonly record struct RuntimeMovementSnapshot(
     long Revision = 0,
     bool AutoRunActive = false,
     bool HasCommandInput = false,
-    Gameplay.MovementInput CommandInput = default);
+    Gameplay.MovementInput CommandInput = default,
+    Gameplay.RuntimeScriptedMoveSnapshot ScriptedMove = default);
 
 public interface IRuntimeMovementView
 {

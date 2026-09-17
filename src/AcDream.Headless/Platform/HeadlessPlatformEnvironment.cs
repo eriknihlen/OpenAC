@@ -17,6 +17,7 @@ internal sealed class HeadlessPlatformEnvironment
     }
 
     public bool IsWindows => OperatingSystem.IsWindows();
+    public bool IsMacOS => OperatingSystem.IsMacOS();
     public string CurrentDirectory => Environment.CurrentDirectory;
 
     public string? GetEnvironmentVariable(string name) =>

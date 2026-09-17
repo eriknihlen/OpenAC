@@ -110,7 +110,7 @@ public sealed class HeadlessProcessContentOwnerTests
         using var diagnostics = new StringWriter();
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             contentFactory: factory);

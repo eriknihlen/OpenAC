@@ -95,15 +95,37 @@ internal sealed class RuntimeWorldScenePViewDiagnosticSource :
 internal interface IWorldSceneDebugStateSource
 {
     bool CollisionWireframesVisible { get; }
+
+    bool NavMeshVisible => false;
 }
 
 internal sealed class WorldSceneDebugState : IWorldSceneDebugStateSource
 {
     public bool CollisionWireframesVisible { get; private set; }
 
+    public bool NavMeshVisible { get; private set; }
+
+    /// <summary>Where navigation reports go besides the log, such as an on-screen message.</summary>
+    public Action<string>? NavigationReport { get; set; }
+
     public bool ToggleCollisionWireframes()
     {
         CollisionWireframesVisible = !CollisionWireframesVisible;
         return CollisionWireframesVisible;
+    }
+
+    public bool ToggleNavMesh()
+    {
+        NavMeshVisible = !NavMeshVisible;
+        return NavMeshVisible;
+    }
+
+    /// <summary>Shows the navigation grid, as asking for a route to draw does.</summary>
+    public void ShowNavMesh() => NavMeshVisible = true;
+
+    public void ReportNavigation(string message)
+    {
+        Console.WriteLine(message);
+        NavigationReport?.Invoke(message);
     }
 }

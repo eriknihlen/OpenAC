@@ -31,6 +31,8 @@ internal interface ILocalPlayerTeleportNetworkSink
 
     void RequestLogout();
 
+    bool TryRequestLogout();
+
     void ResetSession();
 
     void ResetGenerationPresentation();
@@ -72,6 +74,8 @@ internal sealed class DeferredLocalPlayerTeleportNetworkSink
     public void ArmLoginTunnel() => Required().ArmLoginTunnel();
 
     public void RequestLogout() => Required().RequestLogout();
+
+    public bool TryRequestLogout() => Required().TryRequestLogout();
 
     public void ResetSession() => Required().ResetSession();
 

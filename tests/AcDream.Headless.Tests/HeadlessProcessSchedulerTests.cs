@@ -311,7 +311,7 @@ public sealed class HeadlessProcessSchedulerTests
         using var diagnostics = new StringWriter();
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             new System.IO.StringReader(
                 "first-password"
                 + Environment.NewLine
@@ -389,8 +389,7 @@ public sealed class HeadlessProcessSchedulerTests
             using var diagnostics = new StringWriter();
             using var host = new HeadlessProcessHost(
                 configuration,
-                HeadlessPathSet.Resolve(
-                    new HeadlessPathOverrides()),
+                IsolatedHeadlessPaths.Create(),
                 new System.IO.StringReader(string.Concat(
                     Enumerable.Repeat(
                         "random-cancel-password"
@@ -455,7 +454,7 @@ public sealed class HeadlessProcessSchedulerTests
         using var diagnostics = new StringWriter();
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             new System.IO.StringReader(
                 "update-thread-password" + Environment.NewLine),
             diagnostics,

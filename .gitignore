@@ -31,3 +31,6 @@ __pycache__/
 .codex/
 .agents/
 .worktrees/
+
+# DocFX output
+_site/

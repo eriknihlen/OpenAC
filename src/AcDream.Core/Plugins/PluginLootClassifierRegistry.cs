@@ -106,6 +106,47 @@ public sealed class PluginLootClassifierRegistry : IPluginLootClassifierRegistry
         }
     }
 
+    public bool TryNeedsIdentification(
+        string classifierId,
+        in PluginLootClassificationContext context)
+    {
+        if (!TryGetClassifier(classifierId, out IPluginLootClassifier classifier))
+            return false;
+        try
+        {
+            return classifier.NeedsIdentification(context);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool TryClassifyWithProfile(
+        string classifierId,
+        string profileName,
+        in PluginLootClassificationContext context,
+        out PluginLootClassification classification)
+    {
+        if (!TryGetClassifier(classifierId, out IPluginLootClassifier classifier))
+        {
+            classification = default;
+            return false;
+        }
+        try
+        {
+            return classifier.TryClassifyWithProfile(
+                profileName,
+                context,
+                out classification);
+        }
+        catch
+        {
+            classification = default;
+            return false;
+        }
+    }
+
     private bool TryGetClassifier(
         string classifierId,
         out IPluginLootClassifier classifier)

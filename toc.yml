@@ -1,0 +1,4 @@
+- name: Guides
+  href: docs/
+- name: Plugin API reference
+  href: api/

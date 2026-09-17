@@ -92,15 +92,18 @@ public sealed class LiveSessionHost
     private readonly Action<RuntimeGenerationToken> _reset;
     private readonly LiveSessionLifecycleHost _lifecycle;
     private readonly LoginCommandSequence? _loginCommands;
+    private readonly GameRuntime? _runtime;
     private PendingRouteRollback? _pendingRouteRollback;
 
     public LiveSessionHost(
         LiveSessionController controller,
         LiveSessionHostBindings bindings,
-        LiveSessionConnectOptions? connectOptions = null)
+        LiveSessionConnectOptions? connectOptions = null,
+        GameRuntime? runtime = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _connectOptions = connectOptions;
+        _runtime = runtime;
         ArgumentNullException.ThrowIfNull(bindings);
         _routing = bindings.Routing ?? throw new ArgumentNullException(nameof(bindings.Routing));
         _selection = bindings.Selection ?? throw new ArgumentNullException(nameof(bindings.Selection));
@@ -178,6 +181,11 @@ public sealed class LiveSessionHost
     {
         _controller.Tick();
         _loginCommands?.Tick(_controller.Generation, _controller.IsInWorld);
+        // The async connect-to-in-world (and any leaving-world) edge lands
+        // here, not at a command boundary -- BeginConnect polling completes
+        // over several ticks, well after Start/Reconnect already returned
+        // Deferred.
+        _runtime?.SyncLifecycleEmission();
     }
 
     private LiveSessionBinding BindSession(WorldSession session)

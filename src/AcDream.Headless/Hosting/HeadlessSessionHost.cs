@@ -11,6 +11,7 @@ using AcDream.Core.Physics;
 using AcDream.Runtime;
 using AcDream.Runtime.Chat;
 using AcDream.Runtime.Gameplay;
+using AcDream.Runtime.Navigation;
 using AcDream.Runtime.Physics;
 using AcDream.Runtime.Session;
 
@@ -151,10 +152,18 @@ internal sealed class HeadlessSessionHost : IDisposable
     private readonly IHeadlessBotPolicy _policy;
     private readonly IDisposable _policySubscription;
     private readonly HeadlessPluginSession _pluginSession;
+    private readonly AutoWieldController _autoWield;
+    private readonly HeadlessLogoutAutomation _logout;
     private readonly AcDream.Core.Plugins.PluginCommandRegistry _pluginCommands;
     private readonly LiveChatCommandSurface _chatCommandSurface;
     private readonly LiveSessionHost _liveSession;
     private readonly RuntimeLocalPlayerFrameController _localPlayerFrame;
+
+    /// <summary>The session's walks, when it loaded the game data they plan over.</summary>
+    private readonly NavigationWalkController? _navigationWalk;
+
+    /// <summary>The session's /nav and /motor commands.</summary>
+    private readonly NavigationChatCommands? _navigationCommands;
     private readonly HeadlessProcessContentOwner.HeadlessProcessContentLease?
         _contentLease;
     private readonly IRuntimePlacementProjectionSink? _placementSinkOverride;
@@ -172,7 +181,9 @@ internal sealed class HeadlessSessionHost : IDisposable
     private string _accountName = string.Empty;
     private Exception? _fault;
     private bool _faulted;
+    private bool _loggedOut;
     private bool _disposed;
+    private bool _gracefulStopRequested;
 
     internal HeadlessSessionHost(
         HeadlessSessionDescriptor descriptor,
@@ -187,7 +198,9 @@ internal sealed class HeadlessSessionHost : IDisposable
         IRuntimePlacementProjectionSink? placementSinkOverride = null,
         FellowshipAllegianceGateCoordinator? gateCoordinator = null,
         IEnumerable<string>? pluginRoots = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? storage = null,
+        IPluginStorage? vtankProfiles = null,
+        Func<bool>? logoutConfirmedOverride = null)
     {
         _descriptor = descriptor
             ?? throw new ArgumentNullException(nameof(descriptor));
@@ -213,6 +226,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         IHeadlessBotPolicy? policy = null;
         IDisposable? policySubscription = null;
         HeadlessPluginSession? pluginSession = null;
+        AutoWieldController? autoWield = null;
         try
         {
             var gameplay = new HeadlessGameplayOperations();
@@ -240,11 +254,36 @@ internal sealed class HeadlessSessionHost : IDisposable
                 runtime,
                 contentLease?.MagicCatalog,
                 () => _accountName);
+            var logout = new HeadlessLogoutAutomation(
+                runtime,
+                _timeProvider,
+                isConfirmed: logoutConfirmedOverride);
 
             var bridge = new SessionCommandBridge();
             var commands = new DirectGameRuntimeCommandAdapter(
                 runtime,
                 bridge);
+            autoWield = new AutoWieldController(
+                runtime.InventoryOwner.Objects,
+                () => runtime.PlayerIdentity.ServerGuid,
+                commands.TrySendGetAndWieldItem,
+                commands.TrySendPutItemInContainer,
+                combatState: runtime.ActionOwner.Combat,
+                sendChangeCombatMode: gameplay.SendChangeCombatMode,
+                transactions: runtime.InventoryOwner.Transactions);
+            gameplay.BindAutoWield(autoWield);
+            var items = new HeadlessItemAutomation(
+                runtime,
+                commands,
+                commands.TrySendPutItemInContainer,
+                commands.TrySendStackableSplitToContainer,
+                commands.TrySendStackableMerge,
+                commands.TrySendUseWithTarget,
+                commands.TrySendDropItem,
+                commands.TrySendStackableSplitTo3D,
+                commands.TrySendGiveObject,
+                contentLease is { } lease ? lease.MagicCatalog.IsComponentPack : null,
+                autoWield);
             var statusWriter = new SessionStatusWriter(descriptor.StatusFile);
             var pluginCommands = new AcDream.Core.Plugins.PluginCommandRegistry(
                 (verb, error) => diagnostics.Failure(
@@ -275,6 +314,37 @@ internal sealed class HeadlessSessionHost : IDisposable
                     or SubmitOutcome.UnknownCommand
                     or SubmitOutcome.Dropped);
             }
+            bool AnswerConfirmation(uint contextId, bool accept)
+            {
+                if (_pendingConfirmation is not { } pending
+                    || pending.ContextId != contextId)
+                {
+                    return false;
+                }
+                RespondToConfirmation(accept);
+                return true;
+            }
+            NavigationChatCommands? navigationCommands = null;
+            NavigationWalkController? navigationWalk = null;
+            if (contentLease is { } navigationContent)
+            {
+                PhysicsEngine physics = runtime.EntityObjects.Physics.Engine;
+                object navigationDatLock = new();
+                navigationWalk = new NavigationWalkController(
+                    physics,
+                    new RuntimeNavigationWalkBody(runtime.MovementOwner, runtime.Portal),
+                    new RuntimeNavigationGoalSource(physics, runtime, runtime.MovementOwner),
+                    message => diagnostics.Message(descriptor.Id, message),
+                    new RuntimeNavigationDoors(
+                        physics,
+                        runtime,
+                        objectId => commands.TryUseObject(objectId),
+                        commands.TryAppraiseQuietly),
+                    cellId => SealedDungeonCells.IsSealedDungeon(
+                        navigationContent.Dats,
+                        navigationDatLock,
+                        cellId));
+            }
             pluginSession = HeadlessPluginSession.Create(
                 runtime,
                 diagnostics,
@@ -283,9 +353,31 @@ internal sealed class HeadlessSessionHost : IDisposable
                 pluginRoots ?? [],
                 descriptor.Plugins,
                 pluginCommands,
+                storage,
                 vtankProfiles,
                 descriptor.PluginSettings,
-                SubmitChatText);
+                SubmitChatText,
+                items,
+                contentLease?.MagicCatalog,
+                logout,
+                AnswerConfirmation,
+                RequestOwnGracefulStop);
+            // The shared surface owns the navigation plugins see; the host binds its
+            // walk controller and movement commands to that one instance.
+            RuntimeNavigationAutomation navigation = pluginSession.Host.NavigationAutomation;
+            navigation.BindCommands(commands.Movement, () => runtime.Generation);
+            if (navigationWalk is { } boundWalk)
+                navigation.BindWalk(boundWalk);
+            navigationCommands = new NavigationChatCommands(
+                    navigation,
+                    () => runtime.ActionOwner.Selection.SelectedObjectId,
+                    line => runtime.CommunicationOwner.AddText(
+                        line,
+                        RetailLogTextType.Default),
+                    narrate: navigationWalk is { } narrated
+                        ? listener => narrated.Narration = listener
+                        : null)
+                .Register(pluginCommands, pluginSession.Host.Events);
             var liveSession = new LiveSessionHost(
                 runtime.Session,
                 new LiveSessionHostBindings(
@@ -351,7 +443,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                         descriptor.Id,
                         rejection.RawCode,
                         rejection.Reason,
-                        rejection.AttemptedName)));
+                        rejection.AttemptedName)),
+                runtime: runtime);
 
             Runtime = runtime;
             Commands = commands;
@@ -367,6 +460,8 @@ internal sealed class HeadlessSessionHost : IDisposable
                     new HeadlessMovementInputSource(
                         runtime.MovementOwner));
             _contentLease = contentLease;
+            _navigationWalk = navigationWalk;
+            _navigationCommands = navigationCommands;
             bridge.Bind(this);
 
             hostLease = runtime.AcquireHostLease(
@@ -390,10 +485,13 @@ internal sealed class HeadlessSessionHost : IDisposable
             _policy = policy;
             _policySubscription = policySubscription;
             _pluginSession = pluginSession;
+            _autoWield = autoWield;
+            _logout = logout;
         }
         catch
         {
             pluginSession?.Dispose();
+            autoWield?.Dispose();
             policySubscription?.Dispose();
             policy?.Dispose();
             hostLease?.Dispose();
@@ -415,7 +513,7 @@ internal sealed class HeadlessSessionHost : IDisposable
     internal string ActiveCharacterName { get; private set; } =
         string.Empty;
     internal bool IsPolicyComplete =>
-        _faulted || _policy.IsComplete;
+        _faulted || _loggedOut || _policy.IsComplete || _gracefulStopRequested;
     internal bool IsFaulted => _faulted;
     internal Exception? Fault => _fault;
     internal bool IsReconnectPending => _reconnectPending;
@@ -441,6 +539,23 @@ internal sealed class HeadlessSessionHost : IDisposable
             request.ContextId,
             accepted);
         _pendingConfirmation = null;
+    }
+
+    // The server can resolve or cancel a confirmation on its own (a
+    // different client answered it, the underlying request timed out, and
+    // so on) without a matching RespondToConfirmation call. Clear the
+    // pending confirmation whenever that context id completes so a stale
+    // request does not keep answering "yes" to a dialog that already
+    // closed. Guarded by context id so a newer request that arrived after
+    // this one completed is left alone.
+    internal void HandleConfirmationDone(
+        GameEvents.CharacterConfirmationDone done)
+    {
+        if (_pendingConfirmation is { } pending
+            && pending.ContextId == done.ContextId)
+        {
+            _pendingConfirmation = null;
+        }
     }
 
     internal SubmitOutcome SubmitConsoleLine(string line) =>
@@ -469,6 +584,7 @@ internal sealed class HeadlessSessionHost : IDisposable
         if (_reconnectPending)
             return;
         _ = Runtime.Clock.Advance(deltaSeconds);
+        _navigationWalk?.Tick(deltaSeconds);
         _localPlayerFrame.AdvanceBeforeNetwork(
             checked((float)deltaSeconds));
         _liveSession.Tick();
@@ -480,6 +596,16 @@ internal sealed class HeadlessSessionHost : IDisposable
         _policy.Tick(Runtime, Commands);
         _pluginSession.Host.FireTick(deltaSeconds);
         ConsolePump?.Invoke();
+        switch (_logout.Tick())
+        {
+            case HeadlessLogoutOutcome.Completed:
+                _loggedOut = true;
+                break;
+            case HeadlessLogoutOutcome.TimedOut:
+                Quarantine(new TimeoutException(
+                    "A plugin-requested logout was never confirmed by the server."));
+                break;
+        }
     }
 
     internal RuntimeTeardownAcknowledgement Stop(string reason = "stopped")
@@ -494,6 +620,49 @@ internal sealed class HeadlessSessionHost : IDisposable
             _statusWriter.Disconnected(_descriptor.Id, reason);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Ends this session's own connection gracefully -- Stop() plus the
+    /// same terminal-status accounting Dispose() uses -- without disposing
+    /// this session's own runtime/plugin/policy objects yet (that still
+    /// happens at the process's own final disposal, exactly like a
+    /// policy-completed session already leaves them until then). The
+    /// completion flag is only set, and the "exited"/graceful status only
+    /// written, once Stop() actually converges -- a non-converged
+    /// teardown is quarantined the same way any other fault is (so the
+    /// scheduler still stops retrying it, but through _faulted, and the
+    /// eventual final Dispose() reports the real "runtime-fault" status
+    /// instead of a status file that already claimed a clean exit while
+    /// process shutdown was still about to throw). Idempotent past a
+    /// successful call, and safe to call from inside this session's own
+    /// Tick() -- a plugin's RequestClose fires from there, the same
+    /// guarantee RequestLogout above already relies on.
+    /// </summary>
+    internal bool RequestOwnGracefulStop()
+    {
+        if (_disposed)
+            return false;
+        if (_gracefulStopRequested)
+            return true;
+
+        _reconnectPending = false;
+        _reconnectDeadline = 0L;
+        RuntimeTeardownAcknowledgement stopped = Stop();
+        if (!stopped.IsComplete)
+        {
+            Quarantine(
+                stopped.Error
+                ?? new InvalidOperationException(
+                    $"Headless session '{_descriptor.Id}' did not "
+                        + "converge while ending its own session."));
+            return false;
+        }
+
+        _gracefulStopRequested = true;
+        (int exitCode, string exitReason) = ResolveTerminalStatus();
+        _statusWriter.Exited(_descriptor.Id, exitCode, exitReason);
+        return true;
     }
 
     internal void Quarantine(Exception error)
@@ -592,26 +761,31 @@ internal sealed class HeadlessSessionHost : IDisposable
                     _disposeStage++;
                     break;
                 case 4:
+                    _navigationCommands?.Dispose();
                     _pluginSession.Dispose();
                     _disposeStage++;
                     break;
                 case 5:
-                    _hostLease.Dispose();
+                    _autoWield.Dispose();
                     _disposeStage++;
                     break;
                 case 6:
-                    _credential.Dispose();
+                    _hostLease.Dispose();
                     _disposeStage++;
                     break;
                 case 7:
-                    Runtime.Dispose();
+                    _credential.Dispose();
                     _disposeStage++;
                     break;
                 case 8:
-                    _contentLease?.Dispose();
+                    Runtime.Dispose();
                     _disposeStage++;
                     break;
                 case 9:
+                    _contentLease?.Dispose();
+                    _disposeStage++;
+                    break;
+                case 10:
                     _diagnostics.Message(
                         _descriptor.Id,
                         "disposed",
@@ -1096,8 +1270,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                         + $"{request.Type} context={request.ContextId} "
                         + $"text='{request.Message}'");
                     _pendingConfirmation = request;
+                    _pluginSession.Host.RaiseConfirmationRequested(
+                        new PluginConfirmation(
+                            request.ContextId,
+                            (int)request.Type,
+                            request.Message));
                 },
-                OnConfirmationDone: null,
+                OnConfirmationDone: HandleConfirmationDone,
                 ClientTime: () =>
                     Runtime.Clock.SimulationTimeSeconds,
                 OnMovementStatsUpdated: null,
@@ -1109,11 +1288,14 @@ internal sealed class HeadlessSessionHost : IDisposable
                 Runtime.CommunicationOwner.Friends,
                 Runtime.CommunicationOwner.Squelch,
                 (text, type) => Runtime.CommunicationOwner.AddText(text, type),
+                Trade: Runtime.TradeOwner,
                 Fellowship: Runtime.FellowshipOwner,
                 Allegiance: Runtime.AllegianceOwner,
                 House: Runtime.HouseOwner,
                 Contracts: Runtime.ContractsOwner,
-                PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid));
+                PlayerGuid: () => Runtime.PlayerIdentity.ServerGuid,
+                OnLocalPlayerDeath:
+                    Runtime.CommunicationOwner.ReportLocalPlayerDeath));
         var eventRoute = new HeadlessSessionEventRoute(
             route,
             Runtime,

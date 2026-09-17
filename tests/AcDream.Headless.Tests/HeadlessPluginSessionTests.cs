@@ -1,7 +1,15 @@
+using System.Collections.Immutable;
+using System.Numerics;
+using System.Reflection;
 using System.Text.Json;
 using System.Net;
+using AcDream.Content;
+using AcDream.Core.Chat;
+using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
+using AcDream.Core.Physics;
+using AcDream.Core.Plugins;
 using AcDream.Headless.Configuration;
 using AcDream.Headless.Credentials;
 using AcDream.Headless.Diagnostics;
@@ -9,8 +17,12 @@ using AcDream.Headless.Hosting;
 using AcDream.Headless.Plugins;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime;
+using AcDream.Runtime.Entities;
+using AcDream.Runtime.Plugins;
 using AcDream.Runtime.Session;
 using AcDream.Tests.Fixtures.LauncherSession;
+using DatReaderWriter;
+using DatReaderWriter.Options;
 
 namespace AcDream.Headless.Tests;
 
@@ -532,6 +544,348 @@ public sealed class HeadlessPluginSessionTests
         Assert.Contains("runs only on the graphical host", error);
     }
 
+    [Fact]
+    public void ChatCaptureMessagesReturnsTextAddedToTheRuntimeCommunicationTranscript()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        session.Runtime.CommunicationOwner.AddText(
+            "Archer tells you, buff",
+            RetailLogTextType.Tell);
+
+        PluginChatMessage message = Assert.Single(
+            session.Plugins.Host.Automation.Chat.CaptureMessages(0));
+        Assert.Equal("Archer tells you, buff", message.Text);
+    }
+
+    [Fact]
+    public void CharacterAndSpellsReportRealRuntimeStateOnceTheSessionEntersTheWorld()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.Equal(0u, session.Plugins.Host.Automation.Character.ObjectId);
+        Assert.False(session.Plugins.Host.Automation.Spells.IsKnown(1u));
+
+        _ = session.Start();
+        session.Runtime.CharacterOwner.Spellbook.OnSpellLearned(1u);
+
+        Assert.Equal(0x50000001u, session.Plugins.Host.Automation.Character.ObjectId);
+        Assert.True(session.Plugins.Host.Automation.Spells.IsKnown(1u));
+    }
+
+    [Fact]
+    public void ItemsAreAvailableOnceTheSessionEntersTheWorld()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.Items.IsAvailable);
+
+        _ = session.Start();
+
+        Assert.True(session.Plugins.Host.Automation.Items.IsAvailable);
+    }
+
+    [Fact]
+    public void DropGiveAndApplyStartOnceBoundToSendersThatAcceptTheRequest()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        const uint item = 0x50000A01u;
+        const uint target = 0x50000A02u;
+        uint player = session.Plugins.Host.Automation.Character.ObjectId;
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            ContainerId = player,
+            StackSize = 1,
+            StackSizeMax = 1,
+        });
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = target,
+            ContainerId = player,
+        });
+        var surface = (RuntimeAutomationSurface)session.Plugins.Host.Automation;
+        surface.BindItems(
+            useItem: static _ => true,
+            applyItem: static (_, _) => true,
+            moveItem: static (_, _, _, _) => true,
+            mergeItems: static (_, _, _) => true,
+            dropItem: static (_, _) => true,
+            giveItem: static (_, _, _) => true,
+            pickupItem: static (_, _) => true,
+            identifyItem: static _ => true);
+
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Drop(item).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Give(item, target).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Started,
+            surface.Items.Apply(item, target).Status);
+    }
+
+    [Fact]
+    public void DropAndGiveRefuseAnAmountGreaterThanTheStackBeforeTheDelegate()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        const uint item = 0x50000A01u;
+        const uint target = 0x50000A02u;
+        uint player = session.Plugins.Host.Automation.Character.ObjectId;
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            ContainerId = player,
+            StackSize = 5,
+            StackSizeMax = 10,
+        });
+        session.Runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = target,
+            ContainerId = player,
+        });
+        int dropCalls = 0;
+        int giveCalls = 0;
+        var surface = (RuntimeAutomationSurface)session.Plugins.Host.Automation;
+        surface.BindItems(
+            useItem: static _ => true,
+            applyItem: static (_, _) => true,
+            moveItem: static (_, _, _, _) => true,
+            mergeItems: static (_, _, _) => true,
+            dropItem: (_, _) => { dropCalls++; return true; },
+            giveItem: (_, _, _) => { giveCalls++; return true; },
+            pickupItem: static (_, _) => true,
+            identifyItem: static _ => true);
+
+        Assert.Equal(
+            PluginItemCommandStatus.Refused,
+            surface.Items.Drop(item, amount: 6u).Status);
+        Assert.Equal(
+            PluginItemCommandStatus.Refused,
+            surface.Items.Give(item, target, amount: 6u).Status);
+        Assert.Equal(0, dropCalls);
+        Assert.Equal(0, giveCalls);
+    }
+
+    [Fact]
+    public void EquipmentIsAvailableOnceTheSessionEntersTheWorld()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.Equipment.IsAvailable);
+
+        _ = session.Start();
+
+        Assert.True(session.Plugins.Host.Automation.Equipment.IsAvailable);
+    }
+
+    [Fact]
+    public void RemoteObjectPositionTracksTheLatestUpdatePositionNotWhereItSpawned()
+    {
+        const uint remote = 0x50000099u;
+        const uint cell = 0x01010100u;
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        _ = session.Start();
+
+        RuntimeEntityRecord record = session.Runtime.EntityObjects
+            .RegisterEntity(Spawn(remote, 1f, cell))
+            .Canonical!;
+        var body = new PhysicsBody { Position = new Vector3(1f, 10f, 5f) };
+        body.SnapToCell(cell, body.Position, body.Position);
+        session.Runtime.EntityObjects.Entities.SetPhysicsBody(record, body);
+
+        session.Runtime.EntityObjects.TryApplyPosition(
+            new WorldSession.EntityPositionUpdate(
+                remote,
+                new CreateObject.ServerPosition(cell, 51f, 10f, 5f, 1f, 0f, 0f, 0f),
+                Velocity: null,
+                PlacementId: null,
+                IsGrounded: true,
+                InstanceSequence: 0,
+                PositionSequence: 1,
+                TeleportSequence: 0,
+                ForcePositionSequence: 0),
+            isLocalPlayer: false,
+            forcePositionRotation: null,
+            currentLocalVelocity: null,
+            acknowledgeProjection: null,
+            out _,
+            out _,
+            out _);
+
+        Assert.True(session.Plugins.Host.Automation.Objects.TryGet(
+            remote,
+            out PluginWorldObject value));
+        PluginNavigationPosition moved = RuntimeAutomationSurface.ProjectNavigationPosition(
+            new Position(cell, new Vector3(51f, 10f, 5f), Quaternion.Identity));
+        Assert.Equal(0d, value.Position.HorizontalDistanceMeters(moved), 3);
+    }
+
+    [Trait("Lane", "InstalledDat")]
+    [Fact]
+    public void SpellComponentsResolveThroughTheSessionsContentLeaseMagicCatalog()
+    {
+        string? datDir = InstalledDatTestPath.Resolve();
+        if (datDir is null)
+        {
+            Assert.Fail(
+                "Lane=InstalledDat requires an installed retail DAT directory; see docs/release-gate.md.");
+            return;
+        }
+
+        using var dats = new DatCollection(datDir, DatAccessType.Read);
+        using var adapter = new DatCollectionAdapter(dats);
+        MagicCatalog catalog = MagicCatalog.Load(adapter);
+        SpellComponentDescriptor known = catalog.Components.Values
+            .First(static component => component.SpellComponentId != 0u);
+
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var contentOwner = new HeadlessProcessContentOwner(
+            ContentDescriptor(),
+            _ => { },
+            new InstalledMagicContentFactory(catalog));
+        using HeadlessProcessContentOwner.HeadlessProcessContentLease lease =
+            contentOwner.AcquireLease("headless-session");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            contentLease: lease,
+            pluginRoots: [temporary.Path]);
+
+        Assert.True(session.Plugins.Host.Automation.Spells.TryGetComponent(
+            known.SpellComponentId,
+            out PluginSpellComponentInfo info));
+        Assert.Equal(known.Name, info.Name);
+    }
+
+    [Fact]
+    public void SpellComponentsAreUnavailableWithoutAContentLease()
+    {
+        using var temporary = new TemporaryDirectory();
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            credential,
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+
+        Assert.False(session.Plugins.Host.Automation.Spells.TryGetComponent(
+            4200u,
+            out _));
+    }
+
+    [Fact]
+    public void PluginStorageWrittenThroughAScopedHostReadsBackThroughAFreshSessionOverTheSameDirectory()
+    {
+        using var temporary = new TemporaryDirectory();
+        using var storageRoot = new TemporaryDirectory();
+        using (var session = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "status.jsonl")),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            storage: new FilePluginStorage(storageRoot.Path)))
+        {
+            var scope = new ScopedPluginHost(
+                session.Plugins.Host,
+                "acdream.test.storage",
+                "Storage fixture");
+            scope.Storage.WriteText("settings.json", "hello");
+        }
+
+        using var fresh = new HeadlessSessionHost(
+            Descriptor([], Path.Combine(temporary.Path, "fresh-status.jsonl")),
+            new HeadlessCredentialSecret("fixture", "password"),
+            new HeadlessDiagnosticWriter(new StringWriter()),
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path],
+            storage: new FilePluginStorage(storageRoot.Path));
+        var freshScope = new ScopedPluginHost(
+            fresh.Plugins.Host,
+            "acdream.test.storage",
+            "Storage fixture");
+
+        Assert.Equal("hello", freshScope.Storage.ReadText("settings.json"));
+    }
+
+    private static HeadlessContentDescriptor ContentDescriptor() => new()
+    {
+        DatDirectory = "fixture-dats",
+        PreparedAssetPath = "fixture.pak",
+    };
+
+    private sealed class InstalledMagicContentFactory(MagicCatalog magic)
+        : IHeadlessProcessContentFactory
+    {
+        public HeadlessOpenedProcessContent Open(
+            HeadlessContentDescriptor descriptor,
+            Action<string> diagnostic) =>
+            new(
+                DispatchProxy.Create<IDatReaderWriter, TestResourceProxy>(),
+                DispatchProxy.Create<ITestPreparedSource, TestResourceProxy>(),
+                magic,
+                ImmutableArray.CreateRange(new float[256]));
+    }
+
     private static HeadlessSessionDescriptor Descriptor(
         List<string> plugins,
         string statusPath,
@@ -566,10 +920,13 @@ public sealed class HeadlessPluginSessionTests
             PluginSettings = pluginSettings,
         };
 
-    private static WorldSession.EntitySpawn Spawn(uint guid, float x) => new(
+    private static WorldSession.EntitySpawn Spawn(
+        uint guid,
+        float x,
+        uint cell = 0x01010001u) => new(
         guid,
         new CreateObject.ServerPosition(
-            0x01010001u,
+            cell,
             x,
             10f,
             5f,

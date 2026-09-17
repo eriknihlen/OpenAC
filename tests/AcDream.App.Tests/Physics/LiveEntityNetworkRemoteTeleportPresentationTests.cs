@@ -832,6 +832,8 @@ public sealed class LiveEntityNetworkRemoteTeleportPresentationTests
 
             public void RequestLogout() { }
 
+            public bool TryRequestLogout() => true;
+
             public void ResetSession() { }
 
             public void ResetGenerationPresentation() { }

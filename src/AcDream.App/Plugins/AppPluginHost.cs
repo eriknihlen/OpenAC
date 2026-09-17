@@ -14,7 +14,10 @@ public sealed class AppPluginHost : IPluginHost
         IPluginStorage? storage = null,
         IPluginCommandRegistry? commands = null,
         IPluginLootClassifierRegistry? lootClassifiers = null,
-        IPluginStorage? vtankProfiles = null)
+        IPluginStorage? vtankProfiles = null,
+        IPluginClipboard? clipboard = null,
+        IHotkeyRegistry? hotkeys = null,
+        IHostWindow? window = null)
     {
         Log = log;
         State = state;
@@ -27,6 +30,9 @@ public sealed class AppPluginHost : IPluginHost
         LootClassifiers = lootClassifiers
             ?? NoOpPluginLootClassifierRegistry.Instance;
         VtankProfiles = vtankProfiles ?? NoOpPluginStorage.Instance;
+        Clipboard = clipboard ?? NoOpPluginClipboard.Instance;
+        Hotkeys = hotkeys ?? NoOpHotkeyRegistry.Instance;
+        Window = window ?? NoOpHostWindow.Instance;
     }
 
     public bool HasUi => true;
@@ -40,4 +46,7 @@ public sealed class AppPluginHost : IPluginHost
     public IPluginCommandRegistry Commands { get; }
     public IPluginLootClassifierRegistry LootClassifiers { get; }
     public IPluginStorage VtankProfiles { get; }
+    public IPluginClipboard Clipboard { get; }
+    public IHotkeyRegistry Hotkeys { get; }
+    public IHostWindow Window { get; }
 }

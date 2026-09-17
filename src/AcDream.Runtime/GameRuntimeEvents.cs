@@ -77,7 +77,20 @@ public readonly record struct RuntimeChatEntry(
     int Kind,
     string Sender,
     string Text,
-    string ChannelName);
+    string ChannelName)
+{
+    /// <summary>The text class the client colours the line by.</summary>
+    public int LogTextType { get; init; }
+
+    /// <summary>
+    /// Sub-kind of a combat line: 0 when the line is not one, otherwise one
+    /// above the combat line kind.
+    /// </summary>
+    public int CombatKind { get; init; }
+
+    /// <summary>When the client took delivery of the line.</summary>
+    public DateTimeOffset Received { get; init; }
+}
 
 public readonly record struct RuntimeChatDelta(
     RuntimeEventStamp Stamp,

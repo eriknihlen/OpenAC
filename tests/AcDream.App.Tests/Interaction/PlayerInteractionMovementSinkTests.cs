@@ -24,6 +24,51 @@ public sealed class PlayerInteractionMovementSinkTests
         Assert.False(armed);
     }
 
+    [Fact]
+    public void CurrentApproachFailProgressCountIsNullWithNoPlayer()
+    {
+        var completions = new PlayerApproachCompletionState();
+        var sink = new PlayerInteractionMovementSink(() => null, completions);
+
+        Assert.Null(sink.CurrentApproachFailProgressCount());
+    }
+
+    [Fact]
+    public void CurrentApproachFailProgressCountIsNullWhenNoMoveIsInProgress()
+    {
+        // MEDIUM-2: MoveToManager persists across moves, and its
+        // FailProgressCount field reads 0 both when nothing has ever
+        // moved and when the current move is making fine progress -- the
+        // raw field alone cannot tell "not moving" from "moving and
+        // fine" apart. This must gate on MoveToManager.IsMovingTo()
+        // instead of returning the field directly.
+        var controller = new PlayerMovementController(new PhysicsEngine());
+        controller.SeedPlacementForTest(Vector3.Zero, Cell, Vector3.Zero);
+        var moveTo = new MoveToManager(
+            controller.Motion,
+            stopCompletely: () => { },
+            getPosition: () => controller.CellPosition,
+            getHeading: () => MoveToMath.HeadingFromYaw(controller.Yaw),
+            setHeading: (heading, _) => controller.Yaw = MoveToMath.YawFromHeading(heading),
+            getOwnRadius: () => 0.4f,
+            getOwnHeight: () => 1.8f,
+            contact: () => true,
+            isInterpolating: () => false,
+            getVelocity: () => Vector3.Zero,
+            getSelfId: () => Player,
+            setTarget: (_, _, _, _) => { },
+            clearTarget: () => { },
+            getTargetQuantum: () => 0d,
+            setTargetQuantum: _ => { });
+        controller.MoveTo = moveTo;
+        var sink = new PlayerInteractionMovementSink(
+            () => controller,
+            new PlayerApproachCompletionState());
+
+        Assert.False(moveTo.IsMovingTo());
+        Assert.Null(sink.CurrentApproachFailProgressCount());
+    }
+
     [Theory]
     [InlineData(true, MovementType.TurnToObject)]
     [InlineData(false, MovementType.MoveToObject)]

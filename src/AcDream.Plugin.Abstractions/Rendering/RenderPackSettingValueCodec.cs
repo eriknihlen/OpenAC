@@ -2,14 +2,33 @@ using System.Globalization;
 
 namespace AcDream.Plugin.Abstractions.Rendering;
 
+/// <summary>
+/// Turns a render-pack setting's text value into the single float the client
+/// hands to the pack's shaders, and checks that the value is one the setting
+/// actually allows.
+/// </summary>
 public static class RenderPackSettingValueCodec
 {
     private const long ExactFloatIntegerLimit = 16_777_216L;
 
     /// <summary>
-    /// Validate and encode one string value for set-1/binding-8. The encoded
-    /// value is zero on failure, matching the host block's fail-safe fill.
+    /// Validate and encode one string value for the pack-settings uniform
+    /// block. The encoded value is zero on failure, matching the host block's
+    /// fail-safe fill.
     /// </summary>
+    /// <param name="setting">The setting declaration the value belongs to.</param>
+    /// <param name="value">The value as text.</param>
+    /// <param name="encoded">
+    /// The float the shaders receive: one or zero for a switch, the number
+    /// itself for an integer or fractional setting, and the position of the
+    /// chosen entry for a choice setting. Zero when the value was refused.
+    /// </param>
+    /// <returns>
+    /// False when the value is null, is not readable as the declared kind, is
+    /// outside the declared bounds, does not sit on the declared step, is an
+    /// integer too large to hold exactly in a float, or is not one of the
+    /// declared choices.
+    /// </returns>
     public static bool TryEncode(
         RenderSettingDeclaration setting,
         string? value,

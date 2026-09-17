@@ -193,6 +193,25 @@ public sealed class RetailDialogFactory : IDisposable
         return MakeDialog(data, callback);
     }
 
+    public bool TrySetConfirmationResult(uint context, bool accept)
+    {
+        if (context == 0u)
+            return false;
+        if (_activeNonQueued.TryGetValue(context, out DialogInfo? nonQueued))
+        {
+            nonQueued.Data.Set(RetailDialogProperty.ConfirmationResult, accept);
+            return true;
+        }
+        foreach (DialogInfo active in _activeQueued.Values)
+        {
+            if (active.Context != context)
+                continue;
+            active.Data.Set(RetailDialogProperty.ConfirmationResult, accept);
+            return true;
+        }
+        return false;
+    }
+
     public bool CloseDialog(uint context)
     {
         if (context == 0u)

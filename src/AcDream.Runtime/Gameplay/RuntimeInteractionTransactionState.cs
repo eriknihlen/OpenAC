@@ -39,9 +39,35 @@ public readonly record struct RuntimePendingUse(
     ItemUseRequestReservation? Reservation,
     RuntimeInteractionApproachToken ApproachToken);
 
+/// <summary>
+/// Who asked for an appraisal: a deliberate user action (the assess
+/// keybind/click, or a headless bot's equivalent "examine selected"
+/// command) versus a plugin polling object state in the background
+/// (tracker/loot-scanner style Identify calls). The examination window
+/// only opens or retargets for User-originated requests -- see
+/// AcceptAppraisalResponse and AppraisalUiController.Apply.
+/// </summary>
+public enum AppraisalRequestOrigin
+{
+    User = 0,
+    Automation = 1,
+}
+
+/// <summary>
+/// The result of AcceptAppraisalResponse. Origin and PresentInUi are only
+/// meaningful when FirstResponse is true (the response won the awaiting
+/// slot); for a RefreshCurrentAppraisal re-request (FirstResponse false)
+/// Origin reports User because that call is always made on the window's
+/// own behalf, and PresentInUi is always true because it can only ever
+/// land on the object already current. When Accepted is false every other
+/// field is meaningless -- the response matched neither the awaiting nor
+/// the current object and nothing changed.
+/// </summary>
 public readonly record struct RuntimeAppraisalResponseAcceptance(
     bool Accepted,
-    bool FirstResponse);
+    bool FirstResponse,
+    AppraisalRequestOrigin Origin,
+    bool PresentInUi);
 
 public readonly record struct RuntimeItemUseCompletion(
     long Revision,
@@ -99,7 +125,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
     private uint _lastUseSourceId;
     private uint _lastUseTargetId;
     private uint _awaitingAppraisalId;
+    private AppraisalRequestOrigin _awaitingAppraisalOrigin;
     private uint _currentAppraisalId;
+    private uint _lastCompletedAppraisalId;
     private RuntimePendingPickup? _pendingPickup;
     private ulong _nextPickupToken;
     private RuntimePendingUse? _pendingUse;
@@ -119,7 +147,58 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
 
     public InventoryTransactionState Inventory => _inventory;
     public uint AwaitingAppraisalId => _awaitingAppraisalId;
+    public AppraisalRequestOrigin AwaitingAppraisalOrigin => _awaitingAppraisalOrigin;
+
+    /// <summary>
+    /// The presentation target: the object the examination window shows
+    /// (or would show once it opens). Only a User-originated response
+    /// retargets this, plus an Automation response that happens to land on
+    /// the object already current -- see AcceptAppraisalResponse. Plugin
+    /// completion tracking (ILootAutomation.Appraisal.CurrentObjectId, via
+    /// RuntimeAutomationSurface) must NOT read this -- use
+    /// LastCompletedAppraisalId instead, which advances for every origin.
+    /// </summary>
     public uint CurrentAppraisalId => _currentAppraisalId;
+
+    /// <summary>
+    /// The completion signal: the object id of the most recent appraisal
+    /// response that won the awaiting slot, regardless of origin or
+    /// whether it retargeted the presentation window. Plugins (loot
+    /// scanners, trackers) poll this -- via
+    /// ILootAutomation.Appraisal.CurrentObjectId -- to learn that their own
+    /// Identify request completed, which must not depend on whether the
+    /// user's examination window happens to be showing that object. It is
+    /// a one-shot signal for the request that produced it, not a history:
+    /// TryRequestAppraisal clears it the moment a new request for THAT
+    /// SAME object is accepted, and CancelObjectAppraisalForSpell clears
+    /// it unconditionally along with the rest of the slot. A poll of
+    /// "CurrentObjectId == myId" is only meaningful for the request you
+    /// yourself most recently issued for myId -- an earlier completion of
+    /// the same id does not linger to be misread as this one's.
+    /// </summary>
+    public uint LastCompletedAppraisalId => _lastCompletedAppraisalId;
+
+    /// <summary>
+    /// Raised for every accepted appraisal response for an object,
+    /// including a RefreshCurrentAppraisal re-request that lands on an
+    /// object already current -- its data can still have changed since the
+    /// first reveal. Use AcceptAppraisalResponse's FirstResponse result to
+    /// distinguish the initial reveal from a refresh if that matters to the
+    /// caller; this event by itself does not.
+    /// </summary>
+    public event Action<uint>? AppraisalReceived;
+
+    /// <summary>
+    /// Raised for every completed "use", regardless of whether this state
+    /// was the one awaiting it (LastItemUseCompletion only advances for a
+    /// use this state itself dispatched via TryDispatchUse /
+    /// TryDispatchTargetedUse). A caller that starts a use with its own
+    /// reservation -- BeginUseRequestReservation() without going through
+    /// TryDispatchUse -- correlates the outcome itself against this event,
+    /// the same generic completion the retail-look window observes.
+    /// </summary>
+    public event Action<uint>? UseCompleted;
+
     public int OutboundCount => _outbound.Count;
     public bool HasPendingPickup => _pendingPickup is not null;
     public bool HasPendingUse => _pendingUse is not null;
@@ -258,16 +337,51 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
         else if (_inventory.BusyCount != before)
             IncrementRevision();
+        try { UseCompleted?.Invoke(error); }
+        catch { /* observer errors do not interrupt use-completion bookkeeping */ }
     }
 
+    /// <summary>
+    /// Asks the server to appraise an object. A quiet appraisal, such as one a walk asks
+    /// for to learn whether a door is locked, updates the object without becoming the
+    /// appraisal the character is looking at.
+    /// </summary>
     public bool TryRequestAppraisal(
         uint objectId,
-        Action<uint> sendAppraisal)
+        Action<uint> sendAppraisal,
+        AppraisalRequestOrigin origin = AppraisalRequestOrigin.User)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(sendAppraisal);
         if (objectId == 0u)
             return false;
+
+        // A background plugin Identify must never bump a deliberate user
+        // assess out of the single awaiting slot -- that would make the
+        // user's own assess action produce nothing. The caller's ordinary
+        // CanBeginRequest/busy gate already prevents this in practice (the
+        // user's request holds the one busy reference), so this only ever
+        // bites a narrow same-tick race; it reports the same false a
+        // transport failure would, which callers already treat as refused/
+        // retry-next-scan rather than a hard error.
+        if (origin == AppraisalRequestOrigin.Automation
+            && _awaitingAppraisalId != 0u
+            && _awaitingAppraisalOrigin == AppraisalRequestOrigin.User)
+        {
+            return false;
+        }
+
+        // LastCompletedAppraisalId is a one-shot completion signal, not a
+        // history of every object ever appraised: a plugin re-identifying
+        // the same object it already saw complete needs a fresh signal for
+        // THIS request, not a stale true left over from the last one. Left
+        // sticky, a plugin polling "CurrentObjectId == myId &&
+        // AwaitingObjectId != myId" would see a false completion the
+        // instant it issued the new request (both halves already true from
+        // the prior round), or after this request was cancelled/displaced
+        // without ever completing.
+        if (objectId == _lastCompletedAppraisalId)
+            _lastCompletedAppraisalId = 0u;
 
         uint epoch = _clearEpoch;
         bool acquiredBusy = _awaitingAppraisalId == 0u;
@@ -279,7 +393,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         }
 
         uint previousAwaiting = _awaitingAppraisalId;
+        AppraisalRequestOrigin previousOrigin = _awaitingAppraisalOrigin;
         _awaitingAppraisalId = objectId;
+        _awaitingAppraisalOrigin = origin;
         IncrementRevision();
         try
         {
@@ -292,6 +408,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
                 && _awaitingAppraisalId == objectId)
             {
                 _awaitingAppraisalId = previousAwaiting;
+                _awaitingAppraisalOrigin = previousOrigin;
                 if (acquiredBusy)
                     _inventory.CompleteUse(0u);
                 IncrementRevision();
@@ -312,18 +429,69 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
             return default;
         }
 
+        // A response landing on _awaitingAppraisalId is the request this
+        // slot was waiting on -- a genuine completion, of either origin.
+        // A response landing on _currentAppraisalId instead (the earlier
+        // "objectId != _awaitingAppraisalId" branch of the guard above)
+        // matches the current object but not the awaiting one: it is a
+        // background refresh of what the window already shows, arriving
+        // only through RefreshCurrentAppraisal, which is always made on
+        // the window's own behalf.
         bool firstResponse = objectId == _awaitingAppraisalId;
+        AppraisalRequestOrigin origin = firstResponse
+            ? _awaitingAppraisalOrigin
+            : AppraisalRequestOrigin.User;
+
+        // CurrentAppraisalId is presentation, not completion: a
+        // plugin-originated (Automation) response never retargets the
+        // examination window away from whatever object it already shows --
+        // it only ever "wins" the current slot when its response happens to
+        // land on the object that is already current (a silent background
+        // re-identify of the item the user is looking at, which should
+        // still refresh that window's content in place). A
+        // User-originated response always retargets. See
+        // AppraisalUiController.Apply for the presentation side of this
+        // rule. LastCompletedAppraisalId is the separate completion signal
+        // plugins poll (ILootAutomation.Appraisal.CurrentObjectId) -- it
+        // advances for every completed response below regardless of
+        // origin or retargeting, because a plugin's own Identify
+        // completing must not depend on what the user's window shows.
+        bool retargetsCurrent =
+            firstResponse
+            && (origin == AppraisalRequestOrigin.User
+                || objectId == _currentAppraisalId);
+        bool presentInUi = !firstResponse || retargetsCurrent;
+
         if (firstResponse)
         {
             _awaitingAppraisalId = 0u;
-            _currentAppraisalId = objectId;
+            _awaitingAppraisalOrigin = default;
+            _lastCompletedAppraisalId = objectId;
+            if (retargetsCurrent)
+                _currentAppraisalId = objectId;
             _inventory.CompleteUse(0u);
             IncrementRevision();
         }
 
+        // Raised for every accepted response, not just the first: a
+        // RefreshCurrentAppraisal re-request lands here with
+        // firstResponse == false because the object is already current, but
+        // its payload can still have changed (durability ticked, a stack
+        // count moved) and observers need the update. Consumers that only
+        // care about the initial reveal can dedupe on FirstResponse
+        // themselves; this event alone cannot tell them which response an
+        // invocation carries, so IEvents.ObjectChanged is not affected. It
+        // also fires for a plugin-originated appraisal that never touches
+        // the examination window -- plugin object-property observers need
+        // the data regardless of what the UI does with it.
+        try { AppraisalReceived?.Invoke(objectId); }
+        catch { /* observer errors do not interrupt appraisal bookkeeping */ }
+
         return new RuntimeAppraisalResponseAcceptance(
             Accepted: true,
-            FirstResponse: firstResponse);
+            FirstResponse: firstResponse,
+            Origin: origin,
+            PresentInUi: presentInUi);
     }
 
     public bool RefreshCurrentAppraisal(Action<uint> sendAppraisal)
@@ -346,7 +514,13 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         if (_awaitingAppraisalId != 0u)
             _inventory.CompleteUse(0u);
         _awaitingAppraisalId = 0u;
+        _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
+        // Wipe the completion signal along with the rest of the slot --
+        // this is a full appraisal-state takeover for the spell-examine
+        // view, and leaving a stale LastCompletedAppraisalId behind risks
+        // a plugin later reading a "completion" that predates this cancel.
+        _lastCompletedAppraisalId = 0u;
         IncrementRevision();
         sendAppraisal(0u);
         return true;
@@ -671,6 +845,7 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         bool changed =
             _awaitingAppraisalId != 0u
             || _currentAppraisalId != 0u
+            || _lastCompletedAppraisalId != 0u
             || _outbound.Count != 0
             || _pendingPickup is not null
             || _pendingUse is not null
@@ -687,7 +862,9 @@ public sealed class RuntimeInteractionTransactionState : IDisposable
         _awaitingItemUseCompletion = false;
         LastItemUseCompletion = default;
         _awaitingAppraisalId = 0u;
+        _awaitingAppraisalOrigin = default;
         _currentAppraisalId = 0u;
+        _lastCompletedAppraisalId = 0u;
         _outbound.Clear();
         _pendingPickup = null;
         _pendingUse = null;

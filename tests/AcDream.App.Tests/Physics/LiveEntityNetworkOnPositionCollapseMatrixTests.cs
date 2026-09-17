@@ -1576,6 +1576,8 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
 
             public void RequestLogout() { }
 
+            public bool TryRequestLogout() => true;
+
             public void ResetSession() { }
 
             public void ResetGenerationPresentation() { }

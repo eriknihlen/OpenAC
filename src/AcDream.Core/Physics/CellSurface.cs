@@ -10,6 +10,9 @@ public sealed class CellSurface
 
     private readonly List<(Vector3 A, Vector3 B, Vector3 C)> _triangles;
 
+    /// <summary>The cell's polygons in world space, as the triangles of a fan.</summary>
+    internal IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> Triangles => _triangles;
+
     public CellSurface(
         uint cellId,
         Dictionary<ushort, Vector3> vertices,

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using AcDream.Core.Chat;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
@@ -513,7 +514,7 @@ public sealed class HeadlessConsoleTests
             "hello" + Environment.NewLine + "/quit" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,
@@ -528,6 +529,123 @@ public sealed class HeadlessConsoleTests
         byte[] body = Assert.Single(captured);
         Assert.Equal(ChatRequests.TalkOpcode, ActionOpcode(body));
         Assert.Equal("hello", TalkText(body));
+    }
+
+    [Fact]
+    public async Task PluginRequestCloseEndsItsOwnSessionWhileASiblingSessionKeepsRunning()
+    {
+        // A plugin's Window.RequestClose ends only its own
+        // session -- not the whole process -- so a second session hosted
+        // by the same process is untouched. Only the console's /quit and
+        // a SIGINT/SIGTERM cancel the process-wide token that stops every
+        // session at once (see
+        // ConsoleLineReachesTheSessionAndQuitEndsTheProcessGracefully
+        // above for that path). consoleEnabled is false here on purpose:
+        // this is the route available when there is no console to type
+        // /quit into.
+        string statusPathAlpha = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-alpha-{Guid.NewGuid():N}.jsonl");
+        string statusPathBeta = Path.Combine(
+            Path.GetTempPath(),
+            $"acdream-headless-requestclose-beta-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            HeadlessSessionDescriptor StandardInputDescriptor(
+                string id, string statusFile) =>
+                Descriptor() with
+                {
+                    Id = id,
+                    StatusFile = statusFile,
+                    Credential = new HeadlessCredentialReference
+                    {
+                        Provider = HeadlessCredentialProviderKind.StandardInput,
+                        Reference = "fixture",
+                    },
+                };
+            var configuration = new HeadlessConfiguration
+            {
+                Version = 1,
+                Sessions =
+                [
+                    StandardInputDescriptor("alpha", statusPathAlpha),
+                    StandardInputDescriptor("beta", statusPathBeta),
+                ],
+            };
+            var operations = new FixtureSessionOperations();
+            using var diagnostics = new StringWriter();
+            using var input = new System.IO.StringReader(
+                "password-alpha" + Environment.NewLine
+                + "password-beta" + Environment.NewLine);
+            using var host = new HeadlessProcessHost(
+                configuration,
+                IsolatedHeadlessPaths.Create(),
+                input,
+                diagnostics,
+                operations,
+                new FakeTimeProvider(),
+                directCredentials: null,
+                consoleEnabled: false);
+
+            HeadlessSessionHost alpha = host.Sessions[0];
+            HeadlessSessionHost beta = host.Sessions[1];
+            HostWindowResult? observed = null;
+            alpha.Plugins.Host.Events.LoginComplete += () =>
+            {
+                observed = alpha.Plugins.Host.Window.RequestClose();
+            };
+
+            using var cts = new CancellationTokenSource();
+            Task<HeadlessExitCode> run = host.RunAsync(cts.Token);
+
+            DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (!File.Exists(statusPathAlpha)
+                || !File.ReadAllText(statusPathAlpha).Contains("\"exited\""))
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException(
+                        "alpha never reached its own terminal event.");
+                }
+                await Task.Delay(10);
+
+            }
+            Assert.Equal(HostWindowStatus.Done, observed?.Status);
+            Assert.True(alpha.IsPolicyComplete);
+
+            // beta starts a moment after alpha (sessions start in order in
+            // the same background thread); wait for its own "enteredWorld"
+            // write rather than racing it.
+            DateTime betaDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (!File.Exists(statusPathBeta)
+                || !File.ReadAllText(statusPathBeta).Contains("\"enteredWorld\""))
+            {
+                if (DateTime.UtcNow > betaDeadline)
+                    throw new TimeoutException("beta never reached enteredWorld.");
+                await Task.Delay(10);
+            }
+
+            Assert.False(beta.IsPolicyComplete);
+            Assert.DoesNotContain("\"exited\"", File.ReadAllText(statusPathBeta));
+
+            cts.Cancel();
+            HeadlessExitCode exitCode = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(HeadlessExitCode.Success, exitCode);
+
+            JsonElement alphaExited = JsonDocument.Parse(
+                File.ReadAllLines(statusPathAlpha)
+                    .Single(line => line.Contains("\"exited\"")))
+                .RootElement.Clone();
+            Assert.Equal(0, alphaExited.GetProperty("code").GetInt32());
+            Assert.Equal("graceful", alphaExited.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            if (File.Exists(statusPathAlpha))
+                File.Delete(statusPathAlpha);
+            if (File.Exists(statusPathBeta))
+                File.Delete(statusPathBeta);
+        }
     }
 
     [Theory]
@@ -546,7 +664,7 @@ public sealed class HeadlessConsoleTests
         using var input = new System.IO.StringReader("/quit" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,
@@ -591,7 +709,7 @@ public sealed class HeadlessConsoleTests
             + "password-two" + Environment.NewLine);
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             input,
             diagnostics,
             operations,

@@ -173,6 +173,84 @@ public sealed class RetailPanelUiControllerTests
         Assert.Equal((280f, 120f), (character.Left, character.Top));
     }
 
+    // A6 review: RetailUiRuntime's client-window seam calls SetPanelVisibility
+    // directly (ShowWindow/HideWindow) rather than TogglePanel (ToggleWindow).
+    // These pin that both entry points reach the identical show/hide/deferred
+    // state machine -- only TogglePanel's own return-value contract differs by
+    // design (see the second test below).
+
+    [Fact]
+    public void SetPanelVisibilityTrue_MatchesTogglePanel_FromHiddenStart()
+    {
+        var visibleA = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["ordinary"] = false,
+            ["transient"] = false,
+        };
+        RetailPanelUiController controllerA = Create(visibleA);
+        controllerA.Register(1u, "ordinary", restorePrevious: false);
+        controllerA.Register(2u, "transient", restorePrevious: true);
+        controllerA.SetPanelVisibility(1u, true);
+        bool resultA = controllerA.TogglePanel(2u);
+
+        var visibleB = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["ordinary"] = false,
+            ["transient"] = false,
+        };
+        RetailPanelUiController controllerB = Create(visibleB);
+        controllerB.Register(1u, "ordinary", restorePrevious: false);
+        controllerB.Register(2u, "transient", restorePrevious: true);
+        controllerB.SetPanelVisibility(1u, true);
+        bool resultB = controllerB.SetPanelVisibility(2u, true);
+
+        // Showing from hidden: TogglePanel(id) == SetPanelVisibility(id, true)
+        // && true, which reduces to the same call and the same return value.
+        Assert.Equal(resultA, resultB);
+        Assert.Equal(visibleA, visibleB);
+        Assert.Equal(controllerA.ActivePanelId, controllerB.ActivePanelId);
+    }
+
+    [Fact]
+    public void SetPanelVisibilityFalse_MatchesTogglePanelState_FromVisibleStart()
+    {
+        var visibleA = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["ordinary"] = false,
+            ["transient"] = false,
+        };
+        RetailPanelUiController controllerA = Create(visibleA);
+        controllerA.Register(1u, "ordinary", restorePrevious: false);
+        controllerA.Register(2u, "transient", restorePrevious: true);
+        controllerA.SetPanelVisibility(1u, true);
+        controllerA.SetPanelVisibility(2u, true);
+        bool resultA = controllerA.TogglePanel(2u);
+
+        var visibleB = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["ordinary"] = false,
+            ["transient"] = false,
+        };
+        RetailPanelUiController controllerB = Create(visibleB);
+        controllerB.Register(1u, "ordinary", restorePrevious: false);
+        controllerB.Register(2u, "transient", restorePrevious: true);
+        controllerB.SetPanelVisibility(1u, true);
+        controllerB.SetPanelVisibility(2u, true);
+        bool resultB = controllerB.SetPanelVisibility(2u, false);
+
+        // Hiding from visible: TogglePanel forces its return to false
+        // (SetPanelVisibility(id, false) && false), while calling
+        // SetPanelVisibility(id, false) directly returns the hide delegate's
+        // own result (true here) -- a deliberate difference in the two
+        // entry points' return contract, not a bug. The underlying state
+        // machine -- which window ends up visible, and which panel (if any)
+        // is restored as deferred -- must still match exactly.
+        Assert.False(resultA);
+        Assert.True(resultB);
+        Assert.Equal(visibleA, visibleB);
+        Assert.Equal(controllerA.ActivePanelId, controllerB.ActivePanelId);
+    }
+
     private static RetailPanelUiController Create(Dictionary<string, bool> visible)
         => new(
             name => visible[name],

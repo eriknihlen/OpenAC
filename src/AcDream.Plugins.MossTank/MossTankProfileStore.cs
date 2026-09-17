@@ -700,6 +700,7 @@ internal sealed class MossTankProfileStore
         public string InventoryLootClassifierId { get; set; } = string.Empty;
         public double InventoryLootScanIntervalSeconds { get; set; } = 0.25d;
         public LootRuleDocument[] InventoryLootRules { get; set; } = [];
+        public bool NavigationWalkLegsWithClient { get; set; }
 
         /// <summary>One <c>eq.c</c> row (<c>eq.cs:25-36</c>) on disk.</summary>
         public sealed class ItemEnchantRowDocument
@@ -757,6 +758,7 @@ internal sealed class MossTankProfileStore
             InventoryLootRules = settings.Inventory.Loot.Rules
                 .Select(LootRuleDocument.From)
                 .ToArray(),
+            NavigationWalkLegsWithClient = settings.Navigation.WalkLegsWithClient,
         };
 
         public static SideCarDocument CreateDefaults() => Capture(
@@ -850,6 +852,7 @@ internal sealed class MossTankProfileStore
             settings.Inventory.Loot.Rules.Clear();
             foreach (LootRuleDocument rule in InventoryLootRules ?? [])
                 settings.Inventory.Loot.Rules.Add(rule.ToRule());
+            settings.Navigation.WalkLegsWithClient = NavigationWalkLegsWithClient;
         }
 
         private void ApplyRuleItemNames(CombatSettings combat)

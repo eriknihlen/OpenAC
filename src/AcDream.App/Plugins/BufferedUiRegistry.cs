@@ -46,6 +46,80 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
     private readonly Dictionary<long, Registration> _registrations = [];
     private long _nextRegistrationId;
 
+    // Client-window control: RetailUiRuntime binds its own generic
+    // string-keyed window seam here once, during its own construction --
+    // the same single main/tick thread every plugin callback already runs
+    // on (see docs/plugin-ui-markup.md: "assign from the thread that calls
+    // Tick"). Before the retail UI runtime exists, or on a no-window host,
+    // these stay unbound and every client-window call reports unavailable.
+    private Func<PluginClientWindow, bool>? _toggleClientWindow;
+    private Func<PluginClientWindow, bool>? _showClientWindow;
+    private Func<PluginClientWindow, bool>? _hideClientWindow;
+    private Func<PluginClientWindow, bool>? _isClientWindowVisible;
+
+    internal void BindClientWindowControl(
+        Func<PluginClientWindow, bool> toggle,
+        Func<PluginClientWindow, bool> show,
+        Func<PluginClientWindow, bool> hide,
+        Func<PluginClientWindow, bool> isVisible)
+    {
+        ArgumentNullException.ThrowIfNull(toggle);
+        ArgumentNullException.ThrowIfNull(show);
+        ArgumentNullException.ThrowIfNull(hide);
+        ArgumentNullException.ThrowIfNull(isVisible);
+        lock (_gate)
+        {
+            _toggleClientWindow = toggle;
+            _showClientWindow = show;
+            _hideClientWindow = hide;
+            _isClientWindowVisible = isVisible;
+        }
+    }
+
+    /// <summary>
+    /// Unbinds the client-window delegates so a disposed RetailUiRuntime
+    /// cannot be invoked through a stale closure once a new one mounts
+    /// (for example across a reconnect). Idempotent.
+    /// </summary>
+    internal void UnbindClientWindowControl()
+    {
+        lock (_gate)
+        {
+            _toggleClientWindow = null;
+            _showClientWindow = null;
+            _hideClientWindow = null;
+            _isClientWindowVisible = null;
+        }
+    }
+
+    public bool ToggleClientWindow(PluginClientWindow window)
+    {
+        Func<PluginClientWindow, bool>? toggle;
+        lock (_gate) toggle = _toggleClientWindow;
+        return toggle?.Invoke(window) ?? false;
+    }
+
+    public bool ShowClientWindow(PluginClientWindow window)
+    {
+        Func<PluginClientWindow, bool>? show;
+        lock (_gate) show = _showClientWindow;
+        return show?.Invoke(window) ?? false;
+    }
+
+    public bool HideClientWindow(PluginClientWindow window)
+    {
+        Func<PluginClientWindow, bool>? hide;
+        lock (_gate) hide = _hideClientWindow;
+        return hide?.Invoke(window) ?? false;
+    }
+
+    public bool IsClientWindowVisible(PluginClientWindow window)
+    {
+        Func<PluginClientWindow, bool>? isVisible;
+        lock (_gate) isVisible = _isClientWindowVisible;
+        return isVisible?.Invoke(window) ?? false;
+    }
+
     public void AddMarkupPanel(string markupPath, object binding)
         => _ = RegisterMarkupPanel(markupPath, binding);
 

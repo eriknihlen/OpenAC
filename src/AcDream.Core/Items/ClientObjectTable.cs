@@ -572,7 +572,9 @@ public sealed class ClientObjectTable
         uint itemId,
         PropertyBundle incoming,
         IReadOnlyList<uint> spellIds,
-        double receivedAtSeconds = 0d)
+        double receivedAtSeconds = 0d,
+        ClientWeaponProfile? weaponProfile = null,
+        ClientArmorProfile? armorProfile = null)
     {
         ArgumentNullException.ThrowIfNull(incoming);
         ArgumentNullException.ThrowIfNull(spellIds);
@@ -581,6 +583,11 @@ public sealed class ClientObjectTable
         item.AppraisedSpellIds = spellIds.Count == 0
             ? Array.Empty<uint>()
             : spellIds.ToArray();
+        // Each successful appraisal fully replaces the retained profile --
+        // there is no partial-blob update, so a null argument here means
+        // "this response did not carry that blob" and clears the stale one.
+        item.WeaponProfile = weaponProfile;
+        item.ArmorProfile = armorProfile;
         if (double.IsFinite(receivedAtSeconds) && receivedAtSeconds >= 0d)
         {
             long milliseconds = checked((long)Math.Round(

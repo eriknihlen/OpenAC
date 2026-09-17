@@ -830,6 +830,67 @@ public sealed partial class RuntimeSettingsControllerTests
         Assert.False(targets.AudioFocusMutedCalls[^1]);
     }
 
+    [Fact]
+    public void BindRuntimeTargets_AppliesTheStoredAlignToSlopeSettingImmediately()
+    {
+        var storage = new FakeStorage
+        {
+            CameraTurningValue = CameraTurningSettings.Default with { AlignToSlope = false },
+        };
+        var events = new List<string>();
+        var controller = CreateController(storage, events);
+        var targets = new FakeRuntimeTargets(events);
+
+        controller.BindRuntimeTargets(targets);
+
+        Assert.False(Assert.Single(targets.CameraTurningCalls).AlignToSlope);
+    }
+
+    [Fact]
+    public void SaveCameraTurningPersistsThenAppliesTheSavedAlignToSlopeSetting()
+    {
+        var events = new List<string>();
+        var controller = CreateController(events: events);
+        var targets = new FakeRuntimeTargets(events) { RecordCameraTurning = true };
+        controller.BindRuntimeTargets(targets);
+        events.Clear();
+
+        CameraTurningSettings updated = CameraTurningSettings.Default with { AlignToSlope = false };
+        controller.SaveCameraTurning(updated);
+
+        Assert.Equal(["save-camera-turning", "target-camera-turning"], events);
+        Assert.False(targets.CameraTurningCalls[^1].AlignToSlope);
+    }
+
+    [Fact]
+    public void RuntimeTarget_ApplyCameraTurning_EnvironmentOverrideForcesAlignToSlopeOff()
+    {
+        bool previousAllowed = CameraDiagnostics.AlignToSlopeAllowed;
+        bool previousAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            var target = new RuntimeSettingsTargets(
+                new InspectingDisplayWindowTarget(static _ => { }),
+                new RecordingQualityApplicationTarget([]),
+                new RecordingUiLockTarget([]),
+                NullCommandBus.Instance,
+                static _ => { });
+
+            CameraDiagnostics.AlignToSlopeAllowed = false;
+            target.ApplyCameraTurning(CameraTurningSettings.Default with { AlignToSlope = true });
+            Assert.False(CameraDiagnostics.AlignToSlope);
+
+            CameraDiagnostics.AlignToSlopeAllowed = true;
+            target.ApplyCameraTurning(CameraTurningSettings.Default with { AlignToSlope = true });
+            Assert.True(CameraDiagnostics.AlignToSlope);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlopeAllowed = previousAllowed;
+            CameraDiagnostics.AlignToSlope = previousAlign;
+        }
+    }
+
     [Theory]
     [InlineData(true, true, 0.6f, 0.9f, 0.6f, 0.9f)]     // enabled: slider value passes through
     [InlineData(false, false, 0.6f, 0.9f, 0f, 0f)]       // disabled: forced to zero regardless of slider

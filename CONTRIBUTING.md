@@ -70,6 +70,37 @@ one. A screenshot of the original client doing it right is gold.
 
 ## Plugins
 
-Plugins target `AcDream.Plugin.Abstractions` only and never import `AcDream.App`.
-`docs/plugin-ui-markup.md` documents the panel markup. `AcDream.Plugins.MossTank`
-in `src/` is a complete working example.
+Plugins target `AcDream.Plugin.Abstractions` only and never import `AcDream.App`,
+`AcDream.Runtime` or `AcDream.Core`. `docs/plugin-development.md` is the
+guide for plugin authors; `docs/plugin-api.md` describes the surfaces and
+`docs/plugin-ui-markup.md` the panel markup. Plugins belong in their own
+repositories; `AcDream.Plugins.MossTank` in `src/` is the bundled example.
+
+### Changing the plugin API
+
+The contract is what external plugins compile against, so changes to it
+follow stricter rules than the rest of the client:
+
+- **Additive.** Add a member with a default implementation that returns an
+  inert value (`false`, `Unavailable`, an empty list). Do not rename or
+  remove a public member; a plugin built against the previous contract must
+  keep compiling and loading. If a name must change, keep the old one as a
+  forwarding default and say so in the summary.
+- **Documented.** `AcDream.Plugin.Abstractions` generates its XML
+  documentation with warnings as errors: an undocumented public member fails
+  the build. Write the summary in plain terms, and say when the member
+  returns false or unavailable.
+- **One implementation per operation.** A new capability is implemented once,
+  in Runtime where it concerns game state, and bound by both hosts. If the
+  headless host cannot provide it, bind an explicit refusal there; do not
+  leave the member silently unbound.
+- **Tested through the binding.** A unit test on the surface class plus a
+  host-level test (graphical or headless) that reaches the member through
+  `IPluginHost`, so a panel or command cannot be dead while the layout and
+  the logic both pass.
+- **Not owned by one plugin.** Describe capabilities generically; nothing in
+  the contract names a particular plugin, and the host never constructs a
+  named plugin.
+
+Mention the API change in your pull request description so the next
+contract revision can note it.

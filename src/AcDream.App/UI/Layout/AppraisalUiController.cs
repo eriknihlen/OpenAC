@@ -6,6 +6,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Selection;
 using AcDream.Core.Spells;
+using AcDream.Runtime.Gameplay;
 using AcDream.UI.Abstractions.Input;
 
 namespace AcDream.App.UI.Layout;
@@ -406,6 +407,20 @@ public sealed class AppraisalUiController : IRetainedPanelController
             _interaction.AcceptAppraisalResponse(appraisal.Guid);
         if (!acceptance.Accepted)
             return false;
+        // A plugin-originated (Automation) Identify that does not land on
+        // the object already showing in this window is accepted at the
+        // transaction layer (the object's properties/profiles updated, the
+        // plugin API's AppraisalReceived/ObjectChanged(IdentReceived) event
+        // fired) but must not touch the examination window: it may not
+        // open it, switch what it is showing, or steal focus. Runtime
+        // signals this via PresentInUi, which is false whenever this
+        // response did not win (or keep) the window's current object. A
+        // response that DOES land on the already-displayed object still
+        // refreshes this window's content below (that is presentation the
+        // user is already looking at), it just never re-shows/re-focuses
+        // the window -- see the Origin check further down.
+        if (!acceptance.PresentInUi)
+            return true;
 
         ClientObject? obj = _objects.Get(appraisal.Guid);
         if (obj is null)
@@ -439,7 +454,8 @@ public sealed class AppraisalUiController : IRetainedPanelController
 
         SetActiveView(view);
         _refreshElapsed = 0;
-        if (acceptance.FirstResponse)
+        if (acceptance.FirstResponse
+            && acceptance.Origin == AppraisalRequestOrigin.User)
             _show();
         return true;
     }

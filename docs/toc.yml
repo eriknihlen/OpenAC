@@ -1,0 +1,18 @@
+- name: Writing a plugin
+  href: plugin-development.md
+- name: Plugin API
+  href: plugin-api.md
+- name: Navigation
+  href: navigation.md
+- name: Plugin UI markup
+  href: plugin-ui-markup.md
+- name: Architecture
+  href: architecture.md
+- name: Building and running
+  href: building-and-running.md
+- name: Launcher
+  href: launcher.md
+- name: CI and releases
+  href: ci-and-releases.md
+- name: Release gate
+  href: release-gate.md

@@ -65,7 +65,8 @@ public sealed record LiveSocialSessionBindings(
     RuntimeTradeState? Trade = null,
     RuntimeHouseState? House = null,
     RuntimeContractState? Contracts = null,
-    Func<uint>? PlayerGuid = null);
+    Func<uint>? PlayerGuid = null,
+    Action<string>? OnLocalPlayerDeath = null);
 
 public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
 {
@@ -217,6 +218,7 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 externalContainers: inventory.ExternalContainers,
                 vendor: inventory.Vendor,
                 onInterfaceText: social.AddText,
+                onLocalPlayerDeath: social.OnLocalPlayerDeath,
                 accepting: IsAccepting,
                 onBookOpen: inventory.Book is { } bookOpen
                     ? book =>

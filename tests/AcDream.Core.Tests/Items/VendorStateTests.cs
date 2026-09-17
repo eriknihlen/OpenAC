@@ -177,7 +177,9 @@ public sealed class VendorStateTests
         Assert.Equal(1, delivered);
         Assert.Equal(0u, state.VendorId);
 
+        // A second Reset() with no vendor open must not re-raise Changed --
+        // there is nothing to close.
         Assert.False(state.Reset());
-        Assert.Equal(2, delivered);
+        Assert.Equal(1, delivered);
     }
 }

@@ -15,7 +15,8 @@ internal sealed class WindowCallbackTargets
         Action<double> render,
         Action closing,
         Action<bool> focusChanged,
-        Action<Vector2D<int>> framebufferResize)
+        Action<Vector2D<int>> framebufferResize,
+        Action<WindowState>? stateChanged = null)
     {
         Load = load ?? throw new ArgumentNullException(nameof(load));
         Update = update ?? throw new ArgumentNullException(nameof(update));
@@ -24,6 +25,7 @@ internal sealed class WindowCallbackTargets
         FocusChanged = focusChanged ?? throw new ArgumentNullException(nameof(focusChanged));
         FramebufferResize = framebufferResize
             ?? throw new ArgumentNullException(nameof(framebufferResize));
+        StateChanged = stateChanged;
     }
 
     public Action Load { get; }
@@ -32,6 +34,14 @@ internal sealed class WindowCallbackTargets
     public Action Closing { get; }
     public Action<bool> FocusChanged { get; }
     public Action<Vector2D<int>> FramebufferResize { get; }
+
+    /// <summary>
+    /// Optional: a plugin-facing (or other) observer of raw WindowState
+    /// transitions, fanned out alongside the pacing controller's own
+    /// OnWindowStateChanged rather than replacing it. Null when nothing
+    /// besides pacing needs to know.
+    /// </summary>
+    public Action<WindowState>? StateChanged { get; }
 }
 
 internal interface IWindowCallbackSurface
@@ -140,7 +150,9 @@ internal sealed class SilkWindowCallbackBinding : IDisposable
         _closing = () => _quiescence.Invoke(targets.Closing);
         _focusChanged = value => _quiescence.Invoke(targets.FocusChanged, value);
         _moved = value => _quiescence.Invoke(pacing.OnWindowMoved, value);
-        _stateChanged = value => _quiescence.Invoke(pacing.OnWindowStateChanged, value);
+        _stateChanged = value => _quiescence.Invoke(
+            state => { pacing.OnWindowStateChanged(state); targets.StateChanged?.Invoke(state); },
+            value);
         _framebufferResize = value => _quiescence.Invoke(targets.FramebufferResize, value);
 
         _detach = new ResourceShutdownTransaction(

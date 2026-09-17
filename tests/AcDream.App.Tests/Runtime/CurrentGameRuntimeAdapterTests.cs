@@ -1409,6 +1409,12 @@ public sealed class CurrentGameRuntimeAdapterTests
         public bool BeginApproach(
             InteractionApproach approach,
             Action<PlayerApproachToken>? armAfterCancel = null) => false;
+
+        public uint? CurrentApproachFailProgressCount() => null;
+
+        public void CancelApproach()
+        {
+        }
     }
 
     private sealed class NoopEntityResources

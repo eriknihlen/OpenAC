@@ -36,6 +36,13 @@ public sealed class GameEventWiringTests
         payload.AddRange(u32);
     }
 
+    private static void AppendF64(List<byte> payload, double value)
+    {
+        byte[] f64 = new byte[8];
+        BinaryPrimitives.WriteDoubleLittleEndian(f64, value);
+        payload.AddRange(f64);
+    }
+
     private static byte[] WrapEnvelope(GameEventType type, byte[] payload)
     {
         byte[] body = new byte[GameEventEnvelope.HeaderSize + payload.Length];
@@ -100,6 +107,77 @@ public sealed class GameEventWiringTests
             Assert.Equal(42, items.Get(guid)!.Properties.Ints[25u]);
         else
             Assert.False(items.Get(guid)!.Properties.Ints.ContainsKey(25u));
+    }
+
+    [Fact]
+    public void WireAll_IdentifyObjectResponseWithWeaponAndArmorProfiles_RetainsBothOnClientObject()
+    {
+        const uint guid = 0x50000002u;
+        var dispatcher = new GameEventDispatcher();
+        var items = new ClientObjectTable();
+        items.UpsertProperties(guid, new PropertyBundle());
+        GameEventWiring.WireAll(
+            dispatcher,
+            items,
+            new CombatState(),
+            new Spellbook(),
+            new ChatLog());
+
+        var payload = new List<byte>();
+        AppendU32(payload, guid);
+        AppendU32(
+            payload,
+            (uint)(AppraiseInfoParser.IdentifyResponseFlags.WeaponProfile
+                | AppraiseInfoParser.IdentifyResponseFlags.ArmorProfile));
+        AppendU32(payload, 1u); // success
+
+        // Blob order follows the parser's flag-check order: ArmorProfile
+        // is read before WeaponProfile regardless of the flags' own bit
+        // positions.
+        // ArmorProfile blob (8 floats).
+        float[] armor =
+            [1.5f, 1.4f, 1.3f, 1.2f, 1.1f, 1.0f, 0.9f, 0.8f];
+        foreach (float value in armor)
+        {
+            byte[] f32 = new byte[4];
+            BinaryPrimitives.WriteSingleLittleEndian(f32, value);
+            payload.AddRange(f32);
+        }
+
+        // WeaponProfile blob.
+        AppendU32(payload, 4u);   // DamageType
+        AppendU32(payload, 30u);  // WeaponTime
+        AppendU32(payload, 34u);  // WeaponSkill
+        AppendU32(payload, 12u);  // Damage
+        AppendF64(payload, 0.2d); // DamageVariance
+        AppendF64(payload, 1.1d); // DamageMod
+        AppendF64(payload, 1.0d); // WeaponLength
+        AppendF64(payload, 2.0d); // MaxVelocity
+        AppendF64(payload, 1.05d); // WeaponOffense
+        AppendU32(payload, 1u);   // MaxVelocityEstimated
+
+        dispatcher.Dispatch(GameEventEnvelope.TryParse(
+            WrapEnvelope(GameEventType.IdentifyObjectResponse, payload.ToArray()))!.Value);
+
+        ClientObject item = items.Get(guid)!;
+        Assert.NotNull(item.WeaponProfile);
+        Assert.Equal(4u, item.WeaponProfile!.Value.DamageType);
+        Assert.Equal(34u, item.WeaponProfile.Value.WeaponSkill);
+        Assert.Equal(12u, item.WeaponProfile.Value.Damage);
+        Assert.Equal(0.2d, item.WeaponProfile.Value.DamageVariance);
+        Assert.Equal(1.05d, item.WeaponProfile.Value.WeaponOffense);
+
+        Assert.NotNull(item.ArmorProfile);
+        Assert.Equal(1.5f, item.ArmorProfile!.Value.SlashingProtection);
+        Assert.Equal(0.8f, item.ArmorProfile.Value.LightningProtection);
+
+        // A later non-appraisal property update must not clear either
+        // retained profile.
+        var followUp = new PropertyBundle();
+        followUp.Ints[5] = 1;
+        items.UpdateProperties(guid, followUp);
+        Assert.NotNull(items.Get(guid)!.WeaponProfile);
+        Assert.NotNull(items.Get(guid)!.ArmorProfile);
     }
 
     [Fact]

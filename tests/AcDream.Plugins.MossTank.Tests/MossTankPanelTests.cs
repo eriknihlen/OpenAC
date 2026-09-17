@@ -138,6 +138,48 @@ public sealed class MossTankPanelTests
         return $"profiles/macro/{hash}.json";
     }
 
+    [Theory]
+    [InlineData(false, "Attack", false, false, false, 99d, null)]
+    [InlineData(true, null, false, false, false, 99d, null)]
+    [InlineData(true, "IdlePeace", false, false, false, 99d, null)]
+    [InlineData(true, "RandomHelper", false, false, false, 99d, null)]
+    [InlineData(true, "NavigateRouteIdle", false, false, false, 99d, null)]
+    [InlineData(true, "Attack", false, false, false, 99d, "MossTank is running Attack")]
+    [InlineData(true, "BuffSelf", false, false, false, 99d, "MossTank is running BuffSelf")]
+    [InlineData(true, "NavigateRouteIdle", false, true, false, 99d, "MossTank is following its route")]
+    [InlineData(true, "NavigateRouteIdle", false, false, true, 1d, "MossTank is waiting for a corpse to loot")]
+    [InlineData(true, "NavigateRouteIdle", false, false, false, 1d, null)]
+    [InlineData(true, "NavigateRouteIdle", false, false, true, 3d, null)]
+    [InlineData(false, null, true, false, false, 99d, "MossTank is buffing")]
+    public void AWalkTheClientPlansWaitsWhileTheMacroHasSomethingToDo(
+        bool running,
+        string? lastRule,
+        bool buffing,
+        bool routeNavigation,
+        bool looting,
+        double secondsSinceAttack,
+        string? expected)
+    {
+        Assert.Equal(
+            expected,
+            MossTankPanel.WalkPauseReasonFor(running, lastRule, buffing, routeNavigation, looting, secondsSinceAttack));
+    }
+
+    [Fact]
+    public void WalkingLegsWithClientPathingIsSavedWithTheProfile()
+    {
+        var storage = new MemoryStorage();
+        var automation = new FakeAutomation { Name = "Barris" };
+        var panel = new MossTankPanel(new FakeHost(automation, storage));
+        Assert.False(panel.WalkLegsWithClientEnabled);
+
+        panel.ToggleWalkLegsWithClient();
+
+        Assert.True(panel.WalkLegsWithClientEnabled);
+        var reloaded = new MossTankPanel(new FakeHost(new FakeAutomation { Name = "Barris" }, storage));
+        Assert.True(reloaded.WalkLegsWithClientEnabled);
+    }
+
     [Fact]
     public void FirstLoadMigratesLegacyJsonMacroProfileToUsdAndDeletesTheJsonKey()
     {
@@ -4209,6 +4251,96 @@ public sealed class MossTankPanelTests
         Assert.Same(weaponFirstRead, panel.MonsterWeaponColumn);
     }
 
+    /// <summary>
+    /// A route recorded into a route profile with client pathing checked is loaded back with
+    /// it, and while the macro runs its legs are walked by the client's navigation, one walk to
+    /// each waypoint in turn, instead of being steered at.
+    /// </summary>
+    [Fact]
+    public void ALoadedRouteWithClientPathingCheckedIsWalkedByTheClientsNavigationLegByLeg()
+    {
+        var storage = new MemoryStorage();
+        PluginNavigationPosition[] points = RecordRoute(storage, clientPathing: true);
+
+        var automation = new FakeAutomation { NavigationSnapshot = NavigationAt(0f) };
+        var panel = new MossTankPanel(new FakeHost(automation, storage));
+        panel.SelectRouteProfile("hunt");
+
+        Assert.Equal(3, panel.RouteWaypointTextColumn.Count);
+        Assert.True(panel.WalkLegsWithClientEnabled);
+        if (!panel.NavigationEnabled)
+            panel.ToggleNavigation();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        // A route file keeps its points as map coordinates with no cell, and the client places
+        // such a point by its coordinates alone.
+        Assert.Equal(MapPoint(points[0]), MapPoint(Assert.Single(automation.Walks)));
+        Assert.Equal(0u, automation.Walks[0].CellId);
+        Assert.Empty(automation.MovementIntents);
+
+        automation.NavigationSnapshot = automation.NavigationSnapshot with { Position = points[0] };
+        automation.GoToReport = automation.GoToReport with { State = PluginGoToState.Arrived, Reason = "arrived" };
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Equal([MapPoint(points[0]), MapPoint(points[1])], automation.Walks.Select(MapPoint));
+        Assert.Empty(automation.MovementIntents);
+    }
+
+    private static (double NorthSouth, double EastWest, double Elevation) MapPoint(PluginNavigationPosition position) =>
+        (Math.Round(position.NorthSouth, 5), Math.Round(position.EastWest, 5), Math.Round(position.Elevation, 5));
+
+    /// <summary>The same loaded route with client pathing unchecked is steered at as before, and nothing asks the client to walk.</summary>
+    [Fact]
+    public void ALoadedRouteWithClientPathingUncheckedIsSteeredAtAsBefore()
+    {
+        var storage = new MemoryStorage();
+        RecordRoute(storage, clientPathing: false);
+
+        var automation = new FakeAutomation { NavigationSnapshot = NavigationAt(0f) };
+        var panel = new MossTankPanel(new FakeHost(automation, storage));
+        panel.SelectRouteProfile("hunt");
+        Assert.Equal(3, panel.RouteWaypointTextColumn.Count);
+        Assert.False(panel.WalkLegsWithClientEnabled);
+        if (!panel.NavigationEnabled)
+            panel.ToggleNavigation();
+
+        panel.ToggleCombat();
+        for (int tick = 0; tick < 6; tick++)
+            panel.OnTick(0.3d);
+
+        Assert.Empty(automation.Walks);
+        Assert.NotEmpty(automation.MovementIntents);
+    }
+
+    /// <summary>
+    /// Records a three-point route into the route profile "hunt", with client pathing checked
+    /// or not, the way a player does from the Route tab, and returns where its points stand.
+    /// </summary>
+    private static PluginNavigationPosition[] RecordRoute(MemoryStorage storage, bool clientPathing)
+    {
+        var automation = new FakeAutomation { NavigationSnapshot = NavigationAt(0f) };
+        var panel = new MossTankPanel(new FakeHost(automation, storage));
+        panel.SetRouteProfileNameDraft("hunt");
+        panel.CreateRouteProfile();
+        var points = new PluginNavigationPosition[3];
+        for (int index = 0; index < points.Length; index++)
+        {
+            points[index] = automation.NavigationSnapshot.Position with
+            {
+                NorthSouth = (index + 1) * 20d / 240d,
+            };
+            automation.NavigationSnapshot = automation.NavigationSnapshot with { Position = points[index] };
+            panel.AddRoutePoint();
+        }
+        if (clientPathing)
+            panel.ToggleWalkLegsWithClient();
+        return points;
+    }
+
     [Fact]
     public void RouteGridDeletesByAnyCellClickAndSelectsNearestByDistance()
     {
@@ -5517,6 +5649,23 @@ public sealed class MossTankPanelTests
         public PluginNavigationCommandStatus ClearMovementIntent()
         {
             ClearMovementCount++;
+            return PluginNavigationCommandStatus.Accepted;
+        }
+
+        /// <summary>The walks asked of the client's navigation, and the latest walk's report.</summary>
+        public List<PluginNavigationPosition> Walks { get; } = [];
+        public PluginGoToReport GoToReport { get; set; }
+
+        public PluginNavigationCommandStatus GoTo(PluginNavigationPosition position, float arrivalMeters)
+        {
+            Walks.Add(position);
+            GoToReport = new PluginGoToReport(GoToReport.Sequence + 1, PluginGoToState.Planning, 0u, float.NaN, 0, "planning");
+            return PluginNavigationCommandStatus.Accepted;
+        }
+
+        public PluginNavigationCommandStatus StopGoTo()
+        {
+            GoToReport = GoToReport with { State = PluginGoToState.Stopped, Reason = "stopped" };
             return PluginNavigationCommandStatus.Accepted;
         }
     }

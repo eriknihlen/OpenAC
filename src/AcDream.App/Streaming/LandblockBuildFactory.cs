@@ -355,10 +355,6 @@ public sealed class LandblockBuildFactory
             AcDream.App.Rendering.Walk.WalkBuildingFactory.Build(
                 _dats, landblockId, lbInfo.Buildings, lbOffset));
 
-        uint interiorLbX = (landblockId >> 24) & 0xFFu;
-        uint interiorLbY = (landblockId >> 16) & 0xFFu;
-        uint localCounter = 0;
-
         uint firstCellId = (landblockId & 0xFFFF0000u) | 0x0100u;
         for (uint offset = 0; offset < lbInfo.NumCells; offset++)
         {
@@ -401,93 +397,11 @@ public sealed class LandblockBuildFactory
                         hasDrawableGeometry: hasDrawableGeometry);
                 }
             }
-
-            foreach (var stab in envCell.StaticObjects)
-            {
-                if ((stab.Id & 0xFF000000u) == 0x01000000u
-                    && !KeepsInteriorPart(stab.Id))
-                    continue;
-
-                var meshRefs = new List<AcDream.Core.World.MeshRef>();
-                var interiorBounds = new AcDream.Core.Meshing.LocalBoundsAccumulator();
-                int stabLightCount = 0;
-                bool stabHasDefaultScript = false;
-                if ((stab.Id & 0xFF000000u) == 0x01000000u)
-                {
-                    var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(stab.Id);
-                    if (gfx is not null)
-                    {
-                        var pb = AcDream.Core.Meshing.GfxObjBounds.Get(gfx);
-                        if (pb is not null) interiorBounds.Add(System.Numerics.Matrix4x4.Identity, pb.Value);
-                        meshRefs.Add(new AcDream.Core.World.MeshRef(stab.Id, System.Numerics.Matrix4x4.Identity));
-                    }
-                }
-                else if ((stab.Id & 0xFF000000u) == 0x02000000u)
-                {
-                    var setup = _dats.Get<DatReaderWriter.DBObjs.Setup>(stab.Id);
-                    if (setup is not null)
-                    {
-                        stabLightCount = setup.Lights.Count;
-                        stabHasDefaultScript = setup.DefaultScript.DataId != 0
-                            || (uint)setup.DefaultScriptTable != 0;
-                        var flat = AcDream.Core.Meshing.SetupMesh.Flatten(setup);
-                        foreach (var mr in flat)
-                        {
-                            if (!KeepsInteriorPart(mr.GfxObjId))
-                                continue;
-                            var gfx = _dats.Get<DatReaderWriter.DBObjs.GfxObj>(mr.GfxObjId);
-                            if (gfx is null)
-                            {
-                                continue;
-                            }
-                            var pb = AcDream.Core.Meshing.GfxObjBounds.Get(gfx);
-                            if (pb is not null) interiorBounds.Add(mr.PartTransform, pb.Value);
-                            meshRefs.Add(mr);
-                        }
-                    }
-                }
-
-                if (!AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepEntity(
-                        meshRefs.Count,
-                        stabLightCount,
-                        stabHasDefaultScript))
-                {
-                    continue;
-                }
-
-                var worldPos = stab.Frame.Origin + lbOffset;
-                var worldRot = stab.Frame.Orientation;
-
-                var hydrated = new AcDream.Core.World.WorldEntity
-                {
-                    Id = AcDream.Core.World.InteriorEntityIdAllocator.Allocate(
-                        interiorLbX,
-                        interiorLbY,
-                        ref localCounter),
-                    SourceGfxObjOrSetupId = stab.Id,
-                    Position = worldPos,
-                    Rotation = worldRot,
-                    MeshRefs = meshRefs,
-                    ParentCellId = envCellId,
-                };
-                if (interiorBounds.TryGet(out var ibMin, out var ibMax))
-                    hydrated.SetLocalBounds(ibMin, ibMax);
-
-                result.Add(hydrated);
-            }
         }
 
+        result.AddRange(LandblockPhysicsContentBuilder.HydrateInteriorEntities(_dats, landblockId, lbOffset));
         return result;
     }
-
-
-    private bool KeepsInteriorPart(uint gfxObjId) =>
-        AcDream.Core.Meshing.EntityHydrationRules.ShouldKeepPart(
-            AcDream.Core.Meshing.GfxObjDegradeResolver.IsRuntimeHiddenMarker(_dats, gfxObjId),
-_dats.Get<DatReaderWriter.DBObjs.GfxObj>(gfxObjId) is { } gfx
-                && gfx.Flags.HasFlag(DatReaderWriter.Enums.GfxObjFlags.HasPhysics)
-                && gfx.PhysicsBSP?.Root is not null
-                && gfx.VertexArray is not null);
 
     private (float MaxZ, float MinZ) ComputeWalkZSlab(byte[] heights)
     {

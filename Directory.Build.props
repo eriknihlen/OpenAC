@@ -15,4 +15,15 @@
     <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' == ''">$(MSBuildProjectDirectory)/packages.neutral.lock.json</NuGetLockFilePath>
     <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' != ''">$(MSBuildProjectDirectory)/packages.$(RuntimeIdentifier).lock.json</NuGetLockFilePath>
   </PropertyGroup>
+
+  <!-- XML documentation files of our own assemblies feed the IDE and the plugin
+       SDK; they are never runtime assets, so no publish payload carries them
+       (the macOS bundle signer rejects an unsigned non-code file in the
+       executable folder). -->
+  <Target Name="ExcludeOwnDocumentationFilesFromPublish" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(PublishOwnDocumentationFiles)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Extension)' == '.xml' and $([System.String]::new('%(Filename)').StartsWith('AcDream.'))" />
+    </ItemGroup>
+  </Target>
 </Project>

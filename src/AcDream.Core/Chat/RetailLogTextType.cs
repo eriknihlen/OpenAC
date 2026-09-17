@@ -45,3 +45,27 @@ public enum RetailLogTextType : uint
 
     Reserved21 = 0x21,
 }
+
+/// <summary>
+/// Turns a plugin-supplied text-class value into one safe to hand to
+/// the client's transcript routing.
+/// </summary>
+public static class RetailLogTextTypeCodec
+{
+    /// <summary>
+    /// Validates a plugin-supplied log-text-type value. Anything outside the
+    /// defined range, and <see cref="RetailLogTextType.ClientLocal"/> itself
+    /// (that value routes to the status overlay, not the transcript, and
+    /// plugins have no legitimate reason to post there), falls back to
+    /// <see cref="RetailLogTextType.Default"/>.
+    /// </summary>
+    public static RetailLogTextType FromPluginValue(int logTextType)
+    {
+        if (!Enum.IsDefined(typeof(RetailLogTextType), (uint)logTextType))
+            return RetailLogTextType.Default;
+        var type = (RetailLogTextType)(uint)logTextType;
+        return type == RetailLogTextType.ClientLocal
+            ? RetailLogTextType.Default
+            : type;
+    }
+}

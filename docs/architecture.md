@@ -64,6 +64,20 @@ copy of session, entity, inventory, movement, and physics state. The graphical
 client and the headless host borrow views of the same objects; neither keeps a
 mirror. This is what lets a bot and a window run the same game.
 
+## Navigation
+
+Walks, moves and jumps the client carries out on its own are layered the same
+way. `AcDream.Core.Navigation` plans with no client state: it captures the
+collision world into a grid of standing points and searches routes and leaps
+over it. `AcDream.Runtime` owns the moving parts: the walk controller, the
+route driver and scripted movement, the plugin navigation API
+(`RuntimeNavigationAutomation`) and the `/nav` and `/motor` chat commands.
+Both hosts construct those same objects, so a plugin navigates identically in
+the graphical client and headless; the graphical client adds only the debug
+overlay. Physics is read on the update thread, while grids are built and
+searched on worker tasks from a captured copy. See `navigation.md` for the
+design, the API and the known limits.
+
 ## Content model
 
 The client reads the game's DAT files directly for most data. World meshes and

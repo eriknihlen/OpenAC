@@ -178,6 +178,26 @@ public class PlayerMovementControllerTests
     }
 
     [Fact]
+    public void Update_AttachedAnimationRootDelta_PublishesRealizedCachedVelocity()
+    {
+        var controller = new PlayerMovementController(MakeFlatEngine());
+        var start = new Vector3(96f, 96f, 50f);
+        controller.SeedPlacementForTest(start, 0x0001, start);
+        controller.Yaw = 0f;
+        controller.ObjectScale = 2f;
+        controller.AttachAnimationRootMotionSource((_, frame) =>
+            frame.Origin = new Vector3(0f, 0.1f, 0f));
+
+        controller.Update(ObjectTick, new MovementInput(Forward: true));
+
+        Assert.Equal(0.2f / ObjectTick, controller.CachedVelocity.X, precision: 2);
+        Assert.Equal(0f, controller.CachedVelocity.Y, precision: 2);
+        Assert.Equal(0f, controller.CachedVelocity.Z, precision: 2);
+        Assert.Equal(0f, controller.BodyVelocity.X);
+        Assert.Equal(0f, controller.BodyVelocity.Y);
+    }
+
+    [Fact]
     public void Update_SubQuantumFrames_AdvanceAnimationOnceAtObjectThreshold()
     {
         var controller = new PlayerMovementController(MakeFlatEngine());

@@ -54,7 +54,8 @@ internal sealed class CurrentGameRuntimeAdapter
                 runtime.MovementOwner,
                 runtime.FellowshipOwner,
                 selection,
-                runtime.EventSink);
+                runtime.EventSink,
+                runtime);
         }
         catch
         {

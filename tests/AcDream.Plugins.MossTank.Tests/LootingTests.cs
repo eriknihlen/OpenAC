@@ -348,6 +348,54 @@ public sealed class LootingTests
     }
 
     [Fact]
+    public void UnidentifiedCorpseIsOpenedOnceItsAutomationIdentifyCompletes_EvenWithoutPresentation()
+    {
+        // HIGH-1 regression guard. A corpse identify is always
+        // Automation-origin and, on the real host, only ever advances the
+        // examination window's presentation target if that window already
+        // happens to be showing the corpse -- which it normally is not.
+        // Looting's corpse-appraisal wait polls Appraisal.CurrentObjectId
+        // as a pure completion signal (via CompleteAppraisal, which mirrors
+        // AppAutomationSurface's real LastCompletedAppraisalId mapping,
+        // not a value the test hands over directly); if that signal were
+        // gated on presentation instead, corpse looting would stall
+        // forever waiting on a window that never opens.
+        var settings = new LootSettings
+        {
+            Enabled = true,
+            ScanIntervalSeconds = 0.05d,
+        };
+        settings.Rules.Add(new LootRule { Expression = "*" });
+        var automation = new Automation();
+        var controller = new LootController(new Host(automation), settings);
+        const uint corpse = 0x70000401u;
+        var unidentified = new PluginLootContainer(
+            corpse, 1u, "Corpse", 3f, false, false, false)
+        {
+            LongDescription = "Killed by Tester.",
+        };
+        automation.Corpses = [unidentified];
+
+        Assert.True(controller.Tick(0.1d, canAct: true));
+        Assert.Equal(new[] { corpse }, automation.Identified);
+        Assert.Empty(automation.Opened);
+        Assert.Contains("Identifying", controller.Status);
+
+        automation.CompleteAppraisal(corpse, presentInUi: false);
+        automation.Corpses = [unidentified with { IsIdentified = true }];
+
+        // The completion signal advanced -- but presentation, which is a
+        // different field entirely on the real host, never did. If
+        // CompleteAppraisal's presentInUi parameter were decorative (as it
+        // was before this assertion existed), this would not prove
+        // anything about the corpse identify being genuinely unpresented.
+        Assert.Equal(0u, automation.PresentedObjectId);
+
+        Assert.True(controller.Tick(0.1d, canAct: true));
+        Assert.Equal(new[] { corpse }, automation.Opened);
+    }
+
+    [Fact]
     public void ControllerUsesSelectedExternalClassifierAndPreservesItsAction()
     {
         var settings = new LootSettings
@@ -861,6 +909,41 @@ public sealed class LootingTests
                 AwaitingObjectId = objectId,
             };
             return new(PluginItemCommandStatus.Started);
+        }
+
+        /// <summary>
+        /// The examination window's presentation target, separate from the
+        /// completion signal (AppraisalState.CurrentObjectId) -- mirrors
+        /// RuntimeInteractionTransactionState.CurrentAppraisalId. Only
+        /// CompleteAppraisal(..., presentInUi: true) ever moves this;
+        /// tests assert against it directly to prove a "not presented"
+        /// completion really did not touch presentation.
+        /// </summary>
+        public uint PresentedObjectId { get; private set; }
+
+        /// <summary>
+        /// Simulates an appraisal response landing, through the same split
+        /// the real host uses (AppAutomationSurface.ILootAutomation.
+        /// Appraisal maps CurrentObjectId to the completion signal --
+        /// RuntimeInteractionTransactionState.LastCompletedAppraisalId --
+        /// never to the examination window's presentation target,
+        /// PresentedObjectId here). A test that instead pokes
+        /// AppraisalState.CurrentObjectId directly cannot tell the two
+        /// apart and would not have caught the HIGH-1 corpse-looting
+        /// stall: the corpse identify is Automation-origin and normally
+        /// never presents (presentInUi: false here), yet the completion
+        /// signal must still advance so looting proceeds.
+        /// </summary>
+        public void CompleteAppraisal(uint objectId, bool presentInUi)
+        {
+            AppraisalState = AppraisalState with
+            {
+                Revision = AppraisalState.Revision + 1,
+                AwaitingObjectId = 0u,
+                CurrentObjectId = objectId,
+            };
+            if (presentInUi)
+                PresentedObjectId = objectId;
         }
         public PluginItemCommandResult Pickup(
             uint objectId,

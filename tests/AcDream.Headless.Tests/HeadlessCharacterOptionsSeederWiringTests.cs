@@ -117,7 +117,7 @@ public sealed class HeadlessCharacterOptionsSeederWiringTests
         using var diagnostics = new StringWriter();
         using var host = new HeadlessProcessHost(
             configuration,
-            HeadlessPathSet.Resolve(new HeadlessPathOverrides()),
+            IsolatedHeadlessPaths.Create(),
             new System.IO.StringReader("fixture-password" + Environment.NewLine),
             diagnostics,
             operations);

@@ -1,6 +1,6 @@
 # Continuous integration and releases
 
-Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+Workflow: [`.github/workflows/ci.yml`](https://github.com/eriknihlen/OpenAC/blob/main/.github/workflows/ci.yml).
 
 ## Triggers and runners
 

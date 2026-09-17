@@ -81,6 +81,72 @@ public sealed class ClientObjectTableUpdateTests
     }
 
     [Fact]
+    public void UpdateAppraisal_retainsWeaponAndArmorProfilesAndSurvivesLaterPropertyUpdate()
+    {
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = 0x701u });
+        var bundle = new PropertyBundle();
+        var weapon = new ClientWeaponProfile(
+            DamageType: 4u,
+            WeaponTime: 30u,
+            WeaponSkill: 34u,
+            Damage: 12u,
+            DamageVariance: 0.2d,
+            DamageMod: 1.1d,
+            WeaponLength: 1.0d,
+            MaxVelocity: 2.0d,
+            WeaponOffense: 1.05d,
+            MaxVelocityEstimated: 1u);
+        var armor = new ClientArmorProfile(
+            SlashingProtection: 1.5f,
+            PiercingProtection: 1.4f,
+            BludgeoningProtection: 1.3f,
+            ColdProtection: 1.2f,
+            FireProtection: 1.1f,
+            AcidProtection: 1.0f,
+            NetherProtection: 0.9f,
+            LightningProtection: 0.8f);
+
+        Assert.True(table.UpdateAppraisal(
+            0x701u, bundle, [], weaponProfile: weapon, armorProfile: armor));
+
+        ClientObject item = table.Get(0x701u)!;
+        Assert.Equal(weapon, item.WeaponProfile);
+        Assert.Equal(armor, item.ArmorProfile);
+
+        // A later non-appraisal property update (a normal server property
+        // broadcast) must not clear the retained profile -- only a fresh
+        // appraisal response replaces it.
+        var followUp = new PropertyBundle();
+        followUp.Ints[5] = 999;
+        Assert.True(table.UpdateProperties(0x701u, followUp));
+
+        item = table.Get(0x701u)!;
+        Assert.Equal(999, item.Properties.Ints[5]);
+        Assert.Equal(weapon, item.WeaponProfile);
+        Assert.Equal(armor, item.ArmorProfile);
+    }
+
+    [Fact]
+    public void UpdateAppraisal_withoutAProfile_clearsAnyStaleOneFromAnEarlierAppraisal()
+    {
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = 0x702u });
+        var weapon = new ClientWeaponProfile(1u, 1u, 1u, 1u, 0d, 0d, 0d, 0d, 0d, 0u);
+        Assert.True(table.UpdateAppraisal(
+            0x702u, new PropertyBundle(), [], weaponProfile: weapon));
+        Assert.NotNull(table.Get(0x702u)!.WeaponProfile);
+
+        // Re-appraising the SAME object without a WeaponProfile blob (e.g.
+        // it was reclassified, or the response genuinely omitted it) must
+        // not leave the earlier appraisal's stale profile behind.
+        Assert.True(table.UpdateAppraisal(0x702u, new PropertyBundle(), []));
+
+        Assert.Null(table.Get(0x702u)!.WeaponProfile);
+        Assert.Null(table.Get(0x702u)!.ArmorProfile);
+    }
+
+    [Fact]
     public void NotifyObjectUpdated_publishesAClientSideChangeToObservers()
     {
         var t = new ClientObjectTable();

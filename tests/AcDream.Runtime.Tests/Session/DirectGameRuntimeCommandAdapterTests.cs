@@ -580,6 +580,87 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
             gameAction.AsSpan(8));
 
+    /// <summary>
+    /// A walk opens a door by using it where it stands, without selecting it; the use it
+    /// sends is the one using the door while selected sends.
+    /// </summary>
+    [Fact]
+    public void UseObject_SendsTheSameUseAsUsingTheSelection_WithoutSelectingIt()
+    {
+        const uint door = 0x70000011u;
+        (GameRuntime selecting, DirectGameRuntimeCommandAdapter selectingAdapter, FixtureSessionOperations selectingOperations) =
+            CreateStartedHarness();
+        selecting.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var selectedUse = new List<byte[]>();
+        selectingOperations.Sessions[^1].GameActionCapture = body => selectedUse.Add(body);
+        Assert.True(selectingAdapter.Selection.SelectObject(selecting.Generation, door).Accepted);
+        Assert.True(selectingAdapter.Selection.Execute(selecting.Generation, RuntimeSelectionCommand.UseSelected).Accepted);
+
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var directUse = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => directUse.Add(body);
+
+        Assert.True(adapter.TryUseObject(door));
+
+        byte[] expected = Assert.Single(selectedUse);
+        byte[] sent = Assert.Single(directUse);
+        Assert.Equal(expected, sent);
+        Assert.Null(runtime.ActionOwner.Selection.SelectedObjectId);
+        selecting.Dispose();
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void UseObject_RefusesAnObjectTheClientDoesNotKnow_WithoutSendingAnything()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        Assert.False(adapter.TryUseObject(0x70000099u));
+
+        Assert.Empty(gameActions);
+        runtime.Dispose();
+    }
+
+    /// <summary>
+    /// A walk checks a door's lock by appraising it quietly: the server is asked the way an
+    /// examine asks, and its answer does not become the appraisal the character looks at.
+    /// </summary>
+    [Fact]
+    public void AppraiseQuietly_SendsTheSameAppraisalAsAnExamine_AndItsAnswerIsQuiet()
+    {
+        const uint door = 0x70000012u;
+        (GameRuntime examining, DirectGameRuntimeCommandAdapter examiningAdapter, FixtureSessionOperations examiningOperations) =
+            CreateStartedHarness();
+        examining.InventoryOwner.Objects.AddOrUpdate(new ClientObject { ObjectId = door, Type = ItemType.Misc });
+        var examined = new List<byte[]>();
+        examiningOperations.Sessions[^1].GameActionCapture = body => examined.Add(body);
+        Assert.True(examiningAdapter.Selection.SelectObject(examining.Generation, door).Accepted);
+        Assert.True(examiningAdapter.Selection.Execute(examining.Generation, RuntimeSelectionCommand.ExamineSelected).Accepted);
+
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var appraised = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => appraised.Add(body);
+
+        Assert.True(adapter.TryAppraiseQuietly(door));
+
+        Assert.Equal(Assert.Single(examined), Assert.Single(appraised));
+        RuntimeAppraisalResponseAcceptance answer =
+            runtime.ActionOwner.Transactions.AcceptAppraisalResponse(door);
+        Assert.True(answer.Accepted);
+        Assert.Equal(AppraisalRequestOrigin.Automation, answer.Origin);
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            examining.ActionOwner.Transactions.AcceptAppraisalResponse(door).Origin);
+        examining.Dispose();
+        runtime.Dispose();
+    }
+
     [Fact]
     public void Fellowship_Create_SendsTheCreateOpcodeWithNameAndShareXp()
     {
@@ -786,6 +867,61 @@ public sealed class DirectGameRuntimeCommandAdapterTests
         runtime.Dispose();
     }
 
+    [Fact]
+    public void PutInContainerSplitAndMerge_RefuseWithNoRoute()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, _) =
+            CreateHarness();
+
+        bool moved = adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0);
+        bool split = adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u);
+        bool merged = adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u);
+
+        Assert.False(moved);
+        Assert.False(split);
+        Assert.False(merged);
+        runtime.Dispose();
+    }
+
+    [Fact]
+    public void PutInContainerSplitAndMerge_SendWhileActiveAndRefuseAfterSessionStops()
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateStartedHarness();
+        var gameActions = new List<byte[]>();
+        operations.Sessions[^1].GameActionCapture = body => gameActions.Add(body);
+
+        bool moved = adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0);
+        bool split = adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u);
+        bool merged = adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u);
+
+        Assert.True(moved);
+        Assert.True(split);
+        Assert.True(merged);
+        Assert.Equal(3, gameActions.Count);
+        Assert.Equal(
+            InteractRequests.PutItemInContainerOpcode,
+            ReadOpcode(gameActions[0]));
+        Assert.Equal(
+            InventoryActions.StackableSplitToContainerOpcode,
+            ReadOpcode(gameActions[1]));
+        Assert.Equal(
+            InventoryActions.StackableMergeOpcode,
+            ReadOpcode(gameActions[2]));
+
+        adapter.Session.Stop(runtime.Generation);
+        gameActions.Clear();
+
+        Assert.False(adapter.TrySendPutItemInContainer(0x50000A01u, 0x50000010u, 0));
+        Assert.False(adapter.TrySendStackableSplitToContainer(
+            0x50000A01u, 0x50000010u, 0u, 1u));
+        Assert.False(adapter.TrySendStackableMerge(0x50000A01u, 0x50000A02u, 1u));
+        Assert.Empty(gameActions);
+        runtime.Dispose();
+    }
+
     private static void SeedFellowship(
         GameRuntime runtime,
         uint leader,
@@ -821,6 +957,15 @@ public sealed class DirectGameRuntimeCommandAdapterTests
 
     private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Adapter, FixtureSessionOperations Operations)
         CreateStartedHarness(TimeProvider? timeProvider = null)
+    {
+        (GameRuntime runtime, DirectGameRuntimeCommandAdapter adapter, FixtureSessionOperations operations) =
+            CreateHarness(timeProvider);
+        _ = adapter.Session.Start(runtime.Generation);
+        return (runtime, adapter, operations);
+    }
+
+    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Adapter, FixtureSessionOperations Operations)
+        CreateHarness(TimeProvider? timeProvider = null)
     {
         var operations = new FixtureSessionOperations();
         var gameplay = new FixtureGameplayOperations();
@@ -868,7 +1013,6 @@ public sealed class DirectGameRuntimeCommandAdapterTests
                 _ => { }),
             options);
         adapter = new DirectGameRuntimeCommandAdapter(runtime, live);
-        _ = adapter.Session.Start(runtime.Generation);
         return (runtime, adapter, operations);
     }
 

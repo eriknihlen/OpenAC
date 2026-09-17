@@ -244,6 +244,7 @@ public sealed class GameWindow :
     private AcDream.App.Audio.DictionaryEntitySoundTable? _entitySoundTables;
     private AcDream.App.Audio.AudioHookSink? _audioSink;
     private AcDream.App.Audio.AudioMixerCommandBinding? _audioMixerCommand;
+    private AcDream.Runtime.Navigation.NavigationChatCommands? _navigationCommands;
 
     private AcDream.Core.Vfx.EmitterDescRegistry? _emitterRegistry;
     private AcDream.Core.Vfx.ParticleSystem? _particleSystem;
@@ -263,7 +264,8 @@ public sealed class GameWindow :
     private AcDream.App.World.LiveEntityRuntime? _liveEntities;
     private AcDream.App.World.LiveEntityLivenessController? _liveEntityLiveness;
 
-    private readonly AcDream.App.Plugins.AppAutomationSurface? _automation;
+    private readonly AcDream.Runtime.Plugins.RuntimeAutomationSurface? _automation;
+    private readonly AcDream.App.Input.AppHotkeyRegistry? _hotkeyRegistry;
     private readonly GameRuntime _runtime;
     private readonly IDisposable _runtimeHostLease;
     private RuntimeCommunicationState _runtimeCommunication =>
@@ -272,6 +274,47 @@ public sealed class GameWindow :
     public AcDream.Core.Selection.SelectionState Selection =>
         _runtimeActions.Selection;
     internal SessionStatusWriter StatusWriter => _statusWriter;
+
+    /// <summary>
+    /// The keyboard device the retained UI copies text with; null until the
+    /// retained UI has wired one.
+    /// </summary>
+    internal Silk.NET.Input.IKeyboard? ClipboardKeyboard => _uiHost?.Keyboard;
+
+    /// <summary>
+    /// Marshals a plugin-driven clipboard write onto this window's own
+    /// thread -- GLFW clipboard calls are main-thread-only and silently
+    /// do nothing when called off it. Constructed with the GameWindow
+    /// instance, so its owner thread is whatever thread built the window.
+    /// </summary>
+    internal AcDream.App.Plugins.MainThreadDispatchQueue ClipboardDispatch { get; } =
+        new();
+
+    /// <summary>
+    /// Cached copy of whether the OS window is minimized, kept current by
+    /// OnPluginWindowStateChanged -- itself routed through
+    /// SilkWindowCallbackBinding's gated StateChanged fan-out, not a raw
+    /// window.StateChanged subscription -- rather than read live off
+    /// Silk.NET on a plugin's calling thread. glfwGetWindowAttrib, like the
+    /// clipboard calls ClipboardDispatch exists for, is documented
+    /// main-thread-only, so a live read from an arbitrary thread would
+    /// carry the same silent-failure hazard.
+    /// </summary>
+    internal volatile bool PluginWindowIsMinimized;
+
+    /// <summary>
+    /// Adapter over the native window for plugin minimize/restore/close,
+    /// cached alongside _window itself rather than allocated fresh on
+    /// every access. Calls must be marshalled through ClipboardDispatch
+    /// (renamed in spirit only -- it is this window's general main-thread
+    /// dispatch queue) exactly like the clipboard: GLFW window-state and
+    /// close calls are main-thread-only.
+    /// </summary>
+    internal AcDream.App.Plugins.IPluginHostWindowTarget? PluginWindowHandle =>
+        _pluginWindowHandle;
+
+    private AcDream.App.Plugins.IPluginHostWindowTarget? _pluginWindowHandle;
+
     public AcDream.Core.Chat.ChatLog Chat => _runtimeCommunication.Chat;
     public AcDream.Core.Chat.TurbineChatState TurbineChat =>
         _runtimeCommunication.TurbineChat;
@@ -452,13 +495,15 @@ public sealed class GameWindow :
         WorldEvents worldEvents,
         AcDream.App.Plugins.BufferedUiRegistry? uiRegistry,
         GraphicalHostPlatformServices platformServices,
-        AcDream.App.Plugins.AppAutomationSurface? automation = null,
-        AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null)
+        AcDream.Runtime.Plugins.RuntimeAutomationSurface? automation = null,
+        AcDream.App.Plugins.BufferedRenderPackRegistry? renderPackRegistry = null,
+        AcDream.App.Input.AppHotkeyRegistry? hotkeyRegistry = null)
     {
         _options = options ?? throw new System.ArgumentNullException(nameof(options));
         AcDream.Core.Rendering.RenderingDiagnostics.DumpWalkTranscriptEnabled =
             options.DumpWalkTranscript;
         _automation = automation;
+        _hotkeyRegistry = hotkeyRegistry;
         _statusWriter = new SessionStatusWriter(options.StatusFilePath);
         _platformServices = platformServices
             ?? throw new ArgumentNullException(nameof(platformServices));
@@ -599,6 +644,8 @@ public sealed class GameWindow :
 
         _window = Window.Create(options);
         IWindow window = _window;
+        _pluginWindowHandle = new AcDream.App.Plugins.SilkPluginHostWindowTarget(window);
+        PluginWindowIsMinimized = window.WindowState == WindowState.Minimized;
         _runtimeSettings.BindDisplayWindow(
             new SilkRuntimeDisplayWindowTarget(window),
             _options.ExactAutomationFramebuffer,
@@ -621,7 +668,8 @@ public sealed class GameWindow :
                 OnRender,
                 OnClosing,
                 OnFocusChanged,
-                OnFramebufferResize),
+                OnFramebufferResize,
+                OnPluginWindowStateChanged),
             _displayFramePacing,
             _hostQuiescence);
         _windowCallbacks.Attach();
@@ -708,8 +756,20 @@ public sealed class GameWindow :
         PublishCompositionOwner(ref _mouseLookCursor, value, "mouse-look cursor");
 
     void IGameWindowHostInputCameraPublication.PublishInputDispatcher(
-        AcDream.UI.Abstractions.Input.InputDispatcher value) =>
+        AcDream.UI.Abstractions.Input.InputDispatcher value)
+    {
         PublishCompositionOwner(ref _inputDispatcher, value, "input dispatcher");
+        if (_hotkeyRegistry is null)
+            return;
+        if (_kbSource is null)
+        {
+            throw new InvalidOperationException(
+                "The input dispatcher published before the keyboard source; "
+                + "plugin hotkeys would silently never bind. Composition must "
+                + "publish the keyboard source first.");
+        }
+        _hotkeyRegistry.Bind(_kbSource, _keyBindings, value);
+    }
 
     void IGameWindowHostInputCameraPublication.PublishCameraController(
         CameraController value) =>
@@ -946,6 +1006,13 @@ public sealed class GameWindow :
             (vendorId, itemId, amount) => result.ItemInteraction.TrySell(
                 vendorId,
                 [(amount, itemId)]));
+        _automation?.BindLogout(
+            () => _localPlayerTeleport?.TryRequestLogout() == true,
+            () => _localPlayerTeleport is not null
+                && _runtime.Session.IsInWorld
+                && !_runtime.TransitOwner.IsLogoutActive
+                && !_runtime.TransitOwner.IsTeleportActive
+                && !_runtime.TransitOwner.HasPendingTeleportStart);
         _interactionUiLateBindings = result.LateBindings;
         _magicRuntime = result.Magic;
         if (result.RetainedUi is { } retained)
@@ -956,6 +1023,12 @@ public sealed class GameWindow :
             _characterSheetProvider = retained.CharacterSheet;
             _frameScreenshots = retained.Screenshots;
             retained.Runtime.AttachNativeCursorWindow(_window?.Native?.Glfw ?? 0);
+            if (_automation is { } automation)
+            {
+                automation.BindDialogs(retained.Runtime.TryAnswerConfirmation);
+                retained.Runtime.ConfirmationRequested +=
+                    automation.RaiseConfirmationRequested;
+            }
         }
     }
 
@@ -1030,6 +1103,9 @@ public sealed class GameWindow :
                     InputAction.SelectionNextPlayer,
                 _ => InputAction.None,
             }));
+        _automation?.BindWorldObjectUse(objectId =>
+            AcDream.Runtime.Plugins.RuntimeAutomationSurface.MapWorldObjectUseOutcome(
+                result.SelectionInteractions.TryUseForAutomation(objectId)));
         _retainedUiGameplayBinding = result.RetainedGameplay;
         _paperdollViewportRenderer = result.PaperdollRenderer;
         _paperdollFramePresenter = result.PaperdollPresenter;
@@ -1095,6 +1171,7 @@ public sealed class GameWindow :
         _localPlayerTeleport = result.LocalTeleport;
         _liveSessionHost = result.SessionHost;
         _automation?.BindSessionCommands(result.GameRuntime);
+        _automation?.BindSubmit(result.GameRuntime.SubmitChatText);
         _gameplayInputActions = result.GameplayActions;
         _sessionPlayerBindings = result.RuntimeBindings;
     }
@@ -1112,6 +1189,25 @@ public sealed class GameWindow :
 
         _frameRootBindings = result.RuntimeBindings;
         _frameGraphPublication = result.FrameGraphPublication;
+        if (result.NavigationWalk is { } navigationWalk && _automation is { } automation)
+        {
+            automation.BindNavigationWalk(navigationWalk);
+            _navigationCommands = new AcDream.Runtime.Navigation.NavigationChatCommands(
+                    automation.Navigation,
+                    () => _runtime.ActionOwner.Selection.SelectedObjectId,
+                    // Chat rather than the on-screen notices, so walk reports and debug narration can be copied.
+                    line => _runtimeCommunication.AddText(
+                        line, AcDream.Core.Chat.RetailLogTextType.Default),
+                    toggleGrid: _worldSceneDebugState.ToggleNavMesh,
+                    previewRoute: objectId =>
+                    {
+                        _worldSceneDebugState.ShowNavMesh();
+                        _ = navigationWalk.RouteTo(objectId);
+                        return true;
+                    },
+                    narrate: listener => navigationWalk.Narration = listener)
+                .Register(automation.PluginCommands, _worldEvents);
+        }
     }
 
     private static void PublishCompositionOwner<T>(
@@ -1512,6 +1608,7 @@ public sealed class GameWindow :
         _renderLoopArmed = true;
         using var _updStage = _frameProfiler.BeginStage(
             AcDream.App.Diagnostics.FrameStage.Update);
+        ClipboardDispatch.Drain();
         _frameGraphs.Tick(new AcDream.App.Update.UpdateFrameInput(dt));
         if (_options.LiveMode)
         {
@@ -1579,6 +1676,7 @@ public sealed class GameWindow :
         {
             PersistKeyBindingsAtShutdown();
             _audioMixerCommand?.Dispose();
+            _navigationCommands?.Dispose();
             if (_runtime.Session.IsInWorld)
                 _statusWriter.Disconnected(_options.SessionId ?? "app", "stopped");
             _lifetime.PublishShutdownRoots(CaptureShutdownRoots());
@@ -1729,10 +1827,21 @@ public sealed class GameWindow :
     private void OnFocusChanged(bool focused)
         => _windowFocus.HandleFocusChanged(focused);
 
+    /// <summary>
+    /// Keeps PluginWindowIsMinimized current. Routed through
+    /// SilkWindowCallbackBinding (WindowCallbackTargets.StateChanged) so
+    /// attach/detach and quiescence gating apply exactly like every other
+    /// native callback -- a raw window.StateChanged += subscription would
+    /// bypass both and never unsubscribe.
+    /// </summary>
+    private void OnPluginWindowStateChanged(WindowState state) =>
+        PluginWindowIsMinimized = state == WindowState.Minimized;
+
     public void Dispose()
     {
         CompleteShutdown(releaseNativeWindow: true);
         _window = null;
+        _pluginWindowHandle = null;
     }
 
 }

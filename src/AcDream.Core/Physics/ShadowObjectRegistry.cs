@@ -3208,6 +3208,70 @@ public sealed class ShadowObjectRegistry
         _fallback = null;
     }
 
+    /// <summary>
+    /// Adds every registered object's collision parts to <paramref name="results"/>: each
+    /// object's parts as they stand in the first of its cells that holds any, so an object
+    /// that spans cells is given once. Allocates nothing beyond what the list grows by.
+    /// </summary>
+    public void CaptureEntries(List<ShadowEntry> results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        foreach ((uint entityId, List<uint> cells) in _entityToCells)
+            AddFirstCellEntries(entityId, cells, results, near: false, default, 0f);
+    }
+
+    /// <summary>Adds one registered object's collision parts to <paramref name="results"/>, as <see cref="CaptureEntries(List{ShadowEntry})"/> gives them; nothing for an object not registered.</summary>
+    public void CaptureEntries(uint entityId, List<ShadowEntry> results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        if (_entityToCells.TryGetValue(entityId, out List<uint>? cells))
+            AddFirstCellEntries(entityId, cells, results, near: false, default, 0f);
+    }
+
+    /// <summary>
+    /// Adds the collision parts whose reach comes within <paramref name="radius"/> of a
+    /// point on the ground: a part is kept when the horizontal distance from the point to
+    /// where it stands is no more than <paramref name="radius"/> plus its own radius. Each
+    /// object's parts are taken from the same cell <see cref="CaptureEntries(List{ShadowEntry})"/>
+    /// takes them from.
+    /// </summary>
+    public void CaptureEntriesNear(Vector2 centre, float radius, List<ShadowEntry> results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        foreach ((uint entityId, List<uint> cells) in _entityToCells)
+            AddFirstCellEntries(entityId, cells, results, near: true, centre, radius);
+    }
+
+    private void AddFirstCellEntries(
+        uint entityId,
+        List<uint> cells,
+        List<ShadowEntry> results,
+        bool near,
+        Vector2 centre,
+        float radius)
+    {
+        foreach (uint cellId in cells)
+        {
+            if (!_cells.TryGetValue(cellId, out List<ShadowEntry>? list))
+                continue;
+            bool anyFound = false;
+            foreach (ShadowEntry entry in list)
+            {
+                if (entry.EntityId != entityId)
+                    continue;
+                anyFound = true;
+                if (near
+                    && Vector2.Distance(new Vector2(entry.Position.X, entry.Position.Y), centre) > radius + entry.Radius)
+                {
+                    continue;
+                }
+                results.Add(entry);
+            }
+            if (anyFound)
+                return;
+        }
+    }
+
     public IEnumerable<ShadowEntry> AllEntriesForDebug()
     {
         var seenEntities = new HashSet<uint>();

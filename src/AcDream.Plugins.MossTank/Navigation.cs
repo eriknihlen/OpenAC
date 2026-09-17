@@ -278,6 +278,15 @@ internal sealed class NavigationSettings
     public string FollowTargetName { get; set; } = string.Empty;
     public bool FollowAroundCorners { get; set; } = true;
     public bool OpenDoors { get; set; }
+
+    /// <summary>
+    /// Whether the legs to point waypoints are walked by the client's navigation instead of
+    /// steered straight at each point: the route asks the client to walk to each point, and
+    /// the client plans the way around walls and creatures, through doors, over drops and
+    /// gaps, and back from wherever a fight left the character. Doors are left to the walks,
+    /// so <see cref="OpenDoors"/> stands aside. Other waypoints run as before.
+    /// </summary>
+    public bool WalkLegsWithClient { get; set; }
     public double DoorIdentifyRangeMeters { get; set; } = 20d;
     public double DoorOpenRangeMeters { get; set; } = 4d;
     public int DoorLockpickExcessThreshold { get; set; } = -50;
@@ -337,6 +346,31 @@ internal sealed class NavigationController
     private PluginNavigationPosition _portalOrigin;
     private bool _hasPortalOrigin;
     private bool _hadMovementIntent;
+
+    /// <summary>How long a client-walked route may go without reaching a waypoint before it says it is stuck.</summary>
+    internal const double ClientLegStuckSeconds = 90d;
+
+    /// <summary>How long after a client follow ends the route asks for it again.</summary>
+    internal const double ClientFollowRetrySeconds = 1d;
+
+    /// <summary>
+    /// The waypoint the walk the route last asked the client for goes to, and that walk's
+    /// sequence; how many legs in a row the client could not walk; how long the route has
+    /// walked legs since it last reached a waypoint; and whether it has said it is stuck,
+    /// or that it stopped asking, since.
+    /// </summary>
+    private RouteWaypoint? _clientWalkGoal;
+    private long _clientWalkSequence;
+    private int _clientLegFailures;
+    private double _clientLegSeconds;
+    private bool _clientStuckPosted;
+
+    /// <summary>The follow the route asked the client for: its report's sequence, or zero; its target; when it last ended; and whether the client would not follow that target.</summary>
+    private long _clientFollowSequence;
+    private uint _clientFollowTarget;
+    private double _clientFollowEndedAt = double.NegativeInfinity;
+    private bool _clientFollowRefused;
+    private bool _clientStoppedPosted;
 
     private double _now;
 
@@ -410,6 +444,11 @@ internal sealed class NavigationController
     {
         ResetOncePerRunWarnings();
         StopMovement();
+        StopClientWalk();
+        _clientLegFailures = 0;
+        _clientLegSeconds = 0d;
+        _clientStuckPosted = false;
+        _clientStoppedPosted = false;
         _index = 0;
         _reverse = false;
         _onceComplete = false;
@@ -444,6 +483,8 @@ internal sealed class NavigationController
         if (!_settings.Enabled || !snapshot.IsAvailable)
         {
             StopMovement();
+            if (!_settings.Enabled)
+                StopClientWalk();
             _status = _settings.Enabled
                 ? "Waiting for the world."
                 : "Navigation disabled.";
@@ -468,7 +509,11 @@ internal sealed class NavigationController
             return false;
         }
 
-        if (TickDoor(navigation, snapshot, elapsedSeconds))
+        // With legs walked by the client, doors are the walks' to open: a walk opens the
+        // doors on its way itself, and a second use would close a door again.
+        if (_settings.WalkLegsWithClient)
+            ClearDoor();
+        else if (TickDoor(navigation, snapshot, elapsedSeconds))
             return true;
 
         if (_settings.Mode == RouteMode.Target)
@@ -492,7 +537,7 @@ internal sealed class NavigationController
                 _status = $"Waypoint is outside NavFarStopRange ({distance:0.0}m).";
                 return false;
             }
-            if (distance <= BoundedMinimumDistance())
+            if (distance <= BoundedMinimumDistance() && !_settings.WalkLegsWithClient)
             {
                 if (!TryRegisterArrival())
                     return true;
@@ -500,6 +545,8 @@ internal sealed class NavigationController
                 AdvanceWaypoint();
                 return true;
             }
+            if (_settings.WalkLegsWithClient)
+                return WalkLegWithClient(navigation, waypoint, distance, elapsedSeconds);
             _status = string.Create(
                 CultureInfo.InvariantCulture,
                 $"Waypoint {_index + 1}/{_settings.Waypoints.Count}: {distance:0.0}m");
@@ -516,6 +563,9 @@ internal sealed class NavigationController
         INavigationAutomation navigation,
         in PluginNavigationSnapshot snapshot)
     {
+        if (_settings.WalkLegsWithClient)
+            return FollowWithClient(navigation);
+        StopClientFollow();
         if (_settings.FollowTargetObjectId == 0u
             || !navigation.TryGetObject(
                 _settings.FollowTargetObjectId,
@@ -1260,6 +1310,214 @@ internal sealed class NavigationController
     /// as <c>onLostTurn</c> for both navigate tiers.
     /// </summary>
     internal void StopForLostTurn() => StopMovement();
+
+    /// <summary>
+    /// Walks the route's leg to a point waypoint with the client's navigation: one walk at a
+    /// time, to the waypoint, and on to the next once the walk arrives. The pass is claimed
+    /// while the walk goes on or waits, and while a walk the route did not ask for goes on. A
+    /// leg the client cannot walk is skipped, and once no leg of a whole lap could be walked
+    /// the route stops asking until it is reset.
+    /// </summary>
+    private bool WalkLegWithClient(
+        INavigationAutomation navigation,
+        RouteWaypoint waypoint,
+        double distance,
+        double elapsedSeconds)
+    {
+        int count = _settings.Waypoints.Count;
+        PluginGoToReport report = navigation.GoToReport;
+        bool underWay = IsUnderWay(report.State);
+        RouteWaypoint? goal = report.Sequence == _clientWalkSequence ? _clientWalkGoal : null;
+        if (goal is null && underWay)
+        {
+            _status = "Waiting for a walk the route did not ask for to end.";
+            return true;
+        }
+
+        // A walk that ends without sight of its waypoint still ends as near it as the client
+        // can reach, which is as far as a route's leg needs to go.
+        if (distance <= BoundedMinimumDistance()
+            || (goal is not null && report.State is PluginGoToState.Arrived or PluginGoToState.ArrivedWithoutSight))
+        {
+            if (!TryRegisterArrival())
+                return true;
+            // A point the character already stands at is not a leg the client walked, so it
+            // does not clear the legs that could not be walked before it.
+            if (goal is not null)
+                _clientLegFailures = 0;
+            StopClientWalk();
+            _clientLegSeconds = 0d;
+            _clientStuckPosted = false;
+            AdvanceWaypoint();
+            return true;
+        }
+
+        if (goal is not null)
+        {
+            if (underWay)
+            {
+                _clientLegSeconds += elapsedSeconds;
+                if (_clientLegSeconds >= ClientLegStuckSeconds && !_clientStuckPosted)
+                {
+                    _clientStuckPosted = true;
+                    _host.Automation.Chat.PostSystemMessage(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"[MossTank] The route has not reached waypoint {_index + 1} in {ClientLegStuckSeconds:0} seconds."));
+                }
+                _status = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"Waypoint {_index + 1}/{count}: {distance:0.0}m, walked by the client");
+                return true;
+            }
+            _clientWalkGoal = null;
+            if (report.State is PluginGoToState.NoRoute or PluginGoToState.Blocked)
+            {
+                _clientLegFailures++;
+                _host.Automation.Chat.PostSystemMessage(
+                    $"[MossTank] Waypoint {_index + 1} could not be walked ({(string.IsNullOrWhiteSpace(report.Reason) ? report.State.ToString() : report.Reason)}); moving on to the next.");
+                AdvanceWaypoint();
+                return true;
+            }
+        }
+
+        if (_clientLegFailures >= count)
+        {
+            if (!_clientStoppedPosted)
+            {
+                _clientStoppedPosted = true;
+                _host.Automation.Chat.PostSystemMessage(
+                    "[MossTank] No leg of the route could be walked; reset the route to try again.");
+            }
+            _status = "No leg of the route could be walked; reset the route to try again.";
+            return false;
+        }
+
+        PluginNavigationCommandStatus asked = navigation.GoTo(waypoint.Position, (float)BoundedMinimumDistance());
+        if (asked != PluginNavigationCommandStatus.Accepted)
+        {
+            _status = asked switch
+            {
+                PluginNavigationCommandStatus.Unavailable =>
+                    "This client cannot walk route legs; turn off walking legs with client pathing.",
+                PluginNavigationCommandStatus.Held =>
+                    "Another plugin or the player is driving the character; the walk to the waypoint waits.",
+                _ => "The client refused the walk to the waypoint.",
+            };
+            return false;
+        }
+        _clientWalkGoal = waypoint;
+        _clientWalkSequence = navigation.GoToReport.Sequence;
+        _status = string.Create(
+            CultureInfo.InvariantCulture,
+            $"Waypoint {_index + 1}/{count}: {distance:0.0}m, walked by the client");
+        return true;
+    }
+
+    /// <summary>
+    /// Follows the route's target with the client's navigation: one follow asked for, and held
+    /// while the client follows, plans, or waits. A follow the player's keys, portal space or a
+    /// newer walk ended is asked for again after <see cref="ClientFollowRetrySeconds"/>; a target
+    /// the client will not follow, as one that is not a player, is said once in chat and not
+    /// asked for again until the target changes.
+    /// </summary>
+    private bool FollowWithClient(INavigationAutomation navigation)
+    {
+        uint targetId = _settings.FollowTargetObjectId;
+        string name = navigation.TryGetObject(targetId, out PluginNavigationObject seen) && !string.IsNullOrWhiteSpace(seen.Name)
+            ? seen.Name
+            : string.IsNullOrWhiteSpace(_settings.FollowTargetName) ? $"0x{targetId:X8}" : _settings.FollowTargetName;
+        if (targetId == 0u)
+        {
+            StopClientFollow();
+            _status = "Follow target unavailable.";
+            return false;
+        }
+        if (targetId != _clientFollowTarget)
+        {
+            StopClientFollow();
+            _clientFollowTarget = targetId;
+            _clientFollowRefused = false;
+        }
+
+        PluginGoToReport report = navigation.GoToReport;
+        bool ours = _clientFollowSequence != 0 && report.Sequence == _clientFollowSequence;
+        if (ours && IsUnderWay(report.State))
+        {
+            _status = $"Following {name} with the client: {report.Reason}";
+            return true;
+        }
+        if (!ours && IsUnderWay(report.State))
+        {
+            _status = "Waiting for a walk the route did not ask for to end.";
+            return true;
+        }
+        if (ours)
+        {
+            _clientFollowSequence = 0;
+            _clientFollowEndedAt = _now;
+            if (report.State is PluginGoToState.NoRoute)
+            {
+                _clientFollowRefused = true;
+                _host.Automation.Chat.PostSystemMessage(
+                    $"[MossTank] {name} cannot be followed ({(string.IsNullOrWhiteSpace(report.Reason) ? report.State.ToString() : report.Reason)}).");
+            }
+        }
+        if (_clientFollowRefused)
+        {
+            _status = $"{name} cannot be followed.";
+            return false;
+        }
+        if (_now - _clientFollowEndedAt < ClientFollowRetrySeconds)
+        {
+            _status = $"Following {name}: starting again shortly.";
+            return true;
+        }
+
+        PluginNavigationCommandStatus asked = navigation.Follow(targetId, (float)BoundedMinimumDistance());
+        if (asked != PluginNavigationCommandStatus.Accepted)
+        {
+            _status = asked switch
+            {
+                PluginNavigationCommandStatus.Unavailable =>
+                    "This client cannot follow; turn off walking legs with client pathing.",
+                PluginNavigationCommandStatus.Held =>
+                    "Another plugin or the player is driving the character; the follow waits.",
+                _ => "The client refused to follow the target.",
+            };
+            return false;
+        }
+        _clientFollowSequence = navigation.GoToReport.Sequence;
+        _status = $"Following {name} with the client.";
+        return true;
+    }
+
+    /// <summary>Ends the follow the route asked the client for, if it is still under way.</summary>
+    private void StopClientFollow()
+    {
+        if (_clientFollowSequence == 0)
+            return;
+        INavigationAutomation navigation = _host.Automation.Navigation;
+        PluginGoToReport report = navigation.GoToReport;
+        if (report.Sequence == _clientFollowSequence && IsUnderWay(report.State))
+            _ = navigation.StopGoTo();
+        _clientFollowSequence = 0;
+    }
+
+    /// <summary>Ends the walk the route asked the client for, if it is still under way.</summary>
+    private void StopClientWalk()
+    {
+        StopClientFollow();
+        if (_clientWalkGoal is null)
+            return;
+        _clientWalkGoal = null;
+        INavigationAutomation navigation = _host.Automation.Navigation;
+        PluginGoToReport report = navigation.GoToReport;
+        if (report.Sequence == _clientWalkSequence && IsUnderWay(report.State))
+            _ = navigation.StopGoTo();
+    }
+
+    private static bool IsUnderWay(PluginGoToState state) =>
+        state is PluginGoToState.Planning or PluginGoToState.Walking or PluginGoToState.Waiting;
 
     private void StopMovement()
     {

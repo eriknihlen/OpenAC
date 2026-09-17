@@ -95,7 +95,8 @@ internal interface IWorldRenderCompositionFactory
     DebugLineRenderer CreateDebugLines(
         AcDream.App.Rendering.Gpu.IGpuDevice device,
         ICurrentGpuFrameSource frameSource,
-        string shadersDirectory);
+        string shadersDirectory,
+        IWorldPassScope worldPass);
     byte[]? TryLoadDebugFont();
     BitmapFont CreateDebugFont(AcDream.App.Rendering.Gpu.IGpuDevice device, byte[] bytes);
     TextRenderer CreateTextRenderer(
@@ -192,8 +193,9 @@ internal sealed class RetailWorldRenderCompositionFactory
     public DebugLineRenderer CreateDebugLines(
         AcDream.App.Rendering.Gpu.IGpuDevice device,
         ICurrentGpuFrameSource frameSource,
-        string shadersDirectory) =>
-        new(device, frameSource, shadersDirectory);
+        string shadersDirectory,
+        IWorldPassScope worldPass) =>
+        new(device, frameSource, shadersDirectory, worldPass);
 
     public byte[]? TryLoadDebugFont() =>
         BitmapFont.TryLoadSystemMonospaceFont();
@@ -463,7 +465,8 @@ internal sealed class WorldRenderCompositionPhase
                 () => _factory.CreateDebugLines(
                     _dependencies.GpuDevice,
                     _dependencies.GpuFrameSource,
-                    shadersDirectory),
+                    shadersDirectory,
+                    worldPassScope),
                 _publication.PublishDebugLines,
                 WorldRenderCompositionPoint.DebugLinesPublished);
 

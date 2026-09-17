@@ -375,6 +375,9 @@
            onchange="{SetRouteChatDraft}" onsubmit="{SetRouteChatDraft}"
            maxlength="128" clearonsubmit="false" background="#E6000000"
            color="#FFE8DEC3" tooltip="Chat command added by Add Chat." />
+    <toggle x="604" y="16" w="220" h="20" text="Walk legs with client pathing"
+            checked="{WalkLegsWithClientEnabled}" onclick="{ToggleWalkLegsWithClient}"
+            tooltip="Have the client plan and walk each leg of the route: around walls, creatures and doors, and back from wherever a fight left the character." />
 
     <label x="4" y="195" w="300" h="16" text="{NavigationStatus}" color="#FF9B9072" anchor="bottom" />
     <label x="310" y="195" w="300" h="16" text="{RouteNotice}" color="#FF9B9072" anchor="bottom" />

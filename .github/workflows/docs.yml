@@ -1,0 +1,54 @@
+name: docs
+
+# Builds the documentation site (the guides under docs/ and the plugin API
+# reference generated from AcDream.Plugin.Abstractions) and publishes it to
+# GitHub Pages on every push to main that touches them.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "docs/**"
+      - "src/AcDream.Plugin.Abstractions/**"
+      - "docfx.json"
+      - "toc.yml"
+      - "index.md"
+      - "api/index.md"
+      - ".config/dotnet-tools.json"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore tools
+        run: dotnet tool restore
+      - name: Build the site
+        run: dotnet docfx docfx.json --warningsAsErrors
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

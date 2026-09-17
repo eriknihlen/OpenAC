@@ -43,6 +43,7 @@ internal sealed class HeadlessGameplayOperations
     private SpellComponentRequirementService? _componentRequirements;
     private WorldSession? _session;
     private SessionRoute? _route;
+    private AutoWieldController? _autoWield;
 
     internal void Bind(
         GameRuntime runtime,
@@ -62,6 +63,11 @@ internal sealed class HeadlessGameplayOperations
             runtime.InventoryOwner.Objects,
             () => runtime.PlayerIdentity.ServerGuid,
             accountName);
+    }
+
+    internal void BindAutoWield(AutoWieldController autoWield)
+    {
+        _autoWield = autoWield ?? throw new ArgumentNullException(nameof(autoWield));
     }
 
     internal ILiveSessionCommandRouting CreateRoute(
@@ -153,6 +159,7 @@ internal sealed class HeadlessGameplayOperations
 
     public void NotifyExplicitCombatModeRequest()
     {
+        _autoWield?.NotifyExplicitCombatModeRequest();
     }
 
     public void SendChangeCombatMode(CombatMode mode)

@@ -129,10 +129,18 @@ Plugins are .NET assemblies that target `AcDream.Plugin.Abstractions`, a
 small BCL-only contract: game state, events, commands, and a markup-based UI
 panel system that renders in the game's own look.
 
-**The plugin API is not documented yet.** That is an open to-do; until it
-lands, [docs/plugin-ui-markup.md](docs/plugin-ui-markup.md) covers the panel
-markup and the interfaces in `src/AcDream.Plugin.Abstractions` are the
-reference, with `src/AcDream.Plugins.MossTank` as the worked example.
+Start with [docs/plugin-development.md](docs/plugin-development.md): project
+setup, the manifest, where plugins install, and what the API promises.
+[docs/plugin-api.md](docs/plugin-api.md) describes every surface (game
+state, items, chat, trade, vendor, hotkeys, window, headless) and
+[docs/plugin-ui-markup.md](docs/plugin-ui-markup.md) the in-game panels.
+Every public member of the contract carries a summary that your IDE shows,
+and the same summaries make up the [API reference site](https://eriknihlen.github.io/OpenAC/).
+
+Plugins live in their own repositories and install into the client's plugins
+folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) is
+an external plugin built that way. The same plugin runs unchanged in the
+headless host for bots and tests.
 
 **MossTank** is the bundled plugin: a re-implementation of VirindiTank, the
 automation plugin most Asheron's Call players ran for years. It reads

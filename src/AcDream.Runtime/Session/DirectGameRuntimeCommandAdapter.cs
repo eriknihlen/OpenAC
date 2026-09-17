@@ -93,36 +93,27 @@ public sealed class DirectGameRuntimeCommandAdapter
     public RuntimeSessionStartResult Start(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             _sessionCommands.Start(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeSessionStartResult Reconnect(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeSessionStartResult result =
             _sessionCommands.Reconnect(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
     public RuntimeTeardownAcknowledgement Stop(
         RuntimeGenerationToken expectedGeneration)
     {
-        RuntimeLifecycleState previous = _runtime.Lifecycle.State;
         RuntimeTeardownAcknowledgement result =
             _sessionCommands.Stop(expectedGeneration);
-        _runtime.EventSink.EmitLifecycle(
-            previous,
-            _runtime.Lifecycle.State);
+        _runtime.SyncLifecycleEmission();
         return result;
     }
 
@@ -447,6 +438,73 @@ public sealed class DirectGameRuntimeCommandAdapter
             RuntimeCommandDomain.Movement,
             operation: 0x101,
             RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult BeginMove(
+        RuntimeGenerationToken expectedGeneration,
+        in RuntimeMoveRequest request)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _runtime.MovementOwner.BeginMove(request)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x104,
+            status);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        _runtime.MovementOwner.StopMove();
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            RuntimeCommandStatus.Accepted);
+    }
+
+    public RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration,
+        RuntimeMoveChannel channel)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = Enum.IsDefined(channel)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        if (status == RuntimeCommandStatus.Accepted)
+            _runtime.MovementOwner.StopMove(channel);
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x105,
+            status);
+    }
+
+    public RuntimeCommandResult Jump(
+        RuntimeGenerationToken expectedGeneration,
+        float power)
+    {
+        RuntimeCommandStatus gate =
+            Validate(expectedGeneration, out _);
+        if (gate != RuntimeCommandStatus.Accepted)
+            return Result(gate);
+        RuntimeCommandStatus status = _runtime.MovementOwner.BeginJump(power)
+            ? RuntimeCommandStatus.Accepted
+            : RuntimeCommandStatus.Rejected;
+        return EmitResult(
+            RuntimeCommandDomain.Movement,
+            operation: 0x106,
+            status);
     }
 
     public RuntimeCommandResult TurnToHeading(
@@ -1150,6 +1208,153 @@ public sealed class DirectGameRuntimeCommandAdapter
         }
     }
 
+    internal bool TrySendGetAndWieldItem(uint itemGuid, uint equipMask)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendGetAndWieldItem(itemGuid, equipMask);
+            return true;
+        }
+    }
+
+    internal bool TrySendUseWithTarget(uint sourceGuid, uint targetGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendUseWithTarget(sourceGuid, targetGuid);
+            return true;
+        }
+    }
+
+    internal bool TrySendPutItemInContainer(
+        uint itemGuid,
+        uint containerGuid,
+        int placement)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendPutItemInContainer(itemGuid, containerGuid, placement);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableSplitToContainer(
+        uint itemGuid,
+        uint containerGuid,
+        uint placement,
+        uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableSplitToContainer(
+                itemGuid, containerGuid, placement, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableMerge(
+        uint sourceGuid,
+        uint targetGuid,
+        uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableMerge(sourceGuid, targetGuid, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendDropItem(uint itemGuid)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendDropItem(itemGuid);
+            return true;
+        }
+    }
+
+    internal bool TrySendStackableSplitTo3D(uint stackGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendStackableSplitTo3D(stackGuid, amount);
+            return true;
+        }
+    }
+
+    internal bool TrySendGiveObject(uint targetGuid, uint itemGuid, uint amount)
+    {
+        lock (_gate)
+        {
+            if (_route is null
+                || _session is null
+                || _routeGeneration != _runtime.Generation
+                || !_runtime.Session.IsInWorld)
+            {
+                return false;
+            }
+
+            _session.SendGiveObject(targetGuid, itemGuid, amount);
+            return true;
+        }
+    }
+
     private RuntimeCommandStatus UseSelected(WorldSession session)
     {
         if (_runtime.ActionOwner.Selection.SelectedObjectId
@@ -1158,6 +1363,43 @@ public sealed class DirectGameRuntimeCommandAdapter
             _runtime.ActionOwner.Interaction.EnterUse();
             return RuntimeCommandStatus.Accepted;
         }
+        return UseObject(session, selected);
+    }
+
+    /// <summary>
+    /// Uses a world object the way using it while it is selected does, without selecting
+    /// it, as a walk opening a door on its way does. False when there is no live session
+    /// or the use was refused.
+    /// </summary>
+    internal bool TryUseObject(uint objectId)
+    {
+        if (Validate(_runtime.Generation, out WorldSession? session) != RuntimeCommandStatus.Accepted
+            || session is null)
+        {
+            return false;
+        }
+        return UseObject(session, objectId) == RuntimeCommandStatus.Accepted;
+    }
+
+    /// <summary>
+    /// Asks the server to appraise an object without its answer becoming the appraisal the
+    /// character is looking at, as a walk checking whether a door is locked does.
+    /// </summary>
+    internal bool TryAppraiseQuietly(uint objectId)
+    {
+        if (Validate(_runtime.Generation, out WorldSession? session) != RuntimeCommandStatus.Accepted
+            || session is null)
+        {
+            return false;
+        }
+        return _runtime.ActionOwner.Transactions.TryRequestAppraisal(
+            objectId,
+            session.SendAppraise,
+            AppraisalRequestOrigin.Automation);
+    }
+
+    private RuntimeCommandStatus UseObject(WorldSession session, uint selected)
+    {
         if (_runtime.InventoryOwner.Objects.Get(selected)
             is not { } item)
         {

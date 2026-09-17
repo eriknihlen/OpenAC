@@ -235,9 +235,37 @@ the `>`/`<` toggle at the grip's right end, and persisted like any other.
 `Shift+Ctrl+F1` hides and shows it; hiding the shelf never disables a plugin
 or touches a plugin window's own visibility.
 
+## Client windows
+
+A plugin can also show, hide, toggle, or query one of the client's own
+windows -- the same window a player opens with a keybind or a toolbar
+button -- through `IUiRegistry`'s client-window methods:
+
+```csharp
+bool shown = host.Ui.ToggleClientWindow(PluginClientWindow.Inventory);
+host.Ui.ShowClientWindow(PluginClientWindow.Character);
+host.Ui.HideClientWindow(PluginClientWindow.Character);
+bool isOpen = host.Ui.IsClientWindowVisible(PluginClientWindow.Spellbook);
+```
+
+`PluginClientWindow` lists the retained windows a player can open this way:
+`Inventory`, `Character`, `CharacterInformation`, `Spellbook`, `Map`,
+`Options`, `Social`, `Journal`, `PositiveEffects`, `NegativeEffects`,
+`LinkStatus`, `Vitae`, and `Radar`. Every method returns `false` on a
+no-window host or for a window this build does not mount --
+there is no separate "unsupported" signal to check first.
+
+This is unrelated to a plugin's own `AddPanel`/`RegisterPanel` windows: it
+never creates, closes, or reaches into the plugin's own views, only the
+client's pre-existing ones. Call it from the same thread that calls `Tick`,
+same as any other UI call.
+
 ## Tests
 
 Markup behavior is covered by `MarkupDocumentTests`, `MarkupIconTests`,
 `MarkupListColumnsTests`, `MarkupResizableAnchorTests`, and
 `PluginSidePanelTests` under `tests/AcDream.App.Tests/UI/`, all against fake
-resolvers rather than the game's data files.
+resolvers rather than the game's data files. Client-window control is
+covered by `BufferedUiRegistryTests` and `PluginClientWindowNamesTests` in
+the same tree, and by `ScopedUiRegistryClientWindowTests` under
+`tests/AcDream.Core.Tests/Plugins/` for the scoped forwarder.

@@ -444,6 +444,7 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         CameraDiagnostics.TranslationStiffness = cameraTurning.Stiffness;
         CameraDiagnostics.RotationStiffness = cameraTurning.Stiffness;
         CameraDiagnostics.CameraAdjustmentSpeed = cameraTurning.AdjustmentSpeed;
+        CameraDiagnostics.AlignToSlope = cameraTurning.AlignToSlope && CameraDiagnostics.AlignToSlopeAllowed;
         if (_chase is null)
             return;
         _chase.Sensitivity = cameraTurning.MouseLookSensitivity;

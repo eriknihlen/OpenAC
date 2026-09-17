@@ -5,24 +5,54 @@ namespace AcDream.Plugin.Abstractions.Rendering;
 /// <summary>The shader stage a render-pack declaration assigns to one SPIR-V asset.</summary>
 public enum RenderPackShaderStage
 {
+    /// <summary>The stage that places geometry.</summary>
     Vertex,
+
+    /// <summary>The stage that colours pixels.</summary>
     Fragment,
 }
 
 /// <summary>Hardware-independent validation result for one declared SPIR-V module.</summary>
+/// <param name="Success">True when the module passed every check.</param>
+/// <param name="Reason">
+/// Why the module was refused; null when it passed.
+/// </param>
 public readonly record struct RenderPackSpirvValidationResult(bool Success, string? Reason)
 {
+    /// <summary>A result saying the module passed every check.</summary>
+    /// <returns>A successful result with no reason.</returns>
     public static RenderPackSpirvValidationResult Valid() => new(true, null);
 
+    /// <summary>A result saying the module was refused.</summary>
+    /// <param name="reason">Why the module was refused.</param>
+    /// <returns>A failed result carrying that reason.</returns>
     public static RenderPackSpirvValidationResult Invalid(string reason) => new(false, reason);
 }
 
+/// <summary>
+/// Checks a pack's compiled shader before the client will load it: that it
+/// really is a shader module for the stage it was declared as, and that it only
+/// reaches for the resources its declaration entitles it to. It reads the
+/// module itself and needs no graphics device.
+/// </summary>
 public static class RenderPackSpirvValidator
 {
     private const uint SpirvMagic = 0x0723_0203;
     private const uint VertexExecutionModel = 0;
     private const uint FragmentExecutionModel = 4;
 
+    /// <summary>
+    /// Check one compiled shader belonging to a declared pass.
+    /// </summary>
+    /// <param name="spirv">The compiled shader module's bytes.</param>
+    /// <param name="stage">Which stage the declaration assigned this asset to.</param>
+    /// <param name="pass">The pass declaration the shader belongs to.</param>
+    /// <returns>
+    /// A failed result, carrying the reason, when the bytes are not a shader
+    /// module, when it does not expose exactly one entry point named "main" for
+    /// that stage, when it writes to a storage image, or when it binds anything
+    /// the pass did not declare inputs for; a successful result otherwise.
+    /// </returns>
     public static RenderPackSpirvValidationResult ValidatePassShader(
         ReadOnlySpan<byte> spirv,
         RenderPackShaderStage stage,
@@ -50,6 +80,21 @@ public static class RenderPackSpirvValidator
         return Validate(spirv, stage, access);
     }
 
+    /// <summary>
+    /// Check one compiled shader belonging to a declared pipeline variant. What
+    /// the shader may bind follows from the variant's role, which is stricter
+    /// than for a pass because the shader replaces part of the client's own
+    /// scene drawing.
+    /// </summary>
+    /// <param name="spirv">The compiled shader module's bytes.</param>
+    /// <param name="stage">Which stage the declaration assigned this asset to.</param>
+    /// <param name="variant">The pipeline-variant declaration the shader belongs to.</param>
+    /// <returns>
+    /// A failed result, carrying the reason, when the bytes are not a shader
+    /// module, when it does not expose exactly one entry point named "main" for
+    /// that stage, when it writes to a storage image, or when it binds anything
+    /// its role does not allow; a successful result otherwise.
+    /// </returns>
     public static RenderPackSpirvValidationResult ValidatePipelineVariantShader(
         ReadOnlySpan<byte> spirv,
         RenderPackShaderStage stage,

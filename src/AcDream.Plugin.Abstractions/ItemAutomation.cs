@@ -1,5 +1,16 @@
 namespace AcDream.Plugin.Abstractions;
 
+/// <summary>
+/// One color-swap range that recolors part of an item, together with a sample
+/// of the color it produces, so a plugin can tell two otherwise identical
+/// items apart by their dye.
+/// </summary>
+/// <param name="PaletteId">The color set the swap draws from.</param>
+/// <param name="Offset">Where in the item's color range the swap starts.</param>
+/// <param name="Length">How much of that range the swap covers.</param>
+/// <param name="Red">Red channel of a color sampled from the swap, 0 to 255.</param>
+/// <param name="Green">Green channel of that sampled color, 0 to 255.</param>
+/// <param name="Blue">Blue channel of that sampled color, 0 to 255.</param>
 public readonly record struct PluginPaletteInfo(
     uint PaletteId,
     byte Offset,
@@ -8,6 +19,92 @@ public readonly record struct PluginPaletteInfo(
     byte Green,
     byte Blue);
 
+/// <summary>
+/// One item the player owns -- in a pack, equipped, or wielded -- flattened
+/// into the fields an inventory plugin needs. Numbers that only an appraisal
+/// can supply read as zero until the item has been appraised.
+/// </summary>
+/// <param name="ObjectId">The item's object id.</param>
+/// <param name="WeenieClassId">The item's class id, shared by every copy of it.</param>
+/// <param name="Name">The item's display name.</param>
+/// <param name="ItemType">The item's type bit mask (weapon, armor, food, and so on).</param>
+/// <param name="ContainerObjectId">
+/// The container holding the item, or zero when it is not inside one.
+/// </param>
+/// <param name="WielderObjectId">
+/// The creature wielding the item, or zero when nobody is.
+/// </param>
+/// <param name="ValidLocations">
+/// Bit mask of the equipment slots the item may occupy; zero when it cannot
+/// be equipped at all.
+/// </param>
+/// <param name="EquippedLocation">
+/// Bit mask of the slot the item currently occupies; zero when it is not
+/// equipped.
+/// </param>
+/// <param name="Useability">
+/// How the item may be used -- in particular whether using it needs a second
+/// object as a target.
+/// </param>
+/// <param name="TargetType">
+/// The kind of object the item may be applied to, when it is a targeted-use
+/// item.
+/// </param>
+/// <param name="PublicFlags">
+/// The object's public flag bits: the same bits that mark something as a
+/// door, a corpse, a vendor, and so on.
+/// </param>
+/// <param name="StackSize">How many of the item this stack holds.</param>
+/// <param name="Structure">
+/// The item's remaining charges or uses; zero when it has no such counter.
+/// </param>
+/// <param name="MaximumStructure">The ceiling for <paramref name="Structure"/>.</param>
+/// <param name="SpellId">
+/// The spell the item casts when used, such as a scroll's; zero when it casts
+/// nothing.
+/// </param>
+/// <param name="PetClass">
+/// The kind of pet a pet device summons; zero when the item is not one.
+/// </param>
+/// <param name="SummoningMastery">
+/// The summoning mastery the item belongs to; zero when it has none.
+/// </param>
+/// <param name="ProcSpellId">
+/// The spell the item can cast by itself when it strikes; zero when it has
+/// none.
+/// </param>
+/// <param name="ProcSpellSelfTargeted">
+/// True when that cast-on-strike spell lands on the wielder rather than the
+/// one struck.
+/// </param>
+/// <param name="ProcSpellRate">
+/// How often the cast-on-strike spell fires, as a share of hits from 0 to 1.
+/// </param>
+/// <param name="WeaponSkill">
+/// The skill the weapon attacks with. Read from the appraised weapon profile
+/// when there is one, otherwise from the property table.
+/// </param>
+/// <param name="DamageType">
+/// The damage type the weapon deals, preferring the appraised weapon profile.
+/// </param>
+/// <param name="Damage">
+/// The weapon's damage rating, preferring the appraised weapon profile. Minus
+/// one means the server left the value unset, which is not the same as zero
+/// damage.
+/// </param>
+/// <param name="DamageVariance">
+/// How far below <paramref name="Damage"/> a hit can roll, as a fraction of
+/// it: 0.2 means a hit lands between 80% and 100% of the damage rating.
+/// </param>
+/// <param name="UseRequiresSkill">
+/// The skill needed to use the item; zero when none is.
+/// </param>
+/// <param name="UseRequiresSkillLevel">
+/// How much of that skill the user needs.
+/// </param>
+/// <param name="UseRequiresSkillSpecialized">
+/// How much of that skill the user needs when it is specialised.
+/// </param>
 public readonly record struct PluginInventoryItem(
     uint ObjectId,
     uint WeenieClassId,
@@ -37,43 +134,233 @@ public readonly record struct PluginInventoryItem(
     int UseRequiresSkillLevel,
     int UseRequiresSkillSpecialized)
 {
+    /// <summary>True when the item currently occupies an equipment slot.</summary>
     public bool IsEquipped => EquippedLocation != 0u;
+
+    /// <summary>True when the item summons a pet.</summary>
     public bool IsPetDevice => PetClass != 0;
+
+    /// <summary>
+    /// True when the item can cast a spell of its own on a hit, at some rate
+    /// above zero.
+    /// </summary>
     public bool HasCastOnStrike => ProcSpellId != 0u && ProcSpellRate > 0d;
+
+    /// <summary>
+    /// Which combat role the item fills (melee weapon, missile weapon,
+    /// shield, ammunition); zero when it has none.
+    /// </summary>
     public int CombatUse { get; init; }
+
+    /// <summary>
+    /// The item's spellcraft rating, which sets how hard its own spells are
+    /// to activate; zero when it has none.
+    /// </summary>
     public int ItemSpellcraft { get; init; }
+
+    /// <summary>
+    /// What kind of requirement must be met to wield the item -- a skill, an
+    /// attribute, a level -- or zero when there is none.
+    /// </summary>
     public int WieldRequirements { get; init; }
+
+    /// <summary>The skill or attribute that requirement names.</summary>
     public int WieldSkillType { get; init; }
+
+    /// <summary>How much of it the wielder needs.</summary>
     public int WieldDifficulty { get; init; }
+
+    /// <summary>The attack styles the weapon offers, as a bit mask.</summary>
     public int AttackType { get; init; }
+
+    /// <summary>The weapon category the item belongs to; zero when it is not a weapon.</summary>
     public int WeaponType { get; init; }
+
+    /// <summary>
+    /// Which vital the item restores when used (health, stamina, mana); zero
+    /// when it restores none.
+    /// </summary>
     public int BoosterVital { get; init; }
+
+    /// <summary>How much of that vital one use restores.</summary>
     public int BoostValue { get; init; }
+
+    /// <summary>
+    /// A healing kit's effectiveness multiplier; zero for anything that is
+    /// not one.
+    /// </summary>
     public double HealKitModifier { get; init; }
+
+    /// <summary>
+    /// The spells an appraisal reported on the item; empty until it has been
+    /// appraised.
+    /// </summary>
     public IReadOnlyList<uint> AppraisedSpellIds { get; init; } =
         Array.Empty<uint>();
+
+    /// <summary>The item's damage rating bonus; zero when it carries none.</summary>
     public int GearDamage { get; init; }
+
+    /// <summary>The item's damage-resistance rating bonus; zero when it carries none.</summary>
     public int GearDamageResistance { get; init; }
+
+    /// <summary>The item's critical-chance rating bonus; zero when it carries none.</summary>
     public int GearCriticalChance { get; init; }
+
+    /// <summary>The item's critical-resistance rating bonus; zero when it carries none.</summary>
     public int GearCriticalResistance { get; init; }
+
+    /// <summary>The item's critical-damage rating bonus; zero when it carries none.</summary>
     public int GearCriticalDamage { get; init; }
+
+    /// <summary>
+    /// The item's critical-damage-resistance rating bonus; zero when it
+    /// carries none.
+    /// </summary>
     public int GearCriticalDamageResistance { get; init; }
+
+    /// <summary>
+    /// The largest stack the item can form; one for anything that does not
+    /// stack.
+    /// </summary>
     public int MaximumStackSize { get; init; } = 1;
+
+    /// <summary>
+    /// The item's slot number inside its container, or -1 when the client
+    /// does not know it.
+    /// </summary>
     public int ContainerSlot { get; init; } = -1;
+
+    /// <summary>How many loose items the item can hold, when it is a container.</summary>
     public int ItemsCapacity { get; init; }
+
+    /// <summary>How many packs the item can hold, when it is a container.</summary>
     public int ContainersCapacity { get; init; }
+
+    /// <summary>How much the item weighs against the character's burden limit.</summary>
     public int Burden { get; init; }
+
+    /// <summary>The item's worth in coin, for the whole stack.</summary>
     public int Value { get; init; }
+
+    /// <summary>How much mana the item currently holds.</summary>
     public int ItemCurrentMana { get; init; }
+
+    /// <summary>The most mana the item can hold.</summary>
     public int ItemMaximumMana { get; init; }
+
+    /// <summary>
+    /// The item's workmanship, which an appraisal supplies; zero for an item
+    /// that has none or has not been appraised.
+    /// </summary>
     public float Workmanship { get; init; }
+
+    /// <summary>What the item is made of; zero when the client does not know.</summary>
     public uint MaterialType { get; init; }
+
+    /// <summary>The broad category the item falls into.</summary>
     public PluginObjectClass ObjectClass { get; init; }
+
+    /// <summary>
+    /// The color swaps applied to the item's appearance; empty when the
+    /// client has no appearance data for it.
+    /// </summary>
     public IReadOnlyList<PluginPaletteInfo> Palettes { get; init; } =
         Array.Empty<PluginPaletteInfo>();
+
+    /// <summary>The item's icon, for a plugin that draws its own UI.</summary>
     public uint IconId { get; init; }
 }
 
+/// <summary>
+/// A weapon's real damage/offense numbers as the server's appraisal response
+/// reported them, straight from the WeaponProfile blob -- not the
+/// PropertyInt/PropertyFloat table, which the server does not populate for
+/// most weapons. Null until the item has been successfully appraised, or if
+/// it never carries a WeaponProfile blob (i.e. it is not a weapon).
+/// </summary>
+/// <param name="DamageType">The damage type the weapon deals.</param>
+/// <param name="WeaponTime">
+/// The weapon's speed rating -- a rating, not a duration; higher is slower.
+/// </param>
+/// <param name="WeaponSkill">The skill the weapon attacks with.</param>
+/// <param name="Damage">
+/// The weapon's damage rating. Minus one means the server left it unset.
+/// </param>
+/// <param name="DamageVariance">
+/// How far below <paramref name="Damage"/> a hit can roll, as a fraction of
+/// it: 0.2 means a hit lands between 80% and 100% of the damage rating.
+/// </param>
+/// <param name="DamageMod">
+/// A multiplier on damage centred on 1.0: 1.05 means five percent more.
+/// </param>
+/// <param name="WeaponLength">The weapon's reach.</param>
+/// <param name="MaxVelocity">The launch speed a missile weapon gives its ammunition.</param>
+/// <param name="WeaponOffense">
+/// A multiplier on attack skill centred on 1.0: 0.9 means ten percent less.
+/// </param>
+/// <param name="MaxVelocityEstimated">
+/// Non-zero when <paramref name="MaxVelocity"/> is an estimate the server
+/// worked out at a nominal strength rather than the wielder's own.
+/// </param>
+public readonly record struct PluginWeaponProfile(
+    int DamageType,
+    int WeaponTime,
+    uint WeaponSkill,
+    int Damage,
+    double DamageVariance,
+    double DamageMod,
+    double WeaponLength,
+    double MaxVelocity,
+    double WeaponOffense,
+    int MaxVelocityEstimated);
+
+/// <summary>
+/// A piece of armor's per-damage-type protection modifiers as the server's
+/// appraisal response reported them, from the ArmorProfile blob. Null until
+/// the item has been successfully appraised, or if it never carries an
+/// ArmorProfile blob (i.e. it is not armor). Fields after ArmorLevel are in
+/// the blob's own wire order and stay float to match it exactly.
+/// </summary>
+/// <param name="ArmorLevel">
+/// The flat armor value, which comes from the item's own property table
+/// rather than the profile blob.
+/// </param>
+/// <param name="SlashMod">
+/// Multiplier on incoming slashing damage: 1.2 means the wearer takes twenty
+/// percent more of it, 0.8 twenty percent less.
+/// </param>
+/// <param name="PierceMod">Multiplier on incoming piercing damage.</param>
+/// <param name="BludgeonMod">Multiplier on incoming bludgeoning damage.</param>
+/// <param name="ColdMod">Multiplier on incoming cold damage.</param>
+/// <param name="FireMod">Multiplier on incoming fire damage.</param>
+/// <param name="AcidMod">Multiplier on incoming acid damage.</param>
+/// <param name="NetherMod">Multiplier on incoming nether damage.</param>
+/// <param name="ElectricMod">Multiplier on incoming lightning damage.</param>
+public readonly record struct PluginArmorProfile(
+    int ArmorLevel,
+    float SlashMod,
+    float PierceMod,
+    float BludgeonMod,
+    float ColdMod,
+    float FireMod,
+    float AcidMod,
+    float NetherMod,
+    float ElectricMod);
+
+/// <summary>
+/// Every property the client currently holds for one object, as copies of its
+/// raw property tables keyed by property id, plus the two typed appraisal
+/// blobs. A table is empty when the object carries no properties of that
+/// kind.
+/// </summary>
+/// <param name="Ints">Integer properties by property id.</param>
+/// <param name="Int64s">64-bit integer properties by property id.</param>
+/// <param name="Bools">Boolean properties by property id.</param>
+/// <param name="Floats">Floating-point properties by property id.</param>
+/// <param name="Strings">Text properties by property id.</param>
+/// <param name="DataIds">Data-file references by property id.</param>
+/// <param name="InstanceIds">References to other objects by property id.</param>
 public readonly record struct PluginItemProperties(
     IReadOnlyDictionary<uint, int> Ints,
     IReadOnlyDictionary<uint, long> Int64s,
@@ -81,70 +368,218 @@ public readonly record struct PluginItemProperties(
     IReadOnlyDictionary<uint, double> Floats,
     IReadOnlyDictionary<uint, string> Strings,
     IReadOnlyDictionary<uint, uint> DataIds,
-    IReadOnlyDictionary<uint, uint> InstanceIds);
+    IReadOnlyDictionary<uint, uint> InstanceIds)
+{
+    /// <summary>
+    /// The weapon numbers from the object's last appraisal, or null when it
+    /// has never been appraised or is not a weapon.
+    /// </summary>
+    public PluginWeaponProfile? WeaponProfile { get; init; }
+
+    /// <summary>
+    /// The armor numbers from the object's last appraisal, or null when it
+    /// has never been appraised or is not armor.
+    /// </summary>
+    public PluginArmorProfile? ArmorProfile { get; init; }
+}
 
 /// <summary>One server <c>UseDone</c> for a plugin-issued item action.</summary>
+/// <param name="Revision">
+/// Counts up by one for every completion, so a plugin can tell a fresh one
+/// from one it has already seen. Zero means nothing has completed yet.
+/// </param>
+/// <param name="SourceObjectId">The item that was used.</param>
+/// <param name="TargetObjectId">
+/// The object it was used on, or zero when the use had no target.
+/// </param>
+/// <param name="WeenieError">
+/// The server's error code; zero means the use went through.
+/// </param>
 public readonly record struct PluginItemUseCompletion(
     long Revision,
     uint SourceObjectId,
     uint TargetObjectId,
     uint WeenieError)
 {
+    /// <summary>
+    /// True when a use has actually completed and the server reported no
+    /// error for it.
+    /// </summary>
     public bool IsSuccess => Revision != 0 && WeenieError == 0u;
 }
 
+/// <summary>How the client answered a plugin's item command.</summary>
 public enum PluginItemCommandStatus
 {
+    /// <summary>
+    /// The command could not be run: there is no in-world session, or this
+    /// host does not provide the surface.
+    /// </summary>
     Unavailable = 0,
+
+    /// <summary>
+    /// The item is unknown to the client, or is not one the command may act
+    /// on -- usually because the player does not own it.
+    /// </summary>
     InvalidItem,
+
+    /// <summary>
+    /// The target of the command is unknown or unsuitable: a container that
+    /// is not the player's, a missing target object, a salvage tool that is
+    /// not a tool, or no open vendor to sell to.
+    /// </summary>
     InvalidTarget,
+
+    /// <summary>
+    /// Another inventory request is already in flight. The client sends one
+    /// at a time; try again once it has finished.
+    /// </summary>
     Busy,
+
+    /// <summary>
+    /// The request was sent. The server's own answer arrives later, through
+    /// the completion properties or the object events.
+    /// </summary>
     Started,
+
+    /// <summary>
+    /// The client would not send the request; <c>Notice</c> says why when
+    /// there is something to say.
+    /// </summary>
     Refused,
 }
 
+/// <summary>The outcome of one item command, with an optional explanation.</summary>
+/// <param name="Status">What the client did with the command.</param>
+/// <param name="Notice">A short human-readable reason, when there is one.</param>
 public readonly record struct PluginItemCommandResult(
     PluginItemCommandStatus Status,
     string? Notice = null)
 {
+    /// <summary>True when the request actually went out to the server.</summary>
     public bool Accepted => Status == PluginItemCommandStatus.Started;
 }
 
+/// <summary>Which kind of inventory request a completion belongs to.</summary>
 public enum PluginInventoryCommandKind
 {
+    /// <summary>The client could not attribute the completion to a request it made.</summary>
     Unknown = 0,
+
+    /// <summary>Picking an item up off the ground or out of an open container.</summary>
     Pickup,
+
+    /// <summary>Moving a whole item into a container.</summary>
     PutInContainer,
+
+    /// <summary>Splitting part of a stack off into a container.</summary>
     SplitToContainer,
+
+    /// <summary>Merging one stack into another.</summary>
     Merge,
+
+    /// <summary>Repositioning an item the player already holds.</summary>
     Move,
+
+    /// <summary>Dropping a whole item on the ground.</summary>
     DropToWorld,
+
+    /// <summary>Splitting part of a stack off onto the ground.</summary>
     SplitToWorld,
+
+    /// <summary>Wearing or wielding an item.</summary>
     Wield,
+
+    /// <summary>Handing an item to someone else.</summary>
     Give,
 }
 
+/// <summary>The server's answer to one inventory request.</summary>
+/// <param name="Revision">
+/// Counts up by one for every completion, so a plugin can tell a fresh one
+/// from one it has already seen. Zero means nothing has completed yet.
+/// </param>
+/// <param name="Kind">Which kind of request this answers.</param>
+/// <param name="SourceObjectId">The item the request acted on.</param>
+/// <param name="WeenieError">
+/// The server's error code; zero means the request went through.
+/// </param>
 public readonly record struct PluginInventoryCompletion(
     long Revision,
     PluginInventoryCommandKind Kind,
     uint SourceObjectId,
     uint WeenieError)
 {
+    /// <summary>
+    /// True when a request has actually completed and the server reported no
+    /// error for it.
+    /// </summary>
     public bool IsSuccess => Revision != 0 && WeenieError == 0u;
 }
 
+/// <summary>
+/// Reads and acts on the items the player owns: using them, moving them
+/// between packs, splitting and merging stacks, dropping, giving, salvaging,
+/// and selling. Every command here only asks the server; the result lands
+/// later, through the completion properties or the object events.
+/// </summary>
+/// <remarks>
+/// These commands are not safe to call from another thread. Issue them from
+/// the same thread the host raises its tick on, as they touch the same
+/// inventory and movement state the client itself does.
+/// </remarks>
 public interface IItemAutomation
 {
+    /// <summary>
+    /// True when this surface can be used: the session is in the world and
+    /// the host wired up item commands.
+    /// </summary>
     bool IsAvailable => false;
+
+    /// <summary>
+    /// True while an inventory request is already in flight, so the next
+    /// command would come back <see cref="PluginItemCommandStatus.Busy"/>.
+    /// </summary>
     bool IsBusy => false;
+
+    /// <summary>
+    /// How many living creatures the player currently owns as pets; zero when
+    /// none, or when the session is not in the world.
+    /// </summary>
     int ActiveOwnedPetCount => 0;
+
+    /// <summary>
+    /// The vendor whose shop is open, or zero when none is. This is what
+    /// <see cref="Sell"/> sells to.
+    /// </summary>
     uint ActiveVendorObjectId => 0u;
+
+    /// <summary>
+    /// The server's answer to the last item use. Default until something
+    /// completes.
+    /// </summary>
     PluginItemUseCompletion LastCompletion => default;
+
+    /// <summary>
+    /// The server's answer to the last inventory request -- a move, split,
+    /// merge, drop, or give. Default until something completes.
+    /// </summary>
     PluginInventoryCompletion LastInventoryCompletion => default;
 
+    /// <summary>
+    /// Lists everything the player owns, including what is inside their packs
+    /// and what they have equipped, ordered by name. Returns an empty list
+    /// when the session is not in the world.
+    /// </summary>
     IReadOnlyList<PluginInventoryItem> CaptureOwnedItems() =>
         Array.Empty<PluginInventoryItem>();
 
+    /// <summary>
+    /// Reads the property tables the client holds for one owned item,
+    /// including its weapon and armor profiles once it has been appraised.
+    /// Returns false for anything the player does not own -- use the object
+    /// surface for that.
+    /// </summary>
     bool TryCaptureProperties(
         uint objectId,
         out PluginItemProperties properties)
@@ -153,12 +588,34 @@ public interface IItemAutomation
         return false;
     }
 
+    /// <summary>
+    /// Uses an object. An owned item is used where it lies. Anything else --
+    /// a vendor, a corpse, a chest, a character to talk to -- is approached
+    /// first if it is out of reach, exactly as double-clicking it does; in
+    /// that case <see cref="PluginItemCommandStatus.Started"/> means the walk
+    /// began, not that the use has happened. An owned item that needs a
+    /// target of its own is refused with a notice saying to call
+    /// <see cref="Apply"/> instead.
+    /// </summary>
     PluginItemCommandResult Use(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Uses one owned item on another object -- a lockpick on a chest, a
+    /// tinkering tool on a weapon. The first object must be one the player
+    /// owns; the second only has to be one the client knows about.
+    /// </summary>
     PluginItemCommandResult Apply(uint objectId, uint targetObjectId) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Asks the server to move an owned item into one of the player's
+    /// containers, or into the player themselves for the main pack. Pass an
+    /// <paramref name="amount"/> of zero to move the whole stack, or a
+    /// smaller number to split that many off into the container instead;
+    /// <paramref name="placement"/> is the slot to drop it into. An amount
+    /// larger than the stack is refused with a notice.
+    /// </summary>
     PluginItemCommandResult MoveToContainer(
         uint objectId,
         uint containerObjectId,
@@ -166,6 +623,11 @@ public interface IItemAutomation
         int placement = 0) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Asks the server to pour one owned stack into another owned stack of
+    /// the same thing. Pass an <paramref name="amount"/> of zero to move the
+    /// whole source stack; an amount larger than it is refused with a notice.
+    /// </summary>
     PluginItemCommandResult Merge(
         uint sourceObjectId,
         uint targetObjectId,
@@ -183,11 +645,27 @@ public interface IItemAutomation
         uint amount = 0u) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Asks the server to break a set of owned items down with an owned
+    /// salvaging tool. Reports
+    /// <see cref="PluginItemCommandStatus.InvalidTarget"/> when the tool is
+    /// not one the player owns or is not a salvaging tool, and
+    /// <see cref="PluginItemCommandStatus.InvalidItem"/> for an empty list or
+    /// any item the player does not own.
+    /// </summary>
     PluginItemCommandResult Salvage(
         uint toolObjectId,
         IReadOnlyList<uint> itemObjectIds) =>
         new(PluginItemCommandStatus.Unavailable);
 
+    /// <summary>
+    /// Asks the open vendor to buy an owned item, all of it or an exact
+    /// partial stack. Reports
+    /// <see cref="PluginItemCommandStatus.InvalidTarget"/> when no vendor is
+    /// open, and <see cref="PluginItemCommandStatus.Refused"/> with a notice
+    /// when this particular vendor will not take the item -- wrong kind of
+    /// goods, worth too little or too much, or an item that cannot be sold.
+    /// </summary>
     PluginItemCommandResult Sell(uint objectId, uint amount = 0u) =>
         new(PluginItemCommandStatus.Unavailable);
 }

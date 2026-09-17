@@ -938,7 +938,7 @@ public static class ConfigOptionsPageController
             listBox, "ID_Camera_AlignToSlope", defaultValue: true, page, resolveString,
             read: () => bindings.LoadCameraTurning().AlignToSlope,
             apply: value => bindings.SaveCameraTurning(bindings.LoadCameraTurning() with { AlignToSlope = value }),
-            storeOnly: true);
+            storeOnly: false); // LIVE
 
         cameraTurning = bindings.LoadCameraTurning();
     }

@@ -53,6 +53,29 @@ public sealed class PhysicsEngine
     /// <summary>Number of registered landblocks (diagnostic).</summary>
     public int LandblockCount => _landblocks.Count;
 
+    /// <summary>The ids of the resident landblocks.</summary>
+    internal IEnumerable<uint> LandblockIds => _landblocks.Keys;
+
+    /// <summary>A resident landblock's terrain, cell polygons and world offset.</summary>
+    internal bool TryGetLandblockCollision(
+        uint landblockId,
+        out TerrainSurface terrain,
+        out IReadOnlyList<CellSurface> cells,
+        out Vector3 worldOffset)
+    {
+        if (_landblocks.TryGetValue(landblockId, out LandblockPhysics? landblock))
+        {
+            terrain = landblock.Terrain;
+            cells = landblock.Cells;
+            worldOffset = new Vector3(landblock.WorldOffsetX, landblock.WorldOffsetY, 0f);
+            return true;
+        }
+        terrain = null!;
+        cells = Array.Empty<CellSurface>();
+        worldOffset = default;
+        return false;
+    }
+
     internal CollisionWorldStateSlot CollisionWorld => _collisionWorld;
 
     public Action<string>? DiagnosticLog { get; set; }

@@ -220,6 +220,74 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, sent[^1]);
     }
 
+    /// <summary>
+    /// A walk asks whether a door is locked. The answer must reach the object without
+    /// becoming the appraisal the character is looking at, so nothing opens on screen.
+    /// </summary>
+    [Fact]
+    public void AQuietAppraisalAnswersWithoutBecomingTheCurrentOne()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(new[] { Item }, sent);
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+
+        RuntimeAppraisalResponseAcceptance answer = state.AcceptAppraisalResponse(Item);
+
+        Assert.True(answer.Accepted);
+        Assert.True(answer.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, answer.Origin);
+        Assert.False(answer.PresentInUi);
+        Assert.Equal(0u, state.CurrentAppraisalId);
+        Assert.Equal(0, inventory.BusyCount);
+    }
+
+    [Fact]
+    public void AnAppraisalTheCharacterAskedForBecomesTheCurrentOne()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add));
+        RuntimeAppraisalResponseAcceptance answer = state.AcceptAppraisalResponse(Item);
+
+        Assert.True(answer.FirstResponse);
+        Assert.True(answer.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+    }
+
+    [Fact]
+    public void AppraisalReceivedFiresOnBothTheFirstResponseAndARefresh()
+    {
+        // AcceptAppraisalResponse used to only raise AppraisalReceived on
+        // the first response (objectId == _awaitingAppraisalId). A
+        // RefreshCurrentAppraisal re-request lands on the same objectId as
+        // _currentAppraisalId, so it was silently swallowed: Accepted=true
+        // came back to the caller but no observer ever heard about it.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var received = new List<uint>();
+        state.AppraisalReceived += received.Add;
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        RuntimeAppraisalResponseAcceptance first =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(first.Accepted);
+        Assert.True(first.FirstResponse);
+        Assert.Equal(new[] { Item }, received);
+
+        Assert.True(state.RefreshCurrentAppraisal(_ => { }));
+        RuntimeAppraisalResponseAcceptance refresh =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(refresh.Accepted);
+        Assert.False(refresh.FirstResponse);
+        Assert.Equal(new[] { Item, Item }, received);
+    }
+
     [Fact]
     public void AppraisalTransportFailureRollsBackOnlyItsBusyReference()
     {
@@ -236,6 +304,283 @@ public sealed class RuntimeInteractionTransactionStateTests
         Assert.Equal(0u, snapshot.AwaitingAppraisalId);
         Assert.Equal(0u, snapshot.CurrentAppraisalId);
         Assert.Equal(0, inventory.BusyCount);
+    }
+
+    [Fact]
+    public void AutomationAppraisalOfADifferentObjectDoesNotRetargetCurrent()
+    {
+        // Live finding: a plugin's background Identify(objectId) used to
+        // hijack the single appraisal slot and, once its response landed,
+        // silently swap the examination window's target object out from
+        // under the user (observed live: a periodic gauntlet re-identify
+        // popped the "Leather Gauntlets" assess window). A response tagged
+        // Automation must leave CurrentAppraisalId alone when it lands on
+        // an object other than the one already current.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        RuntimeAppraisalResponseAcceptance userFirst =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userFirst.Accepted);
+        Assert.True(userFirst.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.True(automation.Accepted);
+        Assert.True(automation.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, automation.Origin);
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        // The presentation target did not move -- but the plugin-facing
+        // completion signal must, regardless: this response is the one a
+        // plugin's Identify(Container) was waiting on, and it completed.
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+    }
+
+    [Fact]
+    public void AutomationResponseAdvancesCompletionSignalNotPresentationTarget()
+    {
+        // HIGH-1: CurrentAppraisalId (presentation) and
+        // LastCompletedAppraisalId (the plugin-facing completion signal
+        // mapped by AppAutomationSurface into
+        // ILootAutomation.Appraisal.CurrentObjectId) are two different
+        // things. Before this split, MossTank's corpse-identify wait
+        // polled CurrentAppraisalId and never observed it change for a
+        // corpse the window was not showing, so corpse looting stalled
+        // forever. LastCompletedAppraisalId must advance for every
+        // completed response, of either origin, independent of whatever
+        // the window is presenting.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.True(automation.Accepted);
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(0u, state.CurrentAppraisalId);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+    }
+
+    [Fact]
+    public void AutomationAppraisalOfTheCurrentObjectStillPresents()
+    {
+        // The flip side: a plugin re-identifying the object the user is
+        // already looking at is a legitimate background data refresh
+        // (durability ticked, a stack count moved) and must still reach
+        // the UI so the open window's content stays accurate -- it just
+        // must not reopen or refocus the window (that is
+        // AppraisalUiController's job via the Origin field, not Runtime's).
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        state.AcceptAppraisalResponse(Item);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Item,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance refresh =
+            state.AcceptAppraisalResponse(Item);
+
+        Assert.True(refresh.Accepted);
+        Assert.True(refresh.FirstResponse);
+        Assert.Equal(AppraisalRequestOrigin.Automation, refresh.Origin);
+        Assert.True(refresh.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+    }
+
+    [Fact]
+    public void UserAppraisalDuringAnInFlightAutomationAppraisalStillRetargets()
+    {
+        // A deliberate user assess issued while a plugin's Identify is
+        // still awaiting its response must win the single appraisal slot
+        // and open the window for the user's object -- exactly like today,
+        // just now carrying an explicit User tag instead of an implicit
+        // default.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        Assert.Equal(
+            AppraisalRequestOrigin.Automation,
+            state.AwaitingAppraisalOrigin);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+
+        RuntimeAppraisalResponseAcceptance userResponse =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userResponse.Accepted);
+        Assert.Equal(AppraisalRequestOrigin.User, userResponse.Origin);
+        Assert.True(userResponse.PresentInUi);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+
+        // The superseded Automation request's late response is dropped by
+        // the existing single-slot semantics (unchanged by this change) --
+        // it is neither the awaiting id nor the current one any more.
+        Assert.False(state.AcceptAppraisalResponse(Container).Accepted);
+    }
+
+    [Fact]
+    public void AutomationAppraisalRefusesToEvictAnAwaitingUserAppraisal()
+    {
+        // HIGH-2: the reverse of the test above. Before this fix, a
+        // plugin's background Identify could win the single awaiting slot
+        // away from a user's own assess that was already in flight, so the
+        // user's assess would silently produce nothing once its response
+        // arrived (it was no longer the awaiting id, so
+        // AcceptAppraisalResponse would refuse it). An Automation request
+        // must instead be refused outright while a User request awaits,
+        // leaving the user's request completely untouched.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var userSent = new List<uint>();
+        var automationSent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(Item, userSent.Add));
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+
+        bool accepted = state.TryRequestAppraisal(
+            Container,
+            automationSent.Add,
+            AppraisalRequestOrigin.Automation);
+
+        Assert.False(accepted);
+        Assert.Empty(automationSent);
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+        Assert.Equal(
+            AppraisalRequestOrigin.User,
+            state.AwaitingAppraisalOrigin);
+        Assert.Equal(1, inventory.BusyCount);
+
+        // The user's own assess still completes normally -- it was never
+        // touched by the refused Automation request.
+        RuntimeAppraisalResponseAcceptance userResponse =
+            state.AcceptAppraisalResponse(Item);
+        Assert.True(userResponse.Accepted);
+        Assert.True(userResponse.PresentInUi);
+        Assert.Equal(AppraisalRequestOrigin.User, userResponse.Origin);
+        Assert.Equal(Item, state.CurrentAppraisalId);
+        Assert.Equal(0, inventory.BusyCount);
+    }
+
+    [Fact]
+    public void ReidentifyOfACompletedObjectThenCancelledLeavesNoFalseCompletion()
+    {
+        // HIGH-3: LastCompletedAppraisalId is a one-shot signal for the
+        // request that produced it, not a sticky history. A plugin
+        // re-identifying an object it already saw complete, whose new
+        // request is then cancelled (CancelObjectAppraisalForSpell) before
+        // it ever completes again, must not see the OLD completion
+        // misread as an answer to the new request -- a poll of
+        // "CurrentObjectId == myId && AwaitingObjectId != myId" would be
+        // trivially (and wrongly) true the instant the new request was
+        // accepted, since both halves were already true from the first
+        // completion.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        state.AcceptAppraisalResponse(Container);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        Assert.True(state.CancelObjectAppraisalForSpell(sent.Add));
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+        Assert.Equal(0u, state.AwaitingAppraisalId);
+    }
+
+    [Fact]
+    public void ReidentifyOfACompletedObjectThenDisplacedByAnotherRequestLeavesNoFalseCompletion()
+    {
+        // HIGH-3, the other half: instead of a cancel, the re-identify's
+        // awaiting slot gets displaced by an unrelated request before it
+        // completes again. The stale completion from the FIRST identify
+        // must not survive to be misread as an answer to the second.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var sent = new List<uint>();
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        state.AcceptAppraisalResponse(Container);
+        Assert.Equal(Container, state.LastCompletedAppraisalId);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container, sent.Add, AppraisalRequestOrigin.Automation));
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+
+        // A user assess for a different object displaces Container's
+        // still-in-flight re-identify out of the single awaiting slot.
+        Assert.True(state.TryRequestAppraisal(Item, sent.Add));
+        Assert.Equal(Item, state.AwaitingAppraisalId);
+
+        Assert.Equal(0u, state.LastCompletedAppraisalId);
+    }
+
+    [Fact]
+    public void AppraisalReceivedFiresForAnAutomationOriginResponseThatDoesNotPresent()
+    {
+        // Plugin-facing observers (IEvents.ObjectChanged(IdentReceived),
+        // ILootAutomation.Appraisal) must still see every accepted
+        // appraisal response regardless of whether the UI presents it.
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+        var received = new List<uint>();
+        state.AppraisalReceived += received.Add;
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        state.AcceptAppraisalResponse(Item);
+
+        Assert.True(state.TryRequestAppraisal(
+            Container,
+            _ => { },
+            AppraisalRequestOrigin.Automation));
+        RuntimeAppraisalResponseAcceptance automation =
+            state.AcceptAppraisalResponse(Container);
+
+        Assert.False(automation.PresentInUi);
+        Assert.Equal(new[] { Item, Container }, received);
+    }
+
+    [Fact]
+    public void TryRequestAppraisalDefaultsToUserOrigin()
+    {
+        using var inventory = NewInventory(out _);
+        using var state = new RuntimeInteractionTransactionState(inventory);
+
+        Assert.True(state.TryRequestAppraisal(Item, _ => { }));
+        Assert.Equal(AppraisalRequestOrigin.User, state.AwaitingAppraisalOrigin);
     }
 
     [Fact]

@@ -168,6 +168,28 @@ public interface IRuntimeMovementCommands
         RuntimeGenerationToken expectedGeneration,
         float headingDegrees,
         bool applyRunHoldKey = false);
+
+    /// <summary>
+    /// Begins a scripted move that the client carries out and ends on its own.
+    /// It replaces only a move on the same channel; moves on other channels go on.
+    /// </summary>
+    RuntimeCommandResult BeginMove(
+        RuntimeGenerationToken expectedGeneration,
+        in Gameplay.RuntimeMoveRequest request);
+
+    /// <summary>Ends every scripted move in progress.</summary>
+    RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration);
+
+    /// <summary>Ends the scripted move on one channel, if there is one.</summary>
+    RuntimeCommandResult StopMove(
+        RuntimeGenerationToken expectedGeneration,
+        Gameplay.RuntimeMoveChannel channel);
+
+    /// <summary>Charges a jump for part of a full charge, from 0 to 1, then releases it.</summary>
+    RuntimeCommandResult Jump(
+        RuntimeGenerationToken expectedGeneration,
+        float power);
 }
 
 public interface IRuntimeChatCommands
