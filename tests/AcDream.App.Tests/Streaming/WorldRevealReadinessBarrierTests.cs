@@ -87,6 +87,27 @@ public sealed class WorldRevealReadinessBarrierTests
         Assert.Equal(window, barrier.RequiredWindow(outdoorCell));
     }
 
+    // Retail's LScape shows the world once mid_radius = 5 (11x11) blocks are
+    // in; the streamer's wider far ring keeps filling after the reveal.
+    [Theory]
+    [InlineData(4, 8, 4, 5)]
+    [InlineData(4, 5, 4, 5)]
+    [InlineData(2, 3, 2, 3)]
+    [InlineData(6, 12, 5, 5)]
+    [InlineData(0, 0, 0, 0)]
+    public void RevealGateWindow_ClampsTheFarRingToRetailsBlockSquare(
+        int nearRadius,
+        int farRadius,
+        int expectedNear,
+        int expectedFar)
+    {
+        StreamingRevealWindow gate =
+            new StreamingRevealWindow(nearRadius, farRadius).ForRevealGate();
+
+        Assert.Equal(new StreamingRevealWindow(expectedNear, expectedFar), gate);
+        Assert.Equal(5, StreamingRevealWindow.RetailLandscapeMidRadius);
+    }
+
     [Theory]
     [InlineData(3, 8)]
     [InlineData(5, 15)]

@@ -407,7 +407,7 @@ internal sealed class SessionPlayerCompositionPhase
             () => StreamingDiagnostics.ApplyRevealRadiusOverride(
                 new StreamingRevealWindow(
                     streaming.NearRadius,
-                    streaming.FarRadius)),
+                    streaming.FarRadius).ForRevealGate()),
             streaming.IsRenderNeighborhoodResident,
             d.PhysicsEngine.IsSpawnCellReady,
             d.PhysicsEngine.IsNeighborhoodTerrainResident,

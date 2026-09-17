@@ -2,7 +2,31 @@ namespace AcDream.App.Streaming;
 
 internal readonly record struct StreamingRevealWindow(
     int NearRadius,
-    int FarRadius);
+    int FarRadius)
+{
+    /// <summary>
+    /// Retail's LScape loads mid_radius = 5 (mid_width = 11) blocks around
+    /// the player before the world is shown (LScape::LScape, 0x00505DD0;
+    /// LScape::SetMidRadius, 0x00505660). That 11x11 square is the retail
+    /// portal-exit gate; everything past it is landscape the retail client
+    /// never drew at all.
+    /// </summary>
+    public const int RetailLandscapeMidRadius = 5;
+
+    /// <summary>
+    /// The window a reveal waits on: the live streaming window clamped to
+    /// retail's 11x11 block square. The streamer keeps filling the wider far
+    /// ring after the reveal; an outdoor arrival no longer holds portal space
+    /// for 17x17 = 289 landblocks when retail released it after 121.
+    /// </summary>
+    public StreamingRevealWindow ForRevealGate()
+    {
+        int far = Math.Clamp(FarRadius, 0, RetailLandscapeMidRadius);
+        return new StreamingRevealWindow(
+            Math.Clamp(NearRadius, 0, far),
+            far);
+    }
+}
 
 internal readonly record struct WorldRevealReadinessSnapshot(
     uint DestinationCell,
