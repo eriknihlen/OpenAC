@@ -91,6 +91,56 @@ public class UiRootInputTests
     }
 
     [Fact]
+    public void Tab_TogglesTheChatEntry_AndKeepsTheTextAcrossTheClose()
+    {
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var field = new UiField { Width = 100, Height = 20 };
+        root.AddChild(field);
+        root.DefaultTextInput = field;
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        root.OnKeyUp((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(field, root.KeyboardFocus);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.H);
+        root.OnChar('h');
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);   // used to fall through unhandled
+        root.OnKeyUp((int)Silk.NET.Input.Key.Tab);
+        Assert.Null(root.KeyboardFocus);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.Tab);
+        Assert.Same(field, root.KeyboardFocus);
+        Assert.Equal("h", field.Text);
+    }
+
+    [Fact]
+    public void SelectableText_WithFocus_LeavesTheGameItsKeys()
+    {
+        // Clicking a transcript gives it focus for Ctrl+C on the selection; it
+        // must not claim the keyboard the way an edit box does, or every key
+        // (movement, Enter, Tab) is dead until something else is clicked.
+        var root = new UiRoot { Width = 800, Height = 600 };
+        var text = new UiText { Left = 10, Top = 10, Width = 200, Height = 100, Selectable = true };
+        var field = new UiField { Left = 10, Top = 200, Width = 100, Height = 20 };
+        root.AddChild(text);
+        root.AddChild(field);
+        var fallen = new List<int>();
+        root.WorldKeyFallThrough += (vk, _) => fallen.Add(vk);
+
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+        Assert.Same(text, root.KeyboardFocus);
+        Assert.False(root.WantsKeyboard);
+
+        root.OnKeyDown((int)Silk.NET.Input.Key.W);
+        Assert.Equal(new[] { (int)Silk.NET.Input.Key.W }, fallen);
+
+        root.SetKeyboardFocus(field);
+        Assert.True(root.WantsKeyboard);
+    }
+
+    [Fact]
     public void UiNineSlicePanel_IsNotAnchorManaged_SoUserMoveResizeSticks()
     {
         // Regression: the per-frame anchor pass must NOT reset a window's rect,

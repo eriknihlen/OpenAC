@@ -763,6 +763,12 @@ public sealed class UiField : UiElement
                         FindRoot()?.SetKeyboardFocus(null);
                         return true;
 
+                    case Silk.NET.Input.Key.Tab:
+                        // Retail's toggle key: the key that opened the entry
+                        // closes it again, and what was typed stays for next time.
+                        FindRoot()?.SetKeyboardFocus(null);
+                        return true;
+
                     case Silk.NET.Input.Key.Enter:
                     case Silk.NET.Input.Key.KeypadEnter:
                         if (!OneLine)

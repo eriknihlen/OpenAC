@@ -138,8 +138,9 @@ public sealed class UiText : UiElement, IUiDatStateful
             if (_selectable == value) return;
             _selectable = value;
             ClickThrough = !value;
+            // Focus is for Ctrl+C on the selection; this is not an edit box,
+            // so the game keeps its keys while a transcript holds a selection.
             AcceptsFocus = value;
-            IsEditControl = value;
             CapturesPointerDrag = value;
             if (!value)
                 ClearSelection();
@@ -187,6 +188,10 @@ public sealed class UiText : UiElement, IUiDatStateful
 
     private Anchored? _anchoredStart;   // identity of _selAnchor, when the lines are keyed
     private Anchored? _anchoredCaret;   // identity of _selCaret
+
+    // ── View anchor ──────────────────────────────────────────────────────
+    private Anchored? _heldTopLine;     // the line at the top of a scrolled-up view, when keyed
+    private int _heldTopLinePixels;     // how far into that line the view begins
 
     public UiText()
     {
@@ -440,11 +445,7 @@ public sealed class UiText : UiElement, IUiDatStateful
         float innerH = bottom - top;
         float contentH = lines.Count * lh;
 
-        Scroll.LineHeight = (int)MathF.Round(lh);
-        Scroll.SetExtents(
-            (int)MathF.Ceiling(contentH),
-            (int)MathF.Floor(innerH),
-            preserveEnd: PreserveEndOnLayout);
+        LayoutScroll(lh, innerH);
 
         float baseY = ContentBaseY(
             top,
@@ -739,11 +740,64 @@ public sealed class UiText : UiElement, IUiDatStateful
     /// </summary>
     internal IReadOnlyList<Line> RefreshLines()
     {
+        HoldTopLine();
         _lastLines = LinesProvider();
         _lastLineKeys = LineKeysProvider?.Invoke() ?? Array.Empty<LineKey>();
         ReanchorSelection();
         return _lastLines;
     }
+
+    /// <summary>
+    /// Size the scroll model to the lines just polled and settle where the view sits in them:
+    /// at the end if it was there, otherwise on the line it was holding. Runs once per drawn
+    /// frame after <see cref="RefreshLines"/>; internal so a test can drive it without a font.
+    /// </summary>
+    internal void LayoutScroll(float lineHeight, float viewHeight)
+    {
+        _lastLineHeight = lineHeight;
+        Scroll.LineHeight = (int)MathF.Round(lineHeight);
+        Scroll.SetExtents(
+            (int)MathF.Ceiling(_lastLines.Count * lineHeight),
+            (int)MathF.Floor(viewHeight),
+            preserveEnd: PreserveEndOnLayout);
+        KeepHeldTopLine(lineHeight);
+    }
+
+    /// <summary>
+    /// Note which line is at the top of a scrolled-up view, and how far into it the view
+    /// begins, before the providers are polled. The offset alone is not enough to hold the
+    /// view still: the chat log is a ring, so once it is full every new message drops the
+    /// oldest line and the same pixel offset lands one line further along — with chat
+    /// flowing, the text the reader scrolled up to runs away from under them.
+    /// </summary>
+    private void HoldTopLine()
+    {
+        _heldTopLine = null;
+        if (Scroll.AtEnd || _lastLineKeys.Count == 0 || _lastLineHeight <= 0f)
+            return;
+
+        int topLine = Math.Clamp(
+            (int)MathF.Floor(Scroll.ScrollY / _lastLineHeight), 0, _lastLineKeys.Count - 1);
+        LineKey key = _lastLineKeys[topLine];
+        _heldTopLine = new Anchored(key.Source, key.Start);
+        _heldTopLinePixels = Scroll.ScrollY - LineTop(topLine, _lastLineHeight);
+    }
+
+    /// <summary>
+    /// Put the view back on the line it was holding, now that the extents match the new
+    /// lines. A line that has dropped out of the log leaves the offset where it is — the
+    /// lines that followed it are the nearest thing left to show.
+    /// </summary>
+    private void KeepHeldTopLine(float lineHeight)
+    {
+        if (_heldTopLine is not { } held)
+            return;
+        _heldTopLine = null;
+        if (TryResolveLine(_lastLineKeys, held.Source, held.Offset, out int line))
+            Scroll.SetScrollY(LineTop(line, lineHeight) + _heldTopLinePixels);
+    }
+
+    private static int LineTop(int line, float lineHeight) => (int)MathF.Floor(line * lineHeight);
 
     private void ClearSelection()
     {
@@ -830,6 +884,24 @@ public sealed class UiText : UiElement, IUiDatStateful
         if (lastOfSource < 0) return false;
         position = new Pos(lastOfSource, lines[lastOfSource].Text.Length);
         return true;
+    }
+
+    /// <summary>
+    /// Find the line that begins at <paramref name="start"/> of source item
+    /// <paramref name="source"/> in the current lines — or, when a re-wrap has moved the
+    /// breaks, the first line of that item to begin at or after it, else its last line. False
+    /// when the item is no longer shown. Pure — unit testable without a font or a frame.
+    /// </summary>
+    public static bool TryResolveLine(IReadOnlyList<LineKey> keys, long source, int start, out int line)
+    {
+        line = -1;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (keys[i].Source != source) continue;
+            line = i;
+            if (keys[i].Start >= start) return true;
+        }
+        return line >= 0;
     }
 
     private bool TryGetOrderedSelection(out Pos start, out Pos end)
