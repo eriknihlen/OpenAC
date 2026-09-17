@@ -1136,7 +1136,8 @@ public sealed class PhysicsEngine
         bool forceIntoCell = request.PlacementClass is
             PhysicsPlacementClass.Hook
             or PhysicsPlacementClass.Storage
-            or PhysicsPlacementClass.Corpse;
+            or PhysicsPlacementClass.Corpse
+            || request.Flags.HasFlag(PhysicsSetPositionFlags.ForceIntoCell);
         if (forceIntoCell)
         {
             if (adjusted.CellId == 0u)

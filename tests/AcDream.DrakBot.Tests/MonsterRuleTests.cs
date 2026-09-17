@@ -89,6 +89,33 @@ public sealed class MonsterRuleTests
     }
 
     [Fact]
+    public void ARuleMayListElementsInOrderAndTheFirstCastableWins()
+    {
+        // "Bludgeon, Pierce, Cold" for an Olthoi: no Shock Wave known, so the
+        // Force Bolt is cast; with Shock Wave known, that.
+        var settings = new CombatSettings
+        {
+            Style = CombatStyle.Magic,
+            Monsters = [new() { Name = MonsterRule.DefaultName, Element = "Bludgeon, Pierce, Cold" }],
+            LineOfSight = new LineOfSightSettings { Enabled = false },
+        };
+        (FakeAutomationSurface surface, CombatBehavior behavior, TickClock clock) = Build(settings);
+        surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Magic };
+        surface.Hostiles.Add(Hostile(7, "Olthoi", 8f));
+        surface.AttackSpells.Add(Spell.AttackIn(501, "Force Bolt VI", 51u, 6));
+        surface.AttackSpells.Add(Spell.AttackIn(502, "Frost Bolt VI", 52u, 6));
+
+        Step(behavior, surface, clock);
+        Assert.Equal("cast:501@7", surface.Commands[^1]);
+
+        surface.AttackSpells.Add(Spell.AttackIn(503, "Shock Wave VI", 53u, 6));
+        surface.CompleteCast(501, target: 7u);
+        Step(behavior, surface, clock);
+        Step(behavior, surface, clock);
+        Assert.Equal("cast:503@7", surface.Commands[^1]);
+    }
+
+    [Fact]
     public void MissileStyleWithNoBowNamedWieldsTheOneInThePackAndIsMissingWithoutOne()
     {
         var settings = new CombatSettings
@@ -285,7 +312,7 @@ public sealed class MonsterRuleTests
         var surface = new FakeAutomationSurface();
         surface.CombatSnapshot = surface.CombatSnapshot with { Mode = PluginCombatMode.Magic };
         surface.AttackSpells.Add(Spell.AttackIn(300, "Flame Bolt VI", 30u, 6));
-        surface.AttackSpells.Add(Spell.AttackIn(301, "Ring of Fire", 31u, 6));
+        surface.AttackSpells.Add(Spell.AttackIn(301, "Flame Ring", 31u, 6));
         surface.CombatSpells.Add(Spell.Debuff(400, "Imperil Other VI", 40u, 6));
         surface.CombatSpells.Add(Spell.Debuff(401, "Fire Vulnerability Other VI", 41u, 6));
         var clock = new TickClock();

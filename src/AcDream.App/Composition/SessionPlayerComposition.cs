@@ -407,7 +407,7 @@ internal sealed class SessionPlayerCompositionPhase
             () => StreamingDiagnostics.ApplyRevealRadiusOverride(
                 new StreamingRevealWindow(
                     streaming.NearRadius,
-                    streaming.FarRadius)),
+                    streaming.FarRadius).ForRevealGate()),
             streaming.IsRenderNeighborhoodResident,
             d.PhysicsEngine.IsSpawnCellReady,
             d.PhysicsEngine.IsNeighborhoodTerrainResident,
@@ -688,7 +688,8 @@ internal sealed class SessionPlayerCompositionPhase
         var liveness = new LiveEntityLivenessController(
             live.LiveEntities,
             d.PlayerIdentity,
-            deletion);
+            deletion,
+            new PhysicsDataCacheEnvCellSource(d.PhysicsDataCache));
         var sessionEvents = new LiveEntitySessionController(
             d.InboundEntityEvents,
             hydration,

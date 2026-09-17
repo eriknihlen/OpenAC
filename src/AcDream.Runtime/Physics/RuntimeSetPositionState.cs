@@ -225,7 +225,8 @@ internal readonly record struct RuntimeSetPositionOutcome(
     PhysicsSetPositionError Error,
     PhysicsResidenceDisposition Residence,
     uint ExactCellId,
-    RuntimePlacementProjectionToken Projection)
+    RuntimePlacementProjectionToken Projection,
+    ImmutableArray<uint> CollidedObjectIds = default)
 {
     internal bool Accepted => Error == PhysicsSetPositionError.Ok;
 }
@@ -5154,7 +5155,8 @@ internal sealed class RuntimeSetPositionState : IDisposable
             result.Error,
             result.Residence,
             result.CellId,
-            projection);
+            projection,
+            result.CollidedObjectIds);
 
     private static RuntimeSetPositionOutcome Rejected(
         in PhysicsSetPositionRequest request) => new(

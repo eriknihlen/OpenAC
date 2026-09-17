@@ -60,6 +60,15 @@ internal enum PhysicsSetPositionFlags : uint
     RandomScatter = 0x200,
     Line = 0x400,
     SendPositionEvent = 0x1000,
+
+    /// <summary>
+    /// Not a retail flag. Commits the requested frame without a placement
+    /// sweep, the way retail's ForceIntoCell does for hooks, storage and
+    /// corpses. Used only after a validated placement of the local player's
+    /// portal arrival was refused by the world, so the client lands where the
+    /// server put it instead of holding portal space forever.
+    /// </summary>
+    ForceIntoCell = 0x8000,
 }
 
 internal enum PhysicsPlacementClass

@@ -79,13 +79,84 @@ public sealed class LiveEntityLivenessControllerTests
     }
 
     [Fact]
-    public void VisibilityInsideADungeonIsTheDungeonsOwnLandblock()
+    public void OutdoorsVisibilityIsTheNeighbourhood()
     {
-        const uint playerCell = 0x01D9_0102u;
+        const uint player = 0x3032_0001u;
 
-        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_0140u));
-        Assert.True(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0x01D9_FFFFu));
-        Assert.False(LiveEntityLivenessController.IsWithinVisibleLandblocks(playerCell, 0xA9B4_0001u));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(player, 0x3032_00A7u, NoEnvCells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(player, 0x3133_00FFu, NoEnvCells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(player, 0x3232_0001u, NoEnvCells));
+    }
+
+    [Fact]
+    public void VisibilityInsideADungeonIsTheCellsPvsList()
+    {
+        // The server holds a dungeon object only while its cell is the
+        // player's cell or on that cell's PVS list; the rest of the same
+        // landblock is out of sight, and a sealed cell sees no neighbour.
+        const uint playerCell = 0x6145_031Du;
+        var cells = EnvCells(
+            (playerCell, false, [0x6145_0317u, 0x6145_0370u]),
+            (0x6145_02B6u, false, []));
+
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, playerCell, cells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6145_0317u, cells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6145_0370u, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6145_02B6u, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6145_0140u, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6245_031Du, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x6145_0001u, cells));
+    }
+
+    [Fact]
+    public void ACellSeenFromOutsideAlsoSeesTheNeighbourhood()
+    {
+        const uint playerCell = 0x3032_0101u;
+        var cells = EnvCells(
+            (playerCell, true, [0x3032_0102u]),
+            (0x3032_0103u, false, []),
+            (0x3032_0104u, true, []));
+
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x3032_0102u, cells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x3032_0001u, cells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x3133_0001u, cells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x3032_0103u, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(playerCell, 0x3234_0001u, cells));
+
+        // From outdoors, an object inside a building is seen only through a
+        // cell that is itself seen from outside.
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(0x3032_0001u, 0x3032_0104u, cells));
+        Assert.False(LiveEntityLivenessController.IsVisibleFrom(0x3032_0001u, 0x3032_0103u, cells));
+    }
+
+    [Fact]
+    public void AnUnloadedEnvironmentCellCannotExpireAnything()
+    {
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(0x6145_031Du, 0x6145_02B6u, NoEnvCells));
+        Assert.True(LiveEntityLivenessController.IsVisibleFrom(0x3032_0001u, 0x3032_0103u, NoEnvCells));
+    }
+
+    private static readonly ILiveEntityEnvCellSource NoEnvCells = new EnvCellSource();
+
+    private static ILiveEntityEnvCellSource EnvCells(
+        params (uint CellId, bool SeenOutside, uint[] VisibleCellIds)[] cells)
+    {
+        var source = new EnvCellSource();
+        foreach ((uint cellId, bool seenOutside, uint[] visibleCellIds) in cells)
+        {
+            source.Cells[cellId] = new LiveEntityEnvCellVisibility(
+                seenOutside,
+                new HashSet<uint>(visibleCellIds));
+        }
+        return source;
+    }
+
+    private sealed class EnvCellSource : ILiveEntityEnvCellSource
+    {
+        public Dictionary<uint, LiveEntityEnvCellVisibility> Cells { get; } = [];
+
+        public LiveEntityEnvCellVisibility? GetEnvCell(uint cellId) =>
+            Cells.TryGetValue(cellId, out LiveEntityEnvCellVisibility cell) ? cell : null;
     }
 
     [Fact]

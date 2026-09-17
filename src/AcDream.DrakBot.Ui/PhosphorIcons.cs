@@ -19,6 +19,7 @@ public static class PhosphorIcons
     public const string Crosshair = "\uE1D6";
     public const string Drop = "\uE210";
     public const string FloppyDisk = "\uE248";
+    public const string FolderOpen = "\uE256";
     public const string Footprints = "\uEA88";
     public const string Gear = "\uE270";
     public const string Heart = "\uE2A8";

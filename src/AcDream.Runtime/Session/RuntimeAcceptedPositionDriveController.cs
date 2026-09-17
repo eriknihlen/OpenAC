@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using AcDream.Content;
 using AcDream.Core.Net;
@@ -98,6 +99,20 @@ public sealed class RuntimeAcceptedPositionDriveController
     internal int PendingCount => _pending is null ? 0 : 1;
 
     private (long RevealGeneration, ushort TeleportSequence)? _lastCommittedPortal;
+
+    /// <summary>
+    /// Why the most recent portal-arrival attempt did not commit, for the
+    /// host's own log. Null after a commit or when no attempt ran yet.
+    /// </summary>
+    internal string? LastPortalArrivalRefusal { get; private set; }
+
+    /// <summary>
+    /// Set when the validated portal placement was refused by the world and
+    /// the arrival was committed at the server's frame without a sweep.
+    /// </summary>
+    internal bool LastPortalArrivalWasForced { get; private set; }
+
+    private bool _lastPortalPlacementRefusedByWorld;
 
     internal bool TryConsumePortalCommit(
         long revealGeneration,
@@ -202,29 +217,59 @@ public sealed class RuntimeAcceptedPositionDriveController
         in RuntimeTeleportDestination destination,
         in RuntimePortalPlacementAuthority portal)
     {
-        if (!portal.IsValid
-            || !_entityObjects.Entities.TryGetActive(
-                _localPlayerServerGuid(), out RuntimeEntityRecord record)
-            || record.PhysicsBody is null
-            || record.Key is not { } key
-            || _entityObjects.TryGetInitialCreateResidence(record, out _))
+        LastPortalArrivalRefusal = null;
+        LastPortalArrivalWasForced = false;
+        if (!portal.IsValid)
         {
-            LogPortalArrivalAttempt(
+            return RefusePortalArrival(
                 RuntimeAcceptedPositionExecutionStatus.NotApplicable,
                 portal,
-                resolvedCell: 0u);
-            return RuntimeAcceptedPositionExecutionStatus.NotApplicable;
+                resolvedCell: 0u,
+                "not-applicable:invalid-authority");
+        }
+        if (!_entityObjects.Entities.TryGetActive(
+                _localPlayerServerGuid(), out RuntimeEntityRecord record))
+        {
+            return RefusePortalArrival(
+                RuntimeAcceptedPositionExecutionStatus.NotApplicable,
+                portal,
+                resolvedCell: 0u,
+                "not-applicable:local-player-inactive");
+        }
+        if (record.PhysicsBody is null)
+        {
+            return RefusePortalArrival(
+                RuntimeAcceptedPositionExecutionStatus.NotApplicable,
+                portal,
+                resolvedCell: 0u,
+                "not-applicable:no-physics-body");
+        }
+        if (record.Key is not { } key)
+        {
+            return RefusePortalArrival(
+                RuntimeAcceptedPositionExecutionStatus.NotApplicable,
+                portal,
+                resolvedCell: 0u,
+                "not-applicable:no-entity-key");
+        }
+        if (_entityObjects.TryGetInitialCreateResidence(record, out _))
+        {
+            return RefusePortalArrival(
+                RuntimeAcceptedPositionExecutionStatus.NotApplicable,
+                portal,
+                resolvedCell: 0u,
+                "not-applicable:initial-create-residence-open");
         }
 
         RuntimeAuthoritativePositionRoute route = ClassifyPortalArrival(
             record, key, destination, _generation());
         if (!route.Accepted)
         {
-            LogPortalArrivalAttempt(
+            return RefusePortalArrival(
                 RuntimeAcceptedPositionExecutionStatus.Rejected,
                 portal,
-                record.FullCellId);
-            return RuntimeAcceptedPositionExecutionStatus.Rejected;
+                record.FullCellId,
+                $"rejected:route={route.Disposition}");
         }
 
         RuntimeSetPositionState setPosition = _entityObjects.Physics.SetPosition;
@@ -237,14 +282,75 @@ public sealed class RuntimeAcceptedPositionDriveController
                 portal);
         if (!token.IsValid)
         {
-            LogPortalArrivalAttempt(
+            uint acceptedCell =
+                (record.Snapshot.Physics?.Position ?? record.Snapshot.Position)
+                    ?.LandblockId ?? 0u;
+            return RefusePortalArrival(
                 RuntimeAcceptedPositionExecutionStatus.Contention,
                 portal,
-                record.FullCellId);
-            return RuntimeAcceptedPositionExecutionStatus.Contention;
+                record.FullCellId,
+                $"contention:placement-owned pending={PendingCount} "
+                + $"recordCell=0x{record.FullCellId:X8} "
+                + $"acceptedCell=0x{acceptedCell:X8}");
         }
 
-        return SubmitAndResolvePortal(record, token, route, portal);
+        RuntimeAcceptedPositionExecutionStatus status =
+            SubmitAndResolvePortal(record, token, route, portal);
+        if (status is not RuntimeAcceptedPositionExecutionStatus.Rejected
+            || !_lastPortalPlacementRefusedByWorld)
+        {
+            return status;
+        }
+
+        // The validated sweep refused the server's frame: the spot is inside
+        // something the world grew after the server measured it. Retail's
+        // SmartBox::TeleportPlayer ignores SetPositionSimple's result and
+        // carries on; a client that re-sweeps the same frame every tick holds
+        // portal space forever (eriknihlen/OpenAC#127). Land where the server
+        // put us, the way retail's ForceIntoCell lands hooks and corpses.
+        string refusal = LastPortalArrivalRefusal ?? "rejected";
+        token = setPosition.TryBeginExclusiveAuthoredPlacement(
+            record,
+            record.PositionAuthorityVersion,
+            route.OperationKind,
+            portal);
+        if (!token.IsValid)
+        {
+            return RefusePortalArrival(
+                RuntimeAcceptedPositionExecutionStatus.Contention,
+                portal,
+                record.FullCellId,
+                $"{refusal}; forced-retry=contention");
+        }
+
+        RuntimeAuthoritativePositionRoute forced = route with
+        {
+            SetPositionFlags = route.SetPositionFlags
+                | PhysicsSetPositionFlags.ForceIntoCell,
+        };
+        status = SubmitAndResolvePortal(record, token, forced, portal);
+        if (status is RuntimeAcceptedPositionExecutionStatus.Committed)
+        {
+            LastPortalArrivalWasForced = true;
+            LastPortalArrivalRefusal = $"{refusal}; forced-into-cell";
+        }
+        else
+        {
+            LastPortalArrivalRefusal =
+                $"{refusal}; forced-retry={status}: {LastPortalArrivalRefusal}";
+        }
+        return status;
+    }
+
+    private RuntimeAcceptedPositionExecutionStatus RefusePortalArrival(
+        RuntimeAcceptedPositionExecutionStatus status,
+        in RuntimePortalPlacementAuthority portal,
+        uint resolvedCell,
+        string detail)
+    {
+        LastPortalArrivalRefusal = detail;
+        LogPortalArrivalAttempt(status, portal, resolvedCell);
+        return status;
     }
 
     private static RuntimeAuthoritativePositionRoute ClassifyPortalArrival(
@@ -305,6 +411,7 @@ public sealed class RuntimeAcceptedPositionDriveController
         in RuntimePortalPlacementAuthority portal)
     {
         RuntimeSetPositionState setPosition = _entityObjects.Physics.SetPosition;
+        _lastPortalPlacementRefusedByWorld = false;
         RuntimeSetPositionMoverPreparationStatus status =
             setPosition.TryPrepareAndSubmitAuthoredPlacement(
                 record,
@@ -330,24 +437,25 @@ public sealed class RuntimeAcceptedPositionDriveController
                     PositionEventOwed = false,
                     Portal = portal,
                 });
-                LogPortalArrivalAttempt(
+                return RefusePortalArrival(
                     RuntimeAcceptedPositionExecutionStatus.Contention,
                     portal,
-                    record.FullCellId);
-                return RuntimeAcceptedPositionExecutionStatus.Contention;
+                    record.FullCellId,
+                    $"contention:prepare={status}");
             }
 
             CancelToken(setPosition, token);
-            LogPortalArrivalAttempt(
+            return RefusePortalArrival(
                 RuntimeAcceptedPositionExecutionStatus.Rejected,
                 portal,
-                record.FullCellId);
-            return RuntimeAcceptedPositionExecutionStatus.Rejected;
+                record.FullCellId,
+                $"rejected:prepare={status}");
         }
 
         switch (outcome.Status)
         {
             case RuntimeSetPositionStatus.CommittedHostAcknowledgementPending:
+                LastPortalArrivalRefusal = null;
                 ReconcileAndAcknowledgePortal(record, route, portal);
                 return RuntimeAcceptedPositionExecutionStatus.Committed;
 
@@ -363,11 +471,11 @@ public sealed class RuntimeAcceptedPositionDriveController
                 if (!setPosition.WatchPlacementCompletion(token))
                 {
                     CancelToken(setPosition, token);
-                    LogPortalArrivalAttempt(
+                    return RefusePortalArrival(
                         RuntimeAcceptedPositionExecutionStatus.Rejected,
                         portal,
-                        record.FullCellId);
-                    return RuntimeAcceptedPositionExecutionStatus.Rejected;
+                        record.FullCellId,
+                        "rejected:deferred-cell-watch-refused");
                 }
                 RetainPending(setPosition, new Pending
                 {
@@ -378,19 +486,41 @@ public sealed class RuntimeAcceptedPositionDriveController
                     PositionEventOwed = false,
                     Portal = portal,
                 });
-                LogPortalArrivalAttempt(
+                return RefusePortalArrival(
                     RuntimeAcceptedPositionExecutionStatus.DeferredCell,
                     portal,
-                    record.FullCellId);
-                return RuntimeAcceptedPositionExecutionStatus.DeferredCell;
+                    record.FullCellId,
+                    $"deferred-cell:parked cell=0x{outcome.ExactCellId:X8} "
+                    + $"residence={outcome.Residence}");
+
+            case RuntimeSetPositionStatus.Rejected:
+                CancelToken(setPosition, token);
+                _lastPortalPlacementRefusedByWorld =
+                    outcome.Error
+                        is PhysicsSetPositionError.NoValidPosition
+                        or PhysicsSetPositionError.Collided;
+                return RefusePortalArrival(
+                    RuntimeAcceptedPositionExecutionStatus.Rejected,
+                    portal,
+                    record.FullCellId,
+                    $"rejected:physics={outcome.Error} "
+                    + $"cell=0x{outcome.ExactCellId:X8} "
+                    + "collided=["
+                    + string.Join(
+                        ",",
+                        (outcome.CollidedObjectIds.IsDefault
+                            ? ImmutableArray<uint>.Empty
+                            : outcome.CollidedObjectIds)
+                            .Select(static id => $"0x{id:X8}"))
+                    + "]");
 
             default:
                 CancelToken(setPosition, token);
-                LogPortalArrivalAttempt(
+                return RefusePortalArrival(
                     RuntimeAcceptedPositionExecutionStatus.Rejected,
                     portal,
-                    record.FullCellId);
-                return RuntimeAcceptedPositionExecutionStatus.Rejected;
+                    record.FullCellId,
+                    $"rejected:outcome={outcome.Status}");
         }
     }
 

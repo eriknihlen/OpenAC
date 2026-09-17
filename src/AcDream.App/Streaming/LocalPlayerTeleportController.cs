@@ -476,6 +476,8 @@ internal sealed class LocalPlayerTeleportController
 
     private bool _awaitingDeferredWake;
 
+    private string? _loggedPlacementRefusal;
+
     private float _holdSeconds;
     private long _lifetimeGeneration;
     private bool _disposed;
@@ -909,17 +911,27 @@ internal sealed class LocalPlayerTeleportController
         if (_placementCommitted)
             return true;
 
+        // The drive pump (Advance) can commit a placement it retained on any
+        // retryable refusal, not only a deferred cell: consume that commit
+        // before sweeping the destination a second time.
+        if (_acceptedPositionDrive.TryConsumePortalCommit(
+                _pendingRevealGeneration, sequence))
+        {
+            _awaitingDeferredWake = false;
+            _placementCommitted = true;
+            LogPlacementOutcome("committed-by-pump");
+            return true;
+        }
+
         if (_awaitingDeferredWake)
         {
             if (_acceptedPositionDrive.PendingCount != 0)
                 return false;
             _awaitingDeferredWake = false;
-            if (_acceptedPositionDrive.TryConsumePortalCommit(
-                    _pendingRevealGeneration, sequence))
-            {
-                _placementCommitted = true;
-                return true;
-            }
+            LogPlacementRefusal(
+                "deferred-cell:pending-dropped "
+                + (_acceptedPositionDrive.LastPortalArrivalRefusal
+                    ?? "(no detail)"));
         }
 
         if (!_worldReveal.CanPlacePortalDestination(
@@ -927,6 +939,7 @@ internal sealed class LocalPlayerTeleportController
                 sequence,
                 _pendingCell))
         {
+            LogPlacementRefusal("stale-reveal");
             PhysicsDiagnostics.LogTeleport(
                 "REFUSED", _pendingCell, "cause=stale-reveal");
             PhysicsDiagnostics.LogLocalTeleportArrival(
@@ -948,14 +961,50 @@ internal sealed class LocalPlayerTeleportController
         {
             case RuntimeAcceptedPositionExecutionStatus.Committed:
                 _placementCommitted = true;
+                if (_acceptedPositionDrive.LastPortalArrivalWasForced)
+                {
+                    LogPlacementOutcome(
+                        "forced-into-cell after "
+                        + (_acceptedPositionDrive.LastPortalArrivalRefusal
+                            ?? "a refused sweep"));
+                }
                 return true;
             case RuntimeAcceptedPositionExecutionStatus.DeferredCell:
                 _awaitingDeferredWake = true;
+                LogPlacementRefusal(
+                    _acceptedPositionDrive.LastPortalArrivalRefusal
+                    ?? "deferred-cell");
                 return false;
             default:
+                LogPlacementRefusal(
+                    $"{status}: "
+                    + (_acceptedPositionDrive.LastPortalArrivalRefusal
+                        ?? "(no detail)"));
                 return false;
         }
     }
+
+    /// <summary>
+    /// One console line per distinct refusal cause per transit, so a
+    /// player's log says why portal space is being held without any probe
+    /// environment variable. Per-tick repeats of the same cause stay quiet.
+    /// </summary>
+    private void LogPlacementRefusal(string cause)
+    {
+        if (string.Equals(_loggedPlacementRefusal, cause, StringComparison.Ordinal))
+            return;
+        _loggedPlacementRefusal = cause;
+        Console.WriteLine(
+            $"live: teleport placement refused (gen={_pendingRevealGeneration} "
+            + $"seq={_transit.ActiveTeleportSequence} "
+            + $"cell=0x{_pendingCell:X8}): {cause}");
+    }
+
+    private void LogPlacementOutcome(string outcome) =>
+        Console.WriteLine(
+            $"live: teleport placement {outcome} (gen={_pendingRevealGeneration} "
+            + $"seq={_transit.ActiveTeleportSequence} "
+            + $"cell=0x{_pendingCell:X8})");
 
     private RuntimeAcceptedPositionExecutionStatus
         TryExecuteCanonicalPortalPlacementCore(ushort sequence)
@@ -971,6 +1020,7 @@ internal sealed class LocalPlayerTeleportController
                 _pendingCell,
                 out RuntimeWorldHostProjectionToken hostToken))
         {
+            LogPlacementRefusal("host-token-unavailable");
             PhysicsDiagnostics.LogTeleport(
                 "REFUSED", _pendingCell, "cause=host-token-unavailable");
             PhysicsDiagnostics.LogLocalTeleportArrival(
@@ -1344,6 +1394,7 @@ internal sealed class LocalPlayerTeleportController
         _pendingDestination = destination;
         _hasPendingDestination = true;
         _holdSeconds = 0f;
+        _loggedPlacementRefusal = null;
         PhysicsDiagnostics.LogTeleport(
             "AIM",
             position.ObjCellId,
@@ -1372,6 +1423,7 @@ internal sealed class LocalPlayerTeleportController
         _hasPendingDestination = false;
         _placementCommitted = false;
         _awaitingDeferredWake = false;
+        _loggedPlacementRefusal = null;
         _holdSeconds = 0f;
         _loginRevealGeneration = 0;
         _loginPresentationActive = false;

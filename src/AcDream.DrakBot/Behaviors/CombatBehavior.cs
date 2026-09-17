@@ -402,6 +402,8 @@ public sealed class CombatBehavior(
                 CastOutcome? outcome = casts.Poll();
                 if (casts.HasPendingRequest)
                     return BehaviorStep.Continue;
+                if (outcome is CastOutcome.Succeeded or null)
+                    NoteSwing(board);
                 EnterPhase(Phase.Idle, board.Now);
                 return outcome is CastOutcome.Succeeded or null
                     ? BehaviorStep.Done
@@ -1126,6 +1128,9 @@ public sealed class CombatBehavior(
         if (result != PluginCastRequestResult.Sent)
             return BehaviorStep.Fail($"{spell.Name}: {result}");
         context.Log.Debug($"combat: cast {spell.Name} ({spell.SpellId}) at {target.Name} {target.Distance:0.0}m");
+        // A cast is a swing for the kill count: the target that vanishes
+        // just after it went out was killed by it.
+        _swingTarget = (target.ObjectId, target.Name, target.Distance);
         EnterPhase(Phase.Casting, context.Board.Now);
         return BehaviorStep.Continue;
     }
@@ -1147,9 +1152,22 @@ public sealed class CombatBehavior(
         if (rule is null)
             return spells.TryBestAttack(combat.ElementKeyword, out spell);
 
-        string element = rule.Element.Equals("Auto", StringComparison.OrdinalIgnoreCase)
-            ? (combat.ElementKeyword.Length > 0 ? combat.ElementKeyword : "Fire")
-            : rule.Element;
+        // A rule may list elements in order of preference - "Bludgeon, Pierce,
+        // Cold" for an Olthoi - and the first the character can cast wins;
+        // the debuffs follow the element chosen.
+        string[] preferred = (rule.Element.Equals("Auto", StringComparison.OrdinalIgnoreCase)
+                ? (combat.ElementKeyword.Length > 0 ? combat.ElementKeyword : "Fire")
+                : rule.Element)
+            .Split([',', '/', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string element = preferred.Length > 0 ? preferred[0] : "Fire";
+        foreach (string candidate in preferred)
+        {
+            if (spells.TryBestOffensive(candidate, rule.Shape, ring: false, out _))
+            {
+                element = candidate;
+                break;
+            }
+        }
 
         IReadOnlyList<PluginTrackedEnchantment> landed = context.Surface.Enchantments.Capture(target.ObjectId);
         foreach ((DebuffKind kind, string debuffElement) in MonsterRules.Debuffs(rule, element))

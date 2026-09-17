@@ -76,13 +76,45 @@ internal sealed class LiveEntityLivenessTracker
 }
 
 /// <summary>
+/// The visibility facts of one loaded environment cell: whether it is seen
+/// from outdoors, and the cells (full ids) on its PVS list.
+/// </summary>
+internal readonly record struct LiveEntityEnvCellVisibility(
+    bool SeenOutside,
+    IReadOnlySet<uint> VisibleCellIds);
+
+/// <summary>
+/// Looks up loaded environment cells by full cell id. A cell that is not
+/// loaded yields null, and nothing judged by it may expire.
+/// </summary>
+internal interface ILiveEntityEnvCellSource
+{
+    LiveEntityEnvCellVisibility? GetEnvCell(uint cellId);
+}
+
+/// <summary>The production source: the collision world's loaded cells.</summary>
+internal sealed class PhysicsDataCacheEnvCellSource(
+    AcDream.Core.Physics.PhysicsDataCache cells) : ILiveEntityEnvCellSource
+{
+    private readonly AcDream.Core.Physics.PhysicsDataCache _cells =
+        cells ?? throw new ArgumentNullException(nameof(cells));
+
+    public LiveEntityEnvCellVisibility? GetEnvCell(uint cellId) =>
+        _cells.GetCellStruct(cellId) is { } cell
+            ? new LiveEntityEnvCellVisibility(cell.SeenOutside, cell.VisibleCellIds)
+            : null;
+}
+
+/// <summary>
 /// Owns the 25-second destruction deadline for world objects that left
-/// visibility. Visibility is the player's landblock and its eight
-/// neighbours (a dungeon is its own landblock): the original client only
-/// ever holds those cells, releases everything outside them, and the server
-/// mirrors the same 3x3 as the player's known-object set, forgetting an
-/// object 25 s after it leaves and re-sending it on return. Objects held by
-/// a container, wielder, or parent, and attached projections, never expire.
+/// visibility. Visibility is the server's known-object rule, which the
+/// original client shares: outdoors, the player's landblock and its eight
+/// neighbours; inside an environment cell, that cell and the cells on its
+/// PVS list, plus the 3x3 neighbourhood only when the cell is seen from
+/// outside. The server forgets an object 25 s after it leaves that set,
+/// sends nothing for its later decay, and re-sends a create when the
+/// player returns. Objects held by a container, wielder, or parent, and
+/// attached projections, never expire.
 /// </summary>
 internal sealed class LiveEntityLivenessController
 {
@@ -93,6 +125,7 @@ internal sealed class LiveEntityLivenessController
     private readonly LiveEntityRuntime _runtime;
     private readonly ILocalPlayerIdentitySource _identity;
     private readonly ILiveEntityPruneSink _prune;
+    private readonly ILiveEntityEnvCellSource _envCells;
     private readonly LiveEntityLivenessTracker _tracker = new();
     private readonly List<LiveEntityLivenessSample> _samples = new();
     private double _nextMaintenanceAt;
@@ -100,11 +133,13 @@ internal sealed class LiveEntityLivenessController
     public LiveEntityLivenessController(
         LiveEntityRuntime runtime,
         ILocalPlayerIdentitySource identity,
-        ILiveEntityPruneSink prune)
+        ILiveEntityPruneSink prune,
+        ILiveEntityEnvCellSource envCells)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _prune = prune ?? throw new ArgumentNullException(nameof(prune));
+        _envCells = envCells ?? throw new ArgumentNullException(nameof(envCells));
     }
 
     public void Tick(double now)
@@ -142,7 +177,7 @@ internal sealed class LiveEntityLivenessController
                         $"Materialized liveness owner 0x{record.ServerGuid:X8}/" +
                         $"{record.Generation} has no exact projection key."),
                 record.ServerGuid,
-                IsWithinVisibleLandblocks(playerCell, cell),
+                IsVisibleFrom(playerCell, cell, _envCells),
                 retained));
         }
 
@@ -164,6 +199,56 @@ internal sealed class LiveEntityLivenessController
         _samples.Clear();
         _nextMaintenanceAt = 0;
     }
+
+    /// <summary>
+    /// The server's cell-to-cell visibility rule. Outdoors it is the 3x3
+    /// landblock neighbourhood. When either cell is an environment cell
+    /// (low half at or above 0x100) that cell's PVS list decides within its
+    /// landblock, and only a cell seen from outside also sees the 3x3
+    /// neighbourhood; a sealed dungeon cell sees nothing beyond its list.
+    /// An environment cell that is not loaded cannot be judged, so the
+    /// object counts as visible and is kept.
+    /// </summary>
+    internal static bool IsVisibleFrom(
+        uint playerCell,
+        uint entityCell,
+        ILiveEntityEnvCellSource envCells)
+    {
+        ArgumentNullException.ThrowIfNull(envCells);
+        if (playerCell == entityCell)
+            return true;
+
+        bool withinNeighbourhood = IsWithinVisibleLandblocks(playerCell, entityCell);
+        bool sameLandblock = (playerCell & 0xFFFF0000u) == (entityCell & 0xFFFF0000u);
+
+        if (IsEnvCell(playerCell))
+        {
+            return IsVisibleIndoors(
+                playerCell, entityCell, sameLandblock, withinNeighbourhood, envCells);
+        }
+        if (IsEnvCell(entityCell))
+        {
+            return IsVisibleIndoors(
+                entityCell, playerCell, sameLandblock, withinNeighbourhood, envCells);
+        }
+        return withinNeighbourhood;
+    }
+
+    private static bool IsVisibleIndoors(
+        uint envCellId,
+        uint otherCell,
+        bool sameLandblock,
+        bool withinNeighbourhood,
+        ILiveEntityEnvCellSource envCells)
+    {
+        if (envCells.GetEnvCell(envCellId) is not { } envCell)
+            return true;
+        if (sameLandblock && envCell.VisibleCellIds.Contains(otherCell))
+            return true;
+        return envCell.SeenOutside && withinNeighbourhood;
+    }
+
+    private static bool IsEnvCell(uint cellId) => (cellId & 0xFFFFu) >= 0x100u;
 
     /// <summary>
     /// True when <paramref name="entityCell"/>'s landblock is within one

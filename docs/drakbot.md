@@ -111,8 +111,10 @@ minute is named in the log, with whether an action or a cast is pending.
 The Combat tab's element keyword fights everything the same way. The
 Monsters tab is the VTank-style list instead: one rule per kind of monster
 (a regular expression over the name, or a substring when it is not one),
-with a priority (higher first, zero never fought), an element (or Auto for
-the profile's), the war spell's shape (bolt, arc, streak) and whether to
+with a priority (higher first, zero never fought), an element - or a
+list of them in order of preference, "Bludgeon, Pierce, Cold" for an
+Olthoi, the first the character can cast winning, or Auto for the
+profile's - the war spell's shape (bolt, arc, streak) and whether to
 ring instead once the profile's minimum number of hostiles stand within
 ring range, and the debuffs to land first - imperil, the element's
 vulnerability, a second vulnerability, fester, yield, broadside, gravity
@@ -686,6 +688,7 @@ game's own look.
 /drakbot start | stop | status | rebuff
 /drakbot spells        (what the character can cast; each configured buff: what would be cast, up or due, or what is in the way)
 /drakbot spells <name> (one spell by name - "Heal Self" - and why it is or is not castable)
+/drakbot world [n]     (what the client is holding: world objects by kind and name, most numerous first - for a client that has slowed after hours)
 (a file named commands.txt in the bot's folder, one command per line, is read and deleted once a second and each line run as if typed)
 /drakbot folder [profiles|routes|loot|metas|logs]     (where the bot's files are; opens it)
 /drakbot log quiet|info|debug|trace | tail [n] | dump | clear
