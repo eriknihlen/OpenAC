@@ -688,7 +688,8 @@ internal sealed class SessionPlayerCompositionPhase
         var liveness = new LiveEntityLivenessController(
             live.LiveEntities,
             d.PlayerIdentity,
-            deletion);
+            deletion,
+            new PhysicsDataCacheEnvCellSource(d.PhysicsDataCache));
         var sessionEvents = new LiveEntitySessionController(
             d.InboundEntityEvents,
             hydration,
