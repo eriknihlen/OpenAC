@@ -19,7 +19,7 @@ using DatReaderWriter.Enums;
 
 namespace AcDream.App.Tests.Streaming;
 
-public sealed class LocalPlayerTeleportControllerTests
+public sealed partial class LocalPlayerTeleportControllerTests
 {
     [Fact]
     public void DeferredNetworkOwnedBindingReleasesExactlyAndAllowsRebind()
