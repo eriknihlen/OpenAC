@@ -94,6 +94,9 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
                 case "hazard":
                     Hazard(rest);
                     break;
+                case "world":
+                    World(rest);
+                    break;
                 default:
                     if (verb.StartsWith("jump", StringComparison.Ordinal))
                     {
@@ -463,6 +466,33 @@ internal sealed class BotCommands(BotController controller, IPluginChat chat)
             return;
         }
         Say(controller.TryGoTo(northSouth, eastWest, out string message) ? message : $"cannot go there: {message}");
+    }
+
+    /// <summary>
+    /// What the client is holding: world objects by kind and name, most
+    /// numerous first - for a client that has run for hours and slowed,
+    /// to see what has piled up (a corpse the server forgot to remove, a
+    /// creature kept after its death).
+    /// </summary>
+    private void World(string[] args)
+    {
+        int count = args.Length > 0 && int.TryParse(args[0], out int n) ? Math.Clamp(n, 1, 50) : 15;
+        IReadOnlyList<PluginWorldObject> objects = controller.Engine.Surface.Objects.CaptureObjects();
+        var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byName = new Dictionary<string, int>(StringComparer.Ordinal);
+        int owned = 0, positioned = 0;
+        foreach (PluginWorldObject o in objects)
+        {
+            if (o.IsOwned) owned++;
+            if (o.HasPosition) positioned++;
+            byKind[o.ObjectClass.ToString()] = byKind.GetValueOrDefault(o.ObjectClass.ToString()) + 1;
+            string name = $"{o.Name} ({o.ObjectClass})";
+            byName[name] = byName.GetValueOrDefault(name) + 1;
+        }
+        Say($"world: {objects.Count} object(s) known to the client, {owned} owned, {positioned} placed");
+        Say("  by kind: " + string.Join(", ", byKind.OrderByDescending(p => p.Value).Select(p => $"{p.Key} {p.Value}")));
+        foreach ((string name, int total) in byName.OrderByDescending(p => p.Value).Take(count))
+            Say($"  {total,5}  {name}");
     }
 
     private void Hazard(string[] args)
