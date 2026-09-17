@@ -856,6 +856,89 @@ public sealed class RuntimeAcceptedPositionDriveControllerTests
     #region Portal arm route
 
     [Fact]
+    public void PortalRefusedByTheWorld_LandsAtTheServerFrameInsteadOfSweepingForever()
+    {
+        // eriknihlen/OpenAC#127: the sanctuary frame is inside something the
+        // world grew after the tie (a lifestone's collision, typically). A
+        // validated sweep refuses it every tick; retail ignores the refusal
+        // and carries on, so the arrival is forced into the cell exactly once.
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        (RuntimeEntityRecord record, PlayerMovementController controller) =
+            EnterLocalPlayer(runtime);
+        runtime.EntityObjects.Physics.Engine.TransitionCellCollisionTestHook =
+            static (_, phase, _, observed) => phase
+                is TransitionCellCollisionPhase.Objects
+                    ? TransitionState.Collided
+                    : observed;
+
+        const ushort teleportSequence = 11;
+        var destinationPosition = new Vector3(33f, 35f, SpawnHeight);
+        WorldSession.EntityPositionUpdate destinationUpdate = PortalDestinationUpdate(
+            destinationPosition, SpawnLandblock | 0x0001u, teleportSequence);
+        MergeAccepted(runtime, controller, destinationUpdate);
+        (RuntimePortalPlacementAuthority portal, RuntimeTeleportDestination destination) =
+            BeginPortal(runtime, SpawnLandblock | 0x0001u, teleportSequence, destinationUpdate);
+        using var portalHostGuard = new PortalHostConvergenceGuard(
+            runtime, portal.RevealGeneration, portal.Projection);
+        RuntimeAcceptedPositionDriveController drive =
+            CreateAcceptedPositionDrive(runtime, out List<byte[]> gameActions);
+
+        RuntimeAcceptedPositionExecutionStatus status =
+            drive.TryExecuteAcceptedPortalArrival(destination, portal);
+
+        Assert.Equal(RuntimeAcceptedPositionExecutionStatus.Committed, status);
+        Assert.True(drive.LastPortalArrivalWasForced);
+        Assert.Contains("rejected:physics=NoValidPosition", drive.LastPortalArrivalRefusal);
+        Assert.Contains("forced-into-cell", drive.LastPortalArrivalRefusal);
+        Assert.Equal(destinationPosition, controller.Position);
+        Assert.Equal(SpawnLandblock, record.FullCellId & 0xFFFF0000u);
+        Assert.Equal(0, drive.PendingCount);
+        Assert.Single(gameActions);
+        Assert.True(drive.TryConsumePortalCommit(portal.RevealGeneration, teleportSequence));
+        ConvergePortalHost(runtime, portal.RevealGeneration, portal.Projection);
+        AssertConverged(runtime);
+    }
+
+    [Fact]
+    public void PortalRefusedByAuthority_IsNotForced()
+    {
+        // Only a world refusal (the sweep collided) earns the forced landing;
+        // a placement the runtime itself rejects keeps its refusal.
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        (RuntimeEntityRecord record, PlayerMovementController controller) =
+            EnterLocalPlayer(runtime);
+        Vector3 positionBefore = controller.Position;
+
+        const ushort teleportSequence = 12;
+        WorldSession.EntityPositionUpdate destinationUpdate = PortalDestinationUpdate(
+            new Vector3(30f, 32f, SpawnHeight), SpawnLandblock | 0x0001u, teleportSequence);
+        MergeAccepted(runtime, controller, destinationUpdate);
+        (RuntimePortalPlacementAuthority portal, RuntimeTeleportDestination destination) =
+            BeginPortal(runtime, SpawnLandblock | 0x0001u, teleportSequence, destinationUpdate);
+        using var portalHostGuard = new PortalHostConvergenceGuard(
+            runtime, portal.RevealGeneration, portal.Projection);
+        RuntimeAcceptedPositionDriveController drive =
+            CreateAcceptedPositionDrive(runtime, out List<byte[]> gameActions);
+        var mismatched = new RuntimePortalPlacementAuthority(
+            true, portal.RevealGeneration, teleportSequence,
+            new RuntimeWorldHostProjectionToken(
+                portal.RevealGeneration, SpawnLandblock | 0x0002u));
+
+        RuntimeAcceptedPositionExecutionStatus status =
+            drive.TryExecuteAcceptedPortalArrival(destination, mismatched);
+
+        Assert.Equal(RuntimeAcceptedPositionExecutionStatus.Contention, status);
+        Assert.False(drive.LastPortalArrivalWasForced);
+        Assert.StartsWith("contention:placement-owned", drive.LastPortalArrivalRefusal);
+        Assert.Equal(positionBefore, controller.Position);
+        Assert.Empty(gameActions);
+        ConvergePortalHost(runtime, portal.RevealGeneration, portal.Projection);
+        AssertConverged(runtime);
+    }
+
+    [Fact]
     public void PortalCommitted_UnderServerControlSendsNoMovementEvent()
     {
         using StartedRuntime started = StartRuntime();
