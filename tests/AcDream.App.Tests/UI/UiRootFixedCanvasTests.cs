@@ -104,4 +104,40 @@ public class UiRootFixedCanvasTests
         root.OnMouseUp(UiMouseButton.Left, 360, 420);
         Assert.Equal(1, clicks);
     }
+
+    [Fact]
+    public void GameplayScale_ResizesLogicalCanvas_AndMapsPointer()
+    {
+        var root = new UiRoot();
+        root.SetScreenSize(new Vector2(3840f, 2160f));
+        root.GameplayUiScale = 2f;
+
+        Assert.Equal(new Vector2(1920f, 1080f), root.EffectiveCanvasSize);
+        Assert.Equal(new Vector2(2f, 2f), root.CanvasScale);
+
+        int clicks = 0;
+        root.AddChild(new UiButton(
+            new ElementInfo { Width = 120, Height = 40 },
+            _ => (0u, 0, 0))
+        {
+            Left = 350f,
+            Top = 280f,
+            Width = 120f,
+            Height = 40f,
+            OnClick = () => clicks++,
+        });
+
+        root.OnMouseMove(800, 600);
+        Assert.Equal(400, root.MouseX);
+        Assert.Equal(300, root.MouseY);
+        root.OnMouseDown(UiMouseButton.Left, 800, 600);
+        root.OnMouseUp(UiMouseButton.Left, 800, 600);
+        Assert.Equal(1, clicks);
+
+        root.DeclareFixedCanvas(this, new Vector2(800f, 600f));
+        Assert.Equal(new Vector2(4.8f, 3.6f), root.CanvasScale);
+        root.RevokeFixedCanvas(this);
+        Assert.Equal(new Vector2(2f, 2f), root.CanvasScale);
+        Assert.Equal(new Vector2(1920f, 1080f), root.EffectiveCanvasSize);
+    }
 }

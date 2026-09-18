@@ -454,6 +454,17 @@ public sealed class SettingsStoreTests : System.IDisposable
         Assert.Equal(original, store.LoadChat());
     }
 
+    [Fact]
+    public void UiScale_round_trips_and_defaults_to_one_hundred_percent()
+    {
+        var store = new SettingsStore(_tempPath);
+        Assert.Equal(100, store.LoadChat().UiScalePercent);
+
+        store.SaveChat(store.LoadChat() with { UiScalePercent = 230 });
+
+        Assert.Equal(230, store.LoadChat().UiScalePercent);
+    }
+
 
     [Fact]
     public void LoadChat_returns_retail_PostInit_filter_defaults_when_file_is_missing()

@@ -121,6 +121,9 @@ public static class ConfigOptionsPageController
         /// <summary>Applies a chat face/size pair to the live chat windows, called after
         /// <see cref="SaveChat"/> so the choice is both stored and live.</summary>
         public Action<int, int>? ApplyChatFont { get; init; }
+
+        /// <summary>Applies the stored gameplay UI scale to the live canvas.</summary>
+        public Action<int>? ApplyUiScale { get; init; }
     }
 
     /// <summary>
@@ -1325,6 +1328,35 @@ public static class ConfigOptionsPageController
             storeOnly: false,
             resolveSprite, datFont, debugFont);
 
+        int currentScalePercent = bindings.LoadChat().UiScalePercent;
+        page.BeforeApply += () =>
+        {
+            if (currentScalePercent == bindings.LoadChat().UiScalePercent)
+                return;
+            bindings.SaveChat(bindings.LoadChat() with { UiScalePercent = currentScalePercent });
+            bindings.ApplyUiScale?.Invoke(currentScalePercent);
+        };
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "UI Scale",
+            min: 50,
+            max: 300,
+            step: 10,
+            integer: true,
+            defaultValue: 100,
+            page,
+            read: () => currentScalePercent = bindings.LoadChat().UiScalePercent,
+            apply: value =>
+            {
+                currentScalePercent = (int)value;
+                return true;
+            },
+            isCurrent: () => true,
+            tooltip: "Scale gameplay frames, text, and controls together after Apply.",
+            rangeLowText: "50%",
+            rangeHighText: "300%",
+            dynamicLabel: () => $"UI Scale ({currentScalePercent}%)");
+
         chat = bindings.LoadChat();
     }
 
@@ -1924,7 +1956,8 @@ public static class ConfigOptionsPageController
         string? tooltip = null,
         Func<bool>? dimmed = null,
         string? rangeLowText = null,
-        string? rangeHighText = null)
+        string? rangeHighText = null,
+        Func<string>? dynamicLabel = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(RangedSliderTemplateIndex);
         if (row is null)
@@ -1939,7 +1972,7 @@ public static class ConfigOptionsPageController
             label.LinesProvider = () =>
             [
                 new UiText.Line(
-                    labelText,
+                    dynamicLabel?.Invoke() ?? labelText,
                     dimmed?.Invoke() == true
                         ? UiRenderContext.StoreOnlyCaptionColor
                         : label.DefaultColor),
@@ -1977,8 +2010,13 @@ public static class ConfigOptionsPageController
             {
                 double snapped = SnapExplicitNumber(value, min, max, step, integer);
                 slider.SetScalarPosition((float)((snapped - min) / (max - min)));
-                if (!isCurrent() || apply(snapped))
+                if (!isCurrent())
                     return;
+                if (apply(snapped))
+                {
+                    option!.RefreshFromLink((float)snapped);
+                    return;
+                }
                 double stored = SnapExplicitNumber(read(), min, max, step, integer);
                 slider.SetScalarPosition((float)((stored - min) / (max - min)));
                 option!.RefreshFromLink((float)stored);

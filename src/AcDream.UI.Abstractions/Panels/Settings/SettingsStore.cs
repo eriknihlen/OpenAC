@@ -203,7 +203,8 @@ public sealed class SettingsStore
                 DefaultOpacity:   ReadFloat(chat, "defaultOpacity",   d.DefaultOpacity),
                 ActiveOpacity:    ReadFloat(chat, "activeOpacity",    d.ActiveOpacity),
                 ChatFontFace:      ReadInt(chat, "chatFontFace",      d.ChatFontFace),
-                ChatFontSizeIndex: ReadInt(chat, "chatFontSizeIndex", d.ChatFontSizeIndex));
+                ChatFontSizeIndex: ReadInt(chat, "chatFontSizeIndex", d.ChatFontSizeIndex),
+                UiScalePercent: Math.Clamp(ReadInt(chat, "uiScalePercent", d.UiScalePercent), 50, 300));
         }
         catch (Exception ex)
         {
@@ -676,6 +677,7 @@ public sealed class SettingsStore
             ["appearOffline"]     = c.AppearOffline,
             ["chatFontFace"]      = c.ChatFontFace,
             ["chatFontSizeIndex"] = c.ChatFontSizeIndex,
+            ["uiScalePercent"] = c.UiScalePercent,
             ["chatWindow1Filter"] = c.ChatWindow1Filter,
             ["chatWindow2Filter"] = c.ChatWindow2Filter,
             ["chatWindow3Filter"] = c.ChatWindow3Filter,

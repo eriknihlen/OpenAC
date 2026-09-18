@@ -389,6 +389,7 @@ public sealed class RetailUiRuntime : IDisposable
     private Layout.CharacterTitlesController? _characterTitlesController;
     private ResourceShutdownTransaction? _shutdown;
     private bool _disposed;
+    private int _requestedUiScalePercent = 100;
 
     internal bool IsDisposalComplete => _disposed;
 
@@ -407,6 +408,10 @@ public sealed class RetailUiRuntime : IDisposable
             IsClientWindowVisible);
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
+        _requestedUiScalePercent = Math.Clamp(chatSettings.UiScalePercent, 50, 300);
+        bindings.Host.Root.GameplayUiScale = (bindings.IsGameplayDisplay?.Invoke() ?? true)
+            ? _requestedUiScalePercent / 100f
+            : 1f;
         WindowLockPresentation = new RetailWindowLockPresentationController(
             bindings.Host.Root.WindowManager);
         WindowOpacity = new RetailWindowOpacityController(
@@ -486,7 +491,7 @@ public sealed class RetailUiRuntime : IDisposable
                 Host.WindowManager,
                 persistence?.Store,
                 persistence?.CharacterKey ?? (() => "default"),
-                persistence?.ScreenSize ?? (() => ((int)Host.Root.Width, (int)Host.Root.Height)),
+                () => ((int)Host.Root.EffectiveCanvasSize.X, (int)Host.Root.EffectiveCanvasSize.Y),
                 stateManagedVisibilityWindows:
                 [
                     WindowNames.Combat,
@@ -692,7 +697,7 @@ public sealed class RetailUiRuntime : IDisposable
     public void Tick(double deltaSeconds)
     {
         _bindings.SynchronizeDisplayPhase?.Invoke();
-        _persistence?.SetGameplayActive(_bindings.IsGameplayDisplay?.Invoke() ?? true);
+        SyncGameplayUiScale();
         Layout.UiMediaClock.Advance(deltaSeconds);
         FpsController?.Tick();
         _vividTargetIndicator?.Tick();
@@ -736,10 +741,10 @@ public sealed class RetailUiRuntime : IDisposable
 
     public void Draw(System.Numerics.Vector2 screenSize)
     {
+        SyncGameplayUiScale();
         if (screenSize != _lastScreenSize)
         {
-            Host.Root.Width = screenSize.X;
-            Host.Root.Height = screenSize.Y;
+            Host.Root.SetScreenSize(screenSize);
             bool gameplay = _bindings.IsGameplayDisplay?.Invoke() ?? true;
             _persistence?.SetGameplayActive(gameplay);
             if (gameplay) _persistence?.ReflowToScreen();
@@ -1119,8 +1124,7 @@ public sealed class RetailUiRuntime : IDisposable
         if (_bindings.Persistence is { } persistence)
         {
             var screen = persistence.ScreenSize();
-            Host.Root.Width = screen.Width;
-            Host.Root.Height = screen.Height;
+            Host.Root.SetScreenSize(new System.Numerics.Vector2(screen.Width, screen.Height));
             _lastScreenSize = new System.Numerics.Vector2(screen.Width, screen.Height);
         }
         _persistence?.RestoreAll();
@@ -1688,6 +1692,24 @@ public sealed class RetailUiRuntime : IDisposable
         _chatWindowController?.ApplyChatFont(font);
         foreach (FloatingChatWindowController? floating in _floatingChatControllers)
             floating?.ApplyChatFont(font);
+    }
+
+    private void ApplyUiScale(int percent)
+    {
+        _requestedUiScalePercent = Math.Clamp(percent, 50, 300);
+        SyncGameplayUiScale();
+    }
+
+    private void SyncGameplayUiScale()
+    {
+        bool gameplay = _bindings.IsGameplayDisplay?.Invoke() ?? true;
+        _persistence?.SetGameplayActive(gameplay);
+        float desired = gameplay ? _requestedUiScalePercent / 100f : 1f;
+        if (Host.Root.GameplayUiScale == desired)
+            return;
+        Host.Root.GameplayUiScale = desired;
+        if (gameplay)
+            _persistence?.ReflowToScreen();
     }
 
     private void MountToolbar()
@@ -2703,6 +2725,7 @@ public sealed class RetailUiRuntime : IDisposable
                         }
                         : null,
                     ApplyChatFont = ApplyChatFont,
+                    ApplyUiScale = ApplyUiScale,
                 },
                 resolveSprite: _bindings.Assets.ResolveSprite,
                 datFont: _bindings.Assets.DefaultFont,
