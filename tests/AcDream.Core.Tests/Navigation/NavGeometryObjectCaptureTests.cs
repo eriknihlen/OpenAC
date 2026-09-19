@@ -15,6 +15,7 @@ public class NavGeometryObjectCaptureTests
     private const uint LandblockId = 0xA9B4FFFFu;
     private const uint Rock = 0x8000_2AAEu;
     private const uint Post = 0xCA9B_4061u;
+    private const uint Bolt = 0x8000_2AAFu;
     private static readonly NavBody Body = NavBody.Player(0.6f, 1.5f);
 
     [Fact]
@@ -99,9 +100,55 @@ public class NavGeometryObjectCaptureTests
         Assert.NotEqual(0uL, geometry.ObjectFingerprint);
     }
 
+    /// <summary>
+    /// A spell's bolt, an arrow or a thrown blade crosses a dungeon every frame it is
+    /// in flight. None of it is floor or wall, and none of it may count towards what
+    /// the objects here came to: a grid that counted one would be out of date the
+    /// moment it was built, and the client would do nothing but build grids while
+    /// anything was being cast.
+    /// </summary>
+    [Fact]
+    public void AMissileInFlightIsNeitherFloorNorAReasonToBuildAgain()
+    {
+        PhysicsEngine engine = FlatWorld();
+        RegisterRock(engine, new Vector3(30f, 30f, 0f), radius: 1.2f, height: 1.5f);
+        ulong still = NavGeometry.FingerprintObjects(engine, 0f, 0f, 64f, Anything);
+
+        RegisterBolt(engine, new Vector3(20f, 30f, 51f));
+        NavGeometry geometry = NavGeometry.Capture(engine, 0f, 0f, 64f, standsOn: Anything)!;
+        ulong cast = NavGeometry.FingerprintObjects(engine, 0f, 0f, 64f, Anything);
+
+        RegisterBolt(engine, new Vector3(24f, 30f, 51f));
+        ulong flying = NavGeometry.FingerprintObjects(engine, 0f, 0f, 64f, Anything);
+
+        Assert.Equal(still, cast);
+        Assert.Equal(still, flying);
+        Assert.Equal(geometry.ObjectFingerprint, flying);
+        Assert.DoesNotContain(Bolt, geometry.ObjectIds);
+        NavGrid grid = NavGrid.Build(geometry, Body);
+        Assert.True(
+            grid.FindNode(new Vector3(20f, 30f, 51.5f), 0.5f, 0.3f) < 0,
+            "a node stands on a missile in flight");
+    }
+
     private static bool Anything(uint entityId) => true;
 
     private static bool Standable(uint entityId) => entityId == Rock;
+
+    private static void RegisterBolt(PhysicsEngine engine, Vector3 at) =>
+        engine.ShadowObjects.Register(
+            Bolt,
+            gfxObjId: 0u,
+            at,
+            Quaternion.Identity,
+            0.1f,
+            worldOffsetX: 0f,
+            worldOffsetY: 0f,
+            landblockId: LandblockId,
+            collisionType: ShadowCollisionType.Cylinder,
+            cylHeight: 0.2f,
+            state: (uint)(PhysicsStateFlags.Missile | PhysicsStateFlags.ReportCollisions),
+            isStatic: false);
 
     private static void RegisterRock(
         PhysicsEngine engine,

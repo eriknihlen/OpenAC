@@ -106,6 +106,7 @@ public sealed class NavGrid
         byte[] borderDistance,
         float[] wallDistance,
         bool[] clear,
+        bool[] terrain,
         WallPieces walls,
         NavGridBuildReport report)
     {
@@ -126,6 +127,7 @@ public sealed class NavGrid
         _borderDistance = borderDistance;
         _wallDistance = wallDistance;
         _clear = clear;
+        _terrain = terrain;
         _walls = walls;
         Report = report;
     }
@@ -196,6 +198,11 @@ public sealed class NavGrid
     public int Link(int node, int direction) => _links[(node * DirectionCount) + direction];
 
     public bool IsClear(int node) => _clear[node];
+
+    /// <summary>Whether a node's floor is bare terrain, rather than an object, a building or a room standing on or over it.</summary>
+    public bool IsTerrain(int node) => _terrain[node];
+
+    private readonly bool[] _terrain;
 
     /// <summary>
     /// Whether a body stands on a node at all: no wall crowds it, though its floor may
@@ -601,6 +608,7 @@ public sealed class NavGrid
         var nodeColumns = new List<int>();
         var nodeHeights = new List<float>();
         var nodeCeilings = new List<float>();
+        var nodeTerrain = new List<bool>();
         int tiles = spans.Head.TilesPerSide;
         int tileColumns = NavColumnTiles<int>.TileColumns;
         var column = new List<int>(8);
@@ -647,6 +655,7 @@ public sealed class NavGrid
                             nodeColumns.Add((y * side) + x);
                             nodeHeights.Add(spans.Max[span]);
                             nodeCeilings.Add(ceiling);
+                            nodeTerrain.Add(spans.Source[span] == FromTerrain);
                         }
                         if (nodeHeights.Count > first)
                             columnNodes.Slot(x, y) = new ColumnNodes(first, nodeHeights.Count - first);
@@ -696,6 +705,7 @@ public sealed class NavGrid
             borderDistance,
             wallDistance,
             clear,
+            nodeTerrain.ToArray(),
             walls,
             report);
     }

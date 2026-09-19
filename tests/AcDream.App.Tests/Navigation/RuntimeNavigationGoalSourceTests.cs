@@ -2,6 +2,7 @@ using System.Numerics;
 using AcDream.Runtime.Navigation;
 using AcDream.Core.Items;
 using AcDream.Core.Navigation;
+using AcDream.Core.Physics;
 
 namespace AcDream.App.Tests.Navigation;
 
@@ -138,6 +139,22 @@ public sealed class RuntimeNavigationGoalSourceTests
             System.Numerics.Vector3.Zero);
 
         Assert.Equal([neighbour], kept);
+    }
+
+    /// <summary>
+    /// A missile in flight stands nowhere, so it is none of the three things a walk asks about
+    /// objects: not a wall the grid holds, not something a route keeps out of, and not what
+    /// stopped a walk that stalled. Each used to ask in its own words, and the one that names a
+    /// stalled walk's blocker never asked at all, so an arrow passing a stuck body was named as
+    /// the thing in its way and kept out of for the rest of the walk.
+    /// </summary>
+    [Fact]
+    public void AMissileInFlightStandsNowhere()
+    {
+        Assert.False(RuntimeNavigationGoalSource.StandsAnywhere(PhysicsStateFlags.Missile));
+        Assert.False(RuntimeNavigationGoalSource.StandsAnywhere(PhysicsStateFlags.Missile | PhysicsStateFlags.Ethereal));
+        Assert.True(RuntimeNavigationGoalSource.StandsAnywhere((PhysicsStateFlags)0));
+        Assert.True(RuntimeNavigationGoalSource.StandsAnywhere(PhysicsStateFlags.Ethereal));
     }
 
     private static ClientObject Item(ItemType type, PublicWeenieFlags flags, uint petOwner = 0u) => new()

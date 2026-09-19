@@ -344,9 +344,9 @@ public sealed class RuntimeScriptedMovementTests
         var movement = new RuntimeScriptedMovement();
         Assert.True(movement.BeginJump(0.5f));
 
-        Assert.True(movement.Advance(Sample(10d)) is { Jump: true });
-        Assert.True(movement.Advance(Sample(10.4d)) is { Jump: true });
-        Assert.True(movement.Advance(Sample(10.5d)) is { Jump: false, IsPersistentCommand: true });
+        Assert.True(movement.Advance(Sample(10d)) is { Jump: true, JumpExtent: null });
+        Assert.True(movement.Advance(Sample(10.4d)) is { Jump: true, JumpExtent: null });
+        Assert.True(movement.Advance(Sample(10.5d)) is { Jump: false, IsPersistentCommand: true, JumpExtent: 0.5f });
         Assert.False(movement.Snapshot.JumpCharging);
         Assert.Null(movement.Advance(Sample(10.6d)));
     }
@@ -359,7 +359,7 @@ public sealed class RuntimeScriptedMovementTests
 
         Assert.True(movement.Advance(Sample(10d)) is { Jump: true, Forward: false });
         Assert.True(movement.Advance(Sample(10.4d)) is { Jump: true, Forward: false });
-        Assert.True(movement.Advance(Sample(10.5d)) is { Jump: false, Forward: true, Run: true });
+        Assert.True(movement.Advance(Sample(10.5d)) is { Jump: false, Forward: true, Run: true, JumpExtent: 0.5f });
         Assert.Equal(RuntimeScriptedMoveState.Moving, movement.Snapshot.Travel.State);
         Assert.Equal(RuntimeMovePace.Run, movement.Snapshot.Travel.Request.Pace);
     }

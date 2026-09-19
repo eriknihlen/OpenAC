@@ -337,6 +337,42 @@ public sealed class NavigationWalkControllerTests
         Assert.Equal(byCell.Z, byMap.Z, 3);
     }
 
+    /// <summary>
+    /// A grid is built before the server has placed everything around the character, as a
+    /// dungeon's is on arrival. An object placed after it is floor the next walk stands on.
+    /// </summary>
+    [Fact]
+    public void AnObjectPlacedAfterTheGridWasBuiltIsFloorTheNextWalkStandsOn()
+    {
+        const uint crate = 0x80002AB0u;
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        PhysicsEngine world = FlatWorld();
+        var goals = new Goals();
+        var walk = new NavigationWalkController(world, body, goals);
+        walk.WalkToPlace(0xA9B40001u, new Vector3(45f, 40f, 0f), 1f);
+        Assert.Equal(NavigationWalkState.Arrived, RunUntilSettled(walk, body).State);
+
+        world.ShadowObjects.Register(
+            crate,
+            gfxObjId: 0u,
+            new Vector3(60f, 40f, 0f),
+            Quaternion.Identity,
+            2f,
+            worldOffsetX: 0f,
+            worldOffsetY: 0f,
+            landblockId: 0xA9B4FFFFu,
+            collisionType: ShadowCollisionType.Cylinder,
+            cylHeight: 0.5f,
+            seedCellId: 0xA9B40001u,
+            isStatic: false);
+        goals.Standing.Add(crate);
+        walk.WalkToPlace(0xA9B40001u, new Vector3(60f, 40f, 0.5f), 1f);
+        NavigationWalkReport report = RunUntilSettled(walk, body);
+
+        Assert.Equal(NavigationWalkState.Arrived, report.State);
+        Assert.Equal(0.5f, walk.Route!.Legs[^1].Z, 1);
+    }
+
     [Fact]
     public void AWalkToAPlaceArrivesThereWithoutTurningToFaceIt()
     {
@@ -1808,6 +1844,133 @@ public sealed class NavigationWalkControllerTests
         Assert.True(body.Position.Y > 60f);
     }
 
+    /// <summary>
+    /// A walk builds its grid again over the objects standing here where it needs them and
+    /// the grid has none of them, and it does that once for each stretch it walks. Where
+    /// the goal is one nothing reaches and the objects here keep changing, the answer must
+    /// still be that nothing reaches it: build, search, build, search is a walk that never
+    /// answers and a client that does nothing else.
+    /// </summary>
+    [Fact]
+    public void AWalkThatCannotArriveStopsBuildingGridsThoughObjectsKeepChanging()
+    {
+        const uint drifter = 0x80002AB2u;
+        var said = new List<string>();
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        PhysicsEngine world = FlatWorld();
+        var goals = new Goals();
+        var walk = new NavigationWalkController(world, body, goals, say: said.Add);
+        walk.WalkToPlace(0xA9B40001u, new Vector3(45f, 40f, 0f), 1f);
+        Assert.Equal(NavigationWalkState.Arrived, RunUntilSettled(walk, body).State);
+
+        world.ShadowObjects.Register(
+            drifter,
+            gfxObjId: 0u,
+            new Vector3(50f, 40f, 0f),
+            Quaternion.Identity,
+            1f,
+            worldOffsetX: 0f,
+            worldOffsetY: 0f,
+            landblockId: 0xA9B4FFFFu,
+            collisionType: ShadowCollisionType.Cylinder,
+            cylHeight: 1f,
+            seedCellId: 0xA9B40001u,
+            isStatic: false);
+        goals.Standing.Add(drifter);
+
+        int built = said.Count(line => line.StartsWith("Navmesh:", StringComparison.Ordinal));
+        walk.WalkToPlace(0xA9B40001u, new Vector3(60f, 40f, 4f), 1f);
+
+        var wall = Stopwatch.StartNew();
+        NavigationWalkReport report = walk.Report;
+        for (float along = 0f; wall.Elapsed < TimeSpan.FromSeconds(60); along += 0.5f)
+        {
+            world.ShadowObjects.UpdatePosition(
+                drifter,
+                new Vector3(50f + (along % 8f), 40f, 0f),
+                Quaternion.Identity,
+                worldOffsetX: 0f,
+                worldOffsetY: 0f,
+                landblockId: 0xA9B4FFFFu,
+                seedCellId: 0xA9B40001u);
+            walk.Tick(Frame);
+            report = walk.Report;
+            if (report.State is not (NavigationWalkState.Planning or NavigationWalkState.Walking or NavigationWalkState.Waiting))
+                break;
+            Thread.Sleep(1);
+        }
+
+        Assert.Equal(NavigationWalkState.NoRoute, report.State);
+        Assert.InRange(said.Count(line => line.StartsWith("Navmesh:", StringComparison.Ordinal)) - built, 0, 2);
+    }
+
+    /// <summary>
+    /// The ground hardly ever changes: what changes it is a thing the server places and
+    /// leaves, as the rocks of a jump puzzle are placed as the character comes near. A
+    /// thing crossing the region is not that, and a grid must not be built for it: a
+    /// dungeon's grid takes far longer to build than the moment the thing is there, so
+    /// one built for each look would be built again and again and never be of use.
+    /// </summary>
+    [Fact]
+    public void AThingCrossingTheRegionBuildsNoGridAndOneThatStaysBuildsOne()
+    {
+        const uint drifter = 0x80002AB1u;
+        var said = new List<string>();
+        var body = new SimulatedBody(new Vector3(40f, 40f, 0f));
+        PhysicsEngine world = FlatWorld();
+        var goals = new Goals();
+        var walk = new NavigationWalkController(world, body, goals, say: said.Add) { ShowGrid = true };
+        Assert.True(TickUntilSaid(walk, said, 1), "no grid was built to show around the character");
+
+        world.ShadowObjects.Register(
+            drifter,
+            gfxObjId: 0u,
+            new Vector3(50f, 40f, 0f),
+            Quaternion.Identity,
+            1f,
+            worldOffsetX: 0f,
+            worldOffsetY: 0f,
+            landblockId: 0xA9B4FFFFu,
+            collisionType: ShadowCollisionType.Cylinder,
+            cylHeight: 1f,
+            seedCellId: 0xA9B40001u,
+            isStatic: false);
+        goals.Standing.Add(drifter);
+
+        var wall = Stopwatch.StartNew();
+        for (float along = 0f; wall.Elapsed < TimeSpan.FromSeconds(2); along += 0.5f)
+        {
+            world.ShadowObjects.UpdatePosition(
+                drifter,
+                new Vector3(50f + (along % 10f), 40f, 0f),
+                Quaternion.Identity,
+                worldOffsetX: 0f,
+                worldOffsetY: 0f,
+                landblockId: 0xA9B4FFFFu,
+                seedCellId: 0xA9B40001u);
+            walk.Tick(Frame);
+            Thread.Sleep(1);
+        }
+        Assert.Single(said);
+
+        Assert.True(TickUntilSaid(walk, said, 2), "no grid was built once the thing stayed where it was");
+        Assert.Contains("built because the objects in it changed", said[1]);
+    }
+
+    /// <summary>Ticks a walk until it has said this many lines, or gives up.</summary>
+    private static bool TickUntilSaid(NavigationWalkController walk, List<string> said, int lines)
+    {
+        var wall = Stopwatch.StartNew();
+        while (wall.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            walk.Tick(Frame);
+            if (said.Count >= lines)
+                return said.Count == lines;
+            Thread.Sleep(1);
+        }
+        return false;
+    }
+
     private static PhysicsEngine FlatWorld(int landblocksNorth = 1)
     {
         var physics = new PhysicsEngine();
@@ -1987,6 +2150,11 @@ public sealed class NavigationWalkControllerTests
 
         /// <summary>The collision of the objects a walk may stand on.</summary>
         public Dictionary<uint, NavSurfaces> Surfaces { get; } = [];
+
+        /// <summary>The objects a grid stands on.</summary>
+        public HashSet<uint> Standing { get; } = [];
+
+        public bool StandsStill(uint entityLocalId) => Standing.Contains(entityLocalId);
 
         public bool TryGetSurfaces(uint objectId, out NavSurfaces surfaces) => Surfaces.TryGetValue(objectId, out surfaces!);
 

@@ -208,7 +208,7 @@ public sealed class NavGeometry
         engine.ShadowObjects.CaptureEntries(entries);
         foreach (ShadowEntry entry in entries)
         {
-            if (((PhysicsStateFlags)entry.State).HasFlag(PhysicsStateFlags.Ethereal))
+            if (!Meets(entry))
                 continue;
             bool named = standsOn?.Invoke(entry.EntityId) == true
                 && Within(entry.Position, originX, originY, size);
@@ -255,7 +255,7 @@ public sealed class NavGeometry
         var cylinders = new List<NavCylinder>();
         foreach (ShadowEntry entry in entries)
         {
-            if (!((PhysicsStateFlags)entry.State).HasFlag(PhysicsStateFlags.Ethereal))
+            if (Meets(entry))
                 AddCollision(engine.DataCache, entry, cylinders, triangles);
         }
         return triangles.Count == 0 && cylinders.Count == 0 ? null : new NavSurfaces(triangles, cylinders);
@@ -293,6 +293,19 @@ public sealed class NavGeometry
         }
     }
 
+    /// <summary>
+    /// Whether a body meets an object where it stands: not one that is ethereal, which
+    /// a body walks through, and not a missile in flight. An arrow, a thrown blade or a
+    /// spell's bolt stands nowhere: it is on its way and gone in a moment, so it is
+    /// neither floor nor wall, and it moves every frame, which would leave a grid built
+    /// with one in it out of date the moment it was built.
+    /// </summary>
+    private static bool Meets(ShadowEntry entry)
+    {
+        var state = (PhysicsStateFlags)entry.State;
+        return !state.HasFlag(PhysicsStateFlags.Ethereal) && !state.HasFlag(PhysicsStateFlags.Missile);
+    }
+
     /// <summary>How much of an object outside a region still counts as standing in it.</summary>
     private const float RegionSlack = 4f;
 
@@ -323,7 +336,7 @@ public sealed class NavGeometry
         engine.ShadowObjects.CaptureEntries(entries);
         foreach (ShadowEntry entry in entries)
         {
-            if (((PhysicsStateFlags)entry.State).HasFlag(PhysicsStateFlags.Ethereal)
+            if (!Meets(entry)
                 || !Within(entry.Position, originX, originY, size)
                 || !standsOn(entry.EntityId))
             {

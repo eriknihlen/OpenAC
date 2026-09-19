@@ -18,7 +18,8 @@ public readonly record struct MovementInput(
     bool Run = false,
     float MouseDeltaX = 0f,
     bool Jump = false,
-    bool IsPersistentCommand = false);
+    bool IsPersistentCommand = false,
+    float? JumpExtent = null);
 
 public readonly record struct PlayerMovementConstructionOptions(
     int RunSkill,
@@ -1764,6 +1765,10 @@ public sealed class PlayerMovementController
         }
         else if (_jumpCharging)
         {
+            // A jump released by a script leaves at the power it asked for, rather than at the
+            // charge the frames it was held for add up to, which overshoots by up to a frame.
+            if (input.JumpExtent is { } exact && float.IsFinite(exact))
+                _jumpExtent = Math.Clamp(exact, 0f, 1f);
             var jumpResult = _motion.jump(_jumpExtent);
             if (jumpResult == WeenieError.None)
             {

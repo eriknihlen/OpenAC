@@ -450,6 +450,24 @@ public class PlayerMovementControllerTests
         Assert.False(controller.AdvancedObjectQuantumLastTick);
     }
 
+    /// <summary>
+    /// A jump released with an exact extent, as a script releases one, leaves at that extent
+    /// rather than at the charge the frames it was held for add up to.
+    /// </summary>
+    [Theory]
+    [InlineData(null, 0.6f)]
+    [InlineData(0.37f, 0.37f)]
+    public void AJumpReleasedWithAnExactExtentLeavesAtThatExtent(float? exact, float expected)
+    {
+        var controller = new PlayerMovementController(MakeFlatEngine());
+        controller.SeedPlacementForTest(new Vector3(96f, 96f, 50f), 0x0001, new Vector3(96f, 96f, 50f));
+        controller.Update(0.6f, new MovementInput(Jump: true));
+
+        MovementResult released = controller.Update(ObjectTick, new MovementInput(Jump: false, JumpExtent: exact));
+
+        Assert.Equal(expected, released.JumpExtent!.Value, precision: 3);
+    }
+
     [Fact]
     public void Update_AirbornePartArrayFrame_SuppressesOriginButPreservesOrientation()
     {

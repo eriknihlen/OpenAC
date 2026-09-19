@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -123,6 +124,12 @@ public readonly record struct NavLeap(int From, int To, float Power, bool Run, f
 public readonly record struct NavRouteLeap(int LegIndex, float Power, bool Run);
 
 /// <summary>
+/// A leap aimed again from where a body really stands: charged to <paramref name="Power"/> and
+/// left at running or walking pace, facing the landing.
+/// </summary>
+public readonly record struct NavLeapAim(float Power, bool Run);
+
+/// <summary>
 /// Finds the leaps a body can take between pieces of floor no walk joins, such as
 /// platforms, ledges, and the floor beyond a gap or below a drop. Leaps are aimed at the
 /// middle of each other piece in reach: the centre of a small platform, and a band well
@@ -179,8 +186,15 @@ internal sealed class NavLeapFinder
     /// <summary>How far to either side of its landing a body may face as it leaves: it turns to face the landing to within this.</summary>
     private const float HeadingSlackDegrees = 2f;
 
-    /// <summary>How far short of its takeoff, or past it, a body may stop before it jumps.</summary>
-    private const float TakeoffSlack = 0.35f;
+    /// <summary>
+    /// How far short of its takeoff, or past it, a body may stop before it jumps. Measured live
+    /// over sixty leaps, a body charges a median 0.05 m from its takeoff and nine in ten within
+    /// 0.20 m, so a leap is kept that still lands from three times the usual miss. It is also
+    /// how near its planned takeoff a body counts as standing at it, which a caller asking for
+    /// a leap to be aimed again says with the <c>atItsTakeoff</c> of
+    /// <see cref="AimFrom(Vector3, Vector3, bool, bool, out string?)"/>.
+    /// </summary>
+    public const float TakeoffSlack = 0.15f;
 
     /// <summary>
     /// What each meter a landing may move costs a takeoff, in meters, when takeoffs are
@@ -202,8 +216,33 @@ internal sealed class NavLeapFinder
     /// <summary>A takeoff standing less than this far back from the edge it leaves is a risk.</summary>
     private const float EasyTakeoffBack = 0.5f;
 
-    /// <summary>A leap flown farther than this, measured flat, is a risk: the same small error carries its landing farther.</summary>
-    private const float EasyLeapMeters = 10f;
+    /// <summary>
+    /// About how far from its spot a leap comes to rest, measured live over seventy landings: a
+    /// leap flown farther misses by more, and one flown at a run misses by more again. Walking
+    /// leaps of 6 to 10 m came to rest a median 0.08 m from their spots, running leaps of 10 to
+    /// 18 m a median 0.45 m, and running leaps of 18 to 30 m a median 0.70 m.
+    /// </summary>
+    private static float MissOf(float flat, bool run) =>
+        LeastMissMeters + (flat * (run ? RunMissShare : WalkMissShare));
+
+    private const float LeastMissMeters = 0.1f;
+    private const float WalkMissShare = 0.02f;
+    private const float RunMissShare = 0.03f;
+
+    /// <summary>
+    /// How much of a risk a leap's miss is against the room its landing leaves: the square of the
+    /// one over the other, so a leap that misses by twice what its landing holds is four times the
+    /// risk of one that misses by as much as it holds, rather than twice. Leaps chain, and a route
+    /// of three leaps each landing inside their room is surer than one leap that does not, which a
+    /// risk counted straight would not say.
+    /// </summary>
+    private static float MissRisk(float flat, bool run, float room)
+    {
+        float share = MissOf(flat, run) / MathF.Max(room, LeastMissMeters);
+        return MathF.Min(MostMissRisk, share * share);
+    }
+
+    private const float MostMissRisk = 8f;
 
     /// <summary>What a leap's power costs, in meters, when takeoffs are ranked.</summary>
     private const float PowerCost = 2f;
@@ -313,6 +352,172 @@ internal sealed class NavLeapFinder
             : [];
     }
 
+    /// <summary>
+    /// Aims a leap again from exactly where a body stands at <paramref name="landing"/>, the spot a
+    /// route planned it to come to rest on, as the route's own leaps are aimed and kept: its arc must
+    /// clear the lip of any higher floor it jumps up onto, it must come to rest on the landing's floor
+    /// with room, and it must still do both charged a little more or less, turned a little either way,
+    /// and left from a little short of where the body stands or a little past it. A body a step or
+    /// two from where the route planned it to jump, as one that slid on after a landing or a walk is,
+    /// then jumps from where it is, at the pace the route planned. Null when no jump from here is
+    /// kept.
+    /// </summary>
+    public NavLeapAim? AimFrom(Vector3 standing, Vector3 landing, bool preferRun) =>
+        AimFrom(standing, landing, preferRun, out _);
+
+    /// <summary>As <see cref="AimFrom(Vector3, Vector3, bool)"/>, saying why no leap is kept when none is.</summary>
+    public NavLeapAim? AimFrom(Vector3 standing, Vector3 landing, bool preferRun, out string? refused) =>
+        AimFrom(standing, landing, preferRun, atItsTakeoff: false, out refused);
+
+    /// <summary>
+    /// As <see cref="AimFrom(Vector3, Vector3, bool)"/>, where <paramref name="atItsTakeoff"/>
+    /// says the body stands within the slack of the takeoff the route planned the leap from.
+    /// A landing smaller than the body keeps no room to spare, so the route's own leap onto one
+    /// is kept without the check that it still lands when flown a little off. A leap aimed again
+    /// from that same takeoff is kept the same way, and one from farther off is not: live, one
+    /// kept from 2.2 m off came down beside the rock.
+    /// </summary>
+    public NavLeapAim? AimFrom(Vector3 standing, Vector3 landing, bool preferRun, bool atItsTakeoff, out string? refused)
+    {
+        int from = _grid.FindStandingNode(standing, AimFromRadius, AimFromHeightTolerance);
+        int spot = _grid.FindStandingNode(landing, AimFromRadius, AimFromHeightTolerance);
+        refused = from < 0 ? "no floor the grid knows is under the body"
+            : spot < 0 ? "no floor the grid knows is under the landing"
+            : null;
+        if (refused is not null)
+            return null;
+        int piece = _surfaces.PieceOf[from];
+        int target = _surfaces.PieceOf[spot];
+        refused = piece < 0 ? "the body stands on no piece of floor"
+            : target < 0 ? "the landing is on no piece of floor"
+            : piece == target ? "the landing is on the floor the body stands on"
+            : null;
+        if (refused is not null)
+            return null;
+        Vector3 at = _grid.Position(spot);
+        Vector2 back = Flat(standing) - Flat(at);
+        float distance = back.Length();
+        if (distance < ShortestLeap)
+        {
+            refused = "the landing is too near to leap to";
+            return null;
+        }
+        var reasons = new List<string>(3);
+        float standsAbove = standing.Z - _grid.Position(from).Z;
+        if (MathF.Abs(standsAbove) >= 0.05f)
+            reasons.Add(string.Create(CultureInfo.InvariantCulture, $"the body stands {standsAbove:+0.00;-0.00} m off the grid's floor"));
+        Line line = Trace(spot, back / distance, piece, standing.Z);
+        float rise = at.Z - standing.Z;
+        float beforeFace = distance - line.FaceAt - _grid.Body.Radius;
+        int deepest = _surfaces.Deepest[target];
+        int leastRoom = Math.Max(0, Math.Min(LeastLandingRoomSteps, deepest - 1));
+        bool fussy = atItsTakeoff && _grid.BorderDistance(spot) * _grid.CellSize < _grid.Body.Radius;
+
+        // Only at the pace the route planned it: a walking leap aimed again as the lowest running
+        // jump was kept by the model and, live, ran off the rock's edge.
+        foreach (bool run in (ReadOnlySpan<bool>)[preferRun])
+        {
+            float speed = run ? _ability.RunSpeed : _ability.WalkSpeed;
+            string pace = run ? "running" : "walking";
+            bool reachesRest = AimShort(standing, at, _grid.IsTerrain(spot), speed, settles: true, out Vector3 restAt, out float restPower, out float restLaunch);
+            bool reachesLand = AimShort(standing, at, _grid.IsTerrain(spot), speed, settles: false, out Vector3 landAt, out float landPower, out float landLaunch);
+            bool aimsToRest = reachesRest && Clearance(restLaunch) >= LeastLipClearance;
+            bool aimsToLand = reachesLand && Clearance(landLaunch) >= LeastLipClearance;
+            string? missed = null;
+            if (aimsToRest && Flies(restAt, restPower, settles: true))
+                return new NavLeapAim(restPower, run);
+            if (aimsToLand && (!aimsToRest || Vector2.Distance(Flat(restAt), Flat(landAt)) > SlideTolerance)
+                && Flies(landAt, landPower, settles: false))
+            {
+                return new NavLeapAim(landPower, run);
+            }
+            reasons.Add(!reachesRest && !reachesLand
+                ? string.Create(CultureInfo.InvariantCulture, $"no jump {pace} reaches the landing, which needs {NeededPower(standing, at, speed):0.00} of full power before any slide")
+                : !aimsToRest && !aimsToLand ? $"no jump {pace} clears the lip of the landing's floor"
+                : $"the jump {pace} {missed ?? "misses"}");
+
+            float Clearance(float leaves) => rise <= 0f ? float.PositiveInfinity
+                : beforeFace > 0f ? _ability.Physics.Height(leaves, beforeFace / speed) - rise
+                : float.NegativeInfinity;
+
+            bool Flies(Vector3 aimAt, float power, bool settles)
+            {
+                int lands = FlyAt(from, standing, aimAt, power, run, target, settles, out float lip, out int room);
+                if (lands < 0 || room < leastRoom)
+                {
+                    missed = lip < LeastLipClearance ? "touches a lip on the way"
+                        : lands < 0 ? "does not come to rest on the landing's floor"
+                        : "comes to rest too near the landing floor's edge";
+                    return false;
+                }
+                // A landing smaller than the body keeps no room to spare, and the route's own
+                // leap is aimed from the least risky takeoff of many. A leap aimed again from
+                // wherever the body stands has no such choice, so it must still land when flown
+                // a little off: live on Doriathazaar's puzzle, one kept without that check was
+                // taken from 2.2 m off its takeoff and came down off the rock.
+                if (WorstRoom(standing, aimAt, power, run, target, leastRoom, settles) >= leastRoom || fussy)
+                    return true;
+                missed = "does not still land when flown a little off";
+                return false;
+            }
+        }
+        refused = string.Join("; ", reasons);
+        return null;
+    }
+
+    /// <summary>The share of full power a jump at <paramref name="speed"/> needs to come down through a point, ignoring what it goes on after; above one where none can.</summary>
+    private float NeededPower(Vector3 from, Vector3 to, float speed)
+    {
+        float distance = Vector2.Distance(Flat(from), Flat(to));
+        if (!(speed > 0f) || distance < 1e-3f || !(_ability.FullJumpHeight > 0f))
+            return float.NaN;
+        float launch = _ability.Physics.LaunchFor(to.Z - from.Z, distance / speed);
+        return launch * launch / (2f * Gravity) / _ability.FullJumpHeight;
+    }
+
+    /// <summary>How far, measured flat, a body or its landing may stand from the node <see cref="AimFrom"/> places it on.</summary>
+    private const float AimFromRadius = 0.5f;
+
+    /// <summary>How far above or below that node it may stand.</summary>
+    private const float AimFromHeightTolerance = 1f;
+
+    /// <summary>
+    /// A leap from exactly where a body stands onto the floor a planned landing lies on, for a
+    /// body that keeps no aim at the landing itself. Every spot its own floor leaps to on that
+    /// floor is aimed at from where the body is, the planned landing's own neighbours first, and
+    /// the first leap kept is taken with the spot it comes to rest on. A body that came to rest a
+    /// step off the takeoff a route planned then jumps on from where it stands rather than walk to
+    /// that spot, which a walk cannot reach in one move anyway.
+    /// </summary>
+    public NavLeapAim? AimOnward(Vector3 standing, Vector3 landing, bool preferRun, out Vector3 spot)
+    {
+        spot = landing;
+        int from = _grid.FindStandingNode(standing, AimFromRadius, AimFromHeightTolerance);
+        int planned = _grid.FindStandingNode(landing, AimFromRadius, AimFromHeightTolerance);
+        if (from < 0 || planned < 0)
+            return null;
+        int piece = _surfaces.PieceOf[from];
+        int target = _surfaces.PieceOf[planned];
+        if (piece < 0 || target < 0 || piece == target)
+            return null;
+        Vector2 at = Flat(landing);
+        NavLeap[] onward = _onward.GetOrAdd(from, _ => Standing(_byPiece.GetOrAdd(piece, FindFrom), from));
+        foreach (NavLeap leap in onward
+            .Where(leap => _surfaces.PieceOf[leap.To] == target && leap.To != planned)
+            .OrderBy(leap => Vector2.Distance(Flat(_grid.Position(leap.To)), at)))
+        {
+            Vector3 candidate = _grid.Position(leap.To);
+            if (AimFrom(standing, candidate, preferRun, atItsTakeoff: false, out _) is { } aimed)
+            {
+                spot = candidate;
+                return aimed;
+            }
+        }
+        return null;
+    }
+
+    private readonly ConcurrentDictionary<int, NavLeap[]> _onward = new();
+
     /// <summary>Every leap of a piece with no room to walk on, taken from where a body stands on it.</summary>
     private static NavLeap[] Standing(Dictionary<int, NavLeap[]> byTakeoff, int node)
     {
@@ -415,8 +620,8 @@ internal sealed class NavLeapFinder
             foreach (bool run in Paces)
             {
                 float speed = run ? _ability.RunSpeed : _ability.WalkSpeed;
-                bool aimsToRest = AimShort(from, landing, speed, settles: true, out Vector3 aimAt, out float power, out float launch);
-                bool aimsToLand = AimShort(from, landing, speed, settles: false, out Vector3 landAt, out float landPower, out float landLaunch);
+                bool aimsToRest = AimShort(from, landing, _grid.IsTerrain(spot), speed, settles: true, out Vector3 aimAt, out float power, out float launch);
+                bool aimsToLand = AimShort(from, landing, _grid.IsTerrain(spot), speed, settles: false, out Vector3 landAt, out float landPower, out float landLaunch);
                 float restClearance = aimsToRest ? Clearance(launch) : float.NegativeInfinity;
                 float landClearance = aimsToLand ? Clearance(landLaunch) : float.NegativeInfinity;
                 aimsToRest &= restClearance >= LeastLipClearance;
@@ -436,7 +641,7 @@ internal sealed class NavLeapFinder
                     + takeoffRisk
                     + lipRisk
                     + (shift > EasyShiftMeters ? 1f : 0f)
-                    + (flat > EasyLeapMeters ? 1f : 0f);
+                    + MissRisk(flat, run, runOut);
                 float cost = flat + MathF.Abs(rise) + (power * PowerCost) + (shift * ShiftCost);
                 candidates.Add(new Candidate(node, aimAt, power, run, risk, lipRisk, cost, aimsToRest, landAt, twin ? landPower : float.NaN));
 
@@ -562,7 +767,7 @@ internal sealed class NavLeapFinder
     /// come down through, and the jump's power and launch speed; false when no jump comes down short
     /// enough.
     /// </summary>
-    private bool AimShort(Vector3 from, Vector3 spot, float speed, bool settles, out Vector3 aimAt, out float power, out float launch)
+    private bool AimShort(Vector3 from, Vector3 spot, bool onTerrain, float speed, bool settles, out Vector3 aimAt, out float power, out float launch)
     {
         aimAt = spot;
         power = 0f;
@@ -580,7 +785,7 @@ internal sealed class NavLeapFinder
             if (flat < ShortestLeap || !Aim(from, point, speed, out float charged, out float leaves))
                 break;
             (aimAt, power, launch, aimed) = (point, charged, leaves, true);
-            float goesOn = ShortBy(speed, _ability.Physics.FallSpeed(leaves, flat / speed), settles);
+            float goesOn = ShortBy(speed, onTerrain ? _ability.Physics.FallSpeed(leaves, flat / speed) : 0f, settles);
             if (MathF.Abs(goesOn - shortBy) <= SlideTolerance)
                 break;
             shortBy = goesOn;
@@ -761,11 +966,14 @@ internal sealed class NavLeapFinder
     /// room as <see cref="Settle"/> counts it for a leap aimed, with <paramref name="settles"/>, to
     /// rest on its spot, or else only to come down to stay on it.
     /// </summary>
-    private int FlyAt(int from, Vector3 toward, float power, bool run, int target, bool settles, out float lip, out int room)
+    private int FlyAt(int from, Vector3 toward, float power, bool run, int target, bool settles, out float lip, out int room) =>
+        FlyAt(from, _grid.Position(from), toward, power, run, target, settles, out lip, out room);
+
+    /// <summary>As <see cref="FlyAt(int, Vector3, float, bool, int, bool, out float, out int)"/>, from a point on the node rather than the node's own.</summary>
+    private int FlyAt(int from, Vector3 start, Vector3 toward, float power, bool run, int target, bool settles, out float lip, out int room)
     {
         lip = float.PositiveInfinity;
         room = -1;
-        Vector3 start = _grid.Position(from);
         Vector2 line = Flat(toward) - Flat(start);
         float distance = line.Length();
         if (distance < 1e-3f)
@@ -774,8 +982,8 @@ internal sealed class NavLeapFinder
         int touchdown = Fly(start, heading, power, run, distance + FlightOvershoot, out lip, out float fall);
         if (touchdown < 0 || lip < LeastLipClearance)
             return -1;
-        (float carry, float slide) = GoesOn(run, fall);
-        int rest = Settle(touchdown, heading, carry, slide, target, settles, out room);
+        (float carry, float slide) = GoesOn(run, fall, touchdown);
+        int rest = Settle(touchdown, heading, carry, slide, SpeedOf(run), target, settles, out room);
         return rest >= 0 && Lands(from, rest, start, target) ? rest : -1;
     }
 
@@ -789,9 +997,12 @@ internal sealed class NavLeapFinder
     /// Room is counted as <see cref="Settle"/> counts it for a leap aimed, with
     /// <paramref name="settles"/>, to rest on its spot, or else only to come down to stay on it.
     /// </summary>
-    private int WorstRoom(int from, Vector3 spot, float power, bool run, int target, int least, bool settles)
+    private int WorstRoom(int from, Vector3 spot, float power, bool run, int target, int least, bool settles) =>
+        WorstRoom(_grid.Position(from), spot, power, run, target, least, settles);
+
+    /// <summary>As <see cref="WorstRoom(int, Vector3, float, bool, int, int, bool)"/>, from a point rather than a node.</summary>
+    private int WorstRoom(Vector3 start, Vector3 spot, float power, bool run, int target, int least, bool settles)
     {
-        Vector3 start = _grid.Position(from);
         Vector2 toward = Flat(spot) - Flat(start);
         float distance = toward.Length();
         Vector2 heading = toward / distance;
@@ -805,8 +1016,8 @@ internal sealed class NavLeapFinder
             int room = -1;
             if (touchdown >= 0 && lip >= 0f)
             {
-                (float carry, float slide) = GoesOn(run, fall);
-                Settle(touchdown, along, carry, slide, target, settles, out room);
+                (float carry, float slide) = GoesOn(run, fall, touchdown);
+                Settle(touchdown, along, carry, slide, SpeedOf(run), target, settles, out room);
             }
             worst = Math.Min(worst, room);
             return worst >= least;
@@ -839,10 +1050,15 @@ internal sealed class NavLeapFinder
     /// How far a body leaping at the pace goes on off the ground after its arc comes down falling
     /// at <paramref name="fall"/>, and how far it then slides along the ground.
     /// </summary>
-    private (float Carry, float Slide) GoesOn(bool run, float fall)
+    private (float Carry, float Slide) GoesOn(bool run, float fall, int touchdown)
     {
         float speed = run ? _ability.RunSpeed : _ability.WalkSpeed;
-        return (_ability.Physics.Carry(speed, fall), _ability.Physics.GroundSlide(speed));
+        // A body coming down on terrain is thrown back up a little and skims on through the hop;
+        // one coming down on an object is not: live on Doriathazaar's rocks, over a hundred
+        // landings slid on exactly as far as the ground slide alone carries a body, walking or
+        // running, while with the retail human motion table on terrain the hop is there.
+        float falling = touchdown >= 0 && !_grid.IsTerrain(touchdown) ? 0f : fall;
+        return (_ability.Physics.Carry(speed, falling), _ability.Physics.GroundSlide(speed));
     }
 
     /// <summary>
@@ -858,7 +1074,9 @@ internal sealed class NavLeapFinder
     /// on its spot, that is its room where it comes to rest, unless a ledge held it; otherwise, and
     /// then, its room where it came back down to stay.
     /// </summary>
-    private int Settle(int touchdown, Vector2 heading, float carry, float slide, int target, bool settles, out int room)
+    private float SpeedOf(bool run) => run ? _ability.RunSpeed : _ability.WalkSpeed;
+
+    private int Settle(int touchdown, Vector2 heading, float carry, float slide, float speed, int target, bool settles, out int room)
     {
         room = RoomOn(touchdown, target);
         if (room < 0)
@@ -867,69 +1085,201 @@ internal sealed class NavLeapFinder
         float goesOn = carry + slide;
         if (!(goesOn > 0f))
             return touchdown;
-        Vector3 start = _grid.Position(touchdown);
-        (int x, int y) = _grid.ColumnOf(touchdown);
-        float cell = _grid.CellSize;
-        float localX = start.X - _grid.OriginX;
-        float localY = start.Y - _grid.OriginY;
-        int stepX = MathF.Sign(heading.X);
-        int stepY = MathF.Sign(heading.Y);
-        float nextX = stepX == 0
-            ? float.PositiveInfinity
-            : (stepX > 0 ? ((x + 1) * cell) - localX : localX - (x * cell)) / MathF.Abs(heading.X);
-        float nextY = stepY == 0
-            ? float.PositiveInfinity
-            : (stepY > 0 ? ((y + 1) * cell) - localY : localY - (y * cell)) / MathF.Abs(heading.Y);
-        float acrossX = stepX == 0 ? float.PositiveInfinity : cell / MathF.Abs(heading.X);
-        float acrossY = stepY == 0 ? float.PositiveInfinity : cell / MathF.Abs(heading.Y);
         int at = touchdown;
         int standing = _surfaces.PieceOf[touchdown] == target ? touchdown : -1;
-        while (true)
+        float cell = _grid.CellSize;
+        // The square of the speed the body slides at, which a rise spends and a drop gives back.
+        float energy = speed * speed;
+        for (int turned = 0; ; turned++)
         {
-            float entered;
-            int direction;
-            if (nextX < nextY)
+            Vector3 start = _grid.Position(at);
+            (int x, int y) = _grid.ColumnOf(at);
+            float localX = start.X - _grid.OriginX;
+            float localY = start.Y - _grid.OriginY;
+            int stepX = MathF.Sign(heading.X);
+            int stepY = MathF.Sign(heading.Y);
+            float nextX = stepX == 0
+                ? float.PositiveInfinity
+                : (stepX > 0 ? ((x + 1) * cell) - localX : localX - (x * cell)) / MathF.Abs(heading.X);
+            float nextY = stepY == 0
+                ? float.PositiveInfinity
+                : (stepY > 0 ? ((y + 1) * cell) - localY : localY - (y * cell)) / MathF.Abs(heading.Y);
+            float acrossX = stepX == 0 ? float.PositiveInfinity : cell / MathF.Abs(heading.X);
+            float acrossY = stepY == 0 ? float.PositiveInfinity : cell / MathF.Abs(heading.Y);
+            bool along = false;
+            float before = 0f;
+            while (true)
             {
-                entered = nextX;
-                nextX += acrossX;
-                direction = NavGrid.DirectionOf(stepX, 0);
+                float entered;
+                int direction;
+                if (nextX < nextY)
+                {
+                    entered = nextX;
+                    nextX += acrossX;
+                    direction = NavGrid.DirectionOf(stepX, 0);
+                }
+                else
+                {
+                    entered = nextY;
+                    nextY += acrossY;
+                    direction = NavGrid.DirectionOf(0, stepY);
+                }
+                bool aloft = entered <= carry;
+                int next = entered > goesOn ? -1 : _grid.Link(at, direction);
+                if (entered > goesOn || (next < 0 && StopsAgainst(at, direction)))
+                {
+                    standing = turned > 0 ? Beside(at, target, standing) : standing;
+                    room = standing < 0 ? -1 : settles ? (turned > 0 ? RoomOn(standing, target) : room) : cameDown;
+                    return standing;
+                }
+                if (next < 0)
+                {
+                    // Sliding along the ground into a ledge, a body is pushed along the edge rather
+                    // than stopped, as the client's precipice slide carries it: what it goes on
+                    // with is the part of its slide that lies along the edge.
+                    if (!aloft && turned < MostEdgeSlides && AlongEdge(at, heading, out Vector2 edge, out float keeps))
+                    {
+                        goesOn = (goesOn - entered) * keeps;
+                        carry = 0f;
+                        heading = edge;
+                        along = true;
+                        break;
+                    }
+                    standing = turned > 0 && !aloft ? Beside(at, target, standing) : standing;
+                    room = aloft || standing < 0 ? -1 : cameDown;
+                    return aloft ? -1 : standing;
+                }
+                int nextRoom = RoomOn(next, target);
+                if (nextRoom < 0)
+                {
+                    if (aloft || _surfaces.PieceOf[next] >= 0)
+                    {
+                        room = -1;
+                        return -1;
+                    }
+                    nextRoom = 0;
+                }
+                if (!aloft && energy > 0f)
+                {
+                    // Sliding up a rise spends the body's speed and sliding down one gives it back,
+                    // and a slide goes on as far as its speed carries it: a landing at a run climbs
+                    // no more than its speed squared over twice gravity, where the planner once slid
+                    // a body 3.4 m up the side of a rock that live it climbed 1.5 m of.
+                    float across = MathF.Max(entered - before, 0f);
+                    float rise = _grid.Position(next).Z - _grid.Position(at).Z;
+                    float spent = energy - (2f * NavLeapPhysics.Gravity * rise);
+                    if (!(spent > 0f))
+                    {
+                        standing = turned > 0 ? Beside(at, target, standing) : standing;
+                        room = standing < 0 ? -1 : settles ? room : cameDown;
+                        return standing;
+                    }
+                    float left = (goesOn - entered) * MathF.Sqrt(spent / energy);
+                    if (rise > 0f)
+                        left -= MathF.Sqrt((across * across) + (rise * rise)) - across;
+                    energy = spent;
+                    goesOn = entered + left;
+                    if (!(left > 0f))
+                    {
+                        standing = turned > 0 ? Beside(at, target, standing) : standing;
+                        room = standing < 0 ? -1 : settles ? room : cameDown;
+                        return standing;
+                    }
+                }
+                before = entered;
+                room = nextRoom;
+                if (aloft)
+                    cameDown = nextRoom;
+                at = next;
+                if (_surfaces.PieceOf[at] == target)
+                    standing = at;
             }
-            else
+            if (!along || !(goesOn > 0f))
             {
-                entered = nextY;
-                nextY += acrossY;
-                direction = NavGrid.DirectionOf(0, stepY);
-            }
-            bool aloft = entered <= carry;
-            int next = entered > goesOn ? -1 : _grid.Link(at, direction);
-            if (entered > goesOn || (next < 0 && StopsAgainst(at, direction)))
-            {
-                room = standing < 0 ? -1 : settles ? room : cameDown;
+                standing = Beside(at, target, standing);
+                room = standing < 0 ? -1 : settles ? RoomOn(standing, target) : cameDown;
                 return standing;
             }
-            if (next < 0)
-            {
-                room = aloft || standing < 0 ? -1 : cameDown;
-                return aloft ? -1 : standing;
-            }
-            int nextRoom = RoomOn(next, target);
-            if (nextRoom < 0)
-            {
-                if (aloft || _surfaces.PieceOf[next] >= 0)
-                {
-                    room = -1;
-                    return -1;
-                }
-                nextRoom = 0;
-            }
-            room = nextRoom;
-            if (aloft)
-                cameDown = nextRoom;
-            at = next;
-            if (_surfaces.PieceOf[at] == target)
-                standing = at;
         }
     }
+
+    /// <summary>Where a body sliding along the ground from a node, on its own piece of floor, comes to rest, as a leap's landing slide is followed; -1 when it leaves the piece.</summary>
+    internal int SlidesTo(int node, Vector2 heading, float slide) =>
+        Settle(node, Vector2.Normalize(heading), 0f, slide, _ability.RunSpeed, _surfaces.PieceOf[node], settles: true, out _);
+
+    /// <summary>
+    /// The node of a piece a body at a node stands on: the node itself on the piece, else a
+    /// neighbour on it, as a body pushed along a piece's edge stands beside it; else
+    /// <paramref name="otherwise"/>.
+    /// </summary>
+    private int Beside(int node, int target, int otherwise)
+    {
+        if (_surfaces.PieceOf[node] == target)
+            return node;
+        for (int direction = 0; direction < NavGrid.DirectionCount; direction++)
+        {
+            int next = _grid.Link(node, direction);
+            if (next >= 0 && _surfaces.PieceOf[next] == target)
+                return next;
+        }
+        return otherwise;
+    }
+
+    /// <summary>
+    /// Flies a leap from a point toward another at a power and pace, as a route's leaps are flown,
+    /// and gives where its arc comes down and where the body then comes to rest on the floor it came
+    /// down on, for narration; false where it comes down nowhere.
+    /// </summary>
+    public bool Follow(Vector3 start, Vector3 toward, float power, bool run, out Vector3 cameDown, out Vector3 rests)
+    {
+        cameDown = default;
+        rests = default;
+        Vector2 line = Flat(toward) - Flat(start);
+        float distance = line.Length();
+        if (distance < 1e-3f)
+            return false;
+        Vector2 heading = line / distance;
+        int touchdown = Fly(start, heading, power, run, distance + FlightOvershoot, out _, out float fall);
+        if (touchdown < 0)
+            return false;
+        cameDown = _grid.Position(touchdown);
+        (float carry, float slide) = GoesOn(run, fall, touchdown);
+        int piece = _surfaces.PieceOf[touchdown];
+        int rest = piece < 0 ? -1 : Settle(touchdown, heading, carry, slide, SpeedOf(run), piece, settles: true, out _);
+        rests = rest >= 0 ? _grid.Position(rest) : cameDown;
+        return true;
+    }
+
+    /// <summary>How many edges a sliding body is followed along before it is taken to stop at the next.</summary>
+    private const int MostEdgeSlides = 3;
+
+    /// <summary>
+    /// The way along a ledge a body sliding into it from a node goes on: the direction to a
+    /// neighbouring node nearest its heading, and the share of its slide that lies that way. False
+    /// when it meets the ledge head on, with no way on within 80 degrees of its heading.
+    /// </summary>
+    private bool AlongEdge(int node, Vector2 heading, out Vector2 edge, out float keeps)
+    {
+        edge = default;
+        keeps = 0f;
+        for (int direction = 0; direction < NavGrid.DirectionCount; direction++)
+        {
+            if (_grid.Link(node, direction) < 0)
+                continue;
+            (int stepX, int stepY) = NavGrid.StepOf(direction);
+            Vector2 way = Vector2.Normalize(new Vector2(stepX, stepY));
+            float share = Vector2.Dot(way, heading);
+            if (share > keeps)
+            {
+                keeps = share;
+                edge = way;
+            }
+        }
+        return keeps > LeastEdgeSlideShare;
+    }
+
+    /// <summary>The least share of a slide that goes on along a ledge: cos 80 degrees, so a body meeting one nearly head on stops.</summary>
+    private const float LeastEdgeSlideShare = 0.17f;
 
     /// <summary>Whether a body sliding from a node toward the neighbouring column is stopped there by a wall or a rise, rather than going over a ledge.</summary>
     private bool StopsAgainst(int node, int direction)

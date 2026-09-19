@@ -112,6 +112,7 @@ public static class NavRouter
     /// <summary>What each unit of a leap's risk costs a route, in meters, so a route takes an easy leap over a risky one wherever it can.</summary>
     private const float LeapRiskCost = 6f;
 
+
     /// <summary>A route toward a goal beyond the grid found with leaps is taken only when it ends this much nearer the goal.</summary>
     private const float LeapWorthMeters = 1f;
 

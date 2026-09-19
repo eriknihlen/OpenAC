@@ -1,45 +1,45 @@
 big dungeon 0x0019, a north corridor to a far hall
-  cutting corners:  Arrived, 2.3 m left, replans 0; route 19 legs, 845.9 m; 84.0 s, 1 stops, 0.0 s walking; ran around 17 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.4 m left, replans 0; route 19 legs, 845.9 m; 84.1 s, 2 stops, 0.0 s walking; ran around 17 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.2 m left, replans 0; route 19 legs, 845.9 m; 86.9 s, 10 stops, 0.0 s walking; ran around 0 corners and turned in place at 9; 0 frames off the floor, 0 through a wall
 big dungeon 0x200F, across the mines
-  cutting corners:  Arrived, 2.4 m left, replans 0; route 94 legs, 1836.2 m; 188.0 s, 23 stops, 0.0 s walking; ran around 70 corners and turned in place at 22; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.4 m left, replans 0; route 94 legs, 1836.2 m; 190.4 s, 33 stops, 0.0 s walking; ran around 70 corners and turned in place at 22; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.4 m left, replans 0; route 94 legs, 1836.2 m; 204.3 s, 78 stops, 0.0 s walking; ran around 0 corners and turned in place at 82; 0 frames off the floor, 0 through a wall
 big dungeon 0x039E, down 42 m
-  cutting corners:  Arrived, 2.1 m left, replans 0; route 15 legs, 636.2 m; 63.7 s, 3 stops, 0.0 s walking; ran around 12 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 15 legs, 636.2 m; 64.0 s, 4 stops, 0.0 s walking; ran around 12 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.3 m left, replans 0; route 15 legs, 636.2 m; 66.1 s, 15 stops, 0.0 s walking; ran around 0 corners and turned in place at 14; 0 frames off the floor, 0 through a wall
 small dungeon 0x019E, the entrance to an upper room
-  cutting corners:  Arrived, 2.0 m left, replans 0; route 7 legs, 80.7 m; 9.6 s, 4 stops, 0.0 s walking; ran around 3 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 7 legs, 80.7 m; 10.0 s, 4 stops, 0.0 s walking; ran around 3 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.0 m left, replans 0; route 7 legs, 80.7 m; 9.8 s, 6 stops, 0.0 s walking; ran around 0 corners and turned in place at 5; 0 frames off the floor, 0 through a wall
 small dungeon 0x0156, the bottom level to the top
-  cutting corners:  Arrived, 2.3 m left, replans 0; route 21 legs, 279.3 m; 32.4 s, 12 stops, 0.0 s walking; ran around 9 corners and turned in place at 11; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 21 legs, 279.3 m; 33.8 s, 13 stops, 0.0 s walking; ran around 9 corners and turned in place at 11; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.2 m left, replans 0; route 21 legs, 279.3 m; 32.7 s, 15 stops, 0.0 s walking; ran around 0 corners and turned in place at 16; 0 frames off the floor, 0 through a wall
 small dungeon 0x0156, corridors to a six-way room
-  cutting corners:  Arrived, 2.3 m left, replans 0; route 7 legs, 71.6 m; 8.8 s, 4 stops, 0.0 s walking; ran around 3 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 7 legs, 71.6 m; 9.3 s, 4 stops, 0.0 s walking; ran around 3 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.3 m left, replans 0; route 7 legs, 71.6 m; 8.9 s, 4 stops, 0.0 s walking; ran around 0 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
 dungeon 0x0156, a closed door on the route that opens
-  cutting corners:  Arrived, 2.2 m left, replans 0; route 8 legs, 93.7 m; 12.0 s, 7 stops, 0.0 s walking; ran around 4 corners and turned in place at 4, door used 1 and appraised 1 times; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.3 m left, replans 0; route 8 legs, 93.7 m; 12.5 s, 5 stops, 0.0 s walking; ran around 4 corners and turned in place at 4, door used 1 and appraised 1 times; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.2 m left, replans 0; route 8 legs, 93.7 m; 12.1 s, 7 stops, 0.0 s walking; ran around 0 corners and turned in place at 6, door used 1 and appraised 1 times; 0 frames off the floor, 0 through a wall
 dungeon 0x0156, a locked door on the only way
-  cutting corners:  Blocked (a locked door: Door (0x7A000001), and no other way around it was found), 14.4 m left, replans 0; route 17 legs, 174.0 m; 10.8 s, 3 stops, 0.0 s walking; ran around 4 corners and turned in place at 3, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
+  cutting corners:  Blocked (a locked door: Door (0x7A000001), and no other way around it was found), 14.4 m left, replans 0; route 17 legs, 174.0 m; 11.1 s, 3 stops, 0.0 s walking; ran around 4 corners and turned in place at 3, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
   turning in place: Blocked (a locked door: Door (0x7A000001), and no other way around it was found), 13.8 m left, replans 0; route 17 legs, 174.0 m; 10.8 s, 4 stops, 0.0 s walking; ran around 0 corners and turned in place at 5, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
 dungeon 0x01F8, across the mite maze
-  cutting corners:  Arrived, 2.2 m left, replans 0; route 10 legs, 105.0 m; 12.3 s, 3 stops, 0.0 s walking; ran around 7 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 10 legs, 105.0 m; 12.5 s, 3 stops, 0.0 s walking; ran around 7 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.2 m left, replans 0; route 10 legs, 105.0 m; 12.8 s, 8 stops, 0.0 s walking; ran around 0 corners and turned in place at 5; 0 frames off the floor, 0 through a wall
 dungeon 0x01F8, a locked door with another way
-  cutting corners:  Arrived, 2.3 m left, replans 0; route 1 legs, 31.4 m; 26.8 s, 8 stops, 0.0 s walking; ran around 11 corners and turned in place at 6, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.4 m left, replans 0; route 1 legs, 31.4 m; 27.9 s, 9 stops, 0.0 s walking; ran around 11 corners and turned in place at 6, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.3 m left, replans 0; route 1 legs, 31.4 m; 27.4 s, 11 stops, 0.0 s walking; ran around 0 corners and turned in place at 12, door used 0 and appraised 1 times; 0 frames off the floor, 0 through a wall
 Holtburg, outdoors into a building
-  cutting corners:  Arrived, 1.9 m left, replans 0; route 3 legs, 62.7 m; 6.7 s, 1 stops, 0.0 s walking; ran around 2 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.1 m left, replans 0; route 3 legs, 62.7 m; 6.8 s, 1 stops, 0.0 s walking; ran around 2 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 1.9 m left, replans 0; route 3 legs, 62.7 m; 6.7 s, 1 stops, 0.0 s walking; ran around 0 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
 Holtburg, out of one building and into another
-  cutting corners:  Arrived, 1.9 m left, replans 0; route 7 legs, 92.3 m; 10.8 s, 5 stops, 0.0 s walking; ran around 3 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.4 m left, replans 0; route 7 legs, 92.3 m; 11.0 s, 3 stops, 0.0 s walking; ran around 3 corners and turned in place at 2; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 1.9 m left, replans 0; route 7 legs, 92.3 m; 11.0 s, 7 stops, 0.0 s walking; ran around 0 corners and turned in place at 3; 0 frames off the floor, 0 through a wall
 Holtburg, beside the Contract Broker to Renald the Elder
-  cutting corners:  ArrivedWithoutSight (no reachable spot can see the goal, so the route ends at the nearest spot, 1.9 m from it, without a line of sight), 2.1 m left, replans 0; route 2 legs, 33.8 m; 3.8 s, 1 stops, 0.0 s walking; ran around 1 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
+  cutting corners:  ArrivedWithoutSight (no reachable spot can see the goal, so the route ends at the nearest spot, 1.9 m from it, without a line of sight), 2.0 m left, replans 0; route 2 legs, 33.8 m; 3.9 s, 1 stops, 0.0 s walking; ran around 1 corners and turned in place at 0; 0 frames off the floor, 0 through a wall
   turning in place: ArrivedWithoutSight (no reachable spot can see the goal, so the route ends at the nearest spot, 1.9 m from it, without a line of sight), 2.2 m left, replans 0; route 2 legs, 33.8 m; 3.9 s, 2 stops, 0.0 s walking; ran around 0 corners and turned in place at 1; 0 frames off the floor, 0 through a wall
 Yaraq, the archmage's room out and up to the healer's deck
-  cutting corners:  Arrived, 2.2 m left, replans 0; route 11 legs, 106.3 m; 14.2 s, 13 stops, 0.0 s walking; ran around 2 corners and turned in place at 8; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.4 m left, replans 0; route 11 legs, 106.3 m; 14.3 s, 9 stops, 0.0 s walking; ran around 2 corners and turned in place at 8; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.2 m left, replans 0; route 11 legs, 106.3 m; 14.6 s, 16 stops, 0.0 s walking; ran around 0 corners and turned in place at 10; 0 frames off the floor, 0 through a wall
 around Holtburg, west to east across three landblocks in stages
-  cutting corners:  Arrived, 2.3 m left, replans 0; route 1 legs, 275.1 m; 39.5 s, 2 stops, 0.0 s walking; ran around 0 corners and turned in place at 0, 1 stages walked before the last; 0 frames off the floor, 0 through a wall
+  cutting corners:  Arrived, 2.2 m left, replans 0; route 1 legs, 275.1 m; 39.6 s, 2 stops, 0.0 s walking; ran around 0 corners and turned in place at 0, 1 stages walked before the last; 0 frames off the floor, 0 through a wall
   turning in place: Arrived, 2.3 m left, replans 0; route 1 legs, 275.1 m; 39.5 s, 2 stops, 0.0 s walking; ran around 0 corners and turned in place at 0, 1 stages walked before the last; 0 frames off the floor, 0 through a wall

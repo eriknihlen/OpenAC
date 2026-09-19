@@ -893,6 +893,202 @@ public sealed class NavGridTests
     }
 
     /// <summary>
+    /// A leap aimed again from its own takeoff is the leap the route planned: the same pace, and
+    /// about the same power.
+    /// </summary>
+    [Fact]
+    public void ALeapAimedAgainFromItsTakeoffIsTheLeapTheRoutePlanned()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 2f, 10f, 12f, 0f),
+            .. Floor(13f, 2f, 28f, 12f, 0f)]);
+        NavLeapAbility sliding = Leaper with { Physics = OrdinaryGround };
+        NavRoute leapt = NavRouter.Find(grid, new Vector3(6f, 7f, 0f), new Vector3(22f, 7f, 0f), 1f, leaps: sliding);
+        NavRouteLeap leap = Assert.Single(leapt.Leaps);
+
+        NavLeapAim? aim = new NavLeapFinder(grid, sliding).AimFrom(leapt.Legs[leap.LegIndex - 1], leapt.Legs[leap.LegIndex], leap.Run);
+
+        Assert.NotNull(aim);
+        Assert.Equal(leap.Run, aim.Value.Run);
+        Assert.InRange(aim.Value.Power, leap.Power - 0.1f, leap.Power + 0.1f);
+    }
+
+    /// <summary>
+    /// A body that stopped a step short of its takeoff, as one a walk let go of early does, is aimed
+    /// from where it stands: charged harder, and kept by the same checks the route's own leaps pass.
+    /// </summary>
+    [Fact]
+    public void ALeapAimedFromAStepShortOfItsTakeoffIsChargedHarder()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 2f, 10f, 12f, 0f),
+            .. Floor(13f, 2f, 28f, 12f, 0f)]);
+        NavLeapAbility sliding = Leaper with { Physics = OrdinaryGround };
+        NavRoute leapt = NavRouter.Find(grid, new Vector3(6f, 7f, 0f), new Vector3(22f, 7f, 0f), 1f, leaps: sliding);
+        NavRouteLeap leap = Assert.Single(leapt.Leaps);
+        Vector3 takeoff = leapt.Legs[leap.LegIndex - 1];
+        Vector3 landing = leapt.Legs[leap.LegIndex];
+        Vector3 away = Vector3.Normalize(new Vector3(takeoff.X - landing.X, takeoff.Y - landing.Y, 0f));
+
+        NavLeapAim? aim = new NavLeapFinder(grid, sliding).AimFrom(takeoff + (away * 0.8f), landing, leap.Run);
+
+        Assert.NotNull(aim);
+        Assert.True(aim.Value.Power > leap.Power || aim.Value.Run != leap.Run, $"aimed at {aim.Value.Power:0.00} power against the planned {leap.Power:0.00}");
+    }
+
+    /// <summary>
+    /// Where no leap at the landing a route planned is kept from the spot a body came to rest on,
+    /// a leap onto another spot of that same floor is taken from where it stands, so the body
+    /// jumps on rather than walk back to the takeoff the route picked.
+    /// </summary>
+    [Fact]
+    public void ALeapOntoAnotherSpotOfTheLandingsFloorIsAimedFromWhereTheBodyStands()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 2f, 10f, 12f, 0f),
+            .. Floor(13f, 2f, 28f, 12f, 0f)]);
+        NavLeapAbility sliding = Leaper with { Physics = OrdinaryGround };
+        var finder = new NavLeapFinder(grid, sliding);
+        var standing = new Vector3(6f, 7f, 0f);
+        // Farther across the far floor than a leap from here reaches.
+        var planned = new Vector3(27f, 7f, 0f);
+
+        Assert.Null(finder.AimFrom(standing, planned, preferRun: true));
+        NavLeapAim? onward = finder.AimOnward(standing, planned, preferRun: true, out Vector3 spot);
+
+        Assert.NotNull(onward);
+        Assert.True(spot.X < planned.X, $"the leap aimed onward at ({spot.X:0.0}, {spot.Y:0.0}), no nearer than the landing it replaced");
+        Assert.NotNull(finder.AimFrom(standing, spot, preferRun: true));
+    }
+
+    /// <summary>
+    /// A landing smaller than the body keeps no room to spare: the route's own leap onto one is
+    /// kept without the check that it still lands when flown a little off, so a leap aimed again
+    /// from the takeoff it was planned from is kept too, and one aimed from farther off is not.
+    /// </summary>
+    [Fact]
+    public void ALeapOntoALandingSmallerThanTheBodyIsKeptOnlyFromItsOwnTakeoff()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 12f, 8f, 18f, 0f),
+            .. Floor(17f, 14.75f, 25f, 15.25f, 0f)]);
+        var finder = new NavLeapFinder(grid, Leaper with { Physics = OrdinaryGround });
+        var takeoff = new Vector3(7f, 15f, 0f);
+        var landing = new Vector3(21f, 15f, 0f);
+
+        Assert.NotNull(finder.AimFrom(takeoff, landing, preferRun: true, atItsTakeoff: true, out _));
+        Assert.Null(finder.AimFrom(takeoff, landing, preferRun: true, atItsTakeoff: false, out _));
+    }
+
+    /// <summary>
+    /// A leap aimed again is kept only as the route's own leaps are: one that comes down on a strip
+    /// only when flown exactly, and off it when turned a little or charged a frame more or less, is
+    /// not aimed from where the body stands, while the same leap onto a wider strip is.
+    /// </summary>
+    [Fact]
+    public void ALeapAimedAgainMustStillLandWhenFlownALittleOff()
+    {
+        NavLeapAim? AimOnto(float width)
+        {
+            NavGrid grid = Build([
+                .. Floor(2f, 12f, 8f, 18f, 0f),
+                .. Floor(17f, 15f - (width / 2f), 25f, 15f + (width / 2f), 0f)]);
+            return new NavLeapFinder(grid, Leaper with { Physics = OrdinaryGround })
+                .AimFrom(new Vector3(7f, 15f, 0f), new Vector3(21f, 15f, 0f), preferRun: true);
+        }
+
+        Assert.Null(AimOnto(2f));
+        Assert.NotNull(AimOnto(3f));
+    }
+
+    /// <summary>
+    /// A body sliding into a ledge at a slant is pushed along the edge and slides on, as the
+    /// client's precipice slide carries it, with the share of its slide that lies along the edge;
+    /// one sliding into it head on stops there. Live, long running leaps on a jump puzzle's rocks
+    /// slid on 1.3 m to 1.9 m at 20 to 50 degrees off their line.
+    /// </summary>
+    [Fact]
+    public void ASlideIntoALedgeAtASlantGoesOnAlongItsEdge()
+    {
+        NavGrid grid = Build([.. Floor(2f, 2f, 24f, 6f, 0f)]);
+        var finder = new NavLeapFinder(grid, Leaper with { Physics = OrdinaryGround });
+        int from = grid.FindNode(new Vector3(8f, 4.5f, 0f), 0.5f, 0.5f);
+
+        Vector3 slanted = grid.Position(finder.SlidesTo(from, new Vector2(1f, 1f), 4f));
+        Vector3 headOn = grid.Position(finder.SlidesTo(from, new Vector2(0f, 1f), 4f));
+
+        Assert.True(slanted.X > 9.5f, $"the slanted slide came to rest at {slanted.X:0.00}, {slanted.Y:0.00}");
+        Assert.True(slanted.Y < 6f);
+        Assert.InRange(headOn.X, 7.5f, 8.5f);
+        Assert.True(headOn.Y < 6f);
+    }
+
+    /// <summary>
+    /// A landing slide spends its speed climbing: at a run of 7.3 m/s it rises no more than its speed
+    /// squared over twice gravity, 2.7 m, however far it would slide on the flat. Live, the planner
+    /// slid a leap 3.4 m up the side of a rock onto its top, and the body climbed 1.5 m of it.
+    /// </summary>
+    [Fact]
+    public void ALandingSlideClimbsNoHigherThanItsSpeedCarriesIt()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 2f, 20f, 6f, 0f),
+            .. Ramp(2f, 6f, 20f, 12f, 0f, 5.04f)]);
+        var finder = new NavLeapFinder(grid, Leaper with { Physics = OrdinaryGround });
+        int belowRise = grid.FindNode(new Vector3(10f, 5.5f, 0f), 0.5f, 0.5f);
+        int onFlat = grid.FindNode(new Vector3(10f, 3f, 0f), 0.5f, 0.5f);
+
+        Vector3 flat = grid.Position(finder.SlidesTo(onFlat, new Vector2(1f, 0f), 6f));
+        Vector3 climbed = grid.Position(finder.SlidesTo(belowRise, new Vector2(0f, 1f), 6f));
+
+        Assert.True(flat.X - grid.Position(onFlat).X > 5f);
+        float most = 7.3f * 7.3f / (2f * 9.8f);
+        Assert.True(climbed.Z > 1f && climbed.Z <= most + 0.1f, $"the slide climbed to {climbed.Z:0.00} m");
+    }
+
+    /// <summary>
+    /// A leap coming down on terrain is thrown back up a little and skims on through the hop; one
+    /// coming down on an object's floor slides on with no hop, as over a hundred landings on
+    /// Doriathazaar's rocks did.
+    /// </summary>
+    [Fact]
+    public void ALeapHopsOnTerrainButNotOnAnObjectsFloor()
+    {
+        var sliding = Leaper with { Physics = OrdinaryGround };
+        var onTerrain = NavGrid.Build(
+            new NavGeometry(0f, 0f, 32f, [new NavTerrain(new TerrainSurface(new byte[81], new float[256]), 0f, 0f)], [], [], []),
+            Body);
+        NavGrid onObject = Build([.. Floor(0f, 0f, 32f, 32f, 0f)]);
+        int terrainNode = onTerrain.FindNode(new Vector3(10f, 16f, 0f), 0.5f, 0.5f);
+        int objectNode = onObject.FindNode(new Vector3(10f, 16f, 0f), 0.5f, 0.5f);
+
+        Assert.True(onTerrain.IsTerrain(terrainNode));
+        Assert.False(onObject.IsTerrain(objectNode));
+        Assert.True(
+            new NavLeapFinder(onTerrain, sliding).Follow(new Vector3(4f, 16f, 0f), new Vector3(20f, 16f, 0f), 0.9f, true, out Vector3 terrainDown, out Vector3 terrainRest));
+        Assert.True(
+            new NavLeapFinder(onObject, sliding).Follow(new Vector3(4f, 16f, 0f), new Vector3(20f, 16f, 0f), 0.9f, true, out Vector3 objectDown, out Vector3 objectRest));
+        float terrainSlide = terrainRest.X - terrainDown.X;
+        float objectSlide = objectRest.X - objectDown.X;
+        Assert.True(terrainSlide > objectSlide + 0.5f, $"slid {terrainSlide:0.00} m on terrain and {objectSlide:0.00} m on the object");
+        Assert.InRange(objectSlide, sliding.Physics.GroundSlide(sliding.RunSpeed) - 0.3f, sliding.Physics.GroundSlide(sliding.RunSpeed) + 0.4f);
+    }
+
+    /// <summary>A body standing against the wall of a ledge no jump from there clears is not aimed from there.</summary>
+    [Fact]
+    public void NoLeapIsAimedFromWhereItCannotClearTheLedgeItJumpsUpOnto()
+    {
+        NavGrid grid = Build([
+            .. Floor(2f, 2f, 12f, 12f, 0f),
+            .. Wall(12f, 2f, 12f, 12f, 0f, 1.5f),
+            .. Floor(12f, 2f, 24f, 12f, 1.5f)]);
+        var finder = new NavLeapFinder(grid, Leaper);
+
+        Assert.Null(finder.AimFrom(new Vector3(11.4f, 7f, 0f), new Vector3(18f, 7f, 1.5f), preferRun: true));
+        Assert.NotNull(finder.AimFrom(new Vector3(6f, 7f, 0f), new Vector3(15f, 7f, 1.5f), preferRun: true));
+    }
+
+    /// <summary>
     /// How far a leap may carry comes from the body itself, how fast it runs and how long its
     /// jump keeps it in the air, not from a fixed distance: a body that runs 10.6 m/s and jumps
     /// 5.7 m high clears a gap of 18 m onto floor at the same height, and one that jumps 1.5 m does not.
@@ -1055,7 +1251,9 @@ public sealed class NavGridTests
         Assert.True(leapt.Reason == "routed", Described(leapt));
         NavRouteLeap leap = Assert.Single(leapt.Leaps);
         Vector3 rest = leapt.Legs[leap.LegIndex];
-        Assert.InRange(rest.X, 12.5f, 13.5f);
+        // Past the platform's middle at 12.25: coming down on a platform rather than terrain, the
+        // body slides on without a landing hop.
+        Assert.InRange(rest.X, 12.3f, 13.5f);
     }
 
     [Fact]
@@ -1218,7 +1416,9 @@ public sealed class NavGridTests
             leaps: climber);
 
         Assert.True(leapt.Reason == "routed", Described(leapt));
-        Assert.True(leapt.Leaps.Count >= 3, Described(leapt));
+        // A running leap onto a platform, rather than terrain, comes down with no hop to carry it
+        // off again, so it may take the top in one leap rather than hopping up the stack.
+        Assert.NotEmpty(leapt.Leaps);
         Assert.InRange(leapt.Legs[^1].Z, 4.1f, 4.3f);
     }
 

@@ -157,6 +157,9 @@ public sealed class RuntimeScriptedMovement
     private long _jumpSequence;
     private bool _jumpCharging;
     private double _jumpHoldSeconds;
+
+    /// <summary>The power the jump under way was asked for, which it is released at exactly.</summary>
+    private float _jumpPower;
     private double? _jumpReleaseAt;
     private RuntimeMovePace? _jumpLeaveAt;
     private bool _heldLastFrame;
@@ -236,6 +239,7 @@ public sealed class RuntimeScriptedMovement
         if (!float.IsFinite(power) || power <= 0f || power > 1f || _jumpCharging)
             return false;
         _jumpHoldSeconds = power * FullJumpChargeSeconds;
+        _jumpPower = power;
         _jumpReleaseAt = null;
         _jumpLeaveAt = leaveAt;
         _jumpSequence++;
@@ -277,11 +281,13 @@ public sealed class RuntimeScriptedMovement
         }
 
         bool jump = false;
+        float? released = null;
         if (_jumpCharging)
         {
             _jumpReleaseAt ??= sample.TimeSeconds + _jumpHoldSeconds;
             if (sample.TimeSeconds >= _jumpReleaseAt)
             {
+                released = _jumpPower;
                 _jumpCharging = false;
                 _jumpReleaseAt = null;
                 if (_jumpLeaveAt is { } pace)
@@ -297,14 +303,14 @@ public sealed class RuntimeScriptedMovement
         MovementInput? input = null;
         if (IsMoving || jump)
         {
-            MovementInput held = Hold(jump);
+            MovementInput held = Hold(jump) with { JumpExtent = released };
             _heldRun = held.Run;
             input = held;
             _heldLastFrame = true;
         }
         else if (_heldLastFrame)
         {
-            input = new MovementInput(Run: _heldRun, IsPersistentCommand: true);
+            input = new MovementInput(Run: _heldRun, IsPersistentCommand: true, JumpExtent: released);
             _heldLastFrame = false;
         }
         if (!IsActive)

@@ -404,6 +404,10 @@ internal sealed partial class NavigationWalkController
 
     private const int MaximumBuildsPerPlan = 2;
     private const int ViewRetryTicks = 120;
+
+    /// <summary>How far from the goal an object still counts as the thing the goal stands on.</summary>
+    private const float GoalObjectReach = 4f;
+
     private const float FaceToleranceDegrees = 10f;
 
     /// <summary>
@@ -500,6 +504,15 @@ internal sealed partial class NavigationWalkController
     private uint _gridDungeon;
     private uint _buildingDungeon;
 
+    /// <summary>What sent the grid being built building, as the build reports when it lands.</summary>
+    private string _buildingWhy = "a walk needs one over its route";
+
+    /// <summary>
+    /// What the objects in the grid's region came to when they were last looked at, so
+    /// that a change is built for once it has stayed put from one look to the next.
+    /// </summary>
+    private ulong _objectsLastSeen;
+
     /// <summary>
     /// The cell last asked about whether it lies in a sealed dungeon, and the
     /// answer, since each answer reads the game data.
@@ -562,6 +575,53 @@ internal sealed partial class NavigationWalkController
 
     private static string Inv(FormattableString text)
         => text.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Where the planner's own flight puts the leap just flown down and at rest: flown from exactly
+    /// where the body charged, at the power and pace it was flown at, toward the spot it was aimed
+    /// at, which for a leap aimed onward is that spot and not the landing the route planned. Only
+    /// the leap that was flown can be replayed against what it did.
+    /// </summary>
+    private string ModelledTouchdown(RuntimeRouteDriver driver)
+    {
+        RuntimeLeapApproach approach = driver.Approach;
+        int landing = approach.Leg + 1;
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || landing < 1
+            || landing >= driver.Legs.Count)
+        {
+            return string.Empty;
+        }
+        Vector3 end = approach.FlownAt ?? driver.Legs[landing];
+        Vector3 start = approach.ChargedFrom;
+        bool run = approach.Aimed?.Run ?? approach.PlannedRun;
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        return cached.Finder.Follow(start, end, Flown(approach), run, out Vector3 cameDown, out Vector3 rests)
+            ? $", where the planner's flight comes down at {Point(cameDown)} and comes to rest at {Point(rests)}"
+            : ", where the planner's flight comes down nowhere";
+    }
+
+    /// <summary>The power a leap was flown at: as aimed again where it was, else as planned.</summary>
+    private static float Flown(in RuntimeLeapApproach approach) => approach.Aimed?.Power ?? approach.PlannedPower;
+
+    /// <summary>How high the body's own jump at the power a leap was flown at lifts it, as the planner takes it, and the arc's peak with the step it rises through before gravity takes it.</summary>
+    private string PlannedRise(in RuntimeLeapApproach approach)
+    {
+        if (_leapAbility is not { } ability)
+            return "unknown";
+        float height = ability.JumpHeight(Flown(approach));
+        float launch = MathF.Sqrt(2f * NavLeapPhysics.Gravity * height);
+        float peak = height + (launch * MathF.Max(0f, ability.Physics.StepSeconds));
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{height:0.00} m, {peak:0.00} m with its first step, of {ability.FullJumpHeight:0.00} m at full power");
+    }
+
+    /// <summary>Degrees signed, clockwise positive, with nothing written as minus zero.</summary>
+    private static string Degrees(float degrees) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{(MathF.Abs(degrees) < 0.05f ? 0f : degrees):+0.0;-0.0;0.0}");
+
+    private static string Spot(Vector2 at) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({at.X:0.00}, {at.Y:0.00})");
 
     private static string Point(Vector3 at) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0})");
@@ -687,6 +747,8 @@ internal sealed partial class NavigationWalkController
         }
 
         bool inWorld = _body.TrySample(out NavigationWalkBodySample sample);
+        if (inWorld && sample.Leaps is { } ability)
+            _leapAbility = ability;
         if (inWorld && (double.IsNaN(_stillSince) || Vector3.Distance(sample.Position, _stillAt) > StillMeters))
         {
             _stillAt = sample.Position;
@@ -871,6 +933,12 @@ internal sealed partial class NavigationWalkController
             && !IsStale(built, gridDungeon)
                 ? built
                 : null;
+        if (usable is { } have && !active.BuiltForObjects && GoalStandsOnWhatTheGridHasNot(have, active, sample.Body))
+        {
+            active.BuiltForObjects = true;
+            active.RebuildWhy = "the goal stands on something the grid has none of";
+            usable = null;
+        }
         bool staged = false;
         if (usable is null || !usable.Contains(active.Goal, CoverMargin))
         {
@@ -1095,17 +1163,56 @@ internal sealed partial class NavigationWalkController
             End(active, NavigationWalkState.Stopped, "the client refused a move");
             return;
         }
-        if (driver.IsLeaping && !wasLeaping)
+        if (step.Jump is not null)
         {
+            RuntimeLeapApproach approach = driver.Approach;
+            string moves = approach.MovesBegun switch
+            {
+                0 => "from where it stood",
+                1 => $"after one {approach.Pace.ToString().ToLowerInvariant()} begun at {Spot(approach.BegunAt)}",
+                _ => $"after {approach.MovesBegun} {approach.Pace.ToString().ToLowerInvariant()} moves, the last begun at {Spot(approach.BegunAt)}",
+            };
+            string letGo = float.IsNaN(approach.LetGoMeters) ? string.Empty : $", let go {approach.LetGoMeters:0.00} m short at {Spot(approach.LetGoAt)}";
+            string turned = approach.Turns == 0 ? ", no turn" : $", {approach.Turns} turn{(approach.Turns == 1 ? string.Empty : "s")} through {approach.TurnedDegrees:0} degrees from {Spot(approach.TurnedAt)}";
+            string aimed = approach.Aimed is { } aim
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; aimed from here at {aim.Power:0.00} power {(aim.Run ? "running" : "walking")}, planned {approach.PlannedPower:0.00} {(approach.PlannedRun ? "running" : "walking")}")
+                : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; no leap from here is kept ({_aimRefused ?? "not aimed"}), so flown as planned at {approach.PlannedPower:0.00} power");
+            string skipped = approach.WalkSkipped > 0f
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"; leapt from where it stood rather than walk {approach.WalkSkipped:0.0} m to the planned takeoff")
+                : string.Empty;
+            string adjusted = approach.Adjustments == 0 ? string.Empty
+                : $"; went back to the takeoff {approach.Adjustments} time{(approach.Adjustments == 1 ? string.Empty : "s")} first";
+            Detail(
+                $"Walk to {Label(active)}: charging the jump {approach.TakeoffError:0.00} m from its takeoff {Spot(approach.TakeoffAt)} at {Spot(approach.ChargedAt)}, {moves}{letGo}{turned}{aimed}{skipped}{adjusted}");
+        }
+        // Said once for each leap: a body sent back to its takeoff leaves the leap and takes it
+        // up again, and how often it did is in the line above.
+        if (driver.IsLeaping && !wasLeaping && active.AnnouncedLeap != driver.LegIndex)
+        {
+            active.AnnouncedLeap = driver.LegIndex;
             Vector3 takeoff = driver.Legs[driver.LegIndex - 1];
             Vector3 landing = driver.Legs[driver.LegIndex];
             Say(Inv(
                 $"Walk to {Label(active)}: leaping from {takeoff.Z:0.0} m to {landing.Z:0.0} m, {HorizontalDistance(takeoff, landing):0.0} m on"));
         }
-        else if (wasLeaping && !driver.IsLeaping && driver.State == RuntimeRouteDriveState.Driving)
+        else if (wasLeaping && !driver.IsLeaping && driver.LeapFlew && driver.State == RuntimeRouteDriveState.Driving)
         {
             Say(Inv(
                 $"Walk to {Label(active)}: the leap landed at {sample.Position.Z:0.0} m, {driver.LandingError:0.0} m from where it was planned, after sliding {driver.LandingSlide:0.0} m"));
+        }
+        // Only a leap that came down has a landing to measure: one that never left the ground
+        // ends the drive with nothing of its own to say.
+        if (wasLeaping && !driver.IsLeaping && driver.LeapLanded && sample.Airborne is false && driver.State != RuntimeRouteDriveState.Interrupted)
+        {
+            Detail(string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"Walk to {Label(active)}: the leap came to rest {MathF.Abs(driver.LandingLong):0.00} m {(driver.LandingLong < 0f ? "short of" : "past")} its landing and "
+                + $"{MathF.Abs(driver.LandingAside):0.00} m to its {(driver.LandingAside < 0f ? "left" : "right")}, {driver.LandingRise:+0.00;-0.00} m above it; "
+                + $"it came down {driver.LandingFlown:0.00} m from where it charged, of {driver.LandingPlanned:0.00} m to its landing, "
+                + $"flying {Degrees(driver.LandingFlightDegrees)} degrees off the line to it after charging {Degrees(driver.Approach.FacingError)} degrees off it, "
+                + $"then sliding {driver.LandingSlide:0.00} m {Degrees(driver.LandingSlideDegrees)} degrees off that line; "
+                + $"it rose {driver.LandingPeak:0.00} m at its highest, where a jump at {Flown(driver.Approach):0.00} power rises {PlannedRise(driver.Approach)}; "
+                + $"it came down at {Point(driver.LandingTouchdown)}{ModelledTouchdown(driver)}"));
         }
 
         switch (driver.State)
@@ -1554,6 +1661,8 @@ internal sealed partial class NavigationWalkController
             End(active, NavigationWalkState.NoRoute, Inv($"the goal was still {away:0} m away after {active.Stages} stages"));
             return;
         }
+        active.BuiltForObjects = false;
+        active.RebuildWhy = null;
         string next = Inv($"stage {active.Stages} walked; planning the next toward the goal, {away:0} m away");
         Publish(active, NavigationWalkState.Planning, next, float.NaN);
         Say($"Walk to {Label(active)}: {next}");
@@ -1573,7 +1682,13 @@ internal sealed partial class NavigationWalkController
             return;
         }
         active.Builds++;
-        if (!StartBuild(originX, originY, size, sample.Body, dungeon))
+        if (!StartBuild(
+                originX,
+                originY,
+                size,
+                sample.Body,
+                dungeon,
+                active.RebuildWhy ?? "a walk needs one over its route"))
             End(active, NavigationWalkState.NoRoute, "no collision is loaded around the character");
     }
 
@@ -1755,9 +1870,8 @@ internal sealed partial class NavigationWalkController
     /// <summary>
     /// Whether a grid no longer stands for the world: the resident landblocks it was
     /// built from have changed, or the landblock of a grid over a whole sealed dungeon
-    /// has left. Objects arriving and leaving are <see cref="ObjectsMoved"/>, which only
-    /// the grid kept around the character follows, so that a walk can always plan with
-    /// the grid it has.
+    /// has left. Objects arriving and leaving are <see cref="ObjectsMoved"/>, which a walk
+    /// asks about as it plans and the grid kept around the character follows as it is shown.
     /// </summary>
     /// <summary>
     /// Lets go of the grid kept between walks once nothing it was built over is loaded any
@@ -1796,8 +1910,10 @@ internal sealed partial class NavigationWalkController
     /// <summary>
     /// Starts building a grid over a region, or over the whole of the sealed
     /// dungeon whose landblock <paramref name="dungeon"/> names when it is not zero.
+    /// <paramref name="why"/> is what sent it building, which the build reports when it
+    /// lands: a grid built again and again has a reason, and it is worth telling.
     /// </summary>
-    private bool StartBuild(float originX, float originY, float size, NavBody body, uint dungeon)
+    private bool StartBuild(float originX, float originY, float size, NavBody body, uint dungeon, string why)
     {
         NavGeometry? geometry = dungeon == 0u
             ? NavGeometry.Capture(_physics, originX, originY, size, _goals.StandsStill)
@@ -1805,22 +1921,75 @@ internal sealed partial class NavigationWalkController
         if (geometry is null)
             return false;
         _buildingDungeon = dungeon;
+        _buildingWhy = why;
         _building = Task.Run(() => NavGrid.Build(geometry, body));
         return true;
     }
 
     /// <summary>
     /// Whether the objects a body meets in a grid's region have changed since it was
-    /// built, so the grid shown around the character is worth building again.
+    /// built. A walk asks this as it plans, and plans on the answer at once: an object
+    /// the server placed after the grid was built is floor the walk must be given, and
+    /// waiting to be sure of it would be waiting with the walk standing still.
     /// </summary>
-    private bool ObjectsMoved(NavGrid grid) =>
+    private bool ObjectsMoved(NavGrid grid) => Objects(grid) != grid.ObjectFingerprint;
+
+    /// <summary>
+    /// Whether the objects have changed and stayed changed, which is what the grid kept
+    /// around the character is built again for. It is built again for as long as the
+    /// answer is yes, so the answer must not be yes for a thing on its way through: what
+    /// the region holds has to read the same twice running first. The ground hardly ever
+    /// changes, and what changes it is a thing the server places and leaves, which reads
+    /// the same from the moment it lands; anything crossing the region is somewhere else
+    /// on the next look. A dungeon's grid takes far longer to build than to look at, and
+    /// one built for a thing in flight is out of date before the build finishes.
+    /// </summary>
+    private bool ObjectsMovedAndStayed(NavGrid grid)
+    {
+        ulong now = Objects(grid);
+        bool stayed = now != grid.ObjectFingerprint && now == _objectsLastSeen;
+        _objectsLastSeen = now;
+        return stayed;
+    }
+
+    /// <summary>
+    /// Whether the goal stands on or in an object whose collision the grid has none of,
+    /// which is an object the server placed after the grid was built. A route over such a
+    /// grid still arrives: it ends on the floor beside the object or under it, rather than
+    /// on top, as a walk onto a rock the grid never saw does. Asked once as a walk plans,
+    /// not on every tick, since it reads the objects standing around the goal. The grid's
+    /// own rule for what it holds decides, so that what it is asked about and what it was
+    /// built from are the same objects.
+    /// </summary>
+    private bool GoalStandsOnWhatTheGridHasNot(NavGrid grid, Request active, NavBody body)
+    {
+        var goal = new Vector2(active.Goal.X, active.Goal.Y);
+        foreach (ShadowEntry entry in _physics.ShadowObjects.AllEntriesForDebug())
+        {
+            if (grid.ObjectIds.Contains(entry.EntityId) || !_goals.StandsStill(entry.EntityId))
+                continue;
+            // How near the goal a part comes is measured from its footprint and never from
+            // the position it is registered at: a part's collision can sit well off that
+            // position, and the radius kept beside it is its model's own, measured about the
+            // model's middle rather than about where the part stands.
+            NavAvoidance footprint = NavGeometry.FootprintOf(entry, _physics.DataCache);
+            float fromGoal = Vector2.Distance(new Vector2(footprint.Centre.X, footprint.Centre.Y), goal);
+            if (fromGoal > GoalObjectReach + footprint.Radius)
+                continue;
+            if (fromGoal <= footprint.Radius + body.Radius)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>What the objects a body meets in a grid's region come to now.</summary>
+    private ulong Objects(NavGrid grid) =>
         NavGeometry.FingerprintObjects(
             _physics,
             grid.OriginX,
             grid.OriginY,
             grid.Size,
-            _goals.StandsStill)
-        != grid.ObjectFingerprint;
+            _goals.StandsStill);
 
     /// <summary>Keeps a grid around the character while it is shown: the whole dungeon inside a sealed one.</summary>
     private void KeepViewGrid(in NavigationWalkBodySample sample)
@@ -1829,14 +1998,13 @@ internal sealed partial class NavigationWalkController
             return;
         if (TryMeasureDungeon(sample.CellId, out uint dungeon, out Vector2 minimum, out Vector2 maximum))
         {
-            if (_grid is { } whole
-                && whole.Body == sample.Body
-                && _gridDungeon == dungeon
-                && !IsStale(whole, dungeon)
-                && !ObjectsMoved(whole))
-            {
+            string? whyDungeon = _grid is { } whole && whole.Body == sample.Body && _gridDungeon == dungeon
+                ? IsStale(whole, dungeon)
+                    ? "the dungeon's landblock left"
+                    : ObjectsMovedAndStayed(whole) ? "the objects in it changed" : null
+                : "there was none over this dungeon";
+            if (whyDungeon is null)
                 return;
-            }
             Vector2 at = Flat(sample.Position);
             if (!TryChooseSquare(
                     Vector2.Min(minimum, at),
@@ -1845,22 +2013,21 @@ internal sealed partial class NavigationWalkController
                     out float originX,
                     out float originY,
                     out float size)
-                || !StartBuild(originX, originY, size, sample.Body, dungeon))
+                || !StartBuild(originX, originY, size, sample.Body, dungeon, whyDungeon))
             {
                 _viewRetryTick = _tick + ViewRetryTicks;
             }
             return;
         }
-        if (_grid is { } grid
-            && grid.Body == sample.Body
-            && _gridDungeon == 0u
-            && grid.Contains(sample.Position, ViewRegion / 8f)
-            && !ObjectsMoved(grid))
-        {
+        string? why = _grid is { } grid && grid.Body == sample.Body && _gridDungeon == 0u
+            ? grid.Contains(sample.Position, ViewRegion / 8f)
+                ? ObjectsMovedAndStayed(grid) ? "the objects in it changed" : null
+                : "the character walked out of it"
+            : "there was none around the character";
+        if (why is null)
             return;
-        }
         float half = ViewRegion * 0.5f;
-        if (!StartBuild(Snap(sample.Position.X - half), Snap(sample.Position.Y - half), ViewRegion, sample.Body, dungeon: 0u))
+        if (!StartBuild(Snap(sample.Position.X - half), Snap(sample.Position.Y - half), ViewRegion, sample.Body, dungeon: 0u, why))
             _viewRetryTick = _tick + ViewRetryTicks;
     }
 
@@ -1883,7 +2050,7 @@ internal sealed partial class NavigationWalkController
         _gridDungeon = _buildingDungeon;
         NavGridBuildReport report = grid.Report;
         Say(Inv(
-            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms"));
+            $"Navmesh: {report.Nodes} standing points ({report.ClearNodes} clear) over {grid.Size:0} m from {grid.LandblockIds.Count} landblocks in {report.Milliseconds:0} ms, built because {_buildingWhy}"));
     }
 
     private void CollectRoute()
@@ -1916,7 +2083,7 @@ internal sealed partial class NavigationWalkController
             RuntimeRouteLeap[] leaps = [.. detour.Leaps
                 .Where(leap => leap.LegIndex - skipped >= 1)
                 .Select(leap => new RuntimeRouteLeap(leap.LegIndex - skipped, leap.Power, leap.Run))];
-            _driver = Drive(requester, new RuntimeRouteDriver(onward, leaps, takeOverMoves: true, canCutAlong: CornerCuts()));
+            _driver = Drive(requester, new RuntimeRouteDriver(onward, leaps, takeOverMoves: true, canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
             if (requester.Follow)
                 Detail(Inv($"Follow {Label(requester)}: planned again toward the player on the way, {detour.Length:0.0} m"));
             else
@@ -1951,6 +2118,25 @@ internal sealed partial class NavigationWalkController
             string through = "no route keeps out of where the character stuck; planning through it again";
             Publish(requester, NavigationWalkState.Planning, through, float.NaN);
             Say($"{(requester.Follow ? "Follow" : "Walk to")} {Label(requester)}: {through}");
+            return;
+        }
+        if (route.Outcome != NavRouteOutcome.Routed
+            && !requester.BuiltForObjects
+            && _grid is { } searched
+            && ObjectsMoved(searched))
+        {
+            // The grid was built before the server had placed everything here: a dungeon's
+            // is built on arrival, and objects are placed as the character comes near them.
+            // A route keeps out of the objects the grid has none of, as obstacles, which is
+            // right until the way on is over them — the rocks of a jump puzzle are the
+            // route. Having found none, build the grid again with what stands here now and
+            // search once more, rather than asking on every tick whether anything moved.
+            requester.BuiltForObjects = true;
+            requester.RebuildWhy = "no route was found with the objects the grid had";
+            _grid = null;
+            string again = $"{requester.RebuildWhy}; building it again with what stands here now";
+            Publish(requester, NavigationWalkState.Planning, again, float.NaN);
+            Say($"{(requester.Follow ? "Follow" : "Walk to")} {Label(requester)}: {again}");
             return;
         }
         if (route.Outcome != NavRouteOutcome.Routed)
@@ -2013,7 +2199,7 @@ internal sealed partial class NavigationWalkController
                     Inv($"a route was found for the first {route.Length:0} m; the rest is planned on the way"));
                 return;
             }
-            _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts()));
+            _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
             Publish(requester, NavigationWalkState.Walking, "walking", route.Length + left);
             return;
         }
@@ -2034,7 +2220,7 @@ internal sealed partial class NavigationWalkController
         }
         requester.ArrivalReason = route.Reason == "routed" ? null : route.Reason;
         requester.EndsInSight = route.EndsInSight;
-        _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts()));
+        _driver = Drive(requester, new RuntimeRouteDriver(route.Legs, LeapsOf(route), canCutAlong: CornerCuts(), aimLeapFrom: AimLeapFrom, aimOnward: AimOnward, sameFloor: SameFloor));
         Publish(requester, NavigationWalkState.Walking, "walking", route.Length);
     }
 
@@ -2639,6 +2825,69 @@ internal sealed partial class NavigationWalkController
     /// <summary>What a drive cuts corners along: arcs the grid lets a body brush along, or none before there is a grid.</summary>
     private Func<IReadOnlyList<Vector3>, bool>? CornerCuts() => _grid is { } grid ? grid.CanBrushAlong : null;
 
+    /// <summary>What the body could leap when it was last sampled, which a leap is aimed again with.</summary>
+    private NavLeapAbility? _leapAbility;
+
+    /// <summary>The leap finder a leap was last aimed again with, kept while the grid and the body's leaping stay the same.</summary>
+    private (NavGrid Grid, NavLeapAbility Ability, NavLeapFinder Finder)? _aimFinder;
+
+    /// <summary>
+    /// Aims a leap again from exactly where the body stands, on the grid its route was planned
+    /// over, by the same checks the route's own leaps are kept by; null where no leap from there is
+    /// kept, or where the grid does not hold where the body stands or the landing.
+    /// </summary>
+    private RuntimeLeapAim? AimLeapFrom(Vector3 standing, Vector3 landing, bool run, bool atItsTakeoff)
+    {
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || !grid.Contains(standing)
+            || !grid.Contains(landing))
+        {
+            return null;
+        }
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        NavLeapAim? aimed = cached.Finder.AimFrom(standing, landing, run, atItsTakeoff, out string? refused);
+        _aimRefused = refused;
+        return aimed is { } aim ? new RuntimeLeapAim(aim.Power, aim.Run) : null;
+    }
+
+    /// <summary>
+    /// A leap from where the body stands onto the floor a planned landing lies on, for a body that
+    /// keeps no aim at the landing itself, with the spot it comes to rest on.
+    /// </summary>
+    private (RuntimeLeapAim Aim, Vector3 Spot)? AimOnward(Vector3 standing, Vector3 landing, bool run)
+    {
+        if (_grid is not { } grid
+            || _leapAbility is not { } ability
+            || !grid.Contains(standing)
+            || !grid.Contains(landing))
+        {
+            return null;
+        }
+        if (_aimFinder is not { } cached || !ReferenceEquals(cached.Grid, grid) || cached.Ability != ability)
+            _aimFinder = cached = (grid, ability, new NavLeapFinder(grid, ability));
+        return cached.Finder.AimOnward(standing, landing, run, out Vector3 spot) is { } aimed
+            ? (new RuntimeLeapAim(aimed.Power, aimed.Run), spot)
+            : null;
+    }
+
+    /// <summary>Whether two points stand on the same piece of floor of the grid, as one roof or one rock; false where the grid holds either on none.</summary>
+    private bool SameFloor(Vector3 first, Vector3 second)
+    {
+        if (_grid is not { } grid || !grid.Contains(first) || !grid.Contains(second))
+            return false;
+        int one = grid.FindStandingNode(first, 0.5f, NavRouter.StartHeightTolerance);
+        int other = grid.FindStandingNode(second, 0.5f, NavRouter.StartHeightTolerance);
+        if (one < 0 || other < 0)
+            return false;
+        int[] pieces = NavLeapFinder.FloorPieces(grid);
+        return pieces[one] >= 0 && pieces[one] == pieces[other];
+    }
+
+    /// <summary>Why the last leap aimed again from where the body stood was not kept, for narration.</summary>
+    private string? _aimRefused;
+
     private static float HorizontalDistance(Vector3 from, Vector3 to) =>
         Vector2.Distance(new Vector2(from.X, from.Y), new Vector2(to.X, to.Y));
 
@@ -2771,6 +3020,18 @@ internal sealed partial class NavigationWalkController
         /// <summary>Grids built for the current plan.</summary>
         public int Builds { get; set; }
 
+        /// <summary>
+        /// Whether this walk has already built its grid again over the objects standing
+        /// here. It does that once for each stretch it walks, where a search found no
+        /// route and the grid was built without some of what stands here: a goal nothing
+        /// reaches must not build grid after grid, so another one is earned only by
+        /// walking a stage of the way first.
+        /// </summary>
+        public bool BuiltForObjects { get; set; }
+
+        /// <summary>Why this walk asked for its grid again, as the build reports when it lands.</summary>
+        public string? RebuildWhy { get; set; }
+
         /// <summary>Whether the route planned or walked is one stage of a walk to a goal beyond it.</summary>
         public bool Staged { get; set; }
 
@@ -2806,6 +3067,9 @@ internal sealed partial class NavigationWalkController
 
         /// <summary>Whether the route being walked ends where the character can see the goal.</summary>
         public bool EndsInSight { get; set; } = true;
+
+        /// <summary>The leg of the leap the walk last said it was taking, so a body sent back to its takeoff is not announced again.</summary>
+        public int AnnouncedLeap { get; set; } = -1;
 
         /// <summary>The door the walk is waiting on to open, if any.</summary>
         public DoorWait? WaitingOn { get; set; }
