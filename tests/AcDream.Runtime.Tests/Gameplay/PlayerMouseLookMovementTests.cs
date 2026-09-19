@@ -216,6 +216,35 @@ public sealed class PlayerMouseLookMovementTests
     }
 
     [Fact]
+    public void ModernMouseLook_KeyboardTurnWinsWithoutSidestepRemapping()
+    {
+        var controller = CreateController();
+        var keyboard = new MovementInput(TurnLeft: true, Run: true);
+
+        Assert.True(controller.BeginMouseLook(keyboard, modern: true));
+        MovementResult entry = controller.CaptureMovementResult(mouseLookEvent: false);
+        Assert.Equal(MotionCommand.TurnLeft, entry.TurnCommand);
+        Assert.Null(entry.SidestepCommand);
+
+        controller.SubmitMouseTurnAdjustment(-0.5f, keyboard);
+        MovementResult combined = controller.Update(0.01f, keyboard);
+        Assert.Equal(MotionCommand.TurnLeft, combined.TurnCommand);
+        Assert.Null(combined.SidestepCommand);
+        Assert.False(combined.TurnUsesRunHold);
+
+        var releasedKeyboard = new MovementInput(Run: true);
+        controller.SubmitMouseTurnAdjustment(-0.5f, releasedKeyboard);
+        MovementResult mouseOnly = controller.Update(0.01f, releasedKeyboard);
+        Assert.Equal(MotionCommand.TurnRight, mouseOnly.TurnCommand);
+        Assert.True(mouseOnly.TurnUsesRunHold);
+
+        Assert.True(controller.EndMouseLook(keyboard));
+        MovementResult mouseReleased = controller.CaptureMovementResult(mouseLookEvent: false);
+        Assert.Equal(MotionCommand.TurnLeft, mouseReleased.TurnCommand);
+        Assert.Null(mouseReleased.SidestepCommand);
+    }
+
+    [Fact]
     public void MouseLookEntry_PreservesHeldForwardAndRunAfterTakingControl()
     {
         var controller = CreateController();

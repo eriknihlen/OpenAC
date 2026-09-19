@@ -18,6 +18,9 @@ public interface IMouseSource
 
     bool IsHeld(MouseButton button);
 
+    /// <summary>Whether this physical hold began over the game world.</summary>
+    bool WasPressedOverWorld(MouseButton button) => false;
+
     bool WantCaptureMouse { get; }
 
     bool WantCaptureKeyboard { get; }

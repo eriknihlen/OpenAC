@@ -140,6 +140,35 @@ public sealed class SilkInputSourceLifetimeTests
     }
 
     [Fact]
+    public void MouseSourceRemembersWorldOriginOfEachButtonHold()
+    {
+        var surface = new MouseSurface();
+        var capture = new Capture();
+        var source = SilkMouseSource.CreateDetached(
+            surface, capture, modifierSource: null, new HostQuiescenceGate());
+        source.Attach();
+        var callbacks = surface.CopyCallbacks();
+
+        capture.Mouse = true;
+        callbacks.Down(MouseButton.Left);
+        Assert.False(source.WasPressedOverWorld(MouseButton.Left));
+        callbacks.Up(MouseButton.Left);
+
+        capture.Mouse = false;
+        callbacks.Down(MouseButton.Right);
+        callbacks.Down(MouseButton.Left);
+        capture.Mouse = true; // Moving onto UI does not change press origin.
+        Assert.True(source.WasPressedOverWorld(MouseButton.Right));
+        Assert.True(source.WasPressedOverWorld(MouseButton.Left));
+
+        callbacks.Up(MouseButton.Left);
+        Assert.False(source.WasPressedOverWorld(MouseButton.Left));
+        source.Deactivate();
+        Assert.False(source.WasPressedOverWorld(MouseButton.Right));
+        source.Dispose();
+    }
+
+    [Fact]
     public void MouseFailedDetachRetriesOnlyPendingEdge()
     {
         var surface = new MouseSurface();
@@ -179,7 +208,8 @@ public sealed class SilkInputSourceLifetimeTests
 
     private sealed class Capture : IInputCaptureSource
     {
-        public bool WantCaptureMouse => false;
+        public bool Mouse { get; set; }
+        public bool WantCaptureMouse => Mouse;
         public bool WantCaptureKeyboard => false;
         public bool DevToolsWantCaptureKeyboard => false;
     }

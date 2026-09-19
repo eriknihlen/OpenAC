@@ -6,7 +6,9 @@ public sealed record CameraTurningSettings(
     float MouseLookSensitivity,
     bool AlignToSlope,
     bool InvertMouseLookYAxis,
-    bool UseMouseTurning = false)
+    bool UseMouseTurning = false,
+    bool ModernMouseTurning = false,
+    bool BothMouseButtonsRunForward = false)
 {
     public static CameraTurningSettings Default { get; } = new(
         Stiffness: 0.45f,
