@@ -118,6 +118,12 @@ public interface IUiRegistry
     /// </summary>
     bool SetControlVisible(string viewName, string controlName, bool visible) => false;
 
+    /// <summary>Requests binding reevaluation for a plugin view.</summary>
+    bool InvalidateView(string viewName, string? propertyName = null) => false;
+
+    /// <summary>Moves keyboard focus to a named input control.</summary>
+    bool FocusControl(string viewName, string controlName) => false;
+
     /// <summary>
     /// Shows one of the client's own windows if it is hidden, hides it if
     /// shown. Returns whether the window ended up visible; a no-window host
@@ -197,6 +203,12 @@ public interface IScopedUiRegistry : IUiRegistry
         string viewName,
         string controlName,
         bool visible) => false;
+
+    /// <summary>Requests binding reevaluation for one plugin view.</summary>
+    bool InvalidateView(PluginUiOwner owner, string viewName, string? propertyName = null) => false;
+
+    /// <summary>Moves keyboard focus to one plugin input control.</summary>
+    bool FocusControl(PluginUiOwner owner, string viewName, string controlName) => false;
 }
 
 /// <summary>Shared empty registration returned by UI-less/legacy hosts.</summary>
