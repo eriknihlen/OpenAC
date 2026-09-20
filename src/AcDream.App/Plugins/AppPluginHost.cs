@@ -17,7 +17,10 @@ public sealed class AppPluginHost : IPluginHost
         IPluginStorage? vtankProfiles = null,
         IPluginClipboard? clipboard = null,
         IHotkeyRegistry? hotkeys = null,
-        IHostWindow? window = null)
+        IHostWindow? window = null,
+        IPluginMapRegistry? maps = null,
+        IPluginMapResourceCatalog? mapResources = null,
+        IPluginRenderRegistry? rendering = null)
     {
         Log = log;
         State = state;
@@ -33,6 +36,9 @@ public sealed class AppPluginHost : IPluginHost
         Clipboard = clipboard ?? NoOpPluginClipboard.Instance;
         Hotkeys = hotkeys ?? NoOpHotkeyRegistry.Instance;
         Window = window ?? NoOpHostWindow.Instance;
+        Maps = maps ?? NoOpPluginMapRegistry.Instance;
+        MapResources = mapResources ?? NoOpPluginMapResourceCatalog.Instance;
+        Rendering = rendering ?? NoOpPluginRenderRegistry.Instance;
     }
 
     public bool HasUi => true;
@@ -49,4 +55,7 @@ public sealed class AppPluginHost : IPluginHost
     public IPluginClipboard Clipboard { get; }
     public IHotkeyRegistry Hotkeys { get; }
     public IHostWindow Window { get; }
+    public IPluginMapRegistry Maps { get; }
+    public IPluginMapResourceCatalog MapResources { get; }
+    public IPluginRenderRegistry Rendering { get; }
 }

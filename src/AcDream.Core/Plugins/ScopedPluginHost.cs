@@ -59,6 +59,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IHostWindow Window => _inner.Window;
     public IAutomationSurface Automation => _automation;
     public IHotkeyRegistry Hotkeys => _hotkeys;
+    public IPluginMapRegistry Maps => _inner.Maps;
+    public IPluginMapResourceCatalog MapResources => _inner.MapResources;
+    public IPluginRenderRegistry Rendering => _inner.Rendering;
 
     private sealed class ScopedPluginStorage(
         IPluginStorage inner,
