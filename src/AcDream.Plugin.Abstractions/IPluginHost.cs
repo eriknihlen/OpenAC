@@ -50,6 +50,9 @@ public interface IPluginHost
     /// <summary>Map controls, or an inert registry in a headless host.</summary>
     IPluginMapRegistry Maps => NoOpPluginMapRegistry.Instance;
 
+    /// <summary>Asynchronous tiled map resources, or an inert catalog without map assets.</summary>
+    IPluginMapResourceCatalog MapResources => NoOpPluginMapResourceCatalog.Instance;
+
     /// <summary>Plugin-owned HUD and drawing services, or an inert registry without a renderer.</summary>
     IPluginRenderRegistry Rendering => NoOpPluginRenderRegistry.Instance;
 
