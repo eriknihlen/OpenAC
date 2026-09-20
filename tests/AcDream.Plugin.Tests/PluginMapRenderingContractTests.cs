@@ -25,6 +25,18 @@ public sealed class PluginMapRenderingContractTests
     }
 
     [Fact]
+    public void MapSurfaceCopiesStateAndRejectsUseAfterDispose()
+    {
+        using var surface = new PluginMapSurface(new(default, 10, 10));
+        var markers = new[] { new PluginMapMarker("a", default) };
+        surface.SetMarkers(markers);
+        markers[0] = new PluginMapMarker("b", default);
+        Assert.Equal("a", surface.Markers[0].Id);
+        surface.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => surface.SetRoute([]));
+    }
+
+    [Fact]
     public async Task HeadlessFacilitiesAreSafeAndInert()
     {
         using var map = NoOpPluginMapRegistry.Instance.AddMap("map", new(default, 1, 1));
