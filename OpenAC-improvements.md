@@ -1218,11 +1218,13 @@ This phase enables robust multi-leg route execution and authoritative recall tra
 
 ## Phase 4: Data and UI
 
-1. Add scoped structured storage and atomic writes.
-2. Add user-overridable route database directories.
-3. Add resource lookup and packaging declarations.
-4. Add text input, autocomplete, virtualized lists, and binding invalidation.
-5. Port GoArrow's route editor and destination search to the declarative panel.
+1. ~~Add scoped structured storage and atomic writes.~~ **Done** — plugin storage now supports validated logical scopes, JSON helpers, UTF-8 atomic replacement, and unavailable-host behavior.
+2. ~~Add user-overridable route database directories.~~ **Done** — `IPluginResourceCatalog` exposes deterministic layered data-file discovery with package defaults and host/user override roots.
+3. ~~Add resource lookup and packaging declarations.~~ **Done** — declared package resources are available through a safe, traversal-checked `OpenRead`/`List` catalog, with an inert headless implementation.
+4. ~~Add text input, autocomplete, virtualized lists, and binding invalidation.~~ **Done** — plugin UI contracts provide input suggestions, stable list rows, property invalidation, view invalidation, and focus routing.
+5. ~~Port GoArrow's route editor and destination search to the declarative panel.~~ **Done** — shared destination search and stable-key route-editor binding state support capped prefix-first completion, remove, reorder, and live panel refresh.
+
+**Phase 4 is complete on the current data/UI contract branch.**
 
 ## Phase 5: Maps and rendering
 
