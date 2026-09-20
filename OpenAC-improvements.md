@@ -1238,8 +1238,8 @@ This phase enables robust multi-leg route execution and authoritative recall tra
 
 1. ~~Add coordinate parsing and structured chat links.~~ **Done** — compass coordinates such as `28.5S, 59.3E` are parsed and exposed as typed coordinate links.
 2. ~~Add link-click events and plugin action routing.~~ **Done** — `IPluginChat.LinkClicked` delivers typed `PluginChatLinkClicked` events to plugins.
-3. Add command aliases, quoting, completion, and generated help.
-4. Restore the original clickable coordinate workflow.
+3. ~~Add command aliases, quoting, completion, and generated help.~~ **Done** — typed command definitions support aliases, shell-like quoted arguments, asynchronous completion, ownership-safe registration, and generated help text.
+4. ~~Restore the original clickable coordinate workflow.~~ **Done** — coordinate parsing supports compass order/separator variations and `PluginChatCoordinateLinkRouter` safely routes coordinate link clicks to plugin-owned destination callbacks.
 
 ---
 
