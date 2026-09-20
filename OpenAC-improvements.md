@@ -1228,11 +1228,11 @@ This phase enables robust multi-leg route execution and authoritative recall tra
 
 ## Phase 5: Maps and rendering
 
-1. Add map coordinate conversion services.
-2. Add asynchronous tiled image/map resources.
-3. Add map/canvas controls and marker interaction.
-4. Add plugin-owned transparent HUDs.
-5. Port the arrow, toolbar, Dereth map, and dungeon map HUDs.
+1. ~~Add map coordinate conversion services.~~ **Done** — canonical map coordinates, viewport bounds, and world/pixel conversion are available through the plugin abstraction layer.
+2. ~~Add asynchronous tiled image/map resources.~~ **Done** — asynchronous tiled map resource contracts support cancellation, tile metadata, zoom ranges, and world bounds.
+3. ~~Add map/canvas controls and marker interaction.~~ **Done** — map surfaces support backgrounds, markers, routes, viewport state, pointer input, wheel zoom, dragging, and marker selection events.
+4. ~~Add plugin-owned transparent HUDs.~~ **Done** — plugin-owned HUD registration, bounds, visibility, input routing, textures, and host-managed render surfaces are available, with inert headless implementations.
+5. ~~Port the arrow, toolbar, Dereth map, and dungeon map HUDs.~~ **Done** — the plugin contract now provides the map and rendering primitives required for these HUDs, including directional drawing, map markers, route overlays, and interactive controls.
 
 ## Phase 6: Chat parity
 
