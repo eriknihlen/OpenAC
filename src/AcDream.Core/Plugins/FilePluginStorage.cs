@@ -68,6 +68,19 @@ public sealed class FilePluginStorage : IPluginStorage
         return true;
     }
 
+    public IPluginStorage OpenScope(PluginStorageScope scope)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope.Name);
+        string path = Path.GetFullPath(Path.Combine(
+            _root, scope.Name.Replace('/', Path.DirectorySeparatorChar)));
+        string relative = Path.GetRelativePath(_root, path);
+        if (Path.IsPathRooted(relative)
+            || relative.Equals("..", StringComparison.Ordinal)
+            || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new ArgumentException("Plugin storage scope escapes its root.", nameof(scope));
+        return new FilePluginStorage(path);
+    }
+
     private string Resolve(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);

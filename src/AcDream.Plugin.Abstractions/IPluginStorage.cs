@@ -1,4 +1,22 @@
+using System.Text.Json;
+
 namespace AcDream.Plugin.Abstractions;
+
+/// <summary>
+/// Identifies a plugin storage namespace. Scope names are logical names and
+/// are sanitized by the host; plugins must not construct filesystem paths.
+/// </summary>
+public readonly record struct PluginStorageScope(string Name)
+{
+    /// <summary>The plugin-wide namespace.</summary>
+    public static PluginStorageScope Global { get; } = new("global");
+
+    /// <summary>Creates a character-specific namespace.</summary>
+    public static PluginStorageScope Character(string characterId) => new($"character/{characterId}");
+
+    /// <summary>Creates a world-specific namespace.</summary>
+    public static PluginStorageScope World(string worldId) => new($"world/{worldId}");
+}
 
 /// <summary>
 /// A small key/value store the host keeps for one plugin, so its settings
@@ -43,6 +61,30 @@ public interface IPluginStorage
     /// when there was nothing to remove or the storage is unavailable.
     /// </summary>
     bool Delete(string key) => false;
+
+    /// <summary>Opens a child namespace for scoped plugin data.</summary>
+    IPluginStorage OpenScope(PluginStorageScope scope) => this;
+}
+
+/// <summary>JSON conveniences for plugin storage.</summary>
+public static class PluginStorageExtensions
+{
+    /// <summary>Reads and deserializes a JSON value, or returns its default when absent.</summary>
+    public static T? ReadJson<T>(this IPluginStorage storage, string key,
+        JsonSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        string? text = storage.ReadText(key);
+        return text is null ? default : JsonSerializer.Deserialize<T>(text, options);
+    }
+
+    /// <summary>Serializes and atomically stores a JSON value.</summary>
+    public static void WriteJson<T>(this IPluginStorage storage, string key, T value,
+        JsonSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        storage.WriteText(key, JsonSerializer.Serialize(value, options));
+    }
 }
 
 /// <summary>
