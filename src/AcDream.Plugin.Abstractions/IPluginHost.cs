@@ -43,6 +43,11 @@ public interface IPluginHost
     IPluginStorage Storage => NoOpPluginStorage.Instance;
 
     /// <summary>
+    /// Declared package resources and layered user data for this plugin.
+    /// </summary>
+    IPluginResourceCatalog Resources => NoOpPluginResourceCatalog.Instance;
+
+    /// <summary>
     /// Registers this plugin's own rules for deciding what loot is worth
     /// keeping. Inert on a host that does no loot classification.
     /// </summary>
