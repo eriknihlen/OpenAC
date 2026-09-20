@@ -47,6 +47,12 @@ public interface IPluginHost
     /// </summary>
     IPluginResourceCatalog Resources => NoOpPluginResourceCatalog.Instance;
 
+    /// <summary>Map controls, or an inert registry in a headless host.</summary>
+    IPluginMapRegistry Maps => NoOpPluginMapRegistry.Instance;
+
+    /// <summary>Plugin-owned HUD and drawing services, or an inert registry without a renderer.</summary>
+    IPluginRenderRegistry Rendering => NoOpPluginRenderRegistry.Instance;
+
     /// <summary>
     /// Registers this plugin's own rules for deciding what loot is worth
     /// keeping. Inert on a host that does no loot classification.
