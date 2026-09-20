@@ -45,6 +45,26 @@ public sealed class PluginCommandRegistryTests
     }
 
     [Fact]
+    public void QuotedArgumentsAreParsedWithoutBlockingDispatch()
+    {
+        var parsed = PluginCommandLineParser.Parse("Holtburg \"North Road\" 'safe route' escaped\\ value");
+        Assert.Equal(["Holtburg", "North Road", "safe route", "escaped value"], parsed);
+    }
+
+    [Fact]
+    public async Task DefinitionAliasesCompletionAndHelpAreSupported()
+    {
+        var registry = new PluginCommandRegistry();
+        var definition = new TestDefinition();
+        using IDisposable lease = registry.Register(definition);
+
+        Assert.True(registry.TryHandle("/g \"North Road\""));
+        Assert.Equal("North Road", definition.Last?.ParseArguments()[0]);
+        Assert.Equal("/go - Navigate to a destination", registry.GetHelp());
+        Assert.Equal("North", (await registry.CompleteAsync(new("go", "Nor", "/go Nor")))[0].Text);
+    }
+
+    [Fact]
     public void HandlerFailureIsContainedAndReported()
     {
         Exception? failure = null;
@@ -55,5 +75,15 @@ public sealed class PluginCommandRegistryTests
 
         Assert.True(registry.TryHandle("/vt start"));
         Assert.Equal("broken", failure?.Message);
+    }
+
+    private sealed class TestDefinition : IPluginCommandDefinition
+    {
+        public string Verb => "go";
+        public string Description => "Navigate to a destination";
+        public IReadOnlyList<string> Aliases => ["g"];
+        public PluginCommand? Last { get; private set; }
+        public PluginCommandResult Invoke(PluginCommand command) { Last = command; return PluginCommandResult.Accepted(); }
+        public IReadOnlyList<PluginCommandCompletion> Complete(PluginCommand command) => [new("North")];
     }
 }
