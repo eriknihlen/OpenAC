@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
@@ -78,9 +79,9 @@ public sealed class ScopedPluginHostWindowForwardingTests
         }
 
         Assert.True(
-            checkedMembers.Count == 5,
-            "Expected exactly 5 direct-forward members (Log, State, "
-                + "VtankProfiles, Clipboard, Window); found "
+            checkedMembers.Count == 6,
+            "Expected exactly 6 direct-forward members (Log, State, "
+                + "VtankProfiles, Clipboard, Window, Resources); found "
                 + checkedMembers.Count + ": "
                 + string.Join(", ", checkedMembers)
                 + ". Update WrappedMembers deliberately if a member's "
@@ -135,10 +136,17 @@ public sealed class ScopedPluginHostWindowForwardingTests
         public IPluginStorage VtankProfiles { get; } = new FakePluginStorage();
         public IPluginClipboard Clipboard { get; } = new FakeClipboard();
         public IHostWindow Window { get; } = new FakeHostWindow();
+        public IPluginResourceCatalog Resources { get; } = new FakeResourceCatalog();
 
         private sealed class FakePluginStorage : IPluginStorage;
         private sealed class FakeClipboard : IPluginClipboard;
         private sealed class FakeHostWindow : IHostWindow;
+        private sealed class FakeResourceCatalog : IPluginResourceCatalog
+        {
+            public Stream? OpenRead(string resourceId) => null;
+            public IReadOnlyList<string> List(string prefix = "") => [];
+            public IReadOnlyList<string> ListDataFiles(string relativeDirectory) => [];
+        }
 
         private sealed class SilentLogger : IPluginLogger
         {

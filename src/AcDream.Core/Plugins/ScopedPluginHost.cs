@@ -48,6 +48,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IUiRegistry Ui => _ui;
     public IPluginStorage Storage => _storage;
     public IPluginStorage VtankProfiles => _inner.VtankProfiles;
+    public IPluginResourceCatalog Resources => _inner.Resources;
     public IPluginCommandRegistry Commands => _commands;
     public IPluginLootClassifierRegistry LootClassifiers => _lootClassifiers;
     public IReadOnlyDictionary<string, string> SessionSettings =>
