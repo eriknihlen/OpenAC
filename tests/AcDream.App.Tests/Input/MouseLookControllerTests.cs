@@ -186,6 +186,120 @@ public sealed class MouseLookControllerTests
         Assert.False(harness.Chase.RmbOrbitHeld);
     }
 
+    [Fact]
+    public void ModernRmb_StartsOnlyOverWorldAndSurvivesDraggingAcrossUi()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        harness.Mouse.WantCaptureMouse = true;
+
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        Assert.False(harness.Chase.RmbOrbitHeld);
+
+        harness.Mouse.WantCaptureMouse = false;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        Assert.True(harness.Chase.RmbOrbitHeld);
+        Assert.True(harness.Cursor.HasSavedMode);
+
+        harness.Mouse.WantCaptureMouse = true;
+        harness.Chase.ModernViewYaw = harness.Player.Yaw + 0.5f;
+        harness.Owner.Tick();
+        MovementResult turning = harness.Player.Update(0.01f, new MovementInput(Run: true));
+        Assert.NotNull(turning.TurnCommand);
+        Assert.True(harness.Chase.RmbOrbitHeld);
+
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Release);
+        Assert.False(harness.Chase.RmbOrbitHeld);
+        Assert.False(harness.Cursor.HasSavedMode);
+        Assert.Equal(1, harness.Cursor.RestoreCount);
+    }
+
+    [Fact]
+    public void ModernRmb_MouseOnlyConvergesCharacterOnViewHeading()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        float target = harness.Player.Yaw + 0.6f;
+        harness.Chase.ModernViewYaw = target;
+
+        for (int i = 0; i < 180; i++)
+        {
+            harness.Owner.Tick();
+            harness.Player.Update(1f / 60f, new MovementInput(Run: true));
+        }
+
+        float error = MathF.Abs(MathF.IEEERemainder(
+            harness.Chase.ModernViewYaw - harness.Player.Yaw,
+            2f * MathF.PI));
+        Assert.True(error < 0.08f, $"character/view yaw error: {error}");
+    }
+
+    [Fact]
+    public void ModernRmb_LifecycleExitRestoresCursorOnce()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+
+        harness.Owner.EndForLifecycle();
+        harness.Owner.EndForLifecycle();
+
+        Assert.False(harness.Chase.RmbOrbitHeld);
+        Assert.Equal(1, harness.Cursor.RestoreCount);
+        Assert.False(harness.Player.EndMouseLook(new MovementInput()));
+    }
+
+    [Fact]
+    public void BothButtonForward_RequiresWorldPressesAndStopsOnEitherRelease()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Chase.BothMouseButtonsRunForward = true;
+        harness.Mouse.RightHeld = true;
+        harness.Mouse.LeftHeld = true;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+
+        harness.Owner.Tick();
+        Assert.False(harness.Chase.ModernMouseForward); // LMB began on UI.
+
+        harness.Mouse.LeftStartedInWorld = true;
+        harness.Owner.Tick();
+        Assert.True(harness.Chase.ModernMouseForward);
+
+        harness.Mouse.WantCaptureMouse = true; // Drag crosses UI.
+        harness.Owner.Tick();
+        Assert.True(harness.Chase.ModernMouseForward);
+
+        harness.Mouse.LeftHeld = false;
+        harness.Owner.Tick();
+        Assert.False(harness.Chase.ModernMouseForward);
+
+        harness.Mouse.LeftHeld = true;
+        harness.Owner.Tick();
+        Assert.True(harness.Chase.ModernMouseForward);
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Release);
+        Assert.False(harness.Chase.ModernMouseForward);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -371,6 +485,21 @@ public sealed class MouseLookControllerTests
 #pragma warning restore CS0067
         public bool WantCaptureMouse { get; set; }
         public bool WantCaptureKeyboard { get; set; }
-        public bool IsHeld(MouseButton button) => false;
+        public bool RightHeld { get; set; }
+        public bool LeftHeld { get; set; }
+        public bool LeftStartedInWorld { get; set; }
+        public bool RightStartedInWorld { get; set; } = true;
+        public bool IsHeld(MouseButton button) => button switch
+        {
+            MouseButton.Right => RightHeld,
+            MouseButton.Left => LeftHeld,
+            _ => false,
+        };
+        public bool WasPressedOverWorld(MouseButton button) => button switch
+        {
+            MouseButton.Right => RightStartedInWorld,
+            MouseButton.Left => LeftStartedInWorld,
+            _ => false,
+        };
     }
 }

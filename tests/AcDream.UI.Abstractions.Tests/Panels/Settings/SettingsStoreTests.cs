@@ -28,6 +28,25 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void ModernMouseTurning_round_trips_without_changing_legacy_option()
+    {
+        var store = new SettingsStore(_tempPath);
+        Assert.False(store.LoadCameraTurning().ModernMouseTurning);
+
+        store.SaveCameraTurning(CameraTurningSettings.Default with
+        {
+            ModernMouseTurning = true,
+            UseMouseTurning = true,
+            BothMouseButtonsRunForward = true,
+        });
+
+        CameraTurningSettings loaded = store.LoadCameraTurning();
+        Assert.True(loaded.ModernMouseTurning);
+        Assert.True(loaded.UseMouseTurning);
+        Assert.True(loaded.BothMouseButtonsRunForward);
+    }
+
+    [Fact]
     public void UiOnly_round_trips_as_its_own_flag()
     {
         var store = new SettingsStore(_tempPath);

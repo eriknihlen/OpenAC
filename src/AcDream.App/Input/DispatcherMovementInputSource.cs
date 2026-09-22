@@ -11,14 +11,17 @@ internal sealed class DispatcherMovementInputSource : IMovementInputSource
 {
     private readonly RuntimeLocalPlayerMovementState _movement;
     private readonly IInputCaptureSource? _capture;
+    private readonly ChaseCameraInputState? _chase;
     private InputDispatcher? _dispatcher;
 
     public DispatcherMovementInputSource(
         RuntimeLocalPlayerMovementState movement,
-        IInputCaptureSource? capture = null)
+        IInputCaptureSource? capture = null,
+        ChaseCameraInputState? chase = null)
     {
         _movement = movement ?? throw new ArgumentNullException(nameof(movement));
         _capture = capture;
+        _chase = chase;
     }
 
     public bool AutoRunActive => _movement.AutoRunActive;
@@ -59,14 +62,22 @@ internal sealed class DispatcherMovementInputSource : IMovementInputSource
 
         bool walking = dispatcher.IsActionHeld(InputAction.MovementWalkMode);
         bool forward = dispatcher.IsActionHeld(InputAction.MovementForward);
+        bool backward = dispatcher.IsActionHeld(InputAction.MovementBackup);
+        bool mouseForward = _chase is
+        {
+            ModernMouseTurning: true,
+            BothMouseButtonsRunForward: true,
+            ModernMouseForward: true,
+        };
+        bool opposingDirections = mouseForward && backward;
         return new MovementInput(
-            Forward: forward || AutoRunActive,
-            Backward: dispatcher.IsActionHeld(InputAction.MovementBackup),
+            Forward: !opposingDirections && (forward || AutoRunActive || mouseForward),
+            Backward: backward && !mouseForward,
             StrafeLeft: dispatcher.IsActionHeld(InputAction.MovementStrafeLeft),
             StrafeRight: dispatcher.IsActionHeld(InputAction.MovementStrafeRight),
             TurnLeft: dispatcher.IsActionHeld(InputAction.MovementTurnLeft),
             TurnRight: dispatcher.IsActionHeld(InputAction.MovementTurnRight),
-            Run: (_movement.RunAsDefaultMovement != walking) || AutoRunActive,
+            Run: mouseForward || (_movement.RunAsDefaultMovement != walking) || AutoRunActive,
             Jump: dispatcher.IsActionHeld(InputAction.MovementJump));
     }
 

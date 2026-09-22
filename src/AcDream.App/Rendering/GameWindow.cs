@@ -561,7 +561,8 @@ public sealed class GameWindow :
             _retainedInputCapture);
         _movementInput = new AcDream.App.Input.DispatcherMovementInputSource(
             _playerControllerSlot,
-            _inputCapture);
+            _inputCapture,
+            _chaseCameraInput);
         _playerControllerSlot.RunAsDefaultMovementSource = () =>
             _runtime.CharacterOwner.Options.GetOptionBit(
                 AcDream.Core.Net.Messages.CharacterOptionId.ToggleRun);

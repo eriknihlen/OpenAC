@@ -447,8 +447,17 @@ internal sealed class RuntimeSettingsTargets : IRuntimeSettingsTargets
         CameraDiagnostics.AlignToSlope = cameraTurning.AlignToSlope && CameraDiagnostics.AlignToSlopeAllowed;
         if (_chase is null)
             return;
+        if (_chase.ModernMouseTurning != cameraTurning.ModernMouseTurning)
+        {
+            if (_chase.Legacy is not null)
+                _chase.Legacy.YawOffset = 0f;
+            if (_chase.Retail is not null)
+                _chase.Retail.YawOffset = 0f;
+        }
         _chase.Sensitivity = cameraTurning.MouseLookSensitivity;
         _chase.InvertMouseLookYAxis = cameraTurning.InvertMouseLookYAxis;
+        _chase.ModernMouseTurning = cameraTurning.ModernMouseTurning;
+        _chase.BothMouseButtonsRunForward = cameraTurning.BothMouseButtonsRunForward;
     }
 
     public void SetAudioFocusMuted(bool muted)

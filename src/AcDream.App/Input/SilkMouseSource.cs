@@ -116,6 +116,7 @@ public sealed class SilkMouseSource : IMouseSource, IDisposable
     private float _lastX;
     private float _lastY;
     private bool _haveLastPosition;
+    private readonly HashSet<MouseButton> _worldPressedButtons = new();
 
     public event Action<MouseButton, ModifierMask>? MouseDown;
     public event Action<MouseButton, ModifierMask>? MouseUp;
@@ -188,10 +189,16 @@ public sealed class SilkMouseSource : IMouseSource, IDisposable
     }
 
     public bool IsHeld(MouseButton button) => _surface.IsButtonPressed(button);
+    public bool WasPressedOverWorld(MouseButton button) =>
+        _worldPressedButtons.Contains(button);
     public bool WantCaptureMouse => _capture.WantCaptureMouse;
     public bool WantCaptureKeyboard => _capture.WantCaptureKeyboard;
 
-    public void Deactivate() => Interlocked.Exchange(ref _active, 0);
+    public void Deactivate()
+    {
+        Interlocked.Exchange(ref _active, 0);
+        _worldPressedButtons.Clear();
+    }
 
     public void Dispose()
     {
@@ -207,14 +214,23 @@ public sealed class SilkMouseSource : IMouseSource, IDisposable
         _quiescence.Invoke(() =>
         {
             if (Volatile.Read(ref _active) != 0)
+            {
+                if (!_capture.WantCaptureMouse)
+                    _worldPressedButtons.Add(button);
+                else
+                    _worldPressedButtons.Remove(button);
                 MouseDown?.Invoke(button, ReadModifiers());
+            }
         });
 
     private void OnMouseUp(MouseButton button) =>
         _quiescence.Invoke(() =>
         {
             if (Volatile.Read(ref _active) != 0)
+            {
+                _worldPressedButtons.Remove(button);
                 MouseUp?.Invoke(button, ReadModifiers());
+            }
         });
 
     private void OnMouseMove(Vector2 position) =>
