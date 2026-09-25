@@ -4343,7 +4343,7 @@ public sealed class HeadlessSessionHostTests
             worldOffsetY: 0f);
     }
 
-    private static WorldSession.EntitySpawn Spawn(
+    internal static WorldSession.EntitySpawn Spawn(
         uint guid,
         uint cellId = 0xA9B40001u)
     {
