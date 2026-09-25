@@ -1,5 +1,7 @@
 ﻿using AcDream.Core.Chat;
 using AcDream.Core.Combat;
+using AcDream.Core.Items;
+using AcDream.Core.Properties;
 using AcDream.Headless.Plugins;
 using AcDream.Core.Plugins;
 using AcDream.Plugin.Abstractions;
@@ -222,6 +224,44 @@ public sealed class HeadlessPluginApiSurfaceTests
         Assert.True(found);
         Assert.Equal("+Acdream", value.Name);
         Assert.Equal(PluginObjectClass.Player, value.ObjectClass);
+    }
+
+    [Fact]
+    public void ObjectsTryGetExposesPortalDetailsAfterAppraisal()
+    {
+        var (runtime, commands) = NewRealSession();
+        using GameRuntime runtimeDisposal = runtime;
+        using var host = NewHost(runtime);
+        commands.Start(runtime.Generation);
+        IPluginHost pluginHost = host;
+
+        const uint portalId = 0x50000124u;
+        runtime.InventoryOwner.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = portalId,
+            Name = "Town portal",
+            Type = ItemType.Portal,
+        });
+
+        Assert.True(pluginHost.Automation.Objects.TryGet(portalId, out PluginWorldObject before));
+        Assert.Equal(PluginObjectClass.Portal, before.ObjectClass);
+        Assert.False(before.HasAppraisalData);
+        Assert.Null(before.PortalDestination);
+        Assert.Null(before.PortalMinimumLevel);
+        Assert.Null(before.PortalMaximumLevel);
+
+        var appraisal = new PropertyBundle();
+        appraisal.Strings[(uint)PropertyString.AppraisalPortalDestination] = "Holtburg";
+        appraisal.Ints[(uint)PropertyInt.MinLevel] = 10;
+        appraisal.Ints[(uint)PropertyInt.MaxLevel] = 30;
+        Assert.True(runtime.InventoryOwner.Objects.UpdateAppraisal(
+            portalId, appraisal, Array.Empty<uint>()));
+
+        Assert.True(pluginHost.Automation.Objects.TryGet(portalId, out PluginWorldObject after));
+        Assert.True(after.HasAppraisalData);
+        Assert.Equal("Holtburg", after.PortalDestination);
+        Assert.Equal(10, after.PortalMinimumLevel);
+        Assert.Equal(30, after.PortalMaximumLevel);
     }
 
     [Fact]
