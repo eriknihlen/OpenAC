@@ -42,9 +42,6 @@ public sealed class RuntimeChatFeed : IDisposable
     /// <summary>Default number of tail lines a snapshot returns.</summary>
     public const int DefaultLineLimit = 20;
 
-    private const uint FirstPlayerObjectId = 0x50000001u;
-    private const uint LastPlayerObjectId = 0x6FFFFFFFu;
-
     private readonly ChatLog _log;
     private readonly ChatWindowState? _windows;
     private bool _disposed;
@@ -160,82 +157,15 @@ public sealed class RuntimeChatFeed : IDisposable
     // -- Wording -----------------------------------------------------------
 
     /// <summary>The line as plain text, with no clickable sender marked up.</summary>
-    public static string Format(ChatEntry entry)
-        => Format(entry, static sender => sender);
+    public static string Format(ChatEntry entry) => ChatLineWording.Format(entry);
 
     /// <summary>
     /// The line with another player's name wrapped so a front end that supports
     /// it can make the name clickable. Identical to <see cref="Format"/> for
     /// every line that does not name another player.
     /// </summary>
-    public static string FormatTagged(ChatEntry entry)
-        => ShouldTagSender(entry)
-            ? Format(
-                entry,
-                sender =>
-                    $"<Tell:IIDString:{entry.SenderGuid}:{sender}>{sender}<\\Tell>")
-            : Format(entry);
+    public static string FormatTagged(ChatEntry entry) => ChatLineWording.FormatTagged(entry);
 
     /// <summary>Whether this line names another player we could click to tell.</summary>
-    // A channel line names its speaker without an object id (allegiance,
-    // fellowship and the other channels carry only the name), yet the name
-    // is still a link that starts a tell. Every other kind links only a
-    // speaker whose id is a player's.
-    public static bool ShouldTagSender(ChatEntry entry)
-        => (entry.Kind == ChatKind.Channel
-                || (entry.SenderGuid >= FirstPlayerObjectId
-                    && entry.SenderGuid <= LastPlayerObjectId))
-            && !string.IsNullOrEmpty(entry.Sender)
-            && entry.Sender.IndexOf('<') < 0
-            && entry.Sender.IndexOf('>') < 0
-            && !IsOwnSpeaker(entry.Sender)
-            && entry.Kind is ChatKind.LocalSpeech
-                or ChatKind.RangedSpeech
-                or ChatKind.Channel
-                or ChatKind.Tell;
-
-    private static string Format(
-        ChatEntry entry, Func<string, string> decorateSender) => entry.Kind switch
-    {
-        ChatKind.LocalSpeech   => IsOwnSpeaker(entry.Sender)
-            ? $"You say, \"{entry.Text}\""
-            : $"{decorateSender(entry.Sender)} says, \"{entry.Text}\"",
-        ChatKind.RangedSpeech  => IsOwnSpeaker(entry.Sender)
-            ? $"You shout, \"{entry.Text}\""
-            : $"{decorateSender(entry.Sender)} shouts, \"{entry.Text}\"",
-        ChatKind.Channel       => ChannelLine(entry, decorateSender),
-        ChatKind.Tell          => entry.SenderGuid != 0
-            ? $"{decorateSender(entry.Sender)} tells you, \"{entry.Text}\""
-            : $"You tell {entry.Sender}, \"{entry.Text}\"",
-        ChatKind.System        => entry.Text,
-        ChatKind.Popup         => $"[Popup] {entry.Text}",
-        ChatKind.Emote         => $"* {entry.Sender} {entry.Text}",
-        ChatKind.SoulEmote     => $"* {entry.Sender} {entry.Text}",
-        ChatKind.Combat        => entry.Text,
-        _                      => entry.Text,
-    };
-
-    private static bool IsOwnSpeaker(string sender) =>
-        string.IsNullOrEmpty(sender) || sender == "You";
-
-    /// <summary>
-    /// A channel that arrives with a name is shown under that name. One that
-    /// arrives as a bare number is one of the fixed channels, and each of
-    /// those has a sentence of its own.
-    /// </summary>
-    private static string ChannelLine(
-        ChatEntry entry, Func<string, string> decorateSender)
-    {
-        bool own = IsOwnSpeaker(entry.Sender);
-        if (string.IsNullOrEmpty(entry.ChannelName))
-        {
-            return own
-                ? LegacyChannelSentence.Sent(entry.ChannelId, entry.Text)
-                : LegacyChannelSentence.Heard(
-                    entry.ChannelId, decorateSender(entry.Sender), entry.Text);
-        }
-        return own
-            ? $"[{entry.ChannelName}] You say, \"{entry.Text}\""
-            : $"[{entry.ChannelName}] {decorateSender(entry.Sender)} says, \"{entry.Text}\"";
-    }
+    public static bool ShouldTagSender(ChatEntry entry) => ChatLineWording.ShouldTagSender(entry);
 }

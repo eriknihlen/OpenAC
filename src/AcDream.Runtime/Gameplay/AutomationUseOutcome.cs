@@ -16,4 +16,10 @@ internal enum AutomationUseOutcome
     /// caller does not read it as "try again shortly".
     /// </summary>
     Unavailable,
+
+    /// <summary>
+    /// The use meant picking the object up, and no pack the character has
+    /// open has room for it. Nothing was sent.
+    /// </summary>
+    NoRoom,
 }

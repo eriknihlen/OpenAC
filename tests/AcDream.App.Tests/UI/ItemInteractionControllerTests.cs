@@ -2413,6 +2413,125 @@ public sealed class ItemInteractionControllerTests
         Assert.Equal(InventoryRequestKind.SplitToContainer, split.Kind);
     }
 
+    private static void AddInMainPack(
+        Harness h, uint id, Action<ClientObject> configure)
+    {
+        var item = new ClientObject
+        {
+            ObjectId = id,
+            Name = $"Item {id:X}",
+            Type = ItemType.Misc,
+        };
+        configure(item);
+        h.Objects.AddOrUpdate(item);
+        h.Objects.MoveItem(id, Player, h.Objects.GetContents(Player).Count);
+    }
+
+    private static Action<ClientObject> Stack(int size, int max = 100) =>
+        item =>
+        {
+            item.WeenieClassId = 77u;
+            item.StackSize = size;
+            item.StackSizeMax = max;
+        };
+
+    [Fact]
+    public void AutomationMoveJoiningAStackPoursTheWholeStackIntoTheOneInThePack()
+    {
+        var h = new Harness();
+        const uint source = 0x50000A40u;
+        const uint target = 0x50000A41u;
+        AddInMainPack(h, source, Stack(5));
+        h.AddContained(target, Stack(7));
+
+        Assert.True(h.Controller.TryMoveItemForAutomation(
+            source, Pack, amount: 0u, placement: 3, joinStack: true));
+
+        Assert.Equal(new[] { (source, target, 5u) }, h.Merges);
+        Assert.Empty(h.Puts);
+        Assert.Empty(h.SplitPuts);
+        Assert.True(h.Controller.TryGetPendingInventoryRequest(out var pending));
+        Assert.Equal(InventoryRequestKind.Merge, pending.Kind);
+        Assert.Equal(source, pending.ItemId);
+    }
+
+    [Fact]
+    public void AutomationSplitJoiningAStackPoursOnlyTheRequestedAmount()
+    {
+        var h = new Harness();
+        const uint source = 0x50000A42u;
+        const uint target = 0x50000A43u;
+        AddInMainPack(h, source, Stack(10));
+        h.AddContained(target, Stack(7));
+
+        Assert.True(h.Controller.TryMoveItemForAutomation(
+            source, Pack, amount: 4u, placement: 0, joinStack: true));
+
+        Assert.Equal(new[] { (source, target, 4u) }, h.Merges);
+        Assert.Empty(h.SplitPuts);
+    }
+
+    [Fact]
+    public void AutomationMoveJoiningAStackPlacesPlainlyWhenNoStackTakesAllOfIt()
+    {
+        // A stack with room for only part of what moves is passed over, as
+        // is a stack of something else; nothing matching is left, so the
+        // move is the plain one.
+        var h = new Harness();
+        const uint source = 0x50000A44u;
+        const uint nearlyFull = 0x50000A45u;
+        const uint otherKind = 0x50000A46u;
+        AddInMainPack(h, source, Stack(5));
+        h.AddContained(nearlyFull, Stack(98));
+        h.AddContained(otherKind, item =>
+        {
+            item.WeenieClassId = 78u;
+            item.StackSize = 1;
+            item.StackSizeMax = 100;
+        });
+
+        Assert.True(h.Controller.TryMoveItemForAutomation(
+            source, Pack, amount: 0u, placement: 2, joinStack: true));
+
+        Assert.Empty(h.Merges);
+        Assert.Equal(new[] { (source, Pack, 2) }, h.Puts);
+    }
+
+    [Fact]
+    public void AutomationMoveWithoutJoiningNeverMerges()
+    {
+        var h = new Harness();
+        const uint source = 0x50000A47u;
+        const uint target = 0x50000A48u;
+        AddInMainPack(h, source, Stack(5));
+        h.AddContained(target, Stack(7));
+
+        Assert.True(h.Controller.TryMoveItemForAutomation(
+            source, Pack, amount: 0u, placement: 1, joinStack: false));
+
+        Assert.Empty(h.Merges);
+        Assert.Equal(new[] { (source, Pack, 1) }, h.Puts);
+    }
+
+    [Fact]
+    public void AutomationMoveJoiningAStackLooksAtTheContainersOwnItemsBeforeItsPacks()
+    {
+        // The pack is listed first in the main pack, but the stacks lying
+        // loose in the main pack are searched before any pack's contents.
+        var h = new Harness();
+        const uint source = 0x50000A49u;
+        const uint inThePack = 0x50000A4Au;
+        const uint loose = 0x50000A4Bu;
+        h.AddContained(source, Stack(5));
+        h.AddContained(inThePack, Stack(7));
+        AddInMainPack(h, loose, Stack(9));
+
+        Assert.True(h.Controller.TryMoveItemForAutomation(
+            source, Player, amount: 0u, placement: 0, joinStack: true));
+
+        Assert.Equal(new[] { (source, loose, 5u) }, h.Merges);
+    }
+
     [Fact]
     public void AutomationMergeUsesRetailPlannerAndSharedGate()
     {

@@ -50,20 +50,22 @@ public sealed class ChatBoxLineGoldenTests
                 ChatKind.LocalSpeech, sender, "hi there")));
 
     [Fact]
-    public void ShoutFromAnotherPlayer()
+    public void RangedSpeechFromAnotherPlayer()
         => Assert.Equal(
-            "Bob shouts, \"hi there\"",
+            "Bob says, \"hi there\"",
             ChatVM.FormatEntry(Entry(
                 ChatKind.RangedSpeech, "Bob", "hi there", OtherPlayerGuid)));
 
-    [Theory]
-    [InlineData("You")]
-    [InlineData("")]
-    public void ShoutFromUs(string sender)
+    /// <summary>
+    /// A ranged line has no sentence of its own for the speaker: the
+    /// character's own is printed under its own name, like anyone else's.
+    /// </summary>
+    [Fact]
+    public void RangedSpeechFromUs()
         => Assert.Equal(
-            "You shout, \"hi there\"",
+            "Acdream says, \"hi there\"",
             ChatVM.FormatEntry(Entry(
-                ChatKind.RangedSpeech, sender, "hi there")));
+                ChatKind.RangedSpeech, "Acdream", "hi there")));
 
     [Fact]
     public void NamedChannelFromAnotherPlayer()
@@ -148,7 +150,7 @@ public sealed class ChatBoxLineGoldenTests
     [Fact]
     public void EmoteReadsAsAThirdPersonAction()
         => Assert.Equal(
-            "* Bob waves.",
+            "Bob waves.",
             ChatVM.FormatEntry(Entry(
                 ChatKind.Emote,
                 "Bob",
@@ -159,7 +161,7 @@ public sealed class ChatBoxLineGoldenTests
     [Fact]
     public void SoulEmoteReadsExactlyLikeAnEmote()
         => Assert.Equal(
-            "* Bob waves.",
+            "Bob waves.",
             ChatVM.FormatEntry(Entry(
                 ChatKind.SoulEmote,
                 "Bob",
@@ -171,7 +173,7 @@ public sealed class ChatBoxLineGoldenTests
 
     [Theory]
     [InlineData(ChatKind.LocalSpeech, "<Tell:IIDString:1342177290:Bob>Bob<\\Tell> says, \"hi there\"")]
-    [InlineData(ChatKind.RangedSpeech, "<Tell:IIDString:1342177290:Bob>Bob<\\Tell> shouts, \"hi there\"")]
+    [InlineData(ChatKind.RangedSpeech, "<Tell:IIDString:1342177290:Bob>Bob<\\Tell> says, \"hi there\"")]
     [InlineData(ChatKind.Tell, "<Tell:IIDString:1342177290:Bob>Bob<\\Tell> tells you, \"hi there\"")]
     public void AnotherPlayersNameIsWrappedForClickToTell(
         ChatKind kind, string expected)
@@ -194,7 +196,7 @@ public sealed class ChatBoxLineGoldenTests
     [Theory]
     [InlineData(ChatKind.LocalSpeech, "You", "You say, \"hi there\"")]
     [InlineData(ChatKind.System, "", "hi there")]
-    [InlineData(ChatKind.Emote, "Bob", "* Bob hi there")]
+    [InlineData(ChatKind.Emote, "Bob", "Bob hi there")]
     public void LinesWithNoClickableSenderAreIdenticalToThePlainForm(
         ChatKind kind, string sender, string expected)
     {

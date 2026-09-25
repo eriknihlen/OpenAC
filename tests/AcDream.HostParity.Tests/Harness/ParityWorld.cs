@@ -100,6 +100,10 @@ internal static class ParityWorld
         Type = ItemType.Creature,
         Name = "Parity",
         PublicWeenieBitfield = SelectedObjectHealthPolicy.BfPlayer,
+        // A character carries a main pack, as every one the server sends
+        // does; a using client reads that before anything else about it.
+        ItemsCapacity = 102,
+        ContainersCapacity = 7,
         // Every character the server sends carries the table its combat
         // stances come from; a body without one is never ready for melee.
         Properties = { DataIds = { [(uint)PropertyDataId.CombatTable] = CombatTable } },
@@ -110,7 +114,10 @@ internal static class ParityWorld
         ObjectId = objectId,
         Type = ItemType.Creature,
         Name = $"Monster {objectId:X8}",
-        PublicWeenieBitfield = SelectedObjectHealthPolicy.BfAttackable,
+        // Creatures come fixed in place, as the server's own creature
+        // records do; a loose one would read as something to pick up.
+        PublicWeenieBitfield = SelectedObjectHealthPolicy.BfAttackable
+            | (uint)PublicWeenieFlags.Stuck,
     };
 
     /// <summary>A creature nothing may swing at.</summary>
@@ -119,7 +126,7 @@ internal static class ParityWorld
         ObjectId = objectId,
         Type = ItemType.Creature,
         Name = $"Bystander {objectId:X8}",
-        PublicWeenieBitfield = 0u,
+        PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
     };
 
     /// <summary>
@@ -196,6 +203,12 @@ internal static class ParityWorld
 
     /// <summary>What takes the last free slot in the side pack.</summary>
     internal const uint SidePackFiller = 0x50000046u;
+
+    /// <summary>
+    /// A part-filled stack of the same coins as <see cref="CarriedCoin"/>,
+    /// lying in the side pack, for a move to join.
+    /// </summary>
+    internal const uint SidePackCoin = 0x50000047u;
 
     /// <summary>A corpse lying on the ground, openable.</summary>
     internal const uint Corpse = 0x50000050u;
@@ -277,6 +290,34 @@ internal static class ParityWorld
         stone.TargetType = (uint)ItemType.Misc;
         objects.AddOrUpdate(stone);
     }
+
+    /// <summary>
+    /// The carried items, plus two part-filled stacks of one kind of coin:
+    /// one loose in the main pack and one in the side pack.
+    /// </summary>
+    internal static void StageTwoStacksOfOneKind(GameRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        StageCarriedItems(runtime);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        objects.AddOrUpdate(Coins(CarriedCoin, Player, 40));
+        objects.AddOrUpdate(Coins(SidePackCoin, SidePack, 250));
+        // The listing the server sends for the pack, which is what a search
+        // for a stack to join walks.
+        objects.ReplaceContents(SidePack, [new ContainerContentEntry(SidePackCoin, 0u)]);
+    }
+
+    private static ClientObject Coins(uint objectId, uint containerId, int count) => new()
+    {
+        ObjectId = objectId,
+        Type = ItemType.Money,
+        Name = "Pyreal",
+        ContainerId = containerId,
+        WeenieClassId = 0x0000_0111u,
+        StackSize = count,
+        StackSizeMax = 25000,
+        Useability = ItemUseability.Contained,
+    };
 
     /// <summary>
     /// Leaves the character with nowhere to put anything new -- every item

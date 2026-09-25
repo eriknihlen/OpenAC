@@ -34,15 +34,36 @@ public sealed class ChatLogLocalGuidTests
     [Fact]
     public void OnLocalSpeech_NoLocalGuidSet_FallsBackToEmptySubstitution()
     {
-        // Pre-login (guid not yet known), the existing empty-sender
-        // substitution still applies — server-driven ranged echoes
-        // arrive with sender="" before the player has a guid.
+        // Pre-login (guid not yet known), the empty-sender substitution
+        // still applies to speech said within earshot.
         var log = new ChatLog();
         log.OnLocalSpeech("", "anyone home?",
-            senderGuid: 0u, isRanged: true, logTextType: 0x02u);
+            senderGuid: 0u, isRanged: false, logTextType: 0x02u);
 
         Assert.Equal("You", log.Snapshot()[0].Sender);
-        Assert.Equal(ChatKind.RangedSpeech, log.Snapshot()[0].Kind);
+        Assert.Equal(ChatKind.LocalSpeech, log.Snapshot()[0].Kind);
+    }
+
+    /// <summary>
+    /// A ranged line has no sentence of its own for the speaker: the client
+    /// prints it under the name it arrived with even when that is the
+    /// character's own, so the name is kept and not replaced with "You".
+    /// </summary>
+    [Fact]
+    public void OnLocalSpeech_RangedOwnLine_KeepsTheArrivedName()
+    {
+        var log = new ChatLog();
+        log.SetLocalPlayerGuid(0x5000_000A);
+
+        log.OnLocalSpeech("+Acdream", "over here",
+            senderGuid: 0x5000_000A, isRanged: true, logTextType: 0x02u);
+
+        ChatEntry entry = log.Snapshot()[0];
+        Assert.Equal(ChatKind.RangedSpeech, entry.Kind);
+        Assert.Equal("+Acdream", entry.Sender);
+        Assert.Equal(
+            "<Tell:IIDString:1342177290:+Acdream>+Acdream<\\Tell> says, \"over here\"",
+            ChatLineWording.FormatTagged(entry));
     }
 
     [Fact]

@@ -55,8 +55,14 @@ public sealed class ChatLog
 
     public void OnLocalSpeech(string sender, string text, uint senderGuid, bool isRanged, uint logTextType)
     {
+        // Only a line said within earshot has a sentence of its own for the
+        // speaker ("You say"). A ranged line is printed under the name it
+        // arrived with, the speaker's own included; see the research note on
+        // chat wording.
         bool isOwnEcho = _localPlayerGuid != 0 && senderGuid == _localPlayerGuid;
-        string effectiveSender = (isOwnEcho || string.IsNullOrEmpty(sender)) ? "You" : sender;
+        string effectiveSender = !isRanged && (isOwnEcho || string.IsNullOrEmpty(sender))
+            ? "You"
+            : sender;
         Append(new ChatEntry(
             Kind: isRanged ? ChatKind.RangedSpeech : ChatKind.LocalSpeech,
             Sender: effectiveSender,
@@ -122,6 +128,10 @@ public sealed class ChatLog
     public void OnChannelBroadcast(
         uint channelId, string sender, string text, uint? logTextType = null, string channelName = "")
     {
+        // A numbered channel's line with no speaker is the sender's own line
+        // handed back, and takes the sender's text class; see the research
+        // note on chat wording.
+        bool ownLine = string.IsNullOrEmpty(sender);
         Append(new ChatEntry(
             Kind: ChatKind.Channel,
             Sender: sender,
@@ -130,11 +140,16 @@ public sealed class ChatLog
             ChannelId: channelId)
         {
             ChannelName = channelName,
-            LogTextType = logTextType ?? LegacyChannelChatType.Resolve(channelId, ownSend: false),
+            LogTextType = logTextType ?? LegacyChannelChatType.Resolve(channelId, ownSend: ownLine),
         });
     }
 
-    public void OnTellReceived(string sender, string text, uint senderGuid, uint logTextType)
+    /// <param name="targetGuid">
+    /// Who the tell was addressed to. A tell whose speaker is its listener is
+    /// one the character sent itself, and reads as a thought.
+    /// </param>
+    public void OnTellReceived(
+        string sender, string text, uint senderGuid, uint logTextType, uint targetGuid = 0u)
     {
         Append(new ChatEntry(
             Kind: ChatKind.Tell,
@@ -144,6 +159,7 @@ public sealed class ChatLog
             ChannelId: 0)
         {
             LogTextType = logTextType,
+            TargetGuid = targetGuid,
         });
     }
 
@@ -248,10 +264,19 @@ public sealed class ChatLog
             CombatKind = entry.CombatKind is { } combat ? (int)combat + 1 : 0,
             Received = new DateTimeOffset(
                 DateTime.SpecifyKind(entry.Received, DateTimeKind.Utc)),
+            // The entry's number field carries other things on other kinds
+            // (a system line's text class, a death line's killer); only a
+            // channel line's number is a channel.
+            ChannelId = entry.Kind == ChatKind.Channel ? entry.ChannelId : 0u,
+            DisplayText = ChatLineWording.FormatTagged(entry),
         };
 
     private void Append(ChatEntry entry)
     {
+        // The filters are offered the line as it arrived and may eat it; only
+        // then is it censored and kept. That is the order the original client
+        // uses with its own plugin host, so a filter matches the real words
+        // while every reader gets the line as printed.
         if (Filters.ShouldSuppress(ToFilterCandidate(in entry)))
             return;
         if (FilterLanguageSource?.Invoke() == true)
@@ -306,6 +331,16 @@ public readonly record struct ChatEntry(
     public string ChannelName { get; init; } = "";
 
     public uint LogTextType { get; init; } = 0x00u;
+
+    /// <summary>
+    /// Who a received tell was addressed to; 0 on every other line, and when
+    /// the listener is not known.
+    /// </summary>
+    public uint TargetGuid { get; init; }
+
+    /// <summary>A tell the character sent itself: its speaker is its listener.</summary>
+    public bool IsTellToSelf =>
+        Kind == ChatKind.Tell && SenderGuid != 0u && SenderGuid == TargetGuid;
 
     /// <summary>
     /// Append order, unique for the lifetime of the log and never reused. 0 on an entry that

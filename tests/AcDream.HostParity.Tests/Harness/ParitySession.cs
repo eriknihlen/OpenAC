@@ -47,6 +47,7 @@ internal sealed class ParitySessionOperations : ILiveSessionOperations
     private readonly uint _characterId;
     private readonly string _characterName;
     private readonly List<ParityOutbound> _outbound = [];
+    private readonly List<CharacterList.Character> _moreCharacters = [];
 
     internal ParitySessionOperations(
         uint characterId = 0x50000001u,
@@ -101,10 +102,22 @@ internal sealed class ParitySessionOperations : ILiveSessionOperations
     public ServerName.Parsed? GetServerInfo(WorldSession session) =>
         new(ServerPopulation, 800, WorldName);
 
+    /// <summary>
+    /// Puts another character on the account's list, after the one the
+    /// session logs in first. A scenario about switching characters adds it
+    /// before the session opens, as the list is read then.
+    /// </summary>
+    internal void AddCharacter(uint characterId, string characterName) =>
+        _moreCharacters.Add(
+            new CharacterList.Character(characterId, characterName, 0u));
+
     public CharacterList.Parsed GetCharacters(WorldSession session) =>
         new(
             0u,
-            [new CharacterList.Character(_characterId, _characterName, 0u)],
+            [
+                new CharacterList.Character(_characterId, _characterName, 0u),
+                .. _moreCharacters,
+            ],
             [],
             11,
             "Parity",

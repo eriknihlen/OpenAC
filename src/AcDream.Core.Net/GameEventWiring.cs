@@ -89,7 +89,12 @@ public static class GameEventWiring
         {
             var p = GameEvents.ParseTell(e.Payload.Span);
             if (p is not null)
-                chat.OnTellReceived(p.Value.SenderName, p.Value.Message, p.Value.SenderGuid, p.Value.ChatType);
+                chat.OnTellReceived(
+                    p.Value.SenderName,
+                    p.Value.Message,
+                    p.Value.SenderGuid,
+                    p.Value.ChatType,
+                    p.Value.TargetGuid);
         });
         registrar.Register(GameEventType.CommunicationTransientString, e =>
         {

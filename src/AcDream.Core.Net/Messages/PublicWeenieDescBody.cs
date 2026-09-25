@@ -44,7 +44,9 @@ public readonly record struct PublicWeenieDescBody(
     uint? MaterialType = null,
     uint? HouseOwnerId = null,
     uint? MonarchId = null,
-    HouseRestrictionRecord? Restrictions = null);
+    HouseRestrictionRecord? Restrictions = null,
+    uint? WeenieHeaderFlags = null,
+    uint? WeenieHeaderFlags2 = null);
 
 public static class PublicWeenieDescParser
 {
@@ -73,9 +75,11 @@ public static class PublicWeenieDescParser
         int? wMaxStructure = null;
         float? wWorkmanship = null;
         uint? objectDescriptionFlags = null;
+        uint? headerFlags = null;
         if (body.Length - pos >= 4)
         {
             weenieFlags = CreateObject.ReadU32(body, ref pos);
+            headerFlags = weenieFlags;
             try
             {
                 name = CreateObject.ReadString16L(body, ref pos);
@@ -111,6 +115,7 @@ public static class PublicWeenieDescParser
         uint? houseOwnerId = null;
         uint? monarchId = null;
         HouseRestrictionRecord? restrictions = null;
+        uint? headerFlags2 = null;
         try
         {
             bool hasSecondHeader = objectDescriptionFlags.HasValue
@@ -119,6 +124,7 @@ public static class PublicWeenieDescParser
             {
                 if (body.Length - pos < 4) throw new FormatException("trunc weenieFlags2");
                 weenieFlags2 = CreateObject.ReadU32(body, ref pos);
+                headerFlags2 = weenieFlags2;
             }
 
             if ((weenieFlags & 0x00000001u) != 0)         // PluralName
@@ -367,6 +373,8 @@ public static class PublicWeenieDescParser
             MaterialType: materialType,
             HouseOwnerId: houseOwnerId,
             MonarchId: monarchId,
-            Restrictions: restrictions);
+            Restrictions: restrictions,
+            WeenieHeaderFlags: headerFlags,
+            WeenieHeaderFlags2: headerFlags2);
     }
 }

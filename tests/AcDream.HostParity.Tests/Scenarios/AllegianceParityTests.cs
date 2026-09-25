@@ -1,3 +1,4 @@
+using AcDream.Core.Net.Messages;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.HostParity.Tests;
@@ -177,6 +178,61 @@ public sealed class AllegianceParityTests
             Assert.Equal(PluginAllegianceCommandStatus.InvalidTarget, result.Status);
             Assert.Empty(Sent(arm, BreakAction));
             transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>
+    /// Who heads the allegiance, who the character is sworn to and who is
+    /// sworn to it, as the server described them -- read through each
+    /// client's own parser and route, and asserted per arm.
+    ///
+    /// Mutation check (2026-09-25): asking for the patron of the monarch
+    /// instead of the character turned this red on both arms.
+    /// </summary>
+    [Fact]
+    public void EitherClientNamesTheMonarchThePatronAndTheVassals() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            _ = ParityWorld.Stage(arm);
+            const uint Vassal = 0x50000077u;
+            arm.Server.AllegianceUpdate(new ClientCommandResponses.AllegianceUpdate(
+                Rank: 3u,
+                TotalMembers: 4u,
+                TotalVassals: 1u,
+                RecordCount: 4,
+                AllegianceName: "The Order",
+                Monarch: new ClientCommandResponses.AllegianceMemberRecord(
+                    ParityWorld.Monarch, 0u, true, "Monarch",
+                    Rank: 6, Level: 275u, Gender: 2, HeritageGroup: 3),
+                Records:
+                [
+                    new ClientCommandResponses.AllegianceMemberRecord(
+                        ParityWorld.Patron, ParityWorld.Monarch, false, "Patron",
+                        Rank: 4, Level: 180u, Gender: 1, HeritageGroup: 1),
+                    new ClientCommandResponses.AllegianceMemberRecord(
+                        ParityWorld.Player, ParityWorld.Patron, true, "Parity",
+                        Rank: 3, Level: 90u, Gender: 1, HeritageGroup: 2),
+                    new ClientCommandResponses.AllegianceMemberRecord(
+                        Vassal, ParityWorld.Player, true, "Squire",
+                        Rank: 1, Level: 20u, Gender: 2, HeritageGroup: 8),
+                ]));
+            PluginAllegianceSnapshot snapshot = arm.Host.Automation.Allegiance.Snapshot;
+
+            transcript.Step("identities");
+            transcript.Record("monarch", snapshot.Monarch?.Name);
+            transcript.Record("patron", snapshot.Patron?.Name);
+            transcript.Record("vassals", string.Join(",", snapshot.Vassals.Select(static vassal => vassal.Name)));
+            transcript.Record("followers", snapshot.VassalCount);
+            Assert.Equal(
+                new PluginAllegianceMember(ParityWorld.Monarch, "Monarch", 6u, 275u, 3, 2, true),
+                snapshot.Monarch);
+            Assert.Equal(
+                new PluginAllegianceMember(ParityWorld.Patron, "Patron", 4u, 180u, 1, 1, false),
+                snapshot.Patron);
+            Assert.Equal(
+                [new PluginAllegianceMember(Vassal, "Squire", 1u, 20u, 8, 2, true)],
+                snapshot.Vassals);
+            Assert.Equal(1u, snapshot.VassalCount);
+            Assert.Equal(4u, snapshot.MemberCount);
         });
 
     /// <summary>

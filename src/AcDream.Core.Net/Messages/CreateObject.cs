@@ -120,7 +120,13 @@ public static class CreateObject
         uint? MaterialType = null,
         uint? HouseOwnerId = null,
         uint? MonarchId = null,
-        HouseRestrictionRecord? Restrictions = null);
+        HouseRestrictionRecord? Restrictions = null,
+        // The three flag words the description is laid out by, as sent:
+        // the physics description's, the weenie header's and, when present,
+        // the weenie header's second word.
+        uint? PhysicsDescriptionFlags = null,
+        uint? WeenieHeaderFlags = null,
+        uint? WeenieHeaderFlags2 = null);
 
     public readonly record struct ServerMotionState(
         ushort Stance,
@@ -285,15 +291,31 @@ public static class CreateObject
             if ((physicsFlags & PhysicsDescriptionFlag.Position) != 0)
             {
                 if (body.Length - pos < 32) return null;
+                var origin = new System.Numerics.Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 8)),
+                    BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 12)));
+                // A rotation outside the frame tolerance does not stop the
+                // object being created and placed; it is used scaled to unit
+                // length (see DescriptionRotationInUse).
+                System.Numerics.Quaternion rotation =
+                    AcDream.Core.Physics.PositionFrameValidation
+                        .DescriptionRotationInUse(
+                            origin,
+                            new System.Numerics.Quaternion(
+                                BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 20)),
+                                BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 24)),
+                                BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 28)),
+                                BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 16))));
                 position = new ServerPosition(
                     LandblockId: BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(pos + 0)),
-                    PositionX:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 4)),
-                    PositionY:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 8)),
-                    PositionZ:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 12)),
-                    RotationW:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 16)),
-                    RotationX:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 20)),
-                    RotationY:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 24)),
-                    RotationZ:   BinaryPrimitives.ReadSingleLittleEndian(body.Slice(pos + 28)));
+                    PositionX:   origin.X,
+                    PositionY:   origin.Y,
+                    PositionZ:   origin.Z,
+                    RotationW:   rotation.W,
+                    RotationX:   rotation.X,
+                    RotationY:   rotation.Y,
+                    RotationZ:   rotation.Z);
                 pos += 32;
             }
 
@@ -481,7 +503,10 @@ public static class CreateObject
                 MaterialType: desc.MaterialType,
                 HouseOwnerId: desc.HouseOwnerId,
                 MonarchId: desc.MonarchId,
-                Restrictions: desc.Restrictions);
+                Restrictions: desc.Restrictions,
+                PhysicsDescriptionFlags: (uint)physicsFlags,
+                WeenieHeaderFlags: desc.WeenieHeaderFlags,
+                WeenieHeaderFlags2: desc.WeenieHeaderFlags2);
         }
         catch
         {

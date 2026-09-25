@@ -441,6 +441,23 @@ public sealed class RuntimeItemInteraction : IDisposable
         uint containerId,
         uint amount = 0u,
         int placement = 0)
+        => TryMoveItemForAutomation(
+            itemId, containerId, amount, placement, joinStack: false);
+
+    /// <summary>
+    /// The automation move, optionally joining a stack first. With
+    /// <paramref name="joinStack"/> the container and the packs inside it
+    /// are searched for a stack of the same thing with room for everything
+    /// being moved, and the first one found is joined with a merge; that is
+    /// settled before any room check, because joining takes no slot. With no
+    /// such stack, or without the flag, the move is the plain put or split.
+    /// </summary>
+    public bool TryMoveItemForAutomation(
+        uint itemId,
+        uint containerId,
+        uint amount,
+        int placement,
+        bool joinStack)
     {
         if (itemId == 0u
             || containerId == 0u
@@ -456,6 +473,11 @@ public sealed class RuntimeItemInteraction : IDisposable
         uint requested = amount == 0u ? fullStack : amount;
         if (requested == 0u || requested > fullStack)
             return false;
+        if (joinStack
+            && TryPlanAutoMerge(itemId, containerId, requested) is { } join)
+        {
+            return TryDispatchMerge(join);
+        }
         if (requested < fullStack)
         {
             return TrySplitToContainer(
@@ -498,12 +520,16 @@ public sealed class RuntimeItemInteraction : IDisposable
         if (plan is not { } merge)
             return false;
 
-        return TryDispatchInventoryRequest(
+        return TryDispatchMerge(merge);
+    }
+
+    private bool TryDispatchMerge(StackMergePlan merge) =>
+        TryDispatchInventoryRequest(
             InventoryRequestKind.Merge,
-            sourceItemId,
+            merge.SourceObjectId,
             () =>
             {
-                _sendStackableMerge(
+                _sendStackableMerge!(
                     merge.SourceObjectId,
                     merge.TargetObjectId,
                     merge.Amount);
@@ -512,7 +538,6 @@ public sealed class RuntimeItemInteraction : IDisposable
                     merge.TargetObjectId);
                 return true;
             });
-    }
 
     public bool TryDropItemForAutomation(uint itemId, uint amount = 0u)
     {
@@ -865,6 +890,19 @@ public sealed class RuntimeItemInteraction : IDisposable
         }
     }
 
+    /// <summary>
+    /// What a plain use of an object means before any use request is
+    /// considered: picking a loose or looted item up, wielding or sorting it,
+    /// or nothing but the use itself. Null when the object is not known.
+    /// </summary>
+    public ItemPrimaryUseResult? ClassifyPrimaryUse(uint objectId) =>
+        objectId == 0u || _objects.Get(objectId) is not { } item
+            ? null
+            : ItemInteractionPolicy.DetermineUseResult(
+                Snapshot(item),
+                _playerGuid(),
+                _groundObjectId());
+
     public bool TryUseItemForAutomation(uint itemGuid)
     {
         if (itemGuid == 0u || _objects.Get(itemGuid) is not { } item)
@@ -1077,26 +1115,39 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     private StackMergePlan? TryPlanAutoMerge(uint sourceId)
     {
+        if (_objects.Get(sourceId) is not { } source)
+            return null;
+        uint requested = _stackSplitQuantity?.GetObjectSplitSize(
+                sourceId,
+                _selectedObjectId(),
+                (uint)Math.Max(1, source.StackSize))
+            ?? (uint)Math.Max(1, source.StackSize);
+        uint player = _playerGuid();
+        return player == 0u ? null : TryPlanAutoMerge(sourceId, player, requested);
+    }
+
+    /// <summary>
+    /// The first stack in <paramref name="containerId"/> that can take all
+    /// <paramref name="requested"/> of the source in one merge, searching the
+    /// container's own items first and then each pack inside it. A stack
+    /// that could take only part of it is passed over.
+    /// </summary>
+    private StackMergePlan? TryPlanAutoMerge(
+        uint sourceId,
+        uint containerId,
+        uint requested)
+    {
         if (_sendStackableMerge is null
+            || containerId == 0u
             || _objects.Get(sourceId) is not { } source
             || source.StackSizeMax <= 1)
         {
             return null;
         }
 
-        uint requested = _stackSplitQuantity?.GetObjectSplitSize(
-                sourceId,
-                _selectedObjectId(),
-                (uint)Math.Max(1, source.StackSize))
-            ?? (uint)Math.Max(1, source.StackSize);
         int requestedAmount = (int)Math.Min(requested, int.MaxValue);
         var sourceMerge = ToStackMergeItem(source);
-        uint player = _playerGuid();
-        if (player == 0u)
-            return null;
-
-        var visitedContainers = new HashSet<uint>();
-        foreach (uint targetId in ExhaustiveContents(player, visitedContainers))
+        foreach (uint targetId in ExhaustiveContainedItems(containerId))
         {
             if (_objects.Get(targetId) is not { } target)
                 continue;
@@ -1105,27 +1156,40 @@ public sealed class RuntimeItemInteraction : IDisposable
                 ToStackMergeItem(target),
                 CanMakeInventoryRequest,
                 requestedAmount);
-            // AttemptAutoMerge rejects a partial fit and keeps searching.
             if (plan is { } complete && complete.Amount == requested)
                 return complete;
         }
         return null;
     }
 
-    private IEnumerable<uint> ExhaustiveContents(
+    /// <summary>
+    /// Everything a container holds, for finding a stack to join: its own
+    /// items in order, then the items of each pack inside it, pack by pack.
+    /// </summary>
+    private IEnumerable<uint> ExhaustiveContainedItems(uint containerId) =>
+        ExhaustiveContainedItems(containerId, new HashSet<uint>());
+
+    private IEnumerable<uint> ExhaustiveContainedItems(
         uint containerId,
         HashSet<uint> visitedContainers)
     {
         if (!visitedContainers.Add(containerId))
             yield break;
-
+        var packs = new List<uint>();
         foreach (uint itemId in _objects.GetContents(containerId))
         {
-            yield return itemId;
-            if (_objects.GetContents(itemId).Count == 0)
+            if (_objects.Get(itemId) is { } held
+                && InventoryContainerPlacementPolicy.IsContainer(held))
+            {
+                packs.Add(itemId);
                 continue;
-            foreach (uint nested in ExhaustiveContents(itemId, visitedContainers))
-                yield return nested;
+            }
+            yield return itemId;
+        }
+        foreach (uint pack in packs)
+        {
+            foreach (uint itemId in ExhaustiveContainedItems(pack, visitedContainers))
+                yield return itemId;
         }
     }
 

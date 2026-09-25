@@ -343,6 +343,21 @@ public readonly record struct PluginWorldObject(
     /// </summary>
     public int LastIdTime { get; init; }
 
+    /// <summary>
+    /// True when the latest thing the server said about the object was an
+    /// appraisal answer saying it could not appraise it. This follows every
+    /// answer the client receives, whoever asked. A successful answer clears
+    /// it, and so does anything else the server sends about the object -- a
+    /// fresh create, a property or stack-size update, a confirmed move or
+    /// wield, a pack listing or inventory list that names it -- because each
+    /// shows the server still has the object. The server answers
+    /// unsuccessfully for an object it no longer has, but also for an item
+    /// made to resist appraisal and for a repeat request of the same object
+    /// sent within about five seconds of an unsuccessful one, so on its own it
+    /// does not prove the object is gone.
+    /// </summary>
+    public bool LastAppraisalUnsuccessful { get; init; }
+
     /// <summary>True when the object is a door and that door stands open.</summary>
     public bool IsDoorOpen { get; init; }
 
@@ -370,7 +385,64 @@ public readonly record struct PluginWorldObject(
 
     /// <summary>The object's icon, for a plugin that draws its own UI.</summary>
     public uint IconId { get; init; }
+
+    /// <summary>
+    /// The body parts a piece of clothing or armor covers, as the coverage
+    /// bits the server sends when the object first appears -- so known
+    /// before the object has ever been appraised, the same value as
+    /// <see cref="PluginInventoryItem.CoverageMask"/>. Zero for anything
+    /// that is not worn.
+    /// </summary>
+    public uint CoverageMask { get; init; }
+
+    /// <summary>
+    /// The raw description words and optional values of the object's latest
+    /// full description, as the server sent them; null for an object the
+    /// client never received a description of, and on a host that does not
+    /// report them.
+    /// </summary>
+    public PluginObjectHeader? Header { get; init; }
 }
+
+/// <summary>
+/// How the server laid out an object's latest full description, and the
+/// optional values it carried, each exactly as sent. Every value is null
+/// when that description did not carry it, so a plugin can tell a value the
+/// server left out from one it sent as zero. This is low-level data for a
+/// plugin that reproduces another tool's record of an object; the rest of
+/// the API reports the same things in plain terms.
+/// </summary>
+/// <param name="WeenieHeaderFlags">
+/// The word saying which optional item values follow in the description.
+/// </param>
+/// <param name="WeenieHeaderFlags2">
+/// The second such word; null when the description carried none.
+/// </param>
+/// <param name="PhysicsDescriptionFlags">
+/// The word saying which optional physics values follow.
+/// </param>
+/// <param name="PhysicsState">The object's physics state word.</param>
+/// <param name="ObjectDescriptionFlags">
+/// The object's description bit field (openable, a player, a door, and so on).
+/// </param>
+/// <param name="SetupId">The object's physics setup file id.</param>
+/// <param name="Scale">The object's scale, as a multiplier of its natural size.</param>
+/// <param name="HookType">What kind of house hook the object hangs on.</param>
+/// <param name="ParentObjectId">The object it is attached to, such as the creature holding it.</param>
+/// <param name="ParentLocation">Where on that parent it is attached.</param>
+/// <param name="UseRadius">How close, in metres, a user has to be.</param>
+public sealed record PluginObjectHeader(
+    uint? WeenieHeaderFlags,
+    uint? WeenieHeaderFlags2,
+    uint? PhysicsDescriptionFlags,
+    uint? PhysicsState,
+    uint? ObjectDescriptionFlags,
+    uint? SetupId,
+    float? Scale,
+    uint? HookType,
+    uint? ParentObjectId,
+    uint? ParentLocation,
+    float? UseRadius);
 
 /// <summary>
 /// The outcome of a world-object activation (portal, door, NPC, or other

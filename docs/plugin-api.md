@@ -75,6 +75,8 @@ lines, so a plugin that polls less often than that loses the overflow. Use
 | `LogTextType` | The text class the client colours the line by. |
 | `CombatKind` | `0` when the line is not a combat line, `1` ordinary outgoing, `2` incoming, `3` failure. |
 | `Received` | When the client took delivery of the line. |
+| `ChannelId` | The number of the channel a channel line (kind `2`) came on, `0` on every other line. The fixed channels have no name and are told apart by it: `0x800` fellowship, `0x1000` patron, `0x2000` vassal, `0x4000` follower, `0x1000000` co-vassals, `0x2000000` allegiance broadcast, `0x4000000` fellowship broadcast, `0x8`/`0x10`/`0x20` advocate. A named channel carries its room number and its name in `ChannelName`. |
+| `DisplayText` | The whole line as the chat window prints it, channel sentence and verb included, with another player's name in the tell link `<Tell:IIDString:id:Name>Name<\Tell>`; no timestamp and no closing line break. Match against this rather than rebuilding the line from `Sender` and `Text`: the wording of each kind of line is the client's, and it stays the chat window's. |
 
 ### Dropping lines
 
@@ -87,6 +89,11 @@ A filter is consulted *before* the line is shown. Returning true drops it
 outright: it reaches neither the transcript, the chat windows,
 `CaptureMessages`, `Received`, nor the chat log file.
 
+- A filter is offered the line before the language filter runs, so its
+  `Text` and `DisplayText` are the words as they arrived. Every reader
+  (`Received`, `CaptureMessages`, the chat window) gets the line as printed:
+  with the language filter on, both carry `****` in place of a banned word.
+  Match a filter against the uncensored words.
 - Filters run in registration order and stop at the first rejection.
 - A filter that throws suppresses nothing; the host records the fault.
 - Dispose the handle to remove one filter. The host removes every filter a
@@ -95,7 +102,9 @@ outright: it reaches neither the transcript, the chat windows,
 - A filter registered before login still applies to the next session.
 - A dropped incoming tell never becomes the client's reply/retell target:
   the same append point that filters gate is where that target is recorded,
-  so a suppressed tell leaves no trace to `/r` back to.
+  so a suppressed tell leaves no trace to `/r` back to. Only a tell from
+  another player becomes the reply target at all; a tell from a creature or
+  an item is shown but leaves the target where it was.
 - Filters are client-wide, not per-plugin. A line one plugin drops is
   invisible to the client and to every other plugin, including one polling
   `CaptureMessages`. Match narrowly — a filter written for one plugin's own
@@ -183,7 +192,12 @@ host.Events.LocalPlayerDied += deathMessage => { /* the server's message */ };
   instance — treat it as "there is a fresh world to work with", not as
   one-time setup.
 - `Logoff` fires when the in-world session ends, before teardown, so a
-  handler can still read gameplay state.
+  handler can still read gameplay state. It is raised outside the host's
+  session operation: a handler may issue commands (stopping the session,
+  for instance) and they run rather than being deferred. The exception is a
+  session ended from inside another event handler: `Logoff` is then raised
+  within that call, and a session command issued from it is deferred or
+  refused.
 - `LocalPlayerDied` carries the server's death message. It comes from the
   death notification itself, so a plugin does not have to match chat text.
 
@@ -280,6 +294,63 @@ The client checks the request before it sends it, and answers:
 server decides whether it is allowed, and says so by restating the skill,
 attribute or pool. Watch the record you asked about rather than assuming.
 
+### Character options
+
+`host.Automation.CharacterOptions` reads and changes the character's own
+on/off options -- the switches on the character options page, which the
+server keeps with the character:
+
+```csharp
+ICharacterOptionsAutomation options = host.Automation.CharacterOptions;
+
+if (options.TryGet("AllowGive", out bool acceptsGifts) && !acceptsGifts)
+{
+    PluginCharacterOptionResult result = options.Set("AllowGive", true);
+    if (!result.Accepted)
+        host.Log.Warn($"{result.Status}: {result.Notice}");
+}
+```
+
+An option is named the way the page names it (`AllowGive`,
+`FellowshipAutoAcceptRequests`, `MainPackPreferred`, `ShowCloak`,
+`HearGeneralChat`, ...), compared without regard to case; `Names` lists every
+one. A change takes the page's own route: the client's copy changes at once,
+and the server is told straight away for the options it saves on its own and
+with the client's next save of the whole set for the rest. Setting an option
+to the value it already has is `Accepted` and sends nothing.
+
+| `Status` | when |
+|---|---|
+| `Accepted` | the option now has the value asked for |
+| `Unavailable` | the character is not in the world, or there is no session to take the change; the option is unchanged |
+| `UnknownOption` | no option has that name |
+
+The client declines no change to an option it names, so there is no
+separate "rejected" answer.
+
+### Vitae
+
+`Character.VitaeMultiplier` is what the vitae penalty leaves of the
+character's stats, as a fraction: `1` with no penalty, `0.95` after a death
+that cost five percent. It is the product of every vitae effect the server
+has placed on the character, the same factor the client's own stat
+arithmetic applies. `Character.VitaePenaltyPercent` is the same thing as a
+whole-number penalty: `0` for none, `5` for `0.95`, always between 0 and 100.
+Both read "no penalty" before the server has sent the character's
+enchantments.
+
+### Titles
+
+`Character.Titles` lists every title the character has earned, in the order
+the server listed them and then in the order earned since, as
+`PluginCharacterTitle(TitleId, Name)`: the server's number
+for the title and its text as the game displays it. The text comes from the
+installed data files, on either client, and is empty for a title the files
+do not name. `Character.CurrentTitleId` is the title the character has chosen
+to display, or `0` for none. The server sends the whole list when the
+character enters the world and one more title each time one is earned; both
+read empty and `0` before that.
+
 ## Spells
 
 `host.Automation.Spells` gains the whole table, not just what the character
@@ -298,6 +369,14 @@ if (host.Automation.Spells.TryFindByName("Heal Self", partialMatch: true, out Pl
 exact match wins, and `partialMatch: true` falls back to the first name that
 contains the text.
 
+Besides what a caster needs, `PluginSpellInfo` carries five raw spell-table
+fields: `CasterEffect` and `TargetEffect` (the effect-script numbers played on
+the caster and on the target), `FormulaVersion` (with the character's name, it
+decides this character's version of the component formula), `DisplayOrder`
+(spellbook order, rising) and `ComponentLoss` (how readily a cast consumes
+components). Decal-era tools call the last three a spell's generation, sort
+key and speed. A host that does not fill them reports 0.
+
 ## Storage
 
 `host.Storage.RootPath` is the absolute directory the plugin's keys are
@@ -312,6 +391,33 @@ and character at login, and the user sees where things will go before
 anything has been saved. A trailing slash is optional, the call is safe to
 repeat, and a prefix that would escape the storage root is refused the same
 way an escaping key is. A host with nowhere to write returns false.
+
+## Status board
+
+```csharp
+// One plugin says what it is doing...
+host.StatusBoard.Publish("state", "Combat");
+
+// ...and any other plugin in the same client can read it.
+if (host.StatusBoard.TryRead("some.other.plugin", "state", out string state))
+    host.Log.Info($"the other plugin is in {state}");
+```
+
+`host.StatusBoard` is a set of named text lines the plugins in one client
+share. A plugin publishes only under its own manifest id -- `Publish` takes
+no id -- and reads any plugin's lines by that plugin's id (compared without
+regard to case) and the line's name (compared exactly). It is how one plugin
+can show or report another's state without the two referencing each other.
+`Capture(pluginId)` copies every line one plugin has published.
+
+`Publish(key, null)` clears a line. `Publish` returns false for a blank key
+or one longer than 128 characters, a value longer than 4096 characters, and
+a 257th line for one plugin. The board starts empty with each plugin session
+(each time the client loads its plugins, not each login) and nothing on it
+leaves the client; a plugin's lines are cleared when it is unloaded and it
+can write none after that, so a line never outlives the plugin that wrote
+it. Both clients
+keep the board the same way.
 
 ## Clipboard
 
@@ -396,6 +502,25 @@ it to understand the shape of the surroundings, and for nothing else.
 
 Both lists are snapshots the host rebuilds rather than collections mutated
 under a reader.
+
+Some of what an appraisal reveals is known before one. The body parts a
+piece of armor or clothing covers come with the object when it first
+appears, so `PluginWorldObject.CoverageMask` and
+`PluginInventoryItem.CoverageMask` carry those coverage bits for an item
+that has never been appraised; both are zero for anything that is not worn.
+
+For a plugin that reproduces another tool's record of an object, both
+records also carry `Header`, a `PluginObjectHeader` with the raw words the
+server laid the object's latest full description out by -- the weenie
+header flags, the second header word, the physics description flags, the
+physics state and the object description bit field -- and the optional
+values that description carried: the setup id, the scale, the hook type,
+the parent it is attached to and where, and the use radius. Each is exactly
+as sent and null when the description did not carry it, so a value the
+server left out is told apart from one it sent as zero. `Header` itself is
+null for an object the client never received a description of. An item's
+`UseRadius` comes from its body while it is out in the world and from its
+description while it sits in a pack.
 
 `host.Automation.Objects.Identify(objectId)` requests an appraisal of any
 object present in the object table -- owned inventory, equipped,
@@ -508,6 +633,14 @@ item's own automation) is held to, rather than bypassing them:
 `Apply(objectId, targetObjectId)` — using one item on another — is
 unaffected by this: it still requires `objectId` to be an owned item.
 
+`Items.MoveToContainer(item, container, amount, placement, joinStack: true)`
+moves an item the way dropping a stack onto a pack does: it first looks for a
+stack of the same thing in the container (its own items, then each pack inside
+it) with room for everything being moved, and joins the first one it finds
+with a merge, needing no free slot. A stack with room for only part of it is
+passed over; with no stack to join, it is the ordinary move or split. The
+four-argument `MoveToContainer` never joins.
+
 Automation item commands (`Items.Use`/`Apply`/`MoveToContainer`/... and
 this world-object path) are not thread-safe against each other or against
 the client's own input: issue them from the same thread `IEvents.Tick`
@@ -613,6 +746,63 @@ both hosts -- the vendor automation adapter is shared verbatim between the
 graphical and headless hosts, so a headless vendor-shopping plugin gets
 the same `WeaponProfile`/`ArmorProfile` data a graphical one does.
 
+### Summoning essences and pets
+
+A summoning essence is recognised by what the server sends with it: every
+essence belongs to one shared cooldown, `PluginInventoryItem.SummoningCooldownId`
+(213), and `SharedCooldownId` carries the item's cooldown whether it came with
+the object or in an appraisal. `IsPetDevice` is true for that cooldown, or
+when a server names the pet the item summons in `PetClass`; the usual servers
+keep `PetClass` to themselves, so it reads `0` there. `CooldownSeconds` is how
+long the item's cooldown lasts once used, and `Spells.GetCooldownRemaining(
+PluginInventoryItem.SummoningCooldownId)` says how long until the next summon.
+`Items.ActiveOwnedPetCount` counts the living creatures the server names the
+character as owner of.
+
+Before summoning, `Navigation.CheckRoomAhead(3f)` asks whether a body the
+size of the character fits three metres ahead (see
+[navigation.md](navigation.md#where-things-are)).
+
+### An appraisal the server refused, and a lost item
+
+The server answers every appraisal, but not always with a description. An
+unsuccessful answer carries nothing, and the client keeps whatever an earlier
+answer delivered. Two members say which way the server answered:
+
+| Member | Meaning |
+|---|---|
+| `PluginAppraisalState.CurrentObjectUnsuccessful` | The answer that completed `CurrentObjectId` was unsuccessful. Read it in the same poll that sees your `Identify` complete. False when nothing has completed and for an object the client does not hold. |
+| `PluginWorldObject.LastAppraisalUnsuccessful` | The latest thing the server said about this object, whoever asked, was an unsuccessful appraisal answer. A successful answer clears it, and so does anything else the server sends about the object -- a fresh create, a property or stack-size update, a confirmed move or wield, a pack listing or inventory list naming it -- since each shows the server still has it. |
+
+An unsuccessful answer does not by itself mean the object is gone. The server
+also answers this way for an item made to resist appraisal (the client is
+never told which items those are) and for a repeat request of the same object
+sent within about five seconds of an unsuccessful one.
+
+```csharp
+PluginItemCommandResult result = host.Automation.Items.ForgetStaleItem(itemId);
+```
+
+`ForgetStaleItem` lets go of a carried item the server no longer has. The item
+leaves the client the way it would if the server had deleted it -- out of its
+pack, every inventory list and window, and `ObjectChanged` reports it
+`Released` -- and nothing is sent to the server. It answers `Completed` when
+the item is gone and refuses anything else:
+
+| Status | When |
+|---|---|
+| `InvalidItem` | Unknown id, the character itself, anything not carried, or an item the client holds no server record of. |
+| `Refused` | The item is worn or wielded (either in an equipment slot or with a wielder), it is a pack that still holds anything (listed in it, or naming it as its container), `LastAppraisalUnsuccessful` is false for it, or the refusal came more than 30 seconds of game time ago. |
+| `Busy` | An appraisal of this item is still awaited (its answer is the one that counts), or `IsBusy` reads true. `IsBusy` does not cover an appraisal in flight. |
+
+Ask twice, more than five seconds apart, and drop an item refused both times
+straight after the second refusal: an older refusal is not acted on, because
+it may be the repeat-request refusal of a real item nobody has asked about
+since. If the item did exist after all, the server describes it again the
+next time it sends the inventory, at the latest on the next login. This is a
+client-side step the original client does not have; it runs the same way on
+both clients.
+
 ## Confirmations
 
 ```csharp
@@ -679,6 +869,18 @@ if (!sworn.Accepted)
     host.Log.Warn($"{sworn.Status}: {sworn.Notice}");
 ```
 
+`Snapshot` carries the allegiance's `Name`, the character's own `Rank`,
+`MemberCount` (the whole allegiance, monarch included) and `VassalCount`
+(everyone sworn beneath the character, all the way down: its followers).
+`Monarch` and `Patron` say who heads the allegiance and who the character is
+sworn to, and `Vassals` lists the characters sworn directly to it, each as a
+`PluginAllegianceMember`: object id, name, rank, level, `HeritageGroup` (1
+Aluvian, 2 Gharu'ndim, 3 Sho, 4 Viamontian, ... as the server numbers it),
+`Gender` (1 male, 2 female) and whether they were online when the server last
+said. `Monarch` is the character itself when it heads the allegiance;
+`Patron` is null for a monarch; both are null, and `Vassals` empty, until the
+server has stated the allegiance.
+
 The two commands are checked differently before they are sent, because they
 mean different things:
 
@@ -705,6 +907,34 @@ decides whether the character may swear or break -- experience owed, a
 cooldown, a mansion held -- and says so in its own time. Watch `Snapshot`
 rather than assuming, and note that `Snapshot` only changes once the server
 sends the allegiance again.
+
+## Fellowship
+
+`host.Automation.Fellowship` reads the fellowship the server has told the
+client about, and sends the commands the fellowship panel sends.
+
+```csharp
+IFellowshipAutomation fellowship = host.Automation.Fellowship;
+if (fellowship.IsInFellowship)
+{
+    string terms = (fellowship.SharesExperience ? "" : "NOT ") + "Sharing XP"
+        + (fellowship.SharesExperience && !fellowship.SplitsExperienceEvenly
+            ? ", Uneven Split" : "");
+    host.Log.Info($"{fellowship.Name} ({fellowship.MemberCount}): {terms}");
+    foreach (PluginFellowMember member in fellowship.CaptureRoster())
+        host.Log.Info($"  {member.Name} [{member.Level}]");
+}
+```
+
+`SharesExperience` says whether the fellowship shares the experience its
+members earn. `SplitsExperienceEvenly` says whether that shared experience is
+split evenly or in proportion to the members' levels, which happens when
+their levels are too far apart; it only means something while
+`SharesExperience` is true. Each `PluginFellowMember` carries the member's
+`Level` as the roster last reported it. `CaptureMembers` leaves out the
+local player and anyone whose distance the client cannot work out right now;
+`CaptureRoster` includes the local player's own entry. All of these read
+false, zero or empty when there is no fellowship.
 
 ## Loot
 
@@ -1227,6 +1457,20 @@ polygons to overlap where cells meet and fill them rather than stitch them.
 have, for one with no indoor cells, and on a client with no lease on the
 game data.
 
+`CaptureIndoorCells` is the raw placement instead, for a plugin that draws
+dungeons from tiles of its own, one per environment piece: every cell the
+landblock's data lists, in cell id order, as a `PluginIndoorCell` with the
+`EnvironmentId` the cell is built from (the low sixteen bits of the
+environment file's id, as the cell stores it), its `CellStructure`, the
+piece's `Origin` in the same landblock-local metres, its `Orientation`
+quaternion exactly as stored (the data stores W, X, Y, Z in that order) and
+`SeesOutside` (false for a sealed dungeon's cell). `YawDegrees` turns the
+orientation into a turn about the vertical axis, 0 up to 360 counted from
+east towards north, which for dungeon pieces is 0, 90, 180 or 270 to within
+rounding. Cells without geometry, which the floorplan leaves out, are here
+too. The list is read once per landblock and the same list is handed back
+after; it is empty whenever the floorplan would be.
+
 ## Clients on this computer
 
 ```csharp
@@ -1478,6 +1722,89 @@ sides: on a session without the installed data files -- see the "Headless"
 section -- `AnnounceCastAttempt` and `AnnounceCastSuccess` return false and
 `CaptureCasts` is empty, while `CaptureClients` is real either way.
 
+### Relaying to other computers
+
+```csharp
+// Outgoing: what this client tells its neighbours, for your own transport.
+if (peers.TryCaptureSelf(out PluginNetworkClient self))
+    Send(self);
+foreach (PluginPeerCast cast in peers.CaptureOwnCasts(ownCastCursor))
+{
+    Send(cast);
+    ownCastCursor = cast.Sequence;
+}
+foreach (PluginPeerCommand line in peers.CaptureOwnCommands(ownLineCursor))
+{
+    Send(line);
+    ownLineCursor = line.Sequence;
+}
+
+// Incoming: what arrived from a character on another computer.
+peers.ImportRemoteClient(received);                // at least every few seconds
+peers.ImportRemoteCast(caster, target, spell, skill, secondsLeft, landed);
+peers.ImportRemoteCommand(sender, "/myplugin follow", ["healer"], 250);
+```
+
+The host never talks to another computer itself, but a plugin with a
+transport of its own (a web socket, a chat channel) can carry the bus
+further. `TryCaptureSelf` builds the record this client puts in its note,
+on demand, with `IsRemote` false; it returns false while the character is
+not in the world or its position is not known yet. `CaptureOwnCasts` and
+`CaptureOwnCommands` hand back what this client itself announced with
+`AnnounceCastAttempt`, `AnnounceCastSuccess` and `BroadcastCommand`, oldest
+first, under this client's own sequence (not the numbering `CaptureCasts`
+uses), for fifteen seconds and at most the last 32 of each, and only
+while the character that announced them is in the world: they are dropped
+as it leaves, so the next character starts with none.
+`SecondsRemaining` on an own cast is what is left of the announced
+duration, in seconds, and zero for an attempt.
+
+`ImportRemoteClient` adds or refreshes a peer keyed by its `PlayerId`; the
+`ClientId` and `IsRemote` it is given are ignored, and this client assigns
+the peer a `ClientId` of its own that stays the same while the peer keeps
+being imported. The peer then appears in `CaptureClients` with `IsRemote`
+true, and it goes stale fifteen seconds after its last import, exactly as a
+neighbour that stops writing does, so import each peer at least every few
+seconds. `ImportRemoteCast` and `ImportRemoteCommand` accept only a caster or
+sender imported within the last fifteen seconds; the cast or line then
+appears in `CaptureCasts` or `CaptureCommands` with `IsRemote` true, under
+the same world and label rules as a neighbour's, and an imported line aimed
+at this client is run through its chat entry exactly as a neighbour's is. A
+landed cast's `secondsRemaining` is what is left at the moment of the
+import; an attempt's is ignored. An imported line's stagger counts only the
+clients on this computer, since an imported peer's `ClientId` means nothing
+outside this client.
+
+The rules a note is read under apply to imports: each refuses what a
+neighbour's note would be refused for (a zero id, a blank name, a position
+that is not a number, an over-long label or line, a spell this client's
+table does not know), and `ImportRemoteClient` refuses this client's own
+character, a character here that is not in the world, and a new peer while
+256 imported peers are still recent. A character this client already sees
+in a recent note on this computer, in the same world, is read from that
+note, and what is imported for it meanwhile is passed over for good: a relay
+that echoes a neighbour back does not list it twice, count its casts twice
+or run its lines twice, even after the neighbour logs out and the imported
+copy shows again. The other way round, a note that shows up for a character
+the relay was already carrying starts after what its rings held then.
+Imports stay in this client: they are not written to its note, so each
+client that wants remote peers runs a relay of its own.
+
+An imported peer is known by its `PlayerId` alone, which the server numbers
+per world: two characters in different worlds that share an id are one
+imported peer to this client, and a remote character whose id is this
+client's own is refused. A relay that spans worlds keeps to one world per
+client.
+
+**An imported line runs as if it were typed.** Whatever a plugin hands
+`ImportRemoteCommand` goes through this client's chat entry: client
+commands, other plugins' verbs, tells, and anything the server accepts from
+this character, admin commands included. The only check the host makes is
+that the sender was imported in the last fifteen seconds, and the relay
+controls that too. Authenticate the transport and import lines only from
+senders you trust; a relay that cannot vouch for its peers should import
+their state and casts and leave their lines out.
+
 ## Headless
 
 A windowless client binds this same surface through the same binding pass the
@@ -1614,8 +1941,9 @@ was configured with content, and several parts of the surface are read out of
 those files. On a content-less bot they answer rather than act, where a client
 with a window does the work:
 
-- `Navigation`'s walks and path previews need the collision
-  data the files carry. Everything else on `Navigation` -- the snapshot, the
+- `Navigation`'s walks, path previews and `CheckRoomAhead` need the
+  collision data the files carry; without it `CheckRoomAhead` answers
+  `Unknown`. Everything else on `Navigation` -- the snapshot, the
   move channels, `FaceHeading`, `Jump`, `TryFindObject` -- is real either way.
 - `Spells` and `Magic` come from the spell catalogue, so a content-less
   session knows no spells and casts nothing by name.

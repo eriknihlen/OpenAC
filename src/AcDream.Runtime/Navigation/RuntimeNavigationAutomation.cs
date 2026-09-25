@@ -334,6 +334,46 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         return result;
     }
 
+    /// <summary>
+    /// Room for a body the size of the character ahead of it, asked of the physics world
+    /// the runtime owns, so every host answers from the same collision.
+    /// </summary>
+    public PluginRoomAhead CheckRoomAhead(float distanceMeters)
+    {
+        if (!IsAvailable(out GameRuntime runtime)
+            || runtime.MovementOwner.Controller is not { CellId: not 0u } controller)
+        {
+            return default;
+        }
+
+        Position here = controller.CurrentCellPosition;
+        var body = new PlacementRoomBody(
+            controller.SphereList,
+            controller.ObjectScale,
+            controller.StepUpHeight,
+            controller.StepDownHeight,
+            controller.LocalEntityId);
+        PlacementRoomResult result = PlacementRoomProbe.Check(
+            runtime.EntityObjects.Physics.Engine,
+            body,
+            controller.Position,
+            here.Frame.Orientation,
+            here.ObjCellId,
+            here.Frame.Origin,
+            distanceMeters);
+        return result.Room switch
+        {
+            PlacementRoom.Clear => new PluginRoomAhead(
+                PluginRoomAheadStatus.Clear,
+                RuntimeNavigationProjection.Position(new Position(
+                    result.CellId,
+                    result.CellLocalPosition,
+                    here.Frame.Orientation))),
+            PlacementRoom.Blocked => new PluginRoomAhead(PluginRoomAheadStatus.Blocked, default),
+            _ => default,
+        };
+    }
+
     // ── Held movement ─────────────────────────────────────────────────────
 
     public PluginNavigationCommandStatus SetMovementIntent(in PluginMovementIntent intent)

@@ -3,6 +3,8 @@ using AcDream.Core.Content;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Gameplay;
 using AcDream.Runtime.Navigation;
+using DatReaderWriter.DBObjs;
+using DatReaderWriter.Enums;
 
 namespace AcDream.Runtime.Maps;
 
@@ -18,6 +20,14 @@ internal sealed class RuntimeDungeonMapAutomation : IDungeonMapAutomation
 {
     private readonly object _gate = new();
     private readonly Dictionary<uint, PluginDungeonFloorplan> _projected = new();
+    /// <summary>
+    /// How many landblocks' indoor cells are kept; the landblock read
+    /// longest ago goes first once it is full.
+    /// </summary>
+    internal const int MaximumCachedIndoorLandblocks = 64;
+
+    private readonly Dictionary<uint, IReadOnlyList<PluginIndoorCell>> _indoorCells = new();
+    private readonly Queue<uint> _indoorCellOrder = new();
     private GameRuntime? _runtime;
     private IDatObjectSource? _content;
     private object? _contentLock;
@@ -42,6 +52,8 @@ internal sealed class RuntimeDungeonMapAutomation : IDungeonMapAutomation
             _contentLock = contentLock;
             _builder = new DungeonFloorplanBuilder(content, contentLock);
             _projected.Clear();
+            _indoorCells.Clear();
+            _indoorCellOrder.Clear();
         }
     }
 
@@ -77,6 +89,77 @@ internal sealed class RuntimeDungeonMapAutomation : IDungeonMapAutomation
                 ? movement.Position.ObjCellId & 0xFFFF0000u
                 : 0u;
         }
+    }
+
+    public IReadOnlyList<PluginIndoorCell> CaptureIndoorCells(uint landblockId)
+    {
+        uint landblock = landblockId & 0xFFFF0000u;
+        IDatObjectSource? content;
+        object? contentLock;
+        lock (_gate)
+        {
+            if (_indoorCells.TryGetValue(landblock, out IReadOnlyList<PluginIndoorCell>? kept))
+                return kept;
+            content = _content;
+            contentLock = _contentLock;
+        }
+        if (content is null || contentLock is null)
+            return Array.Empty<PluginIndoorCell>();
+
+        // Read-only, because every plugin is handed the same list.
+        IReadOnlyList<PluginIndoorCell> cells =
+            Array.AsReadOnly(ReadIndoorCells(content, contentLock, landblock));
+        lock (_gate)
+        {
+            // Content replaced while this was read: hand back what was read,
+            // and keep nothing from the files that are gone.
+            if (!ReferenceEquals(_content, content))
+                return cells;
+            if (_indoorCells.TryGetValue(landblock, out IReadOnlyList<PluginIndoorCell>? kept))
+                return kept;
+            if (_indoorCells.Count >= MaximumCachedIndoorLandblocks)
+                _indoorCells.Remove(_indoorCellOrder.Dequeue());
+            _indoorCells[landblock] = cells;
+            _indoorCellOrder.Enqueue(landblock);
+            return cells;
+        }
+    }
+
+    /// <summary>
+    /// The landblock's cell count from its information file, then each cell
+    /// the count covers, as stored. A cell the files do not have is left out.
+    /// </summary>
+    private static PluginIndoorCell[] ReadIndoorCells(
+        IDatObjectSource content,
+        object contentLock,
+        uint landblock)
+    {
+        var cells = new List<PluginIndoorCell>();
+        LandBlockInfo? info;
+        lock (contentLock)
+            info = content.Get<LandBlockInfo>(landblock | 0xFFFEu);
+        if (info is null || info.NumCells == 0)
+            return [];
+        uint firstCell = landblock | 0x0100u;
+        for (uint offset = 0; offset < info.NumCells; offset++)
+        {
+            uint cellId = firstCell + offset;
+            // One cell at a time, so a large dungeon does not hold the shared
+            // files away from everything else while it is read.
+            EnvCell? envCell;
+            lock (contentLock)
+                envCell = content.Get<EnvCell>(cellId);
+            if (envCell is null)
+                continue;
+            cells.Add(new PluginIndoorCell(
+                cellId,
+                envCell.EnvironmentId,
+                envCell.CellStructure,
+                envCell.Position?.Origin ?? Vector3.Zero,
+                envCell.Position?.Orientation ?? Quaternion.Identity,
+                envCell.Flags.HasFlag(EnvCellFlags.SeenOutside)));
+        }
+        return cells.ToArray();
     }
 
     public PluginDungeonFloorplan CaptureFloorplan(uint landblockId)

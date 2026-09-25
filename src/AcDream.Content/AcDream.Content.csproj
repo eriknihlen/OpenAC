@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="AcDream.Content.Tests" />
+    <InternalsVisibleTo Include="AcDream.App.Tests" />
   </ItemGroup>
 
   <ItemGroup>

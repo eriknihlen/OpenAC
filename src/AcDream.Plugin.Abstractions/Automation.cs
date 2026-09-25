@@ -135,6 +135,38 @@ public readonly record struct PluginSpellInfo(
 
     /// <summary>The four component slots that identify the spell's formula.</summary>
     public PluginSpellComponentSet ComponentSet { get; init; }
+
+    /// <summary>
+    /// The visual effect played on the caster when the spell goes off, as
+    /// the spell table's effect-script number; 0 when it names none.
+    /// </summary>
+    public uint CasterEffect { get; init; }
+
+    /// <summary>
+    /// The visual effect played on the target when the spell lands, as the
+    /// spell table's effect-script number; 0 when it names none.
+    /// </summary>
+    public uint TargetEffect { get; init; }
+
+    /// <summary>
+    /// The spell table's formula version: the number that, with the
+    /// character's name, decides which components this character's version
+    /// of the formula uses. Decal-era tools call it the spell's generation.
+    /// </summary>
+    public uint FormulaVersion { get; init; }
+
+    /// <summary>
+    /// Where the spell sits in the spellbook: spells are listed in rising
+    /// order of this number. Decal-era tools call it the sort key.
+    /// </summary>
+    public int DisplayOrder { get; init; }
+
+    /// <summary>
+    /// The spell table's component-loss factor, which scales how readily a
+    /// cast of this spell consumes its components. Decal-era tools read it
+    /// as the spell's speed.
+    /// </summary>
+    public float ComponentLoss { get; init; }
 }
 
 /// <summary>
@@ -373,6 +405,14 @@ public enum PluginCastRequestResult
     Unavailable,
 }
 
+/// <summary>One title the character has earned.</summary>
+/// <param name="TitleId">The title's number, as the server names it.</param>
+/// <param name="Name">
+/// The title as the game displays it, read from the installed data files;
+/// empty when the files do not name it or the client has no data files.
+/// </param>
+public readonly record struct PluginCharacterTitle(uint TitleId, string Name);
+
 /// <summary>
 /// The local character: who they are, how they are doing, and what they can
 /// do. Values read 0 or empty until the character is in the world.
@@ -450,6 +490,46 @@ public interface ICharacterInfo
     /// server reports it; 0 when it has said nothing.
     /// </summary>
     int SummoningMastery => 0;
+
+    /// <summary>
+    /// What vitae leaves of the character's attributes, skills and vitals,
+    /// as a fraction: 1 for a character with no vitae penalty, 0.95 for a
+    /// five percent penalty. It is the product of every vitae effect the
+    /// server has placed on the character. 1 before the server has sent the
+    /// character's enchantments, and on a host that does not track them,
+    /// which is what the default implementation reports.
+    /// </summary>
+    float VitaeMultiplier => 1f;
+
+    /// <summary>
+    /// The title the character has chosen to display, by the server's number
+    /// for it; 0 when none is chosen, before the server has sent the
+    /// character's titles, and on a host that does not track them, which is
+    /// what the default implementation reports. Its text is the matching
+    /// entry of <see cref="Titles"/>.
+    /// </summary>
+    uint CurrentTitleId => 0u;
+
+    /// <summary>
+    /// Every title the character has earned, in the order the server listed
+    /// them when the character entered the world, with each title earned
+    /// since added at the end. Empty before the server has sent the list,
+    /// and on a host that does not track titles, which is what the default
+    /// implementation returns.
+    /// </summary>
+    IReadOnlyList<PluginCharacterTitle> Titles =>
+        Array.Empty<PluginCharacterTitle>();
+
+    /// <summary>
+    /// The vitae penalty in whole percent: 0 for none, 5 for a character
+    /// whose stats are held at 95 percent. It is
+    /// <see cref="VitaeMultiplier"/> taken from one, times one hundred and
+    /// rounded to the nearest whole number, and is always between 0 and 100.
+    /// 0 whenever <see cref="VitaeMultiplier"/> reports 1, which includes the
+    /// default implementation.
+    /// </summary>
+    int VitaePenaltyPercent =>
+        Math.Clamp((int)(((1d - VitaeMultiplier) * 100d) + 0.5d), 0, 100);
 
     /// <summary>
     /// Every skill the client can describe, sorted by name. Empty before the
@@ -687,6 +767,32 @@ public readonly record struct PluginChatMessage(
 
     /// <summary>When the client took delivery of the line.</summary>
     public DateTimeOffset Received { get; init; }
+
+    /// <summary>
+    /// The number of the channel a channel line (<see cref="Kind"/> 2) came
+    /// on, and 0 on every other line. The fixed channels have no name on the
+    /// wire and are told apart by this number alone: <c>0x800</c> fellowship,
+    /// <c>0x1000</c> from a patron, <c>0x2000</c> from a vassal,
+    /// <c>0x4000</c> from a follower, <c>0x1000000</c> co-vassals,
+    /// <c>0x2000000</c> allegiance broadcast, <c>0x4000000</c> a fellowship
+    /// broadcast, <c>0x8</c>, <c>0x10</c> and <c>0x20</c> the advocate
+    /// channels. A named channel carries its room number here and its name in
+    /// <see cref="ChannelName"/>.
+    /// </summary>
+    public uint ChannelId { get; init; }
+
+    /// <summary>
+    /// The whole line as the client's chat window prints it: the channel
+    /// prefix, the speaker, the verb and the quoted words, with another
+    /// player's name wrapped in the client's tell link
+    /// (<c>&lt;Tell:IIDString:id:Name&gt;Name&lt;\Tell&gt;</c>). It carries no
+    /// timestamp and no closing line break. Empty on a line the host did not
+    /// word. A chat filter is offered the line before the language filter
+    /// runs, so there this and <see cref="Text"/> are the words as they
+    /// arrived; every reader afterwards gets both as printed, with the
+    /// language filter's <c>****</c> in place when that option is on.
+    /// </summary>
+    public string DisplayText { get; init; } = string.Empty;
 }
 
 /// <summary>What an input interceptor decided about a line the player typed.</summary>
@@ -796,7 +902,8 @@ public interface IPluginChat
     /// <see cref="CaptureMessages"/>, <see cref="Received"/>, or the log file.
     /// Filters run in registration order, and one that throws suppresses
     /// nothing. Dispose the result to remove it; the host also removes every
-    /// filter a plugin installed when that plugin unloads.
+    /// filter a plugin installed when that plugin unloads. A filter sees the
+    /// line before the language filter censors it; readers see it censored.
     /// </summary>
     IDisposable RegisterFilter(Func<PluginChatMessage, bool> suppress) =>
         NoOpPluginRegistration.Instance;
@@ -1053,6 +1160,9 @@ public interface IAutomationSurface
 
     /// <summary>Buying from and selling to a vendor.</summary>
     IVendorAutomation Vendor => NoOpAutomationSurface.Instance;
+
+    /// <summary>The character's own on/off options, as on the character options page.</summary>
+    ICharacterOptionsAutomation CharacterOptions => NoOpAutomationSurface.Instance;
 }
 
 /// <summary>
@@ -1070,7 +1180,7 @@ public sealed class NoOpAutomationSurface
       INetworkAutomation, IRecoveryAutomation, IProjectileAutomation
       , IWorldLabelAutomation, IDungeonMapAutomation
       , ISelectionAutomation, IDialogAutomation, ITradeAutomation,
-      IVendorAutomation
+      IVendorAutomation, ICharacterOptionsAutomation
 {
     /// <summary>The shared instance; this type holds no state.</summary>
     public static NoOpAutomationSurface Instance { get; } = new();
@@ -1156,6 +1266,9 @@ public sealed class NoOpAutomationSurface
 
     /// <inheritdoc/>
     public IVendorAutomation Vendor => this;
+
+    /// <inheritdoc/>
+    public ICharacterOptionsAutomation CharacterOptions => this;
 
     /// <summary>Discards the text; there is nowhere to print it.</summary>
     public void PostSystemMessage(string text)

@@ -198,6 +198,12 @@ public sealed class ClientObject
     public uint HookType { get; set; }
     public bool IsHook => HookType != 0u && HookItemTypes != 0u;
     public uint Priority     { get; set; }
+
+    /// <summary>
+    /// The latest full description's layout words and optional values, as
+    /// sent; null for an object the client never received a description of.
+    /// </summary>
+    public ClientObjectHeader? Header { get; set; }
     public uint? Useability  { get; set; }    // ITEM_USEABLE from PublicWeenieDesc
     public uint? TargetType  { get; set; }
     public uint? PublicWeenieBitfield { get; set; }
@@ -216,6 +222,27 @@ public sealed class ClientObject
     /// its description needs to know the answer came.
     /// </summary>
     public bool AppraisalAnswered { get; internal set; }
+
+    /// <summary>
+    /// True when the latest thing the server said about this object was an
+    /// appraisal answer saying it could not appraise it. A successful answer
+    /// clears it, and so does anything else the server sends about the
+    /// object -- a fresh create, a property or stack-size update, a confirmed
+    /// move or wield, a pack listing or an inventory manifest that names it --
+    /// since each shows the server still has it. The server answers
+    /// unsuccessfully for an object it no longer has, but also for one that
+    /// resists appraisal and for a repeat request made too soon after an
+    /// unsuccessful one, so it is not proof on its own that the object is gone.
+    /// </summary>
+    public bool LastAppraisalUnsuccessful { get; internal set; }
+
+    /// <summary>
+    /// When the latest unsuccessful appraisal answer for this object arrived,
+    /// in seconds on the clock the owning table was given; zero when the table
+    /// has no clock or no such answer has come. Only meaningful while
+    /// <see cref="LastAppraisalUnsuccessful"/> is true.
+    /// </summary>
+    public double LastAppraisalUnsuccessfulAtSeconds { get; internal set; }
     /// <summary>
     /// The most recent appraisal's WeaponProfile blob, if the object is a
     /// weapon and has ever been successfully appraised. Cleared/replaced by
@@ -336,7 +363,39 @@ public readonly record struct WeenieData(
     uint? MaterialType = null,
     uint? HouseOwnerId = null,
     uint? MonarchId = null,
-    HouseRestrictionRecord? Restrictions = null);
+    HouseRestrictionRecord? Restrictions = null,
+    ClientObjectHeader? Header = null);
+
+/// <summary>
+/// The description words the server laid an object's latest full
+/// description out by, and the optional values that description carried,
+/// each exactly as sent and null when that description did not carry it. A
+/// later update to one property does not change this; the next full
+/// description replaces all of it.
+/// </summary>
+/// <param name="WeenieHeaderFlags">Which optional item values follow.</param>
+/// <param name="WeenieHeaderFlags2">The second such word, when sent.</param>
+/// <param name="PhysicsDescriptionFlags">Which optional physics values follow.</param>
+/// <param name="PhysicsState">The physics state word.</param>
+/// <param name="ObjectDescriptionFlags">The object's description bit field.</param>
+/// <param name="SetupId">The physics setup, when sent.</param>
+/// <param name="Scale">The object's scale, when sent.</param>
+/// <param name="HookType">What kind of hook it hangs on, when sent.</param>
+/// <param name="ParentId">What it is attached to, when sent.</param>
+/// <param name="ParentLocation">Where on that parent, when sent.</param>
+/// <param name="UseRadius">How close a user has to be, in metres, when sent.</param>
+public sealed record ClientObjectHeader(
+    uint? WeenieHeaderFlags,
+    uint? WeenieHeaderFlags2,
+    uint? PhysicsDescriptionFlags,
+    uint? PhysicsState,
+    uint? ObjectDescriptionFlags,
+    uint? SetupId,
+    float? Scale,
+    uint? HookType,
+    uint? ParentId,
+    uint? ParentLocation,
+    float? UseRadius);
 
 public static class PlayerKillerStatusBitfield
 {

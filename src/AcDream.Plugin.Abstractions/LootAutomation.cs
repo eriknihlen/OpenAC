@@ -105,7 +105,20 @@ public readonly record struct PluginAppraisalState(
     long Revision,
     uint AwaitingObjectId,
     uint CurrentObjectId,
-    uint LastAbandonedObjectId = 0u);
+    uint LastAbandonedObjectId = 0u)
+{
+    /// <summary>
+    /// True when the answer that completed <see cref="CurrentObjectId"/> said
+    /// the server could not appraise the object; false for a successful
+    /// answer and when nothing has completed. It is read from the object the
+    /// client holds, so an answer about an object the client does not know
+    /// reads false, and so does one the server has since said something else
+    /// about. The same caution as
+    /// <see cref="PluginWorldObject.LastAppraisalUnsuccessful"/> applies: an
+    /// unsuccessful answer does not by itself mean the object is gone.
+    /// </summary>
+    public bool CurrentObjectUnsuccessful { get; init; }
+}
 
 /// <summary>
 /// Looting: finding nearby corpses, opening one, reading what is inside, and

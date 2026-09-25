@@ -9,6 +9,17 @@ public sealed class DebugLineRenderer : IDisposable
     internal const int FloatsPerVertex = 6;
     private const int VertexStrideBytes = FloatsPerVertex * sizeof(float);
 
+    /// <summary>
+    /// The most vertices one batch, from <see cref="Begin"/> to its flushes,
+    /// holds: 4 MiB of them, a quarter of the frame's upload ring. Every batch
+    /// is uploaded into that shared per-frame ring, which the rest of the
+    /// frame also draws from and which cannot grow mid-frame, so an unbounded
+    /// batch (a plugin's world lines, a collision overlay over a busy area)
+    /// would overflow it and end the client. Past the budget, further lines
+    /// and triangles are left out.
+    /// </summary>
+    internal const int VertexBudget = 4 * 1024 * 1024 / VertexStrideBytes;
+
     internal static readonly GpuVertexLayout VertexLayout = GpuVertexLayout.Interleaved(
         strideBytes: VertexStrideBytes,
         [
@@ -62,6 +73,9 @@ public sealed class DebugLineRenderer : IDisposable
         }
     }
 
+    /// <summary>How many more vertices this batch takes before it is full.</summary>
+    internal int RemainingVertexBudget => VertexBudget - _vertexCount - _hiddenVertexCount - _solidVertexCount;
+
     public void Begin()
     {
         _buffer.Clear();
@@ -78,6 +92,8 @@ public sealed class DebugLineRenderer : IDisposable
     /// </summary>
     public void AddLine(Vector3 a, Vector3 b, Vector3 color, bool hiddenByScene = false)
     {
+        if (RemainingVertexBudget < 2)
+            return;
         List<float> buffer = hiddenByScene ? _hiddenBuffer : _buffer;
         buffer.Add(a.X); buffer.Add(a.Y); buffer.Add(a.Z);
         buffer.Add(color.X); buffer.Add(color.Y); buffer.Add(color.Z);
@@ -213,6 +229,8 @@ public sealed class DebugLineRenderer : IDisposable
 
     internal void AddTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color)
     {
+        if (RemainingVertexBudget < 3)
+            return;
         AddSolidVertex(a, color);
         AddSolidVertex(b, color);
         AddSolidVertex(c, color);

@@ -113,8 +113,18 @@ public sealed class ChatCommandTargetState : IDisposable
                 return;
             if (entry.Kind == ChatKind.Tell)
             {
+                // A tell the character sent itself names nobody to answer.
+                if (entry.IsTellToSelf)
+                    return;
+                // Only another player becomes the one to answer: a tell
+                // from a creature or an item is shown but names nobody.
                 if (entry.SenderGuid != 0u)
-                    _lastIncomingTellSender = entry.Sender;
+                {
+                    if (PlayerObjectIds.IsPlayer(entry.SenderGuid))
+                    {
+                        _lastIncomingTellSender = entry.Sender;
+                    }
+                }
                 else
                     _lastOutgoingTellTarget = entry.Sender;
                 return;

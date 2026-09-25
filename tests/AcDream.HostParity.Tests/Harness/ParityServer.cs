@@ -343,6 +343,13 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
         GameEvent(GameEventType.VictimNotification, payload);
     }
 
+    /// <summary>A line said at range (a shout), as the server relays it.</summary>
+    internal void RangedSpeech(string text, string sender, uint senderGuid) =>
+        Raise(
+            nameof(WorldSession.SpeechHeard),
+            new HearSpeech.Parsed(
+                text, sender, senderGuid, ChatType: 0x02u, IsRanged: true, Range: 60f));
+
     /// <summary>A line of text from the server itself.</summary>
     internal void SystemMessage(string text, uint chatType) =>
         Raise(
@@ -396,6 +403,79 @@ internal sealed class ParityServer(WorldSession session, Func<uint> playerGuid)
         }
 
         GameEvent(GameEventType.AllegianceUpdate, [.. payload]);
+    }
+
+    /// <summary>
+    /// A line on one of the numbered chat channels, as the server relays it.
+    /// An empty speaker is how the server hands a line back to the one who
+    /// sent it.
+    /// </summary>
+    internal void ChannelBroadcast(uint channelId, string sender, string text)
+    {
+        var payload = new List<byte>();
+        WriteU32(payload, channelId);
+        WriteString(payload, sender);
+        WriteString(payload, text);
+        GameEvent(GameEventType.ChannelBroadcast, [.. payload]);
+    }
+
+    /// <summary>A tell, as the server delivers one to its listener.</summary>
+    internal void Tell(
+        string text,
+        string sender,
+        uint senderGuid,
+        uint targetGuid,
+        uint chatType)
+    {
+        var payload = new List<byte>();
+        WriteString(payload, text);
+        WriteString(payload, sender);
+        WriteU32(payload, senderGuid);
+        WriteU32(payload, targetGuid);
+        WriteU32(payload, chatType);
+        GameEvent(GameEventType.Tell, [.. payload]);
+    }
+
+    /// <summary>One member of a fellowship, as the server's roster states it.</summary>
+    internal readonly record struct Fellow(uint Guid, string Name, uint Level);
+
+    /// <summary>
+    /// The whole fellowship, as the server states it when the character
+    /// joins or the roster changes: written onto the wire, so the client's
+    /// own parser and inbound route carry it the rest of the way. Every
+    /// member is at full vitals of 100 and takes a share of the loot; nobody
+    /// has departed.
+    /// </summary>
+    internal void FellowshipFullUpdate(
+        string name,
+        uint leaderGuid,
+        bool shareExperience,
+        bool evenSplit,
+        params Fellow[] members)
+    {
+        var payload = new List<byte>();
+        WriteU16(payload, (ushort)members.Length);
+        WriteU16(payload, 0);                 // the table's bucket count
+        foreach (Fellow fellow in members)
+        {
+            WriteU32(payload, fellow.Guid);   // the roster's key
+            WriteU32(payload, 0u);            // experience owed to the leader
+            WriteU32(payload, 0u);            // and luminance
+            WriteU32(payload, fellow.Level);
+            for (int vital = 0; vital < 6; vital++)
+                WriteU32(payload, 100u);      // maximum then current vitals
+            WriteU32(payload, 1u);            // takes a share of the loot
+            WriteString(payload, fellow.Name);
+        }
+        WriteString(payload, name);
+        WriteU32(payload, leaderGuid);
+        WriteU32(payload, shareExperience ? 1u : 0u);
+        WriteU32(payload, evenSplit ? 1u : 0u);
+        WriteU32(payload, 0u);                // not open
+        WriteU32(payload, 0u);                // not locked
+        WriteU16(payload, 0);                 // nobody departed
+        WriteU16(payload, 0);
+        GameEvent(GameEventType.FellowshipFullUpdate, [.. payload]);
     }
 
     /// <summary>One member of the allegiance, as the profile carries it.</summary>

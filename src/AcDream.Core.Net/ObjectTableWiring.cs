@@ -230,5 +230,17 @@ public static class ObjectTableWiring
         MaterialType: s.MaterialType,
         HouseOwnerId: s.HouseOwnerId,
         MonarchId: s.MonarchId,
-        Restrictions: s.Restrictions);
+        Restrictions: s.Restrictions,
+        Header: new ClientObjectHeader(
+            s.WeenieHeaderFlags,
+            s.WeenieHeaderFlags2,
+            s.PhysicsDescriptionFlags,
+            s.PhysicsState,
+            s.ObjectDescriptionFlags,
+            s.SetupTableId,
+            s.ObjScale,
+            s.HookType,
+            s.ParentGuid,
+            s.ParentLocation,
+            s.UseRadius));
 }

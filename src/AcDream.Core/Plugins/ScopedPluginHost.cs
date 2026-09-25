@@ -14,6 +14,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly ScopedLootClassifierRegistry _lootClassifiers;
     private readonly ScopedAutomationSurface _automation;
     private readonly ScopedHotkeyRegistry _hotkeys;
+    private readonly IPluginStatusBoard _statusBoardView;
     private bool _disposed;
     private readonly ScopedWorldLines _worldLines;
 
@@ -21,7 +22,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         IPluginHost inner,
         string pluginId,
         string pluginDisplayName,
-        string? pluginDirectory = null)
+        string? pluginDirectory = null,
+        PluginStatusBoard? statusBoard = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _worldLines = new ScopedWorldLines(inner.WorldLines);
@@ -34,7 +36,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             inner.Ui,
             new PluginUiOwner(pluginId, pluginDisplayName),
             pluginDirectory);
-        _storage = new ScopedPluginStorage(inner.Storage, pluginId);
+        _storage = ScopedPluginStorage.ForPlugin(inner.Storage, pluginId);
         _commands = new ScopedPluginCommandRegistry(inner.Commands);
         _lootClassifiers = new ScopedLootClassifierRegistry(
             inner.LootClassifiers,
@@ -42,6 +44,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             pluginDisplayName);
         _automation = new ScopedAutomationSurface(inner, pluginId);
         _hotkeys = new ScopedHotkeyRegistry(inner.Hotkeys, pluginId);
+        _statusBoardView = statusBoard is null
+            ? inner.StatusBoard
+            : new PluginStatusBoard.Scoped(statusBoard, pluginId);
     }
 
     public bool HasUi => _inner.HasUi;
@@ -68,6 +73,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IPluginMapRegistry Maps => _inner.Maps;
     public IPluginMapResourceCatalog MapResources => _inner.MapResources;
     public IPluginRenderRegistry Rendering => _inner.Rendering;
+    public IPluginStatusBoard StatusBoard => _statusBoardView;
 
     /// <summary>
     /// One plugin's view of the shared storage root: everything it keeps lives
@@ -75,20 +81,29 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     /// root is the plugins folder, and which installs, updates and code removal
     /// leave alone.
     /// </summary>
-    private sealed class ScopedPluginStorage(
-        IPluginStorage inner,
-        string pluginId) : IPluginStorage
+    private sealed class ScopedPluginStorage : IPluginStorage
     {
         private const string FilesFolderName = "files";
 
-        private readonly string _scope = Path.Combine(pluginId, FilesFolderName);
+        private readonly IPluginStorage _inner;
+        private readonly string _scope;
 
-        public bool IsAvailable => inner.IsAvailable;
-        public string? RootPath => inner.RootPath is { } root
+        private ScopedPluginStorage(IPluginStorage inner, string scope)
+        {
+            _inner = inner;
+            _scope = scope;
+        }
+
+        /// <summary>The storage of one plugin: its own folder's <c>files</c>.</summary>
+        public static ScopedPluginStorage ForPlugin(IPluginStorage inner, string pluginId) =>
+            new(inner, Path.Combine(pluginId, FilesFolderName));
+
+        public bool IsAvailable => _inner.IsAvailable;
+        public string? RootPath => _inner.RootPath is { } root
             ? Path.Combine(root, _scope)
             : null;
         public string? ReadText(string key) =>
-            inner.ReadText(ScopedKey(key));
+            _inner.ReadText(ScopedKey(key));
         public IReadOnlyList<string> List(string prefix)
         {
             ArgumentNullException.ThrowIfNull(prefix);
@@ -98,7 +113,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 ? _scope
                 : ScopedKey(prefix);
             string ownerPrefix = _scope + Path.DirectorySeparatorChar;
-            return inner.List(scopedPrefix)
+            return _inner.List(scopedPrefix)
                 .Select(key => key.Replace('/', Path.DirectorySeparatorChar))
                 .Where(key => key.StartsWith(
                     ownerPrefix,
@@ -110,10 +125,15 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 .ToArray();
         }
         public void WriteText(string key, string content) =>
-            inner.WriteText(ScopedKey(key), content);
-        public bool Delete(string key) => inner.Delete(ScopedKey(key));
+            _inner.WriteText(ScopedKey(key), content);
+        public bool Delete(string key) => _inner.Delete(ScopedKey(key));
         public bool EnsureDirectory(string prefix) =>
-            inner.EnsureDirectory(ScopedKey(prefix.TrimEnd('/')));
+            _inner.EnsureDirectory(ScopedKey(prefix.TrimEnd('/')));
+
+        // A named scope -- one character's or one world's files -- is a folder
+        // inside the plugin's own, so it stays within what the plugin owns.
+        public IPluginStorage OpenScope(PluginStorageScope scope) =>
+            new ScopedPluginStorage(_inner, Path.Combine(_scope, ValidateKey(scope.Name)));
 
         private static string ValidateKey(string key)
         {
@@ -144,6 +164,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _lootClassifiers.Dispose();
         _automation.Dispose();
         _hotkeys.Dispose();
+        // A status line never outlives the plugin that wrote it.
+        (_statusBoardView as PluginStatusBoard.Scoped)?.Close();
     }
 
     /// <summary>
@@ -238,6 +260,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         public INetworkAutomation Network => Inner.Network;
         public IRecoveryAutomation Recovery => Inner.Recovery;
         public IProjectileAutomation Projectiles => Inner.Projectiles;
+        public ICharacterOptionsAutomation CharacterOptions => Inner.CharacterOptions;
         // The same shape as navigation: a host whose labels can tell plugins
         // apart hands this plugin its own set, so the cap is per plugin and
         // the set goes with the plugin when it is disabled.
@@ -1582,6 +1605,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
 
         public bool IsViewVisible(string viewName) =>
             _inner.IsViewVisible(_owner, viewName);
+
+        public bool ShowPanel(string viewName) =>
+            _inner.ShowPanel(_owner, viewName);
+
+        public bool HidePanel(string viewName) =>
+            _inner.HidePanel(_owner, viewName);
 
         public bool ControlExists(string viewName, string controlName) =>
             _inner.ControlExists(_owner, viewName, controlName);

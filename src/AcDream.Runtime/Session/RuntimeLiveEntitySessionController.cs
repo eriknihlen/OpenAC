@@ -458,12 +458,35 @@ public sealed class RuntimeLiveEntitySessionController
         RuntimeWorldTransitState transit = _runtime.TransitOwner;
         if (!transit.TryGetAcceptedTeleportDestination(
                 out RuntimeTeleportDestination destination)
-            || !transit.TryBeginPortalReveal(
+            || !transit.CanBeginPortalReveal(
+                destination.TeleportSequence,
+                destination.CellId))
+        {
+            return;
+        }
+
+        // A newer teleport replaces a reveal that is still waiting for its
+        // destination. This client holds nothing for that reveal beyond its
+        // acknowledgements, so it retires it completely before the new one
+        // begins, as the windowed client withdraws its reveal host.
+        if (_pendingPortalCompletion is { } replaced)
+        {
+            ClearPendingPortalCompletion();
+            if (!transit.BeginHostProjectionSupersession(replaced.Projection))
+            {
+                throw new InvalidOperationException(
+                    "Runtime rejected the headless portal supersession.");
+            }
+            AcknowledgeRetirement(transit, replaced.Projection);
+        }
+
+        if (!transit.TryBeginPortalReveal(
                 destination.TeleportSequence,
                 destination.CellId,
                 out long generation))
         {
-            return;
+            throw new InvalidOperationException(
+                "Runtime refused a headless portal reveal it had just allowed.");
         }
 
         if (!transit.TryRegisterHostProjection(
@@ -521,8 +544,7 @@ public sealed class RuntimeLiveEntitySessionController
             return;
         }
 
-        _pendingPortalCompletion = null;
-        _pendingPortalCompletionRetryCount = 0;
+        ClearPendingPortalCompletion();
 
         if (!transit.AcknowledgeDestinationReadiness(
                 readiness))
@@ -576,6 +598,69 @@ public sealed class RuntimeLiveEntitySessionController
     }
 
     public void PumpPortalCompletion() => TryAdvancePortalCompletion();
+
+    /// <summary>
+    /// Ends a portal reveal that is still waiting for its destination when
+    /// the session ends, before the world transit resets. The windowed
+    /// client cancels its reveal and releases its host at the same edge.
+    /// </summary>
+    public void EndPortalRevealForSessionReset()
+    {
+        if (_pendingPortalCompletion is not { } pending)
+            return;
+
+        ClearPendingPortalCompletion();
+        RuntimeWorldTransitState transit = _runtime.TransitOwner;
+        if (!transit.Cancel(pending.Generation))
+        {
+            throw new InvalidOperationException(
+                "Runtime refused to cancel the headless portal reveal.");
+        }
+        AcknowledgeRetirement(transit, pending.Projection);
+    }
+
+    private void ClearPendingPortalCompletion()
+    {
+        _pendingPortalCompletion = null;
+        _pendingPortalCompletionRetryCount = 0;
+    }
+
+    /// <summary>
+    /// Gives a retiring reveal every acknowledgement the transit still waits
+    /// for, in the order the windowed client drains its reveal host. This
+    /// client holds no simulation pause or destination reservation of its
+    /// own, so each release is already true.
+    /// </summary>
+    private static void AcknowledgeRetirement(
+        RuntimeWorldTransitState transit,
+        RuntimeWorldHostProjectionToken projection)
+    {
+        ReadOnlySpan<RuntimeWorldHostAcknowledgementStage> order =
+        [
+            RuntimeWorldHostAcknowledgementStage.SimulationReleaseProjected,
+            RuntimeWorldHostAcknowledgementStage.DestinationReservationReleased,
+            RuntimeWorldHostAcknowledgementStage.TerminalProjected,
+        ];
+        foreach (RuntimeWorldHostAcknowledgementStage stage in order)
+        {
+            if (!transit.TryGetHostProjection(
+                    projection,
+                    out RuntimeWorldHostProjectionSnapshot host))
+            {
+                throw new InvalidOperationException(
+                    "The retiring headless portal projection is gone before "
+                    + "its terminal acknowledgement.");
+            }
+            if ((host.PendingAcknowledgements & stage) != 0)
+                Acknowledge(transit, projection, stage);
+        }
+        if (transit.TryGetHostProjection(projection, out _))
+        {
+            throw new InvalidOperationException(
+                "The retiring headless portal projection is still owned "
+                + "after its terminal acknowledgement.");
+        }
+    }
 
     private static void Acknowledge(
         RuntimeWorldTransitState transit,

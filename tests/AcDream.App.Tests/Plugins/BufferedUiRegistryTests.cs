@@ -152,6 +152,93 @@ public class BufferedUiRegistryTests
             new PluginUiOwner("another.plugin", "Other"), "Status View"));
     }
 
+    /// <summary>
+    /// A plugin reopens its own window after the player closed it with the
+    /// close button. Before this the window stayed shut: the close cleared
+    /// the host's own request, which the plugin's bound visibility could not
+    /// reach. Driven through the real window manager and the real visibility
+    /// controller a mounted plugin window gets.
+    ///
+    /// Mutation check (2026-09-25): forwarding ShowPanel to the hide seam
+    /// turned this red at "shown again".
+    /// </summary>
+    [Fact]
+    public void APluginReopensItsOwnWindowAfterThePlayerClosedIt()
+    {
+        var registry = new BufferedUiRegistry();
+        var owner = new PluginUiOwner("acdream.test", "Test");
+        registry.RegisterPanelContent(
+            owner,
+            new PluginPanelDescriptor("main", "Main"),
+            "<panel />",
+            new object());
+        BufferedUiRegistry.Pending pending = Assert.Single(registry.Drain());
+
+        var root = new UiRoot { Width = 1280f, Height = 720f };
+        bool bindingVisible = true;
+        var frame = new UiPanel { Width = 200f, Height = 100f };
+        var visibility = new PluginWindowVisibilityController(
+            () => bindingVisible, startVisible: true);
+        frame.VisibleSource = visibility.ShouldBeVisible;
+        frame.Visible = visibility.ShouldBeVisible();
+        root.AddChild(frame);
+        registry.CompleteMount(pending, root, frame);
+        root.WindowManager.Register(pending.WindowName, frame, frame, visibility);
+        registry.CompleteWindowMount(
+            pending, () => root.WindowManager.Unregister(pending.WindowName));
+
+        // Not bound yet: nothing to show it with.
+        Assert.False(registry.ShowPanel(owner, "main"));
+        registry.BindPluginWindowControl(root.ShowWindow, root.HideWindow);
+
+        root.Tick(0.016d, 16L);
+        Assert.True(registry.IsViewVisible(owner, "main"));
+
+        // The player's close button.
+        Assert.True(root.WindowManager.Close(pending.WindowName));
+        root.Tick(0.016d, 32L);
+        Assert.False(registry.IsViewVisible(owner, "main"));
+        // The plugin's own binding cannot bring it back, even when it turns
+        // off and on again...
+        bindingVisible = false;
+        root.Tick(0.016d, 40L);
+        bindingVisible = true;
+        root.Tick(0.016d, 48L);
+        Assert.False(registry.IsViewVisible(owner, "main"));
+
+        // ...and ShowPanel does.
+        Assert.True(registry.ShowPanel(owner, "Main"));
+        root.Tick(0.016d, 64L);
+        Assert.True(registry.IsViewVisible(owner, "main"), "shown again");
+
+        Assert.True(registry.HidePanel(owner, "main"));
+        root.Tick(0.016d, 80L);
+        Assert.False(registry.IsViewVisible(owner, "main"));
+
+        // Only this plugin's own windows, by id or title.
+        Assert.False(registry.ShowPanel(new PluginUiOwner("another", "Other"), "main"));
+        Assert.False(registry.ShowPanel(owner, "missing"));
+
+        registry.UnbindClientWindowControl();
+        Assert.False(registry.ShowPanel(owner, "main"));
+    }
+
+    [Fact]
+    public void AWindowNotYetOnScreenCannotBeShown()
+    {
+        var registry = new BufferedUiRegistry();
+        var owner = new PluginUiOwner("acdream.test", "Test");
+        registry.BindPluginWindowControl(static _ => true, static _ => true);
+        registry.RegisterPanelContent(
+            owner,
+            new PluginPanelDescriptor("main", "Main"),
+            "<panel />",
+            new object());
+
+        Assert.False(registry.ShowPanel(owner, "main"));
+        Assert.False(registry.HidePanel(owner, "main"));
+    }
+
     [Fact]
     public void ClientWindowControlIsUnavailableUntilBound()
     {

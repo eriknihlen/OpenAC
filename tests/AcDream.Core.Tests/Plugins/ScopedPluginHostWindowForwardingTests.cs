@@ -39,6 +39,7 @@ public sealed class ScopedPluginHostWindowForwardingTests
         nameof(IPluginHost.Automation),
         nameof(IPluginHost.SessionSettings),
         nameof(IPluginHost.WorldLines), // layers are let go with the plugin
+        nameof(IPluginHost.StatusBoard), // the session's board, written under the plugin's own id
     ];
 
     [Fact]

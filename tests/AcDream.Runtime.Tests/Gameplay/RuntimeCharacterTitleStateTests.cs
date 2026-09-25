@@ -30,6 +30,40 @@ public sealed class RuntimeCharacterTitleStateTests
         Assert.Equal(1, tableReplacedCount);
     }
 
+    /// <summary>
+    /// A reader reporting the list passes it on in the server's order, so the
+    /// order is kept: the listed order first, then each title as earned, and
+    /// a repeat in the list is kept once where it first appeared.
+    /// </summary>
+    [Fact]
+    public void EarnedTitles_KeepTheServersOrderThenTheOrderEarned()
+    {
+        var titles = new RuntimeCharacterTitleState();
+        titles.ReplaceTable(0u, [13u, 1u, 5u, 1u]);
+        titles.ApplyUpdateTitle(2u, setAsDisplay: false);
+        titles.ApplyUpdateTitle(5u, setAsDisplay: false);
+
+        Assert.Equal([13u, 1u, 5u, 2u], titles.EarnedTitleIds);
+    }
+
+    /// <summary>
+    /// The same list arriving again is no change, even when it carries a
+    /// repeat: the stored order has the repeat folded, and the incoming list
+    /// is compared after folding it the same way.
+    /// </summary>
+    [Fact]
+    public void ReplaceTable_SameListWithARepeat_IsNotAChange()
+    {
+        var titles = new RuntimeCharacterTitleState();
+        titles.ReplaceTable(13u, [13u, 1u, 5u, 1u]);
+        long revision = titles.Revision;
+
+        titles.ReplaceTable(13u, [13u, 1u, 5u, 1u]);
+
+        Assert.Equal(revision, titles.Revision);
+        Assert.Equal([13u, 1u, 5u], titles.EarnedTitleIds);
+    }
+
     [Fact]
     public void ReplaceTable_IsAWholesaleReplace_DropsIdsMissingFromTheNewTable()
     {

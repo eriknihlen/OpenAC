@@ -126,7 +126,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             Entities,
             timeProvider: timeProvider,
             gameClock: gameClock);
-        Objects = new ClientObjectTable();
+        Objects = new ClientObjectTable(TableClock(gameClock));
         _pvpBitfieldSync = new RuntimeEntityPvpBitfieldSnapshotSync(Entities, Objects);
         Physics.Engine.Objects = Objects;
         var views = new RuntimeEntityObjectViews(Entities, Objects);
@@ -182,7 +182,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             physicsDataCache,
             timeProvider,
             gameClock);
-        Objects = new ClientObjectTable();
+        Objects = new ClientObjectTable(TableClock(gameClock));
         _pvpBitfieldSync = new RuntimeEntityPvpBitfieldSnapshotSync(Entities, Objects);
         Physics.Engine.Objects = Objects;
         var views = new RuntimeEntityObjectViews(Entities, Objects);
@@ -238,7 +238,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             physicsEngine,
             timeProvider,
             gameClock);
-        Objects = new ClientObjectTable();
+        Objects = new ClientObjectTable(TableClock(gameClock));
         _pvpBitfieldSync = new RuntimeEntityPvpBitfieldSnapshotSync(Entities, Objects);
         Physics.Engine.Objects = Objects;
         var views = new RuntimeEntityObjectViews(Entities, Objects);
@@ -2003,6 +2003,13 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
                 $"Accepted {kind} for 0x{canonical.ServerGuid:X8}/{canonical.Incarnation} could not be retained by its initial-placement FIFO.");
         }
     }
+
+    /// <summary>
+    /// The object table stamps an appraisal refusal with the runtime's own
+    /// simulation clock, so every client measures its age the same way.
+    /// </summary>
+    private static Func<double>? TableClock(IGameRuntimeClock? gameClock) =>
+        gameClock is null ? null : () => gameClock.SimulationTimeSeconds;
 
     private static bool IsFinite(System.Numerics.Vector3 value) =>
         float.IsFinite(value.X)

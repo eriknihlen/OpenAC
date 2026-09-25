@@ -99,6 +99,37 @@ public interface IUiRegistry
     bool IsViewVisible(string viewName) => false;
 
     /// <summary>
+    /// Shows one of this plugin's own windows, as its shelf button does --
+    /// including one the player closed with its close button, which the
+    /// plugin setting its own bound visibility back to true does not undo.
+    /// A window whose markup binds its visibility to something the plugin
+    /// has set false stays hidden until that is true again; this lifts only
+    /// the player's close. Read <see cref="IsViewVisible"/> for the result.
+    /// </summary>
+    /// <param name="viewName">The window's id or title.</param>
+    /// <returns>
+    /// False when this plugin has no such window, before the window has been
+    /// put on screen, and on a host that draws nothing -- which is what the
+    /// default implementation does.
+    /// </returns>
+    bool ShowPanel(string viewName) => false;
+
+    /// <summary>
+    /// Hides one of this plugin's own windows, as closing it does: it stays
+    /// registered and <see cref="ShowPanel"/> or its shelf button brings it
+    /// back. A window already hidden by its own bound visibility is left as
+    /// it is, as a close would leave it: it shows again when the binding
+    /// turns true.
+    /// </summary>
+    /// <param name="viewName">The window's id or title.</param>
+    /// <returns>
+    /// False when this plugin has no such window, before the window has been
+    /// put on screen, and on a host that draws nothing -- which is what the
+    /// default implementation does.
+    /// </returns>
+    bool HidePanel(string viewName) => false;
+
+    /// <summary>
     /// Whether one of this plugin's own windows contains a named control.
     /// False when the window or the control is not found.
     /// </summary>
@@ -199,6 +230,20 @@ public interface IScopedUiRegistry : IUiRegistry
 
     /// <summary>Whether one plugin's named window is currently shown.</summary>
     bool IsViewVisible(PluginUiOwner owner, string viewName) => false;
+
+    /// <summary>
+    /// Shows one plugin's named window; see
+    /// <see cref="IUiRegistry.ShowPanel"/>. False on a host that draws
+    /// nothing.
+    /// </summary>
+    bool ShowPanel(PluginUiOwner owner, string viewName) => false;
+
+    /// <summary>
+    /// Hides one plugin's named window; see
+    /// <see cref="IUiRegistry.HidePanel"/>. False on a host that draws
+    /// nothing.
+    /// </summary>
+    bool HidePanel(PluginUiOwner owner, string viewName) => false;
 
     /// <summary>Whether one plugin's named window contains a named control.</summary>
     bool ControlExists(

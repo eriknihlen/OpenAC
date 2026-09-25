@@ -377,6 +377,8 @@ public sealed class LiveSessionController
     private uint _nextLoginCharacterId;
     private Action<WorldSession>? _autoSaveTickHook;
     private Action<WorldSession>? _preLogoffFlushHook;
+    private Action? _leavingWorldHook;
+    private bool _leavingAnnounced;
 
     public LiveSessionController()
         : this(ProductionLiveSessionOperations.Instance, null)
@@ -479,6 +481,13 @@ public sealed class LiveSessionController
     internal void ConfigurePreLogoffFlush(Action<WorldSession> hook) =>
         _preLogoffFlushHook = hook ?? throw new ArgumentNullException(nameof(hook));
 
+    /// <summary>
+    /// Called once as a stay in the world ends, before anything of the
+    /// session is torn down or the controller stops reporting it in the world.
+    /// </summary>
+    internal void ConfigureLeavingWorld(Action hook) =>
+        _leavingWorldHook = hook ?? throw new ArgumentNullException(nameof(hook));
+
     public bool IsDisposalComplete
     {
         get { lock (_gate) return _disposed; }
@@ -531,6 +540,7 @@ public sealed class LiveSessionController
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(host);
+        AnnounceLeavingWorldBeforeGate(() => !_disposeRequested && !_disposed);
         lock (_gate)
         {
             ThrowIfDisposing();
@@ -545,6 +555,7 @@ public sealed class LiveSessionController
 
     public void Stop()
     {
+        AnnounceLeavingWorldBeforeGate(() => !_disposed);
         lock (_gate)
         {
             if (_disposed)
@@ -561,6 +572,8 @@ public sealed class LiveSessionController
     public RuntimeTeardownAcknowledgement Stop(
         RuntimeGenerationToken expectedGeneration)
     {
+        AnnounceLeavingWorldBeforeGate(() =>
+            !_disposed && expectedGeneration == new RuntimeGenerationToken(_generation));
         lock (_gate)
         {
             RuntimeGenerationToken current = new(_generation);
@@ -604,6 +617,12 @@ public sealed class LiveSessionController
 
     public void Tick()
     {
+        // A lost connection ends the stay; when this tick is not nested in a
+        // call that already holds the gate, the leave is announced with the
+        // gate released before the session is ended.
+        bool mayAnnounceOutsideGate = !Monitor.IsEntered(_gate);
+        SessionScope? lostScope = null;
+        ulong lostGeneration = 0;
         lock (_gate)
         {
             if (_disposed)
@@ -641,6 +660,12 @@ public sealed class LiveSessionController
                         return;
                     if (_operations.IsConnectionLost(scope.Session))
                     {
+                        if (mayAnnounceOutsideGate && _inWorld && !_leavingAnnounced)
+                        {
+                            lostScope = scope;
+                            lostGeneration = generation;
+                            return;
+                        }
                         EndLostSession();
                         return;
                     }
@@ -657,6 +682,21 @@ public sealed class LiveSessionController
                 if (_inWorld)
                     InvokeAutoSaveTick(scope.Session);
             });
+        }
+
+        if (lostScope is not null)
+            EndLostSessionAfterAnnouncing(lostScope, lostGeneration);
+    }
+
+    private void EndLostSessionAfterAnnouncing(SessionScope scope, ulong generation)
+    {
+        AnnounceLeavingWorldBeforeGate(() => IsCurrent(scope, generation));
+        lock (_gate)
+        {
+            // A Logoff handler may already have ended or replaced the session.
+            if (_disposed || !IsCurrent(scope, generation) || _operationDepth != 0)
+                return;
+            RunTopLevel(EndLostSession);
         }
     }
 
@@ -694,6 +734,7 @@ public sealed class LiveSessionController
 
     public void Dispose()
     {
+        AnnounceLeavingWorldBeforeGate(() => !_disposed);
         lock (_gate)
         {
             if (_disposed)
@@ -922,6 +963,7 @@ public sealed class LiveSessionController
         if (!IsCurrent(scope, generation))
             return new LiveSessionStartResult(LiveSessionStartStatus.Deferred);
         _inWorld = true;
+        _leavingAnnounced = false;
         _activeSelection = selection;
         CharacterSelectionState.CompleteEnter(selection.CharacterId);
         CharacterCreationState.CompleteEnter();
@@ -1198,38 +1240,45 @@ public sealed class LiveSessionController
     public RuntimeCommandResult CompleteCharacterLogOff(
         RuntimeGenerationToken expectedGeneration)
     {
+        AnnounceLeavingWorldBeforeGate(() =>
+            ValidateCompleteCharacterLogOff(expectedGeneration)
+                == RuntimeCommandStatus.Accepted);
         lock (_gate)
         {
-            RuntimeGenerationToken current = new(_generation);
-            if (expectedGeneration != current)
+            RuntimeCommandStatus status =
+                ValidateCompleteCharacterLogOff(expectedGeneration);
+            if (status != RuntimeCommandStatus.Accepted)
             {
                 return new RuntimeCommandResult(
-                    RuntimeCommandStatus.StaleGeneration,
-                    current);
-            }
-            if (_disposed
-                || _disposeRequested
-                || _scope is null
-                || _retiredScope is not null
-                || !_inWorld)
-            {
-                return new RuntimeCommandResult(
-                    RuntimeCommandStatus.Inactive,
-                    current);
-            }
-            if (_operationDepth != 0)
-            {
-                return new RuntimeCommandResult(
-                    RuntimeCommandStatus.Rejected,
-                    current);
+                    status,
+                    new RuntimeGenerationToken(_generation));
             }
 
             return RunTopLevel(CompleteCharacterLogOffCore);
         }
     }
 
+    private RuntimeCommandStatus ValidateCompleteCharacterLogOff(
+        RuntimeGenerationToken expectedGeneration)
+    {
+        if (expectedGeneration != new RuntimeGenerationToken(_generation))
+            return RuntimeCommandStatus.StaleGeneration;
+        if (_disposed
+            || _disposeRequested
+            || _scope is null
+            || _retiredScope is not null
+            || !_inWorld)
+        {
+            return RuntimeCommandStatus.Inactive;
+        }
+        return _operationDepth != 0
+            ? RuntimeCommandStatus.Rejected
+            : RuntimeCommandStatus.Accepted;
+    }
+
     private RuntimeCommandResult CompleteCharacterLogOffCore()
     {
+        AnnounceLeavingWorld();
         SessionScope scope = _scope!;
         ILiveSessionLifecycleHost host = scope.Host;
         WorldSession session = scope.Session;
@@ -1355,6 +1404,7 @@ public sealed class LiveSessionController
                 return CharacterSelectionResult(RuntimeCommandStatus.Inactive);
 
             _inWorld = true;
+            _leavingAnnounced = false;
             _activeSelection = selection;
             CharacterSelectionState.CompleteEnter(character.CharacterId);
             CharacterCreationState.CompleteEnter();
@@ -1780,8 +1830,12 @@ public sealed class LiveSessionController
 
     private void StopCore()
     {
+        // Read before the announcement: a plugin that stops the session from
+        // its logoff handler ends the stay under this call.
+        bool wasInWorld = _inWorld;
+        AnnounceLeavingWorld();
         _connection.Reset();
-        if (_inWorld && _scope is { } activeScope)
+        if (wasInWorld && _scope is { } activeScope)
             InvokePreLogoffFlush(activeScope.Session);
 
         ++_generation;
@@ -1804,6 +1858,70 @@ public sealed class LiveSessionController
         DrainPendingInitialReset();
         if (_retiredScope is null && _pendingInitialReset is null)
             _lastTeardownStages = RuntimeTeardownStage.Complete;
+    }
+
+    /// <summary>
+    /// Tells the runtime the stay is ending, once per stay whichever path
+    /// ends it: latched before the hook runs, so a stop the hook itself
+    /// causes, or a failure after it, does not announce again. The public
+    /// calls that end a stay announce ahead of their operation with the gate
+    /// released (<see cref="AnnounceLeavingWorldBeforeGate"/>), so by the
+    /// time an operation gets here the latch is normally set; this inline
+    /// announcement covers a call nested inside another operation, whose
+    /// gate this thread cannot release, and an operation that fails.
+    /// </summary>
+    private void AnnounceLeavingWorld()
+    {
+        if (!_inWorld || _leavingAnnounced)
+            return;
+        _leavingAnnounced = true;
+        RaiseLeavingWorld(_leavingWorldHook);
+    }
+
+    /// <summary>
+    /// Announces the end of the stay ahead of a call that is about to end it,
+    /// with the gate released: the hook reaches plugin code, which may read
+    /// this controller, issue session commands or wait on another thread
+    /// that does, none of which it could do from inside the operation. The
+    /// session is still whole and still reported in the world while the hook
+    /// runs; the call then takes the gate and validates afresh, since the
+    /// hook may itself have ended the session. A call nested inside another
+    /// operation on this thread cannot release the gate and leaves the
+    /// announcement to the operation.
+    /// </summary>
+    private void AnnounceLeavingWorldBeforeGate(Func<bool> callWouldProceed)
+    {
+        if (Monitor.IsEntered(_gate))
+            return;
+        Action? hook;
+        lock (_gate)
+        {
+            if (!_inWorld
+                || _leavingAnnounced
+                || _operationDepth != 0
+                || !callWouldProceed())
+            {
+                return;
+            }
+            _leavingAnnounced = true;
+            hook = _leavingWorldHook;
+        }
+        RaiseLeavingWorld(hook);
+    }
+
+    private static void RaiseLeavingWorld(Action? hook)
+    {
+        if (hook is null)
+            return;
+        try
+        {
+            hook();
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(
+                $"live: leaving-world announcement failed: {error.Message}");
+        }
     }
 
     private void InvokePreLogoffFlush(WorldSession session)
@@ -1875,6 +1993,7 @@ public sealed class LiveSessionController
             return;
         _pendingOperation = operation;
         ++_generation;
+        AnnounceLeavingWorld();
         _inWorld = false;
         _scope?.Binding?.Dispose();
     }

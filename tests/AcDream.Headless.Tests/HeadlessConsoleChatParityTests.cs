@@ -105,14 +105,14 @@ public sealed class HeadlessConsoleChatParityTests
             [
                 "[say] Bob says, \"hi there\"",
                 "[say] You say, \"hi yourself\"",
-                "[say] Bob shouts, \"over here\"",
+                "[say] Bob says, \"over here\"",
                 "[tell] Bob tells you, \"meet me\"",
                 "[tell] You tell Bob, \"on my way\"",
                 // No "[fellowship] " in front: the line already names its
                 // channel, and printing the label twice reads badly.
                 "[Fellowship] Bob says, \"group up\"",
-                "[emote] * Bob waves.",
-                "[emote] * Bob bows deeply.",
+                "[emote] Bob waves.",
+                "[emote] Bob bows deeply.",
                 "[advance] Your Cooking skill is now trained!",
                 "[combat] A Drudge Slinker slashes you for 9 points of damage!",
                 "[msg] [Popup] You have died.",

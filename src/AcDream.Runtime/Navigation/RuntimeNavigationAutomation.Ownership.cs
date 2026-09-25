@@ -196,6 +196,8 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
 
         public IReadOnlyList<PluginNavigationObject> CaptureObjects() => inner.CaptureObjects();
 
+        public PluginRoomAhead CheckRoomAhead(float distanceMeters) => inner.CheckRoomAhead(distanceMeters);
+
         public PluginNavigationCommandStatus SetMovementIntent(in PluginMovementIntent intent) =>
             inner.SetMovementIntent(in intent);
 

@@ -78,7 +78,12 @@ public interface IPluginStorage
     /// </summary>
     bool Delete(string key) => false;
 
-    /// <summary>Opens a child namespace for scoped plugin data.</summary>
+    /// <summary>
+    /// Opens a child namespace for scoped plugin data, kept apart from the
+    /// plugin's other scopes. A scope name follows the key rules: forward
+    /// slashes nest it, and a blank or rooted name, or one containing
+    /// <c>..</c> or a backslash, throws <see cref="ArgumentException"/>.
+    /// </summary>
     IPluginStorage OpenScope(PluginStorageScope scope) => this;
 }
 

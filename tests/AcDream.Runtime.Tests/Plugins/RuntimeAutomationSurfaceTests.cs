@@ -414,6 +414,34 @@ public sealed class RuntimeAutomationSurfaceTests
         Assert.True(surface.Spells.TryGet(11u, out _));
     }
 
+    [Fact]
+    public void ASpellCarriesItsEffectsFormulaVersionDisplayOrderAndComponentLoss()
+    {
+        using var runtime = GameRuntimeTestFactory.Create();
+        runtime.CharacterOwner.InstallSpellMetadata(SpellTable.Create(
+        [
+            DurationSpell() with
+            {
+                CasterEffect = 0x2Au,
+                TargetEffect = 0x3Bu,
+                SortKey = 812,
+                FormulaVersion = 2u,
+                ComponentLoss = 0.35f,
+            },
+        ]));
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+
+        Assert.True(surface.Spells.TryGet(42u, out PluginSpellInfo spell));
+        Assert.Equal(0x2Au, spell.CasterEffect);
+        Assert.Equal(0x3Bu, spell.TargetEffect);
+        Assert.Equal(812, spell.DisplayOrder);
+        Assert.Equal(2u, spell.FormulaVersion);
+        Assert.Equal(0.35f, spell.ComponentLoss);
+        PluginSpellInfo listed = Assert.Single(surface.Spells.All);
+        Assert.Equal(spell, listed);
+    }
+
     private static SpellMetadata TimedBeneficial(
         uint id, string name, uint flags, uint targetMask) => new(
         id,
@@ -685,6 +713,30 @@ public sealed class RuntimeAutomationSurfaceTests
             typeof(AcDream.Runtime.Navigation.RuntimeNavigationAutomation),
             navigation);
         Assert.Equal(navigation, map.TargetMethods[index].DeclaringType);
+    }
+
+    /// <summary>
+    /// The room check a summoner makes is the runtime's own, shared by every
+    /// host, not the interface default that always answers unknown; with no
+    /// session in the world it answers unknown.
+    /// </summary>
+    [Fact]
+    public void CheckRoomAhead_IsImplementedByTheRuntimeAndUnknownOutOfTheWorld()
+    {
+        using var surface = new RuntimeAutomationSurface();
+        Type navigation = surface.Navigation.GetType();
+        System.Reflection.InterfaceMapping map =
+            navigation.GetInterfaceMap(typeof(INavigationAutomation));
+        int index = Array.FindIndex(
+            map.InterfaceMethods,
+            static method => method.Name
+                == nameof(INavigationAutomation.CheckRoomAhead));
+
+        Assert.True(index >= 0, "INavigationAutomation.CheckRoomAhead not found.");
+        Assert.Equal(navigation, map.TargetMethods[index].DeclaringType);
+        Assert.Equal(
+            PluginRoomAheadStatus.Unknown,
+            surface.Navigation.CheckRoomAhead(3f).Status);
     }
 
     [Fact]

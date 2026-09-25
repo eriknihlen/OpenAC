@@ -27,10 +27,15 @@ namespace AcDream.HostParity.Tests;
 /// * the local player's movement controller, which composition only creates
 ///   once a body has been placed in a drawn world, so the windowed attack
 ///   path's pre-attack movement push has nothing to push;
-/// * the retained UI, the selection interaction controller, the entity
-///   deletion controller and the input dispatcher, each of which needs a
-///   presentation tree, so the seams they feed stay empty here exactly as
-///   they do in a run with no window;
+/// * the retained UI, the selection interaction controller and the input
+///   dispatcher, each of which needs a presentation tree, so the seams they
+///   feed stay empty here exactly as they do in a run with no window;
+/// * the drawn-world teardown behind the entity deletion controller. The
+///   deletion controller itself and the drawn-world entity runtime it
+///   unregisters from are the real ones, lent to the runtime as its
+///   authoritative-delete route the way the window lends them, so a dismissed
+///   object leaves through the window's own delete; only the take-down of
+///   what was drawn has nothing to take down, since nothing is;
 /// * the three extras the window adds to the shared item owner -- the
 ///   walk-to-then-act route, which pack the inventory panel has open, and
 ///   how much of a stack the split control is asking for -- which need a
@@ -69,6 +74,20 @@ internal sealed class WindowedArm : ParityArm
     private InputDispatcher? _dispatcher;
 
     /// <summary>
+    /// The window's delete route: its drawn-world entity runtime over the
+    /// shared entity owner, and the deletion controller that unregisters from
+    /// it.
+    /// </summary>
+    private readonly AcDream.App.World.LiveEntityRuntime _liveEntities;
+    private readonly AcDream.App.World.LiveEntityDeletionController _deletion;
+
+    /// <summary>
+    /// How many deletes the runtime has sent down the window's own delete
+    /// route, so a scenario can show a dismissal took it.
+    /// </summary>
+    internal int WindowDeletes { get; private set; }
+
+    /// <summary>
     /// The parts of its own session bindings this client builds while the
     /// session host is being built, so they are made in that builder rather
     /// than in the constructor body.
@@ -102,6 +121,25 @@ internal sealed class WindowedArm : ParityArm
             Runtime,
             _warnings.Add);
         _state.BindWorldEntities(_worldEntities);
+        // The runtime decides what may be dismissed; this client lends the
+        // delete route it runs for a server delete, exactly as its session
+        // composition does.
+        _liveEntities = new AcDream.App.World.LiveEntityRuntime(
+            _worldState,
+            new AcDream.App.World.DelegateLiveEntityResourceLifecycle(
+                static _ => { },
+                static _ => { }),
+            Runtime.EntityObjects);
+        _deletion = new AcDream.App.World.LiveEntityDeletionController(
+            _liveEntities,
+            Runtime.EntityObjects,
+            new UndrawnTeardown(_warnings.Add),
+            new AcDream.App.Input.LocalPlayerIdentityState(Runtime.PlayerIdentity));
+        Runtime.GhostDismissalOwner.BindAuthoritativeDelete(delete =>
+        {
+            WindowDeletes++;
+            return _deletion.Delete(delete);
+        });
         // The character's contracts, exactly as the window binds them:
         // the runtime's own answer, words and all.
         _state.ContractsSource = Runtime.ContractsOwner.ProjectForPlugins;
@@ -590,6 +628,24 @@ internal sealed class WindowedArm : ParityArm
         _automation.Dispose();
         _sessionCommands.Dispose();
         _dispatcher?.Dispose();
+    }
+
+    /// <summary>
+    /// The take-down of what was drawn for an object, after the deletion
+    /// controller has unregistered it. Nothing is drawn here, so no object
+    /// ever has a drawn record to take down -- a call would mean one did, and
+    /// is reported -- and an object without one owns no drawn effects to
+    /// forget.
+    /// </summary>
+    private sealed class UndrawnTeardown(Action<string> report)
+        : AcDream.App.World.ILiveEntityTeardownCoordinator
+    {
+        public void TearDown(AcDream.App.World.LiveEntityRecord record) =>
+            report($"teardown 0x{record.ServerGuid:X8}: nothing is drawn");
+
+        public void ForgetUnknownOwner(uint serverGuid)
+        {
+        }
     }
 
     /// <summary>

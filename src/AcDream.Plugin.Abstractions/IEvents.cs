@@ -40,7 +40,12 @@ public interface IEvents
 
     /// <summary>
     /// Raised when the in-world session ends, before the session is torn
-    /// down, so a handler can still read gameplay state.
+    /// down, so a handler can still read gameplay state. The host raises it
+    /// outside its session operation, so a handler may also issue commands,
+    /// such as stopping the session, and they run rather than being deferred.
+    /// The exception is a session ended from inside another event handler:
+    /// Logoff is then raised within that call, and a session command issued
+    /// from it is deferred or refused.
     /// </summary>
     event Action Logoff
     {

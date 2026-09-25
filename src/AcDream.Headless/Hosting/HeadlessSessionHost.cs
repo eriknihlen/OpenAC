@@ -406,7 +406,13 @@ internal sealed class HeadlessSessionHost : IDisposable
                                             session,
                                             runtime)))),
                             Reset = generation =>
-                                runtime.ResetGeneration(generation, _resetHost),
+                            {
+                                // The windowed client ends its portal reveal
+                                // before the world transit resets; so does
+                                // this one.
+                                _entities?.EndPortalRevealForSessionReset();
+                                runtime.ResetGeneration(generation, _resetHost);
+                            },
                             Identity = runtime.PlayerIdentity,
                             Communication = runtime.CommunicationOwner,
                             Combat = runtime.ActionOwner.Combat,

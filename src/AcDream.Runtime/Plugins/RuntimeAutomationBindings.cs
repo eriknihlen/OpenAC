@@ -198,6 +198,7 @@ internal static class RuntimeAutomationBindings
             ["BindItems"] = null,
             ["BindItems.salvageItems"] = null,
             ["BindItems.sellItem"] = null,
+            ["BindItems.moveItemJoiningStack"] = null,
             ["BindLogout"] = nameof(RuntimeAutomationHostCapabilities.Logout),
             ["BindDialogs"] =
                 nameof(RuntimeAutomationHostCapabilities.AnswerConfirmation),
@@ -207,6 +208,8 @@ internal static class RuntimeAutomationBindings
             ["BindChatInputActive"] = null,
             ["BindChatComposer"] = null,
             ["BindSpeciesNameResolver"] =
+                nameof(RuntimeAutomationHostCapabilities.Content),
+            ["BindTitleNameResolver"] =
                 nameof(RuntimeAutomationHostCapabilities.Content),
             ["BindDungeonMap"] =
                 nameof(RuntimeAutomationHostCapabilities.Content),
@@ -337,10 +340,12 @@ internal static class RuntimeAutomationBindings
             itemOwner.TryAppraiseForAutomation,
             itemOwner.TrySalvageItemsForAutomation,
             (vendorId, itemId, amount) =>
-                itemOwner.TrySell(vendorId, [(amount, itemId)]));
+                itemOwner.TrySell(vendorId, [(amount, itemId)]),
+            itemOwner.TryMoveItemForAutomation);
         bound.Add(nameof(surface.BindItems));
         bound.Add("BindItems.salvageItems");
         bound.Add("BindItems.sellItem");
+        bound.Add("BindItems.moveItemJoiningStack");
         if (capabilities.Logout is { } logout)
         {
             surface.BindLogout(logout.Request, logout.CanRequest);
@@ -483,6 +488,18 @@ internal static class RuntimeAutomationBindings
         surface.BindSpeciesNameResolver(
             species => creatureNames.Value.Resolve(species));
         bound.Add(nameof(surface.BindSpeciesNameResolver));
+
+        // What a character title says is authored in the same files, and a
+        // plugin reporting the character's titles reads it from here on
+        // either host. Read the first time a title is asked about.
+        var titleNames = new Lazy<AcDream.Content.CharacterTitleResolver>(
+            () => new AcDream.Content.CharacterTitleResolver(dats));
+        surface.BindTitleNameResolver(titleId =>
+        {
+            lock (datLock)
+                return titleNames.Value.Resolve(titleId);
+        });
+        bound.Add(nameof(surface.BindTitleNameResolver));
 
         // The shape of a dungeon is authored in the same files: a plugin
         // drawing a map reads it from here, on either host, and the files

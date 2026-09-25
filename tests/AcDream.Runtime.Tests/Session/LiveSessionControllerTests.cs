@@ -1637,6 +1637,139 @@ public sealed class LiveSessionControllerTests
     }
 
     [Fact]
+    public void AStopTheLeavingHookCausesAnnouncesOnceAndStillFlushes()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        var host = new TestHost(calls);
+        var controller = new LiveSessionController(operations);
+        controller.Start(LiveOptions(), host);
+        int announced = 0;
+        int flushed = 0;
+        controller.ConfigureLeavingWorld(() =>
+        {
+            announced++;
+            controller.Stop();
+        });
+        controller.ConfigurePreLogoffFlush(_ => flushed++);
+
+        controller.Stop();
+
+        Assert.Equal(1, announced);
+        Assert.Equal(1, flushed);
+        Assert.False(controller.IsInWorld);
+    }
+
+    [Fact]
+    public void AFailedReturnToSelectionAnnouncesTheLeaveOnce()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        var host = new TestHost(calls);
+        var controller = new LiveSessionController(operations);
+        controller.Start(LiveOptions(), host);
+        int announced = 0;
+        controller.ConfigureLeavingWorld(() => announced++);
+        operations.ThrowOnReturnToCharacterSelect = true;
+
+        controller.CompleteCharacterLogOff(controller.Generation);
+
+        Assert.Equal(1, announced);
+        Assert.Null(controller.CurrentSession);
+    }
+
+    [Fact]
+    public void EachStayInTheWorldAnnouncesItsOwnLeave()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        var host = new TestHost(calls);
+        var controller = new LiveSessionController(operations);
+        controller.Start(LiveOptions(), host);
+        int announced = 0;
+        controller.ConfigureLeavingWorld(() => announced++);
+
+        Assert.True(controller.CompleteCharacterLogOff(controller.Generation).Accepted);
+        Assert.Equal(1, announced);
+        Assert.True(controller.Enter(controller.Generation).Accepted);
+        controller.Stop();
+
+        Assert.Equal(2, announced);
+    }
+
+    [Fact]
+    public void ALogoffHandlerRunsOutsideTheGateAndItsCommandsExecute()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        var host = new TestHost(calls);
+        var controller = new LiveSessionController(operations);
+        controller.Start(LiveOptions(), host);
+        int announced = 0;
+        bool inWorldInHandler = false;
+        int depthInHandler = -1;
+        bool otherThreadRead = false;
+        RuntimeTeardownAcknowledgement? stop = null;
+        controller.ConfigureLeavingWorld(() =>
+        {
+            announced++;
+            inWorldInHandler = controller.IsInWorld;
+            depthInHandler = controller.CaptureOwnership().OperationDepth;
+            // Work on another thread that needs the controller finishes
+            // while the handler waits for it.
+            otherThreadRead = Task.Run(() => controller.IsInWorld)
+                .Wait(TimeSpan.FromSeconds(10));
+            stop = controller.Stop(controller.Generation);
+        });
+
+        RuntimeCommandResult result =
+            controller.CompleteCharacterLogOff(controller.Generation);
+
+        Assert.Equal(1, announced);
+        Assert.True(inWorldInHandler);
+        Assert.Equal(0, depthInHandler);
+        Assert.True(otherThreadRead);
+        Assert.Equal(RuntimeCommandStatus.Accepted, stop!.Value.Status);
+        // The handler ended the session itself; the logoff finds it gone.
+        Assert.Equal(RuntimeCommandStatus.StaleGeneration, result.Status);
+        Assert.False(controller.IsInWorld);
+        Assert.Null(controller.CurrentSession);
+    }
+
+    [Fact]
+    public void ALostConnectionAnnouncesTheLeaveOutsideTheGateBeforeTeardown()
+    {
+        var calls = new List<string>();
+        var operations = new TestOperations(calls);
+        var host = new TestHost(calls);
+        using var controller = new LiveSessionController(operations);
+        controller.Start(LiveOptions(), host);
+        WorldSession session = operations.Sessions[0];
+        int announced = 0;
+        bool sessionWholeInHandler = false;
+        bool otherThreadRead = false;
+        controller.ConfigureLeavingWorld(() =>
+        {
+            announced++;
+            sessionWholeInHandler = controller.IsInWorld
+                && ReferenceEquals(controller.CurrentSession, session)
+                && !operations.DisposeCounts.ContainsKey(session);
+            otherThreadRead = Task.Run(() => controller.CurrentSession)
+                .Wait(TimeSpan.FromSeconds(10));
+        });
+
+        operations.ConnectionLost = true;
+        controller.Tick();
+
+        Assert.Equal(1, announced);
+        Assert.True(sessionWholeInHandler);
+        Assert.True(otherThreadRead);
+        Assert.False(controller.IsInWorld);
+        Assert.True(controller.ConnectionLost);
+        Assert.Equal(1, operations.DisposeCounts[session]);
+    }
+
+    [Fact]
     public void Stop_DoesNotInvokePreLogoffFlushHook_WhenNeverEnteredWorld()
     {
         var calls = new List<string>();

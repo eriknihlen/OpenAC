@@ -548,6 +548,245 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.True(runtime.Portal.Snapshot.Completed);
     }
 
+    /// <summary>
+    /// The server can start a second teleport while the first is still
+    /// waiting for its destination to load (ACE sends two teleports in a
+    /// row when a portal is used twice). The second reveal replaces the
+    /// first; the no-window host must finish retiring the replaced one, or
+    /// the world transit keeps it forever and the session can never reset.
+    /// Mutation executed: the retirement call in the portal completion was
+    /// removed; the transit then kept one host projection with two pending
+    /// acknowledgements and <c>ResetSession</c> threw.
+    /// </summary>
+    [Fact]
+    public void DirectSinkRetiresAPortalRevealReplacedWhileItWaitsForItsDestination()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerGuid = 0x50000006u;
+        runtime.PlayerIdentity.ServerGuid = playerGuid;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        session.GameActionCapture = _ => { };
+        var projection = new FixtureWorldProjection
+        {
+            CollisionReady = false,
+        };
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: projection);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            Spawn(playerGuid, incarnation: 1);
+        sink.Spawned(spawn);
+
+        sink.TeleportStarted(1u);
+        sink.PositionUpdated(TeleportArrival(
+            playerGuid,
+            spawn,
+            teleportSequence: 1,
+            positionSequence: 2));
+        long first = runtime.Portal.Snapshot.Generation;
+        Assert.NotEqual(0, first);
+        Assert.False(runtime.Portal.Snapshot.Completed);
+
+        sink.TeleportStarted(2u);
+        sink.PositionUpdated(TeleportArrival(
+            playerGuid,
+            spawn,
+            teleportSequence: 2,
+            positionSequence: 3));
+        Assert.NotEqual(first, runtime.Portal.Snapshot.Generation);
+
+        projection.CollisionReady = true;
+        controller.PumpPortalCompletion();
+
+        Assert.True(runtime.Portal.Snapshot.Completed);
+        RuntimeWorldTransitOwnershipSnapshot ownership =
+            runtime.TransitOwner.CaptureOwnership();
+        Assert.Equal(0, ownership.HostProjectionCount);
+        Assert.Equal(0, ownership.PendingHostAcknowledgementCount);
+        Assert.True(ownership.IsSessionIdle);
+        runtime.TransitOwner.ResetSession();
+    }
+
+    /// <summary>
+    /// A session that ends while its portal is still waiting for the
+    /// destination must end that reveal before the world transit resets, the
+    /// way the windowed client cancels its reveal at the same edge.
+    /// Mutation executed: the reset edge was made a no-op; the transit reset
+    /// then threw with one host projection still pending.
+    /// </summary>
+    [Fact]
+    public void DirectSinkEndsAWaitingPortalRevealAtTheSessionResetEdge()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        const uint playerGuid = 0x50000007u;
+        runtime.PlayerIdentity.ServerGuid = playerGuid;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        session.GameActionCapture = _ => { };
+        var projection = new FixtureWorldProjection
+        {
+            CollisionReady = false,
+        };
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: projection);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            Spawn(playerGuid, incarnation: 1);
+        sink.Spawned(spawn);
+        sink.TeleportStarted(1u);
+        sink.PositionUpdated(TeleportArrival(
+            playerGuid,
+            spawn,
+            teleportSequence: 1,
+            positionSequence: 2));
+        Assert.Equal(
+            1,
+            runtime.TransitOwner.CaptureOwnership().HostProjectionCount);
+
+        controller.EndPortalRevealForSessionReset();
+
+        Assert.True(runtime.Portal.Snapshot.Cancelled);
+        Assert.Equal(
+            0,
+            runtime.TransitOwner.CaptureOwnership().HostProjectionCount);
+        runtime.TransitOwner.ResetSession();
+
+        // Nothing is left for a later pump to finish.
+        projection.CollisionReady = true;
+        controller.PumpPortalCompletion();
+        Assert.False(runtime.Portal.Snapshot.Completed);
+    }
+
+    /// <summary>
+    /// The object the session died on: a rat burrow whose world-data
+    /// rotation (-0.81, 0, 0, -0.585) is outside the frame tolerance. Read
+    /// off the wire and handed to a session with a world, it is created and
+    /// placed like any other object instead of ending the session.
+    /// Mutation executed: the description read stored the sent rotation
+    /// unchanged; the spawn then threw "cannot acquire a structurally valid
+    /// initial residence lease".
+    /// </summary>
+    [Fact]
+    public void DirectSinkCreatesAnObjectWhoseSentRotationIsOutsideTheFrameTolerance()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        runtime.PlayerIdentity.ServerGuid = 0x50000008u;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        session.GameActionCapture = _ => { };
+        var projection = new FixtureWorldProjection();
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: projection);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        const uint burrowGuid = 0x80000819u;
+        CreateObject.Parsed parsed = CreateObject.TryParse(
+            TopLevelCreateObjectBody(
+                burrowGuid,
+                0x482D000Fu,
+                new System.Numerics.Vector3(37.9574f, 146.688f, 2.447994f),
+                w: -0.81f,
+                z: -0.585f))!.Value;
+
+        sink.Spawned(WorldSession.ToEntitySpawn(parsed));
+
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            burrowGuid,
+            out RuntimeEntityRecord burrow));
+        Assert.Equal(1, projection.SpawnCount);
+        Assert.Equal(burrowGuid, projection.LastRecord?.ServerGuid);
+        Assert.Equal(0x482D000Fu, burrow.Snapshot.Position!.Value.LandblockId);
+    }
+
+    private static byte[] TopLevelCreateObjectBody(
+        uint guid,
+        uint cellId,
+        System.Numerics.Vector3 origin,
+        float w,
+        float z)
+    {
+        var bytes = new List<byte>();
+        void U32(uint value)
+        {
+            Span<byte> tmp = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(tmp, value);
+            bytes.AddRange(tmp.ToArray());
+        }
+        void U16(ushort value)
+        {
+            Span<byte> tmp = stackalloc byte[2];
+            BinaryPrimitives.WriteUInt16LittleEndian(tmp, value);
+            bytes.AddRange(tmp.ToArray());
+        }
+        void F32(float value) =>
+            U32(BitConverter.SingleToUInt32Bits(value));
+        void Align()
+        {
+            while ((bytes.Count & 3) != 0)
+                bytes.Add(0);
+        }
+
+        U32(CreateObject.Opcode);
+        U32(guid);
+        bytes.AddRange([0x11, 0, 0, 0]);
+        U32((uint)CreateObject.PhysicsDescriptionFlag.Position);
+        U32(0u);
+        U32(cellId);
+        F32(origin.X);
+        F32(origin.Y);
+        F32(origin.Z);
+        F32(w);
+        F32(0f);
+        F32(0f);
+        F32(z);
+        for (int i = 0; i < 9; i++)
+            U16(i is 0 or 8 ? (ushort)1 : (ushort)0);
+        Align();
+        U32(0u);
+        byte[] name = System.Text.Encoding.ASCII.GetBytes("Rat Burrow");
+        U16((ushort)name.Length);
+        bytes.AddRange(name);
+        Align();
+        U16(0x1234);
+        U16(0);
+        U32(0x10u);
+        U32(0u);
+        Align();
+        return bytes.ToArray();
+    }
+
+    private static WorldSession.EntityPositionUpdate TeleportArrival(
+        uint playerGuid,
+        WorldSession.EntitySpawn spawn,
+        ushort teleportSequence,
+        ushort positionSequence) =>
+        new(
+            playerGuid,
+            spawn.Position!.Value with
+            {
+                LandblockId = 0x01020001u,
+                PositionX = 30f,
+            },
+            Velocity: null,
+            PlacementId: null,
+            IsGrounded: true,
+            InstanceSequence: 1,
+            PositionSequence: positionSequence,
+            TeleportSequence: teleportSequence,
+            ForcePositionSequence: 0);
+
     [Fact]
     public void ForcePositionWithoutAnAcceptedPositionDrive_StillCentersAndFallsBackToProjectPosition()
     {
@@ -1492,6 +1731,7 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         }
         public RuntimeEntityRecord? LastRecord { get; private set; }
         public RuntimeTeleportDestination LastDestination { get; private set; }
+        public bool CollisionReady { get; set; } = true;
 
         public void ProjectSpawn(
             RuntimeEntityRecord record,
@@ -1537,7 +1777,7 @@ public sealed class RuntimeLiveEntitySessionControllerTests
                 RequiredRenderRadius: indoor ? 0 : 1,
                 IsRenderNeighborhoodReady: true,
                 AreCompositeTexturesReady: true,
-                IsCollisionReady: true);
+                IsCollisionReady: CollisionReady);
         }
     }
 

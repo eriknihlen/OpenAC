@@ -170,6 +170,7 @@ Everything is on `host.Automation.Navigation`. A host without navigation answers
 | `TryGetObject(id, out obj)` | An object's position. Doors also say whether they are open or locked. |
 | `TryFindObject(name, near, meters, out obj)` | An object found by name near a position. |
 | `CaptureObjects()` | A detached list of world objects, for a plugin's own rules. |
+| `CheckRoomAhead(meters)` | Whether a body the size of the character fits that far straight ahead, as a summoned pet needs: `Clear` with the spot, `Blocked`, or `Unknown` when the client cannot look (not in the world, spot not loaded, distance outside 0 to 10 m). Walls, buildings, terrain and solid objects count; creatures and players do not. Ground up to 70 cm higher or 66 cm lower than the feet is tried too. Nothing moves. |
 
 ### Moves
 
