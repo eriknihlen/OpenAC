@@ -122,7 +122,9 @@ constructor. The host creates it with no arguments, then calls:
 `IPluginHost` gives you `State`, `Events`, `Commands`, `Storage`, `Log`,
 `Ui`, `Window`, `Clipboard`, `Hotkeys`, `WorldLines` and `Automation`.
 `WorldLines` draws lines in the world (a route, say) in layers the plugin
-owns; a host without a window hands out no layer. `Automation` is the
+owns; a host without a window hands out no layer. Only the parts of lines
+within 250 m of the camera are drawn, and a frame draws a fixed amount of
+them: past that, the lines nearest the camera are kept. `Automation` is the
 large surface: character, items, spells, combat, world objects, trade,
 vendor, navigation, fellowship, login. Check `IsAvailable` on a surface
 before relying on it; a host that cannot provide something returns an inert

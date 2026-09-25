@@ -153,6 +153,8 @@ public sealed class GameRuntime
     private bool _disposeRequested;
     private bool _disposeDrainActive;
     private RuntimeLifecycleState _lastEmittedLifecycleState = RuntimeLifecycleState.Constructed;
+    private bool _leftWorldSinceLastEmission;
+    private ulong _leftWorldGeneration;
     private bool _disposed;
 
     public GameRuntime(GameRuntimeDependencies dependencies)
@@ -485,6 +487,7 @@ public sealed class GameRuntime
                     if (CharacterOwner.Options.IsDirty)
                         FlushCharacterOptions(session, ifAutoSaveDue: true);
                 });
+            context.Session.ConfigureLeavingWorld(AnnounceLeavingWorld);
             context.Session.ConfigurePreLogoffFlush(
                 session =>
                 {
@@ -667,6 +670,26 @@ public sealed class GameRuntime
     }
 
     /// <summary>
+    /// Called as a stay in the world ends, before the session is torn down
+    /// and before it stops reporting itself in the world. When the character
+    /// was last announced in the world, observers hear that it is leaving
+    /// while the state they may want to read is still there; the lifecycle
+    /// change itself is still raised afterwards, as before. Once per stay,
+    /// whoever calls it.
+    /// </summary>
+    internal void AnnounceLeavingWorld()
+    {
+        if (_lastEmittedLifecycleState != RuntimeLifecycleState.InWorld
+            || _leftWorldSinceLastEmission)
+        {
+            return;
+        }
+        _leftWorldSinceLastEmission = true;
+        _leftWorldGeneration = Session.SessionGeneration;
+        _events.EmitLeavingWorld();
+    }
+
+    /// <summary>
     /// The single lifecycle-emission gate: compares the live Lifecycle.State
     /// against the last state this call itself emitted and raises exactly
     /// one EmitLifecycle for any observed change, deduped by
@@ -676,13 +699,27 @@ public sealed class GameRuntime
     /// the async connect-to-in-world edge, and any other edge a command
     /// boundary did not just observe, actually lands) without double-
     /// firing when both paths converge on the same state in one frame.
+    /// A stay that ended and a new one that began inside one call (a
+    /// logoff straight into the next character) still reads in-world on
+    /// both sides; the announced leave and the new generation tell them
+    /// apart, and the gate then raises the leave and the arrival as two changes.
     /// </summary>
     internal void SyncLifecycleEmission()
     {
         RuntimeLifecycleState current = Lifecycle.State;
         RuntimeLifecycleState previous = _lastEmittedLifecycleState;
-        if (previous == current)
+        bool reentered = _leftWorldSinceLastEmission
+            && current == RuntimeLifecycleState.InWorld
+            && Session.SessionGeneration != _leftWorldGeneration;
+        if (previous == current && !reentered)
             return;
+        _leftWorldSinceLastEmission = false;
+        if (previous == current)
+        {
+            _lastEmittedLifecycleState = RuntimeLifecycleState.Starting;
+            _events.EmitLifecycle(previous, RuntimeLifecycleState.Starting);
+            previous = RuntimeLifecycleState.Starting;
+        }
         _lastEmittedLifecycleState = current;
         if (current == RuntimeLifecycleState.InWorld)
             AskTheServerAboutTheAllegiance();

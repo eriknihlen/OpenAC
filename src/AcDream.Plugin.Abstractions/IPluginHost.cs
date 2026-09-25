@@ -96,6 +96,13 @@ public interface IPluginHost
     IHostWindow Window => NoOpHostWindow.Instance;
 
     /// <summary>
+    /// Named status lines the plugins in this client share: this plugin
+    /// publishes under its own id and reads what any plugin published. The
+    /// default implementation keeps nothing.
+    /// </summary>
+    IPluginStatusBoard StatusBoard => NoOpPluginStatusBoard.Instance;
+
+    /// <summary>
     /// Settings this session was started with for this plugin, keyed by
     /// setting name -- for example the profile a bot session should apply on
     /// login. Empty when the session declared none.

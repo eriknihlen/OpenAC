@@ -810,10 +810,16 @@ internal sealed class CurrentGameRuntimeCommandAdapter
                 RuntimeCommandStatus.Rejected);
         }
         _commands.Publish(new SetSingleCharacterOptionRuntimeCmd(optionId, value));
+        // The session's command route changes the client's copy and tells the
+        // server in one step, synchronously, and silently does neither while
+        // it is not active. What the copy holds afterwards is therefore the
+        // answer: the change took, or there was no session to take it.
         return EmitResult(
             RuntimeCommandDomain.Character,
             operation: 4,
-            RuntimeCommandStatus.Accepted);
+            _character.Options.GetOptionBit(optionId) == value
+                ? RuntimeCommandStatus.Accepted
+                : RuntimeCommandStatus.Inactive);
     }
 
     public RuntimeCommandResult SaveOptions(

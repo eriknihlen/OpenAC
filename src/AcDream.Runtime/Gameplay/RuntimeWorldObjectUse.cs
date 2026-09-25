@@ -159,6 +159,17 @@ internal sealed class RuntimeWorldObjectUse
         if (!_items.EnsureInventoryRequestReady())
             return AutomationUseOutcome.Busy;
 
+        // A plain use of a loose item lying on the ground, or of an item
+        // inside the container the character has open, means picking it up
+        // into the pack. That is decided before a use request is considered
+        // at all, so an item with no use of its own -- a dropped book, a
+        // corpse's loot -- is collected rather than refused as unusable.
+        if (_items.ClassifyPrimaryUse(serverGuid)
+            == ItemPrimaryUseResult.PlaceInBackpack)
+        {
+            return PickUp(serverGuid);
+        }
+
         ItemUseRequestReservation reservation =
             _items.BeginAutomationUseReservation();
         // The reservation holds the busy count from here on; a throw
@@ -173,6 +184,21 @@ internal sealed class RuntimeWorldObjectUse
             reservation.CancelBeforeDispatch();
             throw;
         }
+    }
+
+    private AutomationUseOutcome PickUp(uint serverGuid)
+    {
+        // The same rule as a use: never cut in front of a walk already armed.
+        if (_transactions.HasPendingUse || _transactions.HasPendingPickup)
+            return AutomationUseOutcome.Busy;
+
+        return _items.TryPlaceWorldItemInBackpack(serverGuid) switch
+        {
+            RuntimeBackpackPlacementOutcome.Sent => AutomationUseOutcome.Started,
+            RuntimeBackpackPlacementOutcome.AlreadyPending => AutomationUseOutcome.Busy,
+            RuntimeBackpackPlacementOutcome.NoRoom => AutomationUseOutcome.NoRoom,
+            _ => AutomationUseOutcome.Unavailable,
+        };
     }
 
     private AutomationUseOutcome PerformUse(

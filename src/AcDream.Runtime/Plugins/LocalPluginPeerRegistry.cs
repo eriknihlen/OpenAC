@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AcDream.Plugin.Abstractions;
 
 namespace AcDream.Runtime.Plugins;
@@ -168,6 +169,24 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     internal const double MaximumCastDurationSeconds = 24d * 60d * 60d;
 
     /// <summary>
+    /// How many peers a plugin may import from elsewhere at once. A relay
+    /// carries the characters one player or one group plays, which is a
+    /// handful; the cap keeps a relay that imports whatever it is sent from
+    /// growing this client's lists without limit. A peer that has gone stale
+    /// gives its place up to a new one.
+    /// </summary>
+    internal const int MaximumRemoteClients = 256;
+
+    /// <summary>
+    /// The longest name or world name a note may carry, for a note read from
+    /// a file and a peer imported by a plugin alike.
+    /// </summary>
+    internal const int MaximumNameLength = 128;
+
+    /// <summary>How many labels one client may answer to.</summary>
+    internal const int MaximumClientTags = 128;
+
+    /// <summary>
     /// The highest sequence a cast may claim. Sequences count from one and
     /// only ever grow, and a reader sets its cursor for a peer from them, so
     /// a note claiming a number no client could have counted to would park
@@ -246,6 +265,15 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
 
     /// <summary>The command lines read from the others, oldest first.</summary>
     private readonly List<ObservedCommand> _observedCommands = [];
+
+    /// <summary>
+    /// Peers a plugin imported from somewhere this client cannot read
+    /// itself, keyed by their character. Each one is held as a note of the
+    /// same shape a neighbour writes, so every rule that applies to a note
+    /// read from the folder -- staleness, world, labels, cursors -- applies
+    /// to these through the same code.
+    /// </summary>
+    private readonly Dictionary<uint, RemotePeer> _remotePeers = [];
 
     /// <summary>
     /// What each note file said, against the version of the file that said
@@ -565,14 +593,19 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         }
     }
 
-    public IReadOnlyList<PluginNetworkClient> CaptureRemoteClients()
+    public IReadOnlyList<PluginNetworkClient> CaptureRemoteClients(
+        uint ownPlayerObjectId = 0u)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_gate)
         {
             DateTimeOffset now = _time.GetUtcNow();
             return ReadRemoteNotes(now)
-                .Where(note => IsRecent(note.Document, now))
+                .Where(note => IsRecent(note.Document, now)
+                    // An imported peer that turns out to be the character
+                    // this client is now playing is not somebody else.
+                    && !(note.Document.IsRemote
+                        && note.Document.PlayerId == ownPlayerObjectId))
                 .Select(static note => note.Document.ToClient())
                 .OrderBy(static client => client.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(static client => client.ClientId)
@@ -618,6 +651,279 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             return result.Count == 0
                 ? Array.Empty<PluginPeerCast>()
                 : result.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// The casts this client itself announced above
+    /// <paramref name="afterSequence"/> that a neighbour would still take in,
+    /// oldest first, with what is left of each success's duration.
+    /// </summary>
+    public IReadOnlyList<PluginPeerCast> CaptureOwnCasts(long afterSequence)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            List<PluginPeerCast>? result = null;
+            foreach (PeerCastEntry entry in _ring)
+            {
+                if (entry.Sequence <= afterSequence || Age(entry, now) > StaleAfter)
+                    continue;
+                (result ??= []).Add(new ObservedCast(
+                    entry.Sequence, ClientId, entry, IsRemote: false)
+                    .Project(now));
+            }
+            return result is null
+                ? Array.Empty<PluginPeerCast>()
+                : result.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// The lines this client itself broadcast above
+    /// <paramref name="afterSequence"/> that a neighbour would still take in,
+    /// oldest first.
+    /// </summary>
+    public IReadOnlyList<PluginPeerCommand> CaptureOwnCommands(long afterSequence)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            List<PluginPeerCommand>? result = null;
+            foreach (PeerCommandEntry entry in _commandRing)
+            {
+                if (entry.Sequence <= afterSequence || Age(entry, now) > StaleAfter)
+                    continue;
+                (result ??= []).Add(new PluginPeerCommand(
+                    entry.Sequence,
+                    ClientId,
+                    entry.SenderObjectId,
+                    NormalizeTags(entry.Tags),
+                    entry.Line,
+                    DateTimeOffset.FromUnixTimeMilliseconds(entry.AtUnixMs)));
+            }
+            return result is null
+                ? Array.Empty<PluginPeerCommand>()
+                : result.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Adds or refreshes a peer a plugin carried here from somewhere this
+    /// client cannot read, stamped with this client's clock.
+    /// </summary>
+    /// <param name="client">What the peer said about itself.</param>
+    /// <param name="ownPlayerObjectId">
+    /// This client's own character, which is never imported as somebody
+    /// else.
+    /// </param>
+    /// <returns>
+    /// False for a peer that would not be accepted from a note in the folder
+    /// either, for this client's own character, and when the import cap is
+    /// full of peers that are still recent.
+    /// </returns>
+    public bool ImportRemoteClient(
+        in PluginNetworkClient client,
+        uint ownPlayerObjectId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (client.PlayerId == 0u
+            || client.PlayerId == ownPlayerObjectId
+            || string.IsNullOrWhiteSpace(client.Name)
+            || client.Name.Length > MaximumNameLength
+            || client.WorldName is not { Length: <= MaximumNameLength }
+            || !CanBeWritten(client))
+        {
+            return false;
+        }
+        IReadOnlyList<string> tags = client.Tags ?? Array.Empty<string>();
+        if (tags.Count > MaximumClientTags)
+            return false;
+        foreach (string tag in tags)
+        {
+            // A label too long to travel is refused rather than cut short,
+            // the rule this client's own labels are set under.
+            if (tag is not null && tag.Trim().Length > MaximumTagLength)
+                return false;
+        }
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            if (!_remotePeers.TryGetValue(client.PlayerId, out RemotePeer? remote))
+            {
+                if (_remotePeers.Count >= MaximumRemoteClients)
+                {
+                    foreach (uint gone in _remotePeers
+                        .Where(pair => !IsRecent(pair.Value.Document, now))
+                        .Select(static pair => pair.Key)
+                        .ToArray())
+                    {
+                        _remotePeers.Remove(gone);
+                    }
+                    if (_remotePeers.Count >= MaximumRemoteClients)
+                        return false;
+                }
+                remote = new RemotePeer(NewRemoteIdentity());
+                _remotePeers.Add(client.PlayerId, remote);
+            }
+            PeerDocument document = remote.Document;
+            document.UpdatedUnixMs = now.ToUnixTimeMilliseconds();
+            document.PlayerId = client.PlayerId;
+            document.Name = client.Name;
+            document.WorldName = client.WorldName;
+            document.Tags = NormalizeTags(tags);
+            document.CellId = client.Position.CellId;
+            document.EastWest = client.Position.EastWest;
+            document.NorthSouth = client.Position.NorthSouth;
+            document.Elevation = client.Position.Elevation;
+            document.IsOutdoor = client.Position.IsOutdoor;
+            document.Heading = client.Heading;
+            document.CurrentHealth = client.CurrentHealth;
+            document.CurrentMana = client.CurrentMana;
+            document.CurrentStamina = client.CurrentStamina;
+            document.MaxHealth = client.MaxHealth;
+            document.MaxMana = client.MaxMana;
+            document.MaxStamina = client.MaxStamina;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Adds a cast an imported peer made to that peer's ring, stamped with
+    /// this client's clock, under the rule a cast in a note is read by.
+    /// </summary>
+    /// <returns>
+    /// False when the caster is not an imported peer that is still recent,
+    /// or the cast is not well formed.
+    /// </returns>
+    public bool ImportRemoteCast(
+        uint casterObjectId,
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double secondsRemaining,
+        bool landed)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            if (!TryGetRecentRemote(casterObjectId, now, out RemotePeer? remote))
+                return false;
+            var entry = new PeerCastEntry
+            {
+                Sequence = remote.CastSequence + 1L,
+                AtUnixMs = now.ToUnixTimeMilliseconds(),
+                CasterObjectId = casterObjectId,
+                TargetObjectId = targetObjectId,
+                SpellId = spellId,
+                EffectiveSkill = effectiveSkill,
+                // An attempt carries no duration, whatever the relay said.
+                DurationSeconds = landed ? secondsRemaining : 0d,
+                Landed = landed,
+            };
+            if (!IsWellFormed(entry))
+                return false;
+            remote.CastSequence = entry.Sequence;
+            remote.Document.Casts = Appended(
+                remote.Document.Casts, entry, CastRingCapacity);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Adds a command line an imported peer broadcast to that peer's ring,
+    /// stamped with this client's clock, under the rule a line in a note is
+    /// read by.
+    /// </summary>
+    /// <returns>
+    /// False when the sender is not an imported peer that is still recent,
+    /// or the line is not well formed.
+    /// </returns>
+    public bool ImportRemoteCommand(
+        uint senderObjectId,
+        IReadOnlyList<string>? tags,
+        string line,
+        int delayMilliseconds)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            if (!TryGetRecentRemote(senderObjectId, now, out RemotePeer? remote))
+                return false;
+            var entry = new PeerCommandEntry
+            {
+                Sequence = remote.CommandSequence + 1L,
+                AtUnixMs = now.ToUnixTimeMilliseconds(),
+                SenderObjectId = senderObjectId,
+                Tags = NormalizeTags(tags),
+                Line = line ?? string.Empty,
+                DelayMilliseconds = delayMilliseconds,
+            };
+            if (!IsWellFormed(entry)
+                || (tags is not null && tags.Count > MaximumCommandTags))
+            {
+                return false;
+            }
+            remote.CommandSequence = entry.Sequence;
+            remote.Document.Commands = Appended(
+                remote.Document.Commands, entry, CommandRingCapacity);
+            return true;
+        }
+    }
+
+    private bool TryGetRecentRemote(
+        uint playerObjectId,
+        DateTimeOffset now,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RemotePeer? remote) =>
+        _remotePeers.TryGetValue(playerObjectId, out remote)
+        && IsRecent(remote.Document, now);
+
+    private static T?[] Appended<T>(T?[] ring, T entry, int capacity)
+        where T : class
+    {
+        int keep = Math.Min(ring.Length, capacity - 1);
+        var result = new T?[keep + 1];
+        Array.Copy(ring, ring.Length - keep, result, 0, keep);
+        result[keep] = entry;
+        return result;
+    }
+
+    /// <summary>
+    /// A fresh identity for an imported peer: an instance id no file in the
+    /// folder carries and a client id drawn the way a client draws its own,
+    /// never zero and never this client's.
+    /// </summary>
+    private (Guid InstanceId, uint ClientId) NewRemoteIdentity()
+    {
+        while (true)
+        {
+            Guid instanceId = Guid.NewGuid();
+            uint clientId = BitConverter.ToUInt32(instanceId.ToByteArray(), 0);
+            if (clientId != 0u && clientId != ClientId)
+                return (instanceId, clientId);
+        }
+    }
+
+    /// <summary>
+    /// Drops every cast and line this client announced, for a character that
+    /// has left the world: what the next character is read back as saying
+    /// starts empty. The numbering carries on, so a neighbour's mark on this
+    /// client stays valid.
+    /// </summary>
+    public void ForgetOwnAnnouncements()
+    {
+        if (_disposed)
+            return;
+        lock (_gate)
+        {
+            _ring.Clear();
+            _commandRing.Clear();
+            _castWritePending = false;
+            _commandWritePending = false;
         }
     }
 
@@ -671,7 +977,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         // rather than throwing, which is the same answer as "nothing has
         // ever announced itself here".
         if (!Directory.Exists(_directory))
-            return NoNotes;
+        {
+            return _remotePeers.Count == 0
+                ? NoNotes
+                : WithRemotePeers([], now);
+        }
         var notes = new List<PeerNote>();
         foreach (string file in Directory.EnumerateFiles(
             _directory,
@@ -737,7 +1047,88 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             {
             }
         }
+        return WithRemotePeers(notes, now);
+    }
+
+    /// <summary>
+    /// Adds the peers a plugin imported to the notes read from the folder. A
+    /// character that a recent note in the folder already speaks for, in the
+    /// same world, is read from there: the same character arriving by two
+    /// routes would otherwise be listed twice and have every cast it made
+    /// counted twice. What the hidden copy is handed meanwhile is passed over
+    /// as it arrives, so nothing it carried is taken in when the note goes
+    /// away and the copy shows again; and a note that first shows while a
+    /// copy of the same character was listed starts at the end of its rings,
+    /// because the copy already carried what they hold.
+    /// </summary>
+    private List<PeerNote> WithRemotePeers(List<PeerNote> notes, DateTimeOffset now)
+    {
+        if (_remotePeers.Count == 0)
+            return notes;
+        int local = notes.Count;
+        foreach (RemotePeer remote in _remotePeers.Values)
+        {
+            int shadowing = -1;
+            for (int index = 0; index < local; index++)
+            {
+                PeerDocument document = notes[index].Document;
+                if (document.PlayerId == remote.Document.PlayerId
+                    && IsRecent(document, now)
+                    && IsSameWorld(document, remote.Document.WorldName ?? string.Empty))
+                {
+                    shadowing = index;
+                    break;
+                }
+            }
+            if (shadowing < 0)
+            {
+                notes.Add(new PeerNote(remote.Path, remote.Document));
+                remote.Listed = true;
+                continue;
+            }
+            // The hidden copy: everything it holds counts as read.
+            _observedPeers[new PeerCursorKey(remote.Path, remote.Document.InstanceId)] =
+                new ObservedPeer(remote.CastSequence, remote.CommandSequence, now);
+            PeerNote note = notes[shadowing];
+            var noteCursor = new PeerCursorKey(note.Path, note.Document.InstanceId);
+            if (remote.Listed
+                && IsRecent(remote.Document, now)
+                && !_observedPeers.ContainsKey(noteCursor))
+            {
+                _observedPeers[noteCursor] = new ObservedPeer(
+                    HighestSequence(note.Document.Casts),
+                    HighestSequence(note.Document.Commands),
+                    now);
+            }
+            remote.Listed = false;
+        }
         return notes;
+    }
+
+    private static long HighestSequence(PeerCastEntry?[]? ring)
+    {
+        long highest = 0L;
+        if (ring is null)
+            return highest;
+        foreach (PeerCastEntry? entry in ring)
+        {
+            if (entry is not null && entry.Sequence > highest)
+                highest = entry.Sequence;
+        }
+        return highest;
+    }
+
+    private static long HighestSequence(PeerCommandEntry?[]? ring)
+    {
+        long highest = 0L;
+        if (ring is null)
+            return highest;
+        foreach (PeerCommandEntry? entry in ring)
+        {
+            if (entry is not null && entry.Sequence > highest)
+                highest = entry.Sequence;
+        }
+        return highest;
     }
 
     /// <summary>
@@ -800,7 +1191,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 _observedCasts.Add(new ObservedCast(
                     ++_observedSequence,
                     document.ClientId,
-                    entry));
+                    entry,
+                    document.IsRemote));
             }
             _observedPeers[cursor] = peer with
             {
@@ -873,6 +1265,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 _observedCommands.Add(new ObservedCommand(
                     ++_observedCommandSequence,
                     document.ClientId,
+                    document.IsRemote,
                     entry,
                     aimedAt,
                     StaggerFor(
@@ -935,7 +1328,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             // speaks for anybody at all -- otherwise every client behind a
             // dead one waits one place too many, for as long as the file
             // lies there.
-            if (document.ClientId == senderClientId
+            // Only the clients on this computer share one numbering: an
+            // imported peer's client id is this client's own invention, and
+            // the peer takes its own place wherever it is played.
+            if (document.IsRemote
+                || document.ClientId == senderClientId
                 || document.ClientId >= ClientId
                 || !IsRecent(document, now)
                 || !IsSameWorld(document, worldName)
@@ -977,7 +1374,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 .Where(static tag => !string.IsNullOrWhiteSpace(tag))
                 .Select(static tag => tag!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(128)
+                .Take(MaximumClientTags)
                 .ToArray();
 
     /// <summary>
@@ -1019,11 +1416,11 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         && document.ClientId != 0u
         && document.PlayerId != 0u
         && !string.IsNullOrWhiteSpace(document.Name)
-        && document.Name.Length <= 128
+        && document.Name.Length <= MaximumNameLength
         && document.WorldName is not null
-        && document.WorldName.Length <= 128
+        && document.WorldName.Length <= MaximumNameLength
         && document.Tags is not null
-        && document.Tags.Length <= 128
+        && document.Tags.Length <= MaximumClientTags
         && AreTagsWellFormed(document.Tags)
         && double.IsFinite(document.EastWest)
         && double.IsFinite(document.NorthSouth)
@@ -1260,7 +1657,8 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private readonly record struct ObservedCast(
         long Sequence,
         uint ClientId,
-        PeerCastEntry Entry)
+        PeerCastEntry Entry,
+        bool IsRemote)
     {
         /// <summary>
         /// What the plugin is handed: the time left rather than the total, so
@@ -1281,7 +1679,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                     Entry.DurationSeconds - elapsed,
                     0d,
                     Entry.DurationSeconds),
-                Entry.Landed);
+                Entry.Landed)
+            {
+                IsRemote = IsRemote,
+            };
         }
     }
 
@@ -1292,6 +1693,7 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
     private readonly record struct ObservedCommand(
         long Sequence,
         uint ClientId,
+        bool IsRemote,
         PeerCommandEntry Entry,
         string[] AimedAt,
         int StaggerMilliseconds)
@@ -1303,7 +1705,10 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
                 Entry.SenderObjectId,
                 AimedAt,
                 Entry.Line,
-                DateTimeOffset.FromUnixTimeMilliseconds(Entry.AtUnixMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Entry.AtUnixMs))
+            {
+                IsRemote = IsRemote,
+            },
             StaggerMilliseconds);
     }
 
@@ -1338,9 +1743,45 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
         public int DelayMilliseconds { get; set; }
     }
 
+    /// <summary>
+    /// A peer a plugin imported, held as the note a neighbour would have
+    /// written, with the counters its rings are numbered by.
+    /// </summary>
+    private sealed class RemotePeer
+    {
+        public RemotePeer((Guid InstanceId, uint ClientId) identity)
+        {
+            Document = new PeerDocument
+            {
+                InstanceId = identity.InstanceId,
+                ClientId = identity.ClientId,
+                IsRemote = true,
+            };
+            // Not a file: a key no directory scan can report, so a cursor on
+            // an imported peer can never be moved by a note in the folder.
+            Path = "remote:" + identity.InstanceId.ToString("N");
+        }
+
+        public PeerDocument Document { get; }
+        public string Path { get; }
+        public long CastSequence { get; set; }
+        public long CommandSequence { get; set; }
+
+        /// <summary>Whether the last read listed this copy rather than a note.</summary>
+        public bool Listed { get; set; }
+    }
+
     private sealed class PeerDocument
     {
         public Guid InstanceId { get; set; }
+
+        /// <summary>
+        /// True for a peer a plugin imported. Never read from or written to
+        /// a file, so a note in the folder cannot claim to be one.
+        /// </summary>
+        [JsonIgnore]
+        public bool IsRemote { get; set; }
+
         public long UpdatedUnixMs { get; set; }
         public uint ClientId { get; set; }
         public uint PlayerId { get; set; }
@@ -1433,6 +1874,9 @@ internal sealed class LocalPluginPeerRegistry : IDisposable
             MaxHealth,
             MaxMana,
             MaxStamina,
-            Heading);
+            Heading)
+        {
+            IsRemote = IsRemote,
+        };
     }
 }

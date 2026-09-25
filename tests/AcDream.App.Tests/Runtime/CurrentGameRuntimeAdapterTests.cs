@@ -512,6 +512,7 @@ public sealed class CurrentGameRuntimeAdapterTests
         _ = harness.Runtime.Session.Start(harness.Runtime.Generation);
         RuntimeGenerationToken generation = harness.Runtime.Generation;
         IGameRuntimeCommands commands = harness.Runtime;
+        harness.Commands.ApplyOptionsLikeAnActiveRoute(harness.Character);
 
         RuntimeCommandResult shortcut = commands.InventoryState.AddShortcut(
             generation,
@@ -631,6 +632,34 @@ public sealed class CurrentGameRuntimeAdapterTests
         Assert.Equal(published, harness.Commands.Published.Count);
     }
 
+
+    /// <summary>
+    /// The session's command route drops an option change while it is not
+    /// active, and neither changes the client's copy nor tells the server.
+    /// The change is then not reported as accepted: the other client answers
+    /// from the same copy, and a plugin must not be told an option took that
+    /// did not.
+    /// </summary>
+    [Fact]
+    public void SetSingleOption_DroppedByTheCommandRoute_IsNotAccepted()
+    {
+        using var harness = new Harness();
+        _ = harness.Runtime.Session.Start(harness.Runtime.Generation);
+        RuntimeGenerationToken generation = harness.Runtime.Generation;
+        IGameRuntimeCommands commands = harness.Runtime;
+        bool before = harness.Character.Options.GetOptionBit(0x26u);
+
+        RuntimeCommandResult result = commands.Character.SetSingleOption(
+            generation,
+            0x26u,
+            !before);
+
+        Assert.Contains(
+            harness.Commands.Published,
+            static command => command is SetSingleCharacterOptionRuntimeCmd);
+        Assert.Equal(RuntimeCommandStatus.Inactive, result.Status);
+        Assert.Equal(before, harness.Character.Options.GetOptionBit(0x26u));
+    }
 
     [Fact]
     public void SetSingleOption_UnknownId_RejectsWithoutPublishing()
@@ -1280,15 +1309,32 @@ public sealed class CurrentGameRuntimeAdapterTests
           ICommandBus
     {
         private bool _active;
+        private RuntimeCharacterState? _optionOwner;
 
         public List<object> Published { get; } = [];
 
         public void Activate() => _active = true;
 
+        /// <summary>
+        /// Stands in for what the session's active route does with an option
+        /// change: the client's copy changes as it is sent.
+        /// </summary>
+        public void ApplyOptionsLikeAnActiveRoute(RuntimeCharacterState character) =>
+            _optionOwner = character;
+
         public void Publish<T>(T command) where T : notnull
         {
-            if (_active)
-                Published.Add(command);
+            if (!_active)
+                return;
+            Published.Add(command);
+            if (_optionOwner is { } owner
+                && command is SetSingleCharacterOptionRuntimeCmd option)
+            {
+                owner.Options.TrySetOption(
+                    option.OptionId,
+                    option.Value,
+                    static (_, _) => { });
+            }
         }
 
         public void Dispose() => _active = false;

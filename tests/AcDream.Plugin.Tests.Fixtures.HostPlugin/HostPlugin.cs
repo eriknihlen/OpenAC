@@ -44,6 +44,15 @@ public sealed class HostPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPackA
         }
         host.Log.Info(
             $"fixture-enabled:hasUi={host.HasUi}:entities={host.State.Entities.Count}");
+        // The status board: publish under this plugin's own id and read it
+        // back by the id the tests install the fixture under.
+        bool published = host.StatusBoard.Publish("state", "enabled");
+        string read = host.StatusBoard.TryRead(
+            "acdream.test.host-fixture", "state", out string value)
+            ? value
+            : "<none>";
+        host.Log.Info(
+            $"fixture-status:available={host.StatusBoard.IsAvailable}:published={published}:read={read}");
     }
 
     public void Disable()

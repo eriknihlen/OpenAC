@@ -129,6 +129,82 @@ public sealed class WorldObjectUseParityTests
             transcript.RecordOutbound(arm);
         });
 
+    /// <summary>
+    /// Using a book lying loose on the ground, one with no use of its own.
+    /// Using a loose item means picking it up, on both clients: the answer is
+    /// a start, and what leaves the client is a pick-up into the character's
+    /// own pack, never a use. Mutation check (2026-09-25), run: taking the
+    /// pick-up out of the shared route turned this and the next scenario red
+    /// on both arms (a refusal, and no pick-up on the wire).
+    /// </summary>
+    [Fact]
+    public void UsingALooseBookPicksItUpTheSameOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            IItemAutomation items = StageWorld(arm);
+            ParityWorld.Add(arm.Runtime, LooseBook, ParityWorld.PlayerX + 2f,
+                new AcDream.Core.Items.ClientObject
+                {
+                    ObjectId = LooseBook,
+                    Type = AcDream.Core.Items.ItemType.Writable,
+                    Name = "Damaged Tome",
+                    StackSize = 1,
+                    Useability = AcDream.Core.Items.ItemUseability.No,
+                });
+            _ = arm.Operations.TakeOutbound();
+
+            transcript.Step("use the book");
+            PluginItemCommandResult use = items.Use(LooseBook);
+            Record(transcript, "use", use);
+            Assert.Equal(PluginItemCommandStatus.Started, use.Status);
+            Assert.Empty(Sent(arm, UseAction));
+            Assert.Equal(
+                (LooseBook, ParityWorld.Player),
+                WhatThePickUpNamed(arm));
+            transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>
+    /// Using something inside the corpse the character has open picks it up
+    /// the same way, on both clients.
+    /// </summary>
+    [Fact]
+    public void UsingSomethingInTheOpenCorpsePicksItUpTheSameOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            IItemAutomation items = StageWorld(arm);
+            Assert.True(arm.Runtime.InventoryOwner.ExternalContainers
+                .RequestOpen(ParityWorld.Corpse, isCorpse: true));
+            ParityWorld.DeliverCorpseContents(arm.Runtime);
+            _ = arm.Operations.TakeOutbound();
+
+            transcript.Step("use the gem inside");
+            PluginItemCommandResult use = items.Use(ParityWorld.CorpseGem);
+            Record(transcript, "use", use);
+            Assert.Equal(PluginItemCommandStatus.Started, use.Status);
+            Assert.Empty(Sent(arm, UseAction));
+            Assert.Equal(
+                (ParityWorld.CorpseGem, ParityWorld.Player),
+                WhatThePickUpNamed(arm));
+            transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>A book on the ground two metres out, staged by the scenario that uses it.</summary>
+    private const uint LooseBook = 0x50000060u;
+
+    /// <summary>The client action that says "put that in this container".</summary>
+    private const uint PickUpAction = 0x0019u;
+
+    /// <summary>What the one pick-up this arm sent named: the item and where it goes.</summary>
+    private static (uint Item, uint Container) WhatThePickUpNamed(ParityArm arm)
+    {
+        ParityOutbound message = Assert.Single(Sent(arm, PickUpAction));
+        byte[] body = Convert.FromHexString(message.Body);
+        return (
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(12)),
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(16)));
+    }
+
     /// <summary>The client action that says "use that".</summary>
     private const uint UseAction = 0x0036u;
 

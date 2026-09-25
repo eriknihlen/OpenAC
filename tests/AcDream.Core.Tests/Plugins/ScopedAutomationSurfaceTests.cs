@@ -37,9 +37,9 @@ public sealed class ScopedAutomationSurfaceTests
         // change; a number that no longer matches means one of the two was
         // forgotten.
         Assert.True(
-            properties.Length == 26,
+            properties.Length == 27,
             "IAutomationSurface has "
-                + $"{properties.Length} members rather than the 26 this "
+                + $"{properties.Length} members rather than the 27 this "
                 + "census was written for. Forward the new one in "
                 + "ScopedPluginHost and say so here.");
 
@@ -87,7 +87,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the
         // known forwarders, guarding against the loop silently checking zero
         // properties if reflection ever returned nothing.
-        Assert.Equal(24, checkedMembers.Count);
+        Assert.Equal(25, checkedMembers.Count);
 
         scoped.Dispose();
     }
@@ -381,6 +381,8 @@ public sealed class ScopedAutomationSurfaceTests
         public ISelectionAutomation Selection { get; } = new FakeSelectionAutomation();
         public ITradeAutomation Trade { get; } = new FakeTradeAutomation();
         public IVendorAutomation Vendor { get; } = new FakeVendorAutomation();
+        public ICharacterOptionsAutomation CharacterOptions { get; } =
+            new FakeCharacterOptionsAutomation();
     }
 
     private sealed class FakeCharacterInfo : ICharacterInfo
@@ -494,4 +496,6 @@ public sealed class ScopedAutomationSurfaceTests
     private sealed class FakeTradeAutomation : ITradeAutomation;
 
     private sealed class FakeVendorAutomation : IVendorAutomation;
+
+    private sealed class FakeCharacterOptionsAutomation : ICharacterOptionsAutomation;
 }

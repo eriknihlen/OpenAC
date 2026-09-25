@@ -836,6 +836,13 @@ public sealed class RuntimeCharacterTitleState
 {
     private readonly object _gate = new();
     private readonly HashSet<uint> _earnedTitleIds = new();
+
+    /// <summary>
+    /// The same titles in the order the server listed them, with each one
+    /// earned since added at the end. A reader reporting the list passes it
+    /// on in the server's order rather than one of the client's choosing.
+    /// </summary>
+    private readonly List<uint> _earnedTitleOrder = new();
     private uint _displayTitleId;
     private long _revision;
 
@@ -848,9 +855,13 @@ public sealed class RuntimeCharacterTitleState
     public uint DisplayTitleId => Volatile.Read(ref _displayTitleId);
     public long Revision => Interlocked.Read(ref _revision);
 
+    /// <summary>
+    /// The titles earned, in the order the server listed them and then in
+    /// the order earned since.
+    /// </summary>
     public IReadOnlyCollection<uint> EarnedTitleIds
     {
-        get { lock (_gate) return _earnedTitleIds.ToArray(); }
+        get { lock (_gate) return _earnedTitleOrder.ToArray(); }
     }
 
     public int Count
@@ -878,12 +889,26 @@ public sealed class RuntimeCharacterTitleState
         ArgumentNullException.ThrowIfNull(titleIds);
         bool setChanged;
         bool displayChanged;
+        // A repeat in the list is kept once, where it first appeared; the
+        // comparison is against that de-duplicated order, or a list carrying
+        // a repeat would read as a change every time it arrived.
+        var seen = new HashSet<uint>();
+        var incoming = new List<uint>(titleIds.Count);
+        foreach (uint id in titleIds)
+        {
+            if (seen.Add(id))
+                incoming.Add(id);
+        }
         lock (_gate)
         {
-            setChanged = !_earnedTitleIds.SetEquals(titleIds);
-            _earnedTitleIds.Clear();
-            foreach (uint id in titleIds)
-                _earnedTitleIds.Add(id);
+            setChanged = !_earnedTitleOrder.SequenceEqual(incoming);
+            if (setChanged)
+            {
+                _earnedTitleIds.Clear();
+                _earnedTitleIds.UnionWith(incoming);
+                _earnedTitleOrder.Clear();
+                _earnedTitleOrder.AddRange(incoming);
+            }
             displayChanged = _displayTitleId != displayTitleId;
             if (displayChanged)
                 Volatile.Write(ref _displayTitleId, displayTitleId);
@@ -902,6 +927,8 @@ public sealed class RuntimeCharacterTitleState
         lock (_gate)
         {
             added = _earnedTitleIds.Add(titleId);
+            if (added)
+                _earnedTitleOrder.Add(titleId);
             displayChanged = setAsDisplay && _displayTitleId != titleId;
             if (displayChanged)
                 Volatile.Write(ref _displayTitleId, titleId);
@@ -923,6 +950,7 @@ public sealed class RuntimeCharacterTitleState
         {
             previousDisplayTitleId = _displayTitleId;
             _earnedTitleIds.Clear();
+            _earnedTitleOrder.Clear();
             Volatile.Write(ref _displayTitleId, 0u);
         }
         Interlocked.Increment(ref _revision);

@@ -130,7 +130,10 @@ public sealed partial class WorldSession : IDisposable
         uint? MaterialType = null,
         uint? HouseOwnerId = null,
         uint? MonarchId = null,
-        HouseRestrictionRecord? Restrictions = null);
+        HouseRestrictionRecord? Restrictions = null,
+        uint? PhysicsDescriptionFlags = null,
+        uint? WeenieHeaderFlags = null,
+        uint? WeenieHeaderFlags2 = null);
 
     internal static EntitySpawn ToEntitySpawn(CreateObject.Parsed parsed) => new(
         parsed.Guid,
@@ -193,7 +196,10 @@ public sealed partial class WorldSession : IDisposable
         MaterialType: parsed.MaterialType,
         HouseOwnerId: parsed.HouseOwnerId,
         MonarchId: parsed.MonarchId,
-        Restrictions: parsed.Restrictions);
+        Restrictions: parsed.Restrictions,
+        PhysicsDescriptionFlags: parsed.PhysicsDescriptionFlags,
+        WeenieHeaderFlags: parsed.WeenieHeaderFlags,
+        WeenieHeaderFlags2: parsed.WeenieHeaderFlags2);
 
     public event Action<EntitySpawn>? EntitySpawned;
 

@@ -196,6 +196,24 @@ internal sealed class GameRuntimeEventHub
         }
     }
 
+    /// <summary>Tells every observer the character is about to leave the world.</summary>
+    public void EmitLeavingWorld()
+    {
+        if (!TryObservers(out IRuntimeEventObserver[] observers))
+            return;
+        foreach (IRuntimeEventObserver observer in observers)
+        {
+            try
+            {
+                observer.OnLeavingWorld();
+            }
+            catch (Exception error)
+            {
+                RecordDispatchFailure(error);
+            }
+        }
+    }
+
     public void EmitMovement(in RuntimeMovementSnapshot movement)
     {
         if (!TryObservers(out IRuntimeEventObserver[] observers))

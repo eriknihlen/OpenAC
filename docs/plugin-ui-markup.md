@@ -306,6 +306,26 @@ the `>`/`<` toggle at the grip's right end, and persisted like any other.
 `Shift+Ctrl+F1` hides and shows it; hiding the shelf never disables a plugin
 or touches a plugin window's own visibility.
 
+## Showing and hiding your own window
+
+A plugin window is on screen only while two things agree: the player's own
+request (its shelf button and its close button) and, when the markup binds
+the root's `visible`, the plugin's binding. Closing the window with its
+close button clears the player's request, so setting the binding back to
+true does not reopen it. `ShowPanel` and `HidePanel` make that request from
+the plugin, exactly as the shelf button does:
+
+```csharp
+host.Ui.ShowPanel("main");          // by window id or title
+host.Ui.HidePanel("main");
+bool open = host.Ui.IsViewVisible("main");
+```
+
+They reach only the calling plugin's own windows and return false for a
+window it does not have, before the window has been put on screen, and on a
+client without a window. A window whose bound `visible` is false stays hidden
+after `ShowPanel` until the binding is true again.
+
 ## Client windows
 
 A plugin can also show, hide, toggle, or query one of the client's own

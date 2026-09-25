@@ -193,6 +193,7 @@ public sealed class RuntimeCommunicationState : IDisposable
                 {
                     LogTextType = (int)type,
                     Received = DateTimeOffset.UtcNow,
+                    DisplayText = text,
                 }))
             {
                 return;
@@ -383,6 +384,8 @@ internal sealed class RuntimeCommunicationEventStream
             LogTextType = projection.LogTextType,
             CombatKind = projection.CombatKind,
             Received = projection.Received,
+            ChannelId = projection.ChannelId,
+            DisplayText = projection.DisplayText,
         };
     }
 

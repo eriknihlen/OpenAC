@@ -458,6 +458,208 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
         Assert.Equal(1, logoffs);
     }
 
+    /// <summary>
+    /// Logoff reaches plugins before the session's state is reset, as the
+    /// contract says, and only once: the reset that follows releases every
+    /// object, and a plugin tracking inventory must read that after it was
+    /// told the session is ending, not as the player dropping everything.
+    /// The handler can still read the game. Mutation: drop the controller's
+    /// leaving-world announcement and the order flips to reset-then-logoff,
+    /// with the surface already unavailable.
+    /// </summary>
+    [Fact]
+    public void LogoffReachesPluginsBeforeTheSessionIsResetAndOnlyOnce()
+    {
+        var order = new List<string>();
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession(reset: _ => order.Add("reset"));
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        bool readableAtLogoff = false;
+        events.Logoff += () =>
+        {
+            order.Add("logoff");
+            readableAtLogoff = surface.IsAvailable;
+        };
+
+        Enter(runtime, commands);
+        order.Clear();
+        Leave(runtime, commands);
+
+        Assert.Equal(["logoff", "reset"], order);
+        Assert.True(readableAtLogoff);
+    }
+
+    [Fact]
+    public void LogoffToCharacterSelectReachesPluginsBeforeTheResetAndOnlyOnce()
+    {
+        var order = new List<string>();
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession(reset: _ => order.Add("reset"));
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var observer = new LeavingObserver();
+        using var subscription = runtime.Subscribe(observer);
+        events.Logoff += () => order.Add("logoff");
+        events.LoginComplete += () => order.Add("login");
+
+        Enter(runtime, commands);
+        order.Clear();
+        observer.Clear();
+        Assert.True(runtime.Session.CompleteCharacterLogOff(runtime.Generation).Accepted);
+        runtime.SyncLifecycleEmission();
+        runtime.SyncLifecycleEmission();
+
+        Assert.Equal(["logoff", "reset"], order);
+        Assert.Equal(["leaving", "InWorld->Starting"], observer.Log);
+        Assert.False(surface.IsAvailable);
+    }
+
+    [Fact]
+    public void ALogoffStraightIntoTheNextCharacterRaisesLogoffThenLoginComplete()
+    {
+        var order = new List<string>();
+        var events = new WorldEvents();
+        var operations = new RealSessionOperations();
+        operations.Roster.Add(new CharacterList.Character(0x50000002u, "PluginApiSecond", 0u));
+        var (runtime, commands) = CreateRealSession(operations: operations);
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var observer = new LeavingObserver();
+        using var subscription = runtime.Subscribe(observer);
+        events.Logoff += () => order.Add("logoff");
+        events.LoginComplete += () => order.Add("login " + surface.Name);
+
+        Enter(runtime, commands);
+        order.Clear();
+        observer.Clear();
+        Assert.True(runtime.Session.TrySetNextLogin(0x50000002u));
+        Assert.True(runtime.Session.CompleteCharacterLogOff(runtime.Generation).Accepted);
+        Assert.True(runtime.Session.IsInWorld);
+        runtime.SyncLifecycleEmission();
+        runtime.SyncLifecycleEmission();
+
+        Assert.Equal(["logoff", "login PluginApiSecond"], order);
+        Assert.Equal(
+            ["leaving", "InWorld->Starting", "Starting->InWorld"],
+            observer.Log);
+        Assert.True(surface.IsAvailable);
+    }
+
+    [Fact]
+    public void ALostConnectionReachesPluginsAsOneLogoffBeforeTheReset()
+    {
+        var order = new List<string>();
+        var events = new WorldEvents();
+        var operations = new RealSessionOperations();
+        var (runtime, commands) = CreateRealSession(
+            reset: _ => order.Add("reset"),
+            operations: operations);
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var observer = new LeavingObserver();
+        using var subscription = runtime.Subscribe(observer);
+        events.Logoff += () => order.Add("logoff");
+
+        Enter(runtime, commands);
+        order.Clear();
+        observer.Clear();
+        operations.Lost = true;
+        runtime.Session.Tick();
+        runtime.SyncLifecycleEmission();
+
+        Assert.Equal(["logoff", "reset"], order);
+        Assert.Equal(["leaving", "InWorld->Stopped"], observer.Log);
+    }
+
+    [Fact]
+    public void AStopFromInsideTheLogoffHandlerAnnouncesTheLeaveOnce()
+    {
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var observer = new LeavingObserver();
+        using var subscription = runtime.Subscribe(observer);
+        int logoffs = 0;
+        events.Logoff += () =>
+        {
+            logoffs++;
+            commands.Stop(runtime.Generation);
+        };
+
+        Enter(runtime, commands);
+        observer.Clear();
+        Leave(runtime, commands);
+        runtime.Session.Tick();
+        runtime.SyncLifecycleEmission();
+
+        Assert.Equal(1, logoffs);
+        Assert.Equal(1, observer.Log.Count(entry => entry == "leaving"));
+        Assert.False(runtime.Session.IsInWorld);
+    }
+
+    [Fact]
+    public void WhatACharacterAnnouncedIsNotReadBackAfterItLeaves()
+    {
+        string peers = Path.Combine(
+            Path.GetTempPath(),
+            "acdream-own-announcements-" + Guid.NewGuid().ToString("N"));
+        var events = new WorldEvents();
+        var (runtime, commands) = CreateRealSession();
+        using var runtimeDisposal = runtime;
+        try
+        {
+            using var surface = new RuntimeAutomationSurface(
+                events,
+                new LocalPluginPeerRegistry(peers));
+            surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+            INetworkAutomation network = surface.Network;
+
+            Enter(runtime, commands);
+            Assert.True(network.BroadcastCommand("/go", [], 0));
+            Assert.Single(network.CaptureOwnCommands(0L));
+            Assert.True(runtime.Session.CompleteCharacterLogOff(runtime.Generation).Accepted);
+            runtime.SyncLifecycleEmission();
+
+            Assert.Empty(network.CaptureOwnCommands(0L));
+            Assert.Empty(network.CaptureOwnCasts(0L));
+        }
+        finally
+        {
+            if (Directory.Exists(peers))
+                Directory.Delete(peers, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ASessionThatNeverReachedTheWorldAnnouncesNoLeave()
+    {
+        var events = new WorldEvents();
+        var operations = new RealSessionOperations();
+        operations.Roster.Clear();
+        var (runtime, commands) = CreateRealSession(operations: operations);
+        using var runtimeDisposal = runtime;
+        using var surface = new RuntimeAutomationSurface(events);
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        var observer = new LeavingObserver();
+        using var subscription = runtime.Subscribe(observer);
+        int logoffs = 0;
+        events.Logoff += () => logoffs++;
+
+        Enter(runtime, commands);
+        Assert.False(runtime.Session.IsInWorld);
+        Leave(runtime, commands);
+
+        Assert.Equal(0, logoffs);
+        Assert.DoesNotContain("leaving", observer.Log);
+    }
+
     [Fact]
     public void CharacterIdentityIsPopulatedTheMomentLoginCompleteFires()
     {
@@ -1055,9 +1257,11 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
     // must fire off the same real path production hosts use
     // (GameRuntime.SyncLifecycleEmission), not off a synthetic delta a real
     // session would never produce on its own.
-    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Commands) CreateRealSession()
+    private static (GameRuntime Runtime, DirectGameRuntimeCommandAdapter Commands) CreateRealSession(
+        Action<RuntimeGenerationToken>? reset = null,
+        RealSessionOperations? operations = null)
     {
-        var operations = new RealSessionOperations();
+        operations ??= new RealSessionOperations();
         GameRuntime runtime = GameRuntimeTestFactory.Create(session: operations);
         var session = new LiveSessionHost(
             runtime.Session,
@@ -1065,7 +1269,7 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
                 new LiveSessionRoutingFactories(
                     _ => new NoOpEventRoute(),
                     _ => new NoOpCommandRoute()),
-                _ => { },
+                reset ?? (_ => { }),
                 new LiveSessionSelectionBindings(
                     id => runtime.PlayerIdentity.ServerGuid = id,
                     _ => { },
@@ -1119,10 +1323,17 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
 
         public void Connect(WorldSession session, string user, string password) { }
 
+        public List<CharacterList.Character> Roster { get; } =
+            [new CharacterList.Character(0x50000001u, "PluginApiFixture", 0u)];
+
+        public bool Lost { get; set; }
+
+        public bool IsConnectionLost(WorldSession session) => Lost;
+
         public CharacterList.Parsed GetCharacters(WorldSession session) =>
             new(
                 0u,
-                [new CharacterList.Character(0x50000001u, "PluginApiFixture", 0u)],
+                [.. Roster],
                 [],
                 11,
                 "PluginApi",
@@ -1131,9 +1342,29 @@ public sealed class RuntimeAutomationSurfacePluginApiTests
 
         public void EnterWorld(WorldSession session, int activeCharacterIndex) { }
 
+        public void ReturnToCharacterSelect(WorldSession session) { }
+
         public void Tick(WorldSession session) { }
 
         public void DisposeSession(WorldSession session) => session.Dispose();
+    }
+
+    private sealed class LeavingObserver : IRuntimeEventObserver
+    {
+        public List<string> Log { get; } = [];
+
+        public void Clear() => Log.Clear();
+
+        public void OnLeavingWorld() => Log.Add("leaving");
+        public void OnLifecycle(in RuntimeLifecycleDelta delta) =>
+            Log.Add($"{delta.Previous}->{delta.Current}");
+        public void OnCommand(in RuntimeCommandDelta delta) { }
+        public void OnEntity(in RuntimeEntityDelta delta) { }
+        public void OnInventory(in RuntimeInventoryDelta delta) { }
+        public void OnChat(in RuntimeChatDelta delta) { }
+        public void OnMovement(in RuntimeMovementDelta delta) { }
+        public void OnPortal(in RuntimePortalDelta delta) { }
+        public void OnCombat(in RuntimeCombatDelta delta) { }
     }
 
     private sealed class TestPluginLogger : IPluginLogger

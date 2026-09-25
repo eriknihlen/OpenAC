@@ -35,5 +35,10 @@ public sealed class DungeonMapParityTests
             transcript.Record("layers", plan.Layers.Count);
             Assert.True(plan.IsEmpty);
             Assert.Empty(plan.Layers);
+
+            transcript.Step("the indoor cells, without the files to read");
+            IReadOnlyList<PluginIndoorCell> cells = map.CaptureIndoorCells(landblock);
+            transcript.Record("cells", cells.Count);
+            Assert.Empty(cells);
         });
 }

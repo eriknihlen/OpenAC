@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace AcDream.App.UI.Layout;
+namespace AcDream.Content;
 
 public static class RetailStringEscapes
 {

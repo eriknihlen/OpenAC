@@ -59,6 +59,13 @@ public sealed class ItemParityTests
             transcript.Record("kit.plural", kit.PluralName);
             Assert.Equal(ParityWorld.KitCoverage, kit.CoverageMask);
             Assert.Equal("Healing Kits", kit.PluralName);
+
+            // The same bits on the world-object record, before any appraisal.
+            Assert.True(arm.Host.Automation.Objects.TryGet(
+                ParityWorld.Kit, out PluginWorldObject kitObject));
+            transcript.Record("kit.worldCoverage", kitObject.CoverageMask);
+            Assert.False(kitObject.HasAppraisalData);
+            Assert.Equal(ParityWorld.KitCoverage, kitObject.CoverageMask);
         });
 
     [Fact]
@@ -213,6 +220,67 @@ public sealed class ItemParityTests
             // racing the first, and nothing went out for it.
             Assert.Equal(PluginItemCommandStatus.Busy, second.Status);
             Assert.Empty(Sent(arm, MoveAction));
+            transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>
+    /// A move asked to join a stack pours into the matching stack already in
+    /// the pack instead of taking a slot beside it; the same move not asked to
+    /// join is the plain one. Both clients have to choose the same request, or
+    /// a plugin tidying its packs ends up with a different pack on each.
+    /// </summary>
+    [Fact]
+    public void MovingAStackOntoOneInAPackLooksTheSameOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            _ = ParityWorld.Stage(arm);
+            ParityWorld.StageTwoStacksOfOneKind(arm.Runtime);
+            _ = arm.Operations.TakeOutbound();
+            IItemAutomation items = arm.Host.Automation.Items;
+
+            transcript.Step("move part of the loose coins, joining a stack");
+            PluginItemCommandResult join = items.MoveToContainer(
+                ParityWorld.CarriedCoin,
+                ParityWorld.SidePack,
+                amount: 15u,
+                placement: 0,
+                joinStack: true);
+            Record(transcript, "join", join);
+            // The join really went out as a merge naming the stack in the
+            // pack and the amount asked for, and no plain move went with it.
+            Assert.Equal(PluginItemCommandStatus.Started, join.Status);
+            Assert.Equal(
+                (ParityWorld.CarriedCoin, ParityWorld.SidePackCoin, 15u),
+                TheMerge(arm));
+            Assert.Empty(Sent(arm, MoveAction));
+            Assert.Empty(Sent(arm, SplitToContainerAction));
+            transcript.RecordOutbound(arm);
+        });
+
+    /// <summary>The same move, not asked to join: a plain split into the pack.</summary>
+    [Fact]
+    public void MovingAStackWithoutJoiningLooksTheSameOnBothClients() =>
+        ParityScenario.Run(static (arm, transcript) =>
+        {
+            _ = ParityWorld.Stage(arm);
+            ParityWorld.StageTwoStacksOfOneKind(arm.Runtime);
+            _ = arm.Operations.TakeOutbound();
+            IItemAutomation items = arm.Host.Automation.Items;
+
+            transcript.Step("move part of the loose coins, not joining");
+            PluginItemCommandResult split = items.MoveToContainer(
+                ParityWorld.CarriedCoin,
+                ParityWorld.SidePack,
+                amount: 15u,
+                placement: 0,
+                joinStack: false);
+            Record(transcript, "split", split);
+            Assert.Equal(PluginItemCommandStatus.Started, split.Status);
+            Assert.Empty(Sent(arm, MergeAction));
+            ParityOutbound message =
+                Assert.Single(Sent(arm, SplitToContainerAction));
+            Assert.Equal(ParityWorld.CarriedCoin, Field(message, 12));
+            Assert.Equal(ParityWorld.SidePack, Field(message, 16));
             transcript.RecordOutbound(arm);
         });
 
@@ -460,6 +528,8 @@ public sealed class ItemParityTests
     private const uint ApplyAction = 0x0035u;
     private const uint MoveAction = 0x0019u;
     private const uint SalvageAction = 0x027Du;
+    private const uint MergeAction = 0x0054u;
+    private const uint SplitToContainerAction = 0x0055u;
 
     /// <summary>
     /// Everything this arm asked to send that carries one named client
@@ -494,6 +564,13 @@ public sealed class ItemParityTests
     {
         ParityOutbound message = Assert.Single(Sent(arm, MoveAction));
         return (Field(message, 12), Field(message, 16));
+    }
+
+    /// <summary>What the one merge named: the stack poured, the stack joined, the amount.</summary>
+    private static (uint Source, uint Target, uint Amount) TheMerge(ParityArm arm)
+    {
+        ParityOutbound message = Assert.Single(Sent(arm, MergeAction));
+        return (Field(message, 12), Field(message, 16), Field(message, 20));
     }
 
     /// <summary>

@@ -47,6 +47,9 @@ public sealed class GraphicalPluginSessionTests
         Assert.Contains(
             logger.Messages,
             message => message.Contains("fixture-enabled:hasUi=True", StringComparison.Ordinal));
+        Assert.Contains(
+            "fixture-status:available=True:published=True:read=enabled",
+            logger.Messages);
 
         JsonElement[] statuses = ReadStatuses(statusPath);
         Assert.Equal(["started", "pluginLoaded", "pluginFailed"], EventNames(statuses));

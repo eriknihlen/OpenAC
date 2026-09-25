@@ -24,7 +24,7 @@ public sealed class RuntimeChatFeedTests
             "You say, \"hi there\"",
             Word(new ChatEntry(ChatKind.LocalSpeech, "You", "hi there", 0u, 0u)));
         Assert.Equal(
-            "Bob shouts, \"hi there\"",
+            "Bob says, \"hi there\"",
             Word(new ChatEntry(
                 ChatKind.RangedSpeech, "Bob", "hi there", OtherPlayerGuid, 0u)));
         Assert.Equal(
@@ -47,10 +47,10 @@ public sealed class RuntimeChatFeedTests
             "[Popup] You have died.",
             Word(new ChatEntry(ChatKind.Popup, "", "You have died.", 0u, 0u)));
         Assert.Equal(
-            "* Bob waves.",
+            "Bob waves.",
             Word(new ChatEntry(ChatKind.Emote, "Bob", "waves.", OtherPlayerGuid, 0u)));
         Assert.Equal(
-            "* Bob waves.",
+            "Bob waves.",
             Word(new ChatEntry(
                 ChatKind.SoulEmote, "Bob", "waves.", OtherPlayerGuid, 0u)));
         Assert.Equal(

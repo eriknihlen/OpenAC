@@ -85,6 +85,9 @@ public sealed class HeadlessPluginSessionTests
         Assert.Equal(0, statuses[6].GetProperty("commandIndex").GetInt32());
         Assert.Equal("/", statuses[6].GetProperty("command").GetString());
         Assert.Contains("fixture-enabled:hasUi=False:entities=0", output.ToString());
+        Assert.Contains(
+            "fixture-status:available=True:published=True:read=enabled",
+            output.ToString());
 
         WeakReference context = Assert.Single(
             plugins.CaptureLoadContextWeakReferences());

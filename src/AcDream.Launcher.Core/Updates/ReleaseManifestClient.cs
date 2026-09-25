@@ -377,7 +377,9 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
         or HttpStatusCode.TemporaryRedirect
         or HttpStatusCode.PermanentRedirect;
 
-    private static HttpMessageHandler CreateRedirectDisabledHandler() =>
+    /// <summary>The transport every release download uses: redirects are left to the caller, which
+    /// validates each hop before requesting it.</summary>
+    internal static HttpMessageHandler CreateRedirectDisabledHandler() =>
         new HttpClientHandler
         {
             AllowAutoRedirect = false,

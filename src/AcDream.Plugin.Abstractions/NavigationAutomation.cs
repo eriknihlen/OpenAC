@@ -372,6 +372,40 @@ public readonly record struct PluginGoToReport(
     public string? Owner { get; init; }
 }
 
+/// <summary>What <see cref="INavigationAutomation.CheckRoomAhead"/> found.</summary>
+public enum PluginRoomAheadStatus
+{
+    /// <summary>
+    /// The client could not look: no session is in the world, the character has
+    /// no body or no known shape yet, the spot is not loaded, the distance is out
+    /// of range, or this host does not offer the check.
+    /// </summary>
+    Unknown = 0,
+
+    /// <summary>A body the size of the character fits at the spot.</summary>
+    Clear,
+
+    /// <summary>Something solid is in the way at every height tried.</summary>
+    Blocked,
+}
+
+/// <summary>
+/// The answer of <see cref="INavigationAutomation.CheckRoomAhead"/>.
+/// </summary>
+/// <param name="Status">Whether there is room, or that the client could not tell.</param>
+/// <param name="Position">
+/// Where the body would stand when <paramref name="Status"/> is
+/// <see cref="PluginRoomAheadStatus.Clear"/>, facing the way the character
+/// faces; the default position otherwise.
+/// </param>
+public readonly record struct PluginRoomAhead(
+    PluginRoomAheadStatus Status,
+    PluginNavigationPosition Position)
+{
+    /// <summary>True when the check found room.</summary>
+    public bool IsClear => Status == PluginRoomAheadStatus.Clear;
+}
+
 /// <summary>The outcome of a plan-only navigation request.</summary>
 public enum PluginNavigationPlanStatus
 {
@@ -510,6 +544,30 @@ public interface INavigationAutomation
     /// </returns>
     IReadOnlyList<PluginNavigationObject> CaptureObjects() =>
         Array.Empty<PluginNavigationObject>();
+
+    /// <summary>
+    /// Looks for room to set a body the size of the character down
+    /// <paramref name="distanceMeters"/> straight ahead of where it faces: the
+    /// room a pet needs before it is summoned. The client asks its own
+    /// collision the way it places any object that enters the world, without
+    /// letting the body slide aside, so a wall, a building, rising terrain, a
+    /// door or any other solid object in that spot blocks it; live creatures
+    /// and players standing there do not, as they move on. Ground a little
+    /// higher or lower than the character's feet is tried too: up to 70 cm
+    /// above and about 66 cm below. Nothing moves; call from the thread that
+    /// raises <see cref="IEvents.Tick"/>.
+    /// </summary>
+    /// <param name="distanceMeters">
+    /// How far ahead to look, in metres, above 0 and at most 10. Three metres
+    /// is a summoned pet's usual distance.
+    /// </param>
+    /// <returns>
+    /// Clear with the spot, Blocked, or Unknown when the client cannot look
+    /// (see <see cref="PluginRoomAheadStatus.Unknown"/>); the default
+    /// implementation always answers Unknown, so a plugin that must not stall
+    /// on a host without the check can treat Unknown as room.
+    /// </returns>
+    PluginRoomAhead CheckRoomAhead(float distanceMeters) => default;
 
     /// <summary>
     /// Hold the given movement keys until the intent is replaced or cleared.

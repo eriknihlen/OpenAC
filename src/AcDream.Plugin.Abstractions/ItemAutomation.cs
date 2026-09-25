@@ -66,7 +66,9 @@ public readonly record struct PluginPaletteInfo(
 /// nothing.
 /// </param>
 /// <param name="PetClass">
-/// The kind of pet a pet device summons; zero when the item is not one.
+/// The kind of pet a pet device summons, when the server says; zero when the
+/// item is not one or the server keeps it to itself, as the usual servers do.
+/// <see cref="PluginInventoryItem.IsPetDevice"/> does not depend on it alone.
 /// </param>
 /// <param name="SummoningMastery">
 /// The summoning mastery the item belongs to; zero when it has none.
@@ -139,8 +141,35 @@ public readonly record struct PluginInventoryItem(
     /// <summary>True when the item currently occupies an equipment slot.</summary>
     public bool IsEquipped => EquippedLocation != 0u;
 
-    /// <summary>True when the item summons a pet.</summary>
-    public bool IsPetDevice => PetClass != 0;
+    /// <summary>
+    /// The shared cooldown every summoning essence belongs to in the game's
+    /// item data: using any one of them starts it for all of them. Pass it to
+    /// <see cref="ISpellCatalog.GetCooldownRemaining"/> to see how long until
+    /// the next summon.
+    /// </summary>
+    public const uint SummoningCooldownId = 213u;
+
+    /// <summary>
+    /// True when the item summons a pet: it belongs to the summoning
+    /// essences' shared cooldown (<see cref="SummoningCooldownId"/>), which
+    /// the server sends with the item itself, or the server named the pet it
+    /// summons (<see cref="PetClass"/>).
+    /// </summary>
+    public bool IsPetDevice =>
+        SharedCooldownId == SummoningCooldownId || PetClass != 0;
+
+    /// <summary>
+    /// The shared cooldown the item belongs to: using it starts that
+    /// cooldown for every item with the same id. The server sends it with the
+    /// item and again in an appraisal; zero when the item has none.
+    /// </summary>
+    public uint SharedCooldownId { get; init; }
+
+    /// <summary>
+    /// How long, in seconds, the item's shared cooldown lasts once it is
+    /// used; zero when the server sent no length.
+    /// </summary>
+    public double CooldownSeconds { get; init; }
 
     /// <summary>
     /// True when the item can cast a spell of its own on a hit, at some rate
@@ -361,6 +390,14 @@ public readonly record struct PluginInventoryItem(
     public float UseRadius { get; init; }
 
     /// <summary>
+    /// The raw description words and optional values of the item's latest
+    /// full description, as the server sent them; null for an item the
+    /// client never received a description of, and on a host that does not
+    /// report them. See <see cref="PluginObjectHeader"/>.
+    /// </summary>
+    public PluginObjectHeader? Header { get; init; }
+
+    /// <summary>
     /// The icon-highlight effect bits the server sends with the object
     /// itself. Bit 0 is "magical", which is how a loot rule can tell that an
     /// item is expected to carry spells before anything has appraised it.
@@ -543,6 +580,12 @@ public enum PluginItemCommandStatus
     /// there is something to say.
     /// </summary>
     Refused,
+
+    /// <summary>
+    /// The command was carried out by the client alone and has already taken
+    /// effect; nothing was sent to the server.
+    /// </summary>
+    Completed,
 }
 
 /// <summary>The outcome of one item command, with an optional explanation.</summary>
@@ -728,6 +771,43 @@ public interface IItemAutomation
         new(PluginItemCommandStatus.Unavailable);
 
     /// <summary>
+    /// The same move, able to join a stack the way dropping a stack onto a
+    /// pack does. With <paramref name="joinStack"/> true the client first
+    /// looks for a stack of the same thing in the container -- its own items
+    /// first, then those in each pack inside it -- that has room for
+    /// everything being moved; the first one found is joined instead, with
+    /// no slot needed, and the request is a merge. A stack that could take
+    /// only part of it is passed over. When no stack qualifies, or with
+    /// <paramref name="joinStack"/> false, this is exactly
+    /// <see cref="MoveToContainer(uint, uint, uint, int)"/>.
+    /// </summary>
+    /// <remarks>
+    /// A host that cannot join stacks passes a move with
+    /// <paramref name="joinStack"/> false on to the plain move, and answers
+    /// one with <paramref name="joinStack"/> true
+    /// <see cref="PluginItemCommandStatus.Unavailable"/> without moving
+    /// anything.
+    /// </remarks>
+    /// <param name="objectId">The owned item to move.</param>
+    /// <param name="containerObjectId">
+    /// The container to move it into, or the player for the main pack.
+    /// </param>
+    /// <param name="amount">
+    /// Zero for the whole stack, or how many to split off and move.
+    /// </param>
+    /// <param name="placement">The slot to put it in when it takes one.</param>
+    /// <param name="joinStack">Whether to join a stack already in the container.</param>
+    PluginItemCommandResult MoveToContainer(
+        uint objectId,
+        uint containerObjectId,
+        uint amount,
+        int placement,
+        bool joinStack) =>
+        joinStack
+            ? new(PluginItemCommandStatus.Unavailable)
+            : MoveToContainer(objectId, containerObjectId, amount, placement);
+
+    /// <summary>
     /// Asks the server to pour one owned stack into another owned stack of
     /// the same thing. Pass an <paramref name="amount"/> of zero to move the
     /// whole source stack; an amount larger than it is refused with a notice.
@@ -771,5 +851,47 @@ public interface IItemAutomation
     /// goods, worth too little or too much, or an item that cannot be sold.
     /// </summary>
     PluginItemCommandResult Sell(uint objectId, uint amount = 0u) =>
+        new(PluginItemCommandStatus.Unavailable);
+
+    /// <summary>
+    /// Lets go of an item the client still lists in the player's packs but
+    /// the server no longer has. The item leaves the client exactly as it
+    /// would if the server had deleted it: out of its pack, out of every
+    /// inventory list and window, and <see cref="IEvents.ObjectChanged"/>
+    /// reports it released. Nothing is sent to the server, and the server is
+    /// not asked whether the item exists; if it does after all, it comes back
+    /// the next time the server describes the inventory, at the latest on the
+    /// next login.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only an item the server has just refused to appraise is let go of:
+    /// <see cref="PluginWorldObject.LastAppraisalUnsuccessful"/> must be true
+    /// for it -- so the server has said nothing else about the item since --
+    /// and that refusal must have arrived within the last 30 seconds of game
+    /// time. The server also refuses an item made to resist appraisal and a
+    /// repeat request sent within about five seconds of an unsuccessful one,
+    /// so a careful caller asks again after that pause and drops only an item
+    /// refused twice, straight after the second refusal.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="PluginItemCommandStatus.Completed"/> when the item is
+    /// gone from the client. Reports
+    /// <see cref="PluginItemCommandStatus.InvalidItem"/> for an unknown id, the
+    /// character itself, anything the player does not carry, and an item the
+    /// client has no server record of to let go of.
+    /// Reports <see cref="PluginItemCommandStatus.Refused"/> with a notice for
+    /// an item that is worn or wielded, a pack that still holds anything, an
+    /// item the server has not refused to appraise, and one whose refusal is
+    /// more than 30 seconds old. Reports
+    /// <see cref="PluginItemCommandStatus.Busy"/> while an appraisal of this
+    /// very item is still awaited -- its answer, not the earlier one, is what
+    /// counts -- and whenever <see cref="IsBusy"/> reads true, since an item
+    /// request in flight may be about this item too. <see cref="IsBusy"/> does
+    /// not cover an appraisal in flight, so a caller that has just asked about
+    /// the item waits for the answer before letting go of it.
+    /// </para>
+    /// </remarks>
+    PluginItemCommandResult ForgetStaleItem(uint objectId) =>
         new(PluginItemCommandStatus.Unavailable);
 }

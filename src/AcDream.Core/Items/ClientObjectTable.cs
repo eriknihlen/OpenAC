@@ -80,9 +80,21 @@ public sealed class ClientObjectTable
     private readonly Dictionary<uint, (ClientObjectPlacement Placement, uint? ContainerTypeHint)>
         _pendingUnresolvedPlacements = new();
     private ulong _mutationRevision;
+    private readonly Func<double>? _clockSeconds;
 
     public ClientObjectTable()
+        : this(clockSeconds: null)
     {
+    }
+
+    /// <param name="clockSeconds">
+    /// The clock an unsuccessful appraisal answer is stamped with, so a
+    /// reader can tell how long ago the server refused. Without one the stamp
+    /// stays zero.
+    /// </param>
+    public ClientObjectTable(Func<double>? clockSeconds)
+    {
+        _clockSeconds = clockSeconds;
         ObjectAdded += _ => AdvanceMutationRevision();
         ObjectMoved += _ => AdvanceMutationRevision();
         ObjectRemoved += _ => AdvanceMutationRevision();
@@ -281,6 +293,7 @@ public sealed class ClientObjectTable
         uint? containerTypeHint = null)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         return ApplyPlacement(
             item,
             new ClientObjectPlacement(
@@ -408,6 +421,7 @@ public sealed class ClientObjectTable
             return false;
         }
 
+        ServerShowedObject(item);
         if (!ApplyPlacement(
                 item,
                 placement,
@@ -584,6 +598,7 @@ public sealed class ClientObjectTable
     public bool UpdateProperties(uint itemId, PropertyBundle incoming)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         MergeProperties(item, incoming);
         ApplyCooldownProperties(item, incoming);
         ObjectUpdated?.Invoke(item);
@@ -609,6 +624,7 @@ public sealed class ClientObjectTable
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         MergeProperties(item, incoming);
         item.AppraisalAnswered = true;
+        item.LastAppraisalUnsuccessful = false;
         item.AppraisedSpellIds = spellIds.Count == 0
             ? Array.Empty<uint>()
             : spellIds.ToArray();
@@ -643,14 +659,30 @@ public sealed class ClientObjectTable
     /// <summary>
     /// Records that the server answered an appraisal it could not make. The
     /// answer carries nothing to keep, so nothing else about the object
-    /// changes.
+    /// changes: what an earlier successful answer delivered stays. Every such
+    /// answer is stamped with the table's clock, a repeat refusal included.
     /// </summary>
     public bool RecordUnsuccessfulAppraisal(uint itemId)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
-        if (item.AppraisalAnswered) return true;
+        item.LastAppraisalUnsuccessfulAtSeconds = _clockSeconds?.Invoke() ?? 0d;
+        if (item.AppraisalAnswered && item.LastAppraisalUnsuccessful) return true;
         item.AppraisalAnswered = true;
+        item.LastAppraisalUnsuccessful = true;
         ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
+    /// <summary>
+    /// The server has just said something about the object other than an
+    /// appraisal refusal, which shows it still has the object: an earlier
+    /// refusal no longer stands. Answers whether it stood.
+    /// </summary>
+    private static bool ServerShowedObject(ClientObject item)
+    {
+        if (!item.LastAppraisalUnsuccessful)
+            return false;
+        item.LastAppraisalUnsuccessful = false;
         return true;
     }
 
@@ -663,6 +695,7 @@ public sealed class ClientObjectTable
             item = new ClientObject { ObjectId = guid };
             RetainObject(item);
         }
+        ServerShowedObject(item);
         foreach (var kv in incoming.Ints)        item.Properties.Ints[kv.Key] = kv.Value;
         foreach (var kv in incoming.Int64s)      item.Properties.Int64s[kv.Key] = kv.Value;
         foreach (var kv in incoming.Bools)       item.Properties.Bools[kv.Key] = kv.Value;
@@ -677,6 +710,7 @@ public sealed class ClientObjectTable
     public bool UpdateIntProperty(uint itemId, uint propertyId, int value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         ClientObjectPlacement previous = ClientObjectPlacement.From(item);
         item.Properties.Ints[propertyId] = value;
         if (propertyId == UiEffectsPropertyId) item.Effects = (uint)value;
@@ -720,6 +754,7 @@ public sealed class ClientObjectTable
     public bool UpdateDataIdProperty(uint itemId, uint propertyId, uint value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         item.Properties.DataIds[propertyId] = value;
         switch ((Properties.PropertyDataId)propertyId)
         {
@@ -745,6 +780,7 @@ public sealed class ClientObjectTable
     public bool UpdateInstanceIdProperty(uint itemId, uint propertyId, uint value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         item.Properties.InstanceIds[propertyId] = value;
         ObjectUpdated?.Invoke(item);
         return true;
@@ -753,6 +789,7 @@ public sealed class ClientObjectTable
     public bool UpdateInt64Property(uint itemId, uint propertyId, long value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
         item.Properties.Int64s[propertyId] = value;
         ObjectUpdated?.Invoke(item);
         return true;
@@ -761,6 +798,7 @@ public sealed class ClientObjectTable
     public bool UpdateStackSize(uint guid, int stackSize, int value)
     {
         if (!_objects.TryGetValue(guid, out var item)) return false;
+        ServerShowedObject(item);
         item.StackSize = stackSize;
         item.Value = value;
         ObjectUpdated?.Invoke(item);
@@ -772,6 +810,7 @@ public sealed class ClientObjectTable
     {
         ArgumentNullException.ThrowIfNull(restrictions);
         if (!_objects.TryGetValue(guid, out var item)) return false;
+        ServerShowedObject(item);
         item.Restrictions = restrictions;
         ObjectUpdated?.Invoke(item);
         return true;
@@ -785,6 +824,7 @@ public sealed class ClientObjectTable
             obj = new ClientObject { ObjectId = d.Guid };
             RetainObject(obj);
         }
+        ServerShowedObject(obj);
         uint oldContainer = obj.ContainerId;
         ClientObjectPlacement previous = ClientObjectPlacement.From(obj);
 
@@ -828,6 +868,9 @@ public sealed class ClientObjectTable
         if (d.HouseOwnerId is { } houseOwnerId) obj.HouseOwnerId = houseOwnerId;
         if (d.MonarchId is { } monarchId) obj.MonarchId = monarchId;
         if (d.Restrictions is { } restrictions) obj.Restrictions = restrictions;
+        // A full description replaces the whole header: a value it did not
+        // carry is one the object no longer has on record.
+        if (d.Header is { } header) obj.Header = header;
 
         List<uint>? changedContainers = RemoveFromOtherContainerIndexes(
             obj.ObjectId,
@@ -862,6 +905,7 @@ public sealed class ClientObjectTable
             obj = new ClientObject { ObjectId = guid };
             RetainObject(obj);
         }
+        ServerShowedObject(obj);
         uint oldContainer = obj.ContainerId;
         ClientObjectPlacement previous = ClientObjectPlacement.From(obj);
         if (containerId != 0)
@@ -932,6 +976,7 @@ public sealed class ClientObjectTable
                 RetainObject(obj);
             }
 
+            ServerShowedObject(obj);
             ClientObjectPlacement previous = ClientObjectPlacement.From(obj);
             obj.ContainerId = 0u;
             obj.ContainerSlot = -1;
@@ -1176,6 +1221,7 @@ public sealed class ClientObjectTable
 
         var ordered = new List<uint>(entries.Count);
         var added = new List<ClientObject>();
+        List<ClientObject>? shown = null;
         for (int i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
@@ -1188,11 +1234,20 @@ public sealed class ClientObjectTable
             }
             obj.ContainerTypeHint = entry.ContainerType;
             if (!existed) added.Add(obj);
+            // A listing names only what the server has. An object it names
+            // is otherwise not republished here, so one whose refusal this
+            // listing overturns is, for readers watching that flag.
+            else if (ServerShowedObject(obj)) (shown ??= []).Add(obj);
         }
 
         _containerIndex[containerId] = ordered;
         foreach (ClientObject item in added)
             ObjectAdded?.Invoke(item);
+        if (shown is not null)
+        {
+            foreach (ClientObject item in shown)
+                ObjectUpdated?.Invoke(item);
+        }
         ContainerContentsReplaced?.Invoke(containerId);
     }
 
@@ -1289,6 +1344,7 @@ public sealed class ClientObjectTable
                 RetainObject(obj);
             }
 
+            ServerShowedObject(obj);
             ClientObjectPlacement previous = ClientObjectPlacement.From(obj);
             obj.ContainerId = ownerId;
             obj.ContainerSlot = i;

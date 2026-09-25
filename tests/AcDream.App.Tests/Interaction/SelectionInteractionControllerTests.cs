@@ -884,6 +884,109 @@ public sealed class SelectionInteractionControllerTests
     }
 
     [Fact]
+    public void AutomationUseOfALooseGroundItemWithNoUsePicksItUp()
+    {
+        // A dropped book with no use of its own: a plain use of a loose item
+        // on the ground is a pick-up into the pack, not a refusal.
+        const uint tome = 0x8000_E5AEu;
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = tome,
+            Name = "Damaged Tome",
+            Type = ItemType.Writable,
+            Useability = ItemUseability.No,
+        });
+        h.Query.Useable = false;
+        h.SetApproach(closeRange: false, serverGuid: tome);
+
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(tome);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Empty(h.Transport.Uses);
+        Assert.Equal(new[] { (tome, Player, 0) }, h.Transport.Pickups);
+        Assert.Single(h.PendingPlacements);
+        Assert.Equal(0, h.Items.BusyCount);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnItemInTheOpenContainerPicksItUp()
+    {
+        const uint loot = 0x7000_0011u;
+        var h = new Harness
+        {
+            GroundObjectId = GroundContainer,
+        };
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = loot,
+            Name = "Insatiable Eater Jaw",
+            Type = ItemType.Misc,
+            ContainerId = GroundContainer,
+        });
+        h.Query.Useable = false;
+        h.Query.Approach = null;
+
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(loot);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Empty(h.Movement.Approaches);
+        Assert.Empty(h.Transport.Uses);
+        Assert.Equal(new[] { (loot, Player, 0) }, h.Transport.Pickups);
+    }
+
+    [Fact]
+    public void AutomationUseOfAUseableLooseGroundItemPicksItUpRatherThanUsingIt()
+    {
+        // The pick-up is decided before the item's own use is looked at, so a
+        // potion lying on the ground is collected, not drunk where it lies.
+        const uint potion = 0x8000_E5AFu;
+        var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = potion,
+            Name = "Health Potion",
+            Type = ItemType.Food,
+            Useability = ItemUseability.Contained,
+        });
+        h.SetApproach(closeRange: true, serverGuid: potion);
+
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(potion);
+
+        Assert.Equal(AutomationUseOutcome.Started, outcome);
+        Assert.Empty(h.Transport.Uses);
+        Assert.Single(h.PendingPlacements);
+    }
+
+    [Fact]
+    public void AutomationUseOfAnItemInAContainerThatIsNotOpenIsStillRefused()
+    {
+        // Only the container the character has open lends its contents to a
+        // pick-up; an item inside some other container is not loose.
+        const uint loot = 0x7000_0012u;
+        const uint closedChest = 0x7000_0013u;
+        var h = new Harness
+        {
+            GroundObjectId = GroundContainer,
+        };
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = loot,
+            Name = "Loot",
+            Type = ItemType.Misc,
+            ContainerId = closedChest,
+        });
+        h.Query.Useable = false;
+        h.SetApproach(closeRange: true, serverGuid: loot);
+
+        AutomationUseOutcome outcome = h.WorldObjectUse.TryUse(loot);
+
+        Assert.Equal(AutomationUseOutcome.NotUseable, outcome);
+        Assert.Empty(h.Transport.Pickups);
+        Assert.Empty(h.PendingPlacements);
+    }
+
+    [Fact]
     public void AutomationUseThrottleRefusesASecondCallWithinTheWindow()
     {
         var h = new Harness();

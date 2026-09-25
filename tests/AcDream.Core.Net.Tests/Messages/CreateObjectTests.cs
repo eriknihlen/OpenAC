@@ -206,6 +206,92 @@ public sealed class CreateObjectTests
     }
 
 
+    /// <summary>
+    /// A rat burrow the server spawns from its world data at 0x482D000F with the
+    /// stored angles (-0.81, 0, 0, -0.585): squared length 0.99833, outside
+    /// the 0.001 frame tolerance. The description still places the object;
+    /// its rotation in use is the sent one scaled to unit length, and the
+    /// cell and origin stay exactly as sent.
+    /// Mutation executed: the position branch stored the sent rotation
+    /// unchanged; the parsed rotation then kept its 0.99833 squared length.
+    /// </summary>
+    [Fact]
+    public void TryParse_PositionWithAnOffUnitRotation_CarriesTheUnitRotation()
+    {
+        var sent = new CreateObject.ServerPosition(
+            0x482D000Fu,
+            37.9574f,
+            146.688f,
+            2.447994f,
+            RotationW: -0.81f,
+            RotationX: 0f,
+            RotationY: 0f,
+            RotationZ: -0.585f);
+        byte[] body = BuildMinimalCreateObjectWithWeenieHeader(
+            guid: 0x80000819u,
+            name: "Rat Burrow",
+            itemType: (uint)ItemType.Creature,
+            position: sent);
+
+        var parsed = CreateObject.TryParse(body);
+
+        Assert.NotNull(parsed);
+        CreateObject.ServerPosition position = parsed.Value.Position!.Value;
+        Assert.Equal(sent.LandblockId, position.LandblockId);
+        Assert.Equal(sent.PositionX, position.PositionX);
+        Assert.Equal(sent.PositionY, position.PositionY);
+        Assert.Equal(sent.PositionZ, position.PositionZ);
+        float length = MathF.Sqrt(0.81f * 0.81f + 0.585f * 0.585f);
+        Assert.Equal(-0.81f / length, position.RotationW, precision: 5);
+        Assert.Equal(0f, position.RotationX);
+        Assert.Equal(0f, position.RotationY);
+        Assert.Equal(-0.585f / length, position.RotationZ, precision: 5);
+        Assert.Equal(position, parsed.Value.Physics!.Value.Position);
+    }
+
+    /// <summary>
+    /// A spawn whose stored angles were all left empty arrives with a zero
+    /// rotation. It cannot be scaled to unit length, so the rotation in use
+    /// is the one a freshly read description starts with: the identity.
+    /// </summary>
+    [Fact]
+    public void TryParse_PositionWithAZeroRotation_CarriesTheIdentity()
+    {
+        byte[] body = BuildMinimalCreateObjectWithWeenieHeader(
+            guid: 0x8000081Au,
+            name: "Zero",
+            itemType: (uint)ItemType.Creature,
+            position: new CreateObject.ServerPosition(
+                0x482D0007u, 22.4f, 164.7f, 5.4f, 0f, 0f, 0f, 0f));
+
+        CreateObject.ServerPosition position =
+            CreateObject.TryParse(body)!.Value.Position!.Value;
+
+        Assert.Equal(1f, position.RotationW);
+        Assert.Equal(0f, position.RotationX);
+        Assert.Equal(0f, position.RotationY);
+        Assert.Equal(0f, position.RotationZ);
+        Assert.Equal(22.4f, position.PositionX);
+    }
+
+    /// <summary>
+    /// A rotation inside the frame tolerance is carried bit for bit; the
+    /// rotation is only rescaled when the frame fails the tolerance.
+    /// </summary>
+    [Fact]
+    public void TryParse_PositionWithAValidRotation_IsCarriedAsSent()
+    {
+        var sent = new CreateObject.ServerPosition(
+            0x482D0002u, 7.94917f, 33.0161f, 6f, -0.87f, 0f, 0f, 0.493f);
+        byte[] body = BuildMinimalCreateObjectWithWeenieHeader(
+            guid: 0x8000081Bu,
+            name: "Rat Burrow",
+            itemType: (uint)ItemType.Creature,
+            position: sent);
+
+        Assert.Equal(sent, CreateObject.TryParse(body)!.Value.Position);
+    }
+
     [Fact]
     public void TryParse_NoRadarFlags_LeavesRadarFieldsNull()
     {
@@ -316,6 +402,53 @@ public sealed class CreateObjectTests
         Assert.NotNull(parsed);
         Assert.Equal(0x06005678u, parsed!.Value.IconOverlayId);
         Assert.Equal(0x06009ABCu, parsed.Value.IconUnderlayId);
+    }
+
+    /// <summary>
+    /// The three words the description is laid out by are kept as sent, so a
+    /// reader can tell which optional values were present; the second
+    /// header word is absent, not zero, when the object carried none.
+    /// </summary>
+    [Fact]
+    public void TryParse_KeepsTheDescriptionLayoutWordsAsSent()
+    {
+        byte[] withSecondHeader = BuildMinimalCreateObjectWithWeenieHeader(
+            guid: 0x5000000Du,
+            name: "Wand",
+            itemType: (uint)ItemType.Caster,
+            objectDescriptionFlags: 0x04000000u,
+            weenieFlags: 0x40000000u,
+            weenieFlags2: 0x00000001u,
+            iconOverlayId: 0x5678u,
+            iconUnderlayId: 0x9ABCu,
+            parentGuid: 0x50000001u,
+            parentLocation: 1u);
+
+        CreateObject.Parsed parsed = CreateObject.TryParse(withSecondHeader)!.Value;
+
+        Assert.Equal(0x40000000u, parsed.WeenieHeaderFlags);
+        Assert.Equal(0x00000001u, parsed.WeenieHeaderFlags2);
+        Assert.NotNull(parsed.PhysicsDescriptionFlags);
+        Assert.NotEqual(
+            0u,
+            parsed.PhysicsDescriptionFlags!.Value
+                & (uint)CreateObject.PhysicsDescriptionFlag.Parent);
+        Assert.Equal(0x50000001u, parsed.ParentGuid);
+
+        byte[] plain = BuildMinimalCreateObjectWithWeenieHeader(
+            guid: 0x5000000Eu,
+            name: "Drudge",
+            itemType: (uint)ItemType.Creature,
+            weenieFlags: 0u);
+
+        CreateObject.Parsed plainParsed = CreateObject.TryParse(plain)!.Value;
+
+        Assert.Equal(0u, plainParsed.WeenieHeaderFlags);
+        Assert.Null(plainParsed.WeenieHeaderFlags2);
+        Assert.Equal(
+            0u,
+            plainParsed.PhysicsDescriptionFlags!.Value
+                & (uint)CreateObject.PhysicsDescriptionFlag.Parent);
     }
 
     [Fact]
@@ -722,7 +855,8 @@ public sealed class CreateObjectTests
         uint? monarchId = null,
         bool houseRestrictionOpen = false,
         uint houseRestrictionMonarchId = 0,
-        IReadOnlyDictionary<uint, uint>? houseRestrictionGuests = null)
+        IReadOnlyDictionary<uint, uint>? houseRestrictionGuests = null,
+        CreateObject.ServerPosition? position = null)
     {
         var bytes = new List<byte>();
         WriteU32(bytes, CreateObject.Opcode);
@@ -738,9 +872,21 @@ public sealed class CreateObjectTests
         uint physicsFlags = 0;
         if (placementId.HasValue) physicsFlags |= (uint)CreateObject.PhysicsDescriptionFlag.AnimationFrame;
         if (parentGuid.HasValue) physicsFlags |= (uint)CreateObject.PhysicsDescriptionFlag.Parent;
+        if (position.HasValue) physicsFlags |= (uint)CreateObject.PhysicsDescriptionFlag.Position;
         WriteU32(bytes, physicsFlags);
         WriteU32(bytes, physicsState);
         if (placementId.HasValue) WriteU32(bytes, placementId.Value);
+        if (position is { } sent)
+        {
+            WriteU32(bytes, sent.LandblockId);
+            WriteF32(bytes, sent.PositionX);
+            WriteF32(bytes, sent.PositionY);
+            WriteF32(bytes, sent.PositionZ);
+            WriteF32(bytes, sent.RotationW);
+            WriteF32(bytes, sent.RotationX);
+            WriteF32(bytes, sent.RotationY);
+            WriteF32(bytes, sent.RotationZ);
+        }
         if (parentGuid.HasValue)
         {
             WriteU32(bytes, parentGuid.Value);
@@ -841,6 +987,13 @@ public sealed class CreateObjectTests
     {
         Span<byte> tmp = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(tmp, value);
+        bytes.AddRange(tmp.ToArray());
+    }
+
+    private static void WriteF32(List<byte> bytes, float value)
+    {
+        Span<byte> tmp = stackalloc byte[4];
+        BinaryPrimitives.WriteSingleLittleEndian(tmp, value);
         bytes.AddRange(tmp.ToArray());
     }
 

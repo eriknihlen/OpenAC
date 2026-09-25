@@ -9,7 +9,9 @@ public static class ChatInputParser
         uint TargetGuid = 0u);
 
     // Alias tables. Order matters only for error messages — verb
-    // matching is exact-token, not prefix.
+    // matching is whole-token, not prefix, and ignores letter case: the
+    // client's command table is keyed case-insensitively, so "/Say" and
+    // "@SAY" are the say command (see VerbEquals).
     private static readonly string[] SayAliases     = { "/say", "/s" };
     private static readonly string[] TellAliases    = { "/tell", "/t", "/send", "/whisper", "/w" };
     private static readonly string[] ReplyAliases   = { "/reply", "/r", "/rp" };
@@ -218,7 +220,7 @@ public static class ChatInputParser
     {
         string trimmedVerb = TrimVerbComma(command);
         foreach (var alias in aliases)
-            if (trimmedVerb == alias) return true;
+            if (VerbEquals(trimmedVerb, alias)) return true;
         return false;
     }
 
@@ -244,9 +246,16 @@ public static class ChatInputParser
     private static bool ContainsExact(string[] aliases, string verb)
     {
         for (int i = 0; i < aliases.Length; i++)
-            if (aliases[i] == verb) return true;
+            if (VerbEquals(aliases[i], verb)) return true;
         return false;
     }
+
+    // Command verbs compare without regard to letter case, the way the
+    // client's command table matches a typed verb; the verbs are ASCII, so
+    // an ordinal case-insensitive compare is that rule independent of the
+    // machine's culture.
+    private static bool VerbEquals(string a, string b) =>
+        string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     private static string ExtractVerb(string command)
     {

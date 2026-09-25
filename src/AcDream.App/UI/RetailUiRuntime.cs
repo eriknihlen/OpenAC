@@ -424,6 +424,7 @@ public sealed class RetailUiRuntime : IDisposable
             ShowClientWindow,
             HideClientWindow,
             IsClientWindowVisible);
+        bindings.Plugins?.BindPluginWindowControl(ShowWindow, HideWindow);
         bindings.Plugins?.BindImageServices(new RetailPluginImageBackend(
             bindings.Assets.Dats,
             bindings.Assets.DatLock,
@@ -837,7 +838,7 @@ public sealed class RetailUiRuntime : IDisposable
             case AcDream.UI.Abstractions.Input.InputAction.ChatTellToSelected:
             {
                 uint selected = _bindings.Toolbar.Selection.SelectedObjectId ?? 0u;
-                if (selected is >= 0x50000001u and <= 0x6FFFFFFFu)
+                if (AcDream.Core.Chat.PlayerObjectIds.IsPlayer(selected))
                 {
                     string? name = _bindings.Toolbar.ResolveName(selected);
                     if (!string.IsNullOrEmpty(name))
@@ -5148,28 +5149,6 @@ public sealed class RetailUiRuntime : IDisposable
             Host.Dispose);
         _shutdown.CompleteOrThrow();
         _disposed = _shutdown.IsComplete;
-    }
-
-    private sealed class PluginWindowVisibilityController(
-        Func<bool>? availability,
-        bool startVisible) : IRetainedPanelController
-    {
-        private bool _requestedVisible = startVisible;
-
-        internal bool ShouldBeVisible() =>
-            _requestedVisible && (availability?.Invoke() ?? true);
-
-        public void OnShown() => _requestedVisible = true;
-
-        public void OnHidden()
-        {
-            if (availability?.Invoke() ?? true)
-                _requestedVisible = false;
-        }
-
-        public void Dispose()
-        {
-        }
     }
 
     internal static ResourceShutdownTransaction CreateShutdownTransaction(

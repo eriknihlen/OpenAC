@@ -537,4 +537,73 @@ public class ChatCommandRouterTests
         Assert.Equal(ClientCommandId.Endurance, command.Command);
         Assert.Empty(interfaceTexts);
     }
+
+    // A typed command verb is looked up without regard to letter case, so
+    // "/Say" and "@SAY" are the say command and never a server command.
+    [Theory]
+    [InlineData("/Say You need West", ChatChannelKind.Say, null, "You need West")]
+    [InlineData("@SAY hello", ChatChannelKind.Say, null, "hello")]
+    [InlineData("/S hello", ChatChannelKind.Say, null, "hello")]
+    [InlineData("/Tell Bob, hi there", ChatChannelKind.Tell, "Bob", "hi there")]
+    [InlineData("/W Bob hi", ChatChannelKind.Tell, "Bob", "hi")]
+    [InlineData("/F hello fellows", ChatChannelKind.Fellowship, null, "hello fellows")]
+    [InlineData("/Trade wts sword", ChatChannelKind.Trade, null, "wts sword")]
+    public void ChatVerb_MatchesRegardlessOfLetterCase(
+        string input, ChatChannelKind channel, string? target, string text)
+    {
+        var (vm, log, bus) = Fixture();
+
+        var outcome = ChatCommandRouter.Submit(input, vm, bus, ChatChannelKind.Say);
+
+        Assert.Equal(SubmitOutcome.Sent, outcome);
+        var command = Assert.IsType<SendChatCmd>(Assert.Single(bus.Published));
+        Assert.Equal(channel, command.Channel);
+        Assert.Equal(target, command.TargetName);
+        Assert.Equal(text, command.Text);
+        Assert.Empty(log.Snapshot());
+    }
+
+    [Theory]
+    [InlineData("/F")]
+    [InlineData("/Fellowship")]
+    [InlineData("/PATRON")]
+    public void BareRegisteredChannelVerb_AnyLetterCase_ShowsTheSameRefusal(string input)
+    {
+        var (vm, log, bus, interfaceTexts) = FixtureWithInterfaceSink();
+
+        var outcome = ChatCommandRouter.Submit(input, vm, bus, ChatChannelKind.Say);
+
+        Assert.Equal(SubmitOutcome.ClientHandled, outcome);
+        Assert.Empty(bus.Published);
+        Assert.Equal("You must specify the text you wish to say!", Assert.Single(interfaceTexts));
+        Assert.Empty(log.Snapshot());
+    }
+
+    [Theory]
+    [InlineData("/Say")]
+    [InlineData("/TELL")]
+    [InlineData("/Tell Bob")]
+    public void BareSayOrTellVerb_AnyLetterCase_IsDropped(string input)
+    {
+        var (vm, log, bus) = Fixture();
+
+        var outcome = ChatCommandRouter.Submit(input, vm, bus, ChatChannelKind.Say);
+
+        Assert.Equal(SubmitOutcome.Dropped, outcome);
+        Assert.Empty(bus.Published);
+        Assert.Empty(log.Snapshot());
+    }
+
+    [Fact]
+    public void Reply_AnyLetterCase_NoLastTeller_ShowsTheReplyRefusal()
+    {
+        var (vm, log, bus, interfaceTexts) = FixtureWithInterfaceSink();
+
+        var outcome = ChatCommandRouter.Submit("/Reply hi there", vm, bus, ChatChannelKind.Say);
+
+        Assert.Equal(SubmitOutcome.ClientHandled, outcome);
+        Assert.Empty(bus.Published);
+        Assert.Equal("Someone must @tell you first!", Assert.Single(interfaceTexts));
+        Assert.Empty(log.Snapshot());
+    }
 }

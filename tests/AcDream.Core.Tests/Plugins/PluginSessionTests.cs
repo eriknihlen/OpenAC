@@ -35,6 +35,34 @@ public sealed class PluginSessionTests
             alpha.Storage.WriteText("../escape.json", "bad"));
     }
 
+    /// <summary>
+    /// A named scope -- one character's files -- is its own folder inside the
+    /// plugin's, so two characters never share a settings file. Mutation:
+    /// drop the storage's OpenScope and the interface default hands back the
+    /// plugin's root, which both characters then overwrite.
+    /// </summary>
+    [Fact]
+    public void ScopedHostStorageKeepsEachNamedScopeInItsOwnFolder()
+    {
+        var storage = new MemoryStorage();
+        using var host = new ScopedPluginHost(
+            new StubHost(storage),
+            "acdream.alpha",
+            "Alpha");
+
+        host.Storage.OpenScope(PluginStorageScope.Character("+Mossy XI")).WriteText("settings.json", "xi");
+        host.Storage.OpenScope(PluginStorageScope.Character("+Mossy XII")).WriteText("settings.json", "xii");
+
+        Assert.Equal("xi", storage.Text[Path.Combine(
+            "acdream.alpha", "files", "character", "+Mossy XI", "settings.json")]);
+        Assert.Equal("xii", storage.Text[Path.Combine(
+            "acdream.alpha", "files", "character", "+Mossy XII", "settings.json")]);
+        Assert.Equal("xi", host.Storage.OpenScope(PluginStorageScope.Character("+Mossy XI")).ReadText("settings.json"));
+        Assert.Null(host.Storage.ReadText("settings.json"));
+        Assert.Throws<ArgumentException>(() =>
+            host.Storage.OpenScope(new PluginStorageScope("../other")));
+    }
+
     [Fact]
     public void ScopedHostForwardsVtankProfilesUnscoped()
     {

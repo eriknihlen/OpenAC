@@ -38,6 +38,13 @@ public sealed class PluginSession : IDisposable
     private readonly PluginHostKind? _hostKind;
     private readonly PluginHostVersion? _hostVersion;
     private readonly List<ActivePlugin> _loaded = [];
+
+    /// <summary>
+    /// The status lines this session's plugins share, one board for all of
+    /// them, so every host that runs plugins through a session keeps it the
+    /// same way.
+    /// </summary>
+    private readonly PluginStatusBoard _statusBoard = new();
     private readonly List<WeakReference> _releasedContexts = [];
     private bool _started;
     private bool _disposed;
@@ -272,7 +279,8 @@ public sealed class PluginSession : IDisposable
                     _host,
                     candidate.Manifest!.Id,
                     candidate.Manifest.DisplayName,
-                    candidate.PluginDirectory);
+                    candidate.PluginDirectory,
+                    _statusBoard);
                 ScopedRenderPackRegistry? renderPackScope =
                     candidate.Manifest!.Declares(PluginKind.RenderPack)
                     && _renderPacks is not null

@@ -26,7 +26,8 @@ internal sealed class RuntimeAutomationSurface
       IWorldObjectAutomation, IRecallAutomation, IAllegianceAutomation,
       IWorldTimeAutomation, ILoginAutomation, INetworkAutomation, IRecoveryAutomation,
       IProjectileAutomation, ISelectionAutomation, IDialogAutomation,
-      IWorldLabelAutomation, IScopedWorldLabelSource, IDisposable
+      IWorldLabelAutomation, IScopedWorldLabelSource, ICharacterOptionsAutomation,
+      IDisposable
 {
     private readonly PluginCommandRegistry _pluginCommands;
     private Action<string, Exception>? _pluginCommandFailed;
@@ -92,6 +93,7 @@ internal sealed class RuntimeAutomationSurface
     private IReadOnlyDictionary<uint, uint> _skillIcons =
         new Dictionary<uint, uint>();
     private Func<int, string> _speciesName = static _ => string.Empty;
+    private Func<uint, string?> _titleName = static _ => null;
     private IChargenPaletteColorSource? _paletteColors;
     private Func<uint, uint, bool>? _equip;
     private Func<uint, bool>? _equipSecondary;
@@ -102,6 +104,7 @@ internal sealed class RuntimeAutomationSurface
     private Func<uint, PluginItemCommandResult>? _useWorldObject;
     private Func<uint, uint, bool>? _applyItem;
     private Func<uint, uint, uint, int, bool>? _moveItem;
+    private Func<uint, uint, uint, int, bool, bool>? _moveItemJoiningStack;
     private Func<uint, uint, uint, bool>? _mergeItems;
     private Func<uint, uint, bool>? _dropItem;
     private Func<uint, uint, uint, bool>? _giveItem;
@@ -372,6 +375,64 @@ internal sealed class RuntimeAutomationSurface
     {
         get { lock (_gate) return (IVendorAutomation?)_vendorAutomation ?? NoOpAutomationSurface.Instance; }
     }
+    public ICharacterOptionsAutomation CharacterOptions => this;
+
+    // ── ICharacterOptionsAutomation ─────────────────────────────────────
+    // A change goes through the session's own option command, the one the
+    // character options page and the declared-option seeding use, so the
+    // client's copy, the immediate send of an option the server saves on its
+    // own, and the later save of the whole set are the same on every host.
+
+    IReadOnlyList<string> ICharacterOptionsAutomation.Names =>
+        CharacterOptionNames.All;
+
+    bool ICharacterOptionsAutomation.TryGet(string name, out bool value)
+    {
+        value = false;
+        GameRuntime? runtime;
+        lock (_gate)
+            runtime = _runtime;
+        if (runtime is null
+            || !IsAvailable
+            || !CharacterOptionNames.TryResolve(name, out AcDream.Core.Net.Messages.CharacterOptionId id))
+        {
+            return false;
+        }
+        value = runtime.CharacterOwner.Options.GetOptionBit(id);
+        return true;
+    }
+
+    PluginCharacterOptionResult ICharacterOptionsAutomation.Set(string name, bool value)
+    {
+        if (!CharacterOptionNames.TryResolve(name, out AcDream.Core.Net.Messages.CharacterOptionId id))
+        {
+            return new(
+                PluginCharacterOptionStatus.UnknownOption,
+                $"No character option is called '{name}'.");
+        }
+        GameRuntime? runtime;
+        IGameRuntimeCommands? commands;
+        lock (_gate)
+        {
+            runtime = _runtime;
+            commands = _sessionCommands;
+        }
+        if (runtime is null || commands is null || !IsAvailable)
+            return new(PluginCharacterOptionStatus.Unavailable);
+        RuntimeCommandResult result = commands.Character.SetSingleOption(
+            runtime.Generation,
+            (uint)id,
+            value);
+        return new(result.Status switch
+        {
+            RuntimeCommandStatus.Accepted => PluginCharacterOptionStatus.Accepted,
+            // Both clients decline a change only for an id their option
+            // table does not hold, which the name lookup above already
+            // answers; there is no other reason to refuse.
+            RuntimeCommandStatus.Rejected => PluginCharacterOptionStatus.UnknownOption,
+            _ => PluginCharacterOptionStatus.Unavailable,
+        });
+    }
 
     PluginBusyState IRecoveryAutomation.CaptureBusyState()
     {
@@ -446,7 +507,112 @@ internal sealed class RuntimeAutomationSurface
     {
         if (_events is null)
             PublishPeerSnapshot();
-        return _peers.CaptureRemoteClients();
+        ICharacterInfo character = this;
+        return _peers.CaptureRemoteClients(character.ObjectId);
+    }
+
+    bool INetworkAutomation.TryCaptureSelf(out PluginNetworkClient self)
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                self = default;
+                return false;
+            }
+        }
+        return TryBuildOwnPeerClient(out self);
+    }
+
+    IReadOnlyList<PluginPeerCast> INetworkAutomation.CaptureOwnCasts(
+        long afterSequence)
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<PluginPeerCast>();
+        }
+        return _peers.CaptureOwnCasts(afterSequence);
+    }
+
+    IReadOnlyList<PluginPeerCommand> INetworkAutomation.CaptureOwnCommands(
+        long afterSequence)
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return Array.Empty<PluginPeerCommand>();
+        }
+        return _peers.CaptureOwnCommands(afterSequence);
+    }
+
+    bool INetworkAutomation.ImportRemoteClient(PluginNetworkClient client)
+    {
+        ICharacterInfo character = this;
+        uint ownObjectId = character.ObjectId;
+        // The same gate an announcement is held to: a client that is not
+        // playing has no character to tell an imported one from.
+        if (ownObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+        }
+        return _peers.ImportRemoteClient(client, ownObjectId);
+    }
+
+    bool INetworkAutomation.ImportRemoteCast(
+        uint casterObjectId,
+        uint targetObjectId,
+        uint spellId,
+        int effectiveSkill,
+        double secondsRemaining,
+        bool landed)
+    {
+        ICharacterInfo character = this;
+        if (character.ObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            // Classified in this client's own spell table, exactly as a cast
+            // read from a neighbour's note is: a spell nobody here can name
+            // is a spell nobody here can act on.
+            if (_disposed
+                || _spellbook is null
+                || !_spellbook.TryGetMetadata(spellId, out _))
+            {
+                return false;
+            }
+        }
+        return _peers.ImportRemoteCast(
+            casterObjectId,
+            targetObjectId,
+            spellId,
+            effectiveSkill,
+            secondsRemaining,
+            landed);
+    }
+
+    bool INetworkAutomation.ImportRemoteCommand(
+        uint senderObjectId,
+        string line,
+        IReadOnlyList<string> tags,
+        int delayMilliseconds)
+    {
+        ICharacterInfo character = this;
+        if (character.ObjectId == 0u)
+            return false;
+        lock (_gate)
+        {
+            if (_disposed)
+                return false;
+        }
+        return _peers.ImportRemoteCommand(
+            senderObjectId,
+            tags,
+            line ?? string.Empty,
+            delayMilliseconds);
     }
 
     bool INetworkAutomation.AnnounceCastAttempt(
@@ -938,6 +1104,18 @@ internal sealed class RuntimeAutomationSurface
             _speciesName = resolver;
     }
 
+    /// <summary>
+    /// Lends the surface the text of a character title, read from the
+    /// installed data files. Without it a plugin still sees every title the
+    /// character holds, by number, with empty text.
+    /// </summary>
+    public void BindTitleNameResolver(Func<uint, string?> resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        lock (_gate)
+            _titleName = resolver;
+    }
+
     public void BindPaletteColorResolver(IChargenPaletteColorSource resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
@@ -984,7 +1162,8 @@ internal sealed class RuntimeAutomationSurface
         Func<uint, bool, AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome> pickupItem,
         Func<uint, bool> identifyItem,
         Func<uint, IReadOnlyList<uint>, bool>? salvageItems = null,
-        Func<uint, uint, int, bool>? sellItem = null)
+        Func<uint, uint, int, bool>? sellItem = null,
+        Func<uint, uint, uint, int, bool, bool>? moveItemJoiningStack = null)
     {
         ArgumentNullException.ThrowIfNull(useItem);
         ArgumentNullException.ThrowIfNull(applyItem);
@@ -999,6 +1178,7 @@ internal sealed class RuntimeAutomationSurface
             _useItem = useItem;
             _applyItem = applyItem;
             _moveItem = moveItem;
+            _moveItemJoiningStack = moveItemJoiningStack;
             _mergeItems = mergeItems;
             _dropItem = dropItem;
             _giveItem = giveItem;
@@ -1038,6 +1218,10 @@ internal sealed class RuntimeAutomationSurface
         AutomationUseOutcome.NotUseable =>
             new PluginItemCommandResult(
                 PluginItemCommandStatus.Refused, "That cannot be used."),
+        AutomationUseOutcome.NoRoom =>
+            new PluginItemCommandResult(
+                PluginItemCommandStatus.Refused,
+                "no pack the player has open has room for it"),
         _ => new PluginItemCommandResult(PluginItemCommandStatus.Unavailable),
     };
 
@@ -1332,16 +1516,7 @@ internal sealed class RuntimeAutomationSurface
 
     private void PublishPeerSnapshot()
     {
-        if (!IsAvailable)
-        {
-            _peers.Withdraw();
-            return;
-        }
-
-        ICharacterInfo character = this;
-        PluginNavigationSnapshot navigation =
-            _navigation.Snapshot;
-        if (!navigation.IsAvailable || character.ObjectId == 0u)
+        if (!TryBuildOwnPeerClient(out PluginNetworkClient self))
         {
             _peers.Withdraw();
             return;
@@ -1349,20 +1524,7 @@ internal sealed class RuntimeAutomationSurface
 
         try
         {
-            _peers.Publish(new PluginNetworkClient(
-                _peers.ClientId,
-                character.ObjectId,
-                character.Name,
-                character.WorldName,
-                navigation.Position,
-                _peerTags,
-                character.CurrentHealth,
-                character.CurrentMana,
-                character.CurrentStamina,
-                character.MaxHealth,
-                character.MaxMana,
-                character.MaxStamina,
-                navigation.Position.HeadingDegrees));
+            _peers.Publish(self);
         }
         catch (IOException)
         {
@@ -1370,6 +1532,43 @@ internal sealed class RuntimeAutomationSurface
         catch (UnauthorizedAccessException)
         {
         }
+    }
+
+    /// <summary>
+    /// What this client tells the others on this computer about itself. One
+    /// builder for the note that is written and for a plugin asking what
+    /// that note says, so the two cannot drift.
+    /// </summary>
+    private bool TryBuildOwnPeerClient(out PluginNetworkClient self)
+    {
+        self = default;
+        if (!IsAvailable)
+            return false;
+
+        ICharacterInfo character = this;
+        PluginNavigationSnapshot navigation =
+            _navigation.Snapshot;
+        if (!navigation.IsAvailable || character.ObjectId == 0u)
+            return false;
+
+        string[] tags;
+        lock (_gate)
+            tags = _peerTags;
+        self = new PluginNetworkClient(
+            _peers.ClientId,
+            character.ObjectId,
+            character.Name,
+            character.WorldName,
+            navigation.Position,
+            tags,
+            character.CurrentHealth,
+            character.CurrentMana,
+            character.CurrentStamina,
+            character.MaxHealth,
+            character.MaxMana,
+            character.MaxStamina,
+            navigation.Position.HeadingDegrees);
+        return true;
     }
 
     private void OnInventoryRequestCompleted(PendingInventoryRequest request)
@@ -1586,6 +1785,11 @@ internal sealed class RuntimeAutomationSurface
             meta.ComponentSet.Powder,
             meta.ComponentSet.Potion,
             meta.ComponentSet.Talisman),
+        CasterEffect = meta.CasterEffect,
+        TargetEffect = meta.TargetEffect,
+        FormulaVersion = meta.FormulaVersion,
+        DisplayOrder = meta.SortKey,
+        ComponentLoss = meta.ComponentLoss,
     };
 
     private static uint SchoolSkillId(MagicSchool school) => school switch
@@ -1739,6 +1943,57 @@ internal sealed class RuntimeAutomationSurface
             uint playerId = runtime.PlayerIdentity.ServerGuid;
             return runtime.InventoryOwner.Objects.Get(playerId)?.Properties.GetInt(
                 (uint)PropertyInt.SummoningMastery) ?? 0;
+        }
+    }
+
+    /// <summary>
+    /// The product of every vitae effect on the character, the same factor
+    /// the character's own stat arithmetic applies; 1 with none.
+    /// </summary>
+    public float VitaeMultiplier
+    {
+        get
+        {
+            Spellbook? spellbook;
+            lock (_gate)
+                spellbook = _disposed ? null : _spellbook;
+            return spellbook is null
+                ? 1f
+                : EnchantmentMath.GetVitaeMultiplier(
+                    spellbook.ActiveEnchantmentSnapshot);
+        }
+    }
+
+    public uint CurrentTitleId
+    {
+        get
+        {
+            RuntimeCharacterState? character;
+            lock (_gate)
+                character = _disposed ? null : _character;
+            return character?.Titles.DisplayTitleId ?? 0u;
+        }
+    }
+
+    public IReadOnlyList<PluginCharacterTitle> Titles
+    {
+        get
+        {
+            RuntimeCharacterState? character;
+            Func<uint, string?> titleName;
+            lock (_gate)
+            {
+                character = _disposed ? null : _character;
+                titleName = _titleName;
+            }
+            if (character is null)
+                return Array.Empty<PluginCharacterTitle>();
+            IReadOnlyCollection<uint> earned = character.Titles.EarnedTitleIds;
+            if (earned.Count == 0)
+                return Array.Empty<PluginCharacterTitle>();
+            return earned
+                .Select(id => new PluginCharacterTitle(id, titleName(id) ?? string.Empty))
+                .ToArray();
         }
     }
 
@@ -2073,9 +2328,18 @@ internal sealed class RuntimeAutomationSurface
     // ── Plugin lifecycle projection ───────────────────────────────────────
     // The runtime keeps one root across reconnects, so an in-world edge is
     // the only honest signal that a plugin has a fresh world to work with.
-    void IRuntimeEventObserver.OnLifecycle(in RuntimeLifecycleDelta delta)
+    void IRuntimeEventObserver.OnLifecycle(in RuntimeLifecycleDelta delta) =>
+        ApplyInWorld(delta.Current == RuntimeLifecycleState.InWorld);
+
+    // Plugins hear the logoff while the session is still whole, as the
+    // contract promises: the session's objects are released right after this,
+    // and a plugin that tracks inventory must not read those releases as the
+    // player dropping everything. The lifecycle change that follows the
+    // teardown then finds the plugins already told.
+    void IRuntimeEventObserver.OnLeavingWorld() => ApplyInWorld(false);
+
+    private void ApplyInWorld(bool isInWorld)
     {
-        bool isInWorld = delta.Current == RuntimeLifecycleState.InWorld;
         lock (_gate)
         {
             if (_disposed || _wasInWorld == isInWorld)
@@ -2097,9 +2361,16 @@ internal sealed class RuntimeAutomationSurface
         }
 
         if (isInWorld)
+        {
             _events?.FireLoginComplete();
+        }
         else
+        {
             _events?.FireLogoff();
+            // What the character that left announced is not what the next
+            // one says.
+            _peers.ForgetOwnAnnouncements();
+        }
     }
 
     void IRuntimeEventObserver.OnCommand(in RuntimeCommandDelta delta) { }
@@ -2550,6 +2821,8 @@ internal sealed class RuntimeAutomationSurface
                 LogTextType = entry.LogTextType,
                 CombatKind = entry.CombatKind,
                 Received = entry.Received,
+                ChannelId = entry.ChannelId,
+                DisplayText = entry.DisplayText,
             };
             _chatMessages.Add(message);
             if (_chatMessages.Count > MaximumPluginChatMessages)
@@ -3095,7 +3368,9 @@ internal sealed class RuntimeAutomationSurface
                 runtime = _runtime;
             if (runtime is null || !IsAvailable)
                 return default;
-            RuntimeAllegianceSnapshot snapshot = runtime.Allegiance.Snapshot;
+            IRuntimeAllegianceView allegiance = runtime.Allegiance;
+            RuntimeAllegianceSnapshot snapshot = allegiance.Snapshot;
+            uint self = runtime.PlayerIdentity.ServerGuid;
             return new PluginAllegianceSnapshot(
                 snapshot.Revision,
                 snapshot.HasProfile,
@@ -3103,9 +3378,35 @@ internal sealed class RuntimeAutomationSurface
                 snapshot.Rank,
                 snapshot.TotalMembers,
                 snapshot.TotalVassals,
-                snapshot.MonarchGuid);
+                snapshot.MonarchGuid)
+            {
+                Monarch = allegiance.TryGetMonarch(
+                    out RuntimeAllegianceMemberSnapshot monarch)
+                    ? ProjectAllegianceMember(monarch)
+                    : null,
+                Patron = self != 0u
+                    && allegiance.TryGetPatron(
+                        self, out RuntimeAllegianceMemberSnapshot patron)
+                    ? ProjectAllegianceMember(patron)
+                    : null,
+                Vassals = self == 0u
+                    ? Array.Empty<PluginAllegianceMember>()
+                    : allegiance.GetVassals(self)
+                        .Select(ProjectAllegianceMember)
+                        .ToArray(),
+            };
         }
     }
+
+    private static PluginAllegianceMember ProjectAllegianceMember(
+        RuntimeAllegianceMemberSnapshot member) => new(
+            member.CharacterId,
+            member.Name,
+            member.Rank,
+            member.Level,
+            member.HeritageGroup,
+            member.Gender,
+            member.IsLoggedIn);
 
     // Swearing is done face to face: the patron has to be a player the
     // client can see standing there, which is the same thing the client's
@@ -4001,14 +4302,31 @@ internal sealed class RuntimeAutomationSurface
         uint containerObjectId,
         uint amount = 0u,
         int placement = 0)
+        => MoveToContainer(
+            objectId, containerObjectId, amount, placement, joinStack: false);
+
+    public PluginItemCommandResult MoveToContainer(
+        uint objectId,
+        uint containerObjectId,
+        uint amount,
+        int placement,
+        bool joinStack)
     {
-        Func<uint, uint, uint, int, bool>? move;
+        Func<uint, uint, uint, int, bool>? plainMove;
+        Func<uint, uint, uint, int, bool, bool>? joiningMove;
         GameRuntime? runtime;
         lock (_gate)
         {
-            move = _moveItem;
+            plainMove = _moveItem;
+            joiningMove = _moveItemJoiningStack;
             runtime = _runtime;
         }
+        Func<uint, uint, uint, int, bool>? move = !joinStack
+            ? plainMove
+            : joiningMove is null
+                ? null
+                : (item, container, count, slot) =>
+                    joiningMove(item, container, count, slot, true);
         if (runtime is null || move is null || !IsAvailable)
             return new(PluginItemCommandStatus.Unavailable);
         ClientObjectTable objects = runtime.InventoryOwner.Objects;
@@ -4275,6 +4593,102 @@ internal sealed class RuntimeAutomationSurface
         ClientObjectTable objects) =>
         RuntimeWorldObjectProjection.IsPlayerOwned(item, playerId, objects);
 
+    /// <summary>
+    /// How recent, in simulation seconds, the server's refusal to appraise an
+    /// item must be for <see cref="ForgetStaleItem"/> to act on it.
+    /// </summary>
+    internal const double StaleItemRefusalWindowSeconds = 30d;
+
+    private static bool HoldsAnything(ClientObjectTable objects, uint containerId)
+    {
+        foreach (ClientObject candidate in objects.Objects)
+        {
+            if (candidate.ContainerId == containerId)
+                return true;
+        }
+        return false;
+    }
+
+    public PluginItemCommandResult ForgetStaleItem(uint objectId)
+    {
+        Func<uint, bool>? dismiss;
+        GameRuntime? runtime;
+        lock (_gate)
+        {
+            dismiss = _dismissGhost;
+            runtime = _runtime;
+        }
+        if (runtime is null || dismiss is null || !IsAvailable)
+            return new(PluginItemCommandStatus.Unavailable);
+        uint playerId = runtime.PlayerIdentity.ServerGuid;
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        if (objectId == playerId
+            || !TryGetOwned(objects, playerId, objectId, out ClientObject? item))
+        {
+            return new(PluginItemCommandStatus.InvalidItem);
+        }
+        // The item leaves by the route a server delete takes, and that route
+        // is keyed on the server's own record of the object. Without one there
+        // is nothing a server delete would have removed either.
+        if (!runtime.EntityObjects.Entities.TryGetActive(objectId, out _))
+        {
+            return new(
+                PluginItemCommandStatus.InvalidItem,
+                "The client holds no server record of that item.");
+        }
+        if (item!.CurrentlyEquippedLocation != EquipMask.None
+            || item.WielderId != 0u)
+        {
+            return new(PluginItemCommandStatus.Refused, "That item is equipped.");
+        }
+        // A pack's listing is only what the server last showed of it; an
+        // object can still name the pack as its container without being in
+        // that list. Letting go of such a pack would strand those objects
+        // under a container that no longer exists, out of every plugin's
+        // reach.
+        if (objects.GetContents(objectId).Count != 0
+            || HoldsAnything(objects, objectId))
+        {
+            return new(
+                PluginItemCommandStatus.Refused,
+                "That pack still holds something.");
+        }
+        // An appraisal of this very item still on its way is the answer the
+        // decision rests on: a caller asking a second time is waiting for it,
+        // and what an earlier answer said no longer counts until it lands.
+        RuntimeInteractionTransactionState appraisals =
+            runtime.ActionOwner.Transactions;
+        if (appraisals.AwaitingAppraisalId == objectId
+            && !appraisals.IsAwaitingAppraisalExpired)
+        {
+            return new(
+                PluginItemCommandStatus.Busy,
+                "An appraisal of that item is still awaited.");
+        }
+        if (!item.LastAppraisalUnsuccessful)
+        {
+            return new(
+                PluginItemCommandStatus.Refused,
+                "The server has not refused to appraise that item.");
+        }
+        // Only a refusal the caller has just seen counts. An old one may be
+        // the repeat-request refusal of a real item nobody has asked about
+        // since, and nothing else would ever overturn it.
+        if (runtime.Clock.SimulationTimeSeconds
+                - item.LastAppraisalUnsuccessfulAtSeconds
+            > StaleItemRefusalWindowSeconds)
+        {
+            return new(
+                PluginItemCommandStatus.Refused,
+                "The server refused to appraise that item too long ago; ask again.");
+        }
+        if (IsItemCommandBusy(runtime))
+            return new(PluginItemCommandStatus.Busy);
+        return dismiss(objectId) && objects.Get(objectId) is null
+            ? new(PluginItemCommandStatus.Completed)
+            : new(PluginItemCommandStatus.Refused);
+    }
+
     private static bool TryGetOwned(
         ClientObjectTable objects,
         uint playerId,
@@ -4378,7 +4792,17 @@ internal sealed class RuntimeAutomationSurface
                         // asker with no failure signal waits for ever.
                         transactions.IsAwaitingAppraisalExpired
                             ? transactions.AwaitingAppraisalId
-                            : transactions.LastAbandonedAppraisalId);
+                            : transactions.LastAbandonedAppraisalId)
+                    {
+                        // The answer is recorded on the object before the
+                        // slot completes, both in the same inbound event, so
+                        // the object's latest outcome is the completion's.
+                        CurrentObjectUnsuccessful =
+                            transactions.LastCompletedAppraisalId != 0u
+                            && _runtime!.InventoryOwner.Objects
+                                .Get(transactions.LastCompletedAppraisalId)
+                                ?.LastAppraisalUnsuccessful == true,
+                    };
             }
         }
     }
@@ -4801,6 +5225,10 @@ internal sealed class RuntimeAutomationSurface
             item.Properties.GetInt((uint)PropertyInt.UseRequiresSkillLevel),
             item.Properties.GetInt((uint)PropertyInt.UseRequiresSkillSpec))
         {
+            // The shared cooldown comes with the object and again in an
+            // appraisal; the table keeps the newest of the two here.
+            SharedCooldownId = item.CooldownId ?? 0u,
+            CooldownSeconds = item.CooldownDuration ?? 0d,
             CombatUse = item.CombatUse ?? 0,
             ItemSpellcraft = item.Properties.GetInt(
                 (uint)PropertyInt.ItemSpellcraft),
@@ -4857,11 +5285,18 @@ internal sealed class RuntimeAutomationSurface
             IconOverlayId = item.IconOverlayId,
             CoverageMask = item.Priority,
             PluralName = item.PluralName,
-            UseRadius = runtime.EntityObjects.Entities.TryGetActive(
+            // The live object's own radius when it is out in the world, and
+            // otherwise the one its description carried, so an item in a
+            // pack reports it too.
+            UseRadius = (runtime.EntityObjects.Entities.TryGetActive(
                     item.ObjectId,
                     out RuntimeEntityRecord useRecord)
-                ? useRecord.Snapshot.UseRadius ?? 0f
-                : 0f,
+                    ? useRecord.Snapshot.UseRadius
+                    : null)
+                ?? item.Header?.UseRadius
+                ?? 0f,
+            Header = AcDream.Runtime.Gameplay.RuntimeWorldObjectProjection
+                .ProjectHeader(item.Header),
             Effects = item.Effects,
         };
     }
@@ -4977,6 +5412,28 @@ internal sealed class RuntimeAutomationSurface
         }
     }
 
+    public bool SharesExperience
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            return runtime?.Fellowship.Snapshot is { IsInFellowship: true, ShareXp: true };
+        }
+    }
+
+    public bool SplitsExperienceEvenly
+    {
+        get
+        {
+            GameRuntime? runtime;
+            lock (_gate)
+                runtime = _runtime;
+            return runtime?.Fellowship.Snapshot is { IsInFellowship: true, EvenXpSplit: true };
+        }
+    }
+
     public IReadOnlyList<PluginFellowMember> CaptureMembers()
     {
         GameRuntime? runtime;
@@ -5013,6 +5470,7 @@ internal sealed class RuntimeAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                Level = member.Level,
                 VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
@@ -5120,6 +5578,7 @@ internal sealed class RuntimeAutomationSurface
                 distance)
             {
                 ShareLoot = member.ShareLoot,
+                Level = member.Level,
                 VitalsAgeSeconds = member.VitalsAgeSeconds,
             });
         }
@@ -5598,6 +6057,7 @@ internal sealed class RuntimeAutomationSurface
             _useWorldObject = null;
             _applyItem = null;
             _moveItem = null;
+            _moveItemJoiningStack = null;
             _mergeItems = null;
             _dropItem = null;
             _giveItem = null;

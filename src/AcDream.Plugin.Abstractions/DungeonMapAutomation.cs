@@ -19,6 +19,68 @@ public readonly record struct PluginDungeonWall(Vector2 Start, Vector2 End);
 public readonly record struct PluginDungeonCell(uint CellId, Vector3 Center, float LayerZ);
 
 /// <summary>
+/// One indoor cell exactly as the game data authors it: which environment
+/// piece it is built from and how that piece is placed in the landblock. It
+/// is the raw placement, not a drawing: a plugin that draws dungeons from
+/// its own tiles, one per environment piece, places each tile with this.
+/// </summary>
+/// <param name="CellId">The full cell id, landblock in the high half.</param>
+/// <param name="EnvironmentId">
+/// The environment piece the cell is built from, as the cell stores it: the
+/// low sixteen bits of the environment file's id. Zero for a cell that names
+/// none.
+/// </param>
+/// <param name="CellStructure">
+/// Which of that environment piece's structures the cell uses.
+/// </param>
+/// <param name="Origin">
+/// Where the piece's own origin sits, in landblock-local metres (x east and
+/// y north from the landblock's south-west corner, z up), exactly as stored.
+/// </param>
+/// <param name="Orientation">
+/// How the piece is turned, exactly as stored. The data stores the four
+/// components in the order W, X, Y, Z; a piece turned only about the
+/// vertical axis by an angle a has W = cos(a/2) and Z = sin(a/2), with a
+/// positive a turning east towards north. Identity for a cell that stores no
+/// placement.
+/// </param>
+/// <param name="SeesOutside">
+/// True for a cell that sees the landscape, as a building's rooms do; false
+/// for a sealed dungeon's cell, the same answer
+/// <see cref="IDungeonMapAutomation.IsSealedDungeon"/> gives in reverse.
+/// </param>
+public readonly record struct PluginIndoorCell(
+    uint CellId,
+    uint EnvironmentId,
+    uint CellStructure,
+    Vector3 Origin,
+    Quaternion Orientation,
+    bool SeesOutside)
+{
+    /// <summary>
+    /// The turn about the vertical axis <see cref="Orientation"/> describes,
+    /// in degrees from 0 up to 360, counted from east towards north. For the
+    /// quarter turns dungeon pieces are laid at this is 0, 90, 180 or 270 to
+    /// within rounding; a piece also tilted about another axis reads only
+    /// its turn about the vertical.
+    /// </summary>
+    public float YawDegrees
+    {
+        get
+        {
+            Quaternion q = Orientation;
+            double yaw = Math.Atan2(
+                2d * ((q.W * q.Z) + (q.X * q.Y)),
+                1d - (2d * ((q.Y * q.Y) + (q.Z * q.Z))));
+            double degrees = yaw * (180d / Math.PI);
+            if (degrees < 0d)
+                degrees += 360d;
+            return degrees >= 360d ? 0f : (float)degrees;
+        }
+    }
+}
+
+/// <summary>
 /// One storey of a floorplan: the cells whose floor lies in one six-metre
 /// band of height, flattened together. A cell with no floor of its own, such
 /// as the upper cell of a tall room, is drawn in the band of the cell it
@@ -128,4 +190,18 @@ public interface IDungeonMapAutomation
     /// </summary>
     /// <param name="landblockId">The landblock, or any cell in it.</param>
     PluginDungeonFloorplan CaptureFloorplan(uint landblockId) => PluginDungeonFloorplan.Empty;
+
+    /// <summary>
+    /// Every indoor cell of a landblock as the game data authors it -- the
+    /// environment piece each is built from and how it is placed -- in cell
+    /// id order, read from the game data the first time it is asked for and
+    /// the same list every time after. Unlike the floorplan this is the raw
+    /// placement of every cell the landblock lists, geometry or not. Empty
+    /// for a landblock the data does not have, one with no indoor cells, and
+    /// on a host that cannot read the game data, which is what the default
+    /// implementation always returns.
+    /// </summary>
+    /// <param name="landblockId">The landblock, or any cell in it.</param>
+    IReadOnlyList<PluginIndoorCell> CaptureIndoorCells(uint landblockId) =>
+        Array.Empty<PluginIndoorCell>();
 }

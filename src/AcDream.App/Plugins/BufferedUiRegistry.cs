@@ -18,8 +18,7 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         internal string? PluginDirectory { get; init; }
 
         /// <summary>Stable, manifest-scoped retained-window persistence key.</summary>
-        public string WindowName =>
-            $"plugin:{Owner.Id}:{Descriptor.WindowId}";
+        public string WindowName => WindowNameFor(Owner, Descriptor);
     }
 
     private sealed class Registration(
@@ -57,6 +56,25 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
     private Func<PluginClientWindow, bool>? _hideClientWindow;
     private Func<PluginClientWindow, bool>? _isClientWindowVisible;
 
+    // The plugins' own windows, shown and hidden the way the window manager
+    // shows and hides any retained window, by its window name. Bound by the
+    // UI runtime alongside the client-window seam.
+    private Func<string, bool>? _showWindow;
+    private Func<string, bool>? _hideWindow;
+
+    internal void BindPluginWindowControl(
+        Func<string, bool> show,
+        Func<string, bool> hide)
+    {
+        ArgumentNullException.ThrowIfNull(show);
+        ArgumentNullException.ThrowIfNull(hide);
+        lock (_gate)
+        {
+            _showWindow = show;
+            _hideWindow = hide;
+        }
+    }
+
     internal void BindClientWindowControl(
         Func<PluginClientWindow, bool> toggle,
         Func<PluginClientWindow, bool> show,
@@ -89,6 +107,8 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
             _showClientWindow = null;
             _hideClientWindow = null;
             _isClientWindowVisible = null;
+            _showWindow = null;
+            _hideWindow = null;
         }
     }
 
@@ -611,6 +631,37 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
             view = FindRegistrationLocked(owner, viewName)?.Element;
         return view?.Visible == true;
     }
+
+    public bool ShowPanel(PluginUiOwner owner, string viewName) =>
+        ControlPanel(owner, viewName, show: true);
+
+    public bool HidePanel(PluginUiOwner owner, string viewName) =>
+        ControlPanel(owner, viewName, show: false);
+
+    /// <summary>
+    /// Shows or hides one plugin's own mounted window through the window
+    /// manager, which tells the window's visibility controller exactly as
+    /// the shelf button and the close button do.
+    /// </summary>
+    private bool ControlPanel(PluginUiOwner owner, string viewName, bool show)
+    {
+        Func<string, bool>? control;
+        string? windowName = null;
+        lock (_gate)
+        {
+            control = show ? _showWindow : _hideWindow;
+            if (FindRegistrationLocked(owner, viewName) is { WindowCleanup: not null } mounted)
+                windowName = WindowNameFor(mounted.Owner, mounted.Descriptor);
+        }
+        return control is not null
+            && windowName is not null
+            && control(windowName);
+    }
+
+    private static string WindowNameFor(
+        PluginUiOwner owner,
+        PluginPanelDescriptor descriptor) =>
+        $"plugin:{owner.Id}:{descriptor.WindowId}";
 
     public bool ControlExists(
         PluginUiOwner owner,

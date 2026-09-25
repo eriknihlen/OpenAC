@@ -109,6 +109,8 @@ public sealed class GameEventWiringTests
             Assert.False(items.Get(guid)!.Properties.Ints.ContainsKey(25u));
         // Either way the server answered, and that is kept.
         Assert.True(items.Get(guid)!.AppraisalAnswered);
+        // And which way it answered.
+        Assert.Equal(!success, items.Get(guid)!.LastAppraisalUnsuccessful);
     }
 
     [Fact]

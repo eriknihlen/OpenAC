@@ -28,7 +28,11 @@ public sealed class LiveReleaseInstallTests : IDisposable
     [Trait("Lane", "Live")]
     public async Task InstallsTheAdvertisedClientFromTheLiveRelease()
     {
-        using var http = new HttpClient();
+        // The downloader validates each redirect itself and refuses a transport that follows them
+        // on its own, so this uses the handler the launcher ships with.
+        using var http = new HttpClient(
+            ReleaseManifestClient.CreateRedirectDisabledHandler(),
+            disposeHandler: true);
         using var source = new ReleaseManifestClient(TimeSpan.FromSeconds(30));
         var versions = new ClientVersionStore(_paths);
         var updater = new LauncherUpdater(

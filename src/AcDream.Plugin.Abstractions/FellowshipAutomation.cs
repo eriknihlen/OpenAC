@@ -33,6 +33,12 @@ public readonly record struct PluginFellowMember(
     public bool ShareLoot { get; init; }
 
     /// <summary>
+    /// The member's level as the fellowship roster last reported it; zero on
+    /// a host that does not report it.
+    /// </summary>
+    public uint Level { get; init; }
+
+    /// <summary>
     /// Seconds since the server last streamed this fellow's vitals; null when
     /// it never has. The stream runs only while the host holds a vitals
     /// subscription (see <see cref="IFellowshipAutomation.RequestVitals"/>).
@@ -92,6 +98,22 @@ public interface IFellowshipAutomation
 
     /// <summary>How many members the fellowship has; zero when there is none.</summary>
     int MemberCount => 0;
+
+    /// <summary>
+    /// True when the fellowship shares the experience its members earn;
+    /// false when each member keeps their own, and when there is no
+    /// fellowship.
+    /// </summary>
+    bool SharesExperience => false;
+
+    /// <summary>
+    /// True when shared experience is split evenly between the members, false
+    /// when it is split in proportion to their levels, which happens when the
+    /// members' levels are too far apart. Only meaningful while
+    /// <see cref="SharesExperience"/> is true; false when there is no
+    /// fellowship.
+    /// </summary>
+    bool SplitsExperienceEvenly => false;
 
     /// <summary>
     /// Lists the other members of the fellowship, leaving out the local

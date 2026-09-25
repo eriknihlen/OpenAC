@@ -59,13 +59,16 @@ public sealed class ChatVMTests
     }
 
     [Fact]
-    public void FormatEntry_RangedSpeech_RetailStyleShouts()
+    public void FormatEntry_RangedSpeech_IsWordedAsSpeechUnderTheArrivedName()
     {
+        // A ranged line has no verb of its own and no sentence for the
+        // speaker: everyone, the speaker included, reads the name it arrived
+        // with and "says".
         var incoming = new ChatEntry(ChatKind.RangedSpeech, "Caith", "hello", 0x5000_0001u, 0);
-        Assert.Equal("Caith shouts, \"hello\"", ChatVM.FormatEntry(incoming));
+        Assert.Equal("Caith says, \"hello\"", ChatVM.FormatEntry(incoming));
 
-        var ownEcho = new ChatEntry(ChatKind.RangedSpeech, "You", "loud", 0, 0);
-        Assert.Equal("You shout, \"loud\"", ChatVM.FormatEntry(ownEcho));
+        var own = new ChatEntry(ChatKind.RangedSpeech, "Acdream", "loud", 0x5000_000Au, 0);
+        Assert.Equal("Acdream says, \"loud\"", ChatVM.FormatEntry(own));
     }
 
     [Fact]

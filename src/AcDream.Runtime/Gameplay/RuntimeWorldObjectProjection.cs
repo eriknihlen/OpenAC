@@ -70,6 +70,7 @@ public static class RuntimeWorldObjectProjection
                 : default,
             HasAppraisalData = item is not null && HasPropertyData(item.Properties),
             LastIdTime = item?.LastAppraisalTimeMs ?? 0,
+            LastAppraisalUnsuccessful = item?.LastAppraisalUnsuccessful ?? false,
             // An open door stops colliding; its Open property comes with an appraisal and
             // does not follow the door opening and closing afterwards.
             IsDoorOpen = (publicFlags & (uint)PublicWeenieFlags.Door) != 0u
@@ -84,6 +85,8 @@ public static class RuntimeWorldObjectProjection
                 : Array.Empty<uint>(),
             ActiveSpellIds = activeSpells,
             IconId = item?.IconId ?? 0u,
+            CoverageMask = item?.Priority ?? 0u,
+            Header = ProjectHeader(item?.Header),
             PortalDestination = objectClass == PluginObjectClass.Portal
                 && item is not null
                 && !string.IsNullOrWhiteSpace(item.Properties.GetString(
@@ -102,6 +105,23 @@ public static class RuntimeWorldObjectProjection
                     : null,
         };
     }
+
+    /// <summary>The description header as a plugin reads it.</summary>
+    public static PluginObjectHeader? ProjectHeader(ClientObjectHeader? header) =>
+        header is null
+            ? null
+            : new PluginObjectHeader(
+                header.WeenieHeaderFlags,
+                header.WeenieHeaderFlags2,
+                header.PhysicsDescriptionFlags,
+                header.PhysicsState,
+                header.ObjectDescriptionFlags,
+                header.SetupId,
+                header.Scale,
+                header.HookType,
+                header.ParentId,
+                header.ParentLocation,
+                header.UseRadius);
 
     public static bool IsPlayerOwned(
         ClientObject item,

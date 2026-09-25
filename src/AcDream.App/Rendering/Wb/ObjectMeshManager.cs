@@ -1101,7 +1101,16 @@ namespace AcDream.App.Rendering.Wb
 
             while (_workerTasks.Count < MaxParallelLoads)
             {
-                Task worker = Task.Run(ProcessQueue);
+                // A worker blocks on the work event for its whole life, so it
+                // gets a thread of its own rather than parking a pool thread:
+                // on the pool, a process with many managers (the test suite)
+                // starves the pool and a new manager's workers start seconds
+                // late, after the pool's slow thread injection.
+                Task worker = Task.Factory.StartNew(
+                    ProcessQueue,
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
                 _workerTasks.Add(worker);
                 _ = worker.ContinueWith(
                     OnPreparationWorkerCompleted,

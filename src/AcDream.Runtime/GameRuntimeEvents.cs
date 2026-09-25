@@ -105,6 +105,17 @@ public readonly record struct RuntimeChatEntry(
 
     /// <summary>When the client took delivery of the line.</summary>
     public DateTimeOffset Received { get; init; }
+
+    /// <summary>
+    /// The number of the channel a channel line came on; 0 on every other line.
+    /// </summary>
+    public uint ChannelId { get; init; }
+
+    /// <summary>
+    /// The line as the chat window prints it, with another player's name in
+    /// the tell link; no timestamp.
+    /// </summary>
+    public string DisplayText { get; init; } = string.Empty;
 }
 
 public readonly record struct RuntimeChatDelta(
@@ -142,6 +153,16 @@ public interface IRuntimeEventObserver
     void OnPortal(in RuntimePortalDelta delta);
 
     void OnCombat(in RuntimeCombatDelta delta);
+
+    /// <summary>
+    /// The character is about to leave the world: the session's state is
+    /// still intact and is torn down right after this returns, which releases
+    /// every object the session held. Raised once per stay in the world,
+    /// before the lifecycle change that follows the teardown.
+    /// </summary>
+    void OnLeavingWorld()
+    {
+    }
 }
 
 public interface IRuntimeEventSource
