@@ -412,9 +412,12 @@ refused, not the appraisal outcome.
 
 For a portal, `Objects.TryGet` and `Objects.CaptureObjects` expose
 `PortalDestination`, `PortalMinimumLevel`, and `PortalMaximumLevel` on the
-`PluginWorldObject` snapshot. The destination is the server's display label,
-not a cell id. A missing destination or level limit is `null`; an appraisal
-can fill these fields, and `IdentReceived` signals when to read them again.
+`PluginWorldObject` snapshot. These fields are filled only by an appraisal.
+Before appraisal, `null` means the value is unknown; after appraisal, `null`
+can mean there is no destination or level limit. Check `HasAppraisalData` to
+tell the two cases apart. The destination is server supplied display text and
+should not be parsed as a cell id. `IdentReceived` signals when to read the
+fields again.
 
 `IdentReceived` is reported from the appraisal response path; every other
 kind is reported from the entity and inventory delta observers, which are
