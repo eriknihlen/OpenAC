@@ -535,6 +535,15 @@ plugin. Both report their result through the same `IdentReceived`
 itself only reports whether the request was accepted (`Started`) or
 refused, not the appraisal outcome.
 
+For a portal, `Objects.TryGet` and `Objects.CaptureObjects` expose
+`PortalDestination`, `PortalMinimumLevel`, and `PortalMaximumLevel` on the
+`PluginWorldObject` snapshot. These fields are filled only by an appraisal.
+Before appraisal, `null` means the value is unknown; after appraisal, `null`
+can mean there is no destination or level limit. Check `HasAppraisalData` to
+tell the two cases apart. The destination is server supplied display text and
+should not be parsed as a cell id. `IdentReceived` signals when to read the
+fields again.
+
 `IdentReceived` is reported from the appraisal response path; every other
 kind is reported from the entity and inventory delta observers, which are
 separate sources delivered in the same `Tick`-thread order but not

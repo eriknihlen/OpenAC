@@ -1,6 +1,7 @@
 using AcDream.Core.Items;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
+using AcDream.Core.Properties;
 using AcDream.Plugin.Abstractions;
 using AcDream.Runtime.Entities;
 
@@ -86,6 +87,22 @@ public static class RuntimeWorldObjectProjection
             IconId = item?.IconId ?? 0u,
             CoverageMask = item?.Priority ?? 0u,
             Header = ProjectHeader(item?.Header),
+            PortalDestination = objectClass == PluginObjectClass.Portal
+                && item is not null
+                && !string.IsNullOrWhiteSpace(item.Properties.GetString(
+                    (uint)PropertyString.AppraisalPortalDestination))
+                    ? item.Properties.GetString((uint)PropertyString.AppraisalPortalDestination)
+                    : null,
+            PortalMinimumLevel = objectClass == PluginObjectClass.Portal
+                && item is not null
+                && item.Properties.GetInt((uint)PropertyInt.MinLevel) is > 0 and var minimumLevel
+                    ? minimumLevel
+                    : null,
+            PortalMaximumLevel = objectClass == PluginObjectClass.Portal
+                && item is not null
+                && item.Properties.GetInt((uint)PropertyInt.MaxLevel) is > 0 and var maximumLevel
+                    ? maximumLevel
+                    : null,
         };
     }
 

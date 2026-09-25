@@ -402,6 +402,22 @@ public readonly record struct PluginWorldObject(
     /// report them.
     /// </summary>
     public PluginObjectHeader? Header { get; init; }
+
+    /// <summary>
+    /// A portal's appraised destination label, or null when the client does
+    /// not know one. This is a display label, not a destination cell id.
+    /// </summary>
+    public string? PortalDestination { get; init; }
+
+    /// <summary>
+    /// A portal's minimum character level, or null when no minimum is known.
+    /// </summary>
+    public int? PortalMinimumLevel { get; init; }
+
+    /// <summary>
+    /// A portal's maximum character level, or null when no maximum is known.
+    /// </summary>
+    public int? PortalMaximumLevel { get; init; }
 }
 
 /// <summary>
