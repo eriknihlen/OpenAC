@@ -123,58 +123,6 @@ public sealed class HeadlessSessionNavigationTests
                 StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// A session that loaded no game data never builds a body for its
-    /// character, yet the character is in the world where the server put it,
-    /// and a plugin reading the navigation snapshot is told so: available,
-    /// its own id, and the cell and coordinates the server sent.
-    ///
-    /// Mutation check (2026-09-22), run: restoring the early "no body, no
-    /// snapshot" return turned this red at the availability assert.
-    /// </summary>
-    [Fact]
-    public void TheSnapshotPlacesACharacterWithNoBodyWhereTheServerSaid()
-    {
-        using var credential = new HeadlessCredentialSecret("fixture", "password");
-        using var host = new HeadlessSessionHost(
-            HeadlessSessionHostTests.Descriptor(),
-            credential,
-            new HeadlessDiagnosticWriter(new StringWriter()),
-            new HeadlessSessionHostTests.FixtureSessionOperations());
-        Assert.Equal(RuntimeSessionStartStatus.Connected, host.Start().Status);
-        host.Tick(0.015d);
-
-        // The character's own create, taken the way a session with no game
-        // data takes it: kept, and never turned into a body.
-        const uint player = 0x50000002u;
-        host.Runtime.PlayerIdentity.ServerGuid = player;
-        AcDream.Runtime.Entities.RuntimeEntityRecord record = host.Runtime.EntityObjects
-            .RegisterEntityWithInitialResidence(
-                HeadlessSessionHostTests.Spawn(player),
-                isLocalPlayer: true)
-            .Canonical!;
-        Assert.True(host.Runtime.EntityObjects.ApplyAcceptedSpawn(
-            record,
-            record.CreateIntegrationVersion,
-            record.Snapshot,
-            replaceGeneration: false));
-        host.Tick(0.015d);
-        Assert.Null(host.Runtime.MovementOwner.Controller);
-
-        PluginNavigationSnapshot snapshot =
-            host.Plugins.Host.Automation.Navigation.Snapshot;
-
-        Assert.True(snapshot.IsAvailable);
-        Assert.Equal(player, snapshot.LocalObjectId);
-        Assert.Equal(0xA9B40001u, snapshot.Position.CellId);
-        // 96 m east and 97 m north inside landblock (0xA9, 0xB4), 50 m up, as
-        // map coordinates: 240 m to a unit from the middle of the map.
-        Assert.Equal(((0xA9 - 127) * 192d + 96d - 84d) / 240d, snapshot.Position.EastWest, 6);
-        Assert.Equal(((0xB4 - 127) * 192d + 97d - 84d) / 240d, snapshot.Position.NorthSouth, 6);
-        Assert.Equal(50d / 240d, snapshot.Position.Elevation, 6);
-        Assert.Equal(snapshot.Position, snapshot.ConfirmedPosition);
-    }
-
     /// <summary>A session that loaded no game data has nothing to plan walks over, so it says so.</summary>
     [Fact]
     public void WalksAreUnavailableInASessionWithoutGameData()

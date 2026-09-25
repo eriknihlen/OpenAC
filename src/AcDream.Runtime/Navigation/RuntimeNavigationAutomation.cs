@@ -53,15 +53,6 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
             .SettledPosition(record)
         ?? RuntimeNavigationProjection.FromServer(record.Snapshot.Position);
 
-    /// <summary>
-    /// Where the character is: its body while it has one, and the server's
-    /// last word about it while it has none.
-    /// </summary>
-    private static Position? LocalPosition(
-        in RuntimeMovementSnapshot movement,
-        Position? accepted) =>
-        movement.HasController ? movement.Position : accepted;
-
     public void Bind(GameRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
@@ -193,28 +184,20 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
                 return default;
 
             RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
-            Position? accepted = null;
+            if (!movement.HasController)
+                return default;
+            RuntimePortalSnapshot portal = runtime.Portal.Snapshot;
+            PluginNavigationPosition livePosition = RuntimeNavigationProjection.Position(movement.Position);
+            PluginNavigationPosition confirmedPosition = livePosition;
             ulong confirmedRevision = 0UL;
             if (runtime.EntityObjects.Entities.TryGetActive(
                     runtime.PlayerIdentity.ServerGuid,
                     out RuntimeEntityRecord localRecord)
-                && RuntimeNavigationProjection.FromServer(localRecord.Snapshot.Position) is { } serverPosition)
+                && RuntimeNavigationProjection.FromServer(localRecord.Snapshot.Position) is { } accepted)
             {
-                accepted = serverPosition;
+                confirmedPosition = RuntimeNavigationProjection.Position(accepted);
                 confirmedRevision = localRecord.PositionAuthorityVersion;
             }
-            // The character is where its body is. A client can be in the
-            // world with no body for it -- one given nothing to build a body
-            // from never makes one -- and then the character is where the
-            // server last said, the same rule every other object answers by.
-            // Only a character that is neither is nowhere.
-            if (LocalPosition(movement, accepted) is not { } live)
-                return default;
-            RuntimePortalSnapshot portal = runtime.Portal.Snapshot;
-            PluginNavigationPosition livePosition = RuntimeNavigationProjection.Position(live);
-            PluginNavigationPosition confirmedPosition = accepted is { } confirmed
-                ? RuntimeNavigationProjection.Position(confirmed)
-                : livePosition;
             return new PluginNavigationSnapshot(
                 IsAvailable: true,
                 IsPortalSpace: portal.Kind != RuntimePortalKind.None
@@ -243,23 +226,12 @@ internal sealed partial class RuntimeNavigationAutomation : INavigationAutomatio
         RuntimeMovementSnapshot movement = runtime.Movement.Snapshot;
         if (objectId == runtime.PlayerIdentity.ServerGuid)
         {
-            Position? accepted =
-                runtime.EntityObjects.Entities.TryGetActive(
-                    objectId,
-                    out RuntimeEntityRecord localRecord)
-                ? RuntimeNavigationProjection.FromServer(localRecord.Snapshot.Position)
-                : null;
-            if (LocalPosition(movement, accepted) is not { } live)
-            {
-                value = default;
-                return false;
-            }
             value = new PluginNavigationObject(
                 objectId,
                 runtime.InventoryOwner.Objects.Get(objectId)?.Name
                     ?? string.Empty,
-                RuntimeNavigationProjection.Position(live));
-            return true;
+                RuntimeNavigationProjection.Position(movement.Position));
+            return movement.HasController;
         }
 
         if (!runtime.EntityObjects.Entities.TryGetActive(
