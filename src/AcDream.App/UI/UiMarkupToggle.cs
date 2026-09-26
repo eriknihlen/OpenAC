@@ -4,6 +4,8 @@ namespace AcDream.App.UI;
 
 public sealed class UiMarkupToggle : UiElement
 {
+    public PluginUiPalette? ThemePalette { get; set; }
+
     public string Text { get; set; } = string.Empty;
     public Func<string?>? TextSource { get; set; }
     public Func<bool>? CheckedSource { get; set; }
@@ -36,7 +38,9 @@ public sealed class UiMarkupToggle : UiElement
         if (_keyboardActivation.Focused)
             ctx.DrawRectOutline(0f, 0f, Width, Height,
                 new Vector4(1f, 0.82f, 0.25f, 1f), 1f);
-        UiCheckLamp.Draw(ctx, 1f, MathF.Max(1f, (Height - UiCheckLamp.LampSize) * 0.5f), IsChecked);
+        float checkY = MathF.Max(1f, (Height - UiCheckLamp.LampSize) * 0.5f);
+        if (ThemePalette is { } p) p.DrawCheck(ctx, 1f, checkY, IsChecked);
+        else UiCheckLamp.Draw(ctx, 1f, checkY, IsChecked);
 
         string caption = TextSource?.Invoke() ?? Text;
         Vector4 textColor = TextColorSource?.Invoke() ?? TextColor;
@@ -47,7 +51,7 @@ public sealed class UiMarkupToggle : UiElement
             ? (Height - font.LineHeight) * 0.5f
             : 1f;
         if (DatFont is { } dat)
-            ctx.DrawStringDat(dat, caption, 17f, y, color, outline: true);
+            ctx.DrawStringDat(dat, caption, 17f, y, color, outline: ThemePalette is null);
         else
             ctx.DrawString(caption, 17f, y, color);
     }

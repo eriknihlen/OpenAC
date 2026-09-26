@@ -402,6 +402,8 @@ public sealed class RetailUiRuntime : IDisposable
     private CreditsUiController? _creditsController;
     private CharacterCreationUiMountCoordinator? _characterCreationMount;
     private PluginSidePanel? _pluginSidePanel;
+    private PluginUiThemeSettings? _pluginThemes;
+    private UiNineSlicePanel? _pluginAppearance;
     private readonly Dictionary<string, (uint Texture, int Width, int Height)?> _pluginIcons = [];
     private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
@@ -4061,6 +4063,8 @@ public sealed class RetailUiRuntime : IDisposable
     {
         if (_bindings.Plugins is null) return;
 
+        _pluginThemes ??= new PluginUiThemeSettings(_bindings.Chat.Store);
+
         IMarkupIconResolver iconResolver = new RetailMarkupIconResolver(
             _bindings.Assets.Dats,
             _bindings.Assets.Icons,
@@ -4078,7 +4082,7 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Assets.ResolveSprite,
                     _bindings.Assets.Controls,
                     _bindings.Assets.DefaultFont,
-                    iconResolver);
+                    iconResolver, _pluginThemes);
 
                 if (Host.WindowManager.TryGet(panel.WindowName, out _))
                 {
@@ -4118,7 +4122,7 @@ public sealed class RetailUiRuntime : IDisposable
                         _pluginSidePanel = new PluginSidePanel(
                             Host.WindowManager,
                             iconResolver.ResolveDid,
-                            _bindings.Assets.DefaultFont);
+                            _bindings.Assets.DefaultFont, _pluginThemes, ShowPluginAppearance);
                         Host.Root.AddChild(_pluginSidePanel);
                         Host.WindowManager.Register(
                             WindowNames.PluginShelf,
@@ -4143,6 +4147,28 @@ public sealed class RetailUiRuntime : IDisposable
                 Console.WriteLine($"[UI] plugin UI panel '{panel.MarkupPath}' failed to load: {ex.Message}");
             }
         }
+    }
+
+    private void ShowPluginAppearance()
+    {
+        if (_pluginAppearance is not null)
+        {
+            _pluginAppearance.Visible = true;
+            Host.Root.BringToFront(_pluginAppearance);
+            return;
+        }
+        var binding = new PluginAppearanceBinding(_pluginThemes!);
+        _pluginAppearance = MarkupDocument.Build("""
+            <panel x="70" y="90" w="310" h="140" title="Plugin appearance" theme="plugin">
+              <label x="12" y="33" text="Theme" />
+              <menu x="12" y="55" w="286" h="24" items="{Themes}" selected="{Selected}" onchange="{Select}" rows="3" />
+              <button x="226" y="102" w="72" h="24" text="Close" onclick="{Close}" />
+            </panel>
+            """, binding, _bindings.Assets.ResolveSprite, _bindings.Assets.Controls,
+            _bindings.Assets.DefaultFont, themes: _pluginThemes);
+        binding.Close = () => _pluginAppearance.Visible = false;
+        Host.Root.AddChild(_pluginAppearance);
+        Host.Root.BringToFront(_pluginAppearance);
     }
 
     /// <summary>

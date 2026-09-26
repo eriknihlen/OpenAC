@@ -21,19 +21,19 @@ public static class MarkupDocument
     public static UiNineSlicePanel Build(
         string xml, object binding, Func<uint, (uint, int, int)> resolve,
         ControlsIni? style = null, UiDatFont? datFont = null,
-        IMarkupIconResolver? icons = null)
+        IMarkupIconResolver? icons = null, PluginUiThemeSettings? themes = null)
     {
         var root = XDocument.Parse(xml).Root ?? throw new FormatException("empty markup");
         if (root.Name.LocalName != "panel")
             throw new FormatException($"root must be <panel>, got <{root.Name.LocalName}>");
 
-        var panel = new UiNineSlicePanel(resolve)
-        {
-            Left   = F(root, "x"),
-            Top    = F(root, "y"),
-            Width  = F(root, "w"),
-            Height = F(root, "h"),
-        };
+        bool themed = (string?)root.Attribute("theme") == "plugin";
+        if (themed) themes ??= new PluginUiThemeSettings();
+        UiNineSlicePanel panel = themed
+            ? new UiPluginMarkupPanel(resolve, themes ?? new PluginUiThemeSettings())
+            : new UiNineSlicePanel(resolve);
+        panel.Left = F(root, "x"); panel.Top = F(root, "y");
+        panel.Width = F(root, "w"); panel.Height = F(root, "h");
 
         bool resizable = B(root, "resizable", false);
         panel.Resizable = resizable;
@@ -72,8 +72,11 @@ public static class MarkupDocument
             });
         }
 
+        if (panel is UiPluginMarkupPanel titlePanel && panel.Children.Count > 0)
+            PluginMarkupTheme.Register(titlePanel, panel.Children[0], new XElement("label"));
+
         foreach (var el in root.Elements())
-            AddElement(panel, el, binding, resolve, datFont, icons);
+            AddElement(panel, el, binding, resolve, datFont, icons, panel as UiPluginMarkupPanel, themes);
 
         // The whole document now sits at its authored sizes, so this is the one
         // moment every anchor margin can be read off the layout its author wrote.
@@ -91,8 +94,22 @@ public static class MarkupDocument
         object binding,
         Func<uint, (uint, int, int)> resolve,
         UiDatFont? datFont,
-        IMarkupIconResolver? icons)
+        IMarkupIconResolver? icons, UiPluginMarkupPanel? themedPanel, PluginUiThemeSettings? themes)
     {
+        int firstChild = parent.Children.Count;
+        void BindColorSource(string? expression, object model, Action<Vector4> setValue,
+            Action<Func<Vector4>> setSource)
+        {
+            if (expression?.StartsWith("theme:", StringComparison.Ordinal) == true)
+            {
+                string token = expression[6..].Split('|')[0];
+                _ = PluginUiPalette.Moss.Token(token);
+                Vector4 classic = Color(expression);
+                Vector4 Read() => themedPanel is not null && themes?.Palette is { } p ? p.Token(token) : classic;
+                setValue(Read()); setSource(Read);
+            }
+            else MarkupDocument.BindColorSource(expression, model, setValue, setSource);
+        }
         switch (el.Name.LocalName)
         {
             case "group":
@@ -122,7 +139,7 @@ public static class MarkupDocument
                 ApplyCommon(group, el, binding);
                 parent.AddChild(group);
                 foreach (XElement child in el.Elements())
-                    AddElement(group, child, binding, resolve, datFont, icons);
+                    AddElement(group, child, binding, resolve, datFont, icons, themedPanel, themes);
                 break;
 
             case "meter":
@@ -446,6 +463,8 @@ public static class MarkupDocument
 
                 var field = new UiField
                 {
+                    OneLine = B(el, "oneline", true),
+                    Editable = B(el, "editable", true),
                     Selectable = true,
                     TabStop = true,
                     Left = F(el, "x"),
@@ -506,6 +525,7 @@ public static class MarkupDocument
                 bool menuRetailButtonArt = ValidateArtStyle("menu", (string?)el.Attribute("style"));
                 var menu = new UiMenu
                 {
+                    Searchable = B(el, "searchable", false),
                     Left = F(el, "x"),
                     Top = F(el, "y"),
                     Width = F(el, "w"),
@@ -638,6 +658,8 @@ public static class MarkupDocument
             default:
                 throw new FormatException($"unknown element <{el.Name.LocalName}>");
         }
+        if (themedPanel is not null && parent.Children.Count > firstChild)
+            PluginMarkupTheme.Register(themedPanel, parent.Children[firstChild], el);
     }
 
     private static string ValidateIconKind(string? iconKind, string context = "iconkind") =>
@@ -1088,6 +1110,8 @@ public static class MarkupDocument
 
     private static Vector4 Color(string? hex)
     {
+        if (hex?.StartsWith("theme:", StringComparison.Ordinal) == true)
+            hex = hex.Contains('|') ? hex[(hex.IndexOf('|') + 1)..] : null;
         if (hex is { Length: 9 } && hex[0] == '#'
             && uint.TryParse(hex.AsSpan(1), NumberStyles.HexNumber,
                              CultureInfo.InvariantCulture, out uint argb))

@@ -13,6 +13,8 @@ public sealed class UiMarkupTabButton : UiSimpleButton
     private static readonly Vector4 Underline =
         new(0.77f, 0.59f, 0.12f, 1f);
 
+    public PluginUiPalette? ThemePalette { get; set; }
+
     public Func<bool>? SelectedSource { get; set; }
 
     public bool IsSelected => SelectedSource?.Invoke() ?? false;
@@ -30,13 +32,13 @@ public sealed class UiMarkupTabButton : UiSimpleButton
         base.OnTick(deltaSeconds);
         TextColor = !Enabled
             ? DisabledText
-            : IsSelected ? ActiveText : NormalText;
+            : IsSelected ? ThemePalette?.Accent ?? ActiveText : ThemePalette?.Muted ?? NormalText;
     }
 
     protected override void OnDraw(UiRenderContext ctx)
     {
         base.OnDraw(ctx);
         if (IsSelected)
-            ctx.DrawFill(2f, Height - 2f, MathF.Max(0f, Width - 4f), 1f, Underline);
+            ctx.DrawFill(2f, Height - 2f, MathF.Max(0f, Width - 4f), 1f, ThemePalette?.Accent ?? Underline);
     }
 }

@@ -35,6 +35,32 @@ Every window gets drag, an optional resize, the global UI lock, and a
 persisted position keyed `plugin:{pluginId}:{windowId}`. Hiding a window never
 pauses the plugin.
 
+## Shared plugin appearance
+
+Right-click the plugin shelf or an entry to open **Plugin appearance**. Classic
+is the default. **Charcoal + moss** and **Warm graphite + brass** apply to
+windows whose root uses `<panel theme="plugin" ...>`. The choice is saved in
+the client's settings. Existing windows without this attribute keep their
+original styling. Modern shelves are 18 pixels wide; wheel scrolling reaches
+entries that do not fit vertically. Icons keep their full-color composition.
+
+Opted-in windows keep their authored layout and use themed labels, buttons,
+tabs, fields, menus, lists, toggles and scrollbars. Literal and bound semantic
+colors remain unchanged. To adapt a decorative color, use a token with its
+original Classic fallback, for example `color="theme:text|#FFE8DEC3"` or
+`background="theme:field|#FF0C0906"`. Tokens are `text`, `muted`, `field`,
+`border`, `accent`, and `background`; the fallback uses `#AARRGGBB`.
+
+Set `searchable="true"` on a menu to add an editable search band. Each typed
+word must match its label, ignoring case. Filtering does not select an item;
+click a result or press Enter to select it, use arrows to navigate, or Escape
+to dismiss. Each opening refreshes the source list and clears the query.
+Omitting the attribute retains existing menu behavior.
+
+Fields support `oneline="false"` for wrapping and `editable="false"` for a
+read-only description. Both default to true. A multiline field can scroll
+through text longer than its viewport.
+
 ## Bindings
 
 An attribute value is either a literal or a binding `{Name}`. A binding names
