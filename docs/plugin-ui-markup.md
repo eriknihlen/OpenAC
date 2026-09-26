@@ -41,7 +41,7 @@ Right-click the plugin shelf or an entry to open **Plugin appearance**. Classic
 is the default. **Charcoal + moss** and **Warm graphite + brass** apply to
 windows whose root uses `<panel theme="plugin" ...>`. The choice is saved in
 the client's settings. Existing windows without this attribute keep their
-original styling. Modern shelves are 18 pixels wide; wheel scrolling reaches
+original styling. Modern shelves are 24 pixels wide; wheel scrolling reaches
 entries that do not fit vertically. Icons keep their full-color composition.
 
 Opted-in windows keep their authored layout and use themed labels, buttons,

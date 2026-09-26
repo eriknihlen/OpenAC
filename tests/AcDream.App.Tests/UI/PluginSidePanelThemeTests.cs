@@ -9,7 +9,7 @@ public sealed class PluginSidePanelThemeTests
     [Theory]
     [InlineData(PluginUiTheme.Moss)]
     [InlineData(PluginUiTheme.Brass)]
-    public void CompactShelfRemains18PixelsAndScrollsEveryEntryIntoView(PluginUiTheme theme)
+    public void CompactShelfRemains24PixelsAndScrollsEveryEntryIntoView(PluginUiTheme theme)
     {
         var root = new UiRoot { Width = 800, Height = 260 };
         var settings = new PluginUiThemeSettings { Theme = theme };
@@ -17,7 +17,7 @@ public sealed class PluginSidePanelThemeTests
         root.AddChild(shelf);
         for (int i = 0; i < 12; i++) Add(root, shelf, i);
         root.Tick(0.016, 16);
-        Assert.Equal(18f, shelf.Width);
+        Assert.Equal(24f, shelf.Width);
         Assert.True(shelf.Top + shelf.Height <= root.Height);
         var buttons = shelf.Children.OfType<PluginSidePanel.PluginShelfButton>().ToArray();
         Assert.True(buttons[0].Visible);
@@ -28,7 +28,7 @@ public sealed class PluginSidePanelThemeTests
         Assert.All(buttons.Where(b => b.Visible), b =>
         {
             Assert.Equal(1f, b.Left);
-            Assert.Equal(16f, b.Width);
+            Assert.Equal(22f, b.Width);
             Assert.True(b.Top >= shelf.ExpandedGripBandHeight);
             Assert.True(b.Top + b.Height <= shelf.Height);
         });

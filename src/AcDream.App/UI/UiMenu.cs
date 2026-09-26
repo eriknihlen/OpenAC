@@ -168,6 +168,7 @@ public sealed class UiMenu : UiElement
                 _searchField.SetText("");
             }
             BeforeOpen?.Invoke();
+            if (Items.Count == 0 && !Searchable) return;
             OnOpen?.Invoke();
             if (Searchable) FilterItems();
         }
@@ -783,7 +784,6 @@ public sealed class UiMenu : UiElement
         }
 
         _facePressed = true;                       // momentary press flick
-        if (!_open && Items.Count == 0) return true;
         SetOpen(!_open);
         return true;
     }

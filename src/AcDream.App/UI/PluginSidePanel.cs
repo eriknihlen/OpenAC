@@ -35,7 +35,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
     private int _visibleRows = 1;
     private bool Compact => (_themes?.Theme ?? PluginUiTheme.Classic) != PluginUiTheme.Classic;
     private float Padding => Compact ? 1f : OuterPadding;
-    private float Extent => Compact ? 16f : ButtonExtent;
+    private float Extent => Compact ? 22f : ButtonExtent;
     private float Gap => Compact ? 2f : ButtonGap;
     private bool _disposed;
     private float _lastLayoutHeight = -1f;
@@ -355,12 +355,12 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
         {
             _grip.Left = 1f;
             _grip.Top = 0f;
-            _grip.Width = 16f;
+            _grip.Width = Extent;
             _grip.Height = 10f;
             _grip.Compact = true;
             _toggle.Left = 1f;
             _toggle.Top = 10f;
-            _toggle.Width = 16f;
+            _toggle.Width = Extent;
             _toggle.Height = 14f;
             _toggle.Outline = false;
             return;
@@ -411,7 +411,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
         if (_collapsed)
         {
-            Width = Compact ? 18f : CollapsedWidth;
+            Width = Compact ? 24f : CollapsedWidth;
             Height = Compact ? 24f : ButtonExtent;
         }
         else

@@ -31,6 +31,40 @@ public class MarkupDocumentTests
         public Action Down => () => DownCount++;
     }
 
+    private sealed class DynamicChoiceBinding
+    {
+        public IReadOnlyList<string> Choices { get; set; } = [];
+        public string Selected { get; set; } = "All";
+        public Action<string> Select => value => Selected = value;
+    }
+
+    [Fact]
+    public void MenuRefreshesInitiallyEmptyChoicesBeforeOpening()
+    {
+        var binding = new DynamicChoiceBinding();
+        var panel = MarkupDocument.Build("""
+            <panel x="0" y="0" w="300" h="250">
+              <menu x="10" y="10" w="200" h="24" items="{Choices}"
+                    selected="{Selected}" onchange="{Select}" />
+            </panel>
+            """, binding, _ => (0u, 0, 0));
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(panel);
+        var menu = Assert.IsType<UiMenu>(panel.Children[0]);
+        Assert.Empty(menu.Items);
+        binding.Choices = ["Custom", "All", "None", "B", "BPS", "BPSA", "BPSAC", "ALFC"];
+        root.OnMouseDown(UiMouseButton.Left, 20, 20);
+        root.OnMouseUp(UiMouseButton.Left, 20, 20);
+        Assert.True(menu.IsOpen);
+        Assert.Equal(8, menu.Items.Count);
+        Assert.Equal("All", binding.Selected);
+        int choiceY = 10 + 24 + RetailChromeSprites.Border + (int)(2.5f * menu.RowHeight);
+        root.OnMouseDown(UiMouseButton.Left, 25, choiceY);
+        root.OnMouseUp(UiMouseButton.Left, 25, choiceY);
+        Assert.Equal("None", binding.Selected);
+        Assert.False(menu.IsOpen);
+    }
+
     [Fact]
     public void MarkupFieldDispatchesArrowKeyActions()
     {
