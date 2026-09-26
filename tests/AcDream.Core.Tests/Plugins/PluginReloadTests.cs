@@ -29,7 +29,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         string folder = InstallHello(temporary.Path, "hello", HelloId, withSymbols: true);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
         Assert.Equal(1, plugins.LoadedCount);
 
@@ -53,7 +53,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         string folder = InstallHello(temporary.Path, "hello", HelloId);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
         WeakReference first = Assert.Single(plugins.CaptureLoadContextWeakReferences());
 
@@ -72,10 +72,12 @@ public sealed class PluginReloadTests
         Assert.Contains("Reloaded acdream.test.hello 1.0.0.", host.Chat);
         Assert.Equal([HelloId], plugins.LoadedPluginIds);
 
-        host.Tick(PluginSession.UnloadCheckAttempts * PluginSession.TicksBetweenUnloadChecks);
+        Collect(first);
         Assert.False(first.IsAlive);
+        _watch.Poll();
+        host.Tick();
         Assert.Contains(host.Logs, static line => line.Contains("has left memory", StringComparison.Ordinal));
-        Assert.DoesNotContain(host.Chat, static line => line.Contains("did not unload", StringComparison.Ordinal));
+        Assert.DoesNotContain(host.Chat, static line => line.Contains("still in memory", StringComparison.Ordinal));
         ReleaseAndCollect(plugins);
     }
 
@@ -86,7 +88,7 @@ public sealed class PluginReloadTests
         InstallHello(temporary.Path, "alpha", "acdream.test.alpha");
         InstallHello(temporary.Path, "beta", "acdream.test.beta");
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         Assert.True(host.Commands.TryHandle("/plugin reload all"));
@@ -104,7 +106,7 @@ public sealed class PluginReloadTests
     {
         using var temporary = new TemporaryDirectory();
         var host = new ReloadHost();
-        using var plugins = new PluginSession(host);
+        using var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         Assert.True(host.Commands.TryHandle("/plugin reload acdream.test.absent"));
@@ -137,8 +139,13 @@ public sealed class PluginReloadTests
         var host = new ReloadHost();
         var plugins = new PluginSession(
             host,
+            report: null,
+            renderPacks: null,
+            supportedKinds: null,
             hostKind: PluginHostKind.Graphical,
-            hostVersion: PluginHostVersion.FromInformationalVersion("0.1.20"));
+            hostVersion: PluginHostVersion.FromInformationalVersion("0.1.20"),
+            timeProvider: null,
+            unloadWatch: _watch);
         plugins.Start([temporary.Path], allowList: null);
         WriteManifest(
             folder,
@@ -170,7 +177,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         InstallHello(temporary.Path, "hello", HelloId);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
         Assert.DoesNotContain("hello-login", host.Logs);
 
@@ -194,7 +201,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         InstallHello(temporary.Path, "hello", HelloId);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         // The first new copy subscribes after the session's own handler, so
@@ -211,28 +218,59 @@ public sealed class PluginReloadTests
     }
 
     /// <summary>
-    /// Mutation (2026-09-26): dropping the unload check left the chat silent
-    /// about a copy that stayed in memory.
+    /// A previous copy still in memory when the watch ends is named once, in
+    /// plain terms, and not before: the runtime is given the whole watch to
+    /// collect it in its own time. Mutation (2026-09-26): reporting on the
+    /// first poll that found the copy alive named it at once.
     /// </summary>
     [Fact]
-    public void AnOldCopyThatCannotLeaveMemoryIsNamedInChat()
+    public void AnOldCopyStillInMemoryWhenTheWatchEndsIsNamedOnceInChat()
     {
         using var temporary = new TemporaryDirectory();
         string folder = InstallHello(temporary.Path, "leaky", "acdream.test.leaky");
         File.WriteAllText(Path.Combine(folder, "leak-on-enable"), string.Empty);
         var host = new ReloadHost();
-        using var plugins = new PluginSession(host);
+        using var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         plugins.RequestReload("acdream.test.leaky");
         host.Tick();
-        host.Tick(PluginSession.UnloadCheckAttempts * PluginSession.TicksBetweenUnloadChecks);
+        _time.Advance(PluginUnloadWatch.Window - TimeSpan.FromSeconds(1));
+        _watch.Poll();
+        host.Tick();
+        Assert.DoesNotContain(host.Chat, static line => line.Contains("still in memory", StringComparison.Ordinal));
 
-        Assert.Contains(
-            host.Chat,
-            static line => line.StartsWith(
-                "The previous copy of acdream.test.leaky did not unload.",
-                StringComparison.Ordinal));
+        _time.Advance(TimeSpan.FromSeconds(1));
+        _watch.Poll();
+        _watch.Poll();
+        host.Tick(2);
+
+        Assert.Equal(
+            ["The previous copy of acdream.test.leaky is still in memory; it is freed when the client restarts."],
+            host.Chat.Where(static line => line.Contains("still in memory", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// A reload never forces a collection on the thread that ticks the game:
+    /// the old copy is looked at later, from the watch. Mutation (2026-09-26):
+    /// the earlier check collected on every eighth tick for a second.
+    /// </summary>
+    [Fact]
+    public void TickingAfterAReloadDoesNotCollect()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallHello(temporary.Path, "hello", HelloId);
+        var host = new ReloadHost();
+        var plugins = NewSession(host);
+        plugins.Start([temporary.Path], allowList: null);
+        plugins.RequestReload(HelloId);
+        host.Tick();
+
+        int before = GC.CollectionCount(GC.MaxGeneration);
+        host.Tick(200);
+
+        Assert.Equal(before, GC.CollectionCount(GC.MaxGeneration));
+        ReleaseAndCollect(plugins);
     }
 
     /// <summary>
@@ -247,7 +285,7 @@ public sealed class PluginReloadTests
         string folder = InstallHello(temporary.Path, "hello", HelloId);
         var time = new ManualTime();
         var host = new ReloadHost();
-        var plugins = new PluginSession(host, timeProvider: time);
+        var plugins = NewSession(host, time);
         plugins.Start([temporary.Path], allowList: null);
 
         File.Copy(FixturePath(), Path.Combine(folder, HelloFileName), overwrite: true);
@@ -266,12 +304,13 @@ public sealed class PluginReloadTests
     }
 
     /// <summary>
-    /// What a plugin writes into its own <c>files</c> folder is the player's
-    /// data, not a new copy of the plugin: it neither marks the plugin nor
-    /// holds back a reload that is waiting for the folder to go quiet, which
-    /// a plugin saving its state every few ticks would otherwise do forever.
-    /// Mutation (2026-09-26): not skipping the files folder kept restarting
-    /// the quiet period, and the plugin did not reload.
+    /// What a plugin writes into its own <c>files</c> folder, or beside its
+    /// code as a log or data file, is not a new copy of the plugin: it
+    /// neither marks the plugin nor holds back a reload that is waiting for
+    /// the code to go quiet, which a plugin writing every few ticks would
+    /// otherwise do forever. Mutation (2026-09-26): counting every write
+    /// outside the files folder kept restarting the quiet period, and the
+    /// plugin did not reload.
     /// </summary>
     [Fact]
     public void WritingThePlayersFilesNeitherMarksNorHoldsBackAReload()
@@ -280,13 +319,14 @@ public sealed class PluginReloadTests
         string folder = InstallHello(temporary.Path, "hello", HelloId);
         var time = new ManualTime();
         var host = new ReloadHost();
-        var plugins = new PluginSession(host, timeProvider: time);
+        var plugins = NewSession(host, time);
         plugins.Start([temporary.Path], allowList: null);
 
         string files = Path.Combine(folder, "files");
         Directory.CreateDirectory(files);
         File.WriteAllText(Path.Combine(files, "plugin.json"), "{}");
         File.WriteAllText(Path.Combine(files, HelloFileName), "not the plugin");
+        File.WriteAllText(Path.Combine(folder, "plugin.log"), "a line");
         Thread.Sleep(300);
         Assert.False(plugins.HasPendingFileChange(HelloId));
 
@@ -295,6 +335,7 @@ public sealed class PluginReloadTests
         Thread.Sleep(300);
         time.Advance(TimeSpan.FromMilliseconds(600));
         File.WriteAllText(Path.Combine(files, "state.json"), "{\"saved\":true}");
+        File.AppendAllText(Path.Combine(folder, "plugin.log"), "another line");
         Thread.Sleep(300);
         time.Advance(TimeSpan.FromMilliseconds(500));
         host.Tick();
@@ -315,7 +356,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         string folder = InstallHello(temporary.Path, "hello", HelloId);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         string marker = Path.Combine(folder, "throw-on-enable");
@@ -343,7 +384,7 @@ public sealed class PluginReloadTests
         using var temporary = new TemporaryDirectory();
         string folder = InstallHello(temporary.Path, "hello", HelloId);
         var host = new ReloadHost();
-        var plugins = new PluginSession(host);
+        var plugins = NewSession(host);
         plugins.Start([temporary.Path], allowList: null);
 
         WriteManifest(folder, HelloId, version: "2.0.0", entryDll: "missing.dll");
@@ -359,6 +400,108 @@ public sealed class PluginReloadTests
         Assert.Equal([HelloId], plugins.LoadedPluginIds);
         ReleaseAndCollect(plugins);
     }
+
+    /// <summary>
+    /// A plugin that failed when the client started is not forgotten: its
+    /// folder is watched and asking for it by name tries it again.
+    /// Mutation (2026-09-26): not keeping plugins that failed at startup made
+    /// the reload answer "No plugin ... is running".
+    /// </summary>
+    [Fact]
+    public void APluginThatFailedAtStartupIsTriedAgain()
+    {
+        using var temporary = new TemporaryDirectory();
+        string folder = InstallHello(temporary.Path, "hello", HelloId);
+        string marker = Path.Combine(folder, "throw-on-enable");
+        File.WriteAllText(marker, string.Empty);
+        var time = new ManualTime();
+        var host = new ReloadHost();
+        var plugins = NewSession(host, time);
+        plugins.Start([temporary.Path], allowList: null);
+        Assert.Empty(plugins.LoadedPluginIds);
+
+        File.Delete(marker);
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "plugin.json"), DateTime.UtcNow);
+        WaitFor(() => plugins.HasPendingFileChange(HelloId));
+        time.Advance(PluginSession.QuietPeriod);
+        host.Tick();
+        Assert.Equal(["Reloaded acdream.test.hello 1.0.0."], host.Chat);
+        Assert.Equal([HelloId], plugins.LoadedPluginIds);
+        ReleaseAndCollect(plugins);
+    }
+
+    [Fact]
+    public void APluginWhoseManifestWasUnreadableAtStartupIsTriedAgainByName()
+    {
+        using var temporary = new TemporaryDirectory();
+        string folder = InstallHello(temporary.Path, "hello", HelloId);
+        string manifest = File.ReadAllText(Path.Combine(folder, "plugin.json"));
+        File.WriteAllText(Path.Combine(folder, "plugin.json"), "{ not json");
+        var host = new ReloadHost();
+        var plugins = NewSession(host);
+        plugins.Start([temporary.Path], ["hello"]);
+        Assert.Empty(plugins.LoadedPluginIds);
+
+        File.WriteAllText(Path.Combine(folder, "plugin.json"), manifest.Replace(HelloId, "hello", StringComparison.Ordinal));
+        Assert.True(host.Commands.TryHandle("/plugin reload hello"));
+        host.Tick();
+        Assert.Equal(["Reloaded hello 1.0.0."], host.Chat);
+        ReleaseAndCollect(plugins);
+    }
+
+    /// <summary>
+    /// The assemblies a plugin runs are the ones read when it was prepared.
+    /// Mutation (2026-09-26): reading the assembly file when it is loaded,
+    /// as the first version did, loaded whatever an update had just written.
+    /// </summary>
+    [Fact]
+    public void APluginsAssembliesComeFromTheCopyReadWhenItWasPrepared()
+    {
+        using var temporary = new TemporaryDirectory();
+        string folder = InstallHello(temporary.Path, "hello", HelloId);
+        string dll = Path.Combine(folder, HelloFileName);
+        var package = PluginPackageSnapshot.Read(folder);
+        var context = new PluginAssemblyLoadContext(package, dll);
+        try
+        {
+            File.WriteAllBytes(dll, [1, 2, 3]);
+            File.Copy(FixturePath(), Path.Combine(folder, "Late.dll"));
+
+            Assert.Equal("AcDream.Core.Tests.Fixtures.HelloPlugin", context.LoadEntry(dll).GetName().Name);
+            Assert.Throws<FileNotFoundException>(
+                () => context.LoadEntry(Path.Combine(folder, "Late.dll")));
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    private static void Collect(WeakReference context)
+    {
+        for (int attempt = 0; attempt < 10 && context.IsAlive; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+    }
+
+    private readonly ManualTime _time = new();
+    private readonly PluginUnloadWatch _watch;
+
+    public PluginReloadTests() => _watch = new PluginUnloadWatch(_time, runTimer: false);
+
+    private PluginSession NewSession(ReloadHost host, TimeProvider? time = null) =>
+        new(
+            host,
+            report: null,
+            renderPacks: null,
+            supportedKinds: null,
+            hostKind: null,
+            hostVersion: null,
+            timeProvider: time,
+            unloadWatch: _watch);
 
     private static void WaitFor(Func<bool> condition)
     {

@@ -1,4 +1,3 @@
-using System.Runtime.Loader;
 using AcDream.Plugin.Abstractions;
 using AcDream.Plugin.Abstractions.Rendering;
 
@@ -32,9 +31,10 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
         // A plugin that subscribes to something outside its host keeps its
         // own code reachable after it is unloaded, which is what the host's
         // unload check has to notice and report.
-        if (File.Exists(Path.Combine(FixtureDirectory(), "leak-on-enable")))
+        string directory = host.PluginDirectory ?? string.Empty;
+        if (File.Exists(Path.Combine(directory, "leak-on-enable")))
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
-        if (File.Exists(Path.Combine(FixtureDirectory(), "throw-on-enable")))
+        if (File.Exists(Path.Combine(directory, "throw-on-enable")))
             throw new InvalidOperationException("fixture enable failed on purpose");
     }
 
@@ -73,7 +73,7 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
                 FeatureSummary = "Test-only no-op render-pack fixture.",
             },
             this);
-        if (File.Exists(Path.Combine(FixtureDirectory(), "throw-after-render-register")))
+        if (File.Exists(Path.Combine(registry.PluginDirectory ?? string.Empty, "throw-after-render-register")))
         {
             throw new InvalidOperationException(
                 "fixture render-pack registration failed after publishing a descriptor");
@@ -92,18 +92,4 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
     }
 
     private void OnProcessExit(object? sender, EventArgs e) => _ = EnableCount;
-
-    /// <summary>
-    /// The fixture's folder. The host loads the assembly from memory, so it
-    /// has no location of its own; the host names its load context after the
-    /// plugin folder, which a render pack, having no host, reads instead.
-    /// </summary>
-    private static string FixtureDirectory()
-    {
-        string location = typeof(HelloPlugin).Assembly.Location;
-        return location.Length > 0
-            ? Path.GetDirectoryName(location)!
-            : AssemblyLoadContext.GetLoadContext(typeof(HelloPlugin).Assembly)?.Name
-                ?? string.Empty;
-    }
 }

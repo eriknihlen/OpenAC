@@ -5,25 +5,29 @@ namespace AcDream.Core.Plugins;
 
 /// <summary>
 /// One plugin's own set of assemblies, unloadable as a unit. Every assembly
-/// is read into memory and loaded from there rather than mapped from its
-/// file, so nothing in the plugin's folder stays open while the plugin runs:
-/// an update can overwrite the files in place, and a reload loads the new
-/// copy.
+/// comes from the plugin's <see cref="PluginPackageSnapshot"/>, read into
+/// memory when the plugin was prepared, never from its file: nothing in the
+/// plugin's folder stays open while the plugin runs, and an update written
+/// into the folder cannot mix its assemblies into the copy already running.
 /// </summary>
 internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext
 {
     private const string AbstractionsAssemblyName = "AcDream.Plugin.Abstractions";
 
     private readonly AssemblyDependencyResolver _resolver;
+    private readonly PluginPackageSnapshot _package;
 
-    public PluginAssemblyLoadContext(string pluginDirectory, string pluginEntryPath)
-        : base(name: pluginDirectory, isCollectible: true)
+    public PluginAssemblyLoadContext(PluginPackageSnapshot package, string pluginEntryPath)
+        : base(name: package.Directory, isCollectible: true)
     {
+        _package = package;
         _resolver = new AssemblyDependencyResolver(pluginEntryPath);
     }
 
     /// <summary>Loads the plugin's entry assembly.</summary>
-    internal Assembly LoadEntry(string path) => LoadFromBytes(path);
+    internal Assembly LoadEntry(string path) =>
+        FromPackage(path)
+            ?? throw new FileNotFoundException($"entry dll not found: {path}", path);
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
@@ -32,20 +36,18 @@ internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext
             return null;
 
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
-        return path is null ? null : LoadFromBytes(path);
+        return path is null ? null : FromPackage(path);
     }
 
     /// <summary>
-    /// Reads the assembly, and its symbols when they sit beside it so a stack
-    /// trace still names files and lines, and loads both from memory.
+    /// Loads an assembly, with its symbols when the package had them so a
+    /// stack trace still names files and lines. An assembly that was not in
+    /// the package when it was read is not loaded, whatever is on disk now.
     /// </summary>
-    private Assembly LoadFromBytes(string path)
+    private Assembly? FromPackage(string path)
     {
-        byte[] image = File.ReadAllBytes(path);
-        string symbolsPath = Path.ChangeExtension(path, ".pdb");
-        byte[]? symbols = File.Exists(symbolsPath)
-            ? File.ReadAllBytes(symbolsPath)
-            : null;
+        if (!_package.TryGetAssembly(path, out byte[] image, out byte[]? symbols))
+            return null;
         using var imageStream = new MemoryStream(image, writable: false);
         if (symbols is null)
             return LoadFromStream(imageStream);

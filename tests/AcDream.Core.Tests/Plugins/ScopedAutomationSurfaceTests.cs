@@ -50,8 +50,14 @@ public sealed class ScopedAutomationSurfaceTests
             // Chat is deliberately wrapped, not forwarded, so the scoped
             // host can revoke a plugin's filters and subscriptions on
             // unload.
+            // Trade, Vendor and Equipment are wrapped too, so the handlers a
+            // plugin adds to their events come off with it; that they still
+            // answer from the host is covered by ScopedPluginHostReleaseTests.
             if (property.Name == nameof(IAutomationSurface.IsAvailable)
-                || property.Name == nameof(IAutomationSurface.Chat))
+                || property.Name == nameof(IAutomationSurface.Chat)
+                || property.Name == nameof(IAutomationSurface.Trade)
+                || property.Name == nameof(IAutomationSurface.Vendor)
+                || property.Name == nameof(IAutomationSurface.Equipment))
             {
                 continue;
             }
@@ -87,7 +93,7 @@ public sealed class ScopedAutomationSurfaceTests
         // Every property this loop actually walked should be one of the
         // known forwarders, guarding against the loop silently checking zero
         // properties if reflection ever returned nothing.
-        Assert.Equal(25, checkedMembers.Count);
+        Assert.Equal(22, checkedMembers.Count);
 
         scoped.Dispose();
     }

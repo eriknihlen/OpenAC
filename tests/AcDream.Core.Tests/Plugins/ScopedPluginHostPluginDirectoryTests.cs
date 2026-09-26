@@ -55,6 +55,45 @@ public sealed class ScopedPluginHostPluginDirectoryTests
             registry.LastMarkupPath);
     }
 
+    /// <summary>
+    /// A panel the plugin opens after an update was written into its folder
+    /// shows the markup of the copy that is running, read when it was
+    /// prepared. Mutation (2026-09-26): registering by path left the panel to
+    /// read the newer markup from disk.
+    /// </summary>
+    [Fact]
+    public void MarkupComesFromTheCopyReadWhenThePluginWasPrepared()
+    {
+        string pluginDirectory = Path.Combine(Path.GetTempPath(), $"acdream-markup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(pluginDirectory, "views"));
+        try
+        {
+            string markup = Path.Combine(pluginDirectory, "views", "main.xml");
+            File.WriteAllText(markup, "<panel version=\"1\"/>");
+            PluginPackageSnapshot package = PluginPackageSnapshot.Read(pluginDirectory);
+            File.WriteAllText(markup, "<panel version=\"2\"/>");
+            var registry = new RecordingDirectoryRegistry();
+            using var scope = new ScopedPluginHost(
+                new StubHost(registry),
+                "acdream.icon",
+                "Icon Plugin",
+                pluginDirectory,
+                package: package);
+
+            scope.Ui.AddPanel(
+                new PluginPanelDescriptor("main", "Icon Plugin"),
+                "views/main.xml",
+                new object());
+
+            Assert.Equal("<panel version=\"1\"/>", registry.LastMarkupContent);
+            Assert.Equal(pluginDirectory, registry.LastPluginDirectory);
+        }
+        finally
+        {
+            Directory.Delete(pluginDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public void AnAbsoluteMarkupPathIsLeftAsItIs()
     {
@@ -188,6 +227,7 @@ public sealed class ScopedPluginHostPluginDirectoryTests
         }
 
         internal string? LastMarkupPath { get; private set; }
+        internal string? LastMarkupContent { get; private set; }
 
         public IDisposable RegisterPanelContent(
             PluginUiOwner owner,
@@ -197,6 +237,7 @@ public sealed class ScopedPluginHostPluginDirectoryTests
             object binding)
         {
             LastPluginDirectory = pluginDirectory;
+            LastMarkupContent = markupContent;
             return NoOpUiRegistration.Instance;
         }
     }

@@ -54,6 +54,16 @@ public interface IRenderPackRegistry
     /// </param>
     /// <returns>The handle that withdraws this registration when disposed.</returns>
     IDisposable Register(RenderPackDescriptor descriptor, IRenderPackAssets assets);
+
+    /// <summary>
+    /// The folder the registering plugin was installed in: the one holding
+    /// its <c>plugin.json</c> and whatever else its package ships. The host
+    /// loads a plugin's assemblies from memory, which leaves
+    /// <see cref="System.Reflection.Assembly.Location"/> empty; a pack that
+    /// reads files from its own package reads them relative to this. Null on
+    /// a host that does not say.
+    /// </summary>
+    string? PluginDirectory => null;
 }
 
 /// <summary>Supplies a pack's shader files to the client on demand.</summary>

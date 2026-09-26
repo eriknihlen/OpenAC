@@ -15,7 +15,7 @@ public sealed class HostPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPackA
     public void Initialize(IPluginHost host)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
-        _assemblyDirectory = host.PluginDirectory ?? FixtureDirectory();
+        _assemblyDirectory = host.PluginDirectory;
         _throwAfterRegistration = File.Exists(
             Path.Combine(_assemblyDirectory!, "throw-after-register"));
         _throwDuringInitialize = File.Exists(
@@ -78,7 +78,7 @@ public sealed class HostPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPackA
     public void Register(IRenderPackRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
-        string directory = FixtureDirectory();
+        string directory = registry.PluginDirectory ?? string.Empty;
         if (File.Exists(Path.Combine(directory, "register-no-render-packs")))
             return;
         string versionPath = Path.Combine(directory, "render-pack-version.txt");
@@ -179,19 +179,6 @@ public sealed class HostPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPackA
             $"ui={uiClosed};events={eventsClosed};selection={selectionClosed}");
     }
 
-    /// <summary>
-    /// The fixture's folder. The host loads the assembly from memory, so it
-    /// has no location of its own; the host names its load context after the
-    /// plugin folder, which a render pack, having no host, reads instead.
-    /// </summary>
-    private static string FixtureDirectory()
-    {
-        string location = typeof(HostPlugin).Assembly.Location;
-        return location.Length > 0
-            ? Path.GetDirectoryName(location)!
-            : AssemblyLoadContext.GetLoadContext(typeof(HostPlugin).Assembly)?.Name
-                ?? string.Empty;
-    }
 
     private static bool Rejects(Action action)
     {

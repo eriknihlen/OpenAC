@@ -116,18 +116,13 @@ public sealed class GraphicalPluginSessionTests
         Assert.Equal(1, plugins.LoadedCount);
         Assert.Equal(1, ui.RegistrationCount);
 
-        for (int tick = 0;
-             tick < PluginSession.UnloadCheckAttempts * PluginSession.TicksBetweenUnloadChecks;
-             tick++)
-        {
-            // The client with a window applies panel changes on its own
-            // frame; the old copy's panel has to leave the drawn tree before
-            // anything can let go of the old copy.
-            _ = ui.Drain();
-            events.FireTick(0.015);
-        }
+        // The client with a window applies panel changes on its own frame;
+        // the old copy's panel has to leave the drawn tree before anything
+        // can let go of the old copy.
+        _ = ui.Drain();
+        events.FireTick(0.015);
+        Collect(first);
         Assert.False(first.IsAlive);
-        Assert.Contains(logger.Messages, static line => line.Contains("has left memory", StringComparison.Ordinal));
 
         IReadOnlyList<WeakReference> contexts = plugins.CaptureLoadContextWeakReferences();
         plugins.Dispose();

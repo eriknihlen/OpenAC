@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using AcDream.Plugin.Abstractions;
 using AcDream.Plugin.Abstractions.Rendering;
 
@@ -36,10 +37,10 @@ public sealed class PluginDuplicateIdException : Exception
 /// or without one.
 /// <para>
 /// A plugin is reloaded when the player asks (<c>/plugin reload</c>) or when
-/// its entry assembly or <c>plugin.json</c> changes on disk and the folder
-/// has then been quiet for <see cref="QuietPeriod"/>. Reloads run on the
-/// thread that raises <see cref="IEvents.Tick"/>, the thread every plugin
-/// already runs on.
+/// its code, markup or <c>plugin.json</c> changes on disk and those files
+/// have then been quiet for <see cref="QuietPeriod"/>. A plugin that failed
+/// to start is retried the same way. Reloads run on the thread that raises
+/// <see cref="IEvents.Tick"/>, the thread every plugin already runs on.
 /// </para>
 /// </summary>
 public sealed class PluginSession : IDisposable
@@ -48,24 +49,15 @@ public sealed class PluginSession : IDisposable
     public const string CommandVerb = "plugin";
 
     /// <summary>
-    /// How long a plugin's folder must go without a write, after its entry
-    /// assembly or <c>plugin.json</c> changed, before the plugin is reloaded.
-    /// An update writes several files; the plugin reloads once, after the
-    /// last of them.
+    /// How long a plugin's code, markup and <c>plugin.json</c> must go
+    /// without a write, after one of them changed, before the plugin is
+    /// reloaded. An update writes several files; the plugin reloads once,
+    /// after the last of them.
     /// </summary>
     public static readonly TimeSpan QuietPeriod = TimeSpan.FromSeconds(1);
 
-    /// <summary>
-    /// How many times, and how many ticks apart, the host looks for the
-    /// previous copy of a reloaded plugin to have left memory before it says
-    /// it did not: about one second in all.
-    /// </summary>
-    internal const int UnloadCheckAttempts = 8;
-    internal const int TicksBetweenUnloadChecks = 8;
-
     private const string AllPlugins = "all";
     private const string ManifestFileName = "plugin.json";
-    private const string FilesFolderName = "files";
 
     private readonly IPluginHost _host;
     private readonly Action<PluginSessionStatus>? _report;
@@ -74,6 +66,7 @@ public sealed class PluginSession : IDisposable
     private readonly PluginHostKind? _hostKind;
     private readonly PluginHostVersion? _hostVersion;
     private readonly TimeProvider _time;
+    private readonly PluginUnloadWatch _unloadWatch;
     private readonly List<ActivePlugin> _loaded = [];
 
     /// <summary>
@@ -85,27 +78,28 @@ public sealed class PluginSession : IDisposable
     private readonly List<WeakReference> _releasedContexts = [];
 
     /// <summary>
-    /// Plugins whose reload stopped after the running copy was already gone:
-    /// off until their files change again or the player asks. Kept so that
-    /// the next attempt knows where they live. Touched on the tick thread only.
+    /// Plugins this session was asked to run that are not running: they
+    /// failed to start, or a reload stopped after the running copy was gone.
+    /// Kept so the next attempt knows where they live. Touched on the tick
+    /// thread only, after Start.
     /// </summary>
     private readonly Dictionary<string, OfflinePlugin> _offline =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Previous copies of reloaded plugins not yet seen to leave memory.</summary>
-    private readonly List<UnloadCheck> _unloadChecks = [];
+    /// <summary>What the process-wide unload watch found, waiting for this session's tick.</summary>
+    private readonly ConcurrentQueue<(string Name, bool LeftMemory)> _unloadResults = new();
 
     // Written by the chat command and the folder watchers, which do not run
     // on the tick thread, and read on the tick thread.
     private readonly object _requestGate = new();
     private readonly List<string> _requestedReloads = [];
-    private readonly Dictionary<string, WatchedFolder> _watchedFolders =
-        new(PathComparer);
+    private readonly Dictionary<string, string> _watchedFolders = new(PathComparer);
     private readonly Dictionary<string, long> _lastFolderWrite =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileSystemWatcher> _watchers = [];
     private bool _watching;
 
+    private string[] _roots = [];
     private IDisposable? _command;
     private Action<double>? _tickHandler;
     private bool _started;
@@ -119,6 +113,27 @@ public sealed class PluginSession : IDisposable
         PluginHostKind? hostKind = null,
         PluginHostVersion? hostVersion = null,
         TimeProvider? timeProvider = null)
+        : this(
+            host,
+            report,
+            renderPacks,
+            supportedKinds,
+            hostKind,
+            hostVersion,
+            timeProvider,
+            PluginUnloadWatch.Shared)
+    {
+    }
+
+    internal PluginSession(
+        IPluginHost host,
+        Action<PluginSessionStatus>? report,
+        IRenderPackRegistry? renderPacks,
+        IEnumerable<PluginKind>? supportedKinds,
+        PluginHostKind? hostKind,
+        PluginHostVersion? hostVersion,
+        TimeProvider? timeProvider,
+        PluginUnloadWatch unloadWatch)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _report = report;
@@ -126,6 +141,7 @@ public sealed class PluginSession : IDisposable
         _hostKind = hostKind;
         _hostVersion = hostVersion;
         _time = timeProvider ?? TimeProvider.System;
+        _unloadWatch = unloadWatch ?? throw new ArgumentNullException(nameof(unloadWatch));
         _supportedKinds = new HashSet<PluginKind>(
             supportedKinds
                 ?? (renderPacks is null
@@ -159,6 +175,7 @@ public sealed class PluginSession : IDisposable
         _started = true;
 
         string[] roots = DistinctRoots(pluginRoots);
+        _roots = roots;
         string[]? requested = allowList is null
             ? null
             : allowList
@@ -173,6 +190,10 @@ public sealed class PluginSession : IDisposable
         var candidates = new Dictionary<string, List<PluginDiscoveryResult>>(
             StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, List<Exception>>(
+            StringComparer.OrdinalIgnoreCase);
+        // Where a plugin that is refused before it is loaded lives, so a
+        // later change to its files can try it again.
+        var refusedFolders = new Dictionary<string, OfflinePlugin>(
             StringComparer.OrdinalIgnoreCase);
         var discoveredOrder = new List<string>();
         HashSet<string>? requestedSet = requested is null
@@ -215,6 +236,9 @@ public sealed class PluginSession : IDisposable
                         directoryId,
                         result.Error ?? new InvalidOperationException(
                             "plugin discovery failed"));
+                    refusedFolders.TryAdd(
+                        directoryId,
+                        new OfflinePlugin(directoryId, result.PluginDirectory, Manifest: null));
                     continue;
                 }
 
@@ -233,6 +257,9 @@ public sealed class PluginSession : IDisposable
                                 $"plugin '{id}' declares only "
                                 + $"{string.Join(", ", result.Manifest.Kinds)} entry points, "
                                 + "which this host does not support."));
+                        refusedFolders.TryAdd(
+                            id,
+                            new OfflinePlugin(id, result.PluginDirectory, result.Manifest));
                     }
                     continue;
                 }
@@ -249,6 +276,9 @@ public sealed class PluginSession : IDisposable
                             id,
                             new PluginHostCompatibilityException(
                                 $"plugin '{id}' {incompatibility}."));
+                        refusedFolders.TryAdd(
+                            id,
+                            new OfflinePlugin(id, result.PluginDirectory, result.Manifest));
                     }
                     continue;
                 }
@@ -266,7 +296,7 @@ public sealed class PluginSession : IDisposable
             ? discoveredOrder
             : requested;
         foreach (string id in loadOrder)
-            LoadOne(id, candidates, errors);
+            LoadOne(id, candidates, errors, refusedFolders);
 
         StartReloading();
     }
@@ -279,9 +309,10 @@ public sealed class PluginSession : IDisposable
         ];
 
     /// <summary>
-    /// Asks for a plugin to be reloaded on the next tick: by its id, or every
-    /// plugin this session runs when <paramref name="pluginIdOrAll"/> is
-    /// <c>all</c>. Safe from any thread; what came of it is written to chat.
+    /// Asks for a plugin to be reloaded, or started again after it failed,
+    /// on the next tick: by its id, or every plugin this session was asked to
+    /// run when <paramref name="pluginIdOrAll"/> is <c>all</c>. Safe from any
+    /// thread; what came of it is written to chat.
     /// </summary>
     public void RequestReload(string pluginIdOrAll)
     {
@@ -295,8 +326,8 @@ public sealed class PluginSession : IDisposable
 
     /// <summary>
     /// Whether a change to the plugin's files has been seen and is waiting
-    /// for its folder to go quiet. For tests, which cannot otherwise tell
-    /// when the operating system has delivered a change.
+    /// for them to go quiet. For tests, which cannot otherwise tell when the
+    /// operating system has delivered a change.
     /// </summary>
     internal bool HasPendingFileChange(string pluginId)
     {
@@ -310,6 +341,7 @@ public sealed class PluginSession : IDisposable
             return;
         _disposed = true;
         StopReloading();
+        _unloadWatch.Forget(this);
 
         for (int index = _loaded.Count - 1; index >= 0; index--)
         {
@@ -357,40 +389,60 @@ public sealed class PluginSession : IDisposable
     private void LoadOne(
         string id,
         IReadOnlyDictionary<string, List<PluginDiscoveryResult>> candidates,
-        Dictionary<string, List<Exception>> errors)
+        Dictionary<string, List<Exception>> errors,
+        IReadOnlyDictionary<string, OfflinePlugin> refusedFolders)
     {
+        OfflinePlugin? failedAt = refusedFolders.GetValueOrDefault(id);
         if (candidates.TryGetValue(id, out List<PluginDiscoveryResult>? available))
         {
             if (available.Count > 1)
             {
+                // Which folder is meant is the player's to settle; nothing
+                // here retries either copy.
                 AddError(
                     errors,
                     id,
                     new PluginDuplicateIdException(DescribeDuplicate(id, available)));
                 available = [];
+                failedAt = null;
             }
             foreach (PluginDiscoveryResult candidate in available)
             {
-                var scope = new ScopedPluginHost(
-                    _host,
-                    candidate.Manifest!.Id,
-                    candidate.Manifest.DisplayName,
-                    candidate.PluginDirectory,
-                    _statusBoard);
+                PluginManifest manifest = candidate.Manifest!;
+                failedAt = new OfflinePlugin(manifest.Id, candidate.PluginDirectory, manifest);
                 ScopedRenderPackRegistry? renderPackScope =
-                    candidate.Manifest!.Declares(PluginKind.RenderPack)
-                    && _renderPacks is not null
+                    manifest.Declares(PluginKind.RenderPack) && _renderPacks is not null
                         ? new ScopedRenderPackRegistry(_renderPacks)
                         : null;
-                LoadedPlugin loaded = PluginLoader.Load(
+                LoadedPlugin? unreadable = PluginLoader.Prepare(
                     candidate.PluginDirectory,
-                    candidate.Manifest,
-                    scope,
-                    renderPackScope);
+                    manifest,
+                    registerRenderPack: renderPackScope is not null,
+                    out PreparedPlugin? prepared);
+                if (unreadable is not null)
+                {
+                    ReleaseRenderScope(renderPackScope, manifest.Id);
+                    ReleaseFailedLoad(unreadable);
+                    AddError(
+                        errors,
+                        id,
+                        unreadable.Error ?? new InvalidOperationException(
+                            "plugin load failed"));
+                    continue;
+                }
+
+                var scope = new ScopedPluginHost(
+                    _host,
+                    manifest.Id,
+                    manifest.DisplayName,
+                    candidate.PluginDirectory,
+                    _statusBoard,
+                    package: prepared!.Package);
+                LoadedPlugin loaded = PluginLoader.Activate(prepared, scope, renderPackScope);
                 if (!loaded.Success)
                 {
                     scope.Dispose();
-                    ReleaseRenderScope(renderPackScope, candidate.Manifest.Id);
+                    ReleaseRenderScope(renderPackScope, manifest.Id);
                     ReleaseFailedLoad(loaded);
                     AddError(
                         errors,
@@ -426,6 +478,9 @@ public sealed class PluginSession : IDisposable
                 }
             }
         }
+
+        if (failedAt is not null)
+            _offline[id] = failedAt with { Id = id };
 
         if (!errors.TryGetValue(id, out List<Exception>? failures)
             || failures.Count == 0)
@@ -487,7 +542,8 @@ public sealed class PluginSession : IDisposable
 
     /// <summary>
     /// Starts listening for reload requests: the tick that carries them out,
-    /// and a watcher on each plugin folder that holds a running plugin.
+    /// and a watcher on every plugins folder this session was configured
+    /// with.
     /// </summary>
     private void StartReloading()
     {
@@ -508,24 +564,20 @@ public sealed class PluginSession : IDisposable
             return;
         }
 
-        var roots = new HashSet<string>(PathComparer);
         lock (_requestGate)
         {
             _watching = true;
             foreach (ActivePlugin active in _loaded)
-            {
-                Watch(active.Directory, active.Loaded.Manifest);
-                if (Path.GetDirectoryName(
-                        Path.TrimEndingDirectorySeparator(
-                            Path.GetFullPath(active.Directory))) is { } root)
-                {
-                    roots.Add(root);
-                }
-            }
+                Watch(active.Directory, active.Loaded.Manifest.Id);
+            foreach (OfflinePlugin offline in _offline.Values)
+                Watch(offline.Directory, offline.Id);
         }
 
-        foreach (string root in roots.Order(PathComparer))
-            StartWatcher(root);
+        foreach (string root in _roots)
+        {
+            if (Directory.Exists(root))
+                StartWatcher(root);
+        }
     }
 
     private void StopReloading()
@@ -611,10 +663,9 @@ public sealed class PluginSession : IDisposable
         watcher.Dispose();
     }
 
-    /// <summary>Records what a plugin folder's changes are matched against. Under the request gate.</summary>
-    private void Watch(string directory, PluginManifest manifest) =>
-        _watchedFolders[Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory))] =
-            new WatchedFolder(manifest.Id, manifest.EntryDll.Replace('\\', '/'));
+    /// <summary>Records which plugin a folder's changes belong to. Under the request gate.</summary>
+    private void Watch(string directory, string pluginId) =>
+        _watchedFolders[Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory))] = pluginId;
 
     private void OnFolderEvent(object sender, FileSystemEventArgs change)
     {
@@ -633,11 +684,11 @@ public sealed class PluginSession : IDisposable
             error.GetException());
 
     /// <summary>
-    /// A write inside a plugin folder. A change to the entry assembly or
-    /// <c>plugin.json</c>, or the folder itself appearing, marks the plugin
-    /// for reload; every later write in the folder restarts the quiet period.
-    /// The player's own <c>files</c> folder is not the plugin's code and is
-    /// ignored.
+    /// A write inside a plugins folder. Only what makes up the plugin counts
+    /// -- its assemblies, symbols, markup, <c>plugin.json</c> and dependency
+    /// list, or the plugin's folder itself appearing -- so a plugin that
+    /// keeps writing its own logs or data beside its code does not hold its
+    /// reload back forever. The player's <c>files</c> folder never counts.
     /// </summary>
     private void NoteFolderWrite(string root, string fullPath, WatcherChangeTypes kind)
     {
@@ -647,26 +698,21 @@ public sealed class PluginSession : IDisposable
             StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0 || parts[0] == "..")
             return;
-        if (parts.Length > 1
-            && string.Equals(parts[1], FilesFolderName, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
 
         string folder = Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(Path.Combine(root, parts[0])));
-        string inside = string.Join('/', parts.Skip(1));
+        bool counts = parts.Length == 1
+            ? kind is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed
+            : !PluginPackageSnapshot.IsPlayerFile(folder, fullPath)
+                && PluginPackageSnapshot.Kind(fullPath) is not PackageFileKind.Other;
+        if (!counts)
+            return;
+
         long now = _time.GetTimestamp();
         lock (_requestGate)
         {
-            if (!_watching || !_watchedFolders.TryGetValue(folder, out WatchedFolder? watched))
-                return;
-            bool marks = inside.Length == 0
-                ? kind is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed
-                : string.Equals(inside, ManifestFileName, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(inside, watched.EntryDll, StringComparison.OrdinalIgnoreCase);
-            if (marks || _lastFolderWrite.ContainsKey(watched.Id))
-                _lastFolderWrite[watched.Id] = now;
+            if (_watching && _watchedFolders.TryGetValue(folder, out string? id))
+                _lastFolderWrite[id] = now;
         }
     }
 
@@ -682,8 +728,8 @@ public sealed class PluginSession : IDisposable
             anyRequest = _lastFolderWrite.Count != 0 || _requestedReloads.Count != 0;
         if (anyRequest)
             ReloadRequested();
-        if (_unloadChecks.Count != 0)
-            CheckUnloads();
+        if (!_unloadResults.IsEmpty)
+            ReportUnloads();
     }
 
     private void ReloadRequested()
@@ -729,12 +775,12 @@ public sealed class PluginSession : IDisposable
     }
 
     /// <summary>
-    /// Replaces a running plugin with the copy now on disk. The new copy is
-    /// read and checked first, so an update this client cannot run leaves
-    /// the running copy alone. Then the old copy is switched off, everything
-    /// it registered is released and its assemblies are let go; the new copy
-    /// is created, handed a fresh host and enabled; and over the next second
-    /// the old copy is checked to have really left memory.
+    /// Replaces a running plugin with the copy now on disk, or starts one
+    /// that is not running. The new copy is read and checked first, so an
+    /// update this client cannot run leaves the running copy alone. Then the
+    /// old copy is switched off, everything it registered is released and
+    /// its assemblies are let go; the new copy is created, handed a fresh
+    /// host and enabled; and the old copy is watched leaving memory.
     /// </summary>
     private void Reload(string id)
     {
@@ -743,16 +789,22 @@ public sealed class PluginSession : IDisposable
             id,
             StringComparison.OrdinalIgnoreCase));
         string directory;
-        PluginManifest current;
+        string expectedId;
+        string name;
+        PluginManifest? current;
         if (index >= 0)
         {
             directory = _loaded[index].Directory;
             current = _loaded[index].Loaded.Manifest;
+            expectedId = current.Id;
+            name = current.DisplayName;
         }
         else if (_offline.TryGetValue(id, out OfflinePlugin? offline))
         {
             directory = offline.Directory;
             current = offline.Manifest;
+            expectedId = offline.Id;
+            name = offline.Manifest?.DisplayName ?? offline.Id;
         }
         else
         {
@@ -760,9 +812,8 @@ public sealed class PluginSession : IDisposable
             return;
         }
 
-        string name = current.DisplayName;
         string keeps = index >= 0 ? " The running copy stays." : string.Empty;
-        if (current.Declares(PluginKind.RenderPack))
+        if (index >= 0 && current!.Declares(PluginKind.RenderPack))
         {
             Say($"{name} was not reloaded: it draws with the renderer, which takes a "
                 + "new copy only when the client restarts.");
@@ -784,7 +835,7 @@ public sealed class PluginSession : IDisposable
             return;
         }
 
-        if (RefuseReplacement(current, next) is { } refusal)
+        if (RefuseReplacement(expectedId, next) is { } refusal)
         {
             Say($"{name} {next.Version} was not loaded: {refusal}.{keeps}");
             return;
@@ -807,23 +858,24 @@ public sealed class PluginSession : IDisposable
         {
             ActivePlugin previous = _loaded[index];
             _loaded.RemoveAt(index);
-            _unloadChecks.Add(new UnloadCheck(
-                name,
-                Release(previous),
-                UnloadCheckAttempts,
-                TicksBetweenUnloadChecks));
+            WeakReference context = Release(previous);
+            string previousName = previous.Loaded.Manifest.DisplayName;
+            _unloadWatch.Watch(
+                this,
+                context,
+                leftMemory => _unloadResults.Enqueue((previousName, leftMemory)));
         }
 
-        Activate(prepared!, directory, index >= 0 ? index : _loaded.Count);
+        Activate(prepared!, directory, index >= 0 ? index : _loaded.Count, expectedId);
     }
 
     /// <summary>
     /// Why a new copy of a plugin cannot replace the running one in this
     /// client, or null when it can.
     /// </summary>
-    private string? RefuseReplacement(PluginManifest current, PluginManifest next)
+    private string? RefuseReplacement(string expectedId, PluginManifest next)
     {
-        if (!string.Equals(current.Id, next.Id, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(expectedId, next.Id, StringComparison.OrdinalIgnoreCase))
         {
             return $"its new {ManifestFileName} names a different plugin ('{next.Id}'); "
                 + "restart the client to load it";
@@ -836,11 +888,11 @@ public sealed class PluginSession : IDisposable
         }
         if (next.Declares(PluginKind.RenderPack))
         {
-            return "it now draws with the renderer, which takes a new copy only when "
+            return "it draws with the renderer, which takes a new copy only when "
                 + "the client restarts";
         }
         if (!next.Kinds.Any(_supportedKinds.Contains))
-            return "it no longer declares anything this client runs";
+            return "it declares nothing this client runs";
         if (_hostKind is { } hostKind
             && PluginHostCompatibility.Evaluate(next, hostKind, _hostVersion)
                 is { } incompatibility)
@@ -850,7 +902,11 @@ public sealed class PluginSession : IDisposable
         return null;
     }
 
-    private void Activate(PreparedPlugin prepared, string directory, int position)
+    private void Activate(
+        PreparedPlugin prepared,
+        string directory,
+        int position,
+        string requestedId)
     {
         PluginManifest manifest = prepared.Manifest;
         var scope = new ScopedPluginHost(
@@ -859,13 +915,14 @@ public sealed class PluginSession : IDisposable
             manifest.DisplayName,
             directory,
             _statusBoard,
-            isHotReload: true);
+            isHotReload: true,
+            package: prepared.Package);
         LoadedPlugin loaded = PluginLoader.Activate(prepared, scope, renderPacks: null);
         if (!loaded.Success)
         {
             scope.Dispose();
             ReleaseFailedLoad(loaded);
-            GoOffline(manifest, directory, loaded.Error!);
+            GoOffline(requestedId, manifest, directory, loaded.Error!);
             return;
         }
 
@@ -876,7 +933,7 @@ public sealed class PluginSession : IDisposable
         catch (Exception error)
         {
             ReleaseFailedEnable(loaded, scope, null);
-            GoOffline(manifest, directory, error);
+            GoOffline(requestedId, manifest, directory, error);
             return;
         }
 
@@ -885,11 +942,11 @@ public sealed class PluginSession : IDisposable
             scope,
             null,
             directory));
-        _offline.Remove(manifest.Id);
+        _offline.Remove(requestedId);
         lock (_requestGate)
         {
             if (_watching)
-                Watch(directory, manifest);
+                Watch(directory, manifest.Id);
         }
 
         Say($"Reloaded {manifest.DisplayName} {manifest.Version}.");
@@ -897,9 +954,13 @@ public sealed class PluginSession : IDisposable
         RaiseLoginIfInWorld(scope, manifest.Id);
     }
 
-    private void GoOffline(PluginManifest manifest, string directory, Exception error)
+    private void GoOffline(
+        string requestedId,
+        PluginManifest manifest,
+        string directory,
+        Exception error)
     {
-        _offline[manifest.Id] = new OfflinePlugin(directory, manifest);
+        _offline[requestedId] = new OfflinePlugin(requestedId, directory, manifest);
         string reason = Describe(error);
         Say($"{manifest.DisplayName} {manifest.Version} failed to start ({reason}). "
             + $"It is off until its files change again or /{CommandVerb} reload {manifest.Id}.");
@@ -953,48 +1014,23 @@ public sealed class PluginSession : IDisposable
     }
 
     /// <summary>
-    /// Looks, a few ticks apart, for the previous copies of reloaded plugins
-    /// to have left memory, and says so when one has not. Never in the tick
-    /// that released it: that tick is still holding the old copy's handlers.
+    /// Says what the unload watch found. A copy that left memory is only
+    /// logged; one still there when the watch ends is named once in chat.
     /// </summary>
-    private void CheckUnloads()
+    private void ReportUnloads()
     {
-        if (_unloadChecks.Count == 0)
-            return;
-
-        bool collected = false;
-        for (int index = _unloadChecks.Count - 1; index >= 0; index--)
+        while (_unloadResults.TryDequeue(out (string Name, bool LeftMemory) result))
         {
-            UnloadCheck check = _unloadChecks[index];
-            if (--check.TicksUntilNext > 0)
-                continue;
-            if (!collected)
+            if (result.LeftMemory)
             {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-                collected = true;
-            }
-            if (!check.Context.IsAlive)
-            {
-                _unloadChecks.RemoveAt(index);
                 SafeLog(
                     static (log, message, _) => log.Info(message),
-                    $"the previous copy of {check.Name} has left memory",
+                    $"the previous copy of {result.Name} has left memory",
                     null);
                 continue;
             }
-            if (--check.AttemptsLeft > 0)
-            {
-                check.TicksUntilNext = TicksBetweenUnloadChecks;
-                continue;
-            }
-
-            _unloadChecks.RemoveAt(index);
-            Say($"The previous copy of {check.Name} did not unload. It is switched off, "
-                + "but it stays in memory until the client restarts. A plugin that keeps "
-                + "static state, runs its own threads or timers, or subscribes to events "
-                + "outside its host cannot be unloaded; see the plugin guide.");
+            Say($"The previous copy of {result.Name} is still in memory; "
+                + "it is freed when the client restarts.");
         }
     }
 
@@ -1227,19 +1263,6 @@ public sealed class PluginSession : IDisposable
         ScopedRenderPackRegistry? RenderPackScope,
         string Directory);
 
-    private sealed record OfflinePlugin(string Directory, PluginManifest Manifest);
-
-    private sealed record WatchedFolder(string Id, string EntryDll);
-
-    private sealed class UnloadCheck(
-        string name,
-        WeakReference context,
-        int attempts,
-        int ticksUntilNext)
-    {
-        internal string Name { get; } = name;
-        internal WeakReference Context { get; } = context;
-        internal int AttemptsLeft { get; set; } = attempts;
-        internal int TicksUntilNext { get; set; } = ticksUntilNext;
-    }
+    /// <summary>A plugin that is not running, where it lives, and its manifest when one could be read.</summary>
+    private sealed record OfflinePlugin(string Id, string Directory, PluginManifest? Manifest);
 }

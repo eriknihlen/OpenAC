@@ -13,6 +13,21 @@ namespace AcDream.Plugin.Tests;
 public sealed class PluginApiInertDefaultTests
 {
     [Fact]
+    public void ARenderPackRegistryNamesNoFolderByDefault()
+    {
+        AcDream.Plugin.Abstractions.Rendering.IRenderPackRegistry registry = new BareRenderPackRegistry();
+        Assert.Null(registry.PluginDirectory);
+    }
+
+    private sealed class BareRenderPackRegistry : AcDream.Plugin.Abstractions.Rendering.IRenderPackRegistry
+    {
+        public IDisposable Register(
+            AcDream.Plugin.Abstractions.Rendering.RenderPackDescriptor descriptor,
+            AcDream.Plugin.Abstractions.Rendering.IRenderPackAssets assets) =>
+            NoOpPluginRegistration.Instance;
+    }
+
+    [Fact]
     public void VitaeReadsAsNoPenaltyByDefault()
     {
         ICharacterInfo character = new MinimalCharacter();

@@ -60,7 +60,8 @@ public static class PluginLoader
         PluginAssemblyLoadContext? alc = null;
         try
         {
-            alc = new PluginAssemblyLoadContext(pluginDirectory, dllPath);
+            PluginPackageSnapshot package = PluginPackageSnapshot.Read(pluginDirectory);
+            alc = new PluginAssemblyLoadContext(package, dllPath);
             var asm = alc.LoadEntry(dllPath);
 
             IEnumerable<Type> types;
@@ -144,7 +145,12 @@ public static class PluginLoader
                         "the host did not supply any facility declared by this plugin"));
             }
 
-            prepared = new PreparedPlugin(manifest, alc, pluginType, renderPackType);
+            prepared = new PreparedPlugin(
+                manifest,
+                alc,
+                pluginType,
+                renderPackType,
+                package);
             return null;
         }
         catch (Exception ex)
@@ -174,7 +180,7 @@ public static class PluginLoader
         {
             CountingRenderPackRegistry? countedRenderPacks =
                 prepared.RenderPackType is not null && renderPacks is not null
-                    ? new CountingRenderPackRegistry(renderPacks)
+                    ? new CountingRenderPackRegistry(renderPacks, prepared.Directory)
                     : null;
             object? sharedInstance = null;
             if (prepared.PluginType is { } pluginType)
@@ -221,10 +227,14 @@ public static class PluginLoader
         }
     }
 
-    private sealed class CountingRenderPackRegistry(IRenderPackRegistry inner) :
+    private sealed class CountingRenderPackRegistry(
+        IRenderPackRegistry inner,
+        string pluginDirectory) :
         IRenderPackRegistry
     {
         private int _registrationCount;
+
+        public string? PluginDirectory => pluginDirectory;
 
         internal int RegistrationCount => Volatile.Read(ref _registrationCount);
 
@@ -267,4 +277,9 @@ internal sealed record PreparedPlugin(
     PluginManifest Manifest,
     PluginAssemblyLoadContext LoadContext,
     Type? PluginType,
-    Type? RenderPackType);
+    Type? RenderPackType,
+    PluginPackageSnapshot Package)
+{
+    /// <summary>The plugin's folder, as a full path.</summary>
+    internal string Directory => Package.Directory;
+}

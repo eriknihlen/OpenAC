@@ -80,6 +80,18 @@ the old version and says so in chat; the update takes effect after updating
 the client. Removing a plugin, and client or launcher updates, still wait until
 every session is closed.
 
+Limits worth knowing:
+
+- A client or headless session started from a release before this one does
+  not reload plugins; it keeps the old version until it is restarted.
+- If the launcher stops in the middle of an update (a crash or a power cut),
+  the next launcher start with no session running puts the previous version
+  back, or finishes the update if its `plugin.json` was already in place.
+- A file in the plugin's folder that something holds open (outside `files`),
+  such as a log file a running plugin writes beside its code, can stop the
+  update; the launcher then puts the previous version back and says why.
+  Close the session and update again.
+
 The **Show beta plugins** checkbox, in Launcher settings behind the gear icon
 on the tab row, is off by default and covers Discover and Add from URL
 instead: on, a plugin with no stable release yet can be found and installed,
