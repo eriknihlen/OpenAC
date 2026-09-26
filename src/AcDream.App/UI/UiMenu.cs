@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Linq;
+using Silk.NET.Input;
 
 namespace AcDream.App.UI;
 
@@ -9,6 +11,21 @@ public sealed class UiMenu : UiElement
     public readonly record struct MenuItem(string Label, object? Payload);
 
     public IReadOnlyList<MenuItem> Items { get; set; } = System.Array.Empty<MenuItem>();
+
+    /// <summary>Enables a live popup label filter without changing the selected payload.</summary>
+    public bool Searchable { get; set; }
+    private readonly UiField _searchField = new() { RecordHistory = false, Selectable = true, MaxCharacters = 256 };
+    private IReadOnlyList<MenuItem> _filteredItems = Array.Empty<MenuItem>();
+    private IReadOnlyList<MenuItem> DisplayItems => Searchable ? _filteredItems : Items;
+    internal IReadOnlyList<MenuItem> FilteredItemsForTest => DisplayItems;
+    private float SearchHeight => Searchable ? MathF.Max(24f, RowHeight + 6f) : 0f;
+    private void FilterItems()
+    {
+        string[] words = _searchField.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        _filteredItems = Items.Where(item => words.All(word => item.Label.Contains(word, StringComparison.OrdinalIgnoreCase))).ToArray();
+        _hoveredPopupIndex = -1;
+        PopupScroll.SetScrollY(0);
+    }
 
     public object? Selected { get; set; }
 
@@ -63,6 +80,7 @@ public sealed class UiMenu : UiElement
         => !PopupScrollbarHideWhenDisabled || PopupContentOverflows;
 
     private bool _draggingPopupThumb;
+    private bool _selectingSearch;
     private float _popupThumbDragOffset;
 
     private int _hoveredPopupIndex = -1;
@@ -117,6 +135,9 @@ public sealed class UiMenu : UiElement
 
     public bool RetailButtonArt { get; set; } = true;
 
+    /// <summary>Uses flat scrollbar rendering in a plain popup even when sprite chrome is available.</summary>
+    public bool PlainPopupScrollbar { get; set; }
+
     public Vector4 PlainBackgroundColor { get; set; } = new(0f, 0f, 0f, 0.92f);
     public Vector4 PlainBorderColor { get; set; } = new(0.46f, 0.37f, 0.16f, 1f);
     public Vector4 PlainOpenBorderColor { get; set; } = new(0.70f, 0.58f, 0.24f, 1f);
@@ -140,35 +161,60 @@ public sealed class UiMenu : UiElement
         // the very first measure/draw of this opening.
         if (value)
         {
+            if (Searchable)
+            {
+                AcceptsFocus = true;
+                IsEditControl = true;
+                _searchField.SetText("");
+            }
             BeforeOpen?.Invoke();
+            if (Items.Count == 0 && !Searchable) return;
             OnOpen?.Invoke();
+            if (Searchable) FilterItems();
+        }
+        if (!value)
+        {
+            EndSearchSelection();
+            _draggingPopupThumb = false;
         }
         _open = value;
         _hoveredPopupIndex = -1;   // stale hover from the last time this popup was open
         if (FindRoot() is not { } root) return;
-        if (value) root.SetActivePopup(this, () => SetOpen(false));
-        else root.ClearActivePopup(this);
+        if (value)
+        {
+            root.SetActivePopup(this, () => SetOpen(false));
+            if (Searchable)
+            {
+                _searchField.Keyboard = root.Keyboard;
+                root.SetKeyboardFocus(this);
+            }
+        }
+        else
+        {
+            root.ClearActivePopup(this);
+            if (Searchable && root.KeyboardFocus == this) root.SetKeyboardFocus(null);
+        }
     }
 
     private int   ColumnCount => Scrollable
         ? 1
-        : (Items.Count + RowsPerColumn - 1) / System.Math.Max(1, RowsPerColumn);
+        : System.Math.Max(Searchable ? 1 : 0, (DisplayItems.Count + RowsPerColumn - 1) / System.Math.Max(1, RowsPerColumn));
     private float InteriorW => Scrollable
         ? ColumnWidth + EffectiveScrollbarWidth
         : ColumnCount * ColumnWidth;
 
     private int EffectiveVisibleRows => Scrollable && PopupSizeToContent
-        ? System.Math.Max(1, Items.Count)
+        ? System.Math.Max(1, DisplayItems.Count)
         : RowsPerColumn;
 
-    private bool PopupContentOverflows => Items.Count > EffectiveVisibleRows;
+    private bool PopupContentOverflows => DisplayItems.Count > EffectiveVisibleRows;
 
     private float EffectiveScrollbarWidth
         => IsPopupScrollbarPresentationVisible ? ScrollbarWidth : 0f;
 
     private float InteriorH => EffectiveVisibleRows * RowHeight;
     private float OuterW => InteriorW + 2 * Border;
-    private float OuterH => InteriorH + 2 * Border;
+    private float OuterH => InteriorH + SearchHeight + 2 * Border;
 
     public float PopupOuterHeight => OuterH;
 
@@ -187,7 +233,34 @@ public sealed class UiMenu : UiElement
 
     private float PopupTop => OpenUpward ? -OuterH : Height;
 
-    public UiMenu() { CapturesPointerDrag = true; }
+    public UiMenu()
+    {
+        CapturesPointerDrag = true;
+        _searchField.OnTextChanged = _ => FilterItems();
+    }
+    protected override void OnTick(double deltaSeconds)
+    {
+        if (_open && Searchable) _searchField.TickSelfAndChildren(deltaSeconds);
+    }
+    private void DrawSearch(UiRenderContext ctx)
+    {
+        if (!Searchable) return;
+        _searchField.Left = Border;
+        _searchField.Top = PopupTop + Border;
+        _searchField.Width = InteriorW;
+        _searchField.Height = SearchHeight - 2f;
+        _searchField.DatFont = DatFont;
+        _searchField.Font = Font;
+        _searchField.TextColor = RetailButtonArt ? TextColorAvailable : PlainTextColor;
+        _searchField.BackgroundColor = PlainBackgroundColor;
+        _searchField.SelectionColor = PlainSelectedColor;
+        _searchField.DrawSelfAndChildren(ctx);
+        ctx.DrawRectOutline(Border, PopupTop + Border, InteriorW, SearchHeight - 2f, PlainOpenBorderColor, 1f);
+        if (_searchField.Text.Length == 0)
+            DrawLabel(ctx, "Search...", Border + 7f, PopupTop + Border + (SearchHeight - LineH()) * 0.5f, TextColorGhosted);
+        if (DisplayItems.Count == 0)
+            DrawLabel(ctx, "No matches", Border + PlainPadding, PopupTop + Border + SearchHeight + 2f, TextColorGhosted);
+    }
 
     public override bool ConsumesDatChildren => true;
 
@@ -299,6 +372,7 @@ public sealed class UiMenu : UiElement
                     DrawScrollablePopupPlain(ctx);
                 else
                     DrawGridPopupPlain(ctx);
+                DrawSearch(ctx);
             }
             finally { ctx.PopAlpha(); }
             return;
@@ -314,6 +388,7 @@ public sealed class UiMenu : UiElement
                 DrawScrollablePopup(ctx, resolve);
             else
                 DrawGridPopup(ctx, resolve);
+            DrawSearch(ctx);
         }
         finally { ctx.PopAlpha(); }
     }
@@ -321,26 +396,26 @@ public sealed class UiMenu : UiElement
     private void DrawGridPopup(UiRenderContext ctx, Func<uint, (uint tex, int w, int h)> resolve)
     {
         float outerTop = PopupTop;                 // G7: direction-aware (see PopupTop's doc)
-        float inX = Border, inY = outerTop + Border; // interior origin (inside the bevel)
+        float inX = Border, inY = outerTop + Border + SearchHeight; // interior origin (inside the bevel)
 
         DrawBevel(ctx, resolve, 0f, outerTop, OuterW, OuterH);
         DrawSprite(ctx, resolve, PopupBgSprite, inX, inY, InteriorW, InteriorH);  // panel fill behind rows
 
-        for (int i = 0; i < Items.Count; i++)
+        for (int i = 0; i < DisplayItems.Count; i++)
         {
             int col = i / RowsPerColumn, row = i % RowsPerColumn;
             float x = inX + col * ColumnWidth, y = inY + row * RowHeight;
-            bool selected = Equals(Items[i].Payload, Selected);
+            bool selected = Equals(DisplayItems[i].Payload, Selected) || (Searchable && i == _hoveredPopupIndex);
             DrawSprite(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, x, y, ColumnWidth, RowHeight);
         }
 
         float textY = (RowHeight - LineH()) * 0.5f;
-        for (int i = 0; i < Items.Count; i++)
+        for (int i = 0; i < DisplayItems.Count; i++)
         {
             int col = i / RowsPerColumn, row = i % RowsPerColumn;
             // Items grey out when unavailable; when EnabledProvider is null all items are enabled.
-            bool avail = EnabledProvider?.Invoke(Items[i].Payload) ?? true;
-            DrawLabel(ctx, Items[i].Label, inX + col * ColumnWidth + ItemTextX(Items[i].Label),
+            bool avail = EnabledProvider?.Invoke(DisplayItems[i].Payload) ?? true;
+            DrawLabel(ctx, DisplayItems[i].Label, inX + col * ColumnWidth + ItemTextX(DisplayItems[i].Label),
                       inY + row * RowHeight + textY,
                       avail ? TextColorAvailable : TextColorGhosted);
         }
@@ -358,27 +433,27 @@ public sealed class UiMenu : UiElement
         ConfigurePopupScroll();
 
         float outerTop = PopupTop;                 // G7: direction-aware (see PopupTop's doc)
-        float inX = Border, inY = outerTop + Border;
+        float inX = Border, inY = outerTop + Border + SearchHeight;
 
         DrawBevel(ctx, resolve, 0f, outerTop, OuterW, OuterH);
         DrawSprite(ctx, resolve, PopupBgSprite, inX, inY, ColumnWidth, InteriorH);
 
         int start = VisibleTopRow;
-        int count = System.Math.Min(EffectiveVisibleRows, Items.Count - start);
+        int count = System.Math.Min(EffectiveVisibleRows, DisplayItems.Count - start);
         float textY = (RowHeight - LineH()) * 0.5f;
         for (int i = 0; i < count; i++)
         {
             int idx = start + i;
             float y = inY + i * RowHeight;
-            bool selected = Equals(Items[idx].Payload, Selected);
+            bool selected = Equals(DisplayItems[idx].Payload, Selected) || (Searchable && idx == _hoveredPopupIndex);
             DrawSprite(ctx, resolve, selected ? ItemHighlightSprite : ItemNormalSprite, inX, y, ColumnWidth, RowHeight);
         }
         for (int i = 0; i < count; i++)
         {
             int idx = start + i;
             float y = inY + i * RowHeight;
-            bool avail = EnabledProvider?.Invoke(Items[idx].Payload) ?? true;
-            DrawLabel(ctx, Items[idx].Label, inX + ItemTextX(Items[idx].Label), y + textY,
+            bool avail = EnabledProvider?.Invoke(DisplayItems[idx].Payload) ?? true;
+            DrawLabel(ctx, DisplayItems[idx].Label, inX + ItemTextX(DisplayItems[idx].Label), y + textY,
                       avail ? TextColorAvailable : TextColorGhosted);
         }
 
@@ -389,7 +464,7 @@ public sealed class UiMenu : UiElement
     {
         int lineHeight = System.Math.Max(1, (int)MathF.Round(RowHeight));
         PopupScroll.LineHeight = lineHeight;
-        PopupScroll.SetExtents(Items.Count * lineHeight, EffectiveVisibleRows * lineHeight);
+        PopupScroll.SetExtents(DisplayItems.Count * lineHeight, EffectiveVisibleRows * lineHeight);
     }
 
     private int VisibleTopRow
@@ -397,7 +472,7 @@ public sealed class UiMenu : UiElement
         get
         {
             int lineHeight = System.Math.Max(1, (int)MathF.Round(RowHeight));
-            int maxStart = System.Math.Max(0, Items.Count - EffectiveVisibleRows);
+            int maxStart = System.Math.Max(0, DisplayItems.Count - EffectiveVisibleRows);
             int row = (int)MathF.Round((float)PopupScroll.ScrollY / lineHeight);
             return System.Math.Clamp(row, 0, maxStart);
         }
@@ -437,16 +512,16 @@ public sealed class UiMenu : UiElement
     private void DrawGridPopupPlain(UiRenderContext ctx)
     {
         float outerTop = PopupTop;
-        float inX = Border, inY = outerTop + Border;
+        float inX = Border, inY = outerTop + Border + SearchHeight;
 
         ctx.DrawFill(0f, outerTop, OuterW, OuterH, PlainBackgroundColor);
         ctx.DrawRectOutline(0f, outerTop, OuterW, OuterH, PlainBorderColor, 1f);
 
-        for (int i = 0; i < Items.Count; i++)
+        for (int i = 0; i < DisplayItems.Count; i++)
         {
             int col = i / RowsPerColumn, row = i % RowsPerColumn;
             float x = inX + col * ColumnWidth, y = inY + row * RowHeight;
-            bool selected = Equals(Items[i].Payload, Selected);
+            bool selected = Equals(DisplayItems[i].Payload, Selected) || (Searchable && i == _hoveredPopupIndex);
             if (selected)
                 ctx.DrawFill(x, y, ColumnWidth, RowHeight, PlainSelectedColor);
             else if (i == _hoveredPopupIndex)
@@ -454,11 +529,11 @@ public sealed class UiMenu : UiElement
         }
 
         float textY = (RowHeight - LineH()) * 0.5f;
-        for (int i = 0; i < Items.Count; i++)
+        for (int i = 0; i < DisplayItems.Count; i++)
         {
             int col = i / RowsPerColumn, row = i % RowsPerColumn;
-            bool avail = EnabledProvider?.Invoke(Items[i].Payload) ?? true;
-            DrawLabel(ctx, Items[i].Label, inX + col * ColumnWidth + PlainPadding,
+            bool avail = EnabledProvider?.Invoke(DisplayItems[i].Payload) ?? true;
+            DrawLabel(ctx, DisplayItems[i].Label, inX + col * ColumnWidth + PlainPadding,
                       inY + row * RowHeight + textY,
                       avail ? PlainTextColor : TextColorGhosted);
         }
@@ -469,19 +544,19 @@ public sealed class UiMenu : UiElement
         ConfigurePopupScroll();
 
         float outerTop = PopupTop;
-        float inX = Border, inY = outerTop + Border;
+        float inX = Border, inY = outerTop + Border + SearchHeight;
 
         ctx.DrawFill(0f, outerTop, OuterW, OuterH, PlainBackgroundColor);
         ctx.DrawRectOutline(0f, outerTop, OuterW, OuterH, PlainBorderColor, 1f);
 
         int start = VisibleTopRow;
-        int count = System.Math.Min(EffectiveVisibleRows, Items.Count - start);
+        int count = System.Math.Min(EffectiveVisibleRows, DisplayItems.Count - start);
         float textY = (RowHeight - LineH()) * 0.5f;
         for (int i = 0; i < count; i++)
         {
             int idx = start + i;
             float y = inY + i * RowHeight;
-            bool selected = Equals(Items[idx].Payload, Selected);
+            bool selected = Equals(DisplayItems[idx].Payload, Selected) || (Searchable && idx == _hoveredPopupIndex);
             if (selected)
                 ctx.DrawFill(inX, y, ColumnWidth, RowHeight, PlainSelectedColor);
             else if (idx == _hoveredPopupIndex)
@@ -490,12 +565,12 @@ public sealed class UiMenu : UiElement
         for (int i = 0; i < count; i++)
         {
             int idx = start + i;
-            bool avail = EnabledProvider?.Invoke(Items[idx].Payload) ?? true;
-            DrawLabel(ctx, Items[idx].Label, inX + PlainPadding, inY + i * RowHeight + textY,
+            bool avail = EnabledProvider?.Invoke(DisplayItems[idx].Payload) ?? true;
+            DrawLabel(ctx, DisplayItems[idx].Label, inX + PlainPadding, inY + i * RowHeight + textY,
                       avail ? PlainTextColor : TextColorGhosted);
         }
 
-        if (SpriteResolve is { } resolve)
+        if (!PlainPopupScrollbar && SpriteResolve is { } resolve)
             DrawPopupScrollbar(ctx, resolve, inX + ColumnWidth, inY);
         else
             DrawPopupScrollbarPlain(ctx, inX + ColumnWidth, inY);
@@ -520,7 +595,7 @@ public sealed class UiMenu : UiElement
 
     private void UpdatePlainPopupHover(float lx, float ly)
     {
-        float ix = lx - Border, iy = ly - (PopupTop + Border);
+        float ix = lx - Border, iy = ly - (PopupTop + Border + SearchHeight);
         _hoveredPopupIndex = Scrollable ? HoveredScrollableIndex(ix, iy) : HoveredGridIndex(ix, iy);
     }
 
@@ -530,7 +605,7 @@ public sealed class UiMenu : UiElement
         int col = (int)(ix / ColumnWidth);
         int row = (int)(iy / RowHeight);
         int idx = col * RowsPerColumn + row;
-        return row >= 0 && row < RowsPerColumn && idx >= 0 && idx < Items.Count ? idx : -1;
+        return row >= 0 && row < RowsPerColumn && idx >= 0 && idx < DisplayItems.Count ? idx : -1;
     }
 
     private int HoveredScrollableIndex(float ix, float iy)
@@ -538,7 +613,7 @@ public sealed class UiMenu : UiElement
         if (ix < 0 || ix >= ColumnWidth || iy < 0 || iy >= InteriorH) return -1;
         int row = (int)(iy / RowHeight);
         int idx = VisibleTopRow + row;
-        return row >= 0 && row < EffectiveVisibleRows && idx >= 0 && idx < Items.Count ? idx : -1;
+        return row >= 0 && row < EffectiveVisibleRows && idx >= 0 && idx < DisplayItems.Count ? idx : -1;
     }
 
     private void DrawBevel(UiRenderContext ctx, Func<uint, (uint tex, int w, int h)> resolve,
@@ -585,6 +660,58 @@ public sealed class UiMenu : UiElement
 
     public override bool OnEvent(in UiEvent e)
     {
+        if (Searchable && e.Type is UiEventType.FocusGained or UiEventType.FocusLost)
+        {
+            if (e.Type == UiEventType.FocusLost) EndSearchSelection();
+            return _searchField.OnEvent(e);
+        }
+        if (e.Type == UiEventType.CaptureChanged)
+        {
+            EndSearchSelection();
+            _draggingPopupThumb = false;
+        }
+        if (_selectingSearch && e.Type is UiEventType.MouseMove or UiEventType.MouseUp)
+        {
+            var searchPointer = new UiEvent(0, _searchField, e.Type, e.Data0,
+                (int)(e.Data1 - Border), (int)(e.Data2 - PopupTop - Border));
+            _searchField.OnEvent(searchPointer);
+            if (e.Type == UiEventType.MouseUp) _selectingSearch = false;
+            return true;
+        }
+        if (Searchable && _open && e.Type is UiEventType.KeyDown or UiEventType.KeyUp or UiEventType.Char)
+        {
+            if (e.Type == UiEventType.KeyDown)
+            {
+                var key = (Key)e.Data0;
+                if (key == Key.Escape) { SetOpen(false); return true; }
+                if (key is Key.Enter or Key.KeypadEnter)
+                {
+                    int index = _hoveredPopupIndex >= 0 ? _hoveredPopupIndex : 0;
+                    if (index < DisplayItems.Count && (EnabledProvider?.Invoke(DisplayItems[index].Payload) ?? true))
+                    {
+                        OnSelect?.Invoke(DisplayItems[index].Payload);
+                        SetOpen(false);
+                    }
+                    return true;
+                }
+                if (key is Key.Down or Key.Up)
+                {
+                    int next = _hoveredPopupIndex;
+                    do { next += key == Key.Down ? 1 : -1; }
+                    while (next >= 0 && next < DisplayItems.Count && !(EnabledProvider?.Invoke(DisplayItems[next].Payload) ?? true));
+                    if (next >= 0 && next < DisplayItems.Count)
+                    {
+                        _hoveredPopupIndex = next;
+                        ConfigurePopupScroll();
+                        if (next < VisibleTopRow) PopupScroll.SetScrollY((int)(next * RowHeight));
+                        else if (next >= VisibleTopRow + EffectiveVisibleRows) PopupScroll.SetScrollY((int)((next - EffectiveVisibleRows + 1) * RowHeight));
+                    }
+                    return true;
+                }
+            }
+            _searchField.OnEvent(e);
+            return true;
+        }
         if (Scrollable && _open)
         {
             if (e.Type == UiEventType.MouseMove && _draggingPopupThumb)
@@ -627,7 +754,16 @@ public sealed class UiMenu : UiElement
         bool clickedInPopup = OpenUpward ? ly < 0 : ly >= Height;
         if (_open && clickedInPopup)
         {
-            float ix = lx - Border, iy = ly - (PopupTop + Border);
+            float ix = lx - Border, iy = ly - (PopupTop + Border + SearchHeight);
+            if (Searchable && iy < 0 && iy >= -SearchHeight)
+            {
+                FindRoot()?.SetKeyboardFocus(this);
+                _selectingSearch = true;
+                _hoveredPopupIndex = -1;
+                var searchClick = new UiEvent(0, _searchField, e.Type, e.Data0, (int)ix, (int)(iy + SearchHeight));
+                _searchField.OnEvent(searchClick);
+                return true;
+            }
             if (Scrollable)
                 return HandleScrollablePopupMouseDown(ix, iy);
 
@@ -637,10 +773,10 @@ public sealed class UiMenu : UiElement
                 int row = (int)(iy / RowHeight);
                 int idx = col * RowsPerColumn + row;
                 // Only pick enabled items.
-                if (row >= 0 && row < RowsPerColumn && idx >= 0 && idx < Items.Count
-                    && (EnabledProvider?.Invoke(Items[idx].Payload) ?? true))
+                if (row >= 0 && row < RowsPerColumn && idx >= 0 && idx < DisplayItems.Count
+                    && (EnabledProvider?.Invoke(DisplayItems[idx].Payload) ?? true))
                 {
-                    OnSelect?.Invoke(Items[idx].Payload);
+                    OnSelect?.Invoke(DisplayItems[idx].Payload);
                 }
             }
             SetOpen(false);
@@ -648,9 +784,15 @@ public sealed class UiMenu : UiElement
         }
 
         _facePressed = true;                       // momentary press flick
-        if (!_open && Items.Count == 0) return true;
         SetOpen(!_open);
         return true;
+    }
+
+    private void EndSearchSelection()
+    {
+        if (!_selectingSearch) return;
+        _selectingSearch = false;
+        _searchField.OnEvent(new UiEvent(0, _searchField, UiEventType.MouseUp));
     }
 
     private bool HandleScrollablePopupMouseDown(float ix, float iy)
@@ -659,10 +801,10 @@ public sealed class UiMenu : UiElement
         {
             int row = (int)(iy / RowHeight);
             int idx = VisibleTopRow + row;
-            if (row >= 0 && row < EffectiveVisibleRows && idx >= 0 && idx < Items.Count
-                && (EnabledProvider?.Invoke(Items[idx].Payload) ?? true))
+            if (row >= 0 && row < EffectiveVisibleRows && idx >= 0 && idx < DisplayItems.Count
+                && (EnabledProvider?.Invoke(DisplayItems[idx].Payload) ?? true))
             {
-                OnSelect?.Invoke(Items[idx].Payload);
+                OnSelect?.Invoke(DisplayItems[idx].Payload);
             }
             SetOpen(false);
             return true;
@@ -701,7 +843,7 @@ public sealed class UiMenu : UiElement
 
     private void DragPopupThumb(float ly)
     {
-        float iy = ly - (PopupTop + Border);         // G7: direction-aware
+        float iy = ly - (PopupTop + Border + SearchHeight);         // G7: direction-aware
         ConfigurePopupScroll();
         float decExtent = System.Math.Clamp(ScrollButtonExtent, 0f, InteriorH);
         float incExtent = System.Math.Clamp(ScrollButtonExtent, 0f, InteriorH - decExtent);

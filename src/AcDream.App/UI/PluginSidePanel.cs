@@ -13,7 +13,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
     private const float GripHeight = 12f;
 
-    internal float ExpandedGripBandHeight =>
+    internal float ExpandedGripBandHeight => Compact ? 24f :
         _font is { } f ? MathF.Max(GripHeight, f.LineHeight + 2f) : GripHeight;
 
     private const float ToggleWidth = 16f;
@@ -27,7 +27,16 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
     private readonly UiDatFont? _font;
     private readonly Dictionary<RetailWindowHandle, ShelfEntry> _entries = [];
     private readonly ShelfGripPanel _grip;
-    private readonly UiSimpleButton _toggle;
+    private readonly ShelfToggleButton _toggle;
+    private readonly PluginUiThemeSettings? _themes;
+    private readonly Action? _appearanceRequested;
+    private PluginUiTheme _lastTheme;
+    private int _firstRow;
+    private int _visibleRows = 1;
+    private bool Compact => (_themes?.Theme ?? PluginUiTheme.Classic) != PluginUiTheme.Classic;
+    private float Padding => Compact ? 1f : OuterPadding;
+    private float Extent => Compact ? 22f : ButtonExtent;
+    private float Gap => Compact ? 2f : ButtonGap;
     private bool _disposed;
     private float _lastLayoutHeight = -1f;
 
@@ -47,11 +56,16 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
     public PluginSidePanel(
         RetailWindowManager windows,
         Func<uint, (uint tex, int width, int height)> resolve,
-        UiDatFont? font)
+        UiDatFont? font,
+        PluginUiThemeSettings? themes = null,
+        Action? appearanceRequested = null)
     {
         _windows = windows ?? throw new ArgumentNullException(nameof(windows));
         _resolve = resolve ?? throw new ArgumentNullException(nameof(resolve));
         _font = font;
+        _themes = themes;
+        _appearanceRequested = appearanceRequested;
+        _lastTheme = themes?.Theme ?? PluginUiTheme.Classic;
 
         Width = ButtonExtent + OuterPadding * 2f;
         Height = ExpandedGripBandHeight + OuterPadding * 2f;
@@ -75,20 +89,20 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             BorderColor = Vector4.Zero,
             Anchors = AnchorEdges.None,
         };
-        _toggle = new UiSimpleButton
+        _toggle = new ShelfToggleButton(() => Compact, () => _collapsed)
         {
             BackgroundColor = Vector4.Zero,
             BorderColor = Vector4.Zero,
             TextColor = ToggleGlyphColor,
             DatFont = _font,
             Outline = true,
-            TextSource = () => _collapsed ? "<" : ">",
+            TextSource = () => Compact ? string.Empty : (_collapsed ? "<" : ">"),
             Anchors = AnchorEdges.None,
         };
         _toggle.Click += ToggleCollapsed;
         AddChild(_grip);
         AddChild(_toggle);
-        LayoutChrome();
+        Reflow();
 
         _windows.WindowUnregistered += OnWindowUnregistered;
         _windows.WindowRegistered += OnWindowRegistered;
@@ -123,7 +137,8 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             handle,
             _resolve,
             _font,
-            fileIcon)
+            fileIcon,
+            _themes)
         {
             Width = ButtonExtent,
             Height = ButtonExtent,
@@ -173,13 +188,21 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
     {
         base.OnTick(deltaSeconds);
 
+        PluginUiTheme theme = _themes?.Theme ?? PluginUiTheme.Classic;
+        if (_lastTheme != theme)
+        {
+            _lastTheme = theme;
+            _firstRow = 0;
+            _lastLayoutHeight = -1f;
+            Reflow();
+        }
         _grip.Opacity = _windows.IsLocked ? 0.5f : 1f;
 
         if (Parent is { } parent)
         {
             float availableHeight = MathF.Max(
-                ButtonExtent + OuterPadding * 2f,
-                parent.Height - Top - ExpandedGripBandHeight - OuterPadding);
+                Extent + Padding * 2f,
+                parent.Height - Top - ExpandedGripBandHeight - Padding);
             if (MathF.Abs(availableHeight - _lastLayoutHeight) > 0.5f)
             {
                 _lastLayoutHeight = availableHeight;
@@ -204,6 +227,28 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             KeepWindowReachable(handle);
 
     }
+
+    /// <inheritdoc />
+    public override bool OnEvent(in UiEvent e)
+    {
+        if (e.Type == UiEventType.RightClick && _appearanceRequested is not null)
+        {
+            _appearanceRequested();
+            return true;
+        }
+        if (Compact && e.Type == UiEventType.Scroll && !_collapsed)
+        {
+            _firstRow = Math.Clamp(_firstRow + (e.Data0 > 0 ? -1 : 1),
+                0, Math.Max(0, _entries.Count - _visibleRows));
+            Reflow();
+            return true;
+        }
+        return base.OnEvent(in e);
+    }
+
+    /// <inheritdoc />
+    public override string? GetTooltipText() => _appearanceRequested is null
+        ? null : "Right-click for plugin appearance. Scroll to browse plugins.";
 
     private void ToggleCollapsed()
     {
@@ -306,6 +351,22 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
     private void LayoutChrome()
     {
+        if (Compact)
+        {
+            _grip.Left = 1f;
+            _grip.Top = 0f;
+            _grip.Width = Extent;
+            _grip.Height = 10f;
+            _grip.Compact = true;
+            _toggle.Left = 1f;
+            _toggle.Top = 10f;
+            _toggle.Width = Extent;
+            _toggle.Height = 14f;
+            _toggle.Outline = false;
+            return;
+        }
+        _grip.Compact = false;
+        _toggle.Outline = true;
         float bandHeight = _collapsed ? ButtonExtent : ExpandedGripBandHeight;
         _grip.Left = 0f;
         _grip.Top = 0f;
@@ -328,40 +389,43 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             : Math.Max(
                 1,
                 (int)MathF.Floor(
-                    (effectiveHeight - OuterPadding * 2f + ButtonGap)
-                    / (ButtonExtent + ButtonGap)));
+                    (effectiveHeight - Padding * 2f + Gap)
+                    / (Extent + Gap)));
+        _visibleRows = maximumRows;
+        _firstRow = Math.Clamp(_firstRow, 0, Math.Max(0, _entries.Count - maximumRows));
         int index = 0;
         foreach (ShelfEntry entry in _entries.Values)
         {
-            int column = index / maximumRows;
-            int row = index % maximumRows;
-            entry.Button.Left = OuterPadding
-                + column * (ButtonExtent + ButtonGap);
-            entry.Button.Top = ExpandedGripBandHeight + OuterPadding
-                + row * (ButtonExtent + ButtonGap);
-            entry.Button.Visible = !_collapsed;
+            int column = Compact ? 0 : index / maximumRows;
+            int row = Compact ? index - _firstRow : index % maximumRows;
+            entry.Button.Left = Padding + column * (Extent + Gap);
+            entry.Button.Top = ExpandedGripBandHeight + Padding + row * (Extent + Gap);
+            entry.Button.Width = Extent;
+            entry.Button.Height = Extent;
+            entry.Button.Visible = !_collapsed && (!Compact || row >= 0 && row < maximumRows);
             index++;
         }
 
         int rows = Math.Min(index, maximumRows);
-        int columns = index == 0 ? 1 : (index + maximumRows - 1) / maximumRows;
+        int columns = Compact || index == 0 ? 1 : (index + maximumRows - 1) / maximumRows;
 
         if (_collapsed)
         {
-            Width = CollapsedWidth;
-            Height = ButtonExtent;
+            Width = Compact ? 24f : CollapsedWidth;
+            Height = Compact ? 24f : ButtonExtent;
         }
         else
         {
-            Width = OuterPadding * 2f
-                + columns * ButtonExtent
-                + Math.Max(0, columns - 1) * ButtonGap;
+            Width = Padding * 2f + columns * Extent + Math.Max(0, columns - 1) * Gap;
             Height = ExpandedGripBandHeight
-                + OuterPadding * 2f
-                + rows * ButtonExtent
-                + Math.Max(0, rows - 1) * ButtonGap;
+                + Padding * 2f + rows * Extent + Math.Max(0, rows - 1) * Gap;
         }
 
+        PluginUiPalette? palette = _themes?.Palette;
+        BackgroundColor = palette?.Background ?? new(0f, 0f, 0f, 0.88f);
+        BorderColor = palette?.Border ?? new(0.62f, 0.48f, 0.16f, 1f);
+        _toggle.TextColor = palette?.Muted ?? ToggleGlyphColor;
+        _grip.DashColor = palette?.Muted ?? new(0.62f, 0.48f, 0.16f, 1f);
         LayoutChrome();
         ApplyVisibility();
 
@@ -401,14 +465,38 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
         PluginShelfButton Button,
         PluginMinimizeButton Minimize);
 
+    private sealed class ShelfToggleButton(Func<bool> compact, Func<bool> collapsed) : UiSimpleButton
+    {
+        protected override void OnDraw(UiRenderContext ctx)
+        {
+            base.OnDraw(ctx);
+            if (!compact()) return;
+            float direction = collapsed() ? -1f : 1f;
+            float center = Width * 0.5f;
+            for (int i = 0; i < 3; i++)
+            {
+                float x = center + direction * (i - 1);
+                ctx.DrawFill(x, Height * 0.5f - 3 + i, 1f, 1f, TextColor);
+                ctx.DrawFill(x, Height * 0.5f + 1 - i, 1f, 1f, TextColor);
+            }
+        }
+    }
+
     private sealed class ShelfGripPanel : UiPanel
     {
-        private static readonly Vector4 DashColor = new(0.62f, 0.48f, 0.16f, 1f);
+        internal bool Compact { get; set; }
+        internal Vector4 DashColor { get; set; } = new(0.62f, 0.48f, 0.16f, 1f);
 
         protected override void OnDraw(UiRenderContext ctx)
         {
             base.OnDraw(ctx);
 
+            if (Compact)
+            {
+                ctx.DrawFill(4f, 3f, 8f, 1f, DashColor);
+                ctx.DrawFill(4f, 6f, 8f, 1f, DashColor);
+                return;
+            }
             const float dashWidth = 5f;
             const float dashGap = 4f;
             float totalDashWidth = dashWidth * 3f + dashGap * 2f;
@@ -430,6 +518,7 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
         private static readonly Vector4 VisibleBorder =
             new(0.76f, 0.64f, 0.25f, 1f);
 
+        private readonly PluginUiThemeSettings? _themes;
         private readonly RetailWindowHandle _handle;
         private readonly Func<uint, (uint tex, int width, int height)> _resolve;
         private readonly (uint Texture, int Width, int Height)? _fileIcon;
@@ -446,8 +535,10 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
             RetailWindowHandle handle,
             Func<uint, (uint tex, int width, int height)> resolve,
             UiDatFont? font,
-            (uint Texture, int Width, int Height)? fileIcon = null)
+            (uint Texture, int Width, int Height)? fileIcon = null,
+            PluginUiThemeSettings? themes = null)
         {
+            _themes = themes;
             _handle = handle;
             _resolve = resolve;
             _fileIcon = fileIcon;
@@ -500,7 +591,8 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
             if (texture == 0 || width <= 0 || height <= 0)
                 return;
-            float extent = MathF.Min(Width - 6f, Height - 6f);
+            float inset = (_themes?.Theme ?? PluginUiTheme.Classic) == PluginUiTheme.Classic ? 6f : 2f;
+            float extent = MathF.Min(Width - inset, Height - inset);
             ctx.DrawSprite(
                 texture,
                 (Width - extent) * 0.5f,
@@ -525,6 +617,20 @@ public sealed class PluginSidePanel : UiPanel, IDisposable, IRetainedWindowState
 
         private void RefreshPresentation()
         {
+            PluginUiTheme theme = _themes?.Theme ?? PluginUiTheme.Classic;
+            if (theme != PluginUiTheme.Classic)
+            {
+                PluginUiPalette palette = _themes!.Palette!;
+                BackgroundColor = _handle.IsVisible ? palette.Selected : palette.Field;
+                BorderColor = _handle.IsVisible ? palette.Accent : palette.Border;
+                Outline = false;
+                TextColor = palette.Text;
+                if (Text.Length > 0) Text = _initialsFallback[..1];
+                return;
+            }
+            Outline = true;
+            TextColor = Vector4.One;
+            if (Text.Length > 0) Text = _initialsFallback;
             BackgroundColor = _handle.IsVisible
                 ? VisibleBackground
                 : HiddenBackground;
