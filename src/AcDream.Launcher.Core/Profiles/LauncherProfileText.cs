@@ -23,12 +23,17 @@ public enum LauncherTextEditorKind { Accounts, Servers, LogonCommands }
 /// /vt start
 /// </code>
 /// In both, a server's section is the whole truth for that server, and a server left out of the
-/// text is left as it is.
+/// text is left as it is. A logon command line starting with a backslash is a command taken
+/// without it, which is how a command starting with # is written.
 /// </remarks>
 public static class LauncherProfileText
 {
     private const string ServerPrefix = "#";
     private const string AccountPrefix = "##";
+
+    /// <summary>Starts a logon command line that is taken as written, without the backslash: how a
+    /// command beginning with # or \ is written.</summary>
+    private const char Escape = '\\';
 
     public static string Read(LauncherProfileDocument document, LauncherTextEditorKind kind)
     {
@@ -257,7 +262,10 @@ public static class LauncherProfileText
                 text.Append(AccountPrefix).AppendLine(EncodeHeader(account.Account));
                 foreach (string command in account.LoginCommands)
                 {
-                    text.AppendLine(command);
+                    // A command that would read as a # or ## line, or as an escape, gets a backslash.
+                    text.AppendLine(command.StartsWith(ServerPrefix, StringComparison.Ordinal) || command.StartsWith(Escape)
+                        ? Escape + command
+                        : command);
                 }
             }
         }
@@ -276,6 +284,20 @@ public static class LauncherProfileText
         List<string>? commands = null;
         foreach ((int number, string line) in Lines(text))
         {
+            if (line.StartsWith(Escape))
+            {
+                if (commands is not null)
+                {
+                    commands.Add(line[1..]);
+                }
+                else if (!skipping)
+                {
+                    errors.Add($"Line {number}: a command needs an ##Account line above it.");
+                }
+
+                continue;
+            }
+
             if (line.StartsWith(AccountPrefix, StringComparison.Ordinal))
             {
                 commands = null;

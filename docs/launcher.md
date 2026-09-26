@@ -80,7 +80,10 @@ to retain their character settings. Close that server's sessions first.
 
 `#` starts a server, `##` an account on it, and every other non-empty line is
 a command, run in order after any character on that account logs in. An
-account with no lines runs no commands. The same rules as Accounts apply: a
+account with no lines runs no commands. A command that itself starts with `#`
+is written with a backslash in front, `\#…`; a line starting with a backslash
+is always a command, taken without that backslash (so a command starting with
+a backslash is written `\\…`). The same rules as Accounts apply: a
 listed server's section is the whole truth, a server left out is left alone,
 and a wrong line (an unknown server or account, a command before any `##`) is
 reported by number and nothing is saved. Commands can be edited while sessions

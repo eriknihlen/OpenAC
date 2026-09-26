@@ -744,6 +744,7 @@
                 <TextBlock FontSize="12" Classes="muted"><Run Text="#Server" FontFamily="Cascadia Mono,Consolas,Menlo,monospace" Foreground="#DBB573" /><Run Text=" starts a server" /></TextBlock>
                 <TextBlock FontSize="12" Classes="muted"><Run Text="##Account" FontFamily="Cascadia Mono,Consolas,Menlo,monospace" Foreground="#9FC7E8" /><Run Text=" starts an account on it" /></TextBlock>
                 <TextBlock FontSize="12" Classes="muted"><Run Text="/command" FontFamily="Cascadia Mono,Consolas,Menlo,monospace" Foreground="#E6DCC6" /><Run Text=" every other line, run at login in this order" /></TextBlock>
+                <TextBlock FontSize="12" Classes="muted"><Run Text="\#…" FontFamily="Cascadia Mono,Consolas,Menlo,monospace" Foreground="#E6DCC6" /><Run Text=" a command that starts with #" /></TextBlock>
               </StackPanel>
             </Panel>
           </Border>

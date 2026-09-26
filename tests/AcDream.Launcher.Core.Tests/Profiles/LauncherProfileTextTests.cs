@@ -195,6 +195,20 @@ public sealed class LauncherProfileTextTests
         Assert.Equal(["acdream.mosstank"], document.Servers[0].Accounts[0].Plugins);
     }
 
+    [Fact]
+    public void ACommandStartingWithAHashOrBackslashIsWrittenWithABackslashAndRoundTrips()
+    {
+        LauncherProfileDocument document = Sample();
+        document.Servers[1].Accounts[0].LoginCommands = ["#not a server", "##not an account", @"\starts with a backslash", "/plain"];
+        string before = Json(document);
+
+        string text = LauncherProfileText.Read(document, LauncherTextEditorKind.LogonCommands);
+        LauncherProfileText.Apply(document, LauncherTextEditorKind.LogonCommands, text);
+
+        Assert.Contains(string.Join(Environment.NewLine, @"\#not a server", @"\##not an account", @"\\starts with a backslash", "/plain"), text);
+        Assert.Equal(before, Json(document));
+    }
+
     [Theory]
     [InlineData("/vt start", "Line 1: a command needs an ##Account line above it.")]
     [InlineData("##notan", "Line 1: put a #Server line above ##Account.")]
