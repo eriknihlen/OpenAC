@@ -263,7 +263,7 @@
                               <TextBlock Grid.Column="4" Text="{Binding Status}" VerticalAlignment="Center" Margin="0,2,0,0" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
                               <Button Grid.Column="5" Content="Play" Classes="primary" Classes.ready="{Binding CanPlay}" Command="{Binding PlayCommand}" IsVisible="{Binding !IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding DisabledReason}" />
                               <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" IsVisible="{Binding IsActive}" VerticalAlignment="Center" HorizontalAlignment="Stretch" />
-                              <Button Grid.Column="6" Content="Options ▾" VerticalAlignment="Center" HorizontalAlignment="Stretch" AutomationProperties.Name="Options">
+                              <Button Grid.Column="6" Content="Options ▾" VerticalAlignment="Center" HorizontalAlignment="Stretch" AutomationProperties.Name="{Binding OptionsAutomationName}">
                                 <Button.Flyout>
                                   <MenuFlyout Placement="BottomEdgeAlignedRight">
                                     <MenuItem Header="Logon commands…" Command="{Binding LogonCommandsCommand}" />

@@ -232,16 +232,17 @@ public sealed partial class LauncherWindowViewModel
     private void RemoveRowCharacter(LauncherAccountServerRowViewModel row)
     {
         if (row.CharacterName is not { } name) return;
-        try
-        {
-            _orchestrator.RemoveCharacter(row.ServerName, row.AccountName, name);
-            LastError = null;
-            OperationStatus = $"Removed {name}. Refreshing the account's characters brings it back.";
-        }
-        catch (Exception ex)
-        {
-            LastError = SafeDisplayError(ex, secret: null);
-        }
+        (string server, string account) = (row.ServerName, row.AccountName);
+        EditorDialog.Open(
+            ProfileEditorKind.Remove,
+            $"Remove {name}?",
+            _ =>
+            {
+                _orchestrator.RemoveCharacter(server, account, name);
+                OperationStatus = $"Removed {name}. Refreshing the account's characters brings it back.";
+            },
+            message: $"This removes {name} from {account} on {server}, with its own plugin list if it has one. "
+                + "The next login to the account brings the character back, using the account's plugins.");
     }
 
     /// <summary>

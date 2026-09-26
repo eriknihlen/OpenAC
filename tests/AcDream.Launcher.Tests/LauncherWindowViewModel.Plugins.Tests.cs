@@ -362,6 +362,28 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public void RemoveCharacterAsksFirstAndTheOptionsButtonNamesItsRow()
+    {
+        using var orchestrator = AccountWithPlugins(
+            [],
+            new LauncherCharacterSnapshot("Local ACE", "testaccount", "+Hero", null, LaunchMode.Gui, [], [], false, "Ready"));
+        orchestrator.Session = FakeLauncherOrchestrator.CreateSession(LauncherActivityState.Exited);
+        using var viewModel = CreateInitialized(orchestrator);
+        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Rows[0];
+        Assert.Equal("Options for testaccount on Local ACE", row.OptionsAutomationName);
+        row.SelectedCharacter = "+Hero";
+        Assert.Equal("Options for +Hero on Local ACE", row.OptionsAutomationName);
+
+        row.RemoveCharacterCommand.Execute(null);
+
+        Assert.Null(orchestrator.RemovedCharacter);
+        Assert.True(viewModel.EditorDialog.IsOpen);
+        Assert.Equal("Remove +Hero?", viewModel.EditorDialog.Title);
+        viewModel.EditorDialog.SubmitCommand.Execute(null);
+        Assert.Equal(("Local ACE", "testaccount", "+Hero"), orchestrator.RemovedCharacter);
+    }
+
+    [Fact]
     public void AccountGroupsShowTheirProfilesPluginsAndCharacterCount()
     {
         using var fixture = new PluginChecklistFixture();

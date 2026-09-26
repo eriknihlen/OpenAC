@@ -144,7 +144,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     public bool IsChecked { get => _isChecked; set { if (SetProperty(ref _isChecked, value)) _changed(); } }
     public ObservableCollection<string> CharacterChoices { get; } = [CharacterSelect];
     public IReadOnlyList<string> LaunchModes { get; } = ["Graphical", "Headless"];
-    public string SelectedCharacter { get => _selectedCharacter; set { if (SetProperty(ref _selectedCharacter, value ?? CharacterSelect)) { OnPropertyChanged(nameof(DisplayedCharacter)); NotifyState(); _changed(); SaveSelection(); } } }
+    public string SelectedCharacter { get => _selectedCharacter; set { if (SetProperty(ref _selectedCharacter, value ?? CharacterSelect)) { OnPropertyChanged(nameof(DisplayedCharacter)); OnPropertyChanged(nameof(OptionsAutomationName)); NotifyState(); _changed(); SaveSelection(); } } }
 
     /// <summary>The character the running session is playing, once the client reports it.</summary>
     public string? ActiveCharacterName
@@ -178,6 +178,9 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     internal void UseSelectionStore(Action<LauncherAccountServerRowViewModel> save) => _selectionChanged = save;
     public LaunchMode Mode => SelectedLaunchMode == "Headless" ? LaunchMode.Headless : SelectedCharacter == CharacterSelect ? LaunchMode.GuiSelect : LaunchMode.Gui;
     public string? CharacterName => SelectedCharacter == CharacterSelect ? null : SelectedCharacter;
+
+    /// <summary>The Options button's name for a screen reader: which row it acts on.</summary>
+    public string OptionsAutomationName => $"Options for {CharacterName ?? AccountName} on {ServerName}";
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
     public string? LaunchError { get => _launchError; private set { if (SetProperty(ref _launchError, value)) OnPropertyChanged(nameof(HasLaunchError)); } }
     public bool HasLaunchError => !string.IsNullOrEmpty(LaunchError);

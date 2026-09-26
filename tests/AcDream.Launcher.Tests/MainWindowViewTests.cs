@@ -82,6 +82,7 @@ public sealed class MainWindowViewTests
             Dispatcher.UIThread.RunJobs();
             window.UpdateLayout();
             Button options = window.GetVisualDescendants().OfType<Button>().First(button => button.Content is string text && text.StartsWith("Options", StringComparison.Ordinal));
+            Assert.Equal("Options for account1 on Local", AutomationProperties.GetName(options));
             var menu = Assert.IsType<MenuFlyout>(options.Flyout);
             menu.ShowAt(options);
             Dispatcher.UIThread.RunJobs();

@@ -20,7 +20,7 @@ the list (**All** and one per tag) show only the accounts with that tag, and
 A row's **Options ▾** menu has **Logon commands…**, **Plugins for this
 character…** (with a character chosen), **Console** (for a running headless
 session), **Open logs folder** and **Remove character** (a later character
-refresh brings a removed character back).
+refresh brings a removed character back; it asks first).
 
 ## Accounts and servers
 
