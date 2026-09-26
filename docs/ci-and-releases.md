@@ -106,8 +106,19 @@ launcher-linux-x64.zip    acdream-launcher + acdream-bake
 client-osx-arm64.zip      acdream-client + acdream-headless for Apple silicon
 launcher-osx-arm64.zip    OpenAC.app Finder bundle with launcher + bake
 manifest.json             version, minimum launcher version, asset URLs, SHA-256s
+launcher-fingerprint.json the launcher's fingerprint for this release (see below)
 AcDream.Plugin.Abstractions.<version>.nupkg   the plugin API package, plus a .sha256 beside it
 ```
+
+The launcher fingerprint is a SHA-256 that `publish-bin.ps1` computes from the
+committed tree: the git object ids of the launcher, the co-deployed bake tool
+and every project they reference, the build-wide files (`global.json`,
+`Directory.Packages.props`, `NuGet.Config`, `Directory.Build.props` without its
+version), the launcher icons and the two packaging scripts. The launcher
+carries the same value (assembly metadata), so a launcher whose fingerprint
+matches the release's does not update itself. It is a separate file because a
+launcher from before fingerprints reads `manifest.json` strictly and would
+refuse a field it does not know.
 
 The plugin API package is the one assembly a plugin references, so attaching
 it to every release lets a plugin kept in its own repository build against a

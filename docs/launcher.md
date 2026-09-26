@@ -192,8 +192,24 @@ Close active sessions before installing. Long content preparation retains its
 progress and cancellation controls. Content and client compatibility checks
 continue to gate launching.
 
-A release's client is installed only by a launcher at least as new as the
-release; the launcher always updates itself first and then offers the client.
+The top right shows the installed **Client** and **Launcher** versions and
+whether your **Plugins** have updates. **Check for updates** beside them checks
+the client, the launcher and the plugins at once; the launcher also checks at
+startup and every 20 minutes while it is open. A background check only shows
+the update banner; the button also opens what it found.
+
+The launcher updates itself only when it changed. Each release publishes a
+fingerprint of what the launcher is built from (`launcher-fingerprint.json`,
+beside `manifest.json`); a launcher whose own fingerprint matches is that
+release's launcher and stays as it is, even though its version number is
+older, and installs the new client directly. When the fingerprints differ the
+launcher updates itself first and then offers the client, as before. A
+launcher built without a fingerprint (a developer build), or a release without
+one, compares versions instead, and a launcher from before fingerprints keeps
+updating by version, so it always reaches the current launcher. The fingerprint
+covers the launcher, the preparation tool it carries and every project they are
+built from, so a release that changes the shared game code still updates the
+launcher.
 
 ### Coming from 0.1.16 or earlier
 

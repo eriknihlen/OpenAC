@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window
         {
             viewModel.PollStatus();
             viewModel.PollServerHealth(IsActive);
+            viewModel.PollUpdateCheck();
         }
     }
 

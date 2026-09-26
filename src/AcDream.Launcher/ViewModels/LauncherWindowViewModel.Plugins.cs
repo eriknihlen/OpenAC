@@ -77,6 +77,11 @@ public sealed partial class LauncherWindowViewModel
         Plugins.Installed.CollectionChanged += (_, _) =>
         {
             if (_snapshot is { } snapshot && !_disposed) RefreshAccountRows(snapshot);
+            NotifyVersions();
+        };
+        Plugins.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LauncherPluginsViewModel.IsBusy)) NotifyVersions();
         };
         SelectAccountsTabCommand = new RelayCommand(() => SelectedTab = LauncherMainTab.Accounts);
         SelectPluginsTabCommand = new RelayCommand(() =>

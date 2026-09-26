@@ -129,7 +129,21 @@
         <TextBlock Text="OpenAC" FontFamily="Georgia,serif" FontSize="27" Foreground="#DBB573" />
         <TextBlock Text="Asheron's Call forever." FontFamily="Georgia,serif" FontSize="18" Foreground="#F0E4CD" />
       </StackPanel>
-      <TextBlock Grid.Column="1" Text="{Binding VersionText}" Foreground="#7C8F99" FontSize="12" TextAlignment="Right" VerticalAlignment="Top" AutomationProperties.Name="{Binding VersionText}" />
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="1" VerticalAlignment="Center" IsVisible="{Binding HasVersions}">
+          <TextBlock Text="Client" Foreground="#9DB0BA" FontSize="12" HorizontalAlignment="Right" />
+          <TextBlock Grid.Column="1" Text="{Binding ClientVersionText}" FontSize="12" AutomationProperties.Name="{Binding ClientVersionText, StringFormat='Client {0}'}" />
+          <TextBlock Grid.Row="1" Text="Launcher" Foreground="#9DB0BA" FontSize="12" HorizontalAlignment="Right" />
+          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding LauncherVersionText}" FontSize="12" AutomationProperties.Name="{Binding LauncherVersionText, StringFormat='Launcher {0}'}" />
+          <TextBlock Grid.Row="2" Text="Plugins" Foreground="#9DB0BA" FontSize="12" HorizontalAlignment="Right" />
+          <Panel Grid.Row="2" Grid.Column="1">
+            <TextBlock Text="{Binding PluginsUpdateText}" Foreground="#8FD18F" FontSize="12" IsVisible="{Binding !HasPluginUpdates}" />
+            <TextBlock Text="{Binding PluginsUpdateText}" Foreground="#DBB573" FontSize="12" IsVisible="{Binding HasPluginUpdates}" />
+          </Panel>
+        </Grid>
+        <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" VerticalAlignment="Center" MinHeight="34"
+                ToolTip.Tip="Checks the client, the launcher and your plugins now; the launcher also checks every 20 minutes" />
+      </StackPanel>
       </Grid>
     </Border>
     <StackPanel Grid.Row="1" Spacing="4">

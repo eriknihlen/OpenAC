@@ -7,6 +7,12 @@ namespace AcDream.Launcher.Core.Updates;
 public interface IReleaseManifestClient
 {
     Task<ReleaseManifest> FetchAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The launcher fingerprint published beside the manifest, or null when the release
+    /// has none or it cannot be read; the launcher then compares versions instead.</summary>
+    Task<LauncherFingerprintDocument?> FetchLauncherFingerprintAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<LauncherFingerprintDocument?>(null);
 }
 
 public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
@@ -112,19 +118,67 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
             TimeSpan.FromSeconds(15));
 
     public async Task<ReleaseManifest> FetchAsync(
+        CancellationToken cancellationToken = default) =>
+        Parse(
+            await FetchBytesAsync(_manifestUri, "release manifest", cancellationToken).ConfigureAwait(false),
+            _allowLoopbackHttp);
+
+    public async Task<LauncherFingerprintDocument?> FetchLauncherFingerprintAsync(
         CancellationToken cancellationToken = default)
     {
         try
         {
-            Uri current = _manifestUri;
+            byte[] bytes = await FetchBytesAsync(
+                    new Uri(_manifestUri, LauncherFingerprintDocument.FileName),
+                    "launcher fingerprint",
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return ParseFingerprint(bytes);
+        }
+        catch (LauncherUpdateException)
+        {
+            // A release from before fingerprints has none; comparing versions still works.
+            return null;
+        }
+    }
+
+    internal static LauncherFingerprintDocument ParseFingerprint(ReadOnlySpan<byte> utf8)
+    {
+        try
+        {
+            FingerprintDocument? document = JsonSerializer.Deserialize<FingerprintDocument>(utf8, SerializerOptions);
+            if (document is null
+                || document.SchemaVersion != LauncherFingerprintDocument.CurrentSchemaVersion
+                || !IsSha256(document.Fingerprint)
+                || !LauncherVersion.TryParse(document.Version, out LauncherVersion? version))
+            {
+                throw new LauncherUpdateException("The launcher fingerprint is invalid.");
+            }
+
+            return new LauncherFingerprintDocument(version, document.Fingerprint!.ToLowerInvariant());
+        }
+        catch (JsonException ex)
+        {
+            throw new LauncherUpdateException($"The launcher fingerprint is invalid: {ex.Message}", ex);
+        }
+    }
+
+    private async Task<byte[]> FetchBytesAsync(
+        Uri start,
+        string description,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Uri current = start;
             var visited = new HashSet<string>(StringComparer.Ordinal);
             for (int redirectCount = 0;;)
             {
-                RequireTransport(current, "manifest redirect", _allowLoopbackHttp);
+                RequireTransport(current, $"{description} redirect", _allowLoopbackHttp);
                 if (!visited.Add(current.AbsoluteUri))
                 {
                     throw new LauncherUpdateException(
-                        "The release manifest redirect chain contains a loop.");
+                        $"The {description} redirect chain contains a loop.");
                 }
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, current);
@@ -138,27 +192,27 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
                     if (redirectCount >= MaximumRedirects)
                     {
                         throw new LauncherUpdateException(
-                            $"The release manifest exceeded {MaximumRedirects} redirects.");
+                            $"The {description} exceeded {MaximumRedirects} redirects.");
                     }
 
                     Uri? location = response.Headers.Location;
                     if (location is null)
                     {
                         throw new LauncherUpdateException(
-                            "The release manifest redirect has no Location header.");
+                            $"The {description} redirect has no Location header.");
                     }
 
                     Uri next = location.IsAbsoluteUri
                         ? location
                         : new Uri(current, location);
-                    RequireTransport(next, "manifest redirect", _allowLoopbackHttp);
+                    RequireTransport(next, $"{description} redirect", _allowLoopbackHttp);
                     current = next;
                     redirectCount++;
                     continue;
                 }
 
                 response.EnsureSuccessStatusCode();
-                return await ReadAndParseAsync(response, cancellationToken)
+                return await ReadBytesAsync(response, description, cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -176,7 +230,7 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
                                    or NotSupportedException)
         {
             throw new LauncherUpdateException(
-                $"The release manifest could not be loaded: {ex.Message}",
+                $"The {description} could not be loaded: {ex.Message}",
                 ex);
         }
     }
@@ -236,15 +290,16 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
     internal static void RequireSecureOrLoopback(Uri uri, string description) =>
         RequireTransport(uri, description, allowLoopbackHttp: true);
 
-    private async Task<ReleaseManifest> ReadAndParseAsync(
+    private static async Task<byte[]> ReadBytesAsync(
         HttpResponseMessage response,
+        string description,
         CancellationToken cancellationToken)
     {
         if (response.Content.Headers.ContentLength is long contentLength
             && contentLength > MaximumManifestBytes)
         {
             throw new LauncherUpdateException(
-                $"The release manifest is larger than {MaximumManifestBytes} bytes.");
+                $"The {description} is larger than {MaximumManifestBytes} bytes.");
         }
 
         await using Stream input = await response.Content
@@ -264,13 +319,13 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
             if (output.Length + read > MaximumManifestBytes)
             {
                 throw new LauncherUpdateException(
-                    $"The release manifest is larger than {MaximumManifestBytes} bytes.");
+                    $"The {description} is larger than {MaximumManifestBytes} bytes.");
             }
 
             output.Write(buffer, 0, read);
         }
 
-        return Parse(output.ToArray(), _allowLoopbackHttp);
+        return output.ToArray();
     }
 
     private static ReleaseManifest Validate(
@@ -424,6 +479,15 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
         public Dictionary<string, ArtifactDocument>? Clients { get; init; }
 
         public Dictionary<string, ArtifactDocument>? Launchers { get; init; }
+    }
+
+    private sealed class FingerprintDocument
+    {
+        public int SchemaVersion { get; init; }
+
+        public string? Version { get; init; }
+
+        public string? Fingerprint { get; init; }
     }
 
     private sealed class ArtifactDocument

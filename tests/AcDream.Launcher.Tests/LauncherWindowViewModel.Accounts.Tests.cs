@@ -224,28 +224,6 @@ public sealed partial class LauncherWindowViewModelTests
         }
     }
 
-    [Theory]
-    [InlineData("0.1.10", "0.1.8", "launcher v0.1.10\nclient v0.1.8")]
-    [InlineData("0.2.0-beta.1+3a71d75", "0.2.0+abc", "launcher v0.2.0-beta.1\nclient v0.2.0")]
-    [InlineData("0.1.10", null, "launcher v0.1.10\nclient not installed")]
-    public void VersionTextShowsLauncherAndClientWithoutBuildMetadata(
-        string launcher, string? client, string expected)
-    {
-        using var core = BatchOrchestrator();
-        using var vm = CreateInitialized(core);
-        ClientVersionResolution resolution = new(
-            client is null ? ClientVersionState.Missing : ClientVersionState.Verified,
-            string.Empty,
-            client is null ? null : LauncherVersion.Parse(client),
-            null,
-            null,
-            null);
-
-        vm.ConfigureVersions(launcher, () => resolution);
-
-        Assert.Equal(expected, vm.VersionText);
-    }
-
     [Fact]
     public void ChangingEndpointClearsHealthFromTheOldEndpoint()
     {

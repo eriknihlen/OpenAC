@@ -79,7 +79,8 @@ public sealed partial class App : Application
                 () => _orchestrator?.GetSnapshot().Sessions.Any(session => session.IsActive)
                     == true,
                 updateManifestUri: startupOptions.UpdateManifestUri,
-                installationLayout: layout);
+                installationLayout: layout,
+                launcherFingerprint: GetLauncherFingerprint());
             _updateComposition = updates;
 
             LauncherPluginComposition plugins = LauncherPluginComposition.Create(
@@ -243,6 +244,14 @@ public sealed partial class App : Application
         System.Diagnostics.Process.Start(start)?.Dispose();
         desktop.Shutdown();
     }
+
+    /// <summary>The fingerprint a release build carries of what it was built from; null for a developer
+    /// build, which then updates by version.</summary>
+    internal static string? GetLauncherFingerprint() =>
+        typeof(App).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "OpenAC.LauncherFingerprint")?
+            .Value;
 
     internal static LauncherVersion GetLauncherVersion()
     {

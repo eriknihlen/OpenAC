@@ -72,6 +72,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
     private readonly string _rid;
     private readonly LauncherInstallationLayout _launcherLayout;
     private readonly Func<bool> _hasRunningSessions;
+    private readonly string? _launcherFingerprint;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
 
     public LauncherUpdater(
@@ -83,7 +84,8 @@ public sealed class LauncherUpdater : ILauncherUpdater
         string rid,
         string launcherTargetDirectory,
         Func<bool>? hasRunningSessions = null,
-        SafeZipExtractor? extractor = null)
+        SafeZipExtractor? extractor = null,
+        string? launcherFingerprint = null)
         : this(
             manifestClient,
             httpClient,
@@ -93,7 +95,8 @@ public sealed class LauncherUpdater : ILauncherUpdater
             rid,
             LauncherInstallationLayout.Flat(launcherTargetDirectory, rid),
             hasRunningSessions,
-            extractor)
+            extractor,
+            launcherFingerprint)
     {
     }
 
@@ -106,7 +109,8 @@ public sealed class LauncherUpdater : ILauncherUpdater
         string rid,
         LauncherInstallationLayout launcherLayout,
         Func<bool>? hasRunningSessions = null,
-        SafeZipExtractor? extractor = null)
+        SafeZipExtractor? extractor = null,
+        string? launcherFingerprint = null)
     {
         _manifestClient = manifestClient
             ?? throw new ArgumentNullException(nameof(manifestClient));
@@ -122,6 +126,7 @@ public sealed class LauncherUpdater : ILauncherUpdater
         _rid = rid;
         _launcherLayout = launcherLayout ?? throw new ArgumentNullException(nameof(launcherLayout));
         _hasRunningSessions = hasRunningSessions ?? (() => false);
+        _launcherFingerprint = string.IsNullOrWhiteSpace(launcherFingerprint) ? null : launcherFingerprint;
         _downloader = new VerifiedArtifactDownloader(
             httpClient ?? throw new ArgumentNullException(nameof(httpClient)));
         _extractor = extractor ?? new SafeZipExtractor();
@@ -149,8 +154,14 @@ public sealed class LauncherUpdater : ILauncherUpdater
                 : null;
             bool clientAvailable = installedVersion is null
                 || manifest.Version > installedVersion;
-            bool launcherAvailable = manifest.Version > _launcherVersion;
-            bool minimumSatisfied = _launcherVersion >= manifest.MinimumLauncherVersion;
+            LauncherFingerprintDocument? published = _launcherFingerprint is null
+                ? null
+                : await _manifestClient.FetchLauncherFingerprintAsync(cancellationToken).ConfigureAwait(false);
+            (bool launcherAvailable, bool minimumSatisfied) = DecideLauncher(
+                manifest,
+                _launcherVersion,
+                _launcherFingerprint,
+                published);
             string status = BuildCheckStatus(
                 manifest,
                 installedVersion,
@@ -396,6 +407,30 @@ public sealed class LauncherUpdater : ILauncherUpdater
         {
             _operationGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Whether the release has a new launcher for this one, and whether this launcher may install
+    /// the release's client. With both fingerprints known and the published one belonging to this
+    /// release, the launcher updates only when its fingerprint differs, and one that matches is
+    /// this release's launcher whatever its version says. Otherwise the versions decide, as they
+    /// always have.
+    /// </summary>
+    internal static (bool LauncherAvailable, bool MinimumSatisfied) DecideLauncher(
+        ReleaseManifest manifest,
+        LauncherVersion running,
+        string? runningFingerprint,
+        LauncherFingerprintDocument? published)
+    {
+        if (runningFingerprint is not null
+            && published is not null
+            && published.Version.Equals(manifest.Version))
+        {
+            bool same = string.Equals(published.Fingerprint, runningFingerprint, StringComparison.OrdinalIgnoreCase);
+            return (!same && manifest.Version > running, same || running >= manifest.MinimumLauncherVersion);
+        }
+
+        return (manifest.Version > running, running >= manifest.MinimumLauncherVersion);
     }
 
     private void ValidateCheck(LauncherUpdateCheckResult check)

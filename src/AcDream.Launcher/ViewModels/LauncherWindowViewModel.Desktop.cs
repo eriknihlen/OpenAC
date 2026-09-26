@@ -79,11 +79,9 @@ public sealed partial class LauncherWindowViewModel
         EditServersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Servers), () => CanInteract);
         EditLogonCommandsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.LogonCommands), () => CanInteract);
         ReviewUpdateCommand = new RelayCommand(UpdatePrompt.OpenAvailableUpdate, () => CanInteract && ShowUpdateBanner);
-        CheckForUpdatesCommand = new AsyncRelayCommand(async () =>
-        {
-            await UpdatePrompt.StartupCheckAsync();
-            if (ShowUpdateBanner) UpdatePrompt.OpenAvailableUpdate();
-        }, () => CanInteract && !UpdatePrompt.IsBusy);
+        CheckForUpdatesCommand = new AsyncRelayCommand(
+            () => CheckForUpdatesAsync(openPrompt: true),
+            () => CanInteract && !UpdatePrompt.IsBusy);
         CheckServersCommand = new AsyncRelayCommand(CheckServerHealthAsync, () => _serverHealth is not null && !_disposed);
         OpenSessionLogCommand = new RelayCommand(() => IsSessionLogOpen = true, () => CanInteract);
         OpenSettingsCommand = new RelayCommand(() => IsSettingsOpen = true, () => CanInteract);
@@ -106,25 +104,85 @@ public sealed partial class LauncherWindowViewModel
     private string? _launcherVersion;
     private Func<ClientVersionResolution?> _clientVersion = () => null;
 
-    /// <summary>The small versions shown at the top right of the window, launcher above client, without
-    /// build metadata. Plugin compatibility is judged against the client, which can differ from the
-    /// launcher while an update is pending.</summary>
-    public string VersionText => _launcherVersion is null
-        ? string.Empty
-        : $"launcher {ShortVersion(_launcherVersion)}\n"
-          + (_clientVersion()?.Version is { } client ? $"client {ShortVersion(client.Value)}" : "client not installed");
+    /// <summary>The client version at the top right, without build metadata, or "not installed".
+    /// The launcher and client can differ: the launcher updates only when it changed.</summary>
+    public string ClientVersionText =>
+        _clientVersion()?.Version is { } client ? ShortVersion(client.Value) : "not installed";
+
+    /// <summary>The launcher version at the top right, without build metadata.</summary>
+    public string LauncherVersionText => _launcherVersion is null ? "" : ShortVersion(_launcherVersion);
+
+    public bool HasVersions => _launcherVersion is not null;
+
+    /// <summary>The plugins line at the top right: "all up to date", "2 updates", or "checking…".</summary>
+    public string PluginsUpdateText
+    {
+        get
+        {
+            if (Plugins.IsBusy) return "checking…";
+            if (!Plugins.HasInstalled) return "none installed";
+            int updates = Plugins.Installed.Count(row => row.UpdateAvailable);
+            return updates switch { 0 => "all up to date", 1 => "1 update", _ => $"{updates} updates" };
+        }
+    }
+
+    public bool HasPluginUpdates => Plugins.Installed.Any(row => row.UpdateAvailable);
 
     public void ConfigureVersions(string launcherVersion, Func<ClientVersionResolution?> clientVersion)
     {
         _launcherVersion = launcherVersion;
         _clientVersion = clientVersion ?? throw new ArgumentNullException(nameof(clientVersion));
-        OnPropertyChanged(nameof(VersionText));
+        NotifyVersions();
+    }
+
+    private void NotifyVersions()
+    {
+        OnPropertyChanged(nameof(ClientVersionText));
+        OnPropertyChanged(nameof(LauncherVersionText));
+        OnPropertyChanged(nameof(HasVersions));
+        OnPropertyChanged(nameof(PluginsUpdateText));
+        OnPropertyChanged(nameof(HasPluginUpdates));
+    }
+
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(20);
+    private DateTimeOffset? _nextUpdateCheck;
+
+    /// <summary>Checks for client, launcher and plugin updates every twenty minutes while the
+    /// launcher is open. The check at startup is the first; a manual check restarts the wait.</summary>
+    public void PollUpdateCheck() => PollUpdateCheck(DateTimeOffset.UtcNow);
+
+    internal void PollUpdateCheck(DateTimeOffset now)
+    {
+        if (_disposed || _startupInitialization is not { IsCompleted: true })
+        {
+            return;
+        }
+
+        _nextUpdateCheck ??= now + UpdateCheckInterval;
+        if (now < _nextUpdateCheck || UpdatePrompt.IsBusy)
+        {
+            return;
+        }
+
+        _ = CheckForUpdatesAsync(openPrompt: false, now);
+    }
+
+    /// <summary>The client and launcher from the release feed, and the installed plugins. A
+    /// background check only raises the banner; the button also opens what it found.</summary>
+    private async Task CheckForUpdatesAsync(bool openPrompt, DateTimeOffset? now = null)
+    {
+        _nextUpdateCheck = (now ?? DateTimeOffset.UtcNow) + UpdateCheckInterval;
+        Task plugins = Plugins.CheckNowCommand.ExecuteAsync();
+        await UpdatePrompt.StartupCheckAsync().ConfigureAwait(true);
+        NotifyVersions();
+        if (openPrompt && ShowUpdateBanner) UpdatePrompt.OpenAvailableUpdate();
+        await plugins.ConfigureAwait(true);
     }
 
     private static string ShortVersion(string version)
     {
         int plus = version.IndexOf('+');
-        return "v" + (plus < 0 ? version : version[..plus]);
+        return plus < 0 ? version : version[..plus];
     }
 
     private InstallFolderViewModel? _installFolder;
