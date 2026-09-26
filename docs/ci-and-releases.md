@@ -110,15 +110,27 @@ launcher-fingerprint.json the launcher's fingerprint for this release (see below
 AcDream.Plugin.Abstractions.<version>.nupkg   the plugin API package, plus a .sha256 beside it
 ```
 
-The launcher fingerprint is a SHA-256 that `publish-bin.ps1` computes from the
-committed tree: the git object ids of the launcher, the co-deployed bake tool
-and every project they reference, the build-wide files (`global.json`,
+The launcher fingerprint is a SHA-256 that `tools/launcher-fingerprint.ps1`
+computes from the committed tree (`-ListInputs` prints every input). It covers
+the launcher's own code (`AcDream.Launcher`, `AcDream.Launcher.Core`,
+`AcDream.Platform`), the bake tool's own project (`AcDream.Bake`), the
+prepared-data recipe (`CurrentFormatVersion` and `CurrentBakeToolVersion` in
+`AcDream.Content/Pak/PakFormat.cs`), the build-wide files (`global.json`,
 `Directory.Packages.props`, `NuGet.Config`, `Directory.Build.props` without its
-version), the launcher icons and the two packaging scripts. The launcher
-carries the same value (assembly metadata), so a launcher whose fingerprint
-matches the release's does not update itself. It is a separate file because a
-launcher from before fingerprints reads `manifest.json` strictly and would
-refuse a field it does not know.
+version), the launcher icons, the packaging scripts, the .NET SDK the build
+resolves and the runtime it bundles, the shared `dotnet publish` flags and the
+workflow's calls to `publish-bin.ps1`. It deliberately leaves out the shared
+game code (`AcDream.Core`, the rest of `AcDream.Content`): the bake tool an
+older launcher carries still prepares valid data until the recipe version goes
+up, so a release that only changes game code does not update the launcher.
+Raise the recipe version whenever a change alters what the bake tool writes.
+`LauncherFingerprintContractTests` pins this rule. The launcher carries the same
+value (assembly metadata), so a launcher whose fingerprint matches the
+release's does not update itself. It is a separate file because a launcher from
+before fingerprints reads `manifest.json` strictly and would refuse a field it
+does not know. The macOS launchers are built on their own runners; if those
+resolve a different SDK patch, their fingerprint differs and they simply keep
+updating by the old rule.
 
 The plugin API package is the one assembly a plugin references, so attaching
 it to every release lets a plugin kept in its own repository build against a

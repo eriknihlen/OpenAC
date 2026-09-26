@@ -224,9 +224,11 @@ launcher updates itself first and then offers the client, as before. A
 launcher built without a fingerprint (a developer build), or a release without
 one, compares versions instead, and a launcher from before fingerprints keeps
 updating by version, so it always reaches the current launcher. The fingerprint
-covers the launcher, the preparation tool it carries and every project they are
-built from, so a release that changes the shared game code still updates the
-launcher.
+covers the launcher's own code, the preparation tool's own project, the version
+of the prepared-data recipe, the build files and the .NET runtime it carries; a
+release that only changes the shared game code leaves the launcher as it is,
+because its preparation tool still prepares valid data until the recipe version
+goes up.
 
 ### Coming from 0.1.16 or earlier
 

@@ -97,54 +97,9 @@ Write-Host ''
 if (Test-Path $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force }
 $null = New-Item -ItemType Directory -Path $Staging -Force
 
-# The launcher's fingerprint: one SHA-256 over everything its payload is built
-# from, the launcher and the co-deployed bake tool with every project they
-# reference, the build-wide settings and the packaging scripts. It changes only
-# when one of those does, not with the release version, so a launcher whose
-# fingerprint matches the release's is that release's launcher and does not
-# update itself. Read from the committed tree (git object ids), so it is the
-# same on every runner and line-ending setting.
-function Get-LauncherFingerprint {
-    $roots = @('src/AcDream.Launcher/AcDream.Launcher.csproj', 'src/AcDream.Bake/AcDream.Bake.csproj')
-    $projects = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
-    $pending = [Collections.Generic.Queue[string]]::new()
-    foreach ($root in $roots) { $pending.Enqueue($root) }
-    while ($pending.Count -gt 0) {
-        $project = $pending.Dequeue()
-        if (-not $projects.Add($project)) { continue }
-        [xml]$xml = Get-Content -LiteralPath (Join-Path $RepoRoot $project) -Raw
-        foreach ($reference in @($xml.Project.ItemGroup.ProjectReference | Where-Object { $_ })) {
-            $full = [IO.Path]::GetFullPath((Join-Path (Join-Path $RepoRoot (Split-Path $project)) $reference.Include))
-            $relative = [IO.Path]::GetRelativePath($RepoRoot, $full).Replace('\', '/')
-            $pending.Enqueue($relative)
-        }
-    }
-
-    $paths = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($project in $projects) { $null = $paths.Add((Split-Path $project).Replace('\', '/')) }
-    foreach ($path in @('assets/icons', 'global.json', 'Directory.Packages.props', 'NuGet.Config',
-            'tools/publish-bin.ps1', 'tools/package-macos-launcher.ps1')) {
-        $null = $paths.Add($path)
-    }
-
-    $lines = [Collections.Generic.List[string]]::new()
-    foreach ($path in $paths) {
-        $objectId = (& git -C $RepoRoot rev-parse "HEAD:$path").Trim()
-        if ($LASTEXITCODE) { throw "Could not read '$path' from the committed tree for the launcher fingerprint." }
-        $lines.Add("$path $objectId")
-    }
-
-    # Directory.Build.props carries the release version, which alone must not
-    # change the fingerprint; everything else in it counts.
-    $props = (& git -C $RepoRoot show 'HEAD:Directory.Build.props') -join "`n"
-    if ($LASTEXITCODE) { throw 'Could not read Directory.Build.props from the committed tree.' }
-    $props = [regex]::Replace($props, '<Version>[^<]*</Version>', '<Version />')
-    $lines.Add("Directory.Build.props $props")
-
-    $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n") + "`n")
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
-}
-
+# The launcher's fingerprint (tools/launcher-fingerprint.ps1 says what it
+# covers), embedded in the launcher and published beside the manifest.
+. (Join-Path $PSScriptRoot 'launcher-fingerprint.ps1')
 $LauncherFingerprint = Get-LauncherFingerprint
 Write-Host "  launcher fingerprint : $LauncherFingerprint"
 
@@ -158,17 +113,13 @@ function Invoke-Publish {
         [string]$Fingerprint
     )
 
+    # The shared flags are part of the launcher fingerprint (launcher-fingerprint.ps1).
     $arguments = @(
         'publish', (Join-Path $RepoRoot $Project),
-        '-c', 'Release',
         '-r', $Rid,
-        '--self-contained', 'true',
         "-p:Version=$Version",
-        # No SourceLink '+<sha>' suffix: LauncherVersion parses this as SemVer.
-        '-p:IncludeSourceRevisionInInformationalVersion=false',
-        '-o', $OutputDirectory,
-        '--nologo'
-    )
+        '-o', $OutputDirectory
+    ) + $CommonPublishFlags
     if ($SingleFile) { $arguments += '-p:PublishSingleFile=true' }
     # Only the launcher carries its fingerprint, so it can tell whether a
     # release's launcher is the one already running.
