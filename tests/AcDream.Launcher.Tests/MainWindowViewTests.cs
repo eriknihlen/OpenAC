@@ -61,6 +61,45 @@ public sealed class MainWindowViewTests
         TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
         ARefusedStartShowsItsReason();
         TheAddServerDialogListsKnownServersAndFocusesItsNameField();
+        TheOptionsMenuActsOnItsOwnRow();
+    }
+
+    private static void TheOptionsMenuActsOnItsOwnRow()
+    {
+        var source = new StubOrchestrator
+        {
+            ServerRows = [new LauncherServerSnapshot("Local", "127.0.0.1", 9000,
+                [new LauncherAccountSnapshot("Local", "account1",
+                    [new LauncherCharacterSnapshot("Local", "account1", "Character1", "0x50000001", LaunchMode.Gui, [], [], false, "Ready")],
+                    false, "Ready")])],
+        };
+        using var viewModel = new LauncherWindowViewModel(source, new ImmediateUiDispatcher());
+        viewModel.Initialize();
+        var window = new MainWindow { DataContext = viewModel, Width = 1120, Height = 740 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Button options = window.GetVisualDescendants().OfType<Button>().First(button => button.Content is string text && text.StartsWith("Options", StringComparison.Ordinal));
+            var menu = Assert.IsType<MenuFlyout>(options.Flyout);
+            menu.ShowAt(options);
+            Dispatcher.UIThread.RunJobs();
+
+            MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
+            Assert.Equal(
+                ["Logon commands…", "Plugins for this character…", "Console", "Open logs folder", "Remove character"],
+                items.Select(item => (string?)item.Header));
+            Assert.All(items, item => Assert.Same(options.DataContext, item.DataContext));
+
+            items[0].Command!.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(viewModel.TextEditor.IsOpen);
+            Assert.True(viewModel.TextEditor.IsLogonCommandsEditor);
+            viewModel.TextEditor.CancelCommand.Execute(null);
+            menu.Hide();
+        }
+        finally { CloseTestWindow(window); }
     }
 
     private static void TheAddServerDialogListsKnownServersAndFocusesItsNameField()
