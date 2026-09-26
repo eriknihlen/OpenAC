@@ -153,9 +153,10 @@ public static class LauncherProfileMigration
     private static List<string> WithoutNone(List<string>? plugins) =>
         [.. (plugins ?? []).Where(id => !string.Equals(id, "none", StringComparison.OrdinalIgnoreCase))];
 
+    /// <summary>The same plugins in the same order: plugins load in list order, so a different
+    /// order is a different list.</summary>
     private static bool SamePlugins(List<string> own, List<string> union) =>
-        own.Count == union.Count
-        && own.All(id => union.Contains(id, StringComparer.OrdinalIgnoreCase));
+        own.SequenceEqual(union, StringComparer.OrdinalIgnoreCase);
 
     private static string DescribeDroppedCommands(
         string serverName,

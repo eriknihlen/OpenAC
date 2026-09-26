@@ -92,11 +92,23 @@ public sealed class LauncherProfileMigrationTests : IDisposable
     {
         LauncherProfileStore store = LoadVersion1();
 
-        Assert.All(Account(store, "sawato", "testaccount").Characters, character => Assert.Null(character.Plugins));
+        Assert.Null(Account(store, "sawato", "testaccount").Characters.Single(c => c.Name == "+Mossy").Plugins);
         AccountProfile notan3 = Account(store, "coldeve", "notan3");
         Assert.Equal(["acdream.mosstank"], notan3.Characters.Single(c => c.Name == "Festivus").Plugins);
         Assert.Equal(["example.arrow"], notan3.Characters.Single(c => c.Name == "Mule").Plugins);
         Assert.Null(notan3.Characters.Single(c => c.Name == "Quiet").Plugins);
+    }
+
+    [Fact]
+    public void ACharacterWithTheSamePluginsInAnotherOrderKeepsItsOrder()
+    {
+        LauncherProfileStore store = LoadVersion1();
+
+        // +Acdream listed the same two plugins as +Mossy, the other way round; plugins load in
+        // list order, so that order is kept as its own list.
+        AccountProfile account = Account(store, "sawato", "testaccount");
+        Assert.Null(account.Characters.Single(c => c.Name == "+Mossy").Plugins);
+        Assert.Equal(["openac.mosswartmassacre", "acdream.mosstank"], account.Characters.Single(c => c.Name == "+Acdream").Plugins);
     }
 
     [Fact]
