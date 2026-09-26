@@ -7,16 +7,33 @@ namespace AcDream.Launcher.Core.Plugins;
 public sealed record PluginInstallResult(string Id, string Version, bool WasUpdate);
 
 /// <summary>Install, update, remove and recovery for launcher-managed plugins, following the plan's
-/// Install/update, Remove and Recovery pipelines. Every
-/// write under <see cref="ApplicationPathSet.PluginsDirectory"/> happens under
-/// <see cref="UpdateSessionBarrier.TryAcquireExclusive"/>. Install never writes a character's plugin
-/// list; that write goes through <see cref="AcDream.Launcher.Core.Orchestration.ILauncherOrchestrator.UpdateCharacterSettings"/>
+/// Install/update, Remove and Recovery pipelines. Install, update and a channel change run while
+/// clients are playing: they hold the install's session lock shared, as a running client does, so a
+/// client update or a move of the install cannot start underneath them, and they take the plugin
+/// write lock so two launchers never write plugins at once. The new files are written into the
+/// plugin's folder one at a time and the running clients load them. Remove and recovery still need
+/// every session closed and take <see cref="UpdateSessionBarrier.TryAcquireExclusive"/>. Install
+/// never writes a character's plugin list; that write goes through
+/// <see cref="AcDream.Launcher.Core.Orchestration.ILauncherOrchestrator.UpdateCharacterSettings"/>
 /// instead.</summary>
 public sealed class PluginInstaller
 {
-    /// <summary>The refusal shown when a running session (or another update) holds the barrier.</summary>
+    /// <summary>The refusal shown when removing a plugin while a running session (or an update)
+    /// holds the barrier.</summary>
     public const string SessionLeaseRefusal =
-        "Close all OpenAC sessions to install or update plugins.";
+        "Close all OpenAC sessions to remove plugins.";
+
+    /// <summary>The refusal shown when an install, update or channel change finds a client update,
+    /// a move of the install folder or a plugin removal already running.</summary>
+    public const string UpdateInProgressRefusal =
+        "A client update or another launcher task is running. Try again when it has finished.";
+
+    /// <summary>The refusal shown when another launcher is already installing or updating a plugin.</summary>
+    public const string PluginWriteBusyRefusal =
+        "Another plugin install or update is running. Try again when it has finished.";
+
+    /// <summary>The lock file, beside the session lock, that one plugin write at a time holds.</summary>
+    public const string PluginWriteLockFileName = ".plugin-write.lock";
 
     /// <summary>The refusal shown when a manifest declares a capability vocabulary newer than this
     /// launcher knows. Says the launcher needs updating rather than that the manifest is invalid,
@@ -62,10 +79,11 @@ public sealed class PluginInstaller
     private readonly UpdateSessionBarrier _barrier;
 
     /// <summary>
-    /// Runs right after an update moved the player's files into staging; a
-    /// test throws here to stand in for the process dying at that moment.
+    /// Runs right after an update moved the old version's files aside and
+    /// before the new ones go in; a test throws here to stand in for a write
+    /// failing at that moment.
     /// </summary>
-    internal Action? AfterFilesStaged { get; set; }
+    internal Action? AfterOldCodeSetAside { get; set; }
 
     public PluginInstaller(
         ApplicationPathSet paths,
@@ -278,18 +296,13 @@ public sealed class PluginInstaller
                 }
             }
 
-            if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
+            using (AcquirePluginWrite())
             {
-                throw new LauncherUpdateException(SessionLeaseRefusal);
-            }
-
-            using (lease)
-            {
-                // Asked again now that nothing else can change the folder: a copy placed by hand
-                // while the download ran must not be swapped out as if it were the old version.
+                // Asked again now that no other launcher can change the folder: a copy placed by
+                // hand while the download ran must not be replaced as if it were the old version.
                 RefuseUnmanagedFolder(existingRecord, manifest.Id, targetDirectory);
 
-                SwapIntoPlace(
+                ReplaceInPlace(
                     manifest.Id,
                     repo,
                     catalog,
@@ -300,7 +313,8 @@ public sealed class PluginInstaller
                     existingRecord,
                     stagingDirectory,
                     targetDirectory,
-                    channel);
+                    channel,
+                    manifest.EntryDll);
             }
 
             return new PluginInstallResult(manifest.Id, manifest.Version, isUpdate);
@@ -325,12 +339,7 @@ public sealed class PluginInstaller
         InstalledPluginRecord record = _recordStore.Find(id)
             ?? throw new LauncherUpdateException($"'{id}' is not a launcher-managed plugin.");
 
-        if (!_barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease))
-        {
-            throw new LauncherUpdateException(SessionLeaseRefusal);
-        }
-
-        using (lease)
+        using (AcquirePluginWrite())
         {
             InstalledPluginRecord updated = record with { Channel = channel };
             Upsert(updated);
@@ -460,6 +469,10 @@ public sealed class PluginInstaller
             string stagingRoot = Path.Combine(_paths.PluginsDirectory, ".staging");
             if (Directory.Exists(stagingRoot))
             {
+                // Before any staging folder goes: an unfinished in-place update keeps the old
+                // version's files beside its staging folder until it is settled.
+                RecoverInPlaceUpdates(stagingRoot);
+
                 foreach (string directory in Directory.EnumerateDirectories(stagingRoot))
                 {
                     ReclaimStaging(
@@ -549,7 +562,16 @@ public sealed class PluginInstaller
         return changed;
     }
 
-    private void SwapIntoPlace(
+    /// <summary>
+    /// Writes a new version into the plugin's own folder while clients may be running it. The
+    /// clients read a plugin's assemblies into memory, so no file is held open; they reload the
+    /// plugin a second after its folder goes quiet. The player's <c>files</c> folder is never
+    /// moved. The old version's files are set aside first and the new ones moved in, with
+    /// <c>plugin.json</c> last, so a folder holding the new <c>plugin.json</c> holds all of the new
+    /// version. A journal beside the staging folder names the old files until the swap is done: a
+    /// failure puts them back, and so does <see cref="Recover"/> after a crash.
+    /// </summary>
+    private void ReplaceInPlace(
         string id,
         string repo,
         PluginCatalog? catalog,
@@ -560,7 +582,8 @@ public sealed class PluginInstaller
         InstalledPluginRecord? existingRecord,
         string stagingDirectory,
         string targetDirectory,
-        PluginReleaseChannel? explicitChannel)
+        PluginReleaseChannel? explicitChannel,
+        string entryDll)
     {
         var pending = new PendingPluginInstall(newVersion, newTag, newZipSha256);
         // The channel follows the version just fetched: a prerelease always lands
@@ -589,56 +612,34 @@ public sealed class PluginInstaller
         Upsert(pendingRecord);
         _recordStore.Save();
 
-        Directory.CreateDirectory(_paths.PluginsDirectory);
-        bool hadExistingFolder = Directory.Exists(targetDirectory);
-        string existingFiles = Path.Combine(targetDirectory, FilesFolderName);
-        string stagedFiles = Path.Combine(stagingDirectory, FilesFolderName);
-        // The player's files ride along inside the new folder, so the swap
-        // below stays one rename and never has a moment where they are gone.
-        bool carryFiles = hadExistingFolder && Directory.Exists(existingFiles);
-        if (carryFiles)
-        {
-            // The marker goes down first: from here on, a files/ folder in
-            // this staging folder is the player's, and recovery hands it
-            // back instead of deleting it with the package.
-            File.WriteAllText(PlayerFilesMarker(stagingDirectory), id);
-            Directory.Move(existingFiles, stagedFiles);
-            AfterFilesStaged?.Invoke();
-        }
-
-        string trashDirectory = CreateTrashPath(id);
-        try
-        {
-            if (hadExistingFolder)
-            {
-                Directory.Move(targetDirectory, trashDirectory);
-            }
-        }
-        catch
-        {
-            if (carryFiles)
-            {
-                Directory.Move(stagedFiles, existingFiles);
-            }
-
-            throw;
-        }
+        Directory.CreateDirectory(targetDirectory);
+        string[] oldCode = CodeFiles(targetDirectory);
+        string[] newCode = CodeFiles(stagingDirectory)
+            .OrderBy(file => InstallOrder(file, entryDll))
+            .ThenBy(static file => file, StringComparer.Ordinal)
+            .ToArray();
+        string journal = InPlaceJournal(stagingDirectory);
+        string setAside = SetAsideDirectory(stagingDirectory);
+        File.WriteAllLines(journal, [id, .. oldCode]);
 
         try
         {
-            Directory.Move(stagingDirectory, targetDirectory);
+            foreach (string file in oldCode)
+                MoveFile(Path.Combine(targetDirectory, file), Path.Combine(setAside, file));
+            AfterOldCodeSetAside?.Invoke();
+            foreach (string file in newCode)
+                MoveFile(Path.Combine(stagingDirectory, file), Path.Combine(targetDirectory, file));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            PutBack(journal);
+            throw new LauncherUpdateException(
+                $"'{id}' could not be updated: {ex.Message} The previous version is back in place.",
+                ex);
         }
         catch
         {
-            if (hadExistingFolder)
-            {
-                Directory.Move(trashDirectory, targetDirectory);
-                if (carryFiles)
-                {
-                    Directory.Move(stagedFiles, existingFiles);
-                }
-            }
-
+            PutBack(journal);
             throw;
         }
 
@@ -651,13 +652,193 @@ public sealed class PluginInstaller
         });
         _recordStore.Save();
 
-        if (hadExistingFolder)
+        FinishInPlace(journal);
+    }
+
+    /// <summary>
+    /// Every file of a plugin's code, relative to its folder with <c>/</c> separators: everything
+    /// but the player's top-level <c>files</c> folder.
+    /// </summary>
+    private static string[] CodeFiles(string directory)
+    {
+        if (!Directory.Exists(directory))
+            return [];
+        return Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Select(file => Path.GetRelativePath(directory, file).Replace(Path.DirectorySeparatorChar, '/'))
+            .Where(static file => !IsInFilesFolder(file))
+            .OrderBy(static file => file, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool IsInFilesFolder(string relativeFile) =>
+        relativeFile.StartsWith(FilesFolderName + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The new version's files go in with its entry assembly second to last and <c>plugin.json</c>
+    /// last: a client reloads when either changes, and by then everything they need is there.
+    /// </summary>
+    private static int InstallOrder(string file, string entryDll) =>
+        string.Equals(file, "plugin.json", StringComparison.OrdinalIgnoreCase) ? 2
+        : string.Equals(file, entryDll.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase) ? 1
+        : 0;
+
+    private static void MoveFile(string source, string destination)
+    {
+        Directory.CreateDirectory(
+            Path.GetDirectoryName(destination)
+            ?? throw new InvalidOperationException("A plugin file has no parent folder."));
+        File.Move(source, destination, overwrite: true);
+    }
+
+    /// <summary>The journal of an in-place update: the plugin id, then the old version's files.</summary>
+    private static string InPlaceJournal(string stagingDirectory) =>
+        Path.TrimEndingDirectorySeparator(stagingDirectory) + ".in-place";
+
+    /// <summary>Where an in-place update keeps the old version's files until it is done.</summary>
+    private static string SetAsideDirectory(string stagingDirectory) =>
+        Path.TrimEndingDirectorySeparator(stagingDirectory) + ".old";
+
+    /// <summary>
+    /// Undoes an unfinished in-place update: every old file set aside goes back, and every file
+    /// the old version did not have leaves the plugin's folder. It can run again after being
+    /// interrupted itself, because it only ever moves what is still set aside. The player's
+    /// <c>files</c> folder is never touched.
+    /// </summary>
+    private void PutBack(string journal)
+    {
+        string[] lines = File.ReadAllLines(journal);
+        string id = lines[0];
+        var oldCode = new HashSet<string>(lines.Skip(1), StringComparer.Ordinal);
+        string targetDirectory = Path.Combine(_paths.PluginsDirectory, id);
+        string stagingDirectory = journal[..^".in-place".Length];
+        string setAside = SetAsideDirectory(stagingDirectory);
+
+        foreach (string file in CodeFiles(setAside))
+            MoveFile(Path.Combine(setAside, file), Path.Combine(targetDirectory, file));
+        foreach (string file in CodeFiles(targetDirectory))
         {
-            SafeZipExtractor.TryDeleteDirectory(trashDirectory);
+            if (!oldCode.Contains(file))
+                File.Delete(Path.Combine(targetDirectory, file));
         }
 
-        VerifiedArtifactDownloader.TryDelete(PlayerFilesMarker(stagingDirectory));
-        TryDeleteIfEmpty(Path.Combine(_paths.PluginsDirectory, ".trash"));
+        RemoveEmptyCodeFolders(targetDirectory);
+        SafeZipExtractor.TryDeleteDirectory(setAside);
+        VerifiedArtifactDownloader.TryDelete(journal);
+    }
+
+    /// <summary>
+    /// Ends a finished in-place update: the old version's files and the journal go. A file an
+    /// older client still has open stays in the set-aside folder, which a later
+    /// <see cref="Recover"/> deletes.
+    /// </summary>
+    private void FinishInPlace(string journal)
+    {
+        string id = File.ReadLines(journal).First();
+        string stagingDirectory = journal[..^".in-place".Length];
+        RemoveEmptyCodeFolders(Path.Combine(_paths.PluginsDirectory, id));
+        SafeZipExtractor.TryDeleteDirectory(SetAsideDirectory(stagingDirectory));
+        VerifiedArtifactDownloader.TryDelete(journal);
+    }
+
+    /// <summary>Removes folders the old version had and the new one left empty.</summary>
+    private static void RemoveEmptyCodeFolders(string pluginDirectory)
+    {
+        if (!Directory.Exists(pluginDirectory))
+            return;
+        foreach (string directory in Directory
+            .EnumerateDirectories(pluginDirectory, "*", SearchOption.AllDirectories)
+            .OrderByDescending(static directory => directory.Length))
+        {
+            string relative = Path.GetRelativePath(pluginDirectory, directory)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            if (string.Equals(relative, FilesFolderName, StringComparison.OrdinalIgnoreCase)
+                || IsInFilesFolder(relative))
+            {
+                continue;
+            }
+            if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                Directory.Delete(directory);
+        }
+    }
+
+    /// <summary>
+    /// Settles every in-place update a crash left unfinished. One whose new <c>plugin.json</c> had
+    /// already gone in is finished; any other is put back to the old version.
+    /// </summary>
+    private void RecoverInPlaceUpdates(string stagingRoot)
+    {
+        foreach (string journal in Directory.EnumerateFiles(stagingRoot, "*.in-place"))
+        {
+            string stagingDirectory = journal[..^".in-place".Length];
+            string? id = File.ReadLines(journal).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                VerifiedArtifactDownloader.TryDelete(journal);
+                continue;
+            }
+
+            bool newManifestIsIn = !File.Exists(Path.Combine(stagingDirectory, "plugin.json"))
+                && File.Exists(Path.Combine(_paths.PluginsDirectory, id, "plugin.json"))
+                && Directory.Exists(stagingDirectory);
+            if (newManifestIsIn)
+                FinishInPlace(journal);
+            else
+                PutBack(journal);
+        }
+    }
+
+    /// <summary>
+    /// The locks a plugin write holds: the install's session lock shared, as a running client
+    /// holds it, so nothing that rewrites the whole install can start meanwhile; and the plugin
+    /// write lock alone, so no other launcher writes plugins at the same time.
+    /// </summary>
+    private IDisposable AcquirePluginWrite()
+    {
+        if (!_barrier.TryAcquireSession(out UpdateSessionBarrier.SessionLease? session))
+        {
+            throw new LauncherUpdateException(UpdateInProgressRefusal);
+        }
+
+        string lockPath = Path.Combine(
+            Path.GetDirectoryName(_barrier.LockPath)
+                ?? throw new InvalidOperationException("The session lock path has no parent folder."),
+            PluginWriteLockFileName);
+        try
+        {
+            var writeLock = new FileStream(
+                lockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.None);
+            return new PluginWriteLease(session!, writeLock);
+        }
+        catch (IOException ex)
+        {
+            session!.Dispose();
+            throw new LauncherUpdateException(PluginWriteBusyRefusal, ex);
+        }
+        catch
+        {
+            session!.Dispose();
+            throw;
+        }
+    }
+
+    private sealed class PluginWriteLease(
+        UpdateSessionBarrier.SessionLease session,
+        FileStream writeLock) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+            writeLock.Dispose();
+            session.Dispose();
+        }
     }
 
     /// <summary>

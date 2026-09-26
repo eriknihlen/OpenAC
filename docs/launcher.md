@@ -71,6 +71,15 @@ downgrades an installed beta; it just stops offering pre-releases until a
 stable release passes it. The release feed can lag a new release by up to a
 minute.
 
+Installing or updating a plugin does not need the game closed. The launcher
+writes the new files into the plugin's folder, leaving the plugin's own
+`files` folder (its saved settings) where it is, and every running client and
+headless session that has the plugin loaded switches to the new version about
+a second later. If the new version needs a newer client, the running one keeps
+the old version and says so in chat; the update takes effect after updating
+the client. Removing a plugin, and client or launcher updates, still wait until
+every session is closed.
+
 The **Show beta plugins** checkbox, in Launcher settings behind the gear icon
 on the tab row, is off by default and covers Discover and Add from URL
 instead: on, a plugin with no stable release yet can be found and installed,

@@ -2702,7 +2702,7 @@ public sealed partial class LauncherWindowViewModelTests
             managed.IsBetaChannel = true;
         }
 
-        Assert.Equal(PluginInstaller.SessionLeaseRefusal, viewModel.Plugins.Error);
+        Assert.Equal(PluginInstaller.UpdateInProgressRefusal, viewModel.Plugins.Error);
         PluginInstalledRowViewModel stillManaged = Assert.Single(
             viewModel.Plugins.Installed, row => row.Id == "edwards.managed");
         Assert.False(stillManaged.IsBetaChannel);
