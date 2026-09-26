@@ -86,3 +86,11 @@ provenance notes in CONTRIBUTING.md.
 Asheron's Call and all associated names, art, and data files are the property
 of their respective owners. OpenAC distributes no game assets and is not
 affiliated with Microsoft, Turbine, or Warner Bros. Entertainment.
+
+## Noto Sans
+
+The graphical client embeds unmodified Noto Sans Regular from the Noto project.
+Copyright 2018 The Noto Project Authors. Licensed under SIL Open Font License 1.1.
+See [the full license](assets/fonts/NotoSans/OFL.txt) and
+[the pinned source and checksum](assets/fonts/NotoSans/README.md).
+A license copy is included as `licenses/NotoSans-OFL.txt` in client distributions.

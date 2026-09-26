@@ -61,6 +61,10 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\fonts\NotoSans\NotoSans-Regular.ttf"
+                      LogicalName="AcDream.App.Fonts.NotoSans-Regular.ttf" />
+    <None Include="..\..\assets\fonts\NotoSans\OFL.txt" Link="licenses\NotoSans-OFL.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="..\..\assets\icons\acdream-client-16.png"
                       LogicalName="AcDream.App.Rendering.Icons.acdream-client-16.png" />
     <EmbeddedResource Include="..\..\assets\icons\acdream-client-32.png"

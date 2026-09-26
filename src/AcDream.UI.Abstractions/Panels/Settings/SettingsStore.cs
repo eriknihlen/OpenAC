@@ -246,6 +246,26 @@ public sealed class SettingsStore
     public void SaveCameraTurning(CameraTurningSettings cameraTurning)
         => SaveSection("cameraTurning", BuildCameraTurningObject(cameraTurning));
 
+    public string LoadPluginUiTheme()
+    {
+        if (!File.Exists(_path)) return "Classic";
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(_path));
+            return doc.RootElement.TryGetProperty("pluginUi", out var section)
+                && section.ValueKind == JsonValueKind.Object
+                ? ReadString(section, "theme", "Classic") : "Classic";
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"settings: failed to load plugin appearance: {ex.Message}");
+            return "Classic";
+        }
+    }
+
+    public void SavePluginUiTheme(string theme)
+        => SaveSection("pluginUi", new SortedDictionary<string, object> { ["theme"] = theme });
+
     public MiscSettings LoadMisc()
     {
         if (!File.Exists(_path)) return MiscSettings.Default;

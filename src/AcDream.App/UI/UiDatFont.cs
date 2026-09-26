@@ -32,26 +32,30 @@ public sealed class UiDatFont
     public int BorderY { get; }
 
     private readonly Dictionary<char, FontCharDesc> _glyphs;
+    private readonly char? _fallbackCharacter;
 
     internal UiDatFont(
         uint fgTex, int fgW, int fgH,
         uint bgTex, int bgW, int bgH,
         float lineHeight, float baselineOffset,
         Dictionary<char, FontCharDesc> glyphs,
-        int borderX = 0, int borderY = 0)
+        int borderX = 0, int borderY = 0, char? fallbackCharacter = null)
     {
         ForegroundTexture = fgTex; ForegroundWidth = fgW; ForegroundHeight = fgH;
         BackgroundTexture = bgTex; BackgroundWidth = bgW; BackgroundHeight = bgH;
         LineHeight = lineHeight;
         BaselineOffset = baselineOffset;
         _glyphs = glyphs;
+        _fallbackCharacter = fallbackCharacter;
         BorderX = borderX;
         BorderY = borderY;
     }
 
     public bool HasBackground => BackgroundTexture != 0;
 
-    public bool TryGetGlyph(char c, out FontCharDesc glyph) => _glyphs.TryGetValue(c, out glyph!);
+    public bool TryGetGlyph(char c, out FontCharDesc glyph)
+        => _glyphs.TryGetValue(c, out glyph!) || (!char.IsControl(c)
+            && _fallbackCharacter is { } fallback && _glyphs.TryGetValue(fallback, out glyph!));
 
     public static UiDatFont? Load(IDatReaderWriter dats, TextureCache cache, uint fontId = DefaultFontId)
     {
@@ -92,7 +96,7 @@ public sealed class UiDatFont
         float width = 0f;
         for (int index = 0; index < text.Length; index++)
         {
-            if (_glyphs.TryGetValue(text[index], out FontCharDesc? glyph))
+            if (TryGetGlyph(text[index], out FontCharDesc glyph))
                 width += GlyphAdvance(glyph);
         }
 

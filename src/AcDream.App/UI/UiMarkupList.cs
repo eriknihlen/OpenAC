@@ -4,6 +4,8 @@ namespace AcDream.App.UI;
 
 public sealed class UiMarkupList : UiElement
 {
+    public PluginUiPalette? ThemePalette { get; set; }
+
     public Func<IReadOnlyList<string>> ItemsSource { get; set; } =
         static () => Array.Empty<string>();
     public Func<IReadOnlyList<uint>> ItemColorsSource { get; set; } =
@@ -139,7 +141,7 @@ public sealed class UiMarkupList : UiElement
             float textY = y + MathF.Max(0f,
                 (RowHeight - (DatFont?.LineHeight ?? 14f)) * 0.5f);
             if (DatFont is { } font)
-                context.DrawStringDat(font, text, textX, textY, textColor, true);
+                context.DrawStringDat(font, text, textX, textY, textColor, ThemePalette is null);
             else
                 context.DrawString(text, textX, textY, textColor);
         }
@@ -333,7 +335,7 @@ public sealed class UiMarkupList : UiElement
         float textX = cellX + Padding;
         float textY = y + MathF.Max(0f, (RowHeight - (DatFont?.LineHeight ?? 14f)) * 0.5f);
         if (DatFont is { } font)
-            context.DrawStringDat(font, text, textX, textY, color, true);
+            context.DrawStringDat(font, text, textX, textY, color, ThemePalette is null);
         else
             context.DrawString(text, textX, textY, color);
     }
@@ -345,7 +347,8 @@ public sealed class UiMarkupList : UiElement
         float extent = MathF.Max(0f, cellW - 2f);
         float lampX = cellX + 1f + MathF.Max(0f, extent - UiCheckLamp.LampSize) * 0.5f;
         float lampY = y + MathF.Max(1f, (RowHeight - UiCheckLamp.LampSize) * 0.5f);
-        UiCheckLamp.Draw(context, lampX, lampY, isChecked);
+        if (ThemePalette is { } p) p.DrawCheck(context, lampX, lampY, isChecked);
+        else UiCheckLamp.Draw(context, lampX, lampY, isChecked);
     }
 
     private void DrawIconCell(
@@ -441,8 +444,19 @@ public sealed class UiMarkupList : UiElement
 
     private void DrawScrollbar(UiRenderContext ctx, float x, int rowCount, int visibleRows)
     {
-        if (SpriteResolve is not { } resolve) return;
         ConfigureScroll(rowCount, visibleRows);
+        if (ThemePalette is { } p)
+        {
+            ctx.DrawFill(x, 0, ScrollbarWidth, Height, p.Field);
+            ctx.DrawRectOutline(x, 0, ScrollbarWidth, Height, p.Border, 1);
+            float button = Math.Min(ScrollButtonExtent, Height / 2);
+            var (top, size) = UiScrollbar.ThumbRect(_scroll, button, Math.Max(0, Height - 2 * button));
+            ctx.DrawFill(x + 3, top, ScrollbarWidth - 6, size, p.Muted);
+            ctx.DrawFill(x + 5, button / 2, ScrollbarWidth - 10, 1, p.Muted);
+            ctx.DrawFill(x + 5, Height - button / 2, ScrollbarWidth - 10, 1, p.Muted);
+            return;
+        }
+        if (SpriteResolve is not { } resolve) return;
 
         float decExtent = Math.Clamp(ScrollButtonExtent, 0f, Height);
         float incExtent = Math.Clamp(ScrollButtonExtent, 0f, Height - decExtent);
