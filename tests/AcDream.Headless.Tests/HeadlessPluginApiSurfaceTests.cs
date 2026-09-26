@@ -1047,6 +1047,39 @@ public sealed class HeadlessPluginApiSurfaceTests
         canvas.Dispose();
     }
 
+    /// <summary>
+    /// The plugin tick runs about 67 times a second on every session, with
+    /// several subscribers whether or not any plugin is loaded (the
+    /// automation surface, the navigation commands, the plugin reloader).
+    /// Handing it out allocates nothing per tick, however many subscribers
+    /// there are: a copied handler list per tick was once the largest single
+    /// cost of an idle headless session, and it grew with each subscriber.
+    /// The bound is under one byte per tick on average, so a one-time
+    /// runtime allocation charged to the thread cannot fail it but any
+    /// per-tick allocation does.
+    /// </summary>
+    [Fact]
+    public void TheTickReachesEverySubscriberWithoutAllocatingPerTick()
+    {
+        const int ticks = 10_000;
+        using GameRuntime runtime = NewRuntime();
+        using var host = NewHost(runtime);
+        var counts = new int[3];
+        host.Events.Tick += _ => counts[0]++;
+        host.Events.Tick += _ => counts[1]++;
+        host.Events.Tick += _ => counts[2]++;
+        for (int warmup = 0; warmup < 64; warmup++)
+            host.FireTick(0.015);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int tick = 0; tick < ticks; tick++)
+            host.FireTick(0.015);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.All(counts, static count => Assert.Equal(64 + ticks, count));
+        Assert.InRange(allocated, 0L, ticks - 1L);
+    }
+
     private static GameRuntime NewRuntime()
     {
         var operations = new InertOperations();
