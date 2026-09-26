@@ -1,3 +1,4 @@
+using System.Globalization;
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Status;
@@ -33,7 +34,7 @@ public sealed class AddServerDialogViewModelTests : IDisposable
         new KnownServer("AChard", "a-chard.ddns.net", 9000, "PvP", "ACE", "PK server", null, null, 3),
         new KnownServer("Coldeve", "play.coldeve.ac", 9000, "PvE", "ACE", "End of retail", new Uri("https://coldeve.ac/"), null, 675),
         new KnownServer("Leafcull", "leafcull.example", 9010, "PvE", "GDLE", "Retail-like", null, null, null),
-    ], fromCache, new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero));
+    ], fromCache, new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero));
 
     [Fact]
     public void KnownServersShowTheirTypePlayersAndWhetherTheyAreAlreadyAdded()
@@ -103,11 +104,40 @@ public sealed class AddServerDialogViewModelTests : IDisposable
     }
 
     [Fact]
-    public void AnOfflineCopySaysWhenItWasSaved()
+    public void AnOfflineCopySaysWhenItWasSavedTheSameWayInEveryLanguage()
     {
-        _dialog.ShowList(List(fromCache: true));
+        CultureInfo before = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("sv-SE");
+            _dialog.ShowList(List(fromCache: true));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = before;
+        }
 
-        Assert.Contains("offline copy from", _dialog.ListStatus);
+        Assert.EndsWith("offline copy from Sep 20, 2026", _dialog.ListStatus);
+    }
+
+    [Fact]
+    public async Task AListThatFailsToLoadLeavesYourOwnServerAndNeverThrows()
+    {
+        using var client = new HttpClient(new ThrowingHandler());
+        _dialog.UseCatalog(new KnownServerCatalog(client, Path.Combine(_root, "cache")));
+
+        await _dialog.OpenAsync();
+
+        Assert.True(_dialog.IsOpen);
+        Assert.Empty(_dialog.Servers);
+        Assert.StartsWith("The known server list could not be loaded", _dialog.ListStatus);
+        Assert.False(_dialog.IsLoading);
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("unexpected");
     }
 
     [Fact]

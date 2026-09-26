@@ -58,28 +58,20 @@ public sealed class KnownServerCatalog(
                 return recent;
             }
 
-            string? servers = await TryFetchAsync(ServersUri, cancellationToken).ConfigureAwait(false);
-            string? counts = await TryFetchAsync(PlayerCountsUri, cancellationToken).ConfigureAwait(false);
+            Task<string?> serversTask = TryFetchAsync(ServersUri, IsServerList, cancellationToken);
+            Task<string?> countsTask = TryFetchAsync(PlayerCountsUri, IsArray, cancellationToken);
+            string? servers = await serversTask.ConfigureAwait(false);
+            string? counts = await countsTask.ConfigureAwait(false);
             bool fromCache = servers is null;
             servers ??= TryReadCache(ServersCachePath);
             counts ??= TryReadCache(CountsCachePath);
-            if (servers is null)
-            {
-                return _last;
-            }
-
-            IReadOnlyList<KnownServer> parsed;
-            try
-            {
-                parsed = Parse(servers, counts);
-            }
-            catch (JsonException)
+            if (servers is null || !IsServerList(servers))
             {
                 return _last;
             }
 
             DateTimeOffset savedAt = fromCache ? CacheTime(ServersCachePath) ?? now : now;
-            _last = new KnownServerList(parsed, fromCache, savedAt);
+            _last = new KnownServerList(Parse(servers, counts), fromCache, savedAt);
             return _last;
         }
         finally
@@ -88,50 +80,30 @@ public sealed class KnownServerCatalog(
         }
     }
 
-    /// <summary>The servers in a servers.json, sorted by name; entries without a name, a host or a
-    /// usable port are left out. Player counts come from a player_counts document when it names the
-    /// server, and from the server's own entry otherwise.</summary>
+    /// <summary>The servers in a servers.json, sorted by name. An entry without a name, a host or a
+    /// usable port, or that is not an object, is left out; a field of an unexpected kind is read as
+    /// missing. Player counts come from a player_counts document when it names the server, and from
+    /// the server's own entry otherwise. A document that is not a JSON array gives no servers.</summary>
     public static IReadOnlyList<KnownServer> Parse(string serversJson, string? playerCountsJson = null)
     {
-        Dictionary<string, int> counts = new(StringComparer.OrdinalIgnoreCase);
-        if (playerCountsJson is not null)
-        {
-            try
-            {
-                counts = ServerHealthService.ParsePlayerCounts(playerCountsJson);
-            }
-            catch (JsonException)
-            {
-                // Unreadable counts leave every server on the count its own entry reports.
-            }
-        }
-
-        using JsonDocument document = JsonDocument.Parse(serversJson);
-        if (document.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            throw new JsonException("Expected a server list.");
-        }
-
+        Dictionary<string, int> counts = playerCountsJson is null ? [] : ParsePlayerCounts(playerCountsJson);
         var servers = new List<KnownServer>();
-        foreach (JsonElement item in document.RootElement.EnumerateArray())
+        foreach (JsonElement item in ArrayItems(serversJson))
         {
             if (item.ValueKind != JsonValueKind.Object
                 || Text(item, "name") is not { } name
                 || Text(item, "host") is not { } host
-                || Port(item) is not { } port)
+                || Whole(item, "port") is not { } port
+                || port is < 1 or > 65535)
             {
                 continue;
             }
 
             int? players = counts.TryGetValue(name, out int count)
                 ? count
-                : item.TryGetProperty("players", out JsonElement reported)
-                    && reported.ValueKind == JsonValueKind.Object
-                    && reported.TryGetProperty("count", out JsonElement reportedCount)
-                    && reportedCount.TryGetInt32(out int value)
-                    && value >= 0
-                        ? value
-                        : null;
+                : item.TryGetProperty("players", out JsonElement reported) && reported.ValueKind == JsonValueKind.Object
+                    ? Whole(reported, "count") is >= 0 and { } value ? value : null
+                    : null;
             servers.Add(new KnownServer(
                 name,
                 host,
@@ -147,6 +119,55 @@ public sealed class KnownServerCatalog(
         return [.. servers.OrderBy(server => server.Name, StringComparer.OrdinalIgnoreCase)];
     }
 
+    /// <summary>Server name to player count from a player_counts document, with the same tolerance.</summary>
+    private static Dictionary<string, int> ParsePlayerCounts(string json)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonElement item in ArrayItems(json))
+        {
+            if (item.ValueKind == JsonValueKind.Object
+                && Text(item, "server") is { } server
+                && Whole(item, "count") is >= 0 and { } count)
+            {
+                counts[server] = count;
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>The items of a JSON array, or none when the text is not one.</summary>
+    private static JsonElement[] ArrayItems(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Array
+                ? [.. document.RootElement.EnumerateArray().Select(item => item.Clone())]
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Only a list with at least one usable server replaces the saved copy.</summary>
+    private static bool IsServerList(string json) => Parse(json).Count > 0;
+
+    private static bool IsArray(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Array;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static string? Text(JsonElement item, string property) =>
         item.TryGetProperty(property, out JsonElement value)
         && value.ValueKind == JsonValueKind.String
@@ -155,22 +176,22 @@ public sealed class KnownServerCatalog(
             ? text.Trim()
             : null;
 
-    /// <summary>The port, which the list writes as a string, or a number from an older list.</summary>
-    private static int? Port(JsonElement item)
+    /// <summary>A whole number written as a number or as a string, such as the port, which the list
+    /// writes as a string; null for anything else.</summary>
+    private static int? Whole(JsonElement item, string property)
     {
-        if (!item.TryGetProperty("port", out JsonElement value))
+        if (!item.TryGetProperty(property, out JsonElement value))
         {
             return null;
         }
 
-        int port = 0;
-        bool parsed = value.ValueKind switch
+        return value.ValueKind switch
         {
-            JsonValueKind.String => int.TryParse(value.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out port),
-            JsonValueKind.Number => value.TryGetInt32(out port),
-            _ => false,
+            JsonValueKind.Number when value.TryGetInt32(out int number) => number,
+            JsonValueKind.String when int.TryParse(
+                value.GetString()?.Trim(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int number) => number,
+            _ => null,
         };
-        return parsed && port is >= 1 and <= 65535 ? port : null;
     }
 
     /// <summary>A website or Discord link, kept only when it is an absolute http or https address.</summary>
@@ -181,7 +202,9 @@ public sealed class KnownServerCatalog(
             ? uri
             : null;
 
-    private async Task<string?> TryFetchAsync(Uri uri, CancellationToken cancellationToken)
+    /// <summary>Downloads a document and saves it for offline use, but only when <paramref name="usable"/>
+    /// accepts it; null when the download fails or is refused.</summary>
+    private async Task<string?> TryFetchAsync(Uri uri, Func<string, bool> usable, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(FetchTimeout);
@@ -193,8 +216,10 @@ public sealed class KnownServerCatalog(
             response.EnsureSuccessStatusCode();
             await response.Content.LoadIntoBufferAsync(MaximumBytes, timeout.Token).ConfigureAwait(false);
             string text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            // Only a document that parses replaces the saved copy.
-            JsonDocument.Parse(text).Dispose();
+            if (!usable(text))
+            {
+                return null;
+            }
 
             TryWriteCache(uri == ServersUri ? ServersCachePath : CountsCachePath, text);
             return text;
@@ -203,7 +228,7 @@ public sealed class KnownServerCatalog(
         {
             return null;
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             return null;
         }

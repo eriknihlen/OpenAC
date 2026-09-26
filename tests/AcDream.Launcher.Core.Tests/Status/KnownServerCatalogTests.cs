@@ -103,6 +103,94 @@ public sealed class KnownServerCatalogTests : IDisposable
     }
 
     [Fact]
+    public void OddValuesAreReadOrLeftOutWithoutFailingTheList()
+    {
+        const string servers = """
+            [
+              { "name": "Text", "host": "text.example", "port": " 9001 ", "players": { "count": "12" } },
+              { "name": "Nulls", "host": "nulls.example", "port": 9000, "type": null, "description": null,
+                "website_url": null, "players": { "count": null } },
+              { "name": "Fraction", "host": "f.example", "port": 9000.5, "players": { "count": 1.5 } },
+              { "name": "Negative", "host": "n.example", "port": "9000", "players": { "count": -3 } },
+              { "name": null, "host": "x.example", "port": "9000" },
+              { "name": "Array", "host": ["a"], "port": "9000" },
+              "not an object",
+              { "name": "PlayersText", "host": "p.example", "port": "9000", "players": "many" }
+            ]
+            """;
+        const string counts = """
+            [
+              { "server": "Nulls", "count": "7" },
+              { "server": "Negative", "count": null },
+              { "server": 5, "count": 1 },
+              "junk"
+            ]
+            """;
+
+        IReadOnlyList<KnownServer> parsed = KnownServerCatalog.Parse(servers, counts);
+
+        Assert.Equal(["Negative", "Nulls", "PlayersText", "Text"], parsed.Select(server => server.Name));
+        Assert.Equal(9001, parsed.Single(server => server.Name == "Text").Port);
+        Assert.Equal(12, parsed.Single(server => server.Name == "Text").PlayerCount);
+        Assert.Equal(7, parsed.Single(server => server.Name == "Nulls").PlayerCount);
+        Assert.Null(parsed.Single(server => server.Name == "Negative").PlayerCount);
+        Assert.Null(parsed.Single(server => server.Name == "PlayersText").PlayerCount);
+        Assert.Null(parsed.Single(server => server.Name == "Nulls").Type);
+    }
+
+    [Theory]
+    [InlineData("""{"error":"maintenance"}""")]
+    [InlineData("[]")]
+    [InlineData("""[{"name":"NoHost"}]""")]
+    public async Task AListThatIsNotAServerListNeverReplacesTheSavedOne(string downloaded)
+    {
+        using (var client = new HttpClient(new Handler(request => request.RequestUri == KnownServerCatalog.ServersUri ? ServersJson : CountsJson)))
+        {
+            await new KnownServerCatalog(client, _cache).LoadAsync();
+        }
+
+        using var broken = new HttpClient(new Handler(request => request.RequestUri == KnownServerCatalog.ServersUri ? downloaded : CountsJson));
+        KnownServerList? list = await new KnownServerCatalog(broken, _cache).LoadAsync();
+
+        Assert.NotNull(list);
+        Assert.True(list.IsFromCache);
+        Assert.Equal(3, list.Servers.Count);
+    }
+
+    [Fact]
+    public async Task TheListAndThePlayerCountsDownloadTogether()
+    {
+        var countsRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var client = new HttpClient(new AsyncHandler(async request =>
+        {
+            if (request.RequestUri == KnownServerCatalog.PlayerCountsUri)
+            {
+                countsRequested.TrySetResult();
+                return CountsJson;
+            }
+
+            // The server list answers only once the counts were asked for too.
+            await countsRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            return ServersJson;
+        }));
+
+        KnownServerList? list = await new KnownServerCatalog(client, _cache).LoadAsync();
+
+        Assert.NotNull(list);
+        Assert.False(list.IsFromCache);
+        Assert.Equal(675, list.Servers.Single(server => server.Name == "Coldeve").PlayerCount);
+    }
+
+    private sealed class AsyncHandler(Func<HttpRequestMessage, Task<string>> respond) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(await respond(request), Encoding.UTF8, "application/json"),
+            };
+    }
+
+    [Fact]
     public async Task ARecentListIsReusedWithoutAnotherFetch()
     {
         int requests = 0;

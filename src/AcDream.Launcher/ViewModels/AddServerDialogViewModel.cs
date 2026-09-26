@@ -151,6 +151,16 @@ public sealed class AddServerDialogViewModel : ObservableObject
         {
             list = await _catalog.LoadAsync().ConfigureAwait(true);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Opened from a button, with nothing above it to catch: a list that fails in a way the
+            // catalog did not expect still leaves the dialog usable for your own server.
+            _all = [];
+            Servers.Clear();
+            OnPropertyChanged(nameof(HasKnownServers));
+            ListStatus = $"The known server list could not be loaded ({ex.Message}). You can still add your own server.";
+            return;
+        }
         finally
         {
             IsLoading = false;
@@ -182,7 +192,9 @@ public sealed class AddServerDialogViewModel : ObservableObject
         ListStatus = list is null
             ? "Offline: the known server list could not be loaded. You can still add your own server."
             : $"{list.Servers.Count} servers · list and player counts from TreeStats"
-              + (list.IsFromCache ? $" · offline copy from {list.SavedAt.ToLocalTime():d MMM yyyy}" : "");
+              + (list.IsFromCache
+                  ? " · offline copy from " + list.SavedAt.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)
+                  : "");
         OnPropertyChanged(nameof(HasKnownServers));
         RefreshAdded();
         ApplyFilter();
