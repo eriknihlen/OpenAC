@@ -72,17 +72,46 @@ internal sealed class OutboundFlowQueue : IDisposable
         ReadOnlySpan<byte> gameMessageBody,
         GameMessageGroup queue)
     {
+        int count = Math.Max(1, (int)(((long)gameMessageBody.Length
+            + MessageFragmentHeader.MaxFragmentDataSize - 1)
+            / MessageFragmentHeader.MaxFragmentDataSize));
+        if (count > ushort.MaxValue)
+            throw new ArgumentException("Game message needs more fragments than the header can represent.", nameof(gameMessageBody));
+
+        // All fragments share one message identity. Reserve it before sending
+        // so a later send failure cannot reuse a partially transmitted identity.
+        uint messageSequence = FragmentSequence++;
+        int offset = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int length = Math.Min(MessageFragmentHeader.MaxFragmentDataSize,
+                gameMessageBody.Length - offset);
+            SendFragment(gameMessageBody.Slice(offset, length), queue,
+                messageSequence, (ushort)index, (ushort)count);
+            offset += length;
+        }
+    }
+
+    private void SendFragment(
+        ReadOnlySpan<byte> gameMessageBody,
+        GameMessageGroup queue,
+        uint messageSequence,
+        ushort index,
+        ushort count)
+    {
         byte[] buffer = _pool.Rent(
             PacketHeader.Size
             + MessageFragmentHeader.Size
             + gameMessageBody.Length);
         try
         {
-            int fragmentLength = GameMessageFragment.WriteSingleFragment(
+            int fragmentLength = GameMessageFragment.WriteFragment(
                 buffer.AsSpan(PacketHeader.Size),
-                FragmentSequence,
+                messageSequence,
                 queue,
-                gameMessageBody);
+                gameMessageBody,
+                index,
+                count);
             var header = new PacketHeader
             {
                 Sequence = PeekNextPacketSequence,
@@ -101,7 +130,6 @@ internal sealed class OutboundFlowQueue : IDisposable
                 out uint isaacKeyUsed,
                 out uint sealedChecksum);
 
-            FragmentSequence++;
             HighestIdSent = header.Sequence;
 
             _send(buffer.AsSpan(0, datagramLength));

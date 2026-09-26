@@ -14,7 +14,7 @@ public static class GameMessageFragment
         if (gameMessageBytes.Length > MessageFragmentHeader.MaxFragmentDataSize)
             throw new ArgumentException(
                 $"game message body ({gameMessageBytes.Length} bytes) exceeds single-fragment capacity " +
-                $"({MessageFragmentHeader.MaxFragmentDataSize} bytes). Multi-fragment split TBD.",
+                $"({MessageFragmentHeader.MaxFragmentDataSize} bytes).",
                 nameof(gameMessageBytes));
 
         var header = new MessageFragmentHeader
@@ -35,13 +35,22 @@ public static class GameMessageFragment
         uint fragmentSequence,
         GameMessageGroup queue,
         ReadOnlySpan<byte> gameMessageBytes)
+        => WriteFragment(destination, fragmentSequence, queue, gameMessageBytes, 0, 1);
+
+    internal static int WriteFragment(
+        Span<byte> destination,
+        uint fragmentSequence,
+        GameMessageGroup queue,
+        ReadOnlySpan<byte> gameMessageBytes,
+        ushort index,
+        ushort count)
     {
         if (gameMessageBytes.Length
             > MessageFragmentHeader.MaxFragmentDataSize)
         {
             throw new ArgumentException(
                 $"game message body ({gameMessageBytes.Length} bytes) exceeds single-fragment capacity "
-                + $"({MessageFragmentHeader.MaxFragmentDataSize} bytes). Multi-fragment split TBD.",
+                + $"({MessageFragmentHeader.MaxFragmentDataSize} bytes).",
                 nameof(gameMessageBytes));
         }
 
@@ -58,9 +67,9 @@ public static class GameMessageFragment
         {
             Sequence = fragmentSequence,
             Id = OutboundFragmentId,
-            Count = 1,
+            Count = count,
             TotalSize = checked((ushort)wireSize),
-            Index = 0,
+            Index = index,
             Queue = (ushort)queue,
         };
         header.Pack(destination);
