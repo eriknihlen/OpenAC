@@ -635,12 +635,18 @@ public sealed class PluginInstallerTests
         Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
     }
 
+    /// <summary>
+    /// A plugin installs and updates while another process -- a running
+    /// client -- holds the session lock. Before plugins were loaded from
+    /// memory this was refused with "Close all OpenAC sessions to install or
+    /// update plugins."
+    /// </summary>
     [Fact]
-    public async Task InstallRefusedWhileASessionLeaseIsHeld()
+    public async Task InstallAndUpdateRunWhileASessionIsPlaying()
     {
         using var fixture = new Fixture();
-        var release = fixture.BuildRelease(Id, "0.1.0");
-        fixture.RegisterRelease(Repo, release);
+        var first = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, first);
 
         string ready = Path.Combine(fixture.Root, "lease.ready");
         string releaseFile = Path.Combine(fixture.Root, "lease.release");
@@ -664,10 +670,17 @@ public sealed class PluginInstallerTests
         {
             await WaitForFileAsync(ready, holder);
 
-            LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(() =>
-                fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
+            await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+            var second = fixture.BuildRelease(Id, "0.2.0");
+            fixture.RegisterRelease(Repo, second);
+            PluginInstallResult result =
+                await fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null);
 
-            Assert.Equal(PluginInstaller.SessionLeaseRefusal, error.Message);
+            Assert.True(result.WasUpdate);
+            Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
+            Assert.Contains(
+                "\"0.2.0\"",
+                File.ReadAllText(Path.Combine(fixture.Paths.PluginsDirectory, Id, "plugin.json")));
         }
         finally
         {
@@ -677,6 +690,118 @@ public sealed class PluginInstallerTests
                 holder.Kill(entireProcessTree: true);
             }
         }
+    }
+
+    /// <summary>
+    /// A client update or a move of the install holds the session lock
+    /// alone; a plugin write waits for it rather than writing underneath it.
+    /// </summary>
+    [Fact]
+    public async Task InstallIsRefusedWhileAClientUpdateRuns()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        Assert.True(barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? lease));
+        using (lease)
+        {
+            LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(
+                () => fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
+            Assert.Equal(PluginInstaller.UpdateInProgressRefusal, error.Message);
+        }
+
+        Assert.Null(fixture.RecordStore.Find(Id));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, Id)));
+    }
+
+    /// <summary>Two launchers never write plugins at the same time.</summary>
+    [Fact]
+    public async Task InstallIsRefusedWhileAnotherPluginWriteRuns()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        string lockPath = Path.Combine(
+            Path.GetDirectoryName(barrier.LockPath)!,
+            PluginInstaller.PluginWriteLockFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(
+                () => fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null));
+            Assert.Equal(PluginInstaller.PluginWriteBusyRefusal, error.Message);
+        }
+
+        // The session lock is let go with the refusal: a client update is not
+        // left blocked by a write that never happened.
+        Assert.True(barrier.TryAcquireExclusive(out UpdateSessionBarrier.ExclusiveLease? exclusive));
+        exclusive!.Dispose();
+    }
+
+    /// <summary>
+    /// The update never moves the player's files folder: a plugin that has a
+    /// file in it open keeps it open through the update. Mutation
+    /// (2026-09-26): the earlier update, which moved files/ into the new
+    /// folder, failed here on Windows because the open file blocks moving its
+    /// folder.
+    /// </summary>
+    [Fact]
+    public async Task AnUpdateLeavesThePlayersFilesFolderWhereItIs()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+        string files = fixture.Paths.PluginFilesDirectory(Id);
+        Directory.CreateDirectory(files);
+        string log = Path.Combine(files, "plugin.log");
+
+        var second = fixture.BuildRelease(Id, "0.2.0");
+        fixture.RegisterRelease(Repo, second);
+        using (var open = new FileStream(log, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            open.Write("before"u8);
+            await fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null);
+            open.Write(" after"u8);
+        }
+
+        Assert.Equal("before after", File.ReadAllText(log));
+        Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
+    }
+
+    /// <summary>
+    /// A file the old version shipped and the new one does not is gone after
+    /// the update, so a client never loads a stale dependency beside the new
+    /// code. Mutation (2026-09-26): writing the new files over the old ones
+    /// without first setting the old ones aside left old.dll behind.
+    /// </summary>
+    [Fact]
+    public async Task AnUpdateRemovesFilesTheNewVersionNoLongerShips()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.BuildRelease(
+            Id,
+            "0.1.0",
+            extraEntries: [("lib/old.dll", Encoding.UTF8.GetBytes("old")), ("shared.xml", Encoding.UTF8.GetBytes("v1"))]);
+        fixture.RegisterRelease(Repo, first);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
+
+        var second = fixture.BuildRelease(
+            Id,
+            "0.2.0",
+            extraEntries: [("shared.xml", Encoding.UTF8.GetBytes("v2"))]);
+        fixture.RegisterRelease(Repo, second);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null);
+
+        string plugin = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        Assert.False(File.Exists(Path.Combine(plugin, "lib", "old.dll")));
+        Assert.False(Directory.Exists(Path.Combine(plugin, "lib")));
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(plugin, "shared.xml")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
     }
 
     [Fact]
@@ -941,28 +1066,127 @@ public sealed class PluginInstallerTests
     }
 
     /// <summary>
-    /// An update that dies right after moving the player's files into
-    /// staging still hands them back. Mutation: not writing the marker before
-    /// staging the files (so they read as package content) fails this.
+    /// An update that fails part-way, after the old version's files were set
+    /// aside, puts every one of them back and never touches the player's
+    /// files. Mutation (2026-09-26): skipping PutBack on failure left the
+    /// folder without its plugin.json.
     /// </summary>
     [Fact]
-    public async Task AnUpdateThatFailsWithFilesStagedHandsThemBack()
+    public async Task AnUpdateThatFailsPartWayPutsTheOldVersionBack()
     {
         using var fixture = new Fixture();
-        var first = fixture.BuildRelease(Id, "0.1.0");
+        var first = fixture.BuildRelease(
+            Id,
+            "0.1.0",
+            extraEntries: [("shared.xml", Encoding.UTF8.GetBytes("v1"))]);
         fixture.RegisterRelease(Repo, first);
         await fixture.Installer.InstallOrUpdateAsync(Repo, first.Tag, null, null);
         string files = fixture.Paths.PluginFilesDirectory(Id);
         Directory.CreateDirectory(files);
         File.WriteAllText(Path.Combine(files, "state.json"), "mine");
-        fixture.Installer.AfterFilesStaged = () => throw new IOException("stopped here");
+        fixture.Installer.AfterOldCodeSetAside = () => throw new IOException("stopped here");
 
-        var second = fixture.BuildRelease(Id, "0.2.0");
+        var second = fixture.BuildRelease(
+            Id,
+            "0.2.0",
+            extraEntries: [("shared.xml", Encoding.UTF8.GetBytes("v2")), ("new.xml", [])]);
         fixture.RegisterRelease(Repo, second);
-        await Assert.ThrowsAsync<IOException>(
+        LauncherUpdateException error = await Assert.ThrowsAsync<LauncherUpdateException>(
             () => fixture.Installer.InstallOrUpdateAsync(Repo, second.Tag, null, null));
 
+        string plugin = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        Assert.Contains("The previous version is back in place.", error.Message);
+        Assert.Contains("\"0.1.0\"", File.ReadAllText(Path.Combine(plugin, "plugin.json")));
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(plugin, "shared.xml")));
+        Assert.False(File.Exists(Path.Combine(plugin, "new.xml")));
         Assert.Equal("mine", File.ReadAllText(Path.Combine(files, "state.json")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
+
+        fixture.Installer.Recover();
+        InstalledPluginRecord record = fixture.RecordStore.Find(Id)!;
+        Assert.Equal("0.1.0", record.Version);
+        Assert.Null(record.Pending);
+    }
+
+    /// <summary>
+    /// A crash in the middle of an in-place update: the journal names the
+    /// old version's files, some are set aside and some new files are in.
+    /// Recover puts the old version back. Mutation (2026-09-26): not settling
+    /// journals before the staging folders are reclaimed deleted the set-aside
+    /// files with them.
+    /// </summary>
+    [Fact]
+    public void RecoveryPutsBackAnInPlaceUpdateACrashInterrupted()
+    {
+        using var fixture = new Fixture();
+        string plugin = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        string staging = Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123");
+        Directory.CreateDirectory(Path.Combine(plugin, "files"));
+        Directory.CreateDirectory(staging);
+        Directory.CreateDirectory(staging + ".old");
+        File.WriteAllText(Path.Combine(plugin, "files", "state.json"), "mine");
+        // Set aside: the old manifest; still in place: the old entry assembly;
+        // already in: one new file; still staged: the new manifest.
+        File.WriteAllText(Path.Combine(staging + ".old", "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+        File.WriteAllText(Path.Combine(plugin, Id + ".dll"), "old");
+        File.WriteAllText(Path.Combine(plugin, "new.xml"), "new");
+        File.WriteAllText(Path.Combine(staging, "plugin.json"), Fixture.ManifestJson(Id, "0.2.0"));
+        File.WriteAllLines(staging + ".in-place", [Id, Id + ".dll", "plugin.json"]);
+        fixture.RecordStore.Records.Add(new InstalledPluginRecord(
+            Id,
+            Repo,
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            Pending: new PendingPluginInstall("0.2.0", "v0.2.0", new string('b', 64))));
+        fixture.RecordStore.Save();
+
+        fixture.Installer.Recover();
+
+        Assert.Contains("\"0.1.0\"", File.ReadAllText(Path.Combine(plugin, "plugin.json")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(plugin, Id + ".dll")));
+        Assert.False(File.Exists(Path.Combine(plugin, "new.xml")));
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(plugin, "files", "state.json")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
+        InstalledPluginRecord record = fixture.RecordStore.Find(Id)!;
+        Assert.Equal("0.1.0", record.Version);
+        Assert.Null(record.Pending);
+    }
+
+    /// <summary>
+    /// A crash after the new plugin.json went in: the update was complete,
+    /// and Recover keeps it and confirms the record.
+    /// </summary>
+    [Fact]
+    public void RecoveryFinishesAnInPlaceUpdateWhoseManifestWasAlreadyIn()
+    {
+        using var fixture = new Fixture();
+        string plugin = Path.Combine(fixture.Paths.PluginsDirectory, Id);
+        string staging = Path.Combine(fixture.Paths.PluginsDirectory, ".staging", $"{Id}-abc123");
+        Directory.CreateDirectory(plugin);
+        Directory.CreateDirectory(staging);
+        Directory.CreateDirectory(staging + ".old");
+        File.WriteAllText(Path.Combine(staging + ".old", "plugin.json"), Fixture.ManifestJson(Id, "0.1.0"));
+        File.WriteAllText(Path.Combine(plugin, "plugin.json"), Fixture.ManifestJson(Id, "0.2.0"));
+        File.WriteAllLines(staging + ".in-place", [Id, "plugin.json"]);
+        fixture.RecordStore.Records.Add(new InstalledPluginRecord(
+            Id,
+            Repo,
+            PluginInstallSource.Listed,
+            "0.1.0",
+            "v0.1.0",
+            new string('a', 64),
+            DateTimeOffset.UtcNow,
+            Pending: new PendingPluginInstall("0.2.0", "v0.2.0", new string('b', 64))));
+        fixture.RecordStore.Save();
+
+        fixture.Installer.Recover();
+
+        Assert.Contains("\"0.2.0\"", File.ReadAllText(Path.Combine(plugin, "plugin.json")));
+        Assert.False(Directory.Exists(Path.Combine(fixture.Paths.PluginsDirectory, ".staging")));
+        Assert.Equal("0.2.0", fixture.RecordStore.Find(Id)!.Version);
     }
 
     /// <summary>
@@ -1059,7 +1283,24 @@ public sealed class PluginInstallerTests
     }
 
     [Fact]
-    public async Task SetChannelIsRefusedWhileASessionLeaseIsHeld()
+    public async Task SetChannelRunsWhileASessionIsPlaying()
+    {
+        using var fixture = new Fixture();
+        var release = fixture.BuildRelease(Id, "0.1.0");
+        fixture.RegisterRelease(Repo, release);
+        await fixture.Installer.InstallOrUpdateAsync(Repo, release.Tag, null, null);
+
+        var barrier = new UpdateSessionBarrier(fixture.Paths.DataDirectory);
+        using (barrier.AcquireSession())
+        {
+            fixture.Installer.SetChannel(Id, PluginReleaseChannel.Beta);
+        }
+
+        Assert.Equal(PluginReleaseChannel.Beta, fixture.RecordStore.Find(Id)!.Channel);
+    }
+
+    [Fact]
+    public async Task SetChannelIsRefusedWhileAClientUpdateRuns()
     {
         using var fixture = new Fixture();
         var release = fixture.BuildRelease(Id, "0.1.0");
@@ -1072,7 +1313,7 @@ public sealed class PluginInstallerTests
         {
             LauncherUpdateException error = Assert.Throws<LauncherUpdateException>(
                 () => fixture.Installer.SetChannel(Id, PluginReleaseChannel.Beta));
-            Assert.Equal(PluginInstaller.SessionLeaseRefusal, error.Message);
+            Assert.Equal(PluginInstaller.UpdateInProgressRefusal, error.Message);
         }
 
         Assert.Equal(PluginReleaseChannel.Stable, fixture.RecordStore.Find(Id)!.Channel);

@@ -99,6 +99,71 @@ public sealed class HeadlessPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    /// <summary>
+    /// <c>/plugin reload</c> through this client's own command route loads a
+    /// fresh copy on the next tick, tells a copy started in the world about
+    /// the login it missed, and lets the old copy leave memory. The same
+    /// script runs against the client with a window in
+    /// GraphicalPluginSessionTests. Mutation (2026-09-26): making the
+    /// session's reload return at once left one "fixture-hot-reload" line.
+    /// </summary>
+    [Fact]
+    public void ReloadCommandLoadsAFreshCopyAndTheOldOneLeavesMemory()
+    {
+        using var temporary = new TemporaryDirectory();
+        InstallFixture(temporary.Path, FixtureId);
+        var output = new StringWriter();
+        var diagnostics = new HeadlessDiagnosticWriter(output);
+        string statusPath = Path.Combine(temporary.Path, "status.jsonl");
+        var credential = new HeadlessCredentialSecret("fixture", "password");
+        using var session = new HeadlessSessionHost(
+            Descriptor(
+                [FixtureId],
+                statusPath,
+                loginCommands: [],
+                loginCommandDelayMs: 0),
+            credential,
+            diagnostics,
+            new FixtureSessionOperations(),
+            pluginRoots: [temporary.Path]);
+        HeadlessPluginSession plugins = session.Plugins;
+        _ = session.Start();
+        WeakReference first = Assert.Single(plugins.CaptureLoadContextWeakReferences());
+        int loginsBefore = Count(output.ToString(), "fixture-login");
+
+        Assert.True(plugins.Host.TryHandlePluginCommand($"/plugin reload {FixtureId}"));
+        plugins.Host.FireTick(0.015);
+
+        string log = output.ToString();
+        Assert.Equal(1, Count(log, "fixture-hot-reload=False"));
+        Assert.Equal(1, Count(log, "fixture-hot-reload=True"));
+        Assert.Contains("Reloaded Host fixture 1.0.0.", log);
+        Assert.Equal(loginsBefore + 1, Count(log, "fixture-login"));
+        Assert.Equal(1, plugins.LoadedCount);
+
+        plugins.Host.FireTick(0.015);
+        Collect(first);
+        Assert.False(first.IsAlive);
+
+        IReadOnlyList<WeakReference> contexts = plugins.CaptureLoadContextWeakReferences();
+        session.Dispose();
+        foreach (WeakReference context in contexts)
+            Collect(context);
+        Assert.All(contexts, static context => Assert.False(context.IsAlive));
+    }
+
+    private static int Count(string text, string value)
+    {
+        int count = 0;
+        for (int index = text.IndexOf(value, StringComparison.Ordinal);
+             index >= 0;
+             index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+        return count;
+    }
+
     [Fact]
     public void ExplicitEmptyConfiguredSetLoadsNone()
     {

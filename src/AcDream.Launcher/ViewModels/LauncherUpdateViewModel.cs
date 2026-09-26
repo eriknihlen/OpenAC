@@ -16,6 +16,7 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
     private bool _isOpen;
     private bool _isBusy;
     private bool _disposed;
+    private bool _clientVerified;
     private string _status = string.Empty;
     private string? _error;
     private double _progressPercent;
@@ -165,7 +166,14 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
         if (!_disposed && HasSomethingToUpdate && _canOpen()) IsOpen = true;
     }
 
-    public async Task StartupCheckAsync()
+    /// <summary>The first check: verifies the installed client, then reads the release feed.</summary>
+    public Task StartupCheckAsync() => CheckAsync(verifyInstalledClient: true);
+
+    /// <summary>A later check, by the button or the timer: reads the release feed only. Verifying the
+    /// installed client again would lock and hash it while it may be running.</summary>
+    public Task RecheckAsync() => CheckAsync(verifyInstalledClient: false);
+
+    private async Task CheckAsync(bool verifyInstalledClient)
     {
         if (IsBusy || _disposed)
         {
@@ -181,8 +189,14 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            _ = await _updater.InitializeAsync(cancellation.Token)
-                .ConfigureAwait(true);
+            // A recheck verifies only if no check has verified the client yet (the startup one failed).
+            if (verifyInstalledClient || !_clientVerified)
+            {
+                _ = await _updater.InitializeAsync(cancellation.Token)
+                    .ConfigureAwait(true);
+                _clientVerified = true;
+            }
+
             _check = await _updater.CheckAsync(cancellation.Token).ConfigureAwait(true);
             StartupCheckSucceeded = true;
             Status = HasSomethingToUpdate ? "An update is available." : "OpenAC is up to date.";

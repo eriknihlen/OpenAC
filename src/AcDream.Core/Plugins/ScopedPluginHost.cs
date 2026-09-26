@@ -17,15 +17,23 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly IPluginStatusBoard _statusBoardView;
     private bool _disposed;
     private readonly ScopedWorldLines _worldLines;
+    private readonly string? _pluginDirectory;
+    private readonly bool _isHotReload;
+    private readonly ScopedMapRegistry _maps;
+    private readonly ScopedRenderRegistry _rendering;
 
     internal ScopedPluginHost(
         IPluginHost inner,
         string pluginId,
         string pluginDisplayName,
         string? pluginDirectory = null,
-        PluginStatusBoard? statusBoard = null)
+        PluginStatusBoard? statusBoard = null,
+        bool isHotReload = false,
+        PluginPackageSnapshot? package = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _pluginDirectory = pluginDirectory;
+        _isHotReload = isHotReload;
         _worldLines = new ScopedWorldLines(inner.WorldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
@@ -35,7 +43,10 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _ui = new ScopedUiRegistry(
             inner.Ui,
             new PluginUiOwner(pluginId, pluginDisplayName),
-            pluginDirectory);
+            pluginDirectory,
+            package);
+        _maps = new ScopedMapRegistry(inner.Maps);
+        _rendering = new ScopedRenderRegistry(inner.Rendering);
         _storage = ScopedPluginStorage.ForPlugin(inner.Storage, pluginId);
         _commands = new ScopedPluginCommandRegistry(inner.Commands);
         _lootClassifiers = new ScopedLootClassifierRegistry(
@@ -70,10 +81,20 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IAutomationSurface Automation => _automation;
     public IHotkeyRegistry Hotkeys => _hotkeys;
     public IPluginResourceCatalog Resources => _inner.Resources;
-    public IPluginMapRegistry Maps => _inner.Maps;
+    public IPluginMapRegistry Maps => _maps;
     public IPluginMapResourceCatalog MapResources => _inner.MapResources;
-    public IPluginRenderRegistry Rendering => _inner.Rendering;
+    public IPluginRenderRegistry Rendering => _rendering;
     public IPluginStatusBoard StatusBoard => _statusBoardView;
+    public bool IsHotReload => _isHotReload;
+    public string? PluginDirectory => _pluginDirectory;
+
+    /// <summary>
+    /// Tells this plugin, and only this plugin, that the character is in the
+    /// world: what a plugin started while the character was already there
+    /// would otherwise never hear.
+    /// </summary>
+    internal void RaiseLoginComplete(Action<string, Exception> report) =>
+        _events.RaiseLoginCompleteToThisPlugin(report);
 
     /// <summary>
     /// One plugin's view of the shared storage root: everything it keeps lives
@@ -164,6 +185,8 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         _lootClassifiers.Dispose();
         _automation.Dispose();
         _hotkeys.Dispose();
+        _maps.Dispose();
+        _rendering.Dispose();
         // A status line never outlives the plugin that wrote it.
         (_statusBoardView as PluginStatusBoard.Scoped)?.Close();
     }
@@ -221,9 +244,17 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             }
         }
 
+        // The handlers a plugin adds to these surfaces' events are tracked
+        // and removed with the plugin, like every other event it can reach.
+        private readonly EventLeases _eventLeases = new();
+        private ScopedEquipment? _equipment;
+        private ScopedTrade? _trade;
+        private ScopedVendor? _vendor;
+
         public IDialogAutomation Dialogs => Inner.Dialogs;
         public ICombatAutomation Combat => Inner.Combat;
-        public IEquipmentAutomation Equipment => Inner.Equipment;
+        public IEquipmentAutomation Equipment =>
+            _equipment ??= new ScopedEquipment(() => Inner.Equipment, _eventLeases);
         public IItemAutomation Items => Inner.Items;
         public ILootAutomation Loot => Inner.Loot;
         public IFellowshipAutomation Fellowship => Inner.Fellowship;
@@ -287,13 +318,16 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         }
         public IDungeonMapAutomation DungeonMap => Inner.DungeonMap;
         public ISelectionAutomation Selection => Inner.Selection;
-        public ITradeAutomation Trade => Inner.Trade;
-        public IVendorAutomation Vendor => Inner.Vendor;
+        public ITradeAutomation Trade =>
+            _trade ??= new ScopedTrade(() => Inner.Trade, _eventLeases);
+        public IVendorAutomation Vendor =>
+            _vendor ??= new ScopedVendor(() => Inner.Vendor, _eventLeases);
 
         public void Dispose()
         {
             INavigationAutomation? navigation;
             IWorldLabelAutomation? labels;
+            _eventLeases.Dispose();
             lock (_gate)
             {
                 _disposed = true;
@@ -310,6 +344,295 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             (navigation as IScopedNavigationSource)?.Release(pluginId);
             (labels as IScopedWorldLabelSource)?.Release(pluginId);
         }
+    }
+
+    /// <summary>
+    /// The event handlers one plugin added through the automation surfaces
+    /// that are not wrapped anywhere else. Each one remembers the exact
+    /// surface it was added to, so it comes off that surface even if the host
+    /// has since swapped it for another.
+    /// </summary>
+    private sealed class EventLeases : IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly List<(Delegate Handler, Action Remove)> _leases = [];
+        private bool _disposed;
+
+        internal void Add(Delegate handler, Action add, Action remove)
+        {
+            ArgumentNullException.ThrowIfNull(handler);
+            add();
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _leases.Add((handler, remove));
+                    return;
+                }
+            }
+            try { remove(); }
+            catch { }
+            throw new ObjectDisposedException(nameof(EventLeases));
+        }
+
+        internal void Remove(Delegate? handler)
+        {
+            if (handler is null)
+                return;
+            Action? remove = null;
+            lock (_gate)
+            {
+                for (int index = _leases.Count - 1; index >= 0; index--)
+                {
+                    if (_leases[index].Handler != handler)
+                        continue;
+                    remove = _leases[index].Remove;
+                    _leases.RemoveAt(index);
+                    break;
+                }
+            }
+            remove?.Invoke();
+        }
+
+        public void Dispose()
+        {
+            (Delegate Handler, Action Remove)[] leases;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                leases = [.. _leases];
+                _leases.Clear();
+            }
+            for (int index = leases.Length - 1; index >= 0; index--)
+            {
+                try { leases[index].Remove(); }
+                catch { }
+            }
+        }
+    }
+
+    private sealed class ScopedEquipment(
+        Func<IEquipmentAutomation> source,
+        EventLeases leases) : IEquipmentAutomation
+    {
+        public bool IsAvailable => source().IsAvailable;
+        public bool IsBusy => source().IsBusy;
+        public IReadOnlyList<PluginEquipmentItem> CaptureOwnedEquipment() =>
+            source().CaptureOwnedEquipment();
+        public IReadOnlyList<PluginEquipmentPlacement> CaptureWorldPlacementsInOrder() =>
+            source().CaptureWorldPlacementsInOrder();
+        public PluginEquipmentCommandResult Equip(uint objectId, uint requestedLocation = 0u) =>
+            source().Equip(objectId, requestedLocation);
+        public PluginEquipmentCommandResult EquipSecondary(uint objectId) =>
+            source().EquipSecondary(objectId);
+
+        public event Action<PluginEquipmentObservation> PlacementObserved
+        {
+            add
+            {
+                IEquipmentAutomation inner = source();
+                leases.Add(value, () => inner.PlacementObserved += value, () => inner.PlacementObserved -= value);
+            }
+            remove => leases.Remove(value);
+        }
+    }
+
+    private sealed class ScopedTrade(
+        Func<ITradeAutomation> source,
+        EventLeases leases) : ITradeAutomation
+    {
+        public bool IsAvailable => source().IsAvailable;
+        public bool IsOpen => source().IsOpen;
+        public uint PartnerObjectId => source().PartnerObjectId;
+        public string PartnerName => source().PartnerName;
+        public IReadOnlyList<uint> MyItems => source().MyItems;
+        public IReadOnlyList<uint> PartnerItems => source().PartnerItems;
+        public bool MyAccepted => source().MyAccepted;
+        public bool PartnerAccepted => source().PartnerAccepted;
+        public PluginTradeCommandResult Add(uint itemObjectId) => source().Add(itemObjectId);
+        public PluginTradeCommandResult Accept() => source().Accept();
+        public PluginTradeCommandResult Decline() => source().Decline();
+        public PluginTradeCommandResult Reset() => source().Reset();
+        public PluginTradeCommandResult End() => source().End();
+
+        public event Action<PluginTradeOpened> Opened
+        {
+            add
+            {
+                ITradeAutomation inner = source();
+                leases.Add(value, () => inner.Opened += value, () => inner.Opened -= value);
+            }
+            remove => leases.Remove(value);
+        }
+
+        public event Action Closed
+        {
+            add
+            {
+                ITradeAutomation inner = source();
+                leases.Add(value, () => inner.Closed += value, () => inner.Closed -= value);
+            }
+            remove => leases.Remove(value);
+        }
+
+        public event Action<uint> PartnerTradeAccepted
+        {
+            add
+            {
+                ITradeAutomation inner = source();
+                leases.Add(
+                    value,
+                    () => inner.PartnerTradeAccepted += value,
+                    () => inner.PartnerTradeAccepted -= value);
+            }
+            remove => leases.Remove(value);
+        }
+
+        public event Action<PluginTradeItemAdded> ItemAdded
+        {
+            add
+            {
+                ITradeAutomation inner = source();
+                leases.Add(value, () => inner.ItemAdded += value, () => inner.ItemAdded -= value);
+            }
+            remove => leases.Remove(value);
+        }
+    }
+
+    private sealed class ScopedVendor(
+        Func<IVendorAutomation> source,
+        EventLeases leases) : IVendorAutomation
+    {
+        public bool IsAvailable => source().IsAvailable;
+        public bool IsOpen => source().IsOpen;
+        public uint VendorObjectId => source().VendorObjectId;
+        public string VendorName => source().VendorName;
+        public IReadOnlyList<PluginVendorItem> Items => source().Items;
+        public PluginVendorProfile Profile => source().Profile;
+        public bool IsBusy => source().IsBusy;
+        public bool TryCaptureProperties(uint templateObjectId, out PluginItemProperties properties) =>
+            source().TryCaptureProperties(templateObjectId, out properties);
+        public IReadOnlyList<(uint TemplateObjectId, int Count)> BuyList => source().BuyList;
+        public IReadOnlyList<uint> SellList => source().SellList;
+        public PluginVendorCommandResult AddToBuyList(uint templateObjectId, int count) =>
+            source().AddToBuyList(templateObjectId, count);
+        public PluginVendorCommandResult AddToSellList(uint itemObjectId) =>
+            source().AddToSellList(itemObjectId);
+        public PluginVendorCommandResult RemoveFromBuyList(uint templateObjectId) =>
+            source().RemoveFromBuyList(templateObjectId);
+        public PluginVendorCommandResult RemoveFromSellList(uint itemObjectId) =>
+            source().RemoveFromSellList(itemObjectId);
+        public PluginVendorCommandResult ClearBuyList() => source().ClearBuyList();
+        public PluginVendorCommandResult ClearSellList() => source().ClearSellList();
+        public PluginVendorCommandResult BuyAll() => source().BuyAll();
+        public PluginVendorCommandResult SellAll() => source().SellAll();
+
+        public event Action<uint> Opened
+        {
+            add
+            {
+                IVendorAutomation inner = source();
+                leases.Add(value, () => inner.Opened += value, () => inner.Opened -= value);
+            }
+            remove => leases.Remove(value);
+        }
+
+        public event Action Closed
+        {
+            add
+            {
+                IVendorAutomation inner = source();
+                leases.Add(value, () => inner.Closed += value, () => inner.Closed -= value);
+            }
+            remove => leases.Remove(value);
+        }
+
+        public event Action<PluginVendorTransaction> TransactionCompleted
+        {
+            add
+            {
+                IVendorAutomation inner = source();
+                leases.Add(
+                    value,
+                    () => inner.TransactionCompleted += value,
+                    () => inner.TransactionCompleted -= value);
+            }
+            remove => leases.Remove(value);
+        }
+    }
+
+    /// <summary>
+    /// The disposable things one plugin was handed by a registry -- a map, a
+    /// HUD, a texture -- let go when the plugin is. One the plugin already
+    /// disposed itself is disposed again, which the contract allows.
+    /// </summary>
+    private sealed class RegistrationTracker : IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly List<IDisposable> _registrations = [];
+        private bool _disposed;
+
+        internal T Track<T>(T registration)
+            where T : IDisposable
+        {
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _registrations.Add(registration);
+                    return registration;
+                }
+            }
+            registration.Dispose();
+            throw new ObjectDisposedException(nameof(RegistrationTracker));
+        }
+
+        public void Dispose()
+        {
+            IDisposable[] registrations;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                registrations = [.. _registrations];
+                _registrations.Clear();
+            }
+            for (int index = registrations.Length - 1; index >= 0; index--)
+            {
+                try { registrations[index].Dispose(); }
+                catch { }
+            }
+        }
+    }
+
+    private sealed class ScopedMapRegistry(IPluginMapRegistry inner)
+        : IPluginMapRegistry, IDisposable
+    {
+        private readonly RegistrationTracker _maps = new();
+
+        public IPluginMapSurface AddMap(string mapId, PluginMapViewport initialViewport) =>
+            _maps.Track(inner.AddMap(mapId, initialViewport));
+
+        public void Dispose() => _maps.Dispose();
+    }
+
+    private sealed class ScopedRenderRegistry(IPluginRenderRegistry inner)
+        : IPluginRenderRegistry, IDisposable
+    {
+        private readonly RegistrationTracker _registrations = new();
+
+        public IPluginHudRegistration AddHud(PluginHudDescriptor descriptor) =>
+            _registrations.Track(inner.AddHud(descriptor));
+
+        public IPluginTexture? LoadTexture(string resourceId) =>
+            inner.LoadTexture(resourceId) is { } texture
+                ? _registrations.Track(texture)
+                : null;
+
+        public void Dispose() => _registrations.Dispose();
     }
 
     private sealed class ScopedPluginChat(IPluginChat inner)
@@ -899,7 +1222,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     {
         private readonly object _gate = new();
         private readonly List<Action<WorldEntitySnapshot>> _registrations = [];
-        private readonly List<Action<double>> _tickRegistrations = [];
+        private readonly List<(Action<double> Handler, Action<double> Guarded)> _tickRegistrations = [];
         private readonly List<Action> _loginCompleteRegistrations = [];
         private readonly List<Action> _logoffRegistrations = [];
         private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
@@ -918,13 +1241,23 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             add
             {
                 ArgumentNullException.ThrowIfNull(value);
+                // A plugin can be unloaded from inside a tick: a reload runs
+                // on the tick thread, and the tick being raised has already
+                // taken its list of handlers. The handler the host holds
+                // checks that its plugin is still here, so an unloaded
+                // plugin is never called by the rest of that same tick.
+                Action<double> guarded = elapsed =>
+                {
+                    if (!Volatile.Read(ref _disposed))
+                        value(elapsed);
+                };
                 try
                 {
-                    inner.Tick += value;
+                    inner.Tick += guarded;
                 }
                 catch
                 {
-                    try { inner.Tick -= value; }
+                    try { inner.Tick -= guarded; }
                     catch { }
                     throw;
                 }
@@ -932,12 +1265,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 {
                     if (!_disposed)
                     {
-                        _tickRegistrations.Add(value);
+                        _tickRegistrations.Add((value, guarded));
                         return;
                     }
                 }
 
-                try { inner.Tick -= value; }
+                try { inner.Tick -= guarded; }
                 catch { }
                 throw new ObjectDisposedException(nameof(ScopedEvents));
             }
@@ -945,17 +1278,42 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             {
                 if (value is null)
                     return;
-                inner.Tick -= value;
+                Action<double>? guarded = null;
                 lock (_gate)
                 {
                     for (int index = _tickRegistrations.Count - 1; index >= 0; index--)
                     {
-                        if (_tickRegistrations[index] != value)
+                        if (_tickRegistrations[index].Handler != value)
                             continue;
+                        guarded = _tickRegistrations[index].Guarded;
                         _tickRegistrations.RemoveAt(index);
                         break;
                     }
                 }
+                if (guarded is not null)
+                    inner.Tick -= guarded;
+            }
+        }
+
+        /// <summary>
+        /// Raises <see cref="LoginComplete"/> to this plugin's own handlers
+        /// only, for a plugin started while the character was already in the
+        /// world. A handler that throws is named through
+        /// <paramref name="report"/> and does not stop the next one.
+        /// </summary>
+        internal void RaiseLoginCompleteToThisPlugin(Action<string, Exception> report)
+        {
+            Action[] handlers;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                handlers = _loginCompleteRegistrations.ToArray();
+            }
+            foreach (Action handler in handlers)
+            {
+                try { handler(); }
+                catch (Exception error) { report("LoginComplete", error); }
             }
         }
 
@@ -1404,7 +1762,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _disposed = true;
                 registrations = _registrations.ToArray();
                 _registrations.Clear();
-                tickRegistrations = _tickRegistrations.ToArray();
+                tickRegistrations = _tickRegistrations
+                    .Select(static registration => registration.Guarded)
+                    .ToArray();
                 _tickRegistrations.Clear();
                 loginCompleteRegistrations = _loginCompleteRegistrations.ToArray();
                 _loginCompleteRegistrations.Clear();
@@ -1532,6 +1892,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private readonly IPluginDirectoryUiRegistry? _directoryInner;
         private readonly PluginUiOwner _owner;
         private readonly string? _pluginDirectory;
+        private readonly PluginPackageSnapshot? _package;
         private readonly object _gate = new();
         private readonly List<IDisposable> _registrations = [];
         private bool _disposed;
@@ -1539,8 +1900,10 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         internal ScopedUiRegistry(
             IUiRegistry inner,
             PluginUiOwner owner,
-            string? pluginDirectory)
+            string? pluginDirectory,
+            PluginPackageSnapshot? package = null)
         {
+            _package = package;
             _inner = inner as IScopedUiRegistry
                 ?? throw new InvalidOperationException(
                     "Plugin hosts must expose an IScopedUiRegistry so UI registrations can be rolled back.");
@@ -1589,9 +1952,34 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private IDisposable RegisterPanelWithInner(
             PluginPanelDescriptor descriptor,
             string markupPath,
-            object binding) => _directoryInner is not null
-                ? _directoryInner.RegisterPanel(_owner, _pluginDirectory, descriptor, markupPath, binding)
-                : _inner.RegisterPanel(_owner, descriptor, markupPath, binding);
+            object binding)
+        {
+            string resolved = ResolveMarkupPath(markupPath);
+            // Markup the plugin shipped is taken from the copy read when the
+            // plugin was prepared, so a panel opened later never shows the
+            // markup of a newer version written into the folder meanwhile.
+            if (_package?.MarkupAt(resolved) is { } content)
+                return RegisterPanelContentWithInner(descriptor, content, binding);
+            return _directoryInner is not null
+                ? _directoryInner.RegisterPanel(_owner, _pluginDirectory, descriptor, resolved, binding)
+                : _inner.RegisterPanel(_owner, descriptor, resolved, binding);
+        }
+
+        /// <summary>
+        /// A relative markup path is read from the plugin's own folder, never
+        /// from whatever the process's working folder happens to be. The
+        /// host loads a plugin's assembly from memory, so a plugin that
+        /// builds its path from its assembly's location gets an empty folder
+        /// and a relative path; this is where that path belongs.
+        /// </summary>
+        private string ResolveMarkupPath(string markupPath)
+        {
+            return _pluginDirectory is not null
+                && !string.IsNullOrWhiteSpace(markupPath)
+                && !Path.IsPathRooted(markupPath)
+                ? Path.GetFullPath(Path.Combine(_pluginDirectory, markupPath))
+                : markupPath;
+        }
 
         private IDisposable RegisterPanelContentWithInner(
             PluginPanelDescriptor descriptor,

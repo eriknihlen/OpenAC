@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window
         {
             viewModel.PollStatus();
             viewModel.PollServerHealth(IsActive);
+            viewModel.PollUpdateCheck();
         }
     }
 
@@ -73,6 +74,7 @@ public sealed partial class MainWindow : Window
             _observedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             _observedViewModel.ConsoleRequested += OnConsoleRequested;
             _observedViewModel.InstallFolder?.AttachShell(new InstallFolderShell(this));
+            _observedViewModel.TextEditor.UseClipboard(new ProfileEditorClipboard(this));
         }
 
         _wasModalOpen = viewModel?.IsModalOpen == true;
@@ -139,6 +141,14 @@ public sealed partial class MainWindow : Window
         else if (viewModel.IsCharacterOptionsOpen)
         {
             CharacterPluginsPanel.Focus();
+        }
+        else if (viewModel.AddServerDialog.IsOpen)
+        {
+            OwnServerNameTextBox.Focus();
+        }
+        else if (viewModel.HasProfileMigrationNotice)
+        {
+            MigrationNoticeCloseButton.Focus();
         }
         else if (viewModel.IsSessionLogOpen)
         {
@@ -224,6 +234,21 @@ public sealed partial class MainWindow : Window
 
         e.Handled = true;
     }
+}
+
+/// <summary>The window clipboard, for the text editors' Copy all and Paste all.</summary>
+internal sealed class ProfileEditorClipboard(TopLevel window) : IProfileEditorClipboard
+{
+    public async Task SetTextAsync(string text)
+    {
+        if (window.Clipboard is { } clipboard)
+            await clipboard.SetTextAsync(text).ConfigureAwait(true);
+    }
+
+    public async Task<string?> GetTextAsync() =>
+        window.Clipboard is { } clipboard
+            ? await clipboard.TryGetTextAsync().ConfigureAwait(true)
+            : null;
 }
 
 /// <summary>

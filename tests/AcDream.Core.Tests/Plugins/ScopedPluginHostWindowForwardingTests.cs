@@ -40,6 +40,10 @@ public sealed class ScopedPluginHostWindowForwardingTests
         nameof(IPluginHost.SessionSettings),
         nameof(IPluginHost.WorldLines), // layers are let go with the plugin
         nameof(IPluginHost.StatusBoard), // the session's board, written under the plugin's own id
+        nameof(IPluginHost.IsHotReload), // how this one plugin was loaded, not the host's
+        nameof(IPluginHost.PluginDirectory), // this one plugin's own folder
+        nameof(IPluginHost.Maps), // maps are let go with the plugin
+        nameof(IPluginHost.Rendering), // HUDs and textures are let go with the plugin
     ];
 
     [Fact]
@@ -79,14 +83,12 @@ public sealed class ScopedPluginHostWindowForwardingTests
             checkedMembers.Add(property.Name);
         }
 
-        // Resources, Maps, MapResources and Rendering are forwarded as they
-        // are while no client implements them. A registration a plugin makes
-        // through Maps or Rendering has to be let go when the plugin is, so
-        // those two move to WrappedMembers with the first real implementation.
+        // Resources and MapResources hand out nothing that outlives the
+        // call, so they are forwarded as they are.
         Assert.True(
-            checkedMembers.Count == 9,
-            "Expected exactly 9 direct-forward members (Log, State, "
-                + "Resources, Maps, MapResources, Rendering, "
+            checkedMembers.Count == 7,
+            "Expected exactly 7 direct-forward members (Log, State, "
+                + "Resources, MapResources, "
                 + "VtankProfiles, Clipboard, Window); found "
                 + checkedMembers.Count + ": "
                 + string.Join(", ", checkedMembers)

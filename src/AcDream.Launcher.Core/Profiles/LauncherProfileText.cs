@@ -1,135 +1,548 @@
+using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace AcDream.Launcher.Core.Profiles;
 
-public enum LauncherTextEditorKind { Users, Servers, LogonCommands }
+public enum LauncherTextEditorKind { Accounts, Servers, LogonCommands }
 
-/// <summary>Editable projections over the canonical profile document.</summary>
+/// <summary>
+/// The plain-text views of the profile document the launcher's editors show, and the parsers that
+/// write them back. A parse checks the whole text first and changes nothing when any line is
+/// wrong; every error names its line.
+/// </summary>
+/// <remarks>
+/// Accounts, grouped by server:
+/// <code>
+/// #Coldeve
+/// Name=notan3,Password=secret,Profiles=Main;Bots
+/// </code>
+/// Logon commands, grouped by server and account:
+/// <code>
+/// #Coldeve
+/// ##notan3
+/// /vt start
+/// </code>
+/// In both, a server's section is the whole truth for that server, and a server left out of the
+/// text is left as it is. A logon command line starting with a backslash is a command taken
+/// without it, which is how a command starting with # is written.
+/// </remarks>
 public static class LauncherProfileText
 {
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-    };
+    private const string ServerPrefix = "#";
+    private const string AccountPrefix = "##";
 
-    public static string Read(LauncherProfileDocument document, LauncherTextEditorKind kind) => kind switch
+    /// <summary>Starts a logon command line that is taken as written, without the backslash: how a
+    /// command beginning with # or \ is written.</summary>
+    private const char Escape = '\\';
+
+    public static string Read(LauncherProfileDocument document, LauncherTextEditorKind kind)
     {
-        LauncherTextEditorKind.Users => string.Join(Environment.NewLine, GetUsers(document)
-            .Select(user => $"{Encode(user.Account)} | {Encode(user.Password)}")),
-        LauncherTextEditorKind.Servers => string.Join(Environment.NewLine, document.Servers
-            .Select(s => $"{Encode(s.Name)} | {Encode(s.Host)} | {s.Port}")),
-        LauncherTextEditorKind.LogonCommands => JsonSerializer.Serialize(document.Servers
-            .SelectMany(s => s.Accounts.SelectMany(a => a.Characters.Select(c =>
-                new CommandEntry(s.Name, a.Account, c.Name, c.LoginCommands.ToArray())))), Options),
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    };
+        ArgumentNullException.ThrowIfNull(document);
+        return kind switch
+        {
+            LauncherTextEditorKind.Accounts => ReadAccounts(document),
+            LauncherTextEditorKind.Servers => string.Join(Environment.NewLine, document.Servers
+                .Select(s => $"{Encode(s.Name)} | {Encode(s.Host)} | {s.Port}")),
+            LauncherTextEditorKind.LogonCommands => ReadLogonCommands(document),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+    }
 
     public static void Apply(LauncherProfileDocument document, LauncherTextEditorKind kind, string text)
     {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(text);
         switch (kind)
         {
-            case LauncherTextEditorKind.Users:
-                var users = ParseUsers(text).ToList();
-                Require(users.All(user => !string.IsNullOrWhiteSpace(user.Account)), "Each user needs a username.");
-                Require(users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() == users.Count,
-                    "Each username must appear once. All servers use the same password for that user.");
-                document.Users = users;
-                SynchronizeUsers(document);
+            case LauncherTextEditorKind.Accounts:
+                ApplyAccounts(document, text);
                 break;
             case LauncherTextEditorKind.Servers:
-                var servers = Lines(text).Select(line =>
-                {
-                    var fields = SplitFields(line, '|');
-                    Require(fields.Length == 3, "Each server line must be name | host | port.");
-                    Require(int.TryParse(Decode(fields[2]), out int port), "Server ports must be numbers from 1 to 65535.");
-                    return new ServerEntry(Decode(fields[0]), Decode(fields[1]), port);
-                }).ToArray();
-                Require(servers.All(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Host) && s.Port is >= 1 and <= 65535), "Each server needs a name, host and port from 1 to 65535.");
-                Require(servers.Select(s => s.Name).Distinct(StringComparer.Ordinal).Count() == servers.Length, "Server names must be unique.");
-                document.Users ??= GetUsers(document).ToList();
-                document.Servers = servers.Select(s => new ServerProfile { Name = s.Name, Host = s.Host, Port = s.Port,
-                    Accounts = document.Servers.Find(old => old.Name == s.Name)?.Accounts ?? [] }).ToList();
-                SynchronizeUsers(document);
+                ApplyServers(document, text);
                 break;
             case LauncherTextEditorKind.LogonCommands:
-                var entries = Parse<CommandEntry>(text);
-                var changes = new Dictionary<CharacterProfile, string[]>();
-                foreach (var entry in entries)
-                {
-                    var character = document.Servers.Find(s => s.Name == entry.Server)?.Accounts.Find(a => a.Account == entry.Account)?.Characters.Find(c => c.Name == entry.Character);
-                    Require(character is not null, "A command entry refers to an unknown server, account or character.");
-                    Require(entry.Commands is not null && entry.Commands.All(c => !string.IsNullOrWhiteSpace(c)), "Commands must be nonempty strings. Use [] for no commands.");
-                    Require(changes.TryAdd(character!, entry.Commands), "Each character may appear only once.");
-                }
-                foreach (var server in document.Servers)
-                    foreach (var account in server.Accounts)
-                        foreach (var character in account.Characters)
-                            character.LoginCommands = changes.TryGetValue(character, out var commands) ? commands.ToList() : [];
+                ApplyLogonCommands(document, text);
                 break;
-            default: throw new ArgumentOutOfRangeException(nameof(kind));
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind));
         }
     }
 
-    public static IReadOnlyList<LauncherUser> ParseUsers(string text) => Lines(text).Select(line =>
-    {
-        var fields = SplitFields(line, '|');
-        Require(fields.Length == 2, "Each user line must be username | password.");
-        return new LauncherUser(Decode(fields[0]), Decode(fields[1]));
-    }).ToArray();
+    // --- Accounts -----------------------------------------------------------
 
-    private static IEnumerable<LauncherUser> GetUsers(LauncherProfileDocument document) =>
-        document.Users ?? document.Servers.SelectMany(server => server.Accounts)
-            .Select(account => new LauncherUser(account.Account, account.Password)).Distinct().ToList();
-
-    internal static void SynchronizeUsers(LauncherProfileDocument document)
+    private static string ReadAccounts(LauncherProfileDocument document)
     {
-        if (document.Users is not { } users) return;
-        Require(users.All(user => user is not null && !string.IsNullOrWhiteSpace(user.Account) && user.Password is not null),
-            "Each user needs a username and password field.");
-        Require(users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() == users.Count,
-            "Each username must appear once. Resolve its passwords in Edit Users first.");
-        foreach (var server in document.Servers)
-            server.Accounts = users.Select(user =>
+        var text = new StringBuilder();
+        foreach (ServerProfile server in document.Servers)
+        {
+            if (text.Length > 0)
             {
-                AccountProfile? existing = server.Accounts.Find(account => account.Account == user.Account);
-                return new AccountProfile
+                text.AppendLine();
+            }
+
+            text.Append(ServerPrefix).AppendLine(EncodeHeader(server.Name));
+            foreach (AccountProfile account in server.Accounts)
+            {
+                text.Append("Name=").Append(Encode(account.Account))
+                    .Append(",Password=").Append(Encode(account.Password));
+                if (account.Profiles.Count > 0)
                 {
-                    Account = user.Account, Password = user.Password,
-                    Characters = existing?.Characters ?? [],
-                    SelectedCharacter = existing?.SelectedCharacter,
-                    SelectedLaunchMode = existing?.SelectedLaunchMode,
-                };
-            }).ToList();
+                    text.Append(",Profiles=").Append(Encode(string.Join(';', account.Profiles)));
+                }
+
+                text.AppendLine();
+            }
+        }
+
+        return text.ToString();
     }
 
-    internal static void EnableSharedUsers(LauncherProfileDocument document)
+    /// <summary>
+    /// The accounts saving <paramref name="text"/> would remove that have something saved on them
+    /// (characters, plugins or logon commands), each as "account on server (1 character, 2
+    /// plugins)". A changed name counts: it is a different account, with its own characters. Empty
+    /// when there are none, or when the text has an error the save will report.
+    /// </summary>
+    public static IReadOnlyList<string> DescribeAccountRemovals(LauncherProfileDocument document, string text)
     {
-        var users = GetUsers(document).ToList();
-        // Keep conflicting older credentials available in the editor for explicit resolution.
-        if (users.Select(user => user.Account).Distinct(StringComparer.Ordinal).Count() != users.Count) return;
-        document.Users = users;
-        SynchronizeUsers(document);
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(text);
+        var errors = new List<string>();
+        var sections = ParseAccounts(document, text, errors);
+        if (errors.Count > 0)
+        {
+            return [];
+        }
+
+        var removals = new List<string>();
+        foreach ((ServerProfile server, var accounts) in sections)
+        {
+            foreach (AccountProfile account in server.Accounts.Where(account => accounts.All(parsed => parsed.Name != account.Account)))
+            {
+                string[] parts =
+                [
+                    .. Count(account.Characters.Count, "character"),
+                    .. Count(account.Plugins.Count, "plugin"),
+                    .. Count(account.LoginCommands.Count, "logon command"),
+                ];
+                if (parts.Length > 0)
+                {
+                    removals.Add($"{account.Account} on {server.Name} ({string.Join(", ", parts)})");
+                }
+            }
+        }
+
+        return removals;
+
+        static string[] Count(int count, string noun) => count switch
+        {
+            0 => [],
+            1 => [$"1 {noun}"],
+            _ => [$"{count} {noun}s"],
+        };
     }
 
-    private static IEnumerable<string> Lines(string text) => text.Split('\n')
-        .Select(line => line.Trim()).Where(line => line.Length > 0);
+    private static void ApplyAccounts(LauncherProfileDocument document, string text)
+    {
+        var errors = new List<string>();
+        var sections = ParseAccounts(document, text, errors);
+        ThrowIfAny(errors);
+        foreach ((ServerProfile server, var accounts) in sections)
+        {
+            server.Accounts = [.. accounts.Select(parsed =>
+            {
+                AccountProfile account = server.Accounts.Find(existing => existing.Account == parsed.Name)
+                    ?? new AccountProfile { Account = parsed.Name };
+                account.Password = parsed.Password;
+                account.Profiles = parsed.Profiles;
+                return account;
+            })];
+        }
+    }
 
-    private static string Encode(string value) => value != value.Trim() || value.IndexOfAny(['|', ',', '"', '\r', '\n', '\t']) >= 0
-        ? JsonSerializer.Serialize(value) : value;
+    private static List<(ServerProfile Server, List<(int Line, string Name, string Password, List<string> Profiles)> Accounts)> ParseAccounts(
+        LauncherProfileDocument document,
+        string text,
+        List<string> errors)
+    {
+        var sections = new List<(ServerProfile Server, List<(int Line, string Name, string Password, List<string> Profiles)> Accounts)>();
+        List<(int Line, string Name, string Password, List<string> Profiles)>? current = null;
+        bool serverSeen = false;
+        foreach ((int number, string line) in Lines(text))
+        {
+            if (line.StartsWith(ServerPrefix, StringComparison.Ordinal))
+            {
+                serverSeen = true;
+                ServerProfile? server = ResolveServer(document, line[ServerPrefix.Length..], number, errors);
+                if (server is not null && sections.Any(section => ReferenceEquals(section.Server, server)))
+                {
+                    errors.Add($"Line {number}: server '{server.Name}' appears more than once.");
+                    server = null;
+                }
+
+                current = server is null ? null : [];
+                if (server is not null)
+                {
+                    sections.Add((server, current!));
+                }
+
+                continue;
+            }
+
+            if (current is null)
+            {
+                // Under a server line that was wrong, the error is already reported.
+                if (!serverSeen)
+                {
+                    errors.Add($"Line {number}: put a #Server line above the accounts on that server.");
+                }
+
+                continue;
+            }
+
+            if (TryParseAccountLine(line, number, errors) is { } account)
+            {
+                if (current.Any(existing => existing.Name == account.Name))
+                {
+                    errors.Add($"Line {number}: account '{account.Name}' appears more than once on this server.");
+                    continue;
+                }
+
+                current.Add((number, account.Name, account.Password, account.Profiles));
+            }
+        }
+
+        return sections;
+    }
+
+    private static (string Name, string Password, List<string> Profiles)? TryParseAccountLine(
+        string line,
+        int number,
+        List<string> errors)
+    {
+        string[] fields;
+        try
+        {
+            fields = SplitFields(line, ',');
+        }
+        catch (LauncherProfileException ex)
+        {
+            errors.Add($"Line {number}: {ex.Message}");
+            return null;
+        }
+
+        string? name = null;
+        string? password = null;
+        List<string> profiles = [];
+        foreach (string field in fields)
+        {
+            int equals = field.IndexOf('=', StringComparison.Ordinal);
+            if (equals < 0)
+            {
+                errors.Add($"Line {number}: expected Name=…,Password=… (a server line starts with #).");
+                return null;
+            }
+
+            string key = field[..equals].Trim();
+            string value;
+            try
+            {
+                value = Decode(field[(equals + 1)..]);
+            }
+            catch (LauncherProfileException ex)
+            {
+                errors.Add($"Line {number}: {ex.Message}");
+                return null;
+            }
+
+            if (key.Equals("Name", StringComparison.OrdinalIgnoreCase) && name is null)
+            {
+                name = value;
+            }
+            else if (key.Equals("Password", StringComparison.OrdinalIgnoreCase) && password is null)
+            {
+                password = value;
+            }
+            else if (key.Equals("Profiles", StringComparison.OrdinalIgnoreCase) && profiles.Count == 0)
+            {
+                foreach (string tag in value.Split(';').Select(tag => tag.Trim()).Where(tag => tag.Length > 0))
+                {
+                    if (tag.IndexOfAny([',', '=', '"', '#', '\r', '\n', '\t']) >= 0)
+                    {
+                        errors.Add($"Line {number}: '{tag}' is not a profile name. Use letters, digits and spaces.");
+                        return null;
+                    }
+
+                    if (profiles.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                    {
+                        errors.Add($"Line {number}: profile '{tag}' is listed twice.");
+                        return null;
+                    }
+
+                    profiles.Add(tag);
+                }
+            }
+            else
+            {
+                errors.Add($"Line {number}: '{key}' is not Name, Password or Profiles, or appears twice.");
+                return null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errors.Add($"Line {number}: each account needs Name=.");
+            return null;
+        }
+
+        return (name, password ?? string.Empty, profiles);
+    }
+
+    // --- Logon commands -----------------------------------------------------
+
+    private static string ReadLogonCommands(LauncherProfileDocument document)
+    {
+        var text = new StringBuilder();
+        foreach (ServerProfile server in document.Servers)
+        {
+            if (text.Length > 0)
+            {
+                text.AppendLine();
+            }
+
+            text.Append(ServerPrefix).AppendLine(EncodeHeader(server.Name));
+            foreach (AccountProfile account in server.Accounts)
+            {
+                text.Append(AccountPrefix).AppendLine(EncodeHeader(account.Account));
+                foreach (string command in account.LoginCommands)
+                {
+                    // A command that would read as a # or ## line, or as an escape, gets a backslash.
+                    text.AppendLine(command.StartsWith(ServerPrefix, StringComparison.Ordinal) || command.StartsWith(Escape)
+                        ? Escape + command
+                        : command);
+                }
+            }
+        }
+
+        return text.ToString();
+    }
+
+    private static void ApplyLogonCommands(LauncherProfileDocument document, string text)
+    {
+        var errors = new List<string>();
+        var changes = new Dictionary<ServerProfile, Dictionary<AccountProfile, List<string>>>();
+        ServerProfile? server = null;
+        bool serverSeen = false;
+        // True under a # or ## line that was wrong: its lines are skipped, the error already reported.
+        bool skipping = false;
+        List<string>? commands = null;
+        foreach ((int number, string line) in Lines(text))
+        {
+            if (line.StartsWith(Escape))
+            {
+                if (commands is not null)
+                {
+                    commands.Add(line[1..]);
+                }
+                else if (!skipping)
+                {
+                    errors.Add($"Line {number}: a command needs an ##Account line above it.");
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith(AccountPrefix, StringComparison.Ordinal))
+            {
+                commands = null;
+                skipping = true;
+                if (!serverSeen)
+                {
+                    errors.Add($"Line {number}: put a #Server line above ##Account.");
+                    continue;
+                }
+
+                if (server is null)
+                {
+                    continue;
+                }
+
+                if (DecodeHeader(line[AccountPrefix.Length..], number, errors) is not { } name)
+                {
+                    continue;
+                }
+
+                AccountProfile? account = server.Accounts.Find(candidate => candidate.Account == name);
+                if (account is null)
+                {
+                    errors.Add($"Line {number}: server '{server.Name}' has no account '{name}'. Add it in Edit accounts first.");
+                    continue;
+                }
+
+                if (!changes[server].TryAdd(account, commands = []))
+                {
+                    errors.Add($"Line {number}: account '{name}' appears more than once under '{server.Name}'.");
+                    commands = null;
+                    continue;
+                }
+
+                skipping = false;
+                continue;
+            }
+
+            if (line.StartsWith(ServerPrefix, StringComparison.Ordinal))
+            {
+                serverSeen = true;
+                commands = null;
+                server = ResolveServer(document, line[ServerPrefix.Length..], number, errors);
+                if (server is not null && !changes.TryAdd(server, []))
+                {
+                    errors.Add($"Line {number}: server '{server.Name}' appears more than once.");
+                    server = null;
+                }
+
+                skipping = server is null;
+                continue;
+            }
+
+            if (commands is not null)
+            {
+                commands.Add(line);
+            }
+            else if (skipping)
+            {
+                // Belongs to a header line that was wrong and is already reported.
+            }
+            else
+            {
+                errors.Add($"Line {number}: a command needs an ##Account line above it.");
+            }
+        }
+
+        ThrowIfAny(errors);
+        foreach ((ServerProfile changedServer, Dictionary<AccountProfile, List<string>> accounts) in changes)
+        {
+            foreach (AccountProfile account in changedServer.Accounts)
+            {
+                account.LoginCommands = accounts.TryGetValue(account, out List<string>? list) ? list : [];
+            }
+        }
+    }
+
+    // --- Servers ------------------------------------------------------------
+
+    private static void ApplyServers(LauncherProfileDocument document, string text)
+    {
+        var servers = Lines(text).Select(entry =>
+        {
+            var fields = SplitFields(entry.Text, '|');
+            Require(fields.Length == 3, "Each server line must be name | host | port.");
+            Require(int.TryParse(Decode(fields[2]), out int port), "Server ports must be numbers from 1 to 65535.");
+            return (Name: Decode(fields[0]), Host: Decode(fields[1]), Port: port);
+        }).ToArray();
+        Require(servers.All(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Host) && s.Port is >= 1 and <= 65535),
+            "Each server needs a name, host and port from 1 to 65535.");
+        Require(servers.Select(s => s.Name).Distinct(StringComparer.Ordinal).Count() == servers.Length, "Server names must be unique.");
+        document.Servers = [.. servers.Select(s => new ServerProfile
+        {
+            Name = s.Name,
+            Host = s.Host,
+            Port = s.Port,
+            Accounts = document.Servers.Find(old => old.Name == s.Name)?.Accounts ?? [],
+        })];
+    }
+
+    // --- Shared -------------------------------------------------------------
+
+    /// <summary>A server named on a # line: its exact name, or failing that the one server whose name
+    /// matches ignoring case.</summary>
+    private static ServerProfile? ResolveServer(
+        LauncherProfileDocument document,
+        string header,
+        int number,
+        List<string> errors)
+    {
+        if (DecodeHeader(header, number, errors) is not { } name)
+        {
+            return null;
+        }
+
+        ServerProfile? exact = document.Servers.Find(server => server.Name == name);
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        ServerProfile[] matches = [.. document.Servers.Where(server =>
+            string.Equals(server.Name, name, StringComparison.OrdinalIgnoreCase))];
+        if (matches.Length == 1)
+        {
+            return matches[0];
+        }
+
+        errors.Add(name.Length == 0
+            ? $"Line {number}: a # line needs a server name."
+            : $"Line {number}: there is no server named '{name}'. Add it with Add server first.");
+        return null;
+    }
+
+    /// <summary>A name after # or ##, quoted like a value when it has edge spaces, a quote, or
+    /// starts with # itself.</summary>
+    private static string EncodeHeader(string name) =>
+        name != name.Trim() || name.StartsWith('#') || name.IndexOfAny(['"', '\r', '\n', '\t']) >= 0
+            ? JsonSerializer.Serialize(name)
+            : name;
+
+    private static string? DecodeHeader(string header, int number, List<string> errors)
+    {
+        try
+        {
+            return Decode(header);
+        }
+        catch (LauncherProfileException ex)
+        {
+            errors.Add($"Line {number}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>The text's non-empty lines, trimmed, with their 1-based line numbers.</summary>
+    private static IEnumerable<(int Number, string Text)> Lines(string text) => text.Split('\n')
+        .Select((line, index) => (Number: index + 1, Text: line.Trim()))
+        .Where(line => line.Text.Length > 0);
+
+    private static void ThrowIfAny(List<string> errors)
+    {
+        if (errors.Count > 0)
+        {
+            throw new LauncherProfileException(string.Join(Environment.NewLine, errors));
+        }
+    }
+
+    private static string Encode(string value) =>
+        value != value.Trim() || value.IndexOfAny(['|', ',', '"', '\r', '\n', '\t']) >= 0
+            ? JsonSerializer.Serialize(value)
+            : value;
 
     private static string Decode(string field)
     {
         field = field.Trim();
-        if (!field.Contains('"')) return field;
+        if (!field.Contains('"'))
+        {
+            return field;
+        }
+
         try
         {
-            Require(field.StartsWith('"'), "A quoted field must use double quotes around the entire value.");
+            Require(field.StartsWith('"'), "A quoted value must have double quotes around all of it.");
             return JsonSerializer.Deserialize<string>(field) ?? "";
         }
-        catch (JsonException) { throw new LauncherProfileException("Invalid quoted field. Use double quotes around values containing separators; escape quotes as \\\" and backslashes as \\\\. "); }
+        catch (JsonException)
+        {
+            throw new LauncherProfileException(
+                "A quoted value is not valid. Put double quotes around a value that contains a comma "
+                + "or a quote; write a quote as \\\" and a backslash as \\\\.");
+        }
     }
 
     private static string[] SplitFields(string line, char separator)
@@ -146,28 +559,17 @@ public static class LauncherProfileText
             if (c == '"') { quoted = !quoted; continue; }
             if (!quoted && c == separator) { fields.Add(line[start..i]); start = i + 1; }
         }
-        Require(!quoted, "A quoted field is missing its closing double quote.");
-        fields.Add(line[start..]);
-        return fields.ToArray();
-    }
 
-    private static T[] Parse<T>(string text) where T : class
-    {
-        try
-        {
-            var values = JsonSerializer.Deserialize<T[]>(text, Options);
-            Require(values is not null && values.All(v => v is not null), "Enter a JSON array of entries; use [] for an empty list.");
-            return values!;
-        }
-        catch (JsonException) { throw new LauncherProfileException("Invalid JSON. Check field names, quotes, commas and brackets."); }
+        Require(!quoted, "A quoted value is missing its closing double quote.");
+        fields.Add(line[start..]);
+        return [.. fields];
     }
 
     private static void Require([System.Diagnostics.CodeAnalysis.DoesNotReturnIf(false)] bool condition, string message)
     {
-        if (!condition) throw new LauncherProfileException(message);
+        if (!condition)
+        {
+            throw new LauncherProfileException(message);
+        }
     }
-
-
-    private sealed record ServerEntry(string Name, string Host, int Port);
-    private sealed record CommandEntry(string Server, string Account, string Character, string[] Commands);
 }

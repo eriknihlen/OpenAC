@@ -4,58 +4,143 @@ using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.ViewModels;
 
+/// <summary>One chip of the profile filter above the accounts: "All", or one profile tag.</summary>
+public sealed class ProfileFilterChipViewModel : ObservableObject
+{
+    private bool _isSelected;
+
+    public ProfileFilterChipViewModel(string label, string? profile, Action<ProfileFilterChipViewModel> select)
+    {
+        Label = label;
+        Profile = profile;
+        SelectCommand = new RelayCommand(() => select(this));
+    }
+
+    public string Label { get; }
+
+    /// <summary>The tag this chip shows, or null for "All".</summary>
+    public string? Profile { get; }
+
+    public bool IsSelected { get => _isSelected; set => SetProperty(ref _isSelected, value); }
+
+    public RelayCommand SelectCommand { get; }
+}
+
 public sealed partial class LauncherWindowViewModel
 {
+    private string? _profileFilter;
+
     public ObservableCollection<LauncherAccountGroupViewModel> Accounts { get; } = [];
     public bool HasAccounts => Accounts.Count != 0;
+
+    /// <summary>"All" and one chip per profile tag, in the order the tags first appear.</summary>
+    public ObservableCollection<ProfileFilterChipViewModel> ProfileFilters { get; } = [];
+
+    public bool HasProfileFilters => ProfileFilters.Count > 1;
+
+    /// <summary>The profile tag the accounts are filtered by, or null for all accounts.</summary>
+    public string? ProfileFilter
+    {
+        get => _profileFilter;
+        set
+        {
+            if (SetProperty(ref _profileFilter, value))
+            {
+                ApplyProfileFilter();
+            }
+        }
+    }
+
     public AsyncRelayCommand LaunchCheckedCommand { get; private set; } = null!;
-    public string CheckedSelectionSummary => $"{AllAccountRows.Count(row => row.IsChecked)} selected · {AllAccountRows.Count(row => row.IsChecked && row.CanPlay)} ready";
-    private IEnumerable<LauncherAccountServerRowViewModel> AllAccountRows => Accounts.SelectMany(account => account.Servers);
+    public string CheckedSelectionSummary => $"{CheckedRows.Count()} selected · {CheckedRows.Count(row => row.CanPlay)} ready";
+
+    /// <summary>"Play selected (2)".</summary>
+    public string PlayCheckedText => $"Play selected ({CheckedRows.Count()})";
+
+    private IEnumerable<LauncherAccountServerRowViewModel> AllAccountRows => Accounts.SelectMany(account => account.Rows);
+
+    /// <summary>The ticked rows the profile filter shows: what Play selected starts.</summary>
+    private IEnumerable<LauncherAccountServerRowViewModel> CheckedRows =>
+        Accounts.Where(account => account.IsVisible).SelectMany(account => account.Rows).Where(row => row.IsChecked);
 
     /// <summary>Whether launching the checked rows would actually do something, so the button can
     /// show gold only when it is ready rather than whenever it is on screen.</summary>
-    public bool HasPlayableCheckedRows => AllAccountRows.Any(row => row.IsChecked && row.CanPlay);
+    public bool HasPlayableCheckedRows => CheckedRows.Any(row => row.CanPlay);
 
     private void InitializeAccountCommands() => LaunchCheckedCommand = new AsyncRelayCommand(
-        () => LaunchRowsAsync(AllAccountRows.Where(row => row.IsChecked).ToArray()),
-        () => CanInteract && AllAccountRows.Any(row => row.IsChecked && row.CanPlay));
+        () => LaunchRowsAsync([.. CheckedRows]),
+        () => CanInteract && CheckedRows.Any(row => row.CanPlay));
 
     public void RefreshProfiles() => RefreshFromCore();
 
     private void RefreshAccountRows(LauncherStateSnapshot snapshot)
     {
-        var retained = new HashSet<LauncherAccountServerRowViewModel>();
-        foreach (string name in snapshot.SharedAccountNames ?? [])
-            if (!Accounts.Any(account => account.AccountName == name)) Accounts.Add(new LauncherAccountGroupViewModel(name));
+        var retained = new HashSet<LauncherAccountGroupViewModel>();
+        int index = 0;
         foreach (LauncherServerSnapshot server in snapshot.Servers)
         foreach (LauncherAccountSnapshot account in server.Accounts)
         {
-            LauncherAccountGroupViewModel? group = Accounts.FirstOrDefault(item => item.AccountName == account.AccountName);
+            LauncherAccountGroupViewModel? group = Accounts.FirstOrDefault(item =>
+                item.ServerName == server.Name && item.AccountName == account.AccountName);
             if (group is null)
             {
-                group = new LauncherAccountGroupViewModel(account.AccountName);
-                Accounts.Add(group);
-            }
-            LauncherAccountServerRowViewModel? row = group.Servers.FirstOrDefault(item => item.ServerName == server.Name);
-            if (row is null)
-            {
-                row = new LauncherAccountServerRowViewModel(account.AccountName, server.Name,
+                group = new LauncherAccountGroupViewModel(server.Name, account.AccountName, OpenAccountPlugins, () => CanInteract);
+                var row = new LauncherAccountServerRowViewModel(account.AccountName, server.Name,
                     GetRowDisabledReason, NotifyAccountCommands, item => LaunchRowsAsync([item]),
-                    StopSessionAsync, OpenRowOptions, () => CanInteract);
+                    StopSessionAsync,
+                    new LauncherRowActions(OpenLogonCommandsFor, OpenCharacterPlugins, OpenLogsFolder, RemoveRowCharacter),
+                    () => CanInteract);
                 row.UseSelectionStore(SaveRowSelection);
                 row.UseConsole(OpenSessionConsole);
-                group.Servers.Add(row);
+                group.Rows.Add(row);
+                Accounts.Insert(Math.Min(index, Accounts.Count), group);
             }
-            retained.Add(row);
-            row.Update(server, account, snapshot.Sessions.OrderByDescending(session => session.CreatedAt).FirstOrDefault(session =>
+            else if (Accounts.IndexOf(group) != index && index < Accounts.Count)
+            {
+                Accounts.Move(Accounts.IndexOf(group), index);
+            }
+
+            index++;
+            retained.Add(group);
+            group.Update(account, PluginDisplayName);
+            group.Rows[0].Update(server, account, snapshot.Sessions.OrderByDescending(session => session.CreatedAt).FirstOrDefault(session =>
                 session.ServerName == server.Name && session.AccountName == account.AccountName));
         }
-        foreach (LauncherAccountGroupViewModel group in Accounts.ToArray())
+
+        foreach (LauncherAccountGroupViewModel group in Accounts.Where(group => !retained.Contains(group)).ToArray())
+            Accounts.Remove(group);
+        RefreshProfileFilters();
+    }
+
+    /// <summary>Rebuilds the chips from the accounts' tags, keeping the chosen one while it exists.</summary>
+    private void RefreshProfileFilters()
+    {
+        string[] tags = [.. Accounts.SelectMany(account => account.Profiles).Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (_profileFilter is not null && !tags.Contains(_profileFilter, StringComparer.OrdinalIgnoreCase))
         {
-            foreach (LauncherAccountServerRowViewModel row in group.Servers.Where(row => !retained.Contains(row)).ToArray())
-                group.Servers.Remove(row);
-            if (group.Servers.Count == 0 && !(snapshot.SharedAccountNames?.Contains(group.AccountName) ?? false)) Accounts.Remove(group);
+            _profileFilter = null;
+            OnPropertyChanged(nameof(ProfileFilter));
         }
+
+        string?[] wanted = [null, .. tags];
+        if (!ProfileFilters.Select(chip => chip.Profile).SequenceEqual(wanted, StringComparer.Ordinal))
+        {
+            ProfileFilters.Clear();
+            foreach (string? tag in wanted)
+                ProfileFilters.Add(new ProfileFilterChipViewModel(tag ?? "All", tag, chip => ProfileFilter = chip.Profile));
+            OnPropertyChanged(nameof(HasProfileFilters));
+        }
+
+        ApplyProfileFilter();
+    }
+
+    private void ApplyProfileFilter()
+    {
+        foreach (ProfileFilterChipViewModel chip in ProfileFilters)
+            chip.IsSelected = string.Equals(chip.Profile, _profileFilter, StringComparison.OrdinalIgnoreCase);
+        foreach (LauncherAccountGroupViewModel group in Accounts)
+            group.IsVisible = _profileFilter is null || group.HasProfile(_profileFilter);
+        NotifyAccountCommands();
     }
 
     private void SaveRowSelection(LauncherAccountServerRowViewModel row)
@@ -138,7 +223,27 @@ public sealed partial class LauncherWindowViewModel
         }
     }
 
-    private void OpenRowOptions(LauncherAccountServerRowViewModel row) => OpenAccountRowOptions(row);
+    private void OpenLogonCommandsFor(LauncherAccountServerRowViewModel row) =>
+        OpenTextEditor(LauncherTextEditorKind.LogonCommands);
+
+    private void OpenLogsFolder(LauncherAccountServerRowViewModel row) =>
+        _installFolder?.Folders.FirstOrDefault(folder => folder.Label == "Logs")?.OpenCommand.Execute(null);
+
+    private void RemoveRowCharacter(LauncherAccountServerRowViewModel row)
+    {
+        if (row.CharacterName is not { } name) return;
+        (string server, string account) = (row.ServerName, row.AccountName);
+        EditorDialog.Open(
+            ProfileEditorKind.Remove,
+            $"Remove {name}?",
+            _ =>
+            {
+                _orchestrator.RemoveCharacter(server, account, name);
+                OperationStatus = $"Removed {name}. Refreshing the account's characters brings it back.";
+            },
+            message: $"This removes {name} from {account} on {server}, with its own plugin list if it has one. "
+                + "The next login to the account brings the character back, using the account's plugins.");
+    }
 
     /// <summary>
     /// Raised when a session's console should be shown. Showing a window is
@@ -155,7 +260,9 @@ public sealed partial class LauncherWindowViewModel
         LaunchCheckedCommand?.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasPlayableCheckedRows));
         OnPropertyChanged(nameof(CheckedSelectionSummary));
+        OnPropertyChanged(nameof(PlayCheckedText));
         OnPropertyChanged(nameof(HasAccounts));
+        foreach (LauncherAccountGroupViewModel group in Accounts) group.EditPluginsCommand.NotifyCanExecuteChanged();
         foreach (LauncherAccountServerRowViewModel row in AllAccountRows) row.NotifyState();
     }
 }

@@ -19,6 +19,10 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
 
     private string? _walkOwner;
     private long _walkSequence;
+
+    /// <summary>The snapshot handlers each owner added, which go with it on release. Under the gate.</summary>
+    private readonly Dictionary<string, List<Action<PluginNavigationSnapshot>>> _ownedSnapshotHandlers =
+        new(StringComparer.Ordinal);
     private long _reportRevision;
     private long _lastReportedSequence;
     private PluginGoToState _lastReportedState;
@@ -44,6 +48,11 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         lock (_gate)
         {
+            if (_ownedSnapshotHandlers.Remove(ownerId, out List<Action<PluginNavigationSnapshot>>? handlers))
+            {
+                foreach (Action<PluginNavigationSnapshot> handler in handlers)
+                    _snapshotChanged -= handler;
+            }
             _pauses.RemoveAll(pause => pause.Owner == ownerId);
             if (_walk is { } walk && OwnerOfLocked(walk) == ownerId)
             {
@@ -139,6 +148,36 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
         }
     }
 
+    private void AddOwnedSnapshotHandler(string owner, Action<PluginNavigationSnapshot> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        lock (_gate)
+        {
+            _snapshotChanged += handler;
+            if (!_ownedSnapshotHandlers.TryGetValue(owner, out List<Action<PluginNavigationSnapshot>>? handlers))
+            {
+                handlers = [];
+                _ownedSnapshotHandlers.Add(owner, handlers);
+            }
+            handlers.Add(handler);
+        }
+    }
+
+    private void RemoveOwnedSnapshotHandler(string owner, Action<PluginNavigationSnapshot>? handler)
+    {
+        if (handler is null)
+            return;
+        lock (_gate)
+        {
+            if (!_ownedSnapshotHandlers.TryGetValue(owner, out List<Action<PluginNavigationSnapshot>>? handlers)
+                || !handlers.Remove(handler))
+            {
+                return;
+            }
+            _snapshotChanged -= handler;
+        }
+    }
+
     private PluginGoToReport GoToReportFor()
     {
         lock (_gate)
@@ -180,8 +219,8 @@ internal sealed partial class RuntimeNavigationAutomation : IScopedNavigationSou
 
         public event Action<PluginNavigationSnapshot> SnapshotChanged
         {
-            add => inner.SnapshotChanged += value;
-            remove => inner.SnapshotChanged -= value;
+            add => inner.AddOwnedSnapshotHandler(owner, value);
+            remove => inner.RemoveOwnedSnapshotHandler(owner, value);
         }
 
         public bool TryGetObject(uint objectId, out PluginNavigationObject value) =>

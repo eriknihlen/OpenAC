@@ -95,6 +95,29 @@ public sealed class RuntimeNavigationOwnershipTests
         Assert.Equal(PluginNavigationCommandStatus.Accepted, staying.GoTo(Goal, 2f));
     }
 
+    /// <summary>
+    /// The snapshot handlers a plugin added go with it; another plugin's stay.
+    /// Mutation (2026-09-26): passing the handler straight to the shared
+    /// event, as before, kept calling the released plugin.
+    /// </summary>
+    [Fact]
+    public void ReleasingAPluginRemovesItsSnapshotHandlersButNotAnothers()
+    {
+        using var h = new Harness();
+        INavigationAutomation going = h.Navigation.ScopeTo("going.plugin");
+        INavigationAutomation staying = h.Navigation.ScopeTo("staying.plugin");
+        int goingCalls = 0;
+        int stayingCalls = 0;
+        going.SnapshotChanged += _ => goingCalls++;
+        staying.SnapshotChanged += _ => stayingCalls++;
+
+        h.Navigation.Release("going.plugin");
+        h.Navigation.PublishSnapshotChanged();
+
+        Assert.Equal(0, goingCalls);
+        Assert.Equal(1, stayingCalls);
+    }
+
     [Fact]
     public void ReleasingAPluginThatOwnsNothingChangesNothing()
     {

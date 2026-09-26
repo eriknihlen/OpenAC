@@ -2,6 +2,17 @@ namespace AcDream.Launcher.Core.Updates;
 
 public sealed record ReleaseArtifact(Uri Url, string Sha256, long Size);
 
+/// <summary>The fingerprint of a release's launcher: one SHA-256 over what the launcher is built
+/// from, published beside the manifest. It changes only when the launcher does, so a launcher
+/// carrying the same fingerprint is that release's launcher whatever its version says.</summary>
+public sealed record LauncherFingerprintDocument(LauncherVersion Version, string Fingerprint)
+{
+    public const int CurrentSchemaVersion = 1;
+
+    /// <summary>The file's name beside manifest.json in a release.</summary>
+    public const string FileName = "launcher-fingerprint.json";
+}
+
 public sealed record ReleaseManifest(
     LauncherVersion Version,
     LauncherVersion MinimumLauncherVersion,

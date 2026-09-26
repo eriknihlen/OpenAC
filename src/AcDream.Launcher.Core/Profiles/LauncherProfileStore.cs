@@ -7,7 +7,12 @@ namespace AcDream.Launcher.Core.Profiles;
 
 public sealed class LauncherProfileStore
 {
-    internal const int CurrentVersion = 1;
+    internal const int CurrentVersion = 2;
+
+    /// <summary>Plugins and logon commands per character, and optionally one user list shared by
+    /// every server.</summary>
+    internal const int Version1 = 1;
+
     internal const UnixFileMode OwnerOnlyFileMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
@@ -27,10 +32,20 @@ public sealed class LauncherProfileStore
         },
     };
 
-    public LauncherProfileStore(string filePath)
+    /// <summary>The file this launcher reads and writes.</summary>
+    public const string FileName = "launcher-profiles.v2.json";
+
+    /// <summary>The file launchers before version 2 read and write; never written by this one.</summary>
+    public const string OlderFileName = "launcher-profiles.json";
+
+    /// <param name="filePath">The profile file this store reads and writes.</param>
+    /// <param name="olderFilePath">An older launcher's profile file, read once to migrate from when
+    /// <paramref name="filePath"/> does not exist yet, and never written.</param>
+    public LauncherProfileStore(string filePath, string? olderFilePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         FilePath = Path.GetFullPath(filePath);
+        OlderFilePath = olderFilePath is null ? null : Path.GetFullPath(olderFilePath);
         Document = new LauncherProfileDocument();
     }
 
@@ -38,69 +53,144 @@ public sealed class LauncherProfileStore
     {
         ArgumentNullException.ThrowIfNull(paths);
         return new LauncherProfileStore(
-            Path.Combine(paths.ConfigDirectory, "launcher-profiles.json"));
+            Path.Combine(paths.ConfigDirectory, FileName),
+            Path.Combine(paths.ConfigDirectory, OlderFileName));
     }
 
     public string FilePath { get; }
 
+    /// <summary>An older launcher's profile file this store migrates from; null for none.</summary>
+    public string? OlderFilePath { get; }
+
     public LauncherProfileDocument Document { get; private set; }
+
+    /// <summary>A copy of the older launcher's file as it was when it was migrated, kept whatever
+    /// happens to that file later.</summary>
+    public string Version1BackupPath
+    {
+        get
+        {
+            string source = OlderFilePath ?? FilePath;
+            return Path.Combine(
+                Path.GetDirectoryName(source) ?? string.Empty,
+                Path.GetFileNameWithoutExtension(source) + ".v1-backup.json");
+        }
+    }
+
+    /// <summary>What the last <see cref="Load"/> could not carry over from an older file, in words
+    /// for the player; null when it had nothing to say. Shown once, after the file is rewritten.</summary>
+    public string? MigrationNotice { get; private set; }
 
     public bool Load()
     {
         DeleteStaleTempFile(FilePath + ".tmp");
+        MigrationNotice = null;
 
-        if (!File.Exists(FilePath))
+        // This launcher's own file wins; without one, the older launcher's file is read once and
+        // migrated into it. The older file is never written, so an older launcher keeps working.
+        string? source = File.Exists(FilePath) ? FilePath
+            : OlderFilePath is not null && File.Exists(OlderFilePath) ? OlderFilePath
+            : null;
+        if (source is null)
         {
             Document = new LauncherProfileDocument();
             return false;
         }
 
-        EnsureExistingCredentialFilePermissions();
+        EnsureExistingCredentialFilePermissions(source);
 
+        byte[] bytes = File.ReadAllBytes(source);
+        int version = ReadVersion(bytes, source);
         LauncherProfileDocument? document;
-        using (FileStream stream = File.OpenRead(FilePath))
+        IReadOnlyList<string> notices = [];
+        try
         {
-            try
+            document = version switch
             {
-                document = JsonSerializer.Deserialize<LauncherProfileDocument>(
-                    stream,
-                    SerializerOptions);
-            }
-            catch (JsonException ex)
-            {
-                throw new LauncherProfileException(
-                    $"'{FilePath}' is not a valid launcher profile document.",
-                    ex);
-            }
+                CurrentVersion => JsonSerializer.Deserialize<LauncherProfileDocument>(
+                    bytes,
+                    SerializerOptions),
+                Version1 => LauncherProfileMigration.FromVersion1(bytes, SerializerOptions, out notices),
+                _ => throw new LauncherProfileException(
+                    $"Unsupported launcher-profiles version {version}; expected {CurrentVersion}."),
+            };
+        }
+        catch (JsonException ex)
+        {
+            throw new LauncherProfileException(
+                $"'{source}' is not a valid launcher profile document.",
+                ex);
         }
 
         if (document is null)
         {
-            throw new LauncherProfileException($"'{FilePath}' is empty.");
-        }
-
-        if (document.Version != CurrentVersion)
-        {
-            throw new LauncherProfileException(
-                $"Unsupported launcher-profiles version {document.Version}; "
-                + $"expected {CurrentVersion}.");
+            throw new LauncherProfileException($"'{source}' is empty.");
         }
 
         ValidateAndNormalizeDocument(document);
-        LauncherProfileText.SynchronizeUsers(document);
         Document = document;
+        if (version == Version1 || source != FilePath)
+        {
+            // A copy of the old file as migrated, whatever an older launcher does to it later.
+            if (version == Version1 && !File.Exists(Version1BackupPath))
+            {
+                WriteCredentialFile(Version1BackupPath, stream => stream.Write(bytes));
+            }
+
+            Save();
+            MigrationNotice = notices.Count == 0
+                ? null
+                : "Plugins and logon commands now belong to the account, so every character on it "
+                  + "shares them. Where characters on one account had different logon commands, "
+                  + "the first character's were kept:"
+                  + Environment.NewLine + Environment.NewLine
+                  + string.Join(Environment.NewLine, notices)
+                  + Environment.NewLine + Environment.NewLine
+                  + $"The old file is kept at {Version1BackupPath}.";
+        }
+
         return true;
     }
 
-    public void Save()
+    private static int ReadVersion(byte[] bytes, string source)
     {
-        string? directory = Path.GetDirectoryName(FilePath);
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(bytes);
+            if (json.RootElement.ValueKind == JsonValueKind.Object
+                && json.RootElement.TryGetProperty("version", out JsonElement version)
+                && version.TryGetInt32(out int value))
+            {
+                return value;
+            }
+        }
+        catch (JsonException ex)
+        {
+            throw new LauncherProfileException(
+                $"'{source}' is not a valid launcher profile document.",
+                ex);
+        }
+
+        throw new LauncherProfileException(
+            $"'{source}' is not a valid launcher profile document: it has no version.");
+    }
+
+    public void Save() =>
+        WriteCredentialFile(
+            FilePath,
+            stream => JsonSerializer.Serialize(stream, Document, SerializerOptions));
+
+    /// <summary>Writes a file that holds passwords: owner-only from its first byte, and whole or not
+    /// at all.</summary>
+    private static void WriteCredentialFile(string path, Action<Stream> write)
+    {
+        string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
         }
 
-        string tempPath = FilePath + ".tmp";
+        string tempPath = path + ".tmp";
         DeleteStaleTempFile(tempPath);
         try
         {
@@ -111,7 +201,7 @@ public sealed class LauncherProfileStore
                     File.SetUnixFileMode(tempPath, OwnerOnlyFileMode);
                 }
 
-                JsonSerializer.Serialize(stream, Document, SerializerOptions);
+                write(stream);
             }
 
             if (LauncherOperatingSystem.IsUnix
@@ -121,14 +211,13 @@ public sealed class LauncherProfileStore
                     "The launcher credential temp file could not be secured to mode 0600.");
             }
 
-            File.Move(tempPath, FilePath, overwrite: true);
+            File.Move(tempPath, path, overwrite: true);
         }
         catch
         {
             DeleteStaleTempFile(tempPath);
             throw;
         }
-
     }
 
     internal static FileStreamOptions CreateCredentialTempFileOptions()
@@ -182,7 +271,6 @@ public sealed class LauncherProfileStore
 
         var server = new ServerProfile { Name = name, Host = host, Port = port };
         Document.Servers.Add(server);
-        LauncherProfileText.SynchronizeUsers(Document);
         return server;
     }
 
@@ -241,11 +329,6 @@ public sealed class LauncherProfileStore
 
         var profile = new AccountProfile { Account = account, Password = password };
         server.Accounts.Add(profile);
-        if (Document.Users is { } users)
-        {
-            users.Add(new LauncherUser(account, password));
-            LauncherProfileText.SynchronizeUsers(Document);
-        }
         return profile;
     }
 
@@ -275,14 +358,44 @@ public sealed class LauncherProfileStore
         {
             profile.Password = newPassword;
         }
-        if (Document.Users is { } users)
-        {
-            int index = users.FindIndex(user => user.Account == account);
-            users[index] = new LauncherUser(profile.Account, profile.Password);
-            foreach (var other in Document.Servers.SelectMany(item => item.Accounts).Where(item => item.Account == account))
-                other.Account = profile.Account;
-            LauncherProfileText.SynchronizeUsers(Document);
-        }
+    }
+
+    /// <summary>The plugins every character on the account launches with, unless it has its own list.</summary>
+    public void SetAccountPlugins(string serverName, string account, IReadOnlyList<string> plugins)
+    {
+        ArgumentNullException.ThrowIfNull(plugins);
+        ValidateStringList(plugins, "plugin", requireUnique: true);
+        FindAccountOrThrow(FindServerOrThrow(serverName), account).Plugins = [.. plugins];
+    }
+
+    /// <summary>The account's profile tags, which the main window filters by.</summary>
+    public void SetAccountProfiles(string serverName, string account, IReadOnlyList<string> profiles)
+    {
+        ArgumentNullException.ThrowIfNull(profiles);
+        ValidateProfileTags(profiles);
+        FindAccountOrThrow(FindServerOrThrow(serverName), account).Profiles = [.. profiles];
+    }
+
+    /// <summary>Commands run in order after any character on the account logs in.</summary>
+    public void SetAccountLoginCommands(string serverName, string account, IReadOnlyList<string> commands)
+    {
+        ArgumentNullException.ThrowIfNull(commands);
+        ValidateStringList(commands, "login command", requireUnique: false);
+        FindAccountOrThrow(FindServerOrThrow(serverName), account).LoginCommands = [.. commands];
+    }
+
+    /// <summary>Gives a character its own plugin list, or with null puts it back on its account's.</summary>
+    public void SetCharacterPlugins(
+        string serverName,
+        string account,
+        string characterName,
+        IReadOnlyList<string>? plugins)
+    {
+        ValidateStringList(plugins, "plugin", requireUnique: true);
+        CharacterProfile character = FindCharacterOrThrow(
+            FindAccountOrThrow(FindServerOrThrow(serverName), account),
+            characterName);
+        character.Plugins = plugins is null ? null : [.. plugins];
     }
 
     /// <summary>Remembers what the account's row is set to launch, so it survives a restart.</summary>
@@ -308,11 +421,6 @@ public sealed class LauncherProfileStore
         ServerProfile server = FindServerOrThrow(serverName);
         AccountProfile profile = FindAccountOrThrow(server, account);
         server.Accounts.Remove(profile);
-        if (Document.Users is { } users)
-        {
-            users.RemoveAll(user => user.Account == account);
-            LauncherProfileText.SynchronizeUsers(Document);
-        }
     }
 
 
@@ -322,13 +430,11 @@ public sealed class LauncherProfileStore
         string characterName,
         string? id = null,
         LaunchMode launchMode = LaunchMode.GuiSelect,
-        IReadOnlyList<string>? plugins = null,
-        IReadOnlyList<string>? loginCommands = null)
+        IReadOnlyList<string>? plugins = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(characterName);
         RequireValidLaunchMode(launchMode);
         ValidateStringList(plugins, "plugin", requireUnique: true);
-        ValidateStringList(loginCommands, "login command", requireUnique: false);
         ServerProfile server = FindServerOrThrow(serverName);
         AccountProfile profile = FindAccountOrThrow(server, account);
 
@@ -351,8 +457,7 @@ public sealed class LauncherProfileStore
             Name = characterName,
             Id = normalizedId,
             LaunchMode = launchMode,
-            Plugins = plugins is null ? [] : [.. plugins],
-            LoginCommands = loginCommands is null ? [] : [.. loginCommands],
+            Plugins = plugins is null ? null : [.. plugins],
         };
         profile.Characters.Add(character);
         return character;
@@ -363,8 +468,6 @@ public sealed class LauncherProfileStore
         string account,
         string characterName,
         LaunchMode? launchMode = null,
-        IReadOnlyList<string>? plugins = null,
-        IReadOnlyList<string>? loginCommands = null,
         string? newName = null,
         string? newId = null)
     {
@@ -403,9 +506,6 @@ public sealed class LauncherProfileStore
             RequireValidLaunchMode(launchMode.Value);
         }
 
-        ValidateStringList(plugins, "plugin", requireUnique: true);
-        ValidateStringList(loginCommands, "login command", requireUnique: false);
-
         character.Name = newName ?? character.Name;
         if (newId is not null)
         {
@@ -416,19 +516,9 @@ public sealed class LauncherProfileStore
         {
             character.LaunchMode = launchMode.Value;
         }
-
-        if (plugins is not null)
-        {
-            character.Plugins = [.. plugins];
-        }
-
-        if (loginCommands is not null)
-        {
-            character.LoginCommands = [.. loginCommands];
-        }
     }
 
-    private void EnsureExistingCredentialFilePermissions()
+    private static void EnsureExistingCredentialFilePermissions(string path)
     {
         if (!LauncherOperatingSystem.IsUnix)
         {
@@ -437,11 +527,11 @@ public sealed class LauncherProfileStore
 
         try
         {
-            UnixFileMode mode = File.GetUnixFileMode(FilePath);
+            UnixFileMode mode = File.GetUnixFileMode(path);
             if (mode != OwnerOnlyFileMode)
             {
-                File.SetUnixFileMode(FilePath, OwnerOnlyFileMode);
-                mode = File.GetUnixFileMode(FilePath);
+                File.SetUnixFileMode(path, OwnerOnlyFileMode);
+                mode = File.GetUnixFileMode(path);
             }
 
             if (mode != OwnerOnlyFileMode)
@@ -452,7 +542,7 @@ public sealed class LauncherProfileStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new LauncherProfileException(
-                $"'{FilePath}' could not be secured to owner-only mode 0600.",
+                $"'{path}' could not be secured to owner-only mode 0600.",
                 ex);
         }
     }
@@ -465,7 +555,6 @@ public sealed class LauncherProfileStore
         {
             mutation();
             ValidateAndNormalizeDocument(Document);
-            LauncherProfileText.SynchronizeUsers(Document);
             Save();
         }
         catch
@@ -546,8 +635,6 @@ public sealed class LauncherProfileStore
                 Id = idText,
                 Name = entry.Name,
                 LaunchMode = LaunchMode.GuiSelect,
-                Plugins = [],
-                LoginCommands = [],
             });
         }
     }
@@ -617,32 +704,12 @@ public sealed class LauncherProfileStore
         && CharacterIdFormat.TryParse(right, out uint rightId)
         && leftId == rightId;
 
-    private static LauncherProfileDocument CloneDocument(
-        LauncherProfileDocument source) =>
-        new()
-        {
-            Version = source.Version,
-            Users = source.Users?.ToList(),
-            Servers = source.Servers.Select(server => new ServerProfile
-            {
-                Name = server.Name,
-                Host = server.Host,
-                Port = server.Port,
-                Accounts = server.Accounts.Select(account => new AccountProfile
-                {
-                    Account = account.Account,
-                    Password = account.Password,
-                    Characters = account.Characters.Select(character => new CharacterProfile
-                    {
-                        Name = character.Name,
-                        Id = character.Id,
-                        LaunchMode = character.LaunchMode,
-                        Plugins = [.. character.Plugins],
-                        LoginCommands = [.. character.LoginCommands],
-                    }).ToList(),
-                }).ToList(),
-            }).ToList(),
-        };
+    /// <summary>A deep copy through the file format itself, so a field added later is never left out
+    /// of a rollback.</summary>
+    private static LauncherProfileDocument CloneDocument(LauncherProfileDocument source) =>
+        JsonSerializer.Deserialize<LauncherProfileDocument>(
+            JsonSerializer.SerializeToUtf8Bytes(source, SerializerOptions),
+            SerializerOptions)!;
 
     private static void ValidateAndNormalizeDocument(LauncherProfileDocument document)
     {
@@ -697,11 +764,18 @@ public sealed class LauncherProfileStore
                         $"Account '{account.Account}' appears more than once on server '{server.Name}'.");
                 }
 
-                if (account.Characters is null)
+                if (account.Characters is null
+                    || account.Plugins is null
+                    || account.LoginCommands is null
+                    || account.Profiles is null)
                 {
                     throw new LauncherProfileException(
-                        $"The characters collection for account '{account.Account}' cannot be null.");
+                        $"Account '{account.Account}' has a null collection.");
                 }
+
+                ValidateStringList(account.Plugins, "plugin", requireUnique: true);
+                ValidateStringList(account.LoginCommands, "login command", requireUnique: false);
+                ValidateProfileTags(account.Profiles);
 
                 var characterNames = new HashSet<string>(StringComparer.Ordinal);
                 var characterIds = new HashSet<uint>();
@@ -738,17 +812,7 @@ public sealed class LauncherProfileStore
                         normalizedIds.Add((character, id));
                     }
 
-                    if (character.Plugins is null || character.LoginCommands is null)
-                    {
-                        throw new LauncherProfileException(
-                            $"Character '{character.Name}' has a null settings collection.");
-                    }
-
                     ValidateStringList(character.Plugins, "plugin", requireUnique: true);
-                    ValidateStringList(
-                        character.LoginCommands,
-                        "login command",
-                        requireUnique: false);
                 }
             }
         }
@@ -784,6 +848,27 @@ public sealed class LauncherProfileStore
             {
                 throw new LauncherProfileException(
                     $"The {valueName} '{value}' appears more than once.");
+            }
+        }
+    }
+
+    /// <summary>A profile tag is a short name with none of the characters the accounts text uses
+    /// as separators, and appears once per account whatever its case.</summary>
+    private static void ValidateProfileTags(IReadOnlyList<string> tags)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string? tag in tags)
+        {
+            if (string.IsNullOrWhiteSpace(tag) || tag != tag.Trim()
+                || tag.IndexOfAny([',', ';', '=', '"', '#', '\r', '\n', '\t']) >= 0)
+            {
+                throw new LauncherProfileException(
+                    $"'{tag}' is not a profile name. Use letters, digits and spaces, without , ; = \" or #.");
+            }
+
+            if (!seen.Add(tag))
+            {
+                throw new LauncherProfileException($"The profile '{tag}' appears more than once.");
             }
         }
     }

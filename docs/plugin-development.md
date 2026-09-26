@@ -157,6 +157,67 @@ For a bot or a test that needs no window, the headless host
 few things that differ (no UI, no window, remote positions from the latest
 server update).
 
+### Reloading while the client runs
+
+When the client loads your plugin it reads the whole package into memory:
+every assembly (with its `.pdb` when one sits beside it, so stack traces keep
+file and line numbers) and every markup file. It runs that copy, never the
+files, so nothing in your plugin's folder is held open, and an assembly or
+panel your plugin loads later still comes from the same copy even if a newer
+version has been written into the folder meanwhile.
+
+Your build writes to its own output folder, not to the plugin folder, so copy
+the output (assembly, `.deps.json`, `.pdb`, `plugin.json`, markup) into your
+plugin's folder while the game runs; a post-build copy step does it for you.
+When any of those files changes, the client waits until they have had no
+writes for one second and then reloads your plugin. Other files -- logs or data
+your plugin writes beside its code, anything in `files/` -- do not count.
+`/plugin reload <id>` reloads one plugin on demand, `/plugin reload all` every
+plugin, in the chat box and on a headless session's console alike. A plugin
+that failed to start is tried again the same way. The same happens when the
+launcher updates your plugin while a game is running.
+
+A reload switches the running copy off (`Disable`), then releases everything
+the host handed it: panels, canvases and images; commands; hotkeys; handlers
+on `Events` and `Selection`; chat filters, input interceptors and chat
+handlers; the handlers on `Automation.Trade`, `Automation.Vendor`,
+`Automation.Equipment` and `Automation.Navigation`, its walk and its pauses;
+world labels and world lines; maps, HUDs and textures; loot classifiers;
+status lines. Then it unloads the old assemblies, creates the new copy, and
+calls `Initialize` and `Enable` as at startup. `IPluginHost.IsHotReload` is
+true for that new copy. If the character is already in the world, the new
+copy's `LoginComplete` handlers are called right after `Enable`, so a plugin
+that sets up on login needs nothing extra.
+
+Before the running copy is touched, the client reads the new `plugin.json`
+and loads the new assembly. A new copy with a different `id`, a newer
+`apiVersion` or a `minHostVersion` this client does not meet is refused, the
+running copy keeps running, and chat says the update needs a restart or a
+newer client. A render pack is never reloaded; it takes effect when the client
+restarts.
+
+What this means for your plugin:
+
+- **In-memory state does not survive a reload.** Anything you want to keep,
+  save through `Storage` and read back in `Initialize` or on login.
+- **Stop your own threads and timers in `Disable`,** and cancel any work you
+  started with `Task.Run`. The host cannot stop them for you.
+- **The previous copy may stay in memory until the client restarts.** It is
+  switched off either way; only its memory is not returned. Anything that
+  still refers to the old copy's types keeps it: a handler you added to a
+  .NET or operating-system event (`AppDomain.ProcessExit`, `SystemEvents`, a
+  `FileSystemWatcher` you did not dispose), a thread still running, a static
+  cache in another assembly -- and libraries you use that cache type
+  information themselves, such as a JSON serializer that has serialized your
+  types. The client watches the old copy for up to two minutes without
+  slowing the game; if it is still there, the log and one chat line say so.
+- **`Assembly.Location` is empty.** Your assembly was loaded from memory, so
+  it has no file. Read the files your package ships relative to
+  `IPluginHost.PluginDirectory` (a render pack gets the same folder as
+  `IRenderPackRegistry.PluginDirectory`). A relative markup path handed to
+  `Ui` is already read from your plugin's folder, so
+  `Path.Combine(".", "panel.xml")` and plain `"panel.xml"` both work.
+
 ## Checking it before you publish
 
 `acdream-plugincheck` tells you whether the launcher would install your

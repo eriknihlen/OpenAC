@@ -24,6 +24,120 @@ public sealed class ScopedPluginHostPluginDirectoryTests
         Assert.Equal("/plugins/icon", registry.LastPluginDirectory);
     }
 
+    /// <summary>
+    /// A plugin that builds its markup path from its assembly's location gets
+    /// an empty folder once the host loads assemblies from memory, and so a
+    /// bare file name; it is read from the plugin's own folder, not from the
+    /// process's working folder. Mutation: passing the path through unchanged
+    /// fails this.
+    /// </summary>
+    [Theory]
+    [InlineData("main.xml")]
+    [InlineData("./main.xml")]
+    [InlineData("views/main.xml")]
+    public void ARelativeMarkupPathIsReadFromThePluginsOwnFolder(string markupPath)
+    {
+        string pluginDirectory = Path.Combine(Path.GetTempPath(), "plugins", "icon");
+        var registry = new RecordingDirectoryRegistry();
+        using var scope = new ScopedPluginHost(
+            new StubHost(registry),
+            "acdream.icon",
+            "Icon Plugin",
+            pluginDirectory);
+
+        scope.Ui.AddPanel(
+            new PluginPanelDescriptor("main", "Icon Plugin"),
+            markupPath,
+            new object());
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(pluginDirectory, markupPath)),
+            registry.LastMarkupPath);
+    }
+
+    /// <summary>
+    /// A panel the plugin opens after an update was written into its folder
+    /// shows the markup of the copy that is running, read when it was
+    /// prepared. Mutation (2026-09-26): registering by path left the panel to
+    /// read the newer markup from disk.
+    /// </summary>
+    [Fact]
+    public void MarkupComesFromTheCopyReadWhenThePluginWasPrepared()
+    {
+        string pluginDirectory = Path.Combine(Path.GetTempPath(), $"acdream-markup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(pluginDirectory, "views"));
+        try
+        {
+            string markup = Path.Combine(pluginDirectory, "views", "main.xml");
+            File.WriteAllText(markup, "<panel version=\"1\"/>");
+            PluginPackageSnapshot package = PluginPackageSnapshot.Read(pluginDirectory);
+            File.WriteAllText(markup, "<panel version=\"2\"/>");
+            var registry = new RecordingDirectoryRegistry();
+            using var scope = new ScopedPluginHost(
+                new StubHost(registry),
+                "acdream.icon",
+                "Icon Plugin",
+                pluginDirectory,
+                package: package);
+
+            scope.Ui.AddPanel(
+                new PluginPanelDescriptor("main", "Icon Plugin"),
+                "views/main.xml",
+                new object());
+
+            Assert.Equal("<panel version=\"1\"/>", registry.LastMarkupContent);
+            Assert.Equal(pluginDirectory, registry.LastPluginDirectory);
+        }
+        finally
+        {
+            Directory.Delete(pluginDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnAbsoluteMarkupPathIsLeftAsItIs()
+    {
+        string markupPath = Path.Combine(Path.GetTempPath(), "elsewhere", "main.xml");
+        var registry = new RecordingDirectoryRegistry();
+        using var scope = new ScopedPluginHost(
+            new StubHost(registry),
+            "acdream.icon",
+            "Icon Plugin",
+            Path.Combine(Path.GetTempPath(), "plugins", "icon"));
+
+        scope.Ui.AddPanel(
+            new PluginPanelDescriptor("main", "Icon Plugin"),
+            markupPath,
+            new object());
+
+        Assert.Equal(markupPath, registry.LastMarkupPath);
+    }
+
+    /// <summary>
+    /// A plugin reads its own folder and how it was loaded from its host.
+    /// Mutation: leaving either to the interface default fails this.
+    /// </summary>
+    [Fact]
+    public void ThePluginReadsItsOwnFolderAndWhetherAReloadStartedIt()
+    {
+        string pluginDirectory = Path.Combine(Path.GetTempPath(), "plugins", "icon");
+        using var atStart = new ScopedPluginHost(
+            new StubHost(new RecordingDirectoryRegistry()),
+            "acdream.icon",
+            "Icon Plugin",
+            pluginDirectory);
+        using var reloaded = new ScopedPluginHost(
+            new StubHost(new RecordingDirectoryRegistry()),
+            "acdream.icon",
+            "Icon Plugin",
+            pluginDirectory,
+            isHotReload: true);
+
+        Assert.Equal(pluginDirectory, ((IPluginHost)atStart).PluginDirectory);
+        Assert.False(((IPluginHost)atStart).IsHotReload);
+        Assert.True(((IPluginHost)reloaded).IsHotReload);
+    }
+
     [Fact]
     public void DoesNotForwardToARegistryThatIsOnlyIScopedUiRegistry()
     {
@@ -108,8 +222,12 @@ public sealed class ScopedPluginHostPluginDirectoryTests
             object binding)
         {
             LastPluginDirectory = pluginDirectory;
+            LastMarkupPath = markupPath;
             return NoOpUiRegistration.Instance;
         }
+
+        internal string? LastMarkupPath { get; private set; }
+        internal string? LastMarkupContent { get; private set; }
 
         public IDisposable RegisterPanelContent(
             PluginUiOwner owner,
@@ -119,6 +237,7 @@ public sealed class ScopedPluginHostPluginDirectoryTests
             object binding)
         {
             LastPluginDirectory = pluginDirectory;
+            LastMarkupContent = markupContent;
             return NoOpUiRegistration.Instance;
         }
     }

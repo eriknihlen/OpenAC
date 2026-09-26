@@ -128,6 +128,70 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task UpdatesAreCheckedAtStartupThenEveryTwentyMinutesAndOnTheButton()
+    {
+        using var orchestrator = new FakeLauncherOrchestrator
+        {
+            Session = FakeLauncherOrchestrator.CreateSession(LauncherActivityState.Exited, "Exited cleanly."),
+        };
+        var updater = new StartupOrderUpdater { ClientUpdateAvailable = false };
+        using var viewModel = new LauncherWindowViewModel(
+            orchestrator,
+            new ImmediateUiDispatcher(),
+            new FakeLauncherInstaller(),
+            updater);
+        viewModel.Initialize();
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+
+        viewModel.PollUpdateCheck(start.AddHours(1));
+        Assert.Equal(0, updater.CheckCalls);
+        await viewModel.StartBackgroundInitializationAsync();
+        Assert.Equal(1, updater.CheckCalls);
+
+        viewModel.PollUpdateCheck(start);
+        viewModel.PollUpdateCheck(start.AddMinutes(19));
+        Assert.Equal(1, updater.CheckCalls);
+        viewModel.PollUpdateCheck(start.AddMinutes(20));
+        Assert.Equal(2, updater.CheckCalls);
+        viewModel.PollUpdateCheck(start.AddMinutes(39));
+        Assert.Equal(2, updater.CheckCalls);
+
+        viewModel.PollUpdateCheck(start.AddMinutes(40));
+        Assert.Equal(3, updater.CheckCalls);
+
+        // The button checks at once, whatever the wait.
+        await viewModel.CheckForUpdatesCommand.ExecuteAsync();
+        Assert.Equal(4, updater.CheckCalls);
+
+        // Only the startup check verifies the installed client; later checks only read the feed,
+        // so they never lock or hash the client while it is being played.
+        Assert.Equal(1, updater.InitializeCalls);
+    }
+
+    [Theory]
+    [InlineData("0.1.10", "0.1.8", "0.1.10", "0.1.8")]
+    [InlineData("0.2.0-beta.1+3a71d75", "0.2.0+abc", "0.2.0-beta.1", "0.2.0")]
+    [InlineData("0.1.10", null, "0.1.10", "not installed")]
+    public void TheVersionLinesShowLauncherAndClientWithoutBuildMetadata(
+        string launcher, string? client, string launcherText, string clientText)
+    {
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        ClientVersionResolution resolution = new(
+            client is null ? ClientVersionState.Missing : ClientVersionState.Verified,
+            string.Empty,
+            client is null ? null : LauncherVersion.Parse(client),
+            null,
+            null,
+            null);
+
+        viewModel.ConfigureVersions(launcher, () => resolution);
+
+        Assert.Equal((launcherText, clientText), (viewModel.LauncherVersionText, viewModel.ClientVersionText));
+        Assert.Equal("none installed", viewModel.PluginsUpdateText);
+    }
+
+    [Fact]
     public async Task StartupStatusStaysEmptyWhenNothingIsAvailable()
     {
         using var orchestrator = new FakeLauncherOrchestrator
@@ -478,15 +542,12 @@ public sealed partial class LauncherWindowViewModelTests
         Assert.Equal("Existing.Plugin", existingPlugin.Id);
         Assert.True(existingPlugin.IsMissing);
         Assert.True(existingPlugin.IsChecked);
-        viewModel.CharacterLoginCommandsText = " /tell someone, hi \n/vt start\n/tell someone, hi";
+        viewModel.CharacterUsesAccountPlugins = false;
         viewModel.SaveCharacterSettingsCommand.Execute(null);
 
         Assert.NotNull(orchestrator.SettingsUpdate);
         Assert.Equal(LaunchMode.Headless, orchestrator.SettingsUpdate.Value.Mode);
         Assert.Equal(["Existing.Plugin"], orchestrator.SettingsUpdate.Value.Plugins);
-        Assert.Equal(
-            ["/tell someone, hi", "/vt start", "/tell someone, hi"],
-            orchestrator.SettingsUpdate.Value.Commands);
 
         await viewModel.LaunchHeadlessCommand.ExecuteAsync();
         Assert.Equal(
@@ -996,9 +1057,11 @@ public sealed partial class LauncherWindowViewModelTests
 
         public (string Server, string Account, string Character)? RemovedCharacter { get; private set; }
 
-        public (LaunchMode Mode, IReadOnlyList<string> Plugins, IReadOnlyList<string> Commands)? SettingsUpdate { get; private set; }
+        public (LaunchMode Mode, IReadOnlyList<string>? Plugins)? SettingsUpdate { get; private set; }
 
-        public List<(string Server, string Account, string Character, LaunchMode Mode, IReadOnlyList<string> Plugins)> SettingsUpdates { get; } = [];
+        public List<(string Server, string Account, IReadOnlyList<string> Plugins)> AccountPluginUpdates { get; } = [];
+
+        public List<(string Server, string Account, string Character, LaunchMode Mode, IReadOnlyList<string>? Plugins)> SettingsUpdates { get; } = [];
 
         public (string Server, string Account, string? Character, LaunchMode Mode)? LaunchRequest { get; private set; }
 
@@ -1115,12 +1178,14 @@ public sealed partial class LauncherWindowViewModelTests
             string accountName,
             string characterName,
             LaunchMode launchMode,
-            IReadOnlyList<string> plugins,
-            IReadOnlyList<string> loginCommands)
+            IReadOnlyList<string>? plugins)
         {
-            SettingsUpdate = (launchMode, plugins, loginCommands);
+            SettingsUpdate = (launchMode, plugins);
             SettingsUpdates.Add((serverName, accountName, characterName, launchMode, plugins));
         }
+
+        public void UpdateAccountPlugins(string serverName, string accountName, IReadOnlyList<string> plugins) =>
+            AccountPluginUpdates.Add((serverName, accountName, plugins));
 
         public (string? Character, LaunchMode Mode)? SavedRowSelection { get; private set; }
 

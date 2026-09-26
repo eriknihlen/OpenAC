@@ -49,7 +49,8 @@ internal sealed class LauncherUpdateComposition : IDisposable
         Func<bool> hasRunningSessions,
         Func<ClientVersionStore, string, ClientVersionResolution>? initialize = null,
         Uri? updateManifestUri = null,
-        LauncherInstallationLayout? installationLayout = null)
+        LauncherInstallationLayout? installationLayout = null,
+        string? launcherFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(launcherVersion);
@@ -87,7 +88,8 @@ internal sealed class LauncherUpdateComposition : IDisposable
                 launcherVersion,
                 rid,
                 installationLayout ?? LauncherInstallationLayout.Flat(launcherTargetDirectory, rid),
-                hasRunningSessions);
+                hasRunningSessions,
+                launcherFingerprint: launcherFingerprint);
             return new LauncherUpdateComposition(
                 versions,
                 LauncherExecutableSet.FromCurrentVersionStore(versions),

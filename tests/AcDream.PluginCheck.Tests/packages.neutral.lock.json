@@ -102,13 +102,13 @@
       "acdream-plugincheck": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Launcher.Core": "[0.1.19, )"
+          "AcDream.Launcher.Core": "[0.1.20, )"
         }
       },
       "acdream.launcher.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Platform": "[0.1.19, )"
+          "AcDream.Platform": "[0.1.20, )"
         }
       },
       "acdream.platform": {
