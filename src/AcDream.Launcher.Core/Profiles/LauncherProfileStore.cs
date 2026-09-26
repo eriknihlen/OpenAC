@@ -32,10 +32,20 @@ public sealed class LauncherProfileStore
         },
     };
 
-    public LauncherProfileStore(string filePath)
+    /// <summary>The file this launcher reads and writes.</summary>
+    public const string FileName = "launcher-profiles.v2.json";
+
+    /// <summary>The file launchers before version 2 read and write; never written by this one.</summary>
+    public const string OlderFileName = "launcher-profiles.json";
+
+    /// <param name="filePath">The profile file this store reads and writes.</param>
+    /// <param name="olderFilePath">An older launcher's profile file, read once to migrate from when
+    /// <paramref name="filePath"/> does not exist yet, and never written.</param>
+    public LauncherProfileStore(string filePath, string? olderFilePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         FilePath = Path.GetFullPath(filePath);
+        OlderFilePath = olderFilePath is null ? null : Path.GetFullPath(olderFilePath);
         Document = new LauncherProfileDocument();
     }
 
@@ -43,18 +53,29 @@ public sealed class LauncherProfileStore
     {
         ArgumentNullException.ThrowIfNull(paths);
         return new LauncherProfileStore(
-            Path.Combine(paths.ConfigDirectory, "launcher-profiles.json"));
+            Path.Combine(paths.ConfigDirectory, FileName),
+            Path.Combine(paths.ConfigDirectory, OlderFileName));
     }
 
     public string FilePath { get; }
 
+    /// <summary>An older launcher's profile file this store migrates from; null for none.</summary>
+    public string? OlderFilePath { get; }
+
     public LauncherProfileDocument Document { get; private set; }
 
-    /// <summary>Where the file an older launcher wrote is kept when <see cref="Load"/> rewrites it.</summary>
-    public string Version1BackupPath =>
-        Path.Combine(
-            Path.GetDirectoryName(FilePath) ?? string.Empty,
-            Path.GetFileNameWithoutExtension(FilePath) + ".v1-backup.json");
+    /// <summary>A copy of the older launcher's file as it was when it was migrated, kept whatever
+    /// happens to that file later.</summary>
+    public string Version1BackupPath
+    {
+        get
+        {
+            string source = OlderFilePath ?? FilePath;
+            return Path.Combine(
+                Path.GetDirectoryName(source) ?? string.Empty,
+                Path.GetFileNameWithoutExtension(source) + ".v1-backup.json");
+        }
+    }
 
     /// <summary>What the last <see cref="Load"/> could not carry over from an older file, in words
     /// for the player; null when it had nothing to say. Shown once, after the file is rewritten.</summary>
@@ -65,16 +86,21 @@ public sealed class LauncherProfileStore
         DeleteStaleTempFile(FilePath + ".tmp");
         MigrationNotice = null;
 
-        if (!File.Exists(FilePath))
+        // This launcher's own file wins; without one, the older launcher's file is read once and
+        // migrated into it. The older file is never written, so an older launcher keeps working.
+        string? source = File.Exists(FilePath) ? FilePath
+            : OlderFilePath is not null && File.Exists(OlderFilePath) ? OlderFilePath
+            : null;
+        if (source is null)
         {
             Document = new LauncherProfileDocument();
             return false;
         }
 
-        EnsureExistingCredentialFilePermissions();
+        EnsureExistingCredentialFilePermissions(source);
 
-        byte[] bytes = File.ReadAllBytes(FilePath);
-        int version = ReadVersion(bytes);
+        byte[] bytes = File.ReadAllBytes(source);
+        int version = ReadVersion(bytes, source);
         LauncherProfileDocument? document;
         IReadOnlyList<string> notices = [];
         try
@@ -92,21 +118,21 @@ public sealed class LauncherProfileStore
         catch (JsonException ex)
         {
             throw new LauncherProfileException(
-                $"'{FilePath}' is not a valid launcher profile document.",
+                $"'{source}' is not a valid launcher profile document.",
                 ex);
         }
 
         if (document is null)
         {
-            throw new LauncherProfileException($"'{FilePath}' is empty.");
+            throw new LauncherProfileException($"'{source}' is empty.");
         }
 
         ValidateAndNormalizeDocument(document);
         Document = document;
-        if (version == Version1)
+        if (version == Version1 || source != FilePath)
         {
-            // The old file stays beside the new one, so nothing it held is lost to the rewrite.
-            if (!File.Exists(Version1BackupPath))
+            // A copy of the old file as migrated, whatever an older launcher does to it later.
+            if (version == Version1 && !File.Exists(Version1BackupPath))
             {
                 WriteCredentialFile(Version1BackupPath, stream => stream.Write(bytes));
             }
@@ -126,7 +152,7 @@ public sealed class LauncherProfileStore
         return true;
     }
 
-    private int ReadVersion(byte[] bytes)
+    private static int ReadVersion(byte[] bytes, string source)
     {
         try
         {
@@ -141,12 +167,12 @@ public sealed class LauncherProfileStore
         catch (JsonException ex)
         {
             throw new LauncherProfileException(
-                $"'{FilePath}' is not a valid launcher profile document.",
+                $"'{source}' is not a valid launcher profile document.",
                 ex);
         }
 
         throw new LauncherProfileException(
-            $"'{FilePath}' is not a valid launcher profile document: it has no version.");
+            $"'{source}' is not a valid launcher profile document: it has no version.");
     }
 
     public void Save() =>
@@ -492,7 +518,7 @@ public sealed class LauncherProfileStore
         }
     }
 
-    private void EnsureExistingCredentialFilePermissions()
+    private static void EnsureExistingCredentialFilePermissions(string path)
     {
         if (!LauncherOperatingSystem.IsUnix)
         {
@@ -501,11 +527,11 @@ public sealed class LauncherProfileStore
 
         try
         {
-            UnixFileMode mode = File.GetUnixFileMode(FilePath);
+            UnixFileMode mode = File.GetUnixFileMode(path);
             if (mode != OwnerOnlyFileMode)
             {
-                File.SetUnixFileMode(FilePath, OwnerOnlyFileMode);
-                mode = File.GetUnixFileMode(FilePath);
+                File.SetUnixFileMode(path, OwnerOnlyFileMode);
+                mode = File.GetUnixFileMode(path);
             }
 
             if (mode != OwnerOnlyFileMode)
@@ -516,7 +542,7 @@ public sealed class LauncherProfileStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new LauncherProfileException(
-                $"'{FilePath}' could not be secured to owner-only mode 0600.",
+                $"'{path}' could not be secured to owner-only mode 0600.",
                 ex);
         }
     }

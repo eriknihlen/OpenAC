@@ -95,12 +95,18 @@ keeps a list of its own, filtered to the plugins that support its launch mode.
 ### Profiles written by an earlier launcher
 
 An earlier launcher kept plugins and logon commands on each character and one
-user list shared by every server. The first start of this launcher rewrites
-the file once, keeping the old one beside it as
-`launcher-profiles.v1-backup.json`:
+user list shared by every server, in `launcher-profiles.json` in the settings
+folder. This launcher keeps its profiles in `launcher-profiles.v2.json`. The
+first time it starts without that file it reads `launcher-profiles.json` once
+and converts it, keeping a byte-for-byte copy as
+`launcher-profiles.v1-backup.json`. It never writes `launcher-profiles.json`,
+so an older launcher started afterwards still finds its own profiles and works
+as before; changes made there are not seen by this launcher, and changes made
+here are not seen by the older one. The conversion:
 
 - each account's plugins are every plugin its characters had, in the order
-  first seen; a character whose own list differed keeps it as its own list;
+  first seen; a character whose own list differed, in its plugins or in their
+  order, keeps it as its own list;
 - each account's logon commands are its characters' commands when they were
   all the same, otherwise the first character's, and a one-time notice lists
   what the other characters had;

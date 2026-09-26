@@ -10,7 +10,11 @@ public sealed class LauncherProfileMigrationTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "acdream-launcher-migration-tests", Guid.NewGuid().ToString("N"));
 
-    private string FilePath => Path.Combine(_root, "launcher-profiles.json");
+    private string FilePath => Path.Combine(_root, LauncherProfileStore.FileName);
+
+    private string OlderFilePath => Path.Combine(_root, LauncherProfileStore.OlderFileName);
+
+    private LauncherProfileStore NewStore() => new(FilePath, OlderFilePath);
 
     public LauncherProfileMigrationTests() => Directory.CreateDirectory(_root);
 
@@ -65,8 +69,8 @@ public sealed class LauncherProfileMigrationTests : IDisposable
 
     private LauncherProfileStore LoadVersion1(string json = Version1File)
     {
-        File.WriteAllText(FilePath, json);
-        var store = new LauncherProfileStore(FilePath);
+        File.WriteAllText(OlderFilePath, json);
+        LauncherProfileStore store = NewStore();
         Assert.True(store.Load());
         return store;
     }
@@ -172,17 +176,51 @@ public sealed class LauncherProfileMigrationTests : IDisposable
             Assert.False(written.RootElement.TryGetProperty("users", out _));
         }
 
-        var reloaded = new LauncherProfileStore(FilePath);
+        LauncherProfileStore reloaded = NewStore();
         reloaded.Load();
         Assert.Null(reloaded.MigrationNotice);
         Assert.Equal(JsonSerializer.Serialize(store.Document), JsonSerializer.Serialize(reloaded.Document));
         Assert.Equal(Version1File, File.ReadAllText(store.Version1BackupPath));
+        Assert.Equal(Path.Combine(_root, "launcher-profiles.v1-backup.json"), store.Version1BackupPath);
+    }
+
+    [Fact]
+    public void TheOlderLaunchersFileIsNeverWrittenSoItKeepsWorking()
+    {
+        LauncherProfileStore store = LoadVersion1();
+        store.ExecuteTransaction(() => store.AddServer("Added later", "h", 9000));
+
+        Assert.Equal(Version1File, File.ReadAllText(OlderFilePath));
+        Assert.Contains("Added later", File.ReadAllText(FilePath));
+    }
+
+    [Fact]
+    public void OnceWrittenTheNewFileIsReadAndTheOlderFileIgnored()
+    {
+        LoadVersion1();
+        // An older launcher run afterwards goes on using its own file.
+        File.WriteAllText(OlderFilePath, """{"version":1,"servers":[]}""");
+
+        LauncherProfileStore store = NewStore();
+        store.Load();
+
+        Assert.Equal(["sawato", "coldeve"], store.Document.Servers.Select(server => server.Name));
+        Assert.Null(store.MigrationNotice);
+    }
+
+    [Fact]
+    public void WithNeitherFileTheProfilesStartEmptyAndNothingIsWritten()
+    {
+        LauncherProfileStore store = NewStore();
+
+        Assert.False(store.Load());
+        Assert.Empty(Directory.EnumerateFiles(_root));
     }
 
     [Fact]
     public void AnExistingBackupIsNeverOverwritten()
     {
-        var store = new LauncherProfileStore(FilePath);
+        LauncherProfileStore store = NewStore();
         File.WriteAllText(store.Version1BackupPath, "earlier backup");
 
         LoadVersion1();
@@ -194,11 +232,12 @@ public sealed class LauncherProfileMigrationTests : IDisposable
     public void AnInvalidOldFileIsRefusedAndLeftAlone()
     {
         string json = """{"version":1,"servers":[{"name":"a","host":"h","port":0,"accounts":[]}]}""";
-        File.WriteAllText(FilePath, json);
-        var store = new LauncherProfileStore(FilePath);
+        File.WriteAllText(OlderFilePath, json);
+        LauncherProfileStore store = NewStore();
 
         Assert.Throws<LauncherProfileException>(() => store.Load());
-        Assert.Equal(json, File.ReadAllText(FilePath));
+        Assert.Equal(json, File.ReadAllText(OlderFilePath));
         Assert.False(File.Exists(store.Version1BackupPath));
+        Assert.False(File.Exists(FilePath));
     }
 }
