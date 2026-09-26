@@ -123,21 +123,35 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
             await FetchBytesAsync(_manifestUri, "release manifest", cancellationToken).ConfigureAwait(false),
             _allowLoopbackHttp);
 
+    /// <summary>How long the optional fingerprint may take before the check goes on without it.</summary>
+    internal TimeSpan FingerprintTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
     public async Task<LauncherFingerprintDocument?> FetchLauncherFingerprintAsync(
         CancellationToken cancellationToken = default)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(FingerprintTimeout);
         try
         {
             byte[] bytes = await FetchBytesAsync(
                     new Uri(_manifestUri, LauncherFingerprintDocument.FileName),
                     "launcher fingerprint",
-                    cancellationToken)
+                    timeout.Token)
                 .ConfigureAwait(false);
             return ParseFingerprint(bytes);
         }
+        // The file is optional: a release from before fingerprints has none, and one that is slow,
+        // unreachable or unreadable leaves the check to compare versions, as it always could.
         catch (LauncherUpdateException)
         {
-            // A release from before fingerprints has none; comparing versions still works.
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
             return null;
         }
     }

@@ -89,6 +89,48 @@ public sealed class LauncherFingerprintTests : IDisposable
         }
     }
 
+    private sealed class FingerprintHandler(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            respond(cancellationToken);
+    }
+
+    public static TheoryData<string> Failures => new() { "timeout", "hang", "reset" };
+
+    [Theory]
+    [MemberData(nameof(Failures))]
+    public async Task AFingerprintThatCannotBeFetchedIsTreatedAsMissing(string failure)
+    {
+        using var source = ReleaseManifestClient.CreateForTransportTest(
+            new Uri("https://example.test/latest/manifest.json"),
+            allowLoopbackHttp: false,
+            new FingerprintHandler(async token => failure switch
+            {
+                "timeout" => throw new TaskCanceledException("The request timed out.", new TimeoutException()),
+                "hang" => await Task.Delay(Timeout.Infinite, token).ContinueWith<HttpResponseMessage>(_ => throw new TaskCanceledException()),
+                _ => throw new IOException("reset"),
+            }));
+        source.FingerprintTimeout = TimeSpan.FromMilliseconds(100);
+
+        Assert.Null(await source.FetchLauncherFingerprintAsync());
+    }
+
+    [Fact]
+    public async Task AskingToStopStillStops()
+    {
+        using var source = ReleaseManifestClient.CreateForTransportTest(
+            new Uri("https://example.test/latest/manifest.json"),
+            allowLoopbackHttp: false,
+            new FingerprintHandler(async token =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                throw new InvalidOperationException("unreachable");
+            }));
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.FetchLauncherFingerprintAsync(stop.Token));
+    }
+
     [Fact]
     public async Task AMatchingLauncherStaysAndInstallsTheNewClient()
     {
