@@ -207,8 +207,12 @@ continue to gate launching.
 
 The top right shows the installed **Client** and **Launcher** versions and
 whether your **Plugins** have updates. **Check for updates** beside them checks
-the client, the launcher and the plugins at once; the launcher also checks at
-startup and every 20 minutes while it is open. A background check only shows
+the client, the launcher and the installed plugins at once; the launcher also
+checks at startup and every 20 minutes while it is open. Only the startup check
+verifies the installed client; the later ones only read the release feed, so
+they never hold up **Play**. The plugin part looks only at installed plugins'
+updates and leaves the Plugins tab's messages and Discover list as they are
+(**Refresh list** there re-checks everything). A background check only shows
 the update banner; the button also opens what it found.
 
 The launcher updates itself only when it changed. Each release publishes a

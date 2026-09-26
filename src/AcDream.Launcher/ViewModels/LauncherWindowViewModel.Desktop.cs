@@ -172,7 +172,7 @@ public sealed partial class LauncherWindowViewModel
     private async Task CheckForUpdatesAsync(bool openPrompt, DateTimeOffset? now = null)
     {
         _nextUpdateCheck = (now ?? DateTimeOffset.UtcNow) + UpdateCheckInterval;
-        Task plugins = Plugins.CheckNowCommand.ExecuteAsync();
+        Task plugins = Plugins.CheckInstalledUpdatesAsync();
         await UpdatePrompt.RecheckAsync().ConfigureAwait(true);
         NotifyVersions();
         if (openPrompt && ShowUpdateBanner) UpdatePrompt.OpenAvailableUpdate();

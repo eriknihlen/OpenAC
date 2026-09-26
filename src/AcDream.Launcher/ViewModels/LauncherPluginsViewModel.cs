@@ -884,6 +884,53 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The update check the header and its timer run: the plugin list and the installed
+    /// plugins' releases only. It leaves the panel's error and status lines as they are, does not
+    /// re-resolve Discover (one request per listed plugin), and when the list or GitHub cannot be
+    /// reached it changes nothing, leaving the last good rows.</summary>
+    internal async Task CheckInstalledUpdatesAsync()
+    {
+        if (_composition is null || IsBusy)
+        {
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _cancellation = cancellation;
+        IsBusy = true;
+        try
+        {
+            PluginCheckOutcome outcome = await _composition
+                .CheckAsync(_clientVersionResolver(), cancellation.Token)
+                .ConfigureAwait(true);
+            if (!outcome.RateLimited && outcome.Catalog is not null)
+            {
+                _orchestrator.SetPluginCatalog(outcome.Catalog);
+                _listAgeUtc = outcome.ListAgeUtc;
+                OnPropertyChanged(nameof(IsUsingCachedList));
+                OnPropertyChanged(nameof(ListAgeText));
+                ApplyInstalled(outcome);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            // Reported without replacing a message already on the panel.
+            Error ??= string.IsNullOrWhiteSpace(ex.Message) ? "Plugin updates could not be checked." : ex.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(_cancellation, cancellation))
+            {
+                _cancellation = null;
+            }
+
+            IsBusy = false;
+        }
+    }
+
     private void ApplyOutcome(PluginCheckOutcome outcome)
     {
         // The catalog the next launched session filters blocked ids against, regardless
@@ -903,13 +950,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             Error = "Could not reach the plugin list.";
         }
 
-        _allInstalled.Clear();
-        foreach (InstalledPluginInfo info in outcome.Installed)
-        {
-            outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
-            outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
-            _allInstalled.Add(BuildInstalledRow(info, availability, withheldReason));
-        }
+        ApplyInstalled(outcome, applyFilters: false);
 
         _allDiscover.Clear();
         foreach (PluginDiscoverEntry entry in outcome.Discover)
@@ -942,6 +983,22 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         DiscoverStatusLine = null;
         UpdateDiscoverCheckingState();
         ApplyFilters();
+    }
+
+    private void ApplyInstalled(PluginCheckOutcome outcome, bool applyFilters = true)
+    {
+        _allInstalled.Clear();
+        foreach (InstalledPluginInfo info in outcome.Installed)
+        {
+            outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
+            outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
+            _allInstalled.Add(BuildInstalledRow(info, availability, withheldReason));
+        }
+
+        if (applyFilters)
+        {
+            ApplyFilters();
+        }
     }
 
     /// <summary>Builds one Installed row from the inventory and its update check, reused by both a

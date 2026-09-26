@@ -527,6 +527,41 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
+    public async Task TheUpdateCheckLooksOnlyAtInstalledPluginsAndLeavesThePanelAsItWas()
+    {
+        using var fixture = new PluginPanelFixture();
+        byte[] remoteManifest = PluginPanelFixture.ManifestJson(
+            "edwards.discoverable", "0.2.0", "0.1.0", ["headless", "graphical"]);
+        Uri manifestUri = GitHubReleaseLocator.LatestAsset("shaneedwards/openac-plugin-hello", "plugin.json");
+        Uri taggedManifestUri = GitHubReleaseLocator.TaggedAsset("shaneedwards/openac-plugin-hello", "v0.2.0", "plugin.json");
+        var handler = new RoutedHandler(request =>
+            request.RequestUri == PluginListUri ? Ok(fixture.ListJson())
+            : request.RequestUri == manifestUri ? Redirect(taggedManifestUri)
+            : request.RequestUri == taggedManifestUri ? Ok(remoteManifest)
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+        using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
+            fixture.Paths, PluginListUri, handler);
+        using var orchestrator = new FakeLauncherOrchestrator();
+        using var viewModel = CreateInitialized(orchestrator);
+        viewModel.ConfigurePlugins(composition, () => null);
+        await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
+        await viewModel.Plugins.RefreshDiscoverDetailsAsync();
+        Assert.Equal(1, handler.Requests.Count(uri => uri == manifestUri));
+        viewModel.Plugins.AddFromUrlText = "not a url";
+        await viewModel.Plugins.AddFromUrlCommand.ExecuteAsync();
+        string? error = viewModel.Plugins.Error;
+        Assert.NotNull(error);
+        int listRequests = handler.Requests.Count(uri => uri == PluginListUri);
+
+        await viewModel.CheckForUpdatesCommand.ExecuteAsync();
+
+        Assert.Equal(listRequests + 1, handler.Requests.Count(uri => uri == PluginListUri));
+        Assert.Equal(1, handler.Requests.Count(uri => uri == manifestUri));
+        Assert.Equal(error, viewModel.Plugins.Error);
+        Assert.Equal("0.2.0", Assert.Single(viewModel.Plugins.Discover).LatestVersion);
+    }
+
+    [Fact]
     public async Task EscapeClosesTheInstallDialogWithoutInstalling()
     {
         using var fixture = new PluginPanelFixture();
