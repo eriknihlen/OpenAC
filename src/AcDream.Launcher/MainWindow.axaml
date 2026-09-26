@@ -777,7 +777,12 @@
           <Border Grid.Row="3" Background="#292820" BorderBrush="#5B4D30" BorderThickness="1" CornerRadius="3" Padding="10,8" IsVisible="{Binding TextEditor.IsAccountsEditor}">
             <TextBlock Text="⚠  Passwords are shown and stored in plain text on this computer. Don't paste this into a public chat." FontSize="12" Foreground="#E6DCC6" TextWrapping="Wrap" />
           </Border>
-          <SelectableTextBlock Grid.Row="4" Text="{Binding TextEditor.Error}" Foreground="#FFB0A0" TextWrapping="Wrap" IsVisible="{Binding TextEditor.HasError}" MaxHeight="120" />
+          <StackPanel Grid.Row="4" Spacing="6">
+            <SelectableTextBlock Text="{Binding TextEditor.Error}" Foreground="#FFB0A0" TextWrapping="Wrap" IsVisible="{Binding TextEditor.HasError}" MaxHeight="120" />
+            <Border Background="#292820" BorderBrush="#DBB573" BorderThickness="1" CornerRadius="3" Padding="10,8" IsVisible="{Binding TextEditor.HasRemovalWarning}">
+              <SelectableTextBlock Text="{Binding TextEditor.RemovalWarning}" Foreground="#E6DCC6" FontSize="12" TextWrapping="Wrap" MaxHeight="120" />
+            </Border>
+          </StackPanel>
           <Grid Grid.Row="5" ColumnDefinitions="*,Auto">
             <Panel VerticalAlignment="Center">
               <CheckBox Content="Show passwords" IsChecked="{Binding TextEditor.ShowPasswords, Mode=TwoWay}" IsVisible="{Binding TextEditor.IsAccountsEditor}"
@@ -786,7 +791,7 @@
             </Panel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
               <Button Content="Cancel" Command="{Binding TextEditor.CancelCommand}" />
-              <Button Content="Save" Classes="primary ready" Command="{Binding TextEditor.SaveCommand}" />
+              <Button Content="{Binding TextEditor.SaveText}" Classes="primary ready" Command="{Binding TextEditor.SaveCommand}" />
             </StackPanel>
           </Grid>
         </Grid>

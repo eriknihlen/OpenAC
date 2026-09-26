@@ -60,6 +60,67 @@ public sealed class ProfileFieldsEditorTests : IDisposable
     }
 
     [Fact]
+    public void RemovingOrRenamingAnAccountWithSettingsAsksFirstAndSavesOnTheSecondSave()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "notan3", "secret");
+        _core.AddAccount("Coldeve", "empty", "secret");
+        _core.AddCharacter("Coldeve", "notan3", "Festivus", "0x5005FBB5");
+        _core.UpdateAccountPlugins("Coldeve", "notan3", ["a.one", "b.two"]);
+        string before = File.ReadAllText(_store.FilePath);
+        _editor.Open(LauncherTextEditorKind.Accounts);
+        _editor.ShowPasswords = true;
+
+        _editor.DisplayedText = "#Coldeve\nName=notan5,Password=secret\n";
+        _editor.SaveCommand.Execute(null);
+
+        Assert.True(_editor.IsOpen);
+        Assert.Equal(before, File.ReadAllText(_store.FilePath));
+        Assert.Contains("notan3 on Coldeve (1 character, 2 plugins)", _editor.RemovalWarning);
+        Assert.DoesNotContain("empty", _editor.RemovalWarning);
+        Assert.Equal("Remove and save", _editor.SaveText);
+
+        _editor.SaveCommand.Execute(null);
+
+        Assert.False(_editor.IsOpen);
+        Assert.Equal("notan5", Assert.Single(_store.Document.Servers[0].Accounts).Account);
+    }
+
+    [Fact]
+    public void EditingTheTextAgainAsksAgain()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "notan3", "secret");
+        _core.AddCharacter("Coldeve", "notan3", "Festivus", "0x5005FBB5");
+        _editor.Open(LauncherTextEditorKind.Accounts);
+        _editor.ShowPasswords = true;
+        _editor.DisplayedText = "#Coldeve\n";
+        _editor.SaveCommand.Execute(null);
+
+        _editor.DisplayedText = "#Coldeve\nName=other\n";
+        Assert.Null(_editor.RemovalWarning);
+        _editor.SaveCommand.Execute(null);
+
+        Assert.True(_editor.IsOpen);
+        Assert.Equal("notan3", Assert.Single(_store.Document.Servers[0].Accounts).Account);
+    }
+
+    [Fact]
+    public void RemovingAnAccountWithNothingSavedOnItSavesAtOnce()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "empty", "secret");
+        _editor.Open(LauncherTextEditorKind.Accounts);
+        _editor.ShowPasswords = true;
+
+        _editor.DisplayedText = "#Coldeve\n";
+        _editor.SaveCommand.Execute(null);
+
+        Assert.False(_editor.IsOpen);
+        Assert.Empty(_store.Document.Servers[0].Accounts);
+    }
+
+    [Fact]
     public void AWrongLineKeepsTheEditorOpenWithItsNumberAndSavesNothing()
     {
         _core.AddServer("Coldeve", "play.coldeve.ac", 9000);

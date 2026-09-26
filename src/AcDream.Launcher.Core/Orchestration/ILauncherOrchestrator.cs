@@ -16,6 +16,10 @@ public interface ILauncherOrchestrator : IDisposable
     void SaveProfileText(LauncherTextEditorKind kind, string text, string originalText) =>
         throw new NotSupportedException("Text editing is not available.");
 
+    /// <summary>The accounts saving this accounts text would remove with something saved on them,
+    /// described for a confirmation; empty for any other editor.</summary>
+    IReadOnlyList<string> DescribeProfileTextRemovals(LauncherTextEditorKind kind, string text) => [];
+
     LauncherStateSnapshot GetSnapshot();
 
     LauncherCapability GetLaunchCapability(LaunchMode mode);

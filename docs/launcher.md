@@ -44,7 +44,11 @@ line below it belongs to that server. `Profiles=` is optional; separate tags
 with `;`. Put double quotes around a value that contains a comma or a quote,
 and write a quote as `\"`. A server's section is the whole truth for that
 server: an account left out of it is removed with its saved characters. A
-server left out of the text is left as it is. Passwords are stored and shown
+server left out of the text is left as it is. Changing an account's name is
+removing it and adding a new one: a different name is a different login, with
+its own characters, so its characters, plugins and logon commands are not
+carried over. When a save would remove an account that has any of those, the
+editor lists them first and saves only when you press **Remove and save**. Passwords are stored and shown
 in plain text on this computer; they stay hidden, and the text read-only,
 until **Show passwords** is ticked. **Copy all** copies the text, passwords
 included; **Paste all** replaces it (nothing is saved until **Save**). A

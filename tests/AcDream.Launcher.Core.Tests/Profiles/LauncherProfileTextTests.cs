@@ -97,6 +97,22 @@ public sealed class LauncherProfileTextTests
     }
 
     [Fact]
+    public void ARemovedOrRenamedAccountIsDescribedWithWhatIsSavedOnIt()
+    {
+        LauncherProfileDocument document = Sample();
+        string before = Json(document);
+
+        IReadOnlyList<string> removals = LauncherProfileText.DescribeAccountRemovals(
+            document, "#Coldeve\nName=notan3-renamed,Password=secret\n#sawato\n");
+
+        Assert.Equal(
+            ["notan3 on Coldeve (1 character, 1 plugin, 1 logon command)", "testaccount on sawato (1 logon command)"],
+            removals);
+        Assert.Equal(before, Json(document));
+        Assert.Empty(LauncherProfileText.DescribeAccountRemovals(document, "#Nowhere\n"));
+    }
+
+    [Fact]
     public void AnAccountWithoutPasswordHasAnEmptyOne()
     {
         LauncherProfileDocument document = Sample();

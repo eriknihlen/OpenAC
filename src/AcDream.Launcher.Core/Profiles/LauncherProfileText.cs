@@ -97,9 +97,74 @@ public static class LauncherProfileText
         return text.ToString();
     }
 
+    /// <summary>
+    /// The accounts saving <paramref name="text"/> would remove that have something saved on them
+    /// (characters, plugins or logon commands), each as "account on server (1 character, 2
+    /// plugins)". A changed name counts: it is a different account, with its own characters. Empty
+    /// when there are none, or when the text has an error the save will report.
+    /// </summary>
+    public static IReadOnlyList<string> DescribeAccountRemovals(LauncherProfileDocument document, string text)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(text);
+        var errors = new List<string>();
+        var sections = ParseAccounts(document, text, errors);
+        if (errors.Count > 0)
+        {
+            return [];
+        }
+
+        var removals = new List<string>();
+        foreach ((ServerProfile server, var accounts) in sections)
+        {
+            foreach (AccountProfile account in server.Accounts.Where(account => accounts.All(parsed => parsed.Name != account.Account)))
+            {
+                string[] parts =
+                [
+                    .. Count(account.Characters.Count, "character"),
+                    .. Count(account.Plugins.Count, "plugin"),
+                    .. Count(account.LoginCommands.Count, "logon command"),
+                ];
+                if (parts.Length > 0)
+                {
+                    removals.Add($"{account.Account} on {server.Name} ({string.Join(", ", parts)})");
+                }
+            }
+        }
+
+        return removals;
+
+        static string[] Count(int count, string noun) => count switch
+        {
+            0 => [],
+            1 => [$"1 {noun}"],
+            _ => [$"{count} {noun}s"],
+        };
+    }
+
     private static void ApplyAccounts(LauncherProfileDocument document, string text)
     {
         var errors = new List<string>();
+        var sections = ParseAccounts(document, text, errors);
+        ThrowIfAny(errors);
+        foreach ((ServerProfile server, var accounts) in sections)
+        {
+            server.Accounts = [.. accounts.Select(parsed =>
+            {
+                AccountProfile account = server.Accounts.Find(existing => existing.Account == parsed.Name)
+                    ?? new AccountProfile { Account = parsed.Name };
+                account.Password = parsed.Password;
+                account.Profiles = parsed.Profiles;
+                return account;
+            })];
+        }
+    }
+
+    private static List<(ServerProfile Server, List<(int Line, string Name, string Password, List<string> Profiles)> Accounts)> ParseAccounts(
+        LauncherProfileDocument document,
+        string text,
+        List<string> errors)
+    {
         var sections = new List<(ServerProfile Server, List<(int Line, string Name, string Password, List<string> Profiles)> Accounts)>();
         List<(int Line, string Name, string Password, List<string> Profiles)>? current = null;
         bool serverSeen = false;
@@ -147,18 +212,7 @@ public static class LauncherProfileText
             }
         }
 
-        ThrowIfAny(errors);
-        foreach ((ServerProfile server, var accounts) in sections)
-        {
-            server.Accounts = [.. accounts.Select(parsed =>
-            {
-                AccountProfile account = server.Accounts.Find(existing => existing.Account == parsed.Name)
-                    ?? new AccountProfile { Account = parsed.Name };
-                account.Password = parsed.Password;
-                account.Profiles = parsed.Profiles;
-                return account;
-            })];
-        }
+        return sections;
     }
 
     private static (string Name, string Password, List<string> Profiles)? TryParseAccountLine(

@@ -277,6 +277,17 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         }
     }
 
+    public IReadOnlyList<string> DescribeProfileTextRemovals(LauncherTextEditorKind kind, string text)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            return kind == LauncherTextEditorKind.Accounts
+                ? LauncherProfileText.DescribeAccountRemovals(_profileStore.Document, text)
+                : [];
+        }
+    }
+
     public void SaveProfileText(LauncherTextEditorKind kind, string text, string originalText) =>
         MutateProfiles(() =>
         {

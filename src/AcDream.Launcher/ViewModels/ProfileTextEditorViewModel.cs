@@ -33,6 +33,8 @@ public sealed partial class ProfileTextEditorViewModel : ObservableObject
     private string _text = "";
     private string? _error;
     private string _originalText = "";
+    private string? _removalWarning;
+    private string? _confirmedText;
     private LauncherTextEditorKind _kind;
 
     public ProfileTextEditorViewModel(ILauncherOrchestrator orchestrator)
@@ -59,6 +61,12 @@ public sealed partial class ProfileTextEditorViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(DisplayedText));
                 OnPropertyChanged(nameof(Summary));
+                // A confirmation was for the text as it was; a changed text is asked about again.
+                if (_text != _confirmedText)
+                {
+                    _confirmedText = null;
+                    RemovalWarning = null;
+                }
             }
         }
     }
@@ -110,6 +118,25 @@ public sealed partial class ProfileTextEditorViewModel : ObservableObject
     }
 
     public string? Error { get => _error; private set { if (SetProperty(ref _error, value)) OnPropertyChanged(nameof(HasError)); } }
+
+    /// <summary>The accounts the last Save would have removed with what is saved on them, asking to
+    /// press Save again; null when there is nothing to confirm.</summary>
+    public string? RemovalWarning
+    {
+        get => _removalWarning;
+        private set
+        {
+            if (SetProperty(ref _removalWarning, value))
+            {
+                OnPropertyChanged(nameof(HasRemovalWarning));
+                OnPropertyChanged(nameof(SaveText));
+            }
+        }
+    }
+
+    public bool HasRemovalWarning => RemovalWarning is not null;
+
+    public string SaveText => HasRemovalWarning ? "Remove and save" : "Save";
     public bool HasError => !string.IsNullOrEmpty(Error);
     public RelayCommand SaveCommand { get; }
     public RelayCommand CancelCommand { get; }
@@ -175,6 +202,8 @@ public sealed partial class ProfileTextEditorViewModel : ObservableObject
     public void Close()
     {
         IsOpen = false;
+        _confirmedText = null;
+        RemovalWarning = null;
         Text = _originalText = "";
         ShowPasswords = false;
         foreach (var row in Rows) row.Value = "";
@@ -185,6 +214,20 @@ public sealed partial class ProfileTextEditorViewModel : ObservableObject
 
     private void Save()
     {
+        if (IsTextEditor && _confirmedText != Text)
+        {
+            IReadOnlyList<string> removals = _orchestrator.DescribeProfileTextRemovals(_kind, Text);
+            if (removals.Count > 0)
+            {
+                _confirmedText = Text;
+                Error = null;
+                RemovalWarning = "Saving removes these accounts and everything saved on them: "
+                    + string.Join("; ", removals)
+                    + ". A changed name is a different account, with its own characters. Press Remove and save to go ahead.";
+                return;
+            }
+        }
+
         try { _orchestrator.SaveProfileText(_kind, IsFieldsEditor ? ReadFields() : Text, _originalText); Close(); }
         catch (Exception ex) when (ex is LauncherProfileException or LauncherOperationException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
