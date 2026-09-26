@@ -16,6 +16,29 @@ public static class PluginLoader
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(host);
 
+        LoadedPlugin? failure = Prepare(
+            pluginDirectory,
+            manifest,
+            registerRenderPack: renderPacks is not null,
+            out PreparedPlugin? prepared);
+        return failure ?? Activate(prepared!, host, renderPacks);
+    }
+
+    /// <summary>
+    /// The first half of a load: reads the plugin's assembly into a load
+    /// context of its own and finds its entry types, without creating or
+    /// starting anything. A reload does this before it lets go of the running
+    /// copy, so a new copy that cannot even be read leaves the old one
+    /// running. Returns the failure, carrying the load context to unload when
+    /// one was made, or null with <paramref name="prepared"/> set.
+    /// </summary>
+    internal static LoadedPlugin? Prepare(
+        string pluginDirectory,
+        PluginManifest manifest,
+        bool registerRenderPack,
+        out PreparedPlugin? prepared)
+    {
+        prepared = null;
         if (!PluginApi.IsSupported(manifest.ApiVersion))
             return new LoadedPlugin(
                 manifest,
@@ -35,12 +58,10 @@ public static class PluginLoader
                 Error: new FileNotFoundException($"entry dll not found: {dllPath}", dllPath));
 
         PluginAssemblyLoadContext? alc = null;
-        IAcDreamPlugin? instance = null;
-        IRenderPackPlugin? renderPackInstance = null;
         try
         {
             alc = new PluginAssemblyLoadContext(pluginDirectory, dllPath);
-            var asm = alc.LoadFromAssemblyPath(dllPath);
+            var asm = alc.LoadEntry(dllPath);
 
             IEnumerable<Type> types;
             try
@@ -59,13 +80,10 @@ public static class PluginLoader
                 ? concreteTypes.FirstOrDefault(
                     static type => typeof(IAcDreamPlugin).IsAssignableFrom(type))
                 : null;
-            bool registerRenderPack =
-                manifest.Declares(PluginKind.RenderPack) && renderPacks is not null;
-            CountingRenderPackRegistry? countedRenderPacks = registerRenderPack
-                ? new CountingRenderPackRegistry(renderPacks!)
-                : null;
+            bool declaresRenderPack =
+                manifest.Declares(PluginKind.RenderPack) && registerRenderPack;
             Type? renderPackType = null;
-            if (registerRenderPack)
+            if (declaresRenderPack)
             {
                 Type[] renderPackTypes = concreteTypes
                     .Where(static type => typeof(IRenderPackPlugin).IsAssignableFrom(type))
@@ -106,7 +124,7 @@ public static class PluginLoader
                         $"no IAcDreamPlugin implementation found in {manifest.EntryDll}"));
             }
 
-            if (registerRenderPack && renderPackType is null)
+            if (declaresRenderPack && renderPackType is null)
             {
                 return new LoadedPlugin(
                     manifest,
@@ -126,8 +144,40 @@ public static class PluginLoader
                         "the host did not supply any facility declared by this plugin"));
             }
 
+            prepared = new PreparedPlugin(manifest, alc, pluginType, renderPackType);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return new LoadedPlugin(
+                manifest,
+                Plugin: null,
+                LoadContext: alc,
+                Error: ex);
+        }
+    }
+
+    /// <summary>
+    /// The second half of a load: creates the entry types found by
+    /// <see cref="Prepare"/>, hands the gameplay entry its host and lets a
+    /// render pack register. Enabling is left to the caller.
+    /// </summary>
+    internal static LoadedPlugin Activate(
+        PreparedPlugin prepared,
+        IPluginHost host,
+        IRenderPackRegistry? renderPacks)
+    {
+        PluginManifest manifest = prepared.Manifest;
+        IAcDreamPlugin? instance = null;
+        IRenderPackPlugin? renderPackInstance = null;
+        try
+        {
+            CountingRenderPackRegistry? countedRenderPacks =
+                prepared.RenderPackType is not null && renderPacks is not null
+                    ? new CountingRenderPackRegistry(renderPacks)
+                    : null;
             object? sharedInstance = null;
-            if (pluginType is not null)
+            if (prepared.PluginType is { } pluginType)
             {
                 sharedInstance = Activator.CreateInstance(pluginType);
                 instance = (IAcDreamPlugin?)sharedInstance
@@ -136,16 +186,17 @@ public static class PluginLoader
                 instance.Initialize(host);
             }
 
-            if (renderPackType is not null)
+            if (prepared.RenderPackType is { } renderPackType
+                && countedRenderPacks is not null)
             {
-                object renderObject = ReferenceEquals(renderPackType, pluginType)
+                object renderObject = ReferenceEquals(renderPackType, prepared.PluginType)
                     ? sharedInstance!
                     : Activator.CreateInstance(renderPackType)
                         ?? throw new InvalidOperationException(
                             $"could not construct IRenderPackPlugin {renderPackType.FullName}");
                 renderPackInstance = (IRenderPackPlugin)renderObject;
-                renderPackInstance.Register(countedRenderPacks!);
-                if (countedRenderPacks!.RegistrationCount == 0)
+                renderPackInstance.Register(countedRenderPacks);
+                if (countedRenderPacks.RegistrationCount == 0)
                 {
                     throw new InvalidOperationException(
                         $"render-pack entry point '{renderPackType.FullName}' registered no packs");
@@ -155,7 +206,7 @@ public static class PluginLoader
             return new LoadedPlugin(
                 manifest,
                 instance,
-                alc,
+                prepared.LoadContext,
                 Error: null,
                 renderPackInstance);
         }
@@ -164,7 +215,7 @@ public static class PluginLoader
             return new LoadedPlugin(
                 manifest,
                 Plugin: instance,
-                LoadContext: alc,
+                LoadContext: prepared.LoadContext,
                 Error: ex,
                 RenderPackPlugin: renderPackInstance);
         }
@@ -207,3 +258,13 @@ public static class PluginLoader
         }
     }
 }
+
+/// <summary>
+/// A plugin whose assembly is loaded and whose entry types are known, but
+/// which has not been created yet.
+/// </summary>
+internal sealed record PreparedPlugin(
+    PluginManifest Manifest,
+    PluginAssemblyLoadContext LoadContext,
+    Type? PluginType,
+    Type? RenderPackType);

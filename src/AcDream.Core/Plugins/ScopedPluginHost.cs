@@ -17,15 +17,20 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     private readonly IPluginStatusBoard _statusBoardView;
     private bool _disposed;
     private readonly ScopedWorldLines _worldLines;
+    private readonly string? _pluginDirectory;
+    private readonly bool _isHotReload;
 
     internal ScopedPluginHost(
         IPluginHost inner,
         string pluginId,
         string pluginDisplayName,
         string? pluginDirectory = null,
-        PluginStatusBoard? statusBoard = null)
+        PluginStatusBoard? statusBoard = null,
+        bool isHotReload = false)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _pluginDirectory = pluginDirectory;
+        _isHotReload = isHotReload;
         _worldLines = new ScopedWorldLines(inner.WorldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDisplayName);
@@ -74,6 +79,16 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     public IPluginMapResourceCatalog MapResources => _inner.MapResources;
     public IPluginRenderRegistry Rendering => _inner.Rendering;
     public IPluginStatusBoard StatusBoard => _statusBoardView;
+    public bool IsHotReload => _isHotReload;
+    public string? PluginDirectory => _pluginDirectory;
+
+    /// <summary>
+    /// Tells this plugin, and only this plugin, that the character is in the
+    /// world: what a plugin started while the character was already there
+    /// would otherwise never hear.
+    /// </summary>
+    internal void RaiseLoginComplete(Action<string, Exception> report) =>
+        _events.RaiseLoginCompleteToThisPlugin(report);
 
     /// <summary>
     /// One plugin's view of the shared storage root: everything it keeps lives
@@ -899,7 +914,7 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
     {
         private readonly object _gate = new();
         private readonly List<Action<WorldEntitySnapshot>> _registrations = [];
-        private readonly List<Action<double>> _tickRegistrations = [];
+        private readonly List<(Action<double> Handler, Action<double> Guarded)> _tickRegistrations = [];
         private readonly List<Action> _loginCompleteRegistrations = [];
         private readonly List<Action> _logoffRegistrations = [];
         private readonly List<Action<string>> _localPlayerDiedRegistrations = [];
@@ -918,13 +933,23 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             add
             {
                 ArgumentNullException.ThrowIfNull(value);
+                // A plugin can be unloaded from inside a tick: a reload runs
+                // on the tick thread, and the tick being raised has already
+                // taken its list of handlers. The handler the host holds
+                // checks that its plugin is still here, so an unloaded
+                // plugin is never called by the rest of that same tick.
+                Action<double> guarded = elapsed =>
+                {
+                    if (!Volatile.Read(ref _disposed))
+                        value(elapsed);
+                };
                 try
                 {
-                    inner.Tick += value;
+                    inner.Tick += guarded;
                 }
                 catch
                 {
-                    try { inner.Tick -= value; }
+                    try { inner.Tick -= guarded; }
                     catch { }
                     throw;
                 }
@@ -932,12 +957,12 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 {
                     if (!_disposed)
                     {
-                        _tickRegistrations.Add(value);
+                        _tickRegistrations.Add((value, guarded));
                         return;
                     }
                 }
 
-                try { inner.Tick -= value; }
+                try { inner.Tick -= guarded; }
                 catch { }
                 throw new ObjectDisposedException(nameof(ScopedEvents));
             }
@@ -945,17 +970,42 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
             {
                 if (value is null)
                     return;
-                inner.Tick -= value;
+                Action<double>? guarded = null;
                 lock (_gate)
                 {
                     for (int index = _tickRegistrations.Count - 1; index >= 0; index--)
                     {
-                        if (_tickRegistrations[index] != value)
+                        if (_tickRegistrations[index].Handler != value)
                             continue;
+                        guarded = _tickRegistrations[index].Guarded;
                         _tickRegistrations.RemoveAt(index);
                         break;
                     }
                 }
+                if (guarded is not null)
+                    inner.Tick -= guarded;
+            }
+        }
+
+        /// <summary>
+        /// Raises <see cref="LoginComplete"/> to this plugin's own handlers
+        /// only, for a plugin started while the character was already in the
+        /// world. A handler that throws is named through
+        /// <paramref name="report"/> and does not stop the next one.
+        /// </summary>
+        internal void RaiseLoginCompleteToThisPlugin(Action<string, Exception> report)
+        {
+            Action[] handlers;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+                handlers = _loginCompleteRegistrations.ToArray();
+            }
+            foreach (Action handler in handlers)
+            {
+                try { handler(); }
+                catch (Exception error) { report("LoginComplete", error); }
             }
         }
 
@@ -1404,7 +1454,9 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
                 _disposed = true;
                 registrations = _registrations.ToArray();
                 _registrations.Clear();
-                tickRegistrations = _tickRegistrations.ToArray();
+                tickRegistrations = _tickRegistrations
+                    .Select(static registration => registration.Guarded)
+                    .ToArray();
                 _tickRegistrations.Clear();
                 loginCompleteRegistrations = _loginCompleteRegistrations.ToArray();
                 _loginCompleteRegistrations.Clear();
@@ -1589,9 +1641,29 @@ internal sealed class ScopedPluginHost : IPluginHost, IDisposable
         private IDisposable RegisterPanelWithInner(
             PluginPanelDescriptor descriptor,
             string markupPath,
-            object binding) => _directoryInner is not null
-                ? _directoryInner.RegisterPanel(_owner, _pluginDirectory, descriptor, markupPath, binding)
-                : _inner.RegisterPanel(_owner, descriptor, markupPath, binding);
+            object binding)
+        {
+            string resolved = ResolveMarkupPath(markupPath);
+            return _directoryInner is not null
+                ? _directoryInner.RegisterPanel(_owner, _pluginDirectory, descriptor, resolved, binding)
+                : _inner.RegisterPanel(_owner, descriptor, resolved, binding);
+        }
+
+        /// <summary>
+        /// A relative markup path is read from the plugin's own folder, never
+        /// from whatever the process's working folder happens to be. The
+        /// host loads a plugin's assembly from memory, so a plugin that
+        /// builds its path from its assembly's location gets an empty folder
+        /// and a relative path; this is where that path belongs.
+        /// </summary>
+        private string ResolveMarkupPath(string markupPath)
+        {
+            return _pluginDirectory is not null
+                && !string.IsNullOrWhiteSpace(markupPath)
+                && !Path.IsPathRooted(markupPath)
+                ? Path.GetFullPath(Path.Combine(_pluginDirectory, markupPath))
+                : markupPath;
+        }
 
         private IDisposable RegisterPanelContentWithInner(
             PluginPanelDescriptor descriptor,

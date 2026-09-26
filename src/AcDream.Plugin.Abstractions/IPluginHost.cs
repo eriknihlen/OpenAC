@@ -110,6 +110,30 @@ public interface IPluginHost
     IReadOnlyDictionary<string, string> SessionSettings =>
         EmptySessionSettings;
 
+    /// <summary>
+    /// Whether this copy of the plugin was loaded by a reload while the
+    /// client was already running, rather than when the client started. A
+    /// reload starts a fresh copy: nothing the previous copy kept in memory
+    /// survives it, so a plugin that wants to carry something across keeps
+    /// it in <see cref="Storage"/>. When the character is already in the
+    /// world, the host raises <see cref="IEvents.LoginComplete"/> to the new
+    /// copy right after <see cref="IAcDreamPlugin.Enable"/>, so a plugin that
+    /// does its setup on login needs nothing extra. False by default.
+    /// </summary>
+    bool IsHotReload => false;
+
+    /// <summary>
+    /// The folder this plugin was installed in: the one holding its
+    /// <c>plugin.json</c>, its assembly and whatever else its package ships.
+    /// The host loads a plugin's assemblies from memory so the folder can be
+    /// updated while the client runs, which leaves
+    /// <see cref="System.Reflection.Assembly.Location"/> empty; read package
+    /// files relative to this instead. A relative markup path given to
+    /// <see cref="IUiRegistry"/> is already read from here. Null on a host
+    /// that does not say.
+    /// </summary>
+    string? PluginDirectory => null;
+
     private static readonly IReadOnlyDictionary<string, string> EmptySessionSettings =
         new Dictionary<string, string>();
 }

@@ -1,3 +1,4 @@
+using System.Runtime.Loader;
 using AcDream.Plugin.Abstractions;
 using AcDream.Plugin.Abstractions.Rendering;
 
@@ -5,6 +6,8 @@ namespace AcDream.Core.Tests.Fixtures.HelloPlugin;
 
 public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPackAssets
 {
+    private bool _disabled;
+
     public int InitializeCount { get; private set; }
     public int EnableCount { get; private set; }
     public int DisableCount { get; private set; }
@@ -14,10 +17,38 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
     {
         ReceivedHost = host;
         InitializeCount++;
+        host.Log.Info(
+            $"hello-initialized:hotReload={host.IsHotReload}:directory={host.PluginDirectory}");
     }
 
-    public void Enable() => EnableCount++;
-    public void Disable() => DisableCount++;
+    public void Enable()
+    {
+        EnableCount++;
+        IPluginHost? host = ReceivedHost;
+        if (host is null)
+            return;
+        host.Events.LoginComplete += OnLoginComplete;
+        host.Events.Tick += OnTick;
+        // A plugin that subscribes to something outside its host keeps its
+        // own code reachable after it is unloaded, which is what the host's
+        // unload check has to notice and report.
+        if (File.Exists(Path.Combine(FixtureDirectory(), "leak-on-enable")))
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        if (File.Exists(Path.Combine(FixtureDirectory(), "throw-on-enable")))
+            throw new InvalidOperationException("fixture enable failed on purpose");
+    }
+
+    public void Disable()
+    {
+        DisableCount++;
+        _disabled = true;
+        IPluginHost? host = ReceivedHost;
+        if (host is null)
+            return;
+        host.Events.LoginComplete -= OnLoginComplete;
+        host.Events.Tick -= OnTick;
+        host.Log.Info("hello-disabled");
+    }
 
     public void Register(IRenderPackRegistry registry)
     {
@@ -42,9 +73,7 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
                 FeatureSummary = "Test-only no-op render-pack fixture.",
             },
             this);
-        string? directory = Path.GetDirectoryName(typeof(HelloPlugin).Assembly.Location);
-        if (directory is not null
-            && File.Exists(Path.Combine(directory, "throw-after-render-register")))
+        if (File.Exists(Path.Combine(FixtureDirectory(), "throw-after-render-register")))
         {
             throw new InvalidOperationException(
                 "fixture render-pack registration failed after publishing a descriptor");
@@ -53,4 +82,28 @@ public sealed class HelloPlugin : IAcDreamPlugin, IRenderPackPlugin, IRenderPack
 
     public Stream OpenRead(string assetKey) =>
         new MemoryStream([], writable: false);
+
+    private void OnLoginComplete() => ReceivedHost?.Log.Info("hello-login");
+
+    private void OnTick(double elapsedSeconds)
+    {
+        if (_disabled)
+            ReceivedHost?.Log.Warn("hello-tick-after-disable");
+    }
+
+    private void OnProcessExit(object? sender, EventArgs e) => _ = EnableCount;
+
+    /// <summary>
+    /// The fixture's folder. The host loads the assembly from memory, so it
+    /// has no location of its own; the host names its load context after the
+    /// plugin folder, which a render pack, having no host, reads instead.
+    /// </summary>
+    private static string FixtureDirectory()
+    {
+        string location = typeof(HelloPlugin).Assembly.Location;
+        return location.Length > 0
+            ? Path.GetDirectoryName(location)!
+            : AssemblyLoadContext.GetLoadContext(typeof(HelloPlugin).Assembly)?.Name
+                ?? string.Empty;
+    }
 }

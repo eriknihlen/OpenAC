@@ -70,6 +70,72 @@ public sealed class GraphicalPluginSessionTests
         Assert.False(context.IsAlive);
     }
 
+    /// <summary>
+    /// <c>/plugin reload</c> through this client's command registry loads a
+    /// fresh copy on the next tick, re-registers its panel and lets the old
+    /// copy leave memory. The same script runs against the client without a
+    /// window in HeadlessPluginSessionTests. Mutation (2026-09-26): making
+    /// the session's reload return at once left one "fixture-hot-reload"
+    /// line.
+    /// </summary>
+    [Fact]
+    public void ReloadCommandLoadsAFreshCopyAndTheOldOneLeavesMemory()
+    {
+        using var temporary = new TemporaryDirectory();
+        ApplicationPathSet paths = Paths(temporary.Path);
+        InstallFixture(paths.PluginsDirectory, FixtureId);
+        var logger = new CapturingLogger();
+        var events = new WorldEvents();
+        var ui = new BufferedUiRegistry();
+        var commands = new PluginCommandRegistry();
+        var host = new AppPluginHost(
+            logger,
+            new WorldGameState(),
+            events,
+            new SelectionState(),
+            ui,
+            NoOpAutomationSurface.Instance,
+            commands: commands);
+
+        using GraphicalPluginSession plugins = GraphicalPluginSession.Create(
+            paths,
+            [FixtureId],
+            "gui-session",
+            host,
+            new SessionStatusWriter(Path.Combine(temporary.Path, "status.jsonl")));
+        plugins.Start();
+        WeakReference first = Assert.Single(plugins.CaptureLoadContextWeakReferences());
+        Assert.Equal(1, ui.RegistrationCount);
+
+        Assert.True(commands.TryHandle($"/plugin reload {FixtureId}"));
+        events.FireTick(0.015);
+
+        Assert.Single(logger.Messages, static line => line == "fixture-hot-reload=False");
+        Assert.Single(logger.Messages, static line => line == "fixture-hot-reload=True");
+        Assert.Contains("Reloaded Host fixture 1.0.0.", logger.Messages);
+        Assert.Equal(1, plugins.LoadedCount);
+        Assert.Equal(1, ui.RegistrationCount);
+
+        for (int tick = 0;
+             tick < PluginSession.UnloadCheckAttempts * PluginSession.TicksBetweenUnloadChecks;
+             tick++)
+        {
+            // The client with a window applies panel changes on its own
+            // frame; the old copy's panel has to leave the drawn tree before
+            // anything can let go of the old copy.
+            _ = ui.Drain();
+            events.FireTick(0.015);
+        }
+        Assert.False(first.IsAlive);
+        Assert.Contains(logger.Messages, static line => line.Contains("has left memory", StringComparison.Ordinal));
+
+        IReadOnlyList<WeakReference> contexts = plugins.CaptureLoadContextWeakReferences();
+        plugins.Dispose();
+        foreach (WeakReference context in contexts)
+            Collect(context);
+        Assert.All(contexts, static context => Assert.False(context.IsAlive));
+    }
+
     [Fact]
     public void ExplicitEmptyConfiguredSetLoadsNone()
     {

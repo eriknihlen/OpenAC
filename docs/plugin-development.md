@@ -157,6 +157,52 @@ For a bot or a test that needs no window, the headless host
 few things that differ (no UI, no window, remote positions from the latest
 server update).
 
+### Reloading while the client runs
+
+The client reads your assembly (and its `.pdb`, when it sits beside it, so
+stack traces keep file and line numbers) into memory instead of running it
+from the file, so nothing in your plugin's folder is held open. Rebuild
+straight into the folder while the game runs: when your entry assembly or
+`plugin.json` changes, the client waits until the folder has had no writes for
+one second and then reloads your plugin. `/plugin reload <id>` reloads one
+plugin on demand, `/plugin reload all` every plugin, in the chat box and on a
+headless session's console alike. The same happens when the launcher updates
+your plugin while a game is running.
+
+A reload switches the running copy off (`Disable`), releases everything the
+host handed it (panels, commands, hotkeys, event handlers, chat filters,
+images, world lines, status lines), unloads its assemblies, then creates the
+new copy and calls `Initialize` and `Enable` as at startup.
+`IPluginHost.IsHotReload` is true for that new copy. If the character is
+already in the world, the new copy's `LoginComplete` handlers are called right
+after `Enable`, so a plugin that sets up on login needs nothing extra.
+
+Before the running copy is touched, the client reads the new `plugin.json`
+and loads the new assembly. A new copy with a different `id`, a newer
+`apiVersion` or a `minHostVersion` this client does not meet is refused, the
+running copy keeps running, and chat says the update needs a restart or a
+newer client. A render pack is never reloaded; it takes effect when the client
+restarts.
+
+What this means for your plugin:
+
+- **In-memory state does not survive a reload.** Anything you want to keep,
+  save through `Storage` and read back in `Initialize` or on login.
+- **Stop your own threads and timers in `Disable`,** and cancel any work you
+  started with `Task.Run`. The host cannot stop them for you.
+- **Do not keep references the host cannot see.** A static cache in another
+  assembly, a handler on a .NET or operating-system event
+  (`AppDomain.ProcessExit`, `SystemEvents`, a `FileSystemWatcher` you did not
+  dispose), or a thread still running keeps the old copy in memory. The client
+  checks for about a second after every reload and, if the old copy is still
+  there, names your plugin in chat and in the log: it is switched off, but
+  its memory is not returned until the client restarts.
+- **`Assembly.Location` is empty.** Your assembly was loaded from memory, so
+  it has no file. Read the files your package ships relative to
+  `IPluginHost.PluginDirectory`. A relative markup path handed to `Ui` is
+  already read from your plugin's folder, so `Path.Combine(".", "panel.xml")`
+  and plain `"panel.xml"` both work.
+
 ## Checking it before you publish
 
 `acdream-plugincheck` tells you whether the launcher would install your
