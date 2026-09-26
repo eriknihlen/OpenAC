@@ -182,8 +182,8 @@ public sealed class LauncherProjectBoundaryTests
             "AcDream.Launcher",
             "MainWindow.axaml.cs"));
 
-        Assert.Equal(10, Count(markup, "KeyboardNavigation.TabNavigation=\"Cycle\""));
-        Assert.Equal(10, Count(markup, "KeyDown=\"OnModalKeyDown\""));
+        Assert.Equal(11, Count(markup, "KeyboardNavigation.TabNavigation=\"Cycle\""));
+        Assert.Equal(11, Count(markup, "KeyDown=\"OnModalKeyDown\""));
         Assert.True(Count(markup, "AutomationProperties.Name=") >= 13);
         Assert.True(Count(markup, "IsDefault=\"True\"") >= 3);
         Assert.Equal(5, Count(markup, "IsCancel=\"True\""));

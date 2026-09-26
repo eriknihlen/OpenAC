@@ -39,6 +39,8 @@ public sealed class MainWindowViewTests
         ("FirstRunDatDirectoryTextBox", typeof(TextBox)),
         ("FirstRunCloseButton", typeof(Button)),
         ("UpdateCloseButton", typeof(Button)),
+        ("OwnServerNameTextBox", typeof(TextBox)),
+        ("MigrationNoticeCloseButton", typeof(Button)),
     ];
 
     [AvaloniaFact]
@@ -58,6 +60,38 @@ public sealed class MainWindowViewTests
         SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
         TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
         ARefusedStartShowsItsReason();
+        TheAddServerDialogListsKnownServersAndFocusesItsNameField();
+    }
+
+    private static void TheAddServerDialogListsKnownServersAndFocusesItsNameField()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel, Width = 1120, Height = 740 };
+        try
+        {
+            window.Show();
+            viewModel.OpenAddServerCommand.Execute(null);
+            viewModel.AddServerDialog.ShowList(new AcDream.Launcher.Core.Status.KnownServerList(
+            [
+                new("Coldeve", "play.coldeve.ac", 9000, "PvE", "ACE", "A PvE server", new Uri("https://coldeve.ac/"), null, 675),
+                new("AChard", "a-chard.ddns.net", 9000, "PvP", "ACE", "PK server", null, new Uri("https://discord.gg/x"), null),
+            ], false, DateTimeOffset.UtcNow));
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+
+            Assert.Same(window.FindControl<TextBox>("OwnServerNameTextBox"), CurrentFocus(window));
+            Assert.Equal(2, window.GetVisualDescendants().OfType<TextBlock>().Count(text => text.Text is "Coldeve" or "AChard"));
+            ComboBox type = window.GetVisualDescendants().OfType<ComboBox>().Single(box => AutomationProperties.GetName(box) == "Server type");
+            Assert.Equal("All types", type.SelectedItem);
+            string artifacts = Path.Combine(FindRepositoryRoot(), "artifacts", "launcher-redesign");
+            Directory.CreateDirectory(artifacts);
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            using var frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+            frame.Save(Path.Combine(artifacts, "launcher-add-server.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+            viewModel.AddServerDialog.CloseCommand.Execute(null);
+        }
+        finally { CloseTestWindow(window); }
     }
 
     /// <summary>

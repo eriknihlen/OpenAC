@@ -19,6 +19,8 @@ public sealed partial class LauncherWindowViewModel
     private string? _profileMigrationNotice;
 
     public ProfileTextEditorViewModel TextEditor { get; private set; } = null!;
+    public AddServerDialogViewModel AddServerDialog { get; private set; } = null!;
+    public AsyncRelayCommand OpenAddServerCommand { get; private set; } = null!;
     public RelayCommand EditAccountsTextCommand { get; private set; } = null!;
     public RelayCommand EditServersTextCommand { get; private set; } = null!;
     public RelayCommand EditLogonCommandsTextCommand { get; private set; } = null!;
@@ -69,6 +71,9 @@ public sealed partial class LauncherWindowViewModel
     {
         TextEditor = new ProfileTextEditorViewModel(_orchestrator);
         TextEditor.PropertyChanged += OnModalPropertyChanged;
+        AddServerDialog = new AddServerDialogViewModel(_orchestrator);
+        AddServerDialog.PropertyChanged += OnModalPropertyChanged;
+        OpenAddServerCommand = new AsyncRelayCommand(() => AddServerDialog.OpenAsync(), () => CanInteract);
         UpdatePrompt.PropertyChanged += OnDesktopUpdateChanged;
         EditAccountsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Accounts), () => CanInteract);
         EditServersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Servers), () => CanInteract);
@@ -149,6 +154,9 @@ public sealed partial class LauncherWindowViewModel
 
     /// <summary>Whether the install may move now: nothing running and nothing busy.</summary>
     internal bool CanMoveInstallFolder => !IsBusy && Sessions.All(session => !session.IsActive);
+
+    /// <summary>Gives Add a server its list of known public servers.</summary>
+    public void ConfigureKnownServers(KnownServerCatalog catalog) => AddServerDialog.UseCatalog(catalog);
 
     public void ConfigureServerHealth(IServerHealthService service)
     {
@@ -239,6 +247,7 @@ public sealed partial class LauncherWindowViewModel
         OnPropertyChanged(nameof(HasActiveSessions));
         EditAccountsTextCommand?.NotifyCanExecuteChanged();
         EditServersTextCommand?.NotifyCanExecuteChanged();
+        OpenAddServerCommand?.NotifyCanExecuteChanged();
         EditLogonCommandsTextCommand?.NotifyCanExecuteChanged();
         ReviewUpdateCommand?.NotifyCanExecuteChanged();
         CheckForUpdatesCommand?.NotifyCanExecuteChanged();
@@ -252,6 +261,7 @@ public sealed partial class LauncherWindowViewModel
         _healthCancellation.Cancel();
         _healthCancellation.Dispose();
         TextEditor.PropertyChanged -= OnModalPropertyChanged;
+        AddServerDialog.PropertyChanged -= OnModalPropertyChanged;
         TextEditor.Close();
         UpdatePrompt.PropertyChanged -= OnDesktopUpdateChanged;
     }

@@ -133,6 +133,7 @@ public sealed partial class App : Application
             _viewModel.UpdatePrompt.AutoOpenDiscoveredUpdates = false;
             _viewModel.ConfigureVersions(launcherVersion.Value, () => updates.Versions.CachedResolution);
             _viewModel.ConfigureServerHealth(new ServerHealthService(_serverStatusClient, new UdpServerReachabilityProbe()));
+            _viewModel.ConfigureKnownServers(new KnownServerCatalog(_serverStatusClient, paths.CacheDirectory));
             _viewModel.ConfigurePlugins(plugins, () => updates.Versions.CachedResolution);
             _viewModel.Initialize();
             mainWindow.Opened += OnMainWindowOpened;

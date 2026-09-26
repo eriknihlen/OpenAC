@@ -51,6 +51,15 @@ included; **Paste all** replaces it (nothing is saved until **Save**). A
 wrong line is reported by its number and nothing is saved. Accounts can be
 edited while sessions run, except that a running account cannot be removed.
 
+**Add server** adds your own server (name, host and port) or one from the list
+of known public servers that [TreeStats](https://treestats.net/) publishes,
+with its type, player count, description and links. Search by name, address or
+description, or narrow the list by type; a server you already have (same name,
+or same host and port) shows **Added**. The list is saved each time it loads,
+so the dialog also opens offline with the last copy; with no copy at all, only
+your own server can be added. A new server has no accounts until you add them
+under its `#` line in **Accounts**.
+
 **Edit servers** has two fields per row: **Server name** and **Address:port**.
 For example, enter `Local` and `127.0.0.1:9000`, or `Example` and
 `game.example.org:9000`. Include the port; for IPv6, use `[::1]:9000`.

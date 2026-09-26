@@ -426,6 +426,7 @@
         <Grid ColumnDefinitions="Auto,*,Auto">
           <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" IsVisible="{Binding IsAccountsTabSelected}">
             <Button Content="Accounts" Command="{Binding EditAccountsTextCommand}" ToolTip.Tip="Every account on every server, as plain text" />
+            <Button Content="Add server" Command="{Binding OpenAddServerCommand}" ToolTip.Tip="Pick a known server, or add your own" />
             <Button Content="Edit servers" Command="{Binding EditServersTextCommand}" />
             <Button Content="Logon commands" Command="{Binding EditLogonCommandsTextCommand}" />
           </StackPanel>
@@ -804,6 +805,87 @@
             <Button Content="Cancel" Command="{Binding CloseDesktopDialogCommand}" />
             <Button Content="Save" Classes="primary ready" Command="{Binding SaveRowOptionsCommand}" />
           </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+    <Border Grid.RowSpan="5" ZIndex="40" Background="#E010171C" IsVisible="{Binding AddServerDialog.IsOpen}"
+            KeyboardNavigation.TabNavigation="Cycle" KeyDown="OnModalKeyDown" AutomationProperties.Name="Add a server dialog">
+      <Border Classes="card" Margin="24" MaxWidth="900" VerticalAlignment="Stretch">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="10">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Add a server" FontFamily="Georgia,serif" FontSize="22" Foreground="#DBB573" />
+            <TextBlock Text="Pick a known server, or add your own." Classes="muted" FontSize="12" />
+          </StackPanel>
+          <Border Grid.Row="1" Background="#141E24" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3" Padding="12,10">
+            <StackPanel Spacing="8">
+              <TextBlock Text="Add your own server" FontWeight="SemiBold" FontSize="13" />
+              <Grid ColumnDefinitions="220,*,90,Auto" ColumnSpacing="10">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Name" Classes="muted" FontSize="12" />
+                  <TextBox x:Name="OwnServerNameTextBox" Text="{Binding AddServerDialog.Name, Mode=TwoWay}" PlaceholderText="My local ACE" AutomationProperties.Name="Server name" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="3">
+                  <TextBlock Text="Host" Classes="muted" FontSize="12" />
+                  <TextBox Text="{Binding AddServerDialog.Host, Mode=TwoWay}" PlaceholderText="127.0.0.1" AutomationProperties.Name="Server host" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="3">
+                  <TextBlock Text="Port" Classes="muted" FontSize="12" />
+                  <TextBox Text="{Binding AddServerDialog.Port, Mode=TwoWay}" AutomationProperties.Name="Server port" />
+                </StackPanel>
+                <Button Grid.Column="3" Content="Add" Classes="primary ready" MinWidth="96" VerticalAlignment="Bottom" Command="{Binding AddServerDialog.AddOwnCommand}"
+                        AutomationProperties.Name="Add your own server" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Panel Grid.Row="2">
+            <TextBlock Text="{Binding AddServerDialog.Error}" Foreground="#FFB0A0" TextWrapping="Wrap" IsVisible="{Binding AddServerDialog.HasError}" />
+            <TextBlock Text="{Binding AddServerDialog.Notice}" Foreground="#8FD18F" TextWrapping="Wrap" IsVisible="{Binding !AddServerDialog.HasError}" />
+          </Panel>
+          <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+            <TextBlock Text="Known servers" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding AddServerDialog.ListStatus}" Classes="muted" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <TextBox Grid.Column="2" Width="220" Text="{Binding AddServerDialog.Search, Mode=TwoWay}" PlaceholderText="Search servers" AutomationProperties.Name="Search servers" />
+            <ComboBox Grid.Column="3" MinWidth="110" ItemsSource="{Binding AddServerDialog.Types}" SelectedItem="{Binding AddServerDialog.SelectedType, Mode=TwoWay}" AutomationProperties.Name="Server type" />
+          </Grid>
+          <Border Grid.Row="4" BorderBrush="#35434B" BorderThickness="1" CornerRadius="3">
+            <Grid RowDefinitions="Auto,*">
+              <Grid Background="#1D2931" ColumnDefinitions="200,60,70,*,90" ColumnSpacing="12" Margin="0">
+                <TextBlock Text="Server" Classes="muted" FontSize="12" Margin="12,7,0,7" />
+                <TextBlock Grid.Column="1" Text="Type" Classes="muted" FontSize="12" Margin="0,7" />
+                <TextBlock Grid.Column="2" Text="Players" Classes="muted" FontSize="12" Margin="0,7" />
+                <TextBlock Grid.Column="3" Text="About" Classes="muted" FontSize="12" Margin="0,7" />
+              </Grid>
+              <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding AddServerDialog.Servers}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:KnownServerRowViewModel">
+                      <Border BorderBrush="#22303A" BorderThickness="0,1,0,0" Padding="12,7">
+                        <Grid ColumnDefinitions="188,60,70,*,90" ColumnSpacing="12">
+                          <StackPanel Spacing="1">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Endpoint}" Foreground="#7C8F99" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Endpoint}" />
+                          </StackPanel>
+                          <TextBlock Grid.Column="1" Text="{Binding Type}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Text="{Binding Players}" FontSize="13" VerticalAlignment="Center" />
+                          <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding About}" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding About}" />
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                              <HyperlinkButton Content="Website" NavigateUri="{Binding Website}" IsVisible="{Binding HasWebsite}" Padding="0" FontSize="11" Foreground="#DBB573" />
+                              <HyperlinkButton Content="Discord" NavigateUri="{Binding Discord}" IsVisible="{Binding HasDiscord}" Padding="0" FontSize="11" Foreground="#DBB573" />
+                            </StackPanel>
+                          </StackPanel>
+                          <Button Grid.Column="4" Classes="gold" Content="Add" Command="{Binding AddCommand}" IsVisible="{Binding IsNotAdded}" HorizontalAlignment="Stretch"
+                                  AutomationProperties.Name="{Binding Name, StringFormat='Add {0}'}" />
+                          <TextBlock Grid.Column="4" Text="Added ✓" Foreground="#8FD18F" FontSize="12" IsVisible="{Binding IsAdded}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Grid>
+          </Border>
+          <Button Grid.Row="5" Content="Close" HorizontalAlignment="Right" MinWidth="96" Command="{Binding AddServerDialog.CloseCommand}" />
         </Grid>
       </Border>
     </Border>

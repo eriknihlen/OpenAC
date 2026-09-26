@@ -155,6 +155,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         || FirstRunWizardShell.IsOpen
         || UpdatePrompt.IsOpen
         || (TextEditor?.IsOpen ?? false)
+        || (AddServerDialog?.IsOpen ?? false)
         || IsCharacterOptionsOpen
         || IsSessionLogOpen
         || IsSettingsOpen
@@ -522,6 +523,10 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         if (TextEditor.IsOpen)
         {
             TextEditor.Close();
+        }
+        else if (AddServerDialog.IsOpen)
+        {
+            AddServerDialog.Close();
         }
         else if (EditorDialog.IsOpen)
         {

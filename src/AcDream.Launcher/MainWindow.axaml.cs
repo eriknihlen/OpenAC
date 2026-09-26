@@ -141,6 +141,10 @@ public sealed partial class MainWindow : Window
         {
             CharacterPluginsPanel.Focus();
         }
+        else if (viewModel.AddServerDialog.IsOpen)
+        {
+            OwnServerNameTextBox.Focus();
+        }
         else if (viewModel.HasProfileMigrationNotice)
         {
             MigrationNoticeCloseButton.Focus();
