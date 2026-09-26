@@ -31,9 +31,16 @@ public sealed class UiScrollable
             SetScrollY(_scrollY);
     }
 
-    public void SetScrollY(int y) => _scrollY = Math.Clamp(y, 0, MaxScroll);
+    /// <summary>Raised when the scroll offset is explicitly updated.</summary>
+    public event Action? PositionChanged;
 
-    public void ScrollToEnd() => _scrollY = MaxScroll;
+    public void SetScrollY(int y)
+    {
+        _scrollY = Math.Clamp(y, 0, MaxScroll);
+        PositionChanged?.Invoke();
+    }
+
+    public void ScrollToEnd() => SetScrollY(MaxScroll);
 
     public float ThumbRatio => ContentHeight <= 0 ? 1f : Math.Min(1f, (float)ViewHeight / ContentHeight);
 

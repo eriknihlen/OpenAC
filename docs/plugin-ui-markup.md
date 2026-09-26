@@ -400,3 +400,20 @@ and canvases (see the plugin API guide) are covered by
 under `tests/AcDream.App.Tests/`, by `ScopedUiRegistryImagesTests` and
 `ScopedUiRegistryCanvasTests` for the scoped forwarder, and by the contract
 and headless suites for the inert answers a host without a window gives.
+
+## Scrolling transcripts
+
+`<log items="{Lines}" firstindex="{FirstIndex}" x="12" y="58" w="596" h="244" />`
+renders a read-only, wrapped transcript with wheel and scrollbar navigation. It
+follows appended entries while at the bottom. Scrolling back pauses following;
+returning to the bottom resumes it. New entries never displace the reader's
+anchor while paused. Resize and theme font changes rewrap text around the same
+entry. Hidden windows retain their reading position.
+
+`items` uses a cached `IReadOnlyList<string>` snapshot; replace the snapshot when
+entries change. `firstindex` is an optional integer binding (default zero): the
+sequence number of the first retained entry. Increment it by the number removed
+from the front, including when clearing, so trimming retains the visible entry.
+If that entry has been removed, the viewport stays at the oldest available entry
+without resuming automatic following. The producer owns history retention limits.
+The control participates in shared plugin themes and anchors.

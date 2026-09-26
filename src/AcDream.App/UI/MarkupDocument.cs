@@ -571,6 +571,19 @@ public static class MarkupDocument
                 parent.AddChild(menu);
                 break;
 
+            case "log":
+                var log = new UiMarkupLog(resolve)
+                {
+                    Left = F(el, "x"), Top = F(el, "y"), Width = F(el, "w"), Height = F(el, "h"),
+                    DatFont = datFont,
+                    ItemsSource = BindStringList((string?)el.Attribute("items"), binding, "log items", preserveSnapshot: true),
+                    FirstIndexSource = el.Attribute("firstindex") is null ? static () => 0
+                        : BindRequiredIntReader((string?)el.Attribute("firstindex"), binding, "log firstindex"),
+                };
+                ApplyCommon(log, el, binding);
+                parent.AddChild(log);
+                break;
+
             case "list":
                 string? listChangeName = (string?)el.Attribute("onchange");
                 Action<int>? listChanged = BindIntAction(listChangeName, binding);
@@ -837,7 +850,7 @@ public static class MarkupDocument
     private static Func<IReadOnlyList<string>> BindStringList(
         string? expression,
         object binding,
-        string context)
+        string context, bool preserveSnapshot = false)
     {
         if (string.IsNullOrWhiteSpace(expression) || !IsBinding(expression))
             throw new FormatException($"{context} must be a string-list binding");
@@ -850,7 +863,7 @@ public static class MarkupDocument
                 + binding.GetType().Name);
         }
         return () => property.GetValue(binding) is IEnumerable<string> values
-            ? values.ToArray()
+            ? preserveSnapshot && values is IReadOnlyList<string> snapshot ? snapshot : values.ToArray()
             : Array.Empty<string>();
     }
 

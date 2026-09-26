@@ -22,6 +22,7 @@ internal static class PluginMarkupTheme
                     Bind(() => menu.DatFont, f => menu.DatFont = f);
                     Bind(() => menu.ButtonDatFont, f => menu.ButtonDatFont = f);
                     break;
+                case UiMarkupLog log: Bind(() => log.DatFont, f => log.DatFont = f); break;
                 case UiMarkupList list: Bind(() => list.DatFont, f => list.DatFont = f); break;
             }
         }
@@ -83,6 +84,9 @@ internal static class PluginMarkupTheme
                     menu.PlainTriangleColor = p?.Muted ?? ma; menu.PlainSelectedColor = p?.Selected ?? ms;
                     menu.PlainHoverColor = p?.Selected ?? mh;
                 });
+                break;
+            case UiMarkupLog log:
+                panel.AddThemeAction(p => log.ThemePalette = p);
                 break;
             case UiMarkupList list:
                 var lb = list.BackgroundColor; var le = list.BorderColor; var lt = list.TextColor;
