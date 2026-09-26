@@ -34,8 +34,7 @@ public sealed class RosterMergeTests
         CharacterProfile first = characters.Single(c => c.Name == "+Acdream");
         Assert.Equal("0x5000000A", first.Id);
         Assert.Equal(LaunchMode.GuiSelect, first.LaunchMode);
-        Assert.Empty(first.Plugins);
-        Assert.Empty(first.LoginCommands);
+        Assert.Null(first.Plugins);
 
         CharacterProfile second = characters.Single(c => c.Name == "+Second");
         Assert.Equal("0x5000000B", second.Id);
@@ -54,9 +53,8 @@ public sealed class RosterMergeTests
             "Local ACE",
             "testaccount",
             "+Acdream",
-            launchMode: LaunchMode.Headless,
-            plugins: ["ExamplePlugin"],
-            loginCommands: ["/vt start"]);
+            launchMode: LaunchMode.Headless);
+        store.SetCharacterPlugins("Local ACE", "testaccount", "+Acdream", ["ExamplePlugin"]);
 
         store.MergeRoster(
             "Local ACE",
@@ -67,7 +65,6 @@ public sealed class RosterMergeTests
             store.Document.Servers.Single().Accounts.Single().Characters);
         Assert.Equal(LaunchMode.Headless, character.LaunchMode);
         Assert.Equal(["ExamplePlugin"], character.Plugins);
-        Assert.Equal(["/vt start"], character.LoginCommands);
     }
 
     [Fact]
@@ -142,8 +139,7 @@ public sealed class RosterMergeTests
             "+Acdream",
             "0x50000001",
             LaunchMode.Headless,
-            ["ExamplePlugin"],
-            ["/vt start"]);
+            ["ExamplePlugin"]);
 
         store.MergeRoster(
             "Local ACE",
@@ -155,7 +151,6 @@ public sealed class RosterMergeTests
         Assert.Equal("0x5000000A", character.Id);
         Assert.Equal(LaunchMode.Headless, character.LaunchMode);
         Assert.Equal(["ExamplePlugin"], character.Plugins);
-        Assert.Equal(["/vt start"], character.LoginCommands);
     }
 
     [Fact]
@@ -169,7 +164,6 @@ public sealed class RosterMergeTests
             Name = "+OldName",
             LaunchMode = LaunchMode.Headless,
             Plugins = ["Canonical.Plugin"],
-            LoginCommands = ["/canonical"],
         });
         account.Characters.Add(new CharacterProfile
         {
@@ -177,7 +171,6 @@ public sealed class RosterMergeTests
             Name = "+Acdream",
             LaunchMode = LaunchMode.Gui,
             Plugins = ["Duplicate.Plugin"],
-            LoginCommands = ["/duplicate"],
         });
 
         store.MergeRoster(

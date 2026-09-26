@@ -21,32 +21,96 @@ public sealed class ProfileFieldsEditorTests : IDisposable
         _editor = new ProfileTextEditorViewModel(_core);
     }
 
-    [Fact]
-    public void AccountFieldsRoundTripLiteralSeparatorsAndPasswordWhitespaceAcrossServers()
+    private sealed class FakeClipboard : IProfileEditorClipboard
     {
-        const string password = "  p|a,ss\"\\word  ";
-        _editor.Open(LauncherTextEditorKind.Users);
-        _editor.Rows[0].Name = "Account | one";
-        _editor.Rows[0].Value = password;
-        Assert.Equal('●', _editor.Rows[0].PasswordChar);
+        public string? Text { get; set; }
+
+        public Task SetTextAsync(string text)
+        {
+            Text = text;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetTextAsync() => Task.FromResult(Text);
+    }
+
+    [Fact]
+    public void TheAccountsEditorHidesPasswordsAndIsReadOnlyUntilShown()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "notan3", "p,a\"ss");
+        _editor.Open(LauncherTextEditorKind.Accounts);
+
+        Assert.True(_editor.IsPasswordHidden);
+        Assert.Equal($"#Coldeve{Environment.NewLine}Name=notan3,Password={ProfileTextEditorViewModel.HiddenPassword}{Environment.NewLine}",
+            _editor.DisplayedText);
+        _editor.DisplayedText = "#Coldeve\nName=someone,Password=typed while hidden";
+        Assert.Contains("notan3", _editor.Text);
+
+        _editor.ShowPasswords = true;
+        Assert.Equal(_editor.Text, _editor.DisplayedText);
+        _editor.DisplayedText = "#Coldeve\nName=notan3,Password=changed,Profiles=Bots\n";
         _editor.SaveCommand.Execute(null);
-        Assert.False(_editor.IsOpen);
-        _editor.Open(LauncherTextEditorKind.Servers);
-        _editor.Rows[0].Name = "Server | one";
-        _editor.Rows[0].Value = "localhost:9001";
-        _editor.SaveCommand.Execute(null);
+
         Assert.False(_editor.IsOpen);
         _store.Load();
-        var server = Assert.Single(_store.Document.Servers);
-        Assert.Equal(9001, server.Port);
-        Assert.Equal(password, Assert.Single(server.Accounts).Password);
-        _editor.Open(LauncherTextEditorKind.Users);
-        Assert.Equal("Account | one", _editor.Rows[0].Name);
-        Assert.Equal(password, _editor.Rows[0].Value);
-        _editor.Rows[0].Value = "discarded change";
-        _editor.CancelCommand.Execute(null);
-        _editor.Open(LauncherTextEditorKind.Users);
-        Assert.Equal(password, _editor.Rows[0].Value);
+        AccountProfile account = Assert.Single(_store.Document.Servers[0].Accounts);
+        Assert.Equal("changed", account.Password);
+        Assert.Equal(["Bots"], account.Profiles);
+    }
+
+    [Fact]
+    public void AWrongLineKeepsTheEditorOpenWithItsNumberAndSavesNothing()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        string before = File.ReadAllText(_store.FilePath);
+        _editor.Open(LauncherTextEditorKind.LogonCommands);
+
+        _editor.Text = "#Coldeve\n##nobody\n/vt start";
+        _editor.SaveCommand.Execute(null);
+
+        Assert.True(_editor.IsOpen);
+        Assert.Equal("Line 2: server 'Coldeve' has no account 'nobody'. Add it in Edit accounts first.", _editor.Error);
+        Assert.Equal(before, File.ReadAllText(_store.FilePath));
+    }
+
+    [Fact]
+    public async Task CopyAllCopiesTheWholeTextAndPasteAllReplacesIt()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "notan3", "secret");
+        var clipboard = new FakeClipboard();
+        _editor.UseClipboard(clipboard);
+        _editor.Open(LauncherTextEditorKind.Accounts);
+
+        await _editor.CopyAllCommand.ExecuteAsync();
+        Assert.Equal(_editor.Text, clipboard.Text);
+        Assert.Contains("Password=secret", clipboard.Text);
+
+        clipboard.Text = "#Coldeve\nName=pasted,Password=x";
+        await _editor.PasteAllCommand.ExecuteAsync();
+        Assert.Equal("#Coldeve\nName=pasted,Password=x", _editor.Text);
+        _editor.SaveCommand.Execute(null);
+
+        Assert.Equal("pasted", Assert.Single(_store.Document.Servers[0].Accounts).Account);
+    }
+
+    [Fact]
+    public void LogonCommandsSaveToTheAccountAndTheSummaryCountsWhatIsTyped()
+    {
+        _core.AddServer("Coldeve", "play.coldeve.ac", 9000);
+        _core.AddAccount("Coldeve", "notan3", "secret");
+        _core.AddAccount("Coldeve", "notan", "secret");
+        _editor.Open(LauncherTextEditorKind.LogonCommands);
+        Assert.Equal("1 server, 2 accounts · an account with no lines runs no commands", _editor.Summary);
+
+        _editor.Text = "#Coldeve\n##notan3\n/vt meta load bore\n/vt start\n##notan\n";
+        _editor.SaveCommand.Execute(null);
+
+        Assert.False(_editor.IsOpen);
+        _store.Load();
+        Assert.Equal(["/vt meta load bore", "/vt start"], _store.Document.Servers[0].Accounts[0].LoginCommands);
+        Assert.Empty(_store.Document.Servers[0].Accounts[1].LoginCommands);
     }
 
     [Theory]
@@ -111,45 +175,12 @@ public sealed class ProfileFieldsEditorTests : IDisposable
     }
 
     [Fact]
-    public void RemovingAccountRowsPersistsAndClearsDraftCredentials()
-    {
-        _editor.Open(LauncherTextEditorKind.Users);
-        _editor.Rows[0].Name = "Player";
-        _editor.Rows[0].Value = "secret";
-        _editor.SaveCommand.Execute(null);
-        _editor.Open(LauncherTextEditorKind.Users);
-        var row = _editor.Rows[0];
-        row.RemoveCommand.Execute(null);
-        Assert.Empty(row.Value);
-        _editor.SaveCommand.Execute(null);
-        Assert.False(_editor.IsOpen);
-        _store.Load();
-        Assert.Empty(_store.Document.Users!);
-    }
-
-    [Fact]
-    public void ConflictingLegacyAccountsCanBeOpenedAndResolved()
-    {
-        _store.Document.Users = null;
-        _core.AddServer("One", "localhost", 9000);
-        _core.AddServer("Two", "localhost", 9001);
-        _core.AddAccount("One", "Player", "first");
-        _core.AddAccount("Two", "Player", "second");
-        _editor.Open(LauncherTextEditorKind.Users);
-        Assert.Equal(2, _editor.Rows.Count);
-        _editor.Rows[1].RemoveCommand.Execute(null);
-        _editor.SaveCommand.Execute(null);
-        Assert.False(_editor.IsOpen);
-        Assert.All(_store.Document.Servers, server => Assert.Equal("first", Assert.Single(server.Accounts).Password));
-    }
-
-    [Fact]
-    public void SavingExistingNamesPreservesWhitespaceAndSavedCharacters()
+    public void SavingUnchangedEditorsPreservesWhitespaceAndSavedCharacters()
     {
         _core.AddServer(" server ", "localhost", 9000);
         _core.AddAccount(" server ", " account ", "secret");
         _core.AddCharacter(" server ", " account ", "Character", "0x50000001");
-        foreach (var kind in new[] { LauncherTextEditorKind.Users, LauncherTextEditorKind.Servers })
+        foreach (var kind in new[] { LauncherTextEditorKind.Accounts, LauncherTextEditorKind.LogonCommands, LauncherTextEditorKind.Servers })
         {
             _editor.Open(kind);
             _editor.SaveCommand.Execute(null);

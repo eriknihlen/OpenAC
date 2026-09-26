@@ -339,7 +339,7 @@ public sealed class MainWindowViewTests
             Control addServerButton = window
                 .GetVisualDescendants()
                 .OfType<Button>()
-                .First(button => Equals(button.Content, "Edit Servers"));
+                .First(button => Equals(button.Content, "Edit servers"));
             addServerButton.Focus();
             Assert.Same(addServerButton, CurrentFocus(window));
 
@@ -424,7 +424,19 @@ public sealed class MainWindowViewTests
         try
         {
             window.Show();
-            foreach (var kind in new[] { LauncherTextEditorKind.Users, LauncherTextEditorKind.Servers })
+            model.TextEditor.Open(LauncherTextEditorKind.Accounts);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var text = window.FindControl<TextBox>("ProfileTextBox")!;
+            Assert.True(text.IsVisible);
+            Assert.True(text.IsReadOnly);
+            model.TextEditor.ShowPasswords = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(text.IsReadOnly);
+            model.TextEditor.CancelCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            foreach (var kind in new[] { LauncherTextEditorKind.Servers })
             {
                 model.TextEditor.Open(kind);
                 window.UpdateLayout();
@@ -433,11 +445,11 @@ public sealed class MainWindowViewTests
                 var fields = window.FindControl<ItemsControl>("ProfileRows")!.GetVisualDescendants().OfType<TextBox>().ToArray();
                 Assert.Equal(2, fields.Length);
                 Assert.Same(fields[0], CurrentFocus(window));
-                fields[0].Text = kind == LauncherTextEditorKind.Users ? "Example account" : "Example server";
-                fields[1].Text = kind == LauncherTextEditorKind.Users ? "example-password" : "game.example.com:9000";
+                fields[0].Text = "Example server";
+                fields[1].Text = "game.example.com:9000";
                 Assert.Equal(fields[0].Text, model.TextEditor.Rows[0].Name);
                 Assert.Equal(fields[1].Text, model.TextEditor.Rows[0].Value);
-                Assert.Equal(kind == LauncherTextEditorKind.Users ? '●' : '\0', fields[1].PasswordChar);
+                Assert.Equal('\0', fields[1].PasswordChar);
                 var add = window.FindControl<Button>("AddProfileRowButton")!;
                 Point origin = add.TranslatePoint(default, window)!.Value;
                 Assert.InRange(origin.Y, 0, window.Bounds.Height - add.Bounds.Height + 1);
@@ -792,8 +804,7 @@ public sealed class MainWindowViewTests
             string accountName,
             string characterName,
             LaunchMode launchMode,
-            IReadOnlyList<string> plugins,
-            IReadOnlyList<string> loginCommands)
+            IReadOnlyList<string>? plugins)
         {
         }
 

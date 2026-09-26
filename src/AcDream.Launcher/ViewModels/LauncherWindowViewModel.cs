@@ -32,7 +32,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     private string? _lastError;
     private string _operationStatus = "Ready";
     private LaunchMode _characterLaunchMode;
-    private string _characterLoginCommandsText = string.Empty;
 
     public LauncherWindowViewModel(
         ILauncherOrchestrator orchestrator,
@@ -159,6 +158,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         || IsCharacterOptionsOpen
         || IsSessionLogOpen
         || IsSettingsOpen
+        || HasProfileMigrationNotice
         || Plugins.InstallDialog.IsOpen
         || Plugins.IsRemoveDialogOpen;
 
@@ -193,12 +193,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     {
         get => _characterLaunchMode;
         set => SetProperty(ref _characterLaunchMode, value);
-    }
-
-    public string CharacterLoginCommandsText
-    {
-        get => _characterLoginCommandsText;
-        set => SetProperty(ref _characterLoginCommandsText, value);
     }
 
     public bool IsInstallationChecking => _isInstallationChecking;
@@ -306,6 +300,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         try
         {
             _orchestrator.LoadProfiles();
+            ProfileMigrationNotice = _orchestrator.TakeProfileMigrationNotice();
             // The plugin panel is configured before this runs (App.axaml.cs), so it read the
             // unloaded store's default; hand it the saved value now the profiles are in.
             Plugins.RestoreShowBetaPluginsFromProfile();
@@ -523,6 +518,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
     public void CloseActiveModal()
     {
         CloseDesktopDialogs();
+        ProfileMigrationNotice = null;
         if (TextEditor.IsOpen)
         {
             TextEditor.Close();
@@ -637,9 +633,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
         LauncherCharacterSnapshot? character = GetSelectedCharacterSnapshot();
         CharacterLaunchMode = character?.LaunchMode ?? LaunchMode.GuiSelect;
         LoadCharacterPluginChoices(character);
-        CharacterLoginCommandsText = character is null
-            ? string.Empty
-            : string.Join(Environment.NewLine, character.LoginCommands);
     }
 
     private void OpenAddServerDialog() =>
@@ -868,8 +861,7 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
                 character.AccountName,
                 character.Name,
                 CharacterLaunchMode,
-                CheckedCharacterPluginIds(),
-                ParseLines(CharacterLoginCommandsText, distinct: false));
+                CharacterUsesAccountPlugins ? null : CheckedCharacterPluginIds());
             LastError = null;
             OperationStatus = $"Saved launch settings for {character.Name}.";
             RefreshFromCore(new SelectionKey(
@@ -1086,20 +1078,6 @@ public sealed partial class LauncherWindowViewModel : ObservableObject, IDisposa
 
         return account.Children.FirstOrDefault(candidate =>
             string.Equals(candidate.CharacterName, key.CharacterName, StringComparison.Ordinal));
-    }
-
-    private static IReadOnlyList<string> ParseLines(string text, bool distinct)
-    {
-        IEnumerable<string> values = text
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(value => value.Trim())
-            .Where(value => value.Length > 0);
-        if (distinct)
-        {
-            values = values.Distinct(StringComparer.Ordinal);
-        }
-
-        return values.ToArray();
     }
 
     private static string? NullIfWhiteSpace(string value) =>

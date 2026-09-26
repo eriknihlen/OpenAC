@@ -1,46 +1,101 @@
 # OpenAC launcher
 
-The launcher groups accounts by username. Expand an account to see its servers.
-Resize the window to fit your desktop; the account list scrolls independently
-of the launch controls.
+The launcher lists each account on each server as its own card: the account
+name, its profile tags, the server and how many characters it has, and the
+plugins its characters start with. Resize the window to fit your desktop; the
+account list scrolls independently of the launch controls.
 
 Choose **Character select** or a known character, then **Graphical** or
-**Headless**. Headless sessions need a named character. Check server rows and
+**Headless**. Headless sessions need a named character. Tick accounts and
 choose **Play selected** to start all eligible selections. Each row starts a
 separate supervised session. A failed launch is reported without preventing
 the other selected rows from starting. Already active accounts cannot start
 again on the same server. **Cancel** stops pending starts; use the row's
 **Stop** action to close an active session gracefully.
 
+**Profiles** tag accounts, such as `Main`, `Bots` or `Mules`. The chips above
+the list (**All** and one per tag) show only the accounts with that tag, and
+**Play selected** then starts only the ticked accounts the filter shows.
+
+A row's **Options ▾** menu has **Logon commands…**, **Plugins for this
+character…** (with a character chosen), **Console** (for a running headless
+session), **Open logs folder** and **Remove character** (a later character
+refresh brings a removed character back).
+
 ## Accounts and servers
 
-The bottom editors run inside the launcher on Windows and Linux. Saves are
-validated and atomic; invalid entries do not partially change your profiles.
-Close active sessions before saving profile edits.
+The editors run inside the launcher. Saves are validated and atomic; invalid
+entries do not partially change your profiles. If profiles change while an
+editor is open, reopen the editor before saving.
 
-**Edit Servers** has two fields per row: **Server name** and **Address:port**.
+**Accounts** is one plain text, grouped by server:
+
+```
+#Coldeve
+Name=notan3,Password=secret,Profiles=Main;Bots
+Name=notan4,Password=other
+
+#sawato
+Name=testaccount,Password=testpassword
+```
+
+A `#` line names a server (matched by its name, ignoring case); every account
+line below it belongs to that server. `Profiles=` is optional; separate tags
+with `;`. Put double quotes around a value that contains a comma or a quote,
+and write a quote as `\"`. A server's section is the whole truth for that
+server: an account left out of it is removed with its saved characters. A
+server left out of the text is left as it is. Passwords are stored and shown
+in plain text on this computer; they stay hidden, and the text read-only,
+until **Show passwords** is ticked. **Copy all** copies the text, passwords
+included; **Paste all** replaces it (nothing is saved until **Save**). A
+wrong line is reported by its number and nothing is saved. Accounts can be
+edited while sessions run, except that a running account cannot be removed.
+
+**Edit servers** has two fields per row: **Server name** and **Address:port**.
 For example, enter `Local` and `127.0.0.1:9000`, or `Example` and
 `game.example.org:9000`. Include the port; for IPv6, use `[::1]:9000`.
-Use **Add server** or **Remove** to change the list, then **Save**.
-
-**Edit accounts** has separate **Username** and **Password** fields. Passwords
-are masked and may be empty. Use **Add account** or **Remove** to change the
-list. Enter values directly; no separators or quoting are needed.
-
-Every user lists every configured server, including servers added later. Users
-can be added before any servers and survive removing all servers. Passwords are
-stored locally. Older conflicting passwords remain in Edit accounts until you
-choose one password per username.
-
 Removing a server removes its saved characters. Keep server names unchanged
-to retain their character settings. If profiles change while an editor is open,
-reopen the editor before saving.
+to retain their character settings. Close that server's sessions first.
 
-A row's **…** action always opens the same dialog: which installed plugins load
-for that row (see **Plugins** below). With a named character chosen it edits that
-character, including its one-command-per-line logon commands. With **Character
-select** chosen it edits every character on the account at once. **Logon commands** in the bottom bar provides the complete
-structured command list for bulk editing.
+**Logon commands** are one plain text too, holding every server and account:
+
+```
+#Coldeve
+##notan3
+/vt start
+##notan
+#sawato
+##testaccount
+/vt nav load bore_circuit1
+```
+
+`#` starts a server, `##` an account on it, and every other non-empty line is
+a command, run in order after any character on that account logs in. An
+account with no lines runs no commands. The same rules as Accounts apply: a
+listed server's section is the whole truth, a server left out is left alone,
+and a wrong line (an unknown server or account, a command before any `##`) is
+reported by number and nothing is saved. Commands can be edited while sessions
+run; they take effect at the next login.
+
+**Plugins for this account** (**Edit plugins** on the account's card) is the
+list every character on the account starts with, the character screen
+included. A character can still differ: **Options ▾ › Plugins for this
+character…** either follows the account (**Use the account's plugins**) or
+keeps a list of its own, filtered to the plugins that support its launch mode.
+
+### Profiles written by an earlier launcher
+
+An earlier launcher kept plugins and logon commands on each character and one
+user list shared by every server. The first start of this launcher rewrites
+the file once, keeping the old one beside it as
+`launcher-profiles.v1-backup.json`:
+
+- each account's plugins are every plugin its characters had, in the order
+  first seen; a character whose own list differed keeps it as its own list;
+- each account's logon commands are its characters' commands when they were
+  all the same, otherwise the first character's, and a one-time notice lists
+  what the other characters had;
+- every server keeps exactly the accounts it showed before.
 
 ## Plugins
 
@@ -54,8 +109,8 @@ what is on disk, with a source badge (**Listed**
 or **Unlisted** for a launcher-managed plugin, **Direct install** or
 **Bundled** otherwise), **Update** for plugins the launcher itself installed,
 and **Remove** for those plus a Direct install. Removing a plugin also
-unticks it for every character that had it enabled, so reinstalling it always
-starts from none. **Refresh list** reloads
+unticks it for every account and character that had it enabled, so reinstalling
+it always starts from none. **Refresh list** reloads
 both lists; the launcher also checks once at startup, without delaying the
 window. **Add from URL** adds a plugin from a `https://github.com/owner/name`
 repository not on the list. Right after a curated-list release publishes,
@@ -88,16 +143,12 @@ responsibility; an unlisted plugin adds that it is not on the curated list.
 The plugin is downloaded and unzipped, never run automatically, and stays
 disabled until the player chooses to enable it.
 
-Installing never enables a plugin. Choose **None** to install without
-enabling anything, **All characters**, or **Choose** to pick specific
-characters; an update carries no such choice, since it can only affect a
-plugin already enabled where it was chosen before. A character's own **…**
-action opens a checklist of installed plugins compatible with its launch
-mode; only checked plugins load, and a blank list loads nothing at all. A row set to **Character select** picks its character inside
-the client, after the plugin list is already fixed, so it loads only the plugins
-every character on that account has enabled; its **…** action ticks a plugin for
-all of them in one step. Existing profiles are not migrated: anyone who relied on a
-plugin loading by default must tick it once.
+Installing never enables a plugin by itself. Choose **None** to install without
+enabling anything, **All accounts**, or **Choose accounts** to add it to
+specific accounts' plugin lists; an update carries no such choice, since it can
+only affect a plugin already enabled where it was chosen before. Only the
+plugins on an account's list (or a character's own list) load, and a blank
+list loads nothing at all.
 
 A blocked plugin (listed as unsafe by the curated list) shows a red
 "Blocked: <reason>" badge, cannot be installed or updated to, and is filtered

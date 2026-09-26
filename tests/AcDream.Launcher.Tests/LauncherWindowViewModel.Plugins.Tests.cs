@@ -56,6 +56,7 @@ public sealed partial class LauncherWindowViewModelTests
             viewModel.CharacterPluginChoices, choice => choice.Id == "plugin.graphical");
 
         missing.IsChecked = false;
+        viewModel.CharacterUsesAccountPlugins = false;
         viewModel.SaveCharacterSettingsCommand.Execute(null);
 
         Assert.NotNull(orchestrator.SettingsUpdate);
@@ -96,6 +97,7 @@ public sealed partial class LauncherWindowViewModelTests
         CharacterPluginChoiceViewModel missing = Assert.Single(viewModel.CharacterPluginChoices);
         Assert.Equal("ghost.missing", missing.Id);
 
+        viewModel.CharacterUsesAccountPlugins = false;
         viewModel.SaveCharacterSettingsCommand.Execute(null);
 
         Assert.NotNull(orchestrator.SettingsUpdate);
@@ -257,9 +259,9 @@ public sealed partial class LauncherWindowViewModelTests
         };
         using var viewModel = CreateInitialized(orchestrator);
 
-        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Servers[0];
+        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Rows[0];
         row.SelectedCharacter = "+Holder";
-        row.OptionsCommand.Execute(null);
+        row.CharacterPluginsCommand.Execute(null);
         Assert.Equal(
             "old.plugin (missing)",
             Assert.Single(viewModel.CharacterPluginChoices).DisplayName);
@@ -283,103 +285,95 @@ public sealed partial class LauncherWindowViewModelTests
         orchestrator.RaiseStateChanged();
 
         row.SelectedCharacter = "+Holder";
-        row.OptionsCommand.Execute(null);
+        row.CharacterPluginsCommand.Execute(null);
 
         Assert.Equal(
             "new.plugin (missing)",
             Assert.Single(viewModel.CharacterPluginChoices).DisplayName);
     }
 
+    private static FakeLauncherOrchestrator AccountWithPlugins(
+        IReadOnlyList<string> accountPlugins,
+        params LauncherCharacterSnapshot[] characters) => new()
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
+                [
+                    new LauncherAccountSnapshot("Local ACE", "testaccount", characters, false, "Ready",
+                        AccountPlugins: accountPlugins, AccountProfiles: ["Bots"]),
+                ]),
+            ],
+        };
+
     [Fact]
-    public void ARowSetToTheCharacterScreenOpensTheSameDialogAndEnablesForEveryCharacter()
+    public void EditPluginsOnAnAccountOffersEveryPluginAndSavesTheListInItsOrder()
     {
         using var fixture = new PluginChecklistFixture();
         fixture.WriteManifest("plugin.both", ["graphical", "headless"]);
         fixture.WriteManifest("plugin.graphical", ["graphical"]);
-        using var orchestrator = new FakeLauncherOrchestrator
-        {
-            ServersOverride =
-            [
-                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
-                [
-                    new LauncherAccountSnapshot("Local ACE", "testaccount",
-                    [
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+One", "0x50000001",
-                            LaunchMode.Gui, ["plugin.both", "other.kept"], [], false, "Ready"),
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+Two", "0x50000002",
-                            LaunchMode.Headless, [], ["/hello"], false, "Ready"),
-                    ],
-                    HasRunningActivity: false,
-                    ActivityStatus: "Ready"),
-                ]),
-            ],
-        };
+        using var orchestrator = AccountWithPlugins(["plugin.both", "other.kept"]);
         using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
 
-        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Servers[0];
-        row.OptionsCommand.Execute(null);
+        viewModel.Accounts[0].EditPluginsCommand.Execute(null);
 
         Assert.True(viewModel.IsCharacterOptionsOpen);
-        Assert.False(viewModel.TextEditor.IsOpen);
         Assert.True(viewModel.IsAccountRowOptions);
-        Assert.False(viewModel.ShowRowLogonCommands);
-        CharacterPluginChoiceViewModel both = Assert.Single(
-            viewModel.CharacterPluginChoices, choice => choice.Id == "plugin.both");
-        Assert.False(both.IsChecked);
-        Assert.Equal("plugin.both (on 1 of 2 characters)", both.DisplayName);
-        CharacterPluginChoiceViewModel graphical = Assert.Single(
-            viewModel.CharacterPluginChoices, choice => choice.Id == "plugin.graphical");
+        Assert.False(viewModel.ShowCharacterPluginChoice);
+        Assert.Equal("Plugins for testaccount", viewModel.RowOptionsTitle);
+        Assert.Equal(
+            [("plugin.both", "plugin.both", true), ("plugin.graphical", "plugin.graphical (windowed only)", false), ("other.kept", "other.kept (missing)", true)],
+            viewModel.CharacterPluginChoices.Select(choice => (choice.Id, choice.DisplayName, choice.IsChecked)));
 
-        both.IsChecked = true;
-        graphical.IsChecked = true;
+        viewModel.CharacterPluginChoices.Single(choice => choice.Id == "plugin.graphical").IsChecked = true;
         viewModel.SaveRowOptionsCommand.Execute(null);
 
-        // +One gains the graphical plugin and keeps everything else; +Two, a headless character,
-        // gains only the plugin that supports headless, and the dialog says what it left out.
-        Assert.Equal(2, orchestrator.SettingsUpdates.Count);
-        Assert.Equal(
-            ["plugin.both", "other.kept", "plugin.graphical"],
-            orchestrator.SettingsUpdates.Single(update => update.Item3 == "+One").Item5);
-        Assert.Equal(
-            ["plugin.both"],
-            orchestrator.SettingsUpdates.Single(update => update.Item3 == "+Two").Item5);
-        Assert.Contains("plugin.graphical for +Two", viewModel.LastError, StringComparison.Ordinal);
+        var update = Assert.Single(orchestrator.AccountPluginUpdates);
+        Assert.Equal(["plugin.both", "other.kept", "plugin.graphical"], update.Plugins);
+        Assert.False(viewModel.IsCharacterOptionsOpen);
     }
 
     [Fact]
-    public void AnUntouchedPartlyEnabledPluginIsLeftAsItIs()
+    public void ACharacterFollowsItsAccountUntilGivenItsOwnList()
     {
         using var fixture = new PluginChecklistFixture();
         fixture.WriteManifest("plugin.both", ["graphical", "headless"]);
-        using var orchestrator = new FakeLauncherOrchestrator
-        {
-            ServersOverride =
-            [
-                new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
-                [
-                    new LauncherAccountSnapshot("Local ACE", "testaccount",
-                    [
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+One", "0x50000001",
-                            LaunchMode.Gui, ["plugin.both"], [], false, "Ready"),
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+Two", "0x50000002",
-                            LaunchMode.Gui, [], [], false, "Ready"),
-                    ],
-                    HasRunningActivity: false,
-                    ActivityStatus: "Ready"),
-                ]),
-            ],
-        };
+        using var orchestrator = AccountWithPlugins(
+            ["plugin.both"],
+            new LauncherCharacterSnapshot("Local ACE", "testaccount", "+Hero", "0x50000001",
+                LaunchMode.Gui, ["plugin.both"], [], false, "Ready"));
+        using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
+        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Rows[0];
+        Assert.False(row.CharacterPluginsCommand.CanExecute(null));
+        row.SelectedCharacter = "+Hero";
+
+        row.CharacterPluginsCommand.Execute(null);
+        Assert.True(viewModel.CharacterUsesAccountPlugins);
+        Assert.False(viewModel.CanEditPluginChoices);
+        viewModel.SaveRowOptionsCommand.Execute(null);
+        Assert.Null(orchestrator.SettingsUpdates.Single().Plugins);
+
+        row.CharacterPluginsCommand.Execute(null);
+        viewModel.CharacterUsesAccountPlugins = false;
+        Assert.True(viewModel.CanEditPluginChoices);
+        viewModel.CharacterPluginChoices.Single().IsChecked = false;
+        viewModel.SaveRowOptionsCommand.Execute(null);
+        Assert.Empty(orchestrator.SettingsUpdates.Last().Plugins!);
+    }
+
+    [Fact]
+    public void AccountGroupsShowTheirProfilesPluginsAndCharacterCount()
+    {
+        using var fixture = new PluginChecklistFixture();
+        using var orchestrator = AccountWithPlugins(
+            ["plugin.both", "other"],
+            new LauncherCharacterSnapshot("Local ACE", "testaccount", "+Hero", null, LaunchMode.Gui, [], [], false, "Ready"));
         using var viewModel = CreateInitialized(orchestrator, pluginInventory: fixture.Inventory);
 
-        viewModel.Accounts[0].Servers[0].OptionsCommand.Execute(null);
-        viewModel.SaveRowOptionsCommand.Execute(null);
-
-        Assert.Empty(orchestrator.SettingsUpdates);
-        Assert.False(viewModel.IsCharacterOptionsOpen);
+        LauncherAccountGroupViewModel group = Assert.Single(viewModel.Accounts);
+        Assert.Equal(["Bots"], group.Profiles);
+        Assert.Equal("plugin.both · other", group.PluginsSummary);
+        Assert.Equal("Local ACE · 1 character", group.Subtitle);
     }
 
     private sealed class PluginChecklistFixture : IDisposable

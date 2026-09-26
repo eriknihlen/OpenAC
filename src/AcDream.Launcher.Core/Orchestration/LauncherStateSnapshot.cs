@@ -11,7 +11,8 @@ public sealed record LauncherCharacterSnapshot(
     IReadOnlyList<string> Plugins,
     IReadOnlyList<string> LoginCommands,
     bool HasRunningSession,
-    string SessionStatus);
+    string SessionStatus,
+    bool HasOwnPlugins = false);
 
 public sealed record LauncherAccountSnapshot(
     string ServerName,
@@ -20,7 +21,20 @@ public sealed record LauncherAccountSnapshot(
     bool HasRunningActivity,
     string ActivityStatus,
     string? SelectedCharacter = null,
-    LaunchMode? SelectedLaunchMode = null);
+    LaunchMode? SelectedLaunchMode = null,
+    IReadOnlyList<string>? AccountPlugins = null,
+    IReadOnlyList<string>? AccountProfiles = null,
+    IReadOnlyList<string>? AccountLoginCommands = null)
+{
+    /// <summary>The plugins every character on the account launches with unless it has its own.</summary>
+    public IReadOnlyList<string> Plugins => AccountPlugins ?? [];
+
+    /// <summary>The account's profile tags.</summary>
+    public IReadOnlyList<string> Profiles => AccountProfiles ?? [];
+
+    /// <summary>Commands run in order after any character on the account logs in.</summary>
+    public IReadOnlyList<string> LoginCommands => AccountLoginCommands ?? [];
+}
 
 public sealed record LauncherServerSnapshot(
     string Name,
@@ -75,7 +89,6 @@ public sealed record LauncherStateSnapshot(
     LauncherPlatformCapabilities Platform,
     bool IsInstallationReady,
     string InstallationStatus,
-    IReadOnlyList<string>? SharedAccountNames = null,
     bool ShowBetaPlugins = false);
 
 public sealed class LauncherOperationException : Exception

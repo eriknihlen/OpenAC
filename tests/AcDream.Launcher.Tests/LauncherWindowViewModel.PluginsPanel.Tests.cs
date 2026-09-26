@@ -922,7 +922,7 @@ public sealed partial class LauncherWindowViewModelTests
                     [
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+Holder", "0x50000001",
-                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready"),
+                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready", HasOwnPlugins: true),
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+Untouched", "0x50000002",
                             LaunchMode.Headless, [], [], false, "Ready"),
@@ -2033,7 +2033,7 @@ public sealed partial class LauncherWindowViewModelTests
             fixture.Paths, PluginListUri, handler);
         var character = new LauncherCharacterSnapshot(
             "Local ACE", "testaccount", "+Holder", "0x50000001",
-            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready");
+            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready", HasOwnPlugins: true);
         using var orchestrator = new FakeLauncherOrchestrator
         {
             ServersOverride =
@@ -2049,9 +2049,9 @@ public sealed partial class LauncherWindowViewModelTests
         viewModel.ConfigurePlugins(composition, () => null);
         await viewModel.Plugins.CheckNowCommand.ExecuteAsync();
 
-        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Servers[0];
+        LauncherAccountServerRowViewModel row = viewModel.Accounts[0].Rows[0];
         row.SelectedCharacter = "+Holder";
-        row.OptionsCommand.Execute(null);
+        row.CharacterPluginsCommand.Execute(null);
         CharacterPluginChoiceViewModel ticked = Assert.Single(viewModel.CharacterPluginChoices);
         Assert.Equal("edwards.managed", ticked.Id);
         Assert.False(ticked.IsMissing);
@@ -2079,16 +2079,16 @@ public sealed partial class LauncherWindowViewModelTests
         orchestrator.RaiseStateChanged();
 
         row.SelectedCharacter = "+Holder";
-        row.OptionsCommand.Execute(null);
+        row.CharacterPluginsCommand.Execute(null);
 
         Assert.Empty(viewModel.CharacterPluginChoices);
         viewModel.SaveCharacterSettingsCommand.Execute(null);
         var saved = orchestrator.SettingsUpdates.Last(update => update.Character == "+Holder");
-        Assert.Empty(saved.Plugins);
+        Assert.Empty(saved.Plugins!);
     }
 
     [Fact]
-    public void EnableForCharactersSkipsCharactersTheInstalledHostsDoNotSupport()
+    public void EnablingAddsThePluginToEachChosenAccountsList()
     {
         using var fixture = new PluginPanelFixture();
         fixture.WriteManifest("edwards.headless-only", "0.1.0", ["headless"]);
@@ -2102,35 +2102,29 @@ public sealed partial class LauncherWindowViewModelTests
             [
                 new LauncherServerSnapshot("Local ACE", "127.0.0.1", 9000,
                 [
-                    new LauncherAccountSnapshot("Local ACE", "testaccount",
-                    [
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+Graphical", "0x50000001",
-                            LaunchMode.Gui, [], [], false, "Ready"),
-                        new LauncherCharacterSnapshot(
-                            "Local ACE", "testaccount", "+Headless", "0x50000002",
-                            LaunchMode.Headless, [], [], false, "Ready"),
-                    ],
-                    HasRunningActivity: false,
-                    ActivityStatus: "Ready"),
+                    new LauncherAccountSnapshot("Local ACE", "testaccount", [], false, "Ready",
+                        AccountPlugins: ["other.plugin"]),
+                    new LauncherAccountSnapshot("Local ACE", "second", [], false, "Ready"),
+                    new LauncherAccountSnapshot("Local ACE", "unchosen", [], false, "Ready"),
                 ]),
             ],
         };
         using var viewModel = CreateInitialized(orchestrator);
         viewModel.ConfigurePlugins(composition, () => null);
 
-        IReadOnlyList<PluginCharacterOption> all =
+        IReadOnlyList<PluginCharacterOption> chosen =
         [
-            new("Local ACE", "testaccount", "+Graphical", "+Graphical (testaccount@Local ACE)"),
-            new("Local ACE", "testaccount", "+Headless", "+Headless (testaccount@Local ACE)"),
+            new("Local ACE", "testaccount", "", "testaccount (Local ACE)"),
+            new("Local ACE", "second", "", "second (Local ACE)"),
         ];
-        viewModel.Plugins.EnableForCharacters("edwards.headless-only", all);
+        viewModel.Plugins.EnableForCharacters("edwards.headless-only", chosen);
 
-        var update = Assert.Single(orchestrator.SettingsUpdates);
-        Assert.Equal("+Headless", update.Character);
-        Assert.Contains("edwards.headless-only", update.Plugins);
-        Assert.Contains("+Graphical", viewModel.Plugins.Error);
-        Assert.Contains("does not support that launch mode", viewModel.Plugins.Error);
+        Assert.Equal(
+            [("Local ACE", "testaccount", (IReadOnlyList<string>)["other.plugin", "edwards.headless-only"]),
+             ("Local ACE", "second", (IReadOnlyList<string>)["edwards.headless-only"])],
+            orchestrator.AccountPluginUpdates.Select(update => (update.Server, update.Account, (IReadOnlyList<string>)[.. update.Plugins])));
+        Assert.Empty(orchestrator.SettingsUpdates);
+        Assert.Null(viewModel.Plugins.Error);
     }
 
     [Fact]
@@ -2155,16 +2149,20 @@ public sealed partial class LauncherWindowViewModelTests
                     [
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+Holder", "0x50000001",
-                            LaunchMode.Headless, ["edwards.managed", "other.plugin"], [], false, "Ready"),
+                            LaunchMode.Headless, ["edwards.managed", "other.plugin"], [], false, "Ready", HasOwnPlugins: true),
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+AlsoHolder", "0x50000002",
-                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready"),
+                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready", HasOwnPlugins: true),
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+Untouched", "0x50000003",
-                            LaunchMode.Headless, ["other.plugin"], [], false, "Ready"),
+                            LaunchMode.Headless, ["other.plugin"], [], false, "Ready", HasOwnPlugins: true),
+                        new LauncherCharacterSnapshot(
+                            "Local ACE", "testaccount", "+Follower", "0x50000004",
+                            LaunchMode.Headless, ["edwards.managed", "other.plugin"], [], false, "Ready"),
                     ],
                     HasRunningActivity: false,
-                    ActivityStatus: "Ready"),
+                    ActivityStatus: "Ready",
+                    AccountPlugins: ["edwards.managed", "other.plugin"]),
                 ]),
             ],
         };
@@ -2181,8 +2179,12 @@ public sealed partial class LauncherWindowViewModelTests
         var holder = Assert.Single(orchestrator.SettingsUpdates, update => update.Character == "+Holder");
         Assert.Equal(["other.plugin"], holder.Plugins);
         var alsoHolder = Assert.Single(orchestrator.SettingsUpdates, update => update.Character == "+AlsoHolder");
-        Assert.Empty(alsoHolder.Plugins);
+        Assert.Empty(alsoHolder.Plugins!);
         Assert.DoesNotContain(orchestrator.SettingsUpdates, update => update.Character == "+Untouched");
+        // A character on the account's list is covered by the account's own strip.
+        Assert.DoesNotContain(orchestrator.SettingsUpdates, update => update.Character == "+Follower");
+        var account = Assert.Single(orchestrator.AccountPluginUpdates);
+        Assert.Equal(["other.plugin"], account.Plugins);
     }
 
     [Fact]
@@ -2207,7 +2209,7 @@ public sealed partial class LauncherWindowViewModelTests
                     [
                         new LauncherCharacterSnapshot(
                             "Local ACE", "testaccount", "+Holder", "0x50000001",
-                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready"),
+                            LaunchMode.Headless, ["edwards.managed"], [], false, "Ready", HasOwnPlugins: true),
                     ],
                     HasRunningActivity: false,
                     ActivityStatus: "Ready"),
@@ -2227,7 +2229,7 @@ public sealed partial class LauncherWindowViewModelTests
         // confirm this), so a reinstall like the LP-11 report never re-adds the id itself; the
         // removed id staying off the list depends entirely on the remove having stripped it.
         var update = Assert.Single(orchestrator.SettingsUpdates, u => u.Character == "+Holder");
-        Assert.DoesNotContain("edwards.managed", update.Plugins, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("edwards.managed", update.Plugins!, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]

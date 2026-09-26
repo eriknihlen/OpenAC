@@ -61,6 +61,31 @@ public sealed class LauncherOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public async Task LogonCommandsAndAccountsCanBeEditedWhileASessionRunsButARunningAccountStays()
+    {
+        var supervisors = new FakeSupervisorFactory();
+        using var orchestrator = CreateOrchestrator(supervisorFactory: supervisors);
+        await orchestrator.LaunchAsync("Local ACE", "testaccount", "+Acdream", LaunchMode.Gui);
+
+        string commands = orchestrator.ReadProfileText(LauncherTextEditorKind.LogonCommands);
+        orchestrator.SaveProfileText(LauncherTextEditorKind.LogonCommands, "#Local ACE\n##testaccount\n/vt start\n", commands);
+        string accounts = orchestrator.ReadProfileText(LauncherTextEditorKind.Accounts);
+        orchestrator.SaveProfileText(
+            LauncherTextEditorKind.Accounts,
+            $"#Local ACE\nName=testaccount,Password={Password},Profiles=Bots\n",
+            accounts);
+
+        LauncherAccountSnapshot account = orchestrator.GetSnapshot().Servers.Single().Accounts.Single();
+        Assert.Equal(["/vt start"], account.LoginCommands);
+        Assert.Equal(["Bots"], account.Profiles);
+        string before = orchestrator.ReadProfileText(LauncherTextEditorKind.Accounts);
+        var refused = Assert.Throws<LauncherOperationException>(() =>
+            orchestrator.SaveProfileText(LauncherTextEditorKind.Accounts, "#Local ACE\n", before));
+        Assert.Contains("Stop testaccount's session", refused.Message);
+        Assert.Equal(before, orchestrator.ReadProfileText(LauncherTextEditorKind.Accounts));
+    }
+
+    [Fact]
     public async Task AssetVersionCrashProducesActionableErrorWithoutExposingStderr()
     {
         var supervisors = new FakeSupervisorFactory();
@@ -176,7 +201,7 @@ public sealed class LauncherOrchestratorTests : IDisposable
         Assert.Equal(0, config.ProbeCallCount);
         Assert.Equal(LaunchMode.Gui, config.LastCharacter!.LaunchMode);
         Assert.Equal(["ExamplePlugin"], config.LastCharacter.Plugins);
-        Assert.Equal(["/vt start"], config.LastCharacter.LoginCommands);
+        Assert.Equal(["/vt start"], config.LastAccountLoginCommands);
         Assert.Equal(string.Empty, config.LastAccountPassword);
 
         FakeSupervisor supervisor = Assert.Single(supervisors.Created);
@@ -734,8 +759,8 @@ public sealed class LauncherOrchestratorTests : IDisposable
                 "+Acdream",
                 "0x5000000A",
                 LaunchMode.GuiSelect,
-                ["ExamplePlugin"],
-                ["/vt start"]);
+                ["ExamplePlugin"]);
+            store.SetAccountLoginCommands("Local ACE", "testaccount", ["/vt start"]);
         }
         store.Save();
 
@@ -817,6 +842,8 @@ public sealed class LauncherOrchestratorTests : IDisposable
 
         public string? LastAccountPassword { get; private set; }
 
+        public IReadOnlyList<string>? LastAccountLoginCommands { get; private set; }
+
         public ComposedSessionConfig? LastComposed { get; private set; }
 
         public ComposedSessionConfig ComposeAndWrite(
@@ -832,6 +859,7 @@ public sealed class LauncherOrchestratorTests : IDisposable
             PlayCallCount++;
             LastCharacter = character;
             LastAccountPassword = account.Password;
+            LastAccountLoginCommands = [.. account.LoginCommands];
             LastComposed = SessionConfigComposer.Compose(
                 server,
                 account,

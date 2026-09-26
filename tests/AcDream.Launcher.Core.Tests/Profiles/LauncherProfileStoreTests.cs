@@ -35,7 +35,7 @@ public sealed class LauncherProfileStoreTests : IDisposable
 
         Assert.False(loaded);
         Assert.False(File.Exists(_filePath));
-        Assert.Equal(1, store.Document.Version);
+        Assert.Equal(2, store.Document.Version);
         Assert.Empty(store.Document.Servers);
     }
 
@@ -203,7 +203,7 @@ public sealed class LauncherProfileStoreTests : IDisposable
     }
 
     [Fact]
-    public void EditCharacterUpdatesLaunchModePluginsAndLoginCommandsOnly()
+    public void CharacterAndAccountSettersChangeOnlyWhatTheyName()
     {
         var store = new LauncherProfileStore(_filePath);
         store.Load();
@@ -218,15 +218,15 @@ public sealed class LauncherProfileStoreTests : IDisposable
             "Local ACE",
             "testaccount",
             "+Acdream",
-            launchMode: LaunchMode.Headless,
-            plugins: ["ExamplePlugin"],
-            loginCommands: ["/tell someone, hi"]);
+            launchMode: LaunchMode.Headless);
+        store.SetCharacterPlugins("Local ACE", "testaccount", "+Acdream", ["ExamplePlugin"]);
+        store.SetAccountLoginCommands("Local ACE", "testaccount", ["/tell someone, hi"]);
 
-        CharacterProfile character = Assert.Single(
-            store.Document.Servers.Single().Accounts.Single().Characters);
+        AccountProfile account = store.Document.Servers.Single().Accounts.Single();
+        CharacterProfile character = Assert.Single(account.Characters);
         Assert.Equal(LaunchMode.Headless, character.LaunchMode);
         Assert.Equal(["ExamplePlugin"], character.Plugins);
-        Assert.Equal(["/tell someone, hi"], character.LoginCommands);
+        Assert.Equal(["/tell someone, hi"], account.LoginCommands);
         Assert.Equal("0x5000000A", character.Id);
     }
 
@@ -299,9 +299,10 @@ public sealed class LauncherProfileStoreTests : IDisposable
             "Local ACE",
             "testaccount",
             "+Acdream",
-            launchMode: LaunchMode.Gui,
-            plugins: ["ExamplePlugin"],
-            loginCommands: ["/vt start"]);
+            launchMode: LaunchMode.Gui);
+        store.SetAccountPlugins("Local ACE", "testaccount", ["ExamplePlugin"]);
+        store.SetAccountProfiles("Local ACE", "testaccount", ["Main", "Bots"]);
+        store.SetAccountLoginCommands("Local ACE", "testaccount", ["/vt start"]);
         store.Save();
 
         string text = File.ReadAllText(_filePath);
@@ -316,14 +317,16 @@ public sealed class LauncherProfileStoreTests : IDisposable
         Assert.Equal("+Acdream", character.Name);
         Assert.Equal("0x5000000A", character.Id);
         Assert.Equal(LaunchMode.Gui, character.LaunchMode);
-        Assert.Equal(["ExamplePlugin"], character.Plugins);
-        Assert.Equal(["/vt start"], character.LoginCommands);
+        Assert.Null(character.Plugins);
+        Assert.Equal(["ExamplePlugin"], account.Plugins);
+        Assert.Equal(["Main", "Bots"], account.Profiles);
+        Assert.Equal(["/vt start"], account.LoginCommands);
     }
 
     [Fact]
     public void LoadRejectsUnsupportedVersion()
     {
-        File.WriteAllText(_filePath, """{"version":2,"servers":[]}""");
+        File.WriteAllText(_filePath, """{"version":3,"servers":[]}""");
         var store = new LauncherProfileStore(_filePath);
 
         Assert.Throws<LauncherProfileException>(() => store.Load());

@@ -16,9 +16,10 @@ public sealed partial class LauncherWindowViewModel
     private bool _isCharacterOptionsOpen;
     private bool _isSessionLogOpen;
     private bool _isSettingsOpen;
+    private string? _profileMigrationNotice;
 
     public ProfileTextEditorViewModel TextEditor { get; private set; } = null!;
-    public RelayCommand EditUsersTextCommand { get; private set; } = null!;
+    public RelayCommand EditAccountsTextCommand { get; private set; } = null!;
     public RelayCommand EditServersTextCommand { get; private set; } = null!;
     public RelayCommand EditLogonCommandsTextCommand { get; private set; } = null!;
     public RelayCommand ReviewUpdateCommand { get; private set; } = null!;
@@ -46,12 +47,30 @@ public sealed partial class LauncherWindowViewModel
         private set { if (SetProperty(ref _isSettingsOpen, value)) NotifyDesktopModal(); }
     }
 
+    /// <summary>What loading an older profile file could not carry over, shown once; null otherwise.</summary>
+    public string? ProfileMigrationNotice
+    {
+        get => _profileMigrationNotice;
+        private set
+        {
+            if (SetProperty(ref _profileMigrationNotice, value))
+            {
+                OnPropertyChanged(nameof(HasProfileMigrationNotice));
+                NotifyDesktopModal();
+            }
+        }
+    }
+
+    public bool HasProfileMigrationNotice => ProfileMigrationNotice is not null;
+
+    public RelayCommand DismissMigrationNoticeCommand { get; private set; } = null!;
+
     private void InitializeDesktop()
     {
         TextEditor = new ProfileTextEditorViewModel(_orchestrator);
         TextEditor.PropertyChanged += OnModalPropertyChanged;
         UpdatePrompt.PropertyChanged += OnDesktopUpdateChanged;
-        EditUsersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Users), () => CanInteract);
+        EditAccountsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Accounts), () => CanInteract);
         EditServersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Servers), () => CanInteract);
         EditLogonCommandsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.LogonCommands), () => CanInteract);
         ReviewUpdateCommand = new RelayCommand(UpdatePrompt.OpenAvailableUpdate, () => CanInteract && ShowUpdateBanner);
@@ -64,6 +83,7 @@ public sealed partial class LauncherWindowViewModel
         OpenSessionLogCommand = new RelayCommand(() => IsSessionLogOpen = true, () => CanInteract);
         OpenSettingsCommand = new RelayCommand(() => IsSettingsOpen = true, () => CanInteract);
         CloseDesktopDialogCommand = new RelayCommand(CloseDesktopDialogs);
+        DismissMigrationNoticeCommand = new RelayCommand(() => ProfileMigrationNotice = null);
         SaveRowOptionsCommand = new RelayCommand(() =>
         {
             if (_rowOptionsAccount is { } account) SaveAccountPluginChoices(account);
@@ -194,37 +214,6 @@ public sealed partial class LauncherWindowViewModel
         }
     }
 
-    private void OpenAccountRowOptions(LauncherAccountServerRowViewModel row)
-    {
-        // The button opens this one dialog whatever the row's character box says. A row set to the
-        // character screen has no single character to edit, so it edits the account's characters
-        // together; accounts themselves are edited from "Edit accounts".
-        if (row.CharacterName is null)
-        {
-            var key = (row.ServerName, row.AccountName);
-            if (FindAccountSnapshot(key) is not { } account) return;
-            SetRowOptionsAccount(key);
-            LoadAccountPluginChoices(account);
-            LastError = null;
-            IsCharacterOptionsOpen = true;
-            return;
-        }
-
-        SetRowOptionsAccount(null);
-        SelectedNode = Servers.FirstOrDefault(server => server.ServerName == row.ServerName)?.Children
-            .FirstOrDefault(account => account.AccountName == row.AccountName)?.Children
-            .FirstOrDefault(character => character.CharacterName == row.CharacterName);
-        if (SelectedNode is not null)
-        {
-            // Reselecting the already-open character's own row leaves SetSelectedNode a no-op, so
-            // the draft needs its own rebuild here to show the saved state on every open, not just
-            // the first.
-            LoadCharacterDraft();
-            CharacterLaunchMode = row.Mode;
-            IsCharacterOptionsOpen = true;
-        }
-    }
-
     private void NotifyDesktopModal()
     {
         OnPropertyChanged(nameof(IsModalOpen));
@@ -248,7 +237,7 @@ public sealed partial class LauncherWindowViewModel
     {
         _installFolder?.NotifyCanMoveChanged();
         OnPropertyChanged(nameof(HasActiveSessions));
-        EditUsersTextCommand?.NotifyCanExecuteChanged();
+        EditAccountsTextCommand?.NotifyCanExecuteChanged();
         EditServersTextCommand?.NotifyCanExecuteChanged();
         EditLogonCommandsTextCommand?.NotifyCanExecuteChanged();
         ReviewUpdateCommand?.NotifyCanExecuteChanged();

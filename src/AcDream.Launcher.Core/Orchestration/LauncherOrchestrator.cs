@@ -29,6 +29,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
     private LauncherInstallRecord? _installRecord;
     private string _installationStatus;
     private PluginCatalog? _pluginCatalog;
+    private string? _profileMigrationNotice;
     private bool _disposed;
 
     public LauncherOrchestrator(
@@ -69,10 +70,20 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         {
             ThrowIfDisposed();
             _profileStore.Load();
-            LauncherProfileText.EnableSharedUsers(_profileStore.Document);
+            _profileMigrationNotice = _profileStore.MigrationNotice;
         }
 
         RaiseStateChanged();
+    }
+
+    public string? TakeProfileMigrationNotice()
+    {
+        lock (_gate)
+        {
+            string? notice = _profileMigrationNotice;
+            _profileMigrationNotice = null;
+            return notice;
+        }
     }
 
     public LauncherStateSnapshot GetSnapshot()
@@ -95,7 +106,6 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 _platform,
                 _installRecord is not null,
                 _installationStatus,
-                _profileStore.Document.Users?.Select(user => user.Account).ToArray(),
                 _profileStore.Document.ShowBetaPlugins);
         }
     }
@@ -272,9 +282,26 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         {
             if (!string.Equals(LauncherProfileText.Read(_profileStore.Document, kind), originalText, StringComparison.Ordinal))
                 throw new LauncherProfileException("Profiles changed while this editor was open. Close and reopen it before saving.");
-            foreach (var server in _profileStore.Document.Servers)
-                EnsureServerIdleLocked(server.Name);
+            // Logon commands take effect at the next login, so they may change while sessions run;
+            // so may accounts, as long as no running account is removed.
+            if (kind == LauncherTextEditorKind.Servers)
+            {
+                foreach (var server in _profileStore.Document.Servers)
+                    EnsureServerIdleLocked(server.Name);
+            }
+
             LauncherProfileText.Apply(_profileStore.Document, kind, text);
+            foreach (ManagedActivity activity in _activities.Where(activity => activity.IsActive))
+            {
+                bool stillThere = _profileStore.Document.Servers.Any(server =>
+                    server.Name == activity.ServerName
+                    && server.Accounts.Any(account => account.Account == activity.AccountName));
+                if (!stillThere)
+                {
+                    throw new LauncherOperationException(
+                        $"Stop {activity.AccountName}'s session on {activity.ServerName} before removing that account.");
+                }
+            }
         });
 
     public void EditServer(string name, string newName, string newHost, int newPort) =>
@@ -307,8 +334,6 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         MutateProfiles(() =>
         {
             EnsureAccountIdleLocked(serverName, accountName);
-            if (_profileStore.Document.Users is not null)
-                foreach (var server in _profileStore.Document.Servers) EnsureAccountIdleLocked(server.Name, accountName);
             _profileStore.EditAccount(
                 serverName,
                 accountName,
@@ -320,8 +345,6 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         MutateProfiles(() =>
         {
             EnsureAccountIdleLocked(serverName, accountName);
-            if (_profileStore.Document.Users is not null)
-                foreach (var server in _profileStore.Document.Servers) EnsureAccountIdleLocked(server.Name, accountName);
             _profileStore.RemoveAccount(serverName, accountName);
         });
 
@@ -359,16 +382,23 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         string accountName,
         string characterName,
         LaunchMode launchMode,
-        IReadOnlyList<string> plugins,
-        IReadOnlyList<string> loginCommands) =>
+        IReadOnlyList<string>? plugins) =>
         MutateProfiles(() =>
+        {
             _profileStore.EditCharacter(
                 serverName,
                 accountName,
                 characterName,
-                launchMode: launchMode,
-                plugins: plugins,
-                loginCommands: loginCommands));
+                launchMode: launchMode);
+            _profileStore.SetCharacterPlugins(serverName, accountName, characterName, plugins);
+        });
+
+    public void UpdateAccountPlugins(
+        string serverName,
+        string accountName,
+        IReadOnlyList<string> plugins) =>
+        MutateProfiles(() =>
+            _profileStore.SetAccountPlugins(serverName, accountName, plugins));
 
     public void UpdateAccountSelection(
         string serverName,
@@ -381,23 +411,6 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                 accountName,
                 selectedCharacter,
                 selectedLaunchMode));
-
-    /// <summary>What a launch to the character screen may load. The character is picked inside the
-    /// client, after the plugin list is already fixed, so only a plugin every character on the
-    /// account has opted into is safe: whoever is picked, it is one they enabled.</summary>
-    internal static List<string> PluginsEnabledForEveryCharacter(AccountProfile account)
-    {
-        if (account.Characters.Count == 0)
-        {
-            return [];
-        }
-
-        return [.. account.Characters[0].Plugins
-            .Where(id => !string.Equals(id, "none", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(id => account.Characters.All(character =>
-                character.Plugins.Contains(id, StringComparer.OrdinalIgnoreCase)))];
-    }
 
     /// <summary>Launcher-wide beta discovery setting.</summary>
     public void SetShowBetaPlugins(bool value) =>
@@ -447,12 +460,12 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                         "Select a cached character for GUI or headless launch.");
                 }
 
+                // The character is picked inside the client, so the launch carries the account's
+                // plugins and commands, which every character on it shares.
                 character = new CharacterProfile
                 {
                     Name = string.Empty,
                     LaunchMode = LaunchMode.GuiSelect,
-                    Plugins = PluginsEnabledForEveryCharacter(account),
-                    LoginCommands = [],
                 };
             }
             else
@@ -1156,10 +1169,11 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
                     character.Name,
                     character.Id,
                     character.LaunchMode,
-                    character.Plugins.ToArray(),
-                    character.LoginCommands.ToArray(),
+                    account.PluginsFor(character).ToArray(),
+                    account.LoginCommands.ToArray(),
                     characterActivity is not null,
-                    characterActivity?.Status ?? "Not running");
+                    characterActivity?.Status ?? "Not running",
+                    character.Plugins is not null);
             })
             .ToArray();
 
@@ -1170,7 +1184,10 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             active is not null,
             active?.Status ?? "Idle",
             account.SelectedCharacter,
-            account.SelectedLaunchMode);
+            account.SelectedLaunchMode,
+            account.Plugins.ToArray(),
+            account.Profiles.ToArray(),
+            account.LoginCommands.ToArray());
     }
 
     private static string ReadStartupFailure(ManagedActivity activity)
@@ -1313,6 +1330,8 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
         {
             Account = source.Account,
             Password = string.Empty,
+            Plugins = [.. source.Plugins],
+            LoginCommands = [.. source.LoginCommands],
         };
 
     private static CharacterProfile CloneCharacter(
@@ -1323,8 +1342,7 @@ public sealed class LauncherOrchestrator : ILauncherOrchestrator
             Name = source.Name,
             Id = source.Id,
             LaunchMode = mode,
-            Plugins = [.. source.Plugins],
-            LoginCommands = [.. source.LoginCommands],
+            Plugins = source.Plugins is null ? null : [.. source.Plugins],
         };
 
     private static string CreateSessionId() =>

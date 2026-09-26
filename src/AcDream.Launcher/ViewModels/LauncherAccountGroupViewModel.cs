@@ -4,13 +4,80 @@ using AcDream.Launcher.Core.Profiles;
 
 namespace AcDream.Launcher.ViewModels;
 
-public sealed class LauncherAccountGroupViewModel(string accountName) : ObservableObject
+/// <summary>One account on one server: its profile tags, the plugins its characters share, and its
+/// launch row.</summary>
+public sealed class LauncherAccountGroupViewModel : ObservableObject
 {
     private bool _isExpanded = true;
-    public string AccountName { get; } = accountName;
+    private bool _isVisible = true;
+    private IReadOnlyList<string> _profiles = [];
+    private string _pluginsSummary = "none";
+    private string _subtitle = string.Empty;
+
+    public LauncherAccountGroupViewModel(
+        string serverName,
+        string accountName,
+        Action<LauncherAccountGroupViewModel>? editPlugins = null,
+        Func<bool>? canInteract = null)
+    {
+        ServerName = serverName;
+        AccountName = accountName;
+        Func<bool> canEdit = canInteract ?? (() => true);
+        EditPluginsCommand = new RelayCommand(() => editPlugins?.Invoke(this), () => editPlugins is not null && canEdit());
+    }
+
+    public string ServerName { get; }
+
+    public string AccountName { get; }
+
     public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
-    public ObservableCollection<LauncherAccountServerRowViewModel> Servers { get; } = [];
+
+    /// <summary>False while the profile filter hides this account.</summary>
+    public bool IsVisible { get => _isVisible; set => SetProperty(ref _isVisible, value); }
+
+    public ObservableCollection<LauncherAccountServerRowViewModel> Rows { get; } = [];
+
+    public IReadOnlyList<string> Profiles
+    {
+        get => _profiles;
+        private set { if (SetProperty(ref _profiles, value)) OnPropertyChanged(nameof(HasProfiles)); }
+    }
+
+    public bool HasProfiles => Profiles.Count > 0;
+
+    /// <summary>The account's plugins by name, such as "Combat · Stats", or "none".</summary>
+    public string PluginsSummary { get => _pluginsSummary; private set => SetProperty(ref _pluginsSummary, value); }
+
+    /// <summary>"sawato · 7 characters".</summary>
+    public string Subtitle { get => _subtitle; private set => SetProperty(ref _subtitle, value); }
+
+    public RelayCommand EditPluginsCommand { get; }
+
+    public bool HasProfile(string profile) =>
+        Profiles.Contains(profile, StringComparer.OrdinalIgnoreCase);
+
+    internal void Update(LauncherAccountSnapshot account, Func<string, string> pluginDisplayName)
+    {
+        if (!Profiles.SequenceEqual(account.Profiles, StringComparer.Ordinal))
+        {
+            Profiles = [.. account.Profiles];
+        }
+
+        PluginsSummary = account.Plugins.Count == 0
+            ? "none"
+            : string.Join(" · ", account.Plugins.Select(pluginDisplayName));
+        int count = account.Characters.Count;
+        Subtitle = $"{ServerName} · {count} {(count == 1 ? "character" : "characters")}";
+        EditPluginsCommand.NotifyCanExecuteChanged();
+    }
 }
+
+/// <summary>What a row's Options menu does, supplied by the window.</summary>
+public sealed record LauncherRowActions(
+    Action<LauncherAccountServerRowViewModel> LogonCommands,
+    Action<LauncherAccountServerRowViewModel> CharacterPlugins,
+    Action<LauncherAccountServerRowViewModel> OpenLogs,
+    Action<LauncherAccountServerRowViewModel> RemoveCharacter);
 
 public sealed class LauncherAccountServerRowViewModel : ObservableObject
 {
@@ -43,7 +110,7 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     public LauncherAccountServerRowViewModel(string accountName, string serverName,
         Func<LauncherAccountServerRowViewModel, string?> disabledReason, Action changed,
         Func<LauncherAccountServerRowViewModel, Task> launch,
-        Func<string, Task> stop, Action<LauncherAccountServerRowViewModel> options,
+        Func<string, Task> stop, LauncherRowActions actions,
         Func<bool> canInteract)
     {
         AccountName = accountName;
@@ -54,7 +121,14 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         PlayCommand = new AsyncRelayCommand(() => launch(this), () => CanPlay);
         StopCommand = new AsyncRelayCommand(() => _activeSessionId is { } id ? stop(id) : Task.CompletedTask,
             () => IsActive && canInteract());
-        OptionsCommand = new RelayCommand(() => options(this), canInteract);
+        LogonCommandsCommand = new RelayCommand(() => actions.LogonCommands(this), canInteract);
+        CharacterPluginsCommand = new RelayCommand(
+            () => actions.CharacterPlugins(this),
+            () => canInteract() && CharacterName is not null);
+        OpenLogsCommand = new RelayCommand(() => actions.OpenLogs(this));
+        RemoveCharacterCommand = new RelayCommand(
+            () => actions.RemoveCharacter(this),
+            () => canInteract() && CharacterName is not null && !IsActive);
         ConsoleCommand = new RelayCommand(
             () =>
             {
@@ -159,7 +233,10 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
     public string DisabledReason => _disabledReason(this) ?? "";
     public AsyncRelayCommand PlayCommand { get; }
     public AsyncRelayCommand StopCommand { get; }
-    public RelayCommand OptionsCommand { get; }
+    public RelayCommand LogonCommandsCommand { get; }
+    public RelayCommand CharacterPluginsCommand { get; }
+    public RelayCommand OpenLogsCommand { get; }
+    public RelayCommand RemoveCharacterCommand { get; }
     public RelayCommand ConsoleCommand { get; }
 
     internal void Update(LauncherServerSnapshot server, LauncherAccountSnapshot account, LauncherSessionSnapshot? session)
@@ -210,7 +287,9 @@ public sealed class LauncherAccountServerRowViewModel : ObservableObject
         OnPropertyChanged(nameof(DisabledReason));
         PlayCommand.NotifyCanExecuteChanged();
         StopCommand.NotifyCanExecuteChanged();
-        OptionsCommand.NotifyCanExecuteChanged();
+        LogonCommandsCommand.NotifyCanExecuteChanged();
+        CharacterPluginsCommand.NotifyCanExecuteChanged();
+        RemoveCharacterCommand.NotifyCanExecuteChanged();
         ConsoleCommand.NotifyCanExecuteChanged();
     }
 }

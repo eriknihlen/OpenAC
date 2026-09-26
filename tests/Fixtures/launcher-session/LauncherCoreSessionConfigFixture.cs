@@ -20,6 +20,7 @@ internal static class LauncherCoreSessionConfigFixture
         {
             Account = "composer-account",
             Password = Password,
+            LoginCommands = ["/composer command"],
         };
         var character = new CharacterProfile
         {
@@ -27,7 +28,6 @@ internal static class LauncherCoreSessionConfigFixture
             Id = "0x50000001",
             LaunchMode = LaunchMode.Headless,
             Plugins = ["ComposerPlugin"],
-            LoginCommands = ["/composer command"],
         };
         var install = new LauncherInstallRecord(
             "composer-dats",
@@ -59,7 +59,6 @@ internal static class LauncherCoreSessionConfigFixture
             Id = "0x50000001",
             LaunchMode = LaunchMode.Headless,
             Plugins = ["none"],
-            LoginCommands = [],
         };
 
         ComposedSessionConfig composed = SessionConfigComposer.Compose(

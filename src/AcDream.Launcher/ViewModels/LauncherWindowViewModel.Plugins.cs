@@ -73,6 +73,11 @@ public sealed partial class LauncherWindowViewModel
         Plugins = new LauncherPluginsViewModel(_orchestrator, _dispatcher, () => CanInteract);
         Plugins.InstallDialog.PropertyChanged += OnModalPropertyChanged;
         Plugins.PropertyChanged += OnModalPropertyChanged;
+        // The account rows name their plugins; an install, update or removal renames them.
+        Plugins.Installed.CollectionChanged += (_, _) =>
+        {
+            if (_snapshot is { } snapshot && !_disposed) RefreshAccountRows(snapshot);
+        };
         SelectAccountsTabCommand = new RelayCommand(() => SelectedTab = LauncherMainTab.Accounts);
         SelectPluginsTabCommand = new RelayCommand(() =>
         {
@@ -99,21 +104,31 @@ public sealed partial class LauncherWindowViewModel
     /// kept as checked, missing rows so a save never silently drops them.</summary>
     private void LoadCharacterPluginChoices(LauncherCharacterSnapshot? character)
     {
-        CharacterPluginChoices.Clear();
+        CharacterUsesAccountPlugins = character is not null && !character.HasOwnPlugins;
         if (character is null)
         {
+            CharacterPluginChoices.Clear();
             return;
         }
 
-        var configured = new HashSet<string>(character.Plugins, StringComparer.OrdinalIgnoreCase);
+        LoadPluginChoices(
+            character.Plugins,
+            character.LaunchMode == LaunchMode.Headless
+                ? LauncherPluginHostKind.Headless
+                : LauncherPluginHostKind.Graphical);
+    }
+
+    /// <summary>The checklist for <paramref name="configuredIds"/>. With a host, plugins that cannot
+    /// run there are left out; without one (an account, whose characters may launch either way)
+    /// every usable plugin is offered and one limited to a host says so.</summary>
+    private void LoadPluginChoices(IReadOnlyList<string> configuredIds, LauncherPluginHostKind? host)
+    {
+        CharacterPluginChoices.Clear();
+        var configured = new HashSet<string>(configuredIds, StringComparer.OrdinalIgnoreCase);
         var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var wrongHostDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var refusedDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var blockedDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        LauncherPluginHostKind host = character.LaunchMode == LaunchMode.Headless
-            ? LauncherPluginHostKind.Headless
-            : LauncherPluginHostKind.Graphical;
-
         if (_pluginInventory is not null)
         {
             IEnumerable<InstalledPluginInfo> installed = _pluginInventory
@@ -124,7 +139,7 @@ public sealed partial class LauncherWindowViewModel
                 LauncherPluginManifest? manifest = TryReadManifest(info.Directory);
                 IReadOnlyList<LauncherPluginHostKind> hosts = manifest?.Hosts
                     ?? [LauncherPluginHostKind.Graphical, LauncherPluginHostKind.Headless];
-                if (!hosts.Contains(host))
+                if (host is { } required && !hosts.Contains(required))
                 {
                     wrongHostDisplayNames[info.Id] = info.DisplayName;
                     continue;
@@ -148,15 +163,18 @@ public sealed partial class LauncherWindowViewModel
                     continue;
                 }
 
+                string choiceName = host is null && hosts.Count == 1
+                    ? $"{info.DisplayName} ({(hosts[0] == LauncherPluginHostKind.Headless ? "headless only" : "windowed only")})"
+                    : info.DisplayName;
                 CharacterPluginChoices.Add(new CharacterPluginChoiceViewModel(
                     info.Id,
-                    info.DisplayName,
+                    choiceName,
                     isChecked: configured.Contains(info.Id),
                     isMissing: false));
             }
         }
 
-        foreach (string id in character.Plugins)
+        foreach (string id in configuredIds)
         {
             if (string.Equals(id, "none", StringComparison.OrdinalIgnoreCase) || !placed.Add(id))
             {
@@ -176,30 +194,45 @@ public sealed partial class LauncherWindowViewModel
     }
 
     private (string Server, string Account)? _rowOptionsAccount;
-    private readonly Dictionary<string, bool> _accountChoiceInitial =
-        new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IReadOnlyList<LauncherPluginHostKind>> _accountChoiceHosts =
-        new(StringComparer.OrdinalIgnoreCase);
+    private bool _characterUsesAccountPlugins;
 
-    /// <summary>True while the row options dialog is open for a row that launches to the
-    /// character screen, where a plugin choice covers every character on the account.</summary>
+    /// <summary>True while the plugins dialog edits an account's list rather than one character's.</summary>
     public bool IsAccountRowOptions => _rowOptionsAccount is not null;
 
-    public bool ShowRowLogonCommands => !IsAccountRowOptions;
+    /// <summary>The character dialog's choice between the account's plugins and its own list.</summary>
+    public bool ShowCharacterPluginChoice => !IsAccountRowOptions;
+
+    /// <summary>Whether the character launches with its account's plugins; unticked, it keeps its
+    /// own list, edited below.</summary>
+    public bool CharacterUsesAccountPlugins
+    {
+        get => _characterUsesAccountPlugins;
+        set
+        {
+            if (SetProperty(ref _characterUsesAccountPlugins, value))
+            {
+                OnPropertyChanged(nameof(CanEditPluginChoices));
+            }
+        }
+    }
+
+    /// <summary>The checklist is editable except while a character follows its account.</summary>
+    public bool CanEditPluginChoices => IsAccountRowOptions || !CharacterUsesAccountPlugins;
 
     public string RowOptionsTitle => _rowOptionsAccount is { } account
-        ? $"{account.Account} · all characters"
-        : SelectionTitle;
+        ? $"Plugins for {account.Account}"
+        : $"Plugins for {SelectionTitle}";
 
     public string RowOptionsPluginsCaption => IsAccountRowOptions
-        ? "Plugins · a checked plugin is enabled for every character on this account"
-        : "Plugins · only checked plugins load";
+        ? "Every character on this account starts with these plugins."
+        : "This character can use its account's plugins or a list of its own.";
 
     private void SetRowOptionsAccount((string Server, string Account)? account)
     {
         _rowOptionsAccount = account;
         OnPropertyChanged(nameof(IsAccountRowOptions));
-        OnPropertyChanged(nameof(ShowRowLogonCommands));
+        OnPropertyChanged(nameof(ShowCharacterPluginChoice));
+        OnPropertyChanged(nameof(CanEditPluginChoices));
         OnPropertyChanged(nameof(RowOptionsTitle));
         OnPropertyChanged(nameof(RowOptionsPluginsCaption));
     }
@@ -210,117 +243,59 @@ public sealed partial class LauncherWindowViewModel
             ?.Accounts.FirstOrDefault(account =>
                 string.Equals(account.AccountName, key.Account, StringComparison.Ordinal));
 
-    /// <summary>The checklist for a row that launches to the character screen. The launcher cannot
-    /// know which character will be picked there, so such a launch loads only what every character
-    /// on the account has enabled; this list edits exactly that, one plugin for all characters.</summary>
-    private void LoadAccountPluginChoices(LauncherAccountSnapshot account)
+    /// <summary>The account's "Edit plugins": one list for every character on it.</summary>
+    private void OpenAccountPlugins(LauncherAccountGroupViewModel group)
     {
-        CharacterPluginChoices.Clear();
-        _accountChoiceInitial.Clear();
-        _accountChoiceHosts.Clear();
-        if (_pluginInventory is null)
-        {
-            return;
-        }
-
-        int total = account.Characters.Count;
-        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        IEnumerable<InstalledPluginInfo> installed = _pluginInventory
-            .Build(clientResolution: null, Plugins.CurrentCatalog)
-            .OrderBy(info => info.DisplayName, StringComparer.OrdinalIgnoreCase);
-        foreach (InstalledPluginInfo info in installed)
-        {
-            if (info.Refusal is not null || info.HasDuplicate || info.Blocked is not null
-                || !placed.Add(info.Id))
-            {
-                continue;
-            }
-
-            int enabled = account.Characters.Count(character =>
-                character.Plugins.Contains(info.Id, StringComparer.OrdinalIgnoreCase));
-            bool all = total > 0 && enabled == total;
-            string displayName = enabled > 0 && !all
-                ? $"{info.DisplayName} (on {enabled} of {total} characters)"
-                : info.DisplayName;
-            _accountChoiceInitial[info.Id] = all;
-            _accountChoiceHosts[info.Id] = TryReadManifest(info.Directory)?.Hosts
-                ?? [LauncherPluginHostKind.Graphical, LauncherPluginHostKind.Headless];
-            CharacterPluginChoices.Add(new CharacterPluginChoiceViewModel(
-                info.Id, displayName, isChecked: all, isMissing: false));
-        }
+        var key = (group.ServerName, group.AccountName);
+        if (FindAccountSnapshot(key) is not { } account) return;
+        SetRowOptionsAccount(key);
+        LoadPluginChoices(account.Plugins, host: null);
+        LastError = null;
+        IsCharacterOptionsOpen = true;
     }
 
-    /// <summary>Writes only the choices the player changed, so a plugin left enabled for some
-    /// characters stays that way unless its box was touched.</summary>
+    /// <summary>Options › Plugins for this character: its account's list or one of its own.</summary>
+    private void OpenCharacterPlugins(LauncherAccountServerRowViewModel row)
+    {
+        if (row.CharacterName is null) return;
+        SetRowOptionsAccount(null);
+        SelectedNode = Servers.FirstOrDefault(server => server.ServerName == row.ServerName)?.Children
+            .FirstOrDefault(account => account.AccountName == row.AccountName)?.Children
+            .FirstOrDefault(character => character.CharacterName == row.CharacterName);
+        if (SelectedNode is null) return;
+        // Reselecting the already-open character leaves SetSelectedNode a no-op, so the draft is
+        // rebuilt here to show the saved state on every open.
+        LoadCharacterDraft();
+        CharacterLaunchMode = row.Mode;
+        LastError = null;
+        IsCharacterOptionsOpen = true;
+    }
+
+    /// <summary>Saves the account list, keeping the order of what was already there and adding newly
+    /// ticked plugins after it.</summary>
     private void SaveAccountPluginChoices((string Server, string Account) key)
     {
-        LauncherAccountSnapshot account = FindAccountSnapshot(key)
-            ?? throw new LauncherOperationException("That account no longer exists.");
-        var skipped = new List<string>();
         try
         {
-            foreach (LauncherCharacterSnapshot character in account.Characters)
-            {
-                List<string> plugins = character.Plugins
-                    .Where(id => !string.Equals(id, "none", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                bool changed = false;
-                LauncherPluginHostKind host = character.LaunchMode == LaunchMode.Headless
-                    ? LauncherPluginHostKind.Headless
-                    : LauncherPluginHostKind.Graphical;
-                foreach (CharacterPluginChoiceViewModel choice in CharacterPluginChoices)
-                {
-                    if (!_accountChoiceInitial.TryGetValue(choice.Id, out bool initial)
-                        || initial == choice.IsChecked)
-                    {
-                        continue;
-                    }
-
-                    bool has = plugins.Contains(choice.Id, StringComparer.OrdinalIgnoreCase);
-                    if (choice.IsChecked && !has)
-                    {
-                        if (!_accountChoiceHosts[choice.Id].Contains(host))
-                        {
-                            skipped.Add($"{choice.DisplayName} for {character.Name}");
-                            continue;
-                        }
-
-                        plugins.Add(choice.Id);
-                        changed = true;
-                    }
-                    else if (!choice.IsChecked && has)
-                    {
-                        plugins.RemoveAll(id =>
-                            string.Equals(id, choice.Id, StringComparison.OrdinalIgnoreCase));
-                        changed = true;
-                    }
-                }
-
-                if (changed)
-                {
-                    _orchestrator.UpdateCharacterSettings(
-                        character.ServerName,
-                        character.AccountName,
-                        character.Name,
-                        character.LaunchMode,
-                        plugins,
-                        character.LoginCommands);
-                }
-            }
-
-            LastError = skipped.Count > 0
-                ? $"Not enabled: {string.Join(", ", skipped)}. That plugin does not support the character's launch mode."
-                : null;
-            OperationStatus = $"Saved plugins for every character on {key.Account}.";
-            RefreshFromCore(new SelectionKey(
-                LauncherTreeNodeKind.Account, key.Server, key.Account, null));
-            if (FindAccountSnapshot(key) is { } saved) LoadAccountPluginChoices(saved);
+            LauncherAccountSnapshot account = FindAccountSnapshot(key)
+                ?? throw new LauncherOperationException("That account no longer exists.");
+            var chosen = CheckedCharacterPluginIds();
+            List<string> plugins = [.. account.Plugins.Where(id => chosen.Contains(id, StringComparer.OrdinalIgnoreCase))];
+            plugins.AddRange(chosen.Where(id => !plugins.Contains(id, StringComparer.OrdinalIgnoreCase)));
+            _orchestrator.UpdateAccountPlugins(key.Server, key.Account, plugins);
+            LastError = null;
+            OperationStatus = $"Saved plugins for {key.Account}.";
         }
         catch (Exception ex)
         {
             LastError = SafeDisplayError(ex, secret: null);
         }
     }
+
+    /// <summary>The installed plugins by name, for the account summaries.</summary>
+    private string PluginDisplayName(string id) =>
+        Plugins.Installed.FirstOrDefault(row => string.Equals(row.Id, id, StringComparison.OrdinalIgnoreCase))?.DisplayName
+        ?? id;
 
     /// <summary>Blank means none: unchecking every plugin saves an empty list, not the old
     /// literal "none" sentinel a free-text box once needed.</summary>
