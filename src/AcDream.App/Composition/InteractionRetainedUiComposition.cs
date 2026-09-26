@@ -608,7 +608,8 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 d.DebugFont,
                 controls,
                 iconComposer,
-                d.TextureCache);
+                d.TextureCache,
+                BundledUiFont.Load(d.TextureCache));
             var characterCreationStrings = new DatStringResolver(d.Dats);
             var chargenSkillScoreResolver = new ChargenSkillScoreResolver(
                 d.Runtime.CharacterCreation.Options);

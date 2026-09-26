@@ -10,9 +10,11 @@ public sealed class PluginUiThemeSettings
 {
     private readonly SettingsStore? _store;
     private PluginUiTheme _theme;
-    public PluginUiThemeSettings(SettingsStore? store = null)
+    public UiDatFont? ModernFont { get; }
+    public PluginUiThemeSettings(SettingsStore? store = null, UiDatFont? modernFont = null)
     {
         _store = store;
+        ModernFont = modernFont;
         _theme = Enum.TryParse<PluginUiTheme>(store?.LoadPluginUiTheme(), out var value)
             && Enum.IsDefined(value) ? value : PluginUiTheme.Classic;
     }
@@ -65,6 +67,7 @@ internal sealed class UiPluginMarkupPanel : UiNineSlicePanel
     private PluginUiTheme? _last;
     public UiPluginMarkupPanel(Func<uint, (uint, int, int)> resolve, PluginUiThemeSettings settings)
         : base(resolve) => _settings = settings;
+    public UiDatFont? ModernFont => _settings.ModernFont;
     public void AddThemeAction(Action<PluginUiPalette?> action)
     {
         _apply.Add(action);

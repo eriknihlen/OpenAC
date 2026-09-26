@@ -41,7 +41,14 @@ Right-click the plugin shelf or an entry to open **Plugin appearance**. Classic
 is the default. **Charcoal + moss** and **Warm graphite + brass** apply to
 windows whose root uses `<panel theme="plugin" ...>`. The choice is saved in
 the client's settings. Existing windows without this attribute keep their
-original styling. Modern shelves are 24 pixels wide; wheel scrolling reaches
+original styling. Both modern themes use the bundled Noto Sans Regular font;
+no operating-system font installation is required. Classic keeps its original
+font. The font loader is shared client infrastructure (`BundledUiFont.Load`),
+so other client panels can use it too; this preference currently changes only
+opted-in plugin windows. The atlas covers Latin, Greek, Cyrillic and common
+punctuation; unsupported characters display a question mark.
+
+Modern shelves are 24 pixels wide; wheel scrolling reaches
 entries that do not fit vertically. Icons keep their full-color composition.
 
 Opted-in windows keep their authored layout and use themed labels, buttons,

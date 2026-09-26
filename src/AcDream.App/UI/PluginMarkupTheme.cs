@@ -5,6 +5,26 @@ internal static class PluginMarkupTheme
 {
     public static void Register(UiPluginMarkupPanel panel, UiElement element, XElement xml)
     {
+        if (panel.ModernFont is { } modern)
+        {
+            void Bind(Func<UiDatFont?> get, Action<UiDatFont?> set)
+            {
+                UiDatFont? classic = get();
+                panel.AddThemeAction(p => set(p is null ? classic : modern));
+            }
+            switch (element)
+            {
+                case UiLabel label: Bind(() => label.DatFont, f => label.DatFont = f); break;
+                case UiSimpleButton button: Bind(() => button.DatFont, f => button.DatFont = f); break;
+                case UiMarkupToggle toggle: Bind(() => toggle.DatFont, f => toggle.DatFont = f); break;
+                case UiField field: Bind(() => field.DatFont, f => field.DatFont = f); break;
+                case UiMenu menu:
+                    Bind(() => menu.DatFont, f => menu.DatFont = f);
+                    Bind(() => menu.ButtonDatFont, f => menu.ButtonDatFont = f);
+                    break;
+                case UiMarkupList list: Bind(() => list.DatFont, f => list.DatFont = f); break;
+            }
+        }
         bool Default(string name) => xml.Attribute(name) is null;
         switch (element)
         {
