@@ -59,6 +59,14 @@
     <InternalsVisibleTo Include="AcDream.Launcher.Tests" />
   </ItemGroup>
 
+  <!-- A release build carries the fingerprint of what it was built from
+       (tools/publish-bin.ps1); the launcher updates itself only when the
+       published fingerprint differs. A developer build has none and falls back
+       to comparing versions. -->
+  <ItemGroup Condition="'$(LauncherFingerprint)' != ''">
+    <AssemblyMetadata Include="OpenAC.LauncherFingerprint" Value="$(LauncherFingerprint)" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Window icon for the Avalonia shell. Linked from assets/icons so the
          art has one source of truth; the Link is what fixes the avares path

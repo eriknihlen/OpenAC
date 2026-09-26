@@ -476,6 +476,7 @@ jobs:
             bin/client-osx-arm64.zip
             bin/launcher-osx-arm64.zip
             bin/manifest.json
+            bin/launcher-fingerprint.json
             bin/package/*.nupkg
             bin/package/*.nupkg.sha256
           fail_on_unmatched_files: true

@@ -109,7 +109,7 @@ public static class SessionConfigComposer
             : null;
 
         (List<string> pluginAllowList, IReadOnlyList<string> pluginStatusLines) =
-            ComposePluginAllowList(character.Plugins, catalog, paths);
+            ComposePluginAllowList(account.PluginsFor(character), catalog, paths);
 
         var descriptor = new SessionDescriptor
         {
@@ -124,8 +124,8 @@ public static class SessionConfigComposer
             Policy = policy,
             Credential = new SessionCredentialDescriptor(),
             Plugins = pluginAllowList,
-            LoginCommands = character.LoginCommands.Count > 0
-                ? [.. character.LoginCommands]
+            LoginCommands = account.LoginCommands.Count > 0
+                ? [.. account.LoginCommands]
                 : null,
             LoginCommandDelayMs = loginCommandDelayMs,
             StatusFile = statusFilePath,

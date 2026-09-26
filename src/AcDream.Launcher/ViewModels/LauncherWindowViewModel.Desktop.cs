@@ -16,9 +16,12 @@ public sealed partial class LauncherWindowViewModel
     private bool _isCharacterOptionsOpen;
     private bool _isSessionLogOpen;
     private bool _isSettingsOpen;
+    private string? _profileMigrationNotice;
 
     public ProfileTextEditorViewModel TextEditor { get; private set; } = null!;
-    public RelayCommand EditUsersTextCommand { get; private set; } = null!;
+    public AddServerDialogViewModel AddServerDialog { get; private set; } = null!;
+    public AsyncRelayCommand OpenAddServerCommand { get; private set; } = null!;
+    public RelayCommand EditAccountsTextCommand { get; private set; } = null!;
     public RelayCommand EditServersTextCommand { get; private set; } = null!;
     public RelayCommand EditLogonCommandsTextCommand { get; private set; } = null!;
     public RelayCommand ReviewUpdateCommand { get; private set; } = null!;
@@ -46,24 +49,44 @@ public sealed partial class LauncherWindowViewModel
         private set { if (SetProperty(ref _isSettingsOpen, value)) NotifyDesktopModal(); }
     }
 
+    /// <summary>What loading an older profile file could not carry over, shown once; null otherwise.</summary>
+    public string? ProfileMigrationNotice
+    {
+        get => _profileMigrationNotice;
+        private set
+        {
+            if (SetProperty(ref _profileMigrationNotice, value))
+            {
+                OnPropertyChanged(nameof(HasProfileMigrationNotice));
+                NotifyDesktopModal();
+            }
+        }
+    }
+
+    public bool HasProfileMigrationNotice => ProfileMigrationNotice is not null;
+
+    public RelayCommand DismissMigrationNoticeCommand { get; private set; } = null!;
+
     private void InitializeDesktop()
     {
         TextEditor = new ProfileTextEditorViewModel(_orchestrator);
         TextEditor.PropertyChanged += OnModalPropertyChanged;
+        AddServerDialog = new AddServerDialogViewModel(_orchestrator);
+        AddServerDialog.PropertyChanged += OnModalPropertyChanged;
+        OpenAddServerCommand = new AsyncRelayCommand(() => AddServerDialog.OpenAsync(), () => CanInteract);
         UpdatePrompt.PropertyChanged += OnDesktopUpdateChanged;
-        EditUsersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Users), () => CanInteract);
+        EditAccountsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Accounts), () => CanInteract);
         EditServersTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.Servers), () => CanInteract);
         EditLogonCommandsTextCommand = new RelayCommand(() => OpenTextEditor(LauncherTextEditorKind.LogonCommands), () => CanInteract);
         ReviewUpdateCommand = new RelayCommand(UpdatePrompt.OpenAvailableUpdate, () => CanInteract && ShowUpdateBanner);
-        CheckForUpdatesCommand = new AsyncRelayCommand(async () =>
-        {
-            await UpdatePrompt.StartupCheckAsync();
-            if (ShowUpdateBanner) UpdatePrompt.OpenAvailableUpdate();
-        }, () => CanInteract && !UpdatePrompt.IsBusy);
+        CheckForUpdatesCommand = new AsyncRelayCommand(
+            () => CheckForUpdatesAsync(openPrompt: true),
+            () => CanInteract && !UpdatePrompt.IsBusy);
         CheckServersCommand = new AsyncRelayCommand(CheckServerHealthAsync, () => _serverHealth is not null && !_disposed);
         OpenSessionLogCommand = new RelayCommand(() => IsSessionLogOpen = true, () => CanInteract);
         OpenSettingsCommand = new RelayCommand(() => IsSettingsOpen = true, () => CanInteract);
         CloseDesktopDialogCommand = new RelayCommand(CloseDesktopDialogs);
+        DismissMigrationNoticeCommand = new RelayCommand(() => ProfileMigrationNotice = null);
         SaveRowOptionsCommand = new RelayCommand(() =>
         {
             if (_rowOptionsAccount is { } account) SaveAccountPluginChoices(account);
@@ -81,25 +104,85 @@ public sealed partial class LauncherWindowViewModel
     private string? _launcherVersion;
     private Func<ClientVersionResolution?> _clientVersion = () => null;
 
-    /// <summary>The small versions shown at the top right of the window, launcher above client, without
-    /// build metadata. Plugin compatibility is judged against the client, which can differ from the
-    /// launcher while an update is pending.</summary>
-    public string VersionText => _launcherVersion is null
-        ? string.Empty
-        : $"launcher {ShortVersion(_launcherVersion)}\n"
-          + (_clientVersion()?.Version is { } client ? $"client {ShortVersion(client.Value)}" : "client not installed");
+    /// <summary>The client version at the top right, without build metadata, or "not installed".
+    /// The launcher and client can differ: the launcher updates only when it changed.</summary>
+    public string ClientVersionText =>
+        _clientVersion()?.Version is { } client ? ShortVersion(client.Value) : "not installed";
+
+    /// <summary>The launcher version at the top right, without build metadata.</summary>
+    public string LauncherVersionText => _launcherVersion is null ? "" : ShortVersion(_launcherVersion);
+
+    public bool HasVersions => _launcherVersion is not null;
+
+    /// <summary>The plugins line at the top right: "all up to date", "2 updates", or "checking…".</summary>
+    public string PluginsUpdateText
+    {
+        get
+        {
+            if (Plugins.IsBusy) return "checking…";
+            if (!Plugins.HasInstalled) return "none installed";
+            int updates = Plugins.Installed.Count(row => row.UpdateAvailable);
+            return updates switch { 0 => "all up to date", 1 => "1 update", _ => $"{updates} updates" };
+        }
+    }
+
+    public bool HasPluginUpdates => Plugins.Installed.Any(row => row.UpdateAvailable);
 
     public void ConfigureVersions(string launcherVersion, Func<ClientVersionResolution?> clientVersion)
     {
         _launcherVersion = launcherVersion;
         _clientVersion = clientVersion ?? throw new ArgumentNullException(nameof(clientVersion));
-        OnPropertyChanged(nameof(VersionText));
+        NotifyVersions();
+    }
+
+    private void NotifyVersions()
+    {
+        OnPropertyChanged(nameof(ClientVersionText));
+        OnPropertyChanged(nameof(LauncherVersionText));
+        OnPropertyChanged(nameof(HasVersions));
+        OnPropertyChanged(nameof(PluginsUpdateText));
+        OnPropertyChanged(nameof(HasPluginUpdates));
+    }
+
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(20);
+    private DateTimeOffset? _nextUpdateCheck;
+
+    /// <summary>Checks for client, launcher and plugin updates every twenty minutes while the
+    /// launcher is open. The check at startup is the first; a manual check restarts the wait.</summary>
+    public void PollUpdateCheck() => PollUpdateCheck(DateTimeOffset.UtcNow);
+
+    internal void PollUpdateCheck(DateTimeOffset now)
+    {
+        if (_disposed || _startupInitialization is not { IsCompleted: true })
+        {
+            return;
+        }
+
+        _nextUpdateCheck ??= now + UpdateCheckInterval;
+        if (now < _nextUpdateCheck || UpdatePrompt.IsBusy)
+        {
+            return;
+        }
+
+        _ = CheckForUpdatesAsync(openPrompt: false, now);
+    }
+
+    /// <summary>The client and launcher from the release feed, and the installed plugins. A
+    /// background check only raises the banner; the button also opens what it found.</summary>
+    private async Task CheckForUpdatesAsync(bool openPrompt, DateTimeOffset? now = null)
+    {
+        _nextUpdateCheck = (now ?? DateTimeOffset.UtcNow) + UpdateCheckInterval;
+        Task plugins = Plugins.CheckInstalledUpdatesAsync();
+        await UpdatePrompt.RecheckAsync().ConfigureAwait(true);
+        NotifyVersions();
+        if (openPrompt && ShowUpdateBanner) UpdatePrompt.OpenAvailableUpdate();
+        await plugins.ConfigureAwait(true);
     }
 
     private static string ShortVersion(string version)
     {
         int plus = version.IndexOf('+');
-        return "v" + (plus < 0 ? version : version[..plus]);
+        return plus < 0 ? version : version[..plus];
     }
 
     private InstallFolderViewModel? _installFolder;
@@ -129,6 +212,9 @@ public sealed partial class LauncherWindowViewModel
 
     /// <summary>Whether the install may move now: nothing running and nothing busy.</summary>
     internal bool CanMoveInstallFolder => !IsBusy && Sessions.All(session => !session.IsActive);
+
+    /// <summary>Gives Add a server its list of known public servers.</summary>
+    public void ConfigureKnownServers(KnownServerCatalog catalog) => AddServerDialog.UseCatalog(catalog);
 
     public void ConfigureServerHealth(IServerHealthService service)
     {
@@ -194,37 +280,6 @@ public sealed partial class LauncherWindowViewModel
         }
     }
 
-    private void OpenAccountRowOptions(LauncherAccountServerRowViewModel row)
-    {
-        // The button opens this one dialog whatever the row's character box says. A row set to the
-        // character screen has no single character to edit, so it edits the account's characters
-        // together; accounts themselves are edited from "Edit accounts".
-        if (row.CharacterName is null)
-        {
-            var key = (row.ServerName, row.AccountName);
-            if (FindAccountSnapshot(key) is not { } account) return;
-            SetRowOptionsAccount(key);
-            LoadAccountPluginChoices(account);
-            LastError = null;
-            IsCharacterOptionsOpen = true;
-            return;
-        }
-
-        SetRowOptionsAccount(null);
-        SelectedNode = Servers.FirstOrDefault(server => server.ServerName == row.ServerName)?.Children
-            .FirstOrDefault(account => account.AccountName == row.AccountName)?.Children
-            .FirstOrDefault(character => character.CharacterName == row.CharacterName);
-        if (SelectedNode is not null)
-        {
-            // Reselecting the already-open character's own row leaves SetSelectedNode a no-op, so
-            // the draft needs its own rebuild here to show the saved state on every open, not just
-            // the first.
-            LoadCharacterDraft();
-            CharacterLaunchMode = row.Mode;
-            IsCharacterOptionsOpen = true;
-        }
-    }
-
     private void NotifyDesktopModal()
     {
         OnPropertyChanged(nameof(IsModalOpen));
@@ -248,8 +303,9 @@ public sealed partial class LauncherWindowViewModel
     {
         _installFolder?.NotifyCanMoveChanged();
         OnPropertyChanged(nameof(HasActiveSessions));
-        EditUsersTextCommand?.NotifyCanExecuteChanged();
+        EditAccountsTextCommand?.NotifyCanExecuteChanged();
         EditServersTextCommand?.NotifyCanExecuteChanged();
+        OpenAddServerCommand?.NotifyCanExecuteChanged();
         EditLogonCommandsTextCommand?.NotifyCanExecuteChanged();
         ReviewUpdateCommand?.NotifyCanExecuteChanged();
         CheckForUpdatesCommand?.NotifyCanExecuteChanged();
@@ -263,6 +319,7 @@ public sealed partial class LauncherWindowViewModel
         _healthCancellation.Cancel();
         _healthCancellation.Dispose();
         TextEditor.PropertyChanged -= OnModalPropertyChanged;
+        AddServerDialog.PropertyChanged -= OnModalPropertyChanged;
         TextEditor.Close();
         UpdatePrompt.PropertyChanged -= OnDesktopUpdateChanged;
     }

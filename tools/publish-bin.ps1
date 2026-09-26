@@ -97,27 +97,33 @@ Write-Host ''
 if (Test-Path $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force }
 $null = New-Item -ItemType Directory -Path $Staging -Force
 
+# The launcher's fingerprint (tools/launcher-fingerprint.ps1 says what it
+# covers), embedded in the launcher and published beside the manifest.
+. (Join-Path $PSScriptRoot 'launcher-fingerprint.ps1')
+$LauncherFingerprint = Get-LauncherFingerprint
+Write-Host "  launcher fingerprint : $LauncherFingerprint"
+
 function Invoke-Publish {
     param(
         [Parameter(Mandatory)][string]$Project,
         [Parameter(Mandatory)][string]$Rid,
         [Parameter(Mandatory)][string]$OutputDirectory,
         [switch]$SingleFile,
-        [switch]$ReadyToRun
+        [switch]$ReadyToRun,
+        [string]$Fingerprint
     )
 
+    # The shared flags are part of the launcher fingerprint (launcher-fingerprint.ps1).
     $arguments = @(
         'publish', (Join-Path $RepoRoot $Project),
-        '-c', 'Release',
         '-r', $Rid,
-        '--self-contained', 'true',
         "-p:Version=$Version",
-        # No SourceLink '+<sha>' suffix: LauncherVersion parses this as SemVer.
-        '-p:IncludeSourceRevisionInInformationalVersion=false',
-        '-o', $OutputDirectory,
-        '--nologo'
-    )
+        '-o', $OutputDirectory
+    ) + $CommonPublishFlags
     if ($SingleFile) { $arguments += '-p:PublishSingleFile=true' }
+    # Only the launcher carries its fingerprint, so it can tell whether a
+    # release's launcher is the one already running.
+    if ($Fingerprint) { $arguments += "-p:LauncherFingerprint=$Fingerprint" }
     # Ahead-of-time compilation, for the hosts that run a frame loop: every
     # path a player walks for the first time -- the first object torn down,
     # the first portal, the first spell -- otherwise pays its compilation
@@ -283,7 +289,7 @@ foreach ($rid in $Rids) {
     Invoke-Publish 'src/AcDream.Headless/AcDream.Headless.csproj' $rid $clientDirectory -ReadyToRun
 
     Write-Host "[$rid] publishing launcher (+ co-deployed bake)..." -ForegroundColor Yellow
-    Invoke-Publish 'src/AcDream.Launcher/AcDream.Launcher.csproj' $rid $launcherDirectory
+    Invoke-Publish 'src/AcDream.Launcher/AcDream.Launcher.csproj' $rid $launcherDirectory -Fingerprint $LauncherFingerprint
 
     $clientZip = Join-Path $BinRoot "client-$rid.zip"
     $launcherZip = Join-Path $BinRoot "launcher-$rid.zip"
@@ -394,6 +400,20 @@ $manifest = [ordered]@{
 $manifestPath = Join-Path $BinRoot 'manifest.json'
 $json = $manifest | ConvertTo-Json -Depth 6
 [IO.File]::WriteAllText($manifestPath, $json + "`n", [Text.UTF8Encoding]::new($false))
+
+# Beside manifest.json, not in it: a launcher from before fingerprints reads
+# manifest.json strictly and would refuse a field it does not know. A launcher
+# that reads this file updates itself only when the fingerprint differs from
+# its own.
+$fingerprintDocument = [ordered]@{
+    schemaVersion = 1
+    version       = $Version
+    fingerprint   = $LauncherFingerprint
+}
+[IO.File]::WriteAllText(
+    (Join-Path $BinRoot 'launcher-fingerprint.json'),
+    (($fingerprintDocument | ConvertTo-Json) + "`n"),
+    [Text.UTF8Encoding]::new($false))
 
 Remove-Item -LiteralPath $Staging -Recurse -Force
 

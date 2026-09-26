@@ -884,6 +884,53 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The update check the header and its timer run: the plugin list and the installed
+    /// plugins' releases only. It leaves the panel's error and status lines as they are, does not
+    /// re-resolve Discover (one request per listed plugin), and when the list or GitHub cannot be
+    /// reached it changes nothing, leaving the last good rows.</summary>
+    internal async Task CheckInstalledUpdatesAsync()
+    {
+        if (_composition is null || IsBusy)
+        {
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _cancellation = cancellation;
+        IsBusy = true;
+        try
+        {
+            PluginCheckOutcome outcome = await _composition
+                .CheckAsync(_clientVersionResolver(), cancellation.Token)
+                .ConfigureAwait(true);
+            if (!outcome.RateLimited && outcome.Catalog is not null)
+            {
+                _orchestrator.SetPluginCatalog(outcome.Catalog);
+                _listAgeUtc = outcome.ListAgeUtc;
+                OnPropertyChanged(nameof(IsUsingCachedList));
+                OnPropertyChanged(nameof(ListAgeText));
+                ApplyInstalled(outcome);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            // Reported without replacing a message already on the panel.
+            Error ??= string.IsNullOrWhiteSpace(ex.Message) ? "Plugin updates could not be checked." : ex.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(_cancellation, cancellation))
+            {
+                _cancellation = null;
+            }
+
+            IsBusy = false;
+        }
+    }
+
     private void ApplyOutcome(PluginCheckOutcome outcome)
     {
         // The catalog the next launched session filters blocked ids against, regardless
@@ -903,13 +950,7 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             Error = "Could not reach the plugin list.";
         }
 
-        _allInstalled.Clear();
-        foreach (InstalledPluginInfo info in outcome.Installed)
-        {
-            outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
-            outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
-            _allInstalled.Add(BuildInstalledRow(info, availability, withheldReason));
-        }
+        ApplyInstalled(outcome, applyFilters: false);
 
         _allDiscover.Clear();
         foreach (PluginDiscoverEntry entry in outcome.Discover)
@@ -942,6 +983,22 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         DiscoverStatusLine = null;
         UpdateDiscoverCheckingState();
         ApplyFilters();
+    }
+
+    private void ApplyInstalled(PluginCheckOutcome outcome, bool applyFilters = true)
+    {
+        _allInstalled.Clear();
+        foreach (InstalledPluginInfo info in outcome.Installed)
+        {
+            outcome.UpdatesAvailable.TryGetValue(info.Id, out PluginUpdateAvailability? availability);
+            outcome.UpdateWithheldReasons.TryGetValue(info.Id, out string? withheldReason);
+            _allInstalled.Add(BuildInstalledRow(info, availability, withheldReason));
+        }
+
+        if (applyFilters)
+        {
+            ApplyFilters();
+        }
     }
 
     /// <summary>Builds one Installed row from the inventory and its update check, reused by both a
@@ -1544,15 +1601,27 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Who to name in the update dialog's keep-enabled choice: every character that already
-    /// has this id in its plugin list, in the same "Name (account@server)" shape the enable-choice
-    /// list uses.</summary>
-    private IReadOnlyList<string> CharactersWithPluginEnabled(string pluginId) =>
-        [.. _orchestrator.GetSnapshot().Servers
-            .SelectMany(server => server.Accounts)
-            .SelectMany(account => account.Characters)
-            .Where(character => character.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
-            .Select(character => $"{character.Name} ({character.AccountName}@{character.ServerName})")];
+    /// <summary>Who to name in the update dialog's keep-enabled choice: every account whose list has
+    /// this id, and every character whose own list has it, in the "name (server)" shape the
+    /// enable-choice list uses.</summary>
+    private IReadOnlyList<string> CharactersWithPluginEnabled(string pluginId)
+    {
+        var names = new List<string>();
+        foreach (LauncherAccountSnapshot account in _orchestrator.GetSnapshot().Servers.SelectMany(server => server.Accounts))
+        {
+            if (account.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
+            {
+                names.Add($"{account.AccountName} ({account.ServerName})");
+            }
+
+            names.AddRange(account.Characters
+                .Where(character => character.HasOwnPlugins
+                    && character.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
+                .Select(character => $"{character.Name} ({account.AccountName}@{account.ServerName})"));
+        }
+
+        return names;
+    }
 
     private async Task<PluginInstallResult> InstallAsync(
         string repo,
@@ -1599,68 +1668,34 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         };
     }
 
-    /// <summary>The install dialog's only profile write, and only for the characters chosen there. Reuses the same <see cref="ILauncherOrchestrator.UpdateCharacterSettings"/> path the
-    /// character options dialog saves through, so every write to a character's plugin list goes
-    /// through the orchestrator's own lock. Runs after the dialog has already closed (install
-    /// succeeded), so any trouble here is reported on the panel, not the dialog.</summary>
-    internal void EnableForCharacters(string pluginId, IReadOnlyList<PluginCharacterOption> characters)
+    /// <summary>The install dialog's only profile write: the plugin joins the plugin list of each
+    /// account chosen there, which every character on it without a list of its own launches with.
+    /// Runs after the dialog has already closed (install succeeded), so any trouble here is reported
+    /// on the panel, not the dialog.</summary>
+    internal void EnableForCharacters(string pluginId, IReadOnlyList<PluginCharacterOption> accounts)
     {
-        IReadOnlyList<LauncherPluginHostKind> hosts = ReadInstalledHosts(pluginId);
-        List<LauncherCharacterSnapshot> snapshots = [.. _orchestrator.GetSnapshot().Servers
-            .SelectMany(server => server.Accounts)
-            .SelectMany(account => account.Characters)];
-        var skipped = new List<string>();
+        List<LauncherAccountSnapshot> snapshots = [.. _orchestrator.GetSnapshot().Servers
+            .SelectMany(server => server.Accounts)];
         try
         {
-            foreach (PluginCharacterOption character in characters)
+            foreach (PluginCharacterOption option in accounts)
             {
-                LauncherCharacterSnapshot? snapshot = snapshots.FirstOrDefault(candidate =>
-                    string.Equals(candidate.ServerName, character.ServerName, StringComparison.Ordinal)
-                    && string.Equals(candidate.AccountName, character.AccountName, StringComparison.Ordinal)
-                    && string.Equals(candidate.Name, character.CharacterName, StringComparison.Ordinal));
-                if (snapshot is null)
+                LauncherAccountSnapshot? account = snapshots.FirstOrDefault(candidate =>
+                    string.Equals(candidate.ServerName, option.ServerName, StringComparison.Ordinal)
+                    && string.Equals(candidate.AccountName, option.AccountName, StringComparison.Ordinal));
+                if (account is null || account.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                LauncherPluginHostKind characterHost = snapshot.LaunchMode == LaunchMode.Headless
-                    ? LauncherPluginHostKind.Headless
-                    : LauncherPluginHostKind.Graphical;
-                if (!hosts.Contains(characterHost))
-                {
-                    skipped.Add(character.DisplayName);
-                    continue;
-                }
-
-                List<string> plugins = snapshot.Plugins
-                    .Where(id => !string.Equals(id, "none", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (!plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
-                {
-                    plugins.Add(pluginId);
-                }
-
-                _orchestrator.UpdateCharacterSettings(
-                    character.ServerName,
-                    character.AccountName,
-                    character.CharacterName,
-                    snapshot.LaunchMode,
-                    plugins,
-                    snapshot.LoginCommands);
+                _orchestrator.UpdateAccountPlugins(account.ServerName, account.AccountName, [.. account.Plugins, pluginId]);
             }
         }
         catch (Exception ex)
         {
             Error = string.IsNullOrWhiteSpace(ex.Message)
-                ? "The plugin installed, but could not be enabled for every chosen character."
+                ? "The plugin installed, but could not be enabled for every chosen account."
                 : ex.Message;
-            return;
-        }
-
-        if (skipped.Count > 0)
-        {
-            Error = $"Not enabled for {string.Join(", ", skipped)}: "
-                + "this plugin does not support that launch mode.";
         }
     }
 
@@ -1669,30 +1704,8 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
             ?.DisplayName
         ?? pluginId;
 
-    private IReadOnlyList<LauncherPluginHostKind> ReadInstalledHosts(string pluginId)
-    {
-        InstalledPluginInfo? info = _composition?.Inventory.Find(
-            pluginId, _clientVersionResolver(), _composition.CurrentCatalog);
-        if (info is null)
-        {
-            return [LauncherPluginHostKind.Graphical, LauncherPluginHostKind.Headless];
-        }
-
-        try
-        {
-            return LauncherPluginManifest.Parse(
-                File.ReadAllText(Path.Combine(info.Directory, "plugin.json"))).Hosts
-                ?? [LauncherPluginHostKind.Graphical, LauncherPluginHostKind.Headless];
-        }
-        catch (Exception ex) when (ex is IOException or LauncherPluginManifestException)
-        {
-            return [LauncherPluginHostKind.Graphical, LauncherPluginHostKind.Headless];
-        }
-    }
-
-    /// <summary>The installed row's own count, read straight from its <c>plugin.json</c> the way
-    /// <see cref="ReadInstalledHosts"/> does, since <see cref="InstalledPluginInfo"/> does not carry
-    /// it.</summary>
+    /// <summary>The installed row's own count, read straight from its <c>plugin.json</c>, since
+    /// <see cref="InstalledPluginInfo"/> does not carry it.</summary>
     private static IReadOnlyList<LauncherPluginCapabilityDeclaration> ReadInstalledCapabilities(
         InstalledPluginInfo info)
     {
@@ -1707,15 +1720,15 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The install dialog's enable choices: one per account, named "account (server)".</summary>
     private IReadOnlyList<PluginCharacterOption> BuildCharacterOptions() =>
         [.. _orchestrator.GetSnapshot().Servers
             .SelectMany(server => server.Accounts)
-            .SelectMany(account => account.Characters)
-            .Select(character => new PluginCharacterOption(
-                character.ServerName,
-                character.AccountName,
-                character.Name,
-                $"{character.Name} ({character.AccountName}@{character.ServerName})"))];
+            .Select(account => new PluginCharacterOption(
+                account.ServerName,
+                account.AccountName,
+                string.Empty,
+                $"{account.AccountName} ({account.ServerName})"))];
 
     private async Task AddFromUrlAsync()
     {
@@ -1865,41 +1878,41 @@ public sealed class LauncherPluginsViewModel : ObservableObject, IDisposable
         StripFromEveryCharacter(target.Id);
     }
 
-    /// <summary>The remove dialog's own profile write: every character still holding the
-    /// removed id loses it, so reinstalling it never inherits an old enable. Reuses the same
-    /// <see cref="ILauncherOrchestrator.UpdateCharacterSettings"/> path <see cref="EnableForCharacters"/>
-    /// saves through. Runs after <see cref="PluginInstaller.Remove"/> has already succeeded, so trouble
-    /// here is reported without undoing the removal.</summary>
+    /// <summary>The remove dialog's own profile write: every account list and every character's own
+    /// list still holding the removed id loses it, so reinstalling it never inherits an old enable.
+    /// Runs after <see cref="PluginInstaller.Remove"/> has already succeeded, so trouble here is
+    /// reported without undoing the removal.</summary>
     private void StripFromEveryCharacter(string pluginId)
     {
-        List<LauncherCharacterSnapshot> snapshots = [.. _orchestrator.GetSnapshot().Servers
-            .SelectMany(server => server.Accounts)
-            .SelectMany(account => account.Characters)];
+        List<LauncherAccountSnapshot> accounts = [.. _orchestrator.GetSnapshot().Servers
+            .SelectMany(server => server.Accounts)];
+        static List<string> Without(IEnumerable<string> plugins, string id) =>
+            [.. plugins.Where(plugin => !string.Equals(plugin, id, StringComparison.OrdinalIgnoreCase))];
         try
         {
-            foreach (LauncherCharacterSnapshot snapshot in snapshots)
+            foreach (LauncherAccountSnapshot account in accounts)
             {
-                if (!snapshot.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
+                if (account.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
                 {
-                    continue;
+                    _orchestrator.UpdateAccountPlugins(account.ServerName, account.AccountName, Without(account.Plugins, pluginId));
                 }
 
-                List<string> plugins = snapshot.Plugins
-                    .Where(id => !string.Equals(id, pluginId, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                _orchestrator.UpdateCharacterSettings(
-                    snapshot.ServerName,
-                    snapshot.AccountName,
-                    snapshot.Name,
-                    snapshot.LaunchMode,
-                    plugins,
-                    snapshot.LoginCommands);
+                foreach (LauncherCharacterSnapshot character in account.Characters.Where(character =>
+                    character.HasOwnPlugins && character.Plugins.Contains(pluginId, StringComparer.OrdinalIgnoreCase)))
+                {
+                    _orchestrator.UpdateCharacterSettings(
+                        character.ServerName,
+                        character.AccountName,
+                        character.Name,
+                        character.LaunchMode,
+                        Without(character.Plugins, pluginId));
+                }
             }
         }
         catch (Exception ex)
         {
             Error = string.IsNullOrWhiteSpace(ex.Message)
-                ? "The plugin was removed, but could not be unchecked for every character."
+                ? "The plugin was removed, but could not be unchecked everywhere."
                 : ex.Message;
         }
     }

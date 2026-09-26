@@ -39,6 +39,8 @@ public sealed class MainWindowViewTests
         ("FirstRunDatDirectoryTextBox", typeof(TextBox)),
         ("FirstRunCloseButton", typeof(Button)),
         ("UpdateCloseButton", typeof(Button)),
+        ("OwnServerNameTextBox", typeof(TextBox)),
+        ("MigrationNoticeCloseButton", typeof(Button)),
     ];
 
     [AvaloniaFact]
@@ -58,6 +60,78 @@ public sealed class MainWindowViewTests
         SettingsShowTheInstallFolderAndOpenItsRowsThroughTheWindow();
         TheFirstRunFormTellsAnUpgradingPlayerThisIsANewInstallation();
         ARefusedStartShowsItsReason();
+        TheAddServerDialogListsKnownServersAndFocusesItsNameField();
+        TheOptionsMenuActsOnItsOwnRow();
+    }
+
+    private static void TheOptionsMenuActsOnItsOwnRow()
+    {
+        var source = new StubOrchestrator
+        {
+            ServerRows = [new LauncherServerSnapshot("Local", "127.0.0.1", 9000,
+                [new LauncherAccountSnapshot("Local", "account1",
+                    [new LauncherCharacterSnapshot("Local", "account1", "Character1", "0x50000001", LaunchMode.Gui, [], [], false, "Ready")],
+                    false, "Ready")])],
+        };
+        using var viewModel = new LauncherWindowViewModel(source, new ImmediateUiDispatcher());
+        viewModel.Initialize();
+        var window = new MainWindow { DataContext = viewModel, Width = 1120, Height = 740 };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Button options = window.GetVisualDescendants().OfType<Button>().First(button => button.Content is string text && text.StartsWith("Options", StringComparison.Ordinal));
+            Assert.Equal("Options for account1 on Local", AutomationProperties.GetName(options));
+            var menu = Assert.IsType<MenuFlyout>(options.Flyout);
+            menu.ShowAt(options);
+            Dispatcher.UIThread.RunJobs();
+
+            MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
+            Assert.Equal(
+                ["Logon commands…", "Plugins for this character…", "Console", "Open logs folder", "Remove character"],
+                items.Select(item => (string?)item.Header));
+            Assert.All(items, item => Assert.Same(options.DataContext, item.DataContext));
+
+            items[0].Command!.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(viewModel.TextEditor.IsOpen);
+            Assert.True(viewModel.TextEditor.IsLogonCommandsEditor);
+            viewModel.TextEditor.CancelCommand.Execute(null);
+            menu.Hide();
+        }
+        finally { CloseTestWindow(window); }
+    }
+
+    private static void TheAddServerDialogListsKnownServersAndFocusesItsNameField()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel, Width = 1120, Height = 740 };
+        try
+        {
+            window.Show();
+            viewModel.OpenAddServerCommand.Execute(null);
+            viewModel.AddServerDialog.ShowList(new AcDream.Launcher.Core.Status.KnownServerList(
+            [
+                new("Coldeve", "play.coldeve.ac", 9000, "PvE", "ACE", "A PvE server", new Uri("https://coldeve.ac/"), null, 675),
+                new("AChard", "a-chard.ddns.net", 9000, "PvP", "ACE", "PK server", null, new Uri("https://discord.gg/x"), null),
+            ], false, DateTimeOffset.UtcNow));
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+
+            Assert.Same(window.FindControl<TextBox>("OwnServerNameTextBox"), CurrentFocus(window));
+            Assert.Equal(2, window.GetVisualDescendants().OfType<TextBlock>().Count(text => text.Text is "Coldeve" or "AChard"));
+            ComboBox type = window.GetVisualDescendants().OfType<ComboBox>().Single(box => AutomationProperties.GetName(box) == "Server type");
+            Assert.Equal("All types", type.SelectedItem);
+            string artifacts = Path.Combine(FindRepositoryRoot(), "artifacts", "launcher-redesign");
+            Directory.CreateDirectory(artifacts);
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            using var frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+            frame.Save(Path.Combine(artifacts, "launcher-add-server.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+            viewModel.AddServerDialog.CloseCommand.Execute(null);
+        }
+        finally { CloseTestWindow(window); }
     }
 
     /// <summary>
@@ -339,7 +413,7 @@ public sealed class MainWindowViewTests
             Control addServerButton = window
                 .GetVisualDescendants()
                 .OfType<Button>()
-                .First(button => Equals(button.Content, "Edit Servers"));
+                .First(button => Equals(button.Content, "Edit servers"));
             addServerButton.Focus();
             Assert.Same(addServerButton, CurrentFocus(window));
 
@@ -424,7 +498,19 @@ public sealed class MainWindowViewTests
         try
         {
             window.Show();
-            foreach (var kind in new[] { LauncherTextEditorKind.Users, LauncherTextEditorKind.Servers })
+            model.TextEditor.Open(LauncherTextEditorKind.Accounts);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var text = window.FindControl<TextBox>("ProfileTextBox")!;
+            Assert.True(text.IsVisible);
+            Assert.True(text.IsReadOnly);
+            model.TextEditor.ShowPasswords = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(text.IsReadOnly);
+            model.TextEditor.CancelCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            foreach (var kind in new[] { LauncherTextEditorKind.Servers })
             {
                 model.TextEditor.Open(kind);
                 window.UpdateLayout();
@@ -433,11 +519,11 @@ public sealed class MainWindowViewTests
                 var fields = window.FindControl<ItemsControl>("ProfileRows")!.GetVisualDescendants().OfType<TextBox>().ToArray();
                 Assert.Equal(2, fields.Length);
                 Assert.Same(fields[0], CurrentFocus(window));
-                fields[0].Text = kind == LauncherTextEditorKind.Users ? "Example account" : "Example server";
-                fields[1].Text = kind == LauncherTextEditorKind.Users ? "example-password" : "game.example.com:9000";
+                fields[0].Text = "Example server";
+                fields[1].Text = "game.example.com:9000";
                 Assert.Equal(fields[0].Text, model.TextEditor.Rows[0].Name);
                 Assert.Equal(fields[1].Text, model.TextEditor.Rows[0].Value);
-                Assert.Equal(kind == LauncherTextEditorKind.Users ? '●' : '\0', fields[1].PasswordChar);
+                Assert.Equal('\0', fields[1].PasswordChar);
                 var add = window.FindControl<Button>("AddProfileRowButton")!;
                 Point origin = add.TranslatePoint(default, window)!.Value;
                 Assert.InRange(origin.Y, 0, window.Bounds.Height - add.Bounds.Height + 1);
@@ -792,8 +878,7 @@ public sealed class MainWindowViewTests
             string accountName,
             string characterName,
             LaunchMode launchMode,
-            IReadOnlyList<string> plugins,
-            IReadOnlyList<string> loginCommands)
+            IReadOnlyList<string>? plugins)
         {
         }
 

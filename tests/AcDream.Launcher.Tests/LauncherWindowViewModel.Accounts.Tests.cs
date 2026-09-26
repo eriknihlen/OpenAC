@@ -15,7 +15,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         core.AccountLaunchCapability = LauncherCapability.Unavailable("Try again in 1 s.");
         vm.PollStatus();
         Assert.False(row.PlayCommand.CanExecute(null));
@@ -34,7 +34,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         core.LaunchHandler = _ =>
         {
             core.Session = core.Session with { ServerName = row.ServerName, AccountName = row.AccountName,
@@ -52,6 +52,57 @@ public sealed partial class LauncherWindowViewModelTests
     private static LauncherServerSnapshot BatchServer(string name, params string[] accounts) => new(name, "localhost", 9000,
         accounts.Select(account => new LauncherAccountSnapshot(name, account,
             [new LauncherCharacterSnapshot(name, account, "A character", "123", LaunchMode.Gui, [], [], false, "Ready")], false, "Ready")).ToArray());
+
+    private static FakeLauncherOrchestrator ProfiledOrchestrator()
+    {
+        static LauncherAccountSnapshot Account(string server, string name, params string[] profiles) =>
+            new(server, name, [new LauncherCharacterSnapshot(server, name, "A character", "123", LaunchMode.Gui, [], [], false, "Ready")],
+                false, "Ready", AccountProfiles: profiles);
+        return new FakeLauncherOrchestrator
+        {
+            ServersOverride =
+            [
+                new LauncherServerSnapshot("One", "localhost", 9000, [Account("One", "Alice", "Main"), Account("One", "Bob", "bots")]),
+                new LauncherServerSnapshot("Two", "localhost", 9000, [Account("Two", "Alice", "Bots", "Mules")]),
+            ],
+            Session = FakeLauncherOrchestrator.CreateSession(LauncherActivityState.Exited),
+        };
+    }
+
+    [Fact]
+    public void EachAccountOnEachServerIsItsOwnGroupInProfileOrder()
+    {
+        using var core = ProfiledOrchestrator();
+        using var vm = CreateInitialized(core);
+
+        Assert.Equal(
+            [("One", "Alice"), ("One", "Bob"), ("Two", "Alice")],
+            vm.Accounts.Select(group => (group.ServerName, group.AccountName)));
+        Assert.Equal(["All", "Main", "bots", "Mules"], vm.ProfileFilters.Select(chip => chip.Label));
+        Assert.True(vm.ProfileFilters[0].IsSelected);
+    }
+
+    [Fact]
+    public async Task AProfileChipShowsItsAccountsAndPlaySelectedStartsOnlyThoseTicked()
+    {
+        using var core = ProfiledOrchestrator();
+        using var vm = CreateInitialized(core);
+        await vm.StartBackgroundInitializationAsync();
+        vm.CloseActiveModal();
+        foreach (var row in vm.Accounts.SelectMany(group => group.Rows)) row.IsChecked = true;
+        Assert.Equal("Play selected (3)", vm.PlayCheckedText);
+
+        vm.ProfileFilters.Single(chip => chip.Label == "bots").SelectCommand.Execute(null);
+
+        Assert.Equal("bots", vm.ProfileFilter);
+        Assert.Equal([false, true, true], vm.Accounts.Select(group => group.IsVisible));
+        Assert.Equal("Play selected (2)", vm.PlayCheckedText);
+        await vm.LaunchCheckedCommand.ExecuteAsync();
+        Assert.Equal([("One", "Bob"), ("Two", "Alice")], core.LaunchRequests.Select(request => (request.Server, request.Account)));
+
+        vm.ProfileFilters[0].SelectCommand.Execute(null);
+        Assert.All(vm.Accounts, group => Assert.True(group.IsVisible));
+    }
 
     private static FakeLauncherOrchestrator BatchOrchestrator() => new()
     {
@@ -173,34 +224,12 @@ public sealed partial class LauncherWindowViewModelTests
         }
     }
 
-    [Theory]
-    [InlineData("0.1.10", "0.1.8", "launcher v0.1.10\nclient v0.1.8")]
-    [InlineData("0.2.0-beta.1+3a71d75", "0.2.0+abc", "launcher v0.2.0-beta.1\nclient v0.2.0")]
-    [InlineData("0.1.10", null, "launcher v0.1.10\nclient not installed")]
-    public void VersionTextShowsLauncherAndClientWithoutBuildMetadata(
-        string launcher, string? client, string expected)
-    {
-        using var core = BatchOrchestrator();
-        using var vm = CreateInitialized(core);
-        ClientVersionResolution resolution = new(
-            client is null ? ClientVersionState.Missing : ClientVersionState.Verified,
-            string.Empty,
-            client is null ? null : LauncherVersion.Parse(client),
-            null,
-            null,
-            null);
-
-        vm.ConfigureVersions(launcher, () => resolution);
-
-        Assert.Equal(expected, vm.VersionText);
-    }
-
     [Fact]
     public void ChangingEndpointClearsHealthFromTheOldEndpoint()
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         row.IsServerOnline = true;
         row.ServerStatusText = "Online · 12 players";
         core.ServersOverride = core.ServersOverride!.Select(server => server with { Host = "different.example" }).ToArray();
@@ -220,7 +249,7 @@ public sealed partial class LauncherWindowViewModelTests
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         row.IsServerOnline = true;
         row.LatencyMilliseconds = milliseconds;
         Assert.Equal(bars, row.PingBars);
@@ -232,7 +261,7 @@ public sealed partial class LauncherWindowViewModelTests
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
 
         row.SelectedCharacter = "A character";
         Assert.Equal(("A character", LaunchMode.Gui), core.SavedRowSelection);
@@ -253,7 +282,7 @@ public sealed partial class LauncherWindowViewModelTests
                     .ToArray(),
             }).ToArray();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         Assert.Equal("A character", row.SelectedCharacter);
         Assert.Equal("Headless", row.SelectedLaunchMode);
         Assert.Null(core.SavedRowSelection);
@@ -264,7 +293,7 @@ public sealed partial class LauncherWindowViewModelTests
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         Assert.Equal(LauncherAccountServerRowViewModel.CharacterSelect, row.DisplayedCharacter);
 
         core.Session = core.Session with
@@ -288,7 +317,7 @@ public sealed partial class LauncherWindowViewModelTests
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         row.LatencyMilliseconds = 15;
         row.IsServerOnline = false;
         Assert.Equal(0, row.PingBars);
@@ -301,7 +330,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        LauncherAccountServerRowViewModel[] rows = vm.Accounts.SelectMany(account => account.Servers).ToArray();
+        LauncherAccountServerRowViewModel[] rows = vm.Accounts.SelectMany(account => account.Rows).ToArray();
         foreach (var row in rows) row.IsChecked = true;
         rows[1].SelectedCharacter = "A character";
         rows[1].SelectedLaunchMode = "Headless";
@@ -324,7 +353,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        LauncherAccountServerRowViewModel row = vm.Accounts[0].Servers[0];
+        LauncherAccountServerRowViewModel row = vm.Accounts[0].Rows[0];
 
         Assert.False(vm.HasPlayableCheckedRows);
 
@@ -347,13 +376,13 @@ public sealed partial class LauncherWindowViewModelTests
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
         var group = vm.Accounts[0];
-        var row = group.Servers[0];
+        var row = group.Rows[0];
         group.IsExpanded = false;
         row.IsChecked = true;
         row.SelectedCharacter = "A character";
         core.RaiseStateChanged();
         Assert.Same(group, vm.Accounts[0]);
-        Assert.Same(row, group.Servers[0]);
+        Assert.Same(row, group.Rows[0]);
         Assert.False(group.IsExpanded);
         Assert.True(row.IsChecked);
         Assert.Equal("A character", row.SelectedCharacter);
@@ -375,7 +404,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        var rows = vm.Accounts[0].Servers;
+        var rows = vm.Accounts.SelectMany(account => account.Rows).ToArray();
         rows[0].IsChecked = true;
         rows[1].IsChecked = true;
         rows[1].SelectedLaunchMode = "Headless";
@@ -389,7 +418,7 @@ public sealed partial class LauncherWindowViewModelTests
     {
         using var core = BatchOrchestrator();
         using var vm = CreateInitialized(core);
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         row.SelectedCharacter = "A character";
         row.CharacterChoices.CollectionChanged += (_, _) => row.SelectedCharacter = null!;
         var server = core.ServersOverride![0];
@@ -410,7 +439,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        foreach (var row in vm.Accounts[0].Servers) row.IsChecked = true;
+        foreach (var row in vm.Accounts.SelectMany(account => account.Rows)) row.IsChecked = true;
         var pending = new TaskCompletionSource<LauncherSessionSnapshot>();
         core.LaunchHandler = _ => pending.Task;
         Task launching = vm.LaunchCheckedCommand.ExecuteAsync();
@@ -426,7 +455,7 @@ public sealed partial class LauncherWindowViewModelTests
         using var vm = CreateInitialized(core);
         await vm.StartBackgroundInitializationAsync();
         vm.CloseActiveModal();
-        var row = vm.Accounts[0].Servers[0];
+        var row = vm.Accounts[0].Rows[0];
         row.IsChecked = true;
         row.SelectedLaunchMode = "Headless";
         Assert.False(row.CanPlay);

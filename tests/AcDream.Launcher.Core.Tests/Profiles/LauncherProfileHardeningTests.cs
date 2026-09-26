@@ -80,7 +80,7 @@ public sealed class LauncherProfileHardeningTests : IDisposable
             {
                 AccountProfile account = store.Document.Servers.Single().Accounts.Single();
                 account.Password = "transient-secret";
-                account.Characters.Single().Plugins.Add("Transient.Plugin");
+                account.Plugins.Add("Transient.Plugin");
                 throw new InvalidOperationException("simulated mutation failure");
             }));
 
@@ -165,8 +165,8 @@ public sealed class LauncherProfileHardeningTests : IDisposable
             "+Acdream",
             "0x5000000A",
             LaunchMode.Headless,
-            ["ExamplePlugin"],
-            ["/vt start"]);
+            ["ExamplePlugin"]);
+        store.SetAccountLoginCommands("Local ACE", "testaccount", ["/vt start"]);
         store.Save();
         return store;
     }

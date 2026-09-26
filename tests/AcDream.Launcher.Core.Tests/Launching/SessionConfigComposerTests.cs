@@ -21,7 +21,12 @@ public sealed class SessionConfigComposerTests
         new() { Name = "Local ACE", Host = "127.0.0.1", Port = 9000 };
 
     private static AccountProfile Account() =>
-        new() { Account = "testaccount", Password = "S3cretPassw0rd!" };
+        new()
+        {
+            Account = "testaccount",
+            Password = "S3cretPassw0rd!",
+            LoginCommands = ["/tell someone, hi"],
+        };
 
     private static CharacterProfile Character(LaunchMode mode, string? id = "0x5000000A") =>
         new()
@@ -30,7 +35,6 @@ public sealed class SessionConfigComposerTests
             Id = id,
             LaunchMode = mode,
             Plugins = ["ExamplePlugin"],
-            LoginCommands = ["/tell someone, hi"],
         };
 
     [Fact]
@@ -197,11 +201,12 @@ public sealed class SessionConfigComposerTests
         // A blank list means none, not "every plugin loads".
         CharacterProfile character = Character(LaunchMode.Gui);
         character.Plugins = [];
-        character.LoginCommands = [];
+        AccountProfile account = Account();
+        account.LoginCommands = [];
 
         ComposedSessionConfig composed = SessionConfigComposer.Compose(
             Server(),
-            Account(),
+            account,
             character,
             Install,
             Paths,
