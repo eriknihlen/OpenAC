@@ -446,9 +446,12 @@ public sealed class WorldEvents : IPluginEventSink
         if (handlers is null)
             return;
 
-        foreach (Delegate handler in handlers.GetInvocationList())
+        // Walked in place rather than copied out: the tick runs about 67
+        // times a second, and a copied handler list costs an array per tick
+        // that grows with every subscriber.
+        foreach (Action<double> handler in Delegate.EnumerateInvocationList(handlers))
         {
-            try { ((Action<double>)handler)(elapsedSeconds); }
+            try { handler(elapsedSeconds); }
             catch (Exception error) { Report("tick", error); }
         }
     }
