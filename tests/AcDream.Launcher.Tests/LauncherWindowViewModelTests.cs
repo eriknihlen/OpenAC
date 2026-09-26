@@ -162,6 +162,10 @@ public sealed partial class LauncherWindowViewModelTests
         // The button checks at once, whatever the wait.
         await viewModel.CheckForUpdatesCommand.ExecuteAsync();
         Assert.Equal(4, updater.CheckCalls);
+
+        // Only the startup check verifies the installed client; later checks only read the feed,
+        // so they never lock or hash the client while it is being played.
+        Assert.Equal(1, updater.InitializeCalls);
     }
 
     [Theory]
