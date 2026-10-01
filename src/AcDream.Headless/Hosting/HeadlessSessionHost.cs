@@ -1070,7 +1070,9 @@ internal sealed class HeadlessSessionHost : IDisposable
                     Combat = Runtime.ActionOwner.Combat,
                     ResolveSkillFormulaBonus =
                         CreateSkillFormulaBonusResolver(),
-                    ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                    // Effects are stamped on the clock the plugin surface
+                    // reads their time left against.
+                    ClientTime = () => Runtime.EffectClock.NowSeconds,
                     OnConfirmationRequest = request =>
                     {
                         _pendingConfirmation = request;

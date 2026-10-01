@@ -163,7 +163,7 @@ internal sealed class WindowlessArm : ParityArm
                 Character = Runtime.CharacterOwner,
                 Combat = Runtime.ActionOwner.Combat,
                 ResolveSkillFormulaBonus = null,
-                ClientTime = () => Runtime.Clock.SimulationTimeSeconds,
+                ClientTime = () => Runtime.EffectClock.NowSeconds,
                 OnConfirmationRequest = request =>
                     _host.RaiseConfirmationRequested(
                         new PluginConfirmation(

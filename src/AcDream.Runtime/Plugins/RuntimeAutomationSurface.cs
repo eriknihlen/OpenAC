@@ -1769,15 +1769,17 @@ internal sealed class RuntimeAutomationSurface
         _knownCombatSpells = combat;
     }
 
-    private double _enchantmentProjectionTime = double.NaN;
+    // The frame the projection was built in. The frame number moves every
+    // host frame, portal space included, so time left is read again once a
+    // frame.
+    private ulong? _enchantmentProjectionFrame;
 
     // The clock must match the timestamp source used when receiving effects.
-    private double EnchantmentTime => _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+    private double EnchantmentTime => _runtime?.EffectClock.NowSeconds ?? 0d;
 
     private void RefreshEnchantmentTime()
     {
-        double now = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
-        if (now != _enchantmentProjectionTime)
+        if (_runtime?.Clock.FrameNumber != _enchantmentProjectionFrame)
             RebuildEnchantments();
     }
 
@@ -1787,7 +1789,7 @@ internal sealed class RuntimeAutomationSurface
         lock (_gate)
             spellbook = _spellbook;
         double now = EnchantmentTime;
-        _enchantmentProjectionTime = _runtime?.Clock.SimulationTimeSeconds ?? 0d;
+        _enchantmentProjectionFrame = _runtime?.Clock.FrameNumber;
         if (spellbook is null)
         {
             _enchantments = Array.Empty<PluginActiveEnchantment>();

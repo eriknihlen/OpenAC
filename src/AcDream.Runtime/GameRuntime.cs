@@ -397,6 +397,7 @@ public sealed class GameRuntime
                 faultInjection);
 
             Clock = clock;
+            EffectClock = new RuntimeEffectClock(dependencies.TimeProvider);
             Session = context.Session;
             PlayerIdentity = context.PlayerIdentity;
             EntityObjects = context.EntityObjects;
@@ -542,6 +543,13 @@ public sealed class GameRuntime
     private readonly RuntimeSelectionEntityFollower? _selectionFollowsEntities;
 
     public GameRuntimeClock Clock { get; }
+
+    /// <summary>
+    /// What both hosts stamp timed effects with and what their time left is
+    /// read against. It keeps running in portal space; see
+    /// <see cref="RuntimeEffectClock"/>.
+    /// </summary>
+    public RuntimeEffectClock EffectClock { get; }
 
     /// <summary>
     /// Takes one host frame off the clock, for whichever client is running.

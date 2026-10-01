@@ -668,7 +668,9 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                         late.GameRuntime.SetDesiredComponent(
                             componentId,
                             amount),
-                    d.ClientTime),
+                    // Effects are stamped on the effect clock when they
+                    // arrive, so their time left is measured on it too.
+                    () => d.Runtime.EffectClock.NowSeconds),
                 JumpPowerbar: new JumpPowerbarRuntimeBindings(
                     () => d.PlayerController.Controller?.JumpCharge ?? default),
                 Fps: CreateFpsBindings(

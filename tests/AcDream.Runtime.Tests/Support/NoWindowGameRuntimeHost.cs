@@ -31,7 +31,8 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
         string password = "runtime-password",
         uint characterId = 0x50000001u,
         string characterName = "Runtime",
-        int deferredConnectTickCount = 0)
+        int deferredConnectTickCount = 0,
+        TimeProvider? timeProvider = null)
     {
         _operations = new FixtureOperations(
             characterId,
@@ -43,6 +44,7 @@ internal sealed class NoWindowGameRuntimeHost : IDisposable
             _gameplay,
             _gameplay,
             _gameplay,
+            TimeProvider: timeProvider,
             SessionOperations: _operations,
             CombatTime: () => _gameplay.Now));
         _gameplay.Bind(Runtime);
