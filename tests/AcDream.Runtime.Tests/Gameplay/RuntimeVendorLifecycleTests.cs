@@ -66,6 +66,46 @@ public sealed class RuntimeVendorLifecycleTests
     }
 
     [Fact]
+    public void ApproachVendorEvent_ZeroStockListing_IsUnlimited()
+    {
+        using GameRuntime runtime = Create();
+        VendorState vendor = runtime.InventoryOwner.Vendor;
+        using IDisposable wiring = Wire(vendor);
+
+        // ACE sends a shop create-list row's authored stack size as-is, and
+        // world content authors many of them as 0. ACE never limits a
+        // create-list item, so 0 carries the same meaning as -1.
+        Dispatch(BuildApproachVendorPayload(
+            vendorGuid: 0x40001000u,
+            categories: 0x42u,
+            minValue: 0u,
+            maxValue: 500u,
+            dealsMagic: false,
+            buyPrice: 0.8f,
+            sellPrice: 1.3f,
+            currencyWcid: 0u,
+            currencyAmount: 0u,
+            currencyName: "",
+            items:
+            [
+                new VendorItemFixture(
+                    ItemGuid: 0x50002000u, StackSize: 0, Name: "Iron Sword",
+                    WeenieClassId: 42u, RawIconId: 0x1234u,
+                    ItemType: (uint)ItemType.Weapon, Value: 250),
+                new VendorItemFixture(
+                    ItemGuid: 0x50002001u, StackSize: -1, Name: "Bread",
+                    WeenieClassId: 43u, RawIconId: 0x1235u,
+                    ItemType: (uint)ItemType.Food, Value: 5),
+                new VendorItemFixture(
+                    ItemGuid: 0x50002002u, StackSize: 3, Name: "Leather Cap",
+                    WeenieClassId: 44u, RawIconId: 0x1236u,
+                    ItemType: (uint)ItemType.Armor, Value: 40),
+            ]));
+
+        Assert.Equal([-1, -1, 3], vendor.Items.Select(i => i.StackSize));
+    }
+
+    [Fact]
     public void SecondApproachVendorEventFromDifferentVendor_ReplacesTheSession()
     {
         using GameRuntime runtime = Create();

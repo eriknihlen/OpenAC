@@ -697,9 +697,13 @@ public static class GameEventWiring
             for (int i = 0; i < shopItems.Length; i++)
             {
                 VendorApproach.ItemProfile item = p.Value.Items[i];
+                // ACE sends a shop create-list row's authored stack size
+                // as-is, and world content authors many of them as 0 rather
+                // than -1. ACE never limits a create-list item, so any
+                // non-positive count means the vendor never runs out.
                 shopItems[i] = new VendorShopItem(
                     item.ItemGuid,
-                    item.StackSize,
+                    item.StackSize > 0 ? item.StackSize : VendorComponentFill.UnlimitedStock,
                     item.Desc.WeenieClassId,
                     item.Desc.Name,
                     item.Desc.ItemType,
