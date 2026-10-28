@@ -76,6 +76,11 @@ public sealed class CharacterSheet
     public int Focus        { get; init; }
     public int Self         { get; init; }
 
+    /// <summary>
+    /// Each attribute without enchantments, as created plus raised:
+    /// Strength, Endurance, Coordination, Quickness, Focus, Self. The
+    /// character information page grades its resistances from these.
+    /// </summary>
     public int[] AttributeBaseValues { get; init; } = Array.Empty<int>();
 
     /// <summary>
@@ -90,7 +95,10 @@ public sealed class CharacterSheet
     public int UnspentSkillCredits     { get; init; }
     public int SpecializedSkillCredits { get; init; }
 
-    public int ChessRank { get; init; }
+    /// <summary>The chess rank a character who never played chess has.</summary>
+    public const int UnrankedChessRank = 1400;
+
+    public int ChessRank { get; init; } = UnrankedChessRank;
 
     public int FishingSkill { get; init; }
 
