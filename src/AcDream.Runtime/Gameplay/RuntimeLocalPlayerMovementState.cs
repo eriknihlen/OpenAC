@@ -176,8 +176,13 @@ public sealed class RuntimeLocalPlayerMovementState
                 Interlocked.Increment(ref _revision);
                 return true;
             case RuntimeMovementCommand.Stop:
+                // The stop key puts the forward axis back to ready, as the
+                // Ready posture does. Held keys stay held: a forward key
+                // still down moves again only once pressed again, and a
+                // jump being charged keeps charging.
                 CancelAutoRun();
                 ClearCommandInput();
+                _ = _controller?.RequestPosture(MotionCommand.Ready);
                 return true;
             case RuntimeMovementCommand.StopCompletely:
                 CancelAutoRun();
