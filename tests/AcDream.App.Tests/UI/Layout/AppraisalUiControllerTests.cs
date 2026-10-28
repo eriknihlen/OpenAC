@@ -1146,6 +1146,118 @@ public sealed class AppraisalUiControllerTests
     }
 
     [Fact]
+    public void CreatureStatsRows_WidenWithTheWindowWhileExtraRowsKeepTheirWidth()
+    {
+        // The attribute and vital rows stretch with their list: a window 100 px
+        // wider makes each of them 100 px wider in both layers, and the
+        // right-justified value keeps its distance to the row's right edge. The
+        // extra rows below are authored at a fixed size and stay as they are.
+        ImportedLayout layout = FixtureLoader.LoadExamination();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ObjectId,
+            Name = "Dww",
+            Type = ItemType.Creature,
+        });
+        using var interaction = NewInteraction(objects, []);
+        var templates = new CreatureAppraisalRowTemplateFactory(
+            FixtureLoader.LoadExaminationRowTemplateInfos(),
+            NoTexture,
+            defaultFont: null);
+        using AppraisalUiController controller = Bind(
+            layout, objects, interaction, new CombatState(), [], [],
+            () => { }, () => { }, templates)!;
+
+        interaction.ExamineSelectedOrEnterMode(ObjectId);
+        var properties = new PropertyBundle();
+        properties.Strings[5u] = "Template";
+        var armorLevels = new AppraiseInfoParser.ArmorLevel(
+            Head: 100, Chest: 110, Abdomen: 120,
+            UpperArm: 130, LowerArm: 140, Hand: 150,
+            UpperLeg: 160, LowerLeg: 170, Foot: 180);
+        Assert.True(controller.Apply(Parsed(
+            properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
+
+        UiElement statsHost = layout.FindElement(
+            AppraisalUiController.CreatureStatsListId)!;
+        UiElement extraHost = layout.FindElement(
+            AppraisalUiController.CreatureExtraListId)!;
+        UiElement creaturePanel = layout.FindElement(
+            AppraisalUiController.CreaturePanelId)!;
+        UiItemList statsForeground = Assert.Single(
+            creaturePanel.Children.OfType<UiItemList>(),
+            candidate => candidate.Top == statsHost.Top);
+        UiItemList statsBackground = Assert.Single(
+            statsHost.Children.OfType<UiItemList>());
+        UiItemList[] stats = [statsForeground, statsBackground];
+        UiItemList[] extras =
+        [
+            CreatureExtraList(layout),
+            Assert.Single(extraHost.Children.OfType<UiItemList>()),
+        ];
+        Assert.Equal(9, statsForeground.GetNumUIItems());
+        Assert.Equal(5, extras[0].GetNumUIItems());
+
+        var device = new RecordingGpuDevice();
+        var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
+        renderer.Begin(new Vector2(800f, 600f));
+        var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
+        layout.Root.DrawSelfAndChildren(ctx);
+
+        static (float RowWidth, float ValueRight) Measure(UiItemList list, int index)
+        {
+            var slot = Assert.IsType<UiTemplateListSlot>(list.GetItem(index));
+            UiElement value = slot.Content.FindElement(
+                CreatureAppraisalRowTemplateFactory.ValueId)!;
+            return (slot.Width, slot.Content.Root.Left + value.Left + value.Width);
+        }
+
+        static void AssertRows(UiItemList list, float rowWidth, float valueRight)
+        {
+            for (int index = 0; index < list.GetNumUIItems(); index++)
+            {
+                if (!list.GetItem(index)!.Visible)
+                    continue;
+                Assert.Equal((rowWidth, valueRight), Measure(list, index));
+                Assert.Equal(0f, list.GetItem(index)!.Left);
+                Assert.Equal(index * 20f - list.Scroll.ScrollY, list.GetItem(index)!.Top);
+            }
+        }
+
+        // Authored: 292 px rows, the value's right edge 9 px inside the row.
+        foreach (UiItemList list in stats.Concat(extras))
+            AssertRows(list, 292f, 283f);
+
+        layout.Root.Width += 100f;
+        layout.Root.DrawSelfAndChildren(ctx);
+
+        foreach (UiItemList list in stats)
+        {
+            Assert.All(
+                Enumerable.Range(0, list.GetNumUIItems()),
+                index => Assert.True(list.GetItem(index)!.Visible));
+            AssertRows(list, 392f, 383f);
+        }
+        foreach (UiItemList list in extras)
+            AssertRows(list, 292f, 283f);
+
+        // Scrolling still moves whole stretched rows; both layers share the
+        // offset. A shorter window leaves the nine rows taller than the list.
+        layout.Root.Height -= 120f;
+        layout.Root.DrawSelfAndChildren(ctx);
+        statsForeground.Scroll.SetScrollY(20);
+        layout.Root.DrawSelfAndChildren(ctx);
+        Assert.Equal(20, statsForeground.Scroll.ScrollY);
+        Assert.False(statsForeground.GetItem(0)!.Visible);
+        Assert.False(statsBackground.GetItem(0)!.Visible);
+        Assert.True(statsForeground.GetItem(1)!.Visible);
+        foreach (UiItemList list in stats)
+            AssertRows(list, 392f, 383f);
+    }
+
+
+    [Fact]
     public void CharacterResponse_CombatRefreshRetainsArmorLevelRows()
     {
         ImportedLayout layout = FixtureLoader.LoadExamination();
