@@ -93,6 +93,9 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
     private readonly UiDatElement? _gradCircle;
 
     private Choice _currentChoice = Choice.Face;
+    // The headgear the face choice took off, for the clothes choice to put
+    // back (Unset: none).
+    private uint _heldHeadgear = Unset;
     private bool _zoomedIn;
     private IChargenPreviewControl? _previewControl;
     private Part _currentPart = Part.Hair;
@@ -275,6 +278,12 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
     }
 
 
+    /// <summary>
+    /// The face choice, made where the original starts the wizard: it takes
+    /// the opening character's headgear off, kept for the clothes choice.
+    /// </summary>
+    internal void SelectFaceChoice() => SelectChoice(Choice.Face);
+
     private void SelectChoice(Choice choice)
     {
         if (_disposed)
@@ -282,6 +291,13 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
         _currentChoice = choice;
         _currentPart = choice == Choice.Face ? Part.Hair : Part.Headgear;
         ApplyChoiceVisibility();
+        // The face choice takes the headgear off so the hair shows, and
+        // keeps it; the clothes choice puts the kept headgear back when it
+        // is none or one the gender still has.
+        if (choice == Choice.Face)
+            TakeHeadgearOff();
+        else
+            PutKeptHeadgearBack();
         // The face choice frames the figure close up, the clothes choice
         // pulls back to show it whole.
         if (choice == Choice.Face)
@@ -289,6 +305,22 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
         else
             ZoomOut();
         RefreshColorAndShadeControlsFromLatestSnapshot();
+    }
+
+    private void TakeHeadgearOff()
+    {
+        _heldHeadgear = _bindings.View()?.Snapshot.Appearance.HeadgearStyle ?? Unset;
+        _bindings.SetAppearanceIndex?.Invoke(ChargenAppearanceSlot.HeadgearStyle, Unset);
+    }
+
+    private void PutKeptHeadgearBack()
+    {
+        IRuntimeCharacterCreationView? view = _bindings.View();
+        int count = view is not null && TryGetGender(view, view.Snapshot, out ChargenGenderOptions? gender)
+            ? StyleCount(Part.Headgear, gender)
+            : 0;
+        if (_heldHeadgear == Unset || _heldHeadgear < (uint)Math.Max(0, count))
+            _bindings.SetAppearanceIndex?.Invoke(ChargenAppearanceSlot.HeadgearStyle, _heldHeadgear);
     }
 
     private void ZoomIn()
