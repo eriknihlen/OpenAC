@@ -3000,4 +3000,98 @@ public class InventoryControllerTests
 
         Assert.Equal(new[] { (0xAu, 0xC0u, 0) }, puts);
     }
+
+    // A drop on a pack's icon searches from that pack: the pack, then the
+    // packs inside it. The main pack holds the side packs; a side pack holds
+    // none, so a full side pack is refused with its own name.
+
+    private const uint LootChest = 0x70000001u;
+    private const uint Loot = 0x70000002u;
+
+    private static RuntimeItemInteraction LootInteraction(
+        ClientObjectTable objects,
+        List<(uint item, uint container, int placement)> puts,
+        List<string> messages)
+    {
+        objects.AddOrUpdate(new ClientObject { ObjectId = LootChest, Type = ItemType.Container, ItemsCapacity = 10 });
+        SeedContained(objects, Loot, LootChest, slot: 0, type: ItemType.Misc);
+        return new RuntimeItemInteraction(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            groundObjectId: () => LootChest,
+            systemMessage: messages.Add,
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+    }
+
+    private static ItemDragPayload LootPayload() => new(Loot, ItemDragSource.Ground, 0, new UiItemSlot());
+
+    [Fact]
+    public void Loot_droppedOnAFullMainPackIcon_goesToTheTopOfTheFirstSidePackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);                          // empty
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot mainPack = top.GetItem(0)!;
+
+        // The icon still shows that the main pack itself has no room.
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(top, mainPack, LootPayload()));
+        controller.HandleDropRelease(top, mainPack, LootPayload());
+
+        Assert.Equal(new[] { (Loot, 0xCu, 0) }, puts);
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public void Loot_droppedOnAFullSidePackIcon_namesThatPackFull_andSendsNothing()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 10);                          // main pack has room
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);        // side pack full
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot sidePack = containers.GetItem(0)!;
+
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(containers, sidePack, LootPayload()));
+        controller.HandleDropRelease(containers, sidePack, LootPayload());
+
+        Assert.Empty(puts);
+        Assert.Equal(new[] { "The Pack C is completely full!" }, messages);
+    }
+
+    [Fact]
+    public void Loot_droppedOnTheMainPackIcon_withEveryPackFull_reportsTheBackpackFull()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot mainPack = top.GetItem(0)!;
+
+        controller.HandleDropRelease(top, mainPack, LootPayload());
+
+        Assert.Empty(puts);
+        Assert.Equal(new[] { "Backpack is completely full!" }, messages);
+    }
 }

@@ -624,8 +624,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         return ItemListDropPlacement.Resolve(dropIndex, count, source, wholeStack);
     }
 
-    private int CountLooseContents(uint containerId) => CountLooseContents(_objects, containerId);
-
     private static int CountLooseContents(ClientObjectTable objects, uint containerId)
     {
         int count = 0;
@@ -922,11 +920,21 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint itemId,
         uint namedContainer,
         out InventoryContainerPlacementRejection refusal)
-    {
-        uint root = _playerGuid();
-        return InventoryPlacementSearch.ChooseContainer(
-            _objects, itemId, root, namedContainer, root, out refusal);
-    }
+        => ResolveFallthroughContainer(itemId, namedContainer, _playerGuid(), out refusal);
+
+    /// <summary>
+    /// The same search started from <paramref name="root"/>: the root, then
+    /// the packs inside it. A drop on a pack's icon starts from that pack, so
+    /// the main pack's icon reaches the side packs and a side pack's icon
+    /// reaches nothing else.
+    /// </summary>
+    private uint ResolveFallthroughContainer(
+        uint itemId,
+        uint namedContainer,
+        uint root,
+        out InventoryContainerPlacementRejection refusal)
+        => InventoryPlacementSearch.ChooseContainer(
+            _objects, itemId, root, namedContainer, _playerGuid(), out refusal);
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
@@ -940,7 +948,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             targetList,
             targetCell,
             item,
-            out _,
+            out bool droppedIsBag,
             out uint legalityDestination);
         if ((legality == InventoryContainerPlacementRejection.None || IsCapacityRejection(legality))
             && TryJoinStackInPack(targetList, targetCell, item))
@@ -950,16 +958,23 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint fallthrough = 0u;
         if (IsCapacityRejection(legality))
         {
+            // An item let go on a pack's icon searches from that pack;
+            // anywhere else the search starts from the main pack.
+            bool onAPackIcon = !droppedIsBag
+                && (ReferenceEquals(targetList, _containerList)
+                    || ReferenceEquals(targetList, _topContainer));
+            uint root = onAPackIcon ? legalityDestination : _playerGuid();
             fallthrough = ResolveFallthroughContainer(
-                item, legalityDestination, out InventoryContainerPlacementRejection noRoom);
+                item, legalityDestination, root, out InventoryContainerPlacementRejection noRoom);
             if (fallthrough == 0u)
             {
-                // Nothing in the inventory has room: the notice names the
-                // inventory as a whole, not the pack that was dropped on.
+                // Nowhere the search reached has room: the notice names
+                // where it started, the main pack or the side pack whose
+                // icon was dropped on.
                 if (InventoryContainerPlacementPolicy.ComposeClientLocal(
                         noRoom,
                         _objects.Get(item),
-                        _objects.Get(_playerGuid()),
+                        _objects.Get(root),
                         _playerGuid()) is { } fullNotice)
                 {
                     _itemInteraction?.ReportClientLocal(fullNotice);
@@ -1031,8 +1046,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             {
                 if (targetCell.ItemId == 0 || targetCell.ItemId == item) return;
                 container = targetCell.ItemId;                                                  // the bag / main pack
-                if (IsContainerFull(container)) return;                                         // red already shown
-                requested = 0;                                                                  // a drop on a pack goes to its top
+                requested = 0;                                                                // a drop on a pack goes to its top
             }
         }
         else return;
@@ -1204,13 +1218,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Func<bool> dispatch)
         => _itemInteraction?.TryDispatchInventoryRequest(kind, itemId, dispatch)
             ?? dispatch();
-
-    private bool IsContainerFull(uint container)
-    {
-        int cap = _objects.Get(container)?.ItemsCapacity ?? 0;
-        if (cap <= 0) return false;
-        return CountLooseContents(container) >= cap;
-    }
 
     // The runtime has already moved the poured stack's shortcut for a
     // merge it sent itself; the panel only follows the selection.
