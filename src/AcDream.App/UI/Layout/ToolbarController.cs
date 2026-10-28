@@ -171,6 +171,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         repo.ObjectRemoved += OnRepositoryObjectChanged;
         repo.ObjectMoved   += OnRepositoryObjectMoved;
         repo.Cleared       += OnRepositoryCleared;
+        repo.ContainerContentsReplaced += OnRepositoryContentsReplaced;
         _store.Changed     += Populate;
         RefreshAmmo();
         RefreshUseButton();
@@ -180,11 +181,22 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     {
         if (IsAmmoRelated(obj))
             RefreshAmmo();
-        if (IsShortcutGuid(obj.ObjectId))
+        // A pack on the bar shows how full it is, so what goes in or out of
+        // it redraws the bar too.
+        if (IsShortcutGuid(obj.ObjectId) || IsShortcutContainer(obj.ContainerId))
             Populate();
         if (obj.ObjectId == _selectedObjectId())
             RefreshUseButton();
     }
+
+    private void OnRepositoryContentsReplaced(uint containerId)
+    {
+        if (IsShortcutContainer(containerId))
+            Populate();
+    }
+
+    private bool IsShortcutContainer(uint containerId)
+        => containerId != 0u && IsShortcutGuid(containerId);
 
     private void OnRepositoryObjectMoved(ClientObjectMove move)
     {
@@ -196,7 +208,9 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
                     || move.Previous.WielderId == player
                     || move.Current.WielderId == player)))
             RefreshAmmo();
-        if (IsShortcutGuid(move.ItemId))
+        if (IsShortcutGuid(move.ItemId)
+            || IsShortcutContainer(move.Previous.ContainerId)
+            || IsShortcutContainer(move.Current.ContainerId))
             Populate();
     }
 
@@ -340,6 +354,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             if (list is null) continue;
             list.Cell.Clear();
             list.Cell.SetStructure(0, 0);
+            list.Cell.CapacityFill = -1f;
         }
 
         for (int slot = 0; slot < _slots.Length; slot++)
@@ -358,6 +373,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
             uint dragTex = _dragIconIds?.Invoke(type, icon, underlay, overlay, effects) ?? 0u;
             list.Cell.SetItem(guid, tex, entry, dragTex);
             list.Cell.SetStructure(item.Structure, item.MaxStructure);
+            list.Cell.CapacityFill = InventoryController.CapacityFill(_repo, guid);
         }
 
         RefreshShortcutSelection();
@@ -636,6 +652,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         _repo.ObjectRemoved -= OnRepositoryObjectChanged;
         _repo.ObjectMoved   -= OnRepositoryObjectMoved;
         _repo.Cleared       -= OnRepositoryCleared;
+        _repo.ContainerContentsReplaced -= OnRepositoryContentsReplaced;
         _store.Changed      -= Populate;
     }
 }

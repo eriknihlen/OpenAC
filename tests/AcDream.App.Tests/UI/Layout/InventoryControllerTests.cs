@@ -231,6 +231,27 @@ public class InventoryControllerTests
         Assert.Equal(0u, containers.GetItem(0)!.ItemId);
     }
 
+    // The session ending forgets the character: the next one's inventory
+    // opens on its own main pack, not on a pack id of the last character.
+    [Fact]
+    public void SessionTableClear_returnsTheWindowToTheMainPack()
+    {
+        var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedContained(objects, 0xD0u, 0xC0u, slot: 0);
+        var uses = new List<uint>();
+        InventoryController controller = Bind(layout, objects, uses: uses);
+        containers.GetItem(0)!.Clicked!();
+        Assert.Equal(0xC0u, controller.CurrentOpenContainerId);
+
+        objects.Clear();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+
+        Assert.Equal(Player, controller.CurrentOpenContainerId);
+        Assert.Equal(0xAu, grid.GetItem(0)!.ItemId);
+    }
+
     [Fact]
     public void GenerationReplacementRemovesOldOwnedProjectionAndSelection()
     {
@@ -1023,6 +1044,45 @@ public class InventoryControllerTests
         Assert.Same(cell, root.DragSource);
         var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
         Assert.Equal(0xAu, payload.ObjId);
+    }
+
+    // Pressing a pack that is not open opens it, which changes only the
+    // contents grid: the pack's own cell stays, so the same press can still
+    // become a drag of the pack.
+    [Fact]
+    public void PressingAnUnopenedPack_opensIt_andTheSamePressDragsIt()
+    {
+        var (layout, grid, containers, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+        SeedBag(objects, 0xC0u, slot: 1);
+        SeedContained(objects, 0xD0u, 0xC0u, slot: 0);
+        var uses = new List<uint>();
+        InventoryController controller = Bind(layout, objects, uses: uses);
+        // BuildLayout leaves everything at the origin; clear the pack column.
+        grid.Left = 40;
+        top.Left = 240;
+        containers.Top = 100;
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(layout.Root);
+
+        UiItemSlot pack = containers.GetItem(0)!;
+        UiItemSlot mainPack = top.GetItem(0)!;
+        var (x, y) = AbsoluteCentre(pack);
+        root.OnMouseMove(x, y);
+        root.OnMouseDown(UiMouseButton.Left, x, y);
+
+        Assert.Equal(0xC0u, controller.CurrentOpenContainerId);
+        Assert.Equal(0xD0u, grid.GetItem(0)!.ItemId);
+        Assert.Same(pack, containers.GetItem(0));
+        Assert.Same(mainPack, top.GetItem(0));
+        Assert.Same(pack, root.Captured);
+
+        root.OnMouseMove(x + 12, y);
+
+        Assert.Same(pack, root.DragSource);
+        var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
+        Assert.Equal(0xC0u, payload.ObjId);
     }
 
     private static (int x, int y) AbsoluteCentre(UiElement element)
@@ -2827,6 +2887,101 @@ public class InventoryControllerTests
         ctrl.HandleDropRelease(grid, grid.GetItem(1)!, Payload(0xC1u));
 
         Assert.Equal(new[] { (0xC1u, Player, 1) }, puts);           // A B -> A C1 B
+    }
+
+    private static void SeedStack(ClientObjectTable t, uint guid, uint container, int slot,
+        int size, int max = 100, uint wcid = 0x1234u)
+    {
+        t.AddOrUpdate(new ClientObject
+        {
+            ObjectId = guid,
+            WeenieClassId = wcid,
+            StackSize = size,
+            StackSizeMax = max,
+        });
+        t.MoveItem(guid, container, slot);
+    }
+
+    // A stack dropped on a pack's icon first joins the first stack in that
+    // pack with room for all of it; one with room for only part is passed over.
+    [Fact]
+    public void StackDroppedOnAPackIcon_joinsTheFirstStackThereWithRoomForAllOfIt()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 95);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 1, size: 50);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        var selection = new SelectionState();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges, selection: selection);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+        Assert.Equal(0xC2u, selection.SelectedObjectId);
+    }
+
+    // Joining a stack takes no slot: a full pack still takes the join.
+    [Fact]
+    public void StackDroppedOnAFullPackIcon_stillJoinsAStackInIt()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0, itemsCapacity: 2);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 5, wcid: 0x9999u);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 1, size: 50);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+    }
+
+    // The main pack's icon searches the main pack, then each side pack.
+    [Fact]
+    public void StackDroppedOnTheMainPackIcon_joinsAStackInASidePack()
+    {
+        var (layout, grid, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject { ObjectId = Player, ItemsCapacity = 102 });
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 0, size: 50);
+        SeedBag(objects, 0xC3u, slot: 1);
+        SeedStack(objects, 0xAu, 0xC3u, slot: 0, size: 10);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(top, top.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+    }
+
+    [Fact]
+    public void StackDroppedOnAPackIcon_withNoStackWithRoomForAllOfIt_movesIntoThePack()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 95);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Empty(merges);
+        Assert.Equal(new[] { (0xAu, 0xC0u, 0) }, puts);
     }
 
     [Fact]

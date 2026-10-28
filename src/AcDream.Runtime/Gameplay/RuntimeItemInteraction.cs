@@ -1139,69 +1139,13 @@ public sealed class RuntimeItemInteraction : IDisposable
         uint sourceId,
         uint containerId,
         uint requested)
-    {
-        if (_sendStackableMerge is null
-            || containerId == 0u
-            || _objects.Get(sourceId) is not { } source
-            || source.StackSizeMax <= 1)
-        {
-            return null;
-        }
+        => _sendStackableMerge is null
+            ? null
+            : StackJoinSearch.Plan(
+                _objects, sourceId, containerId, requested, CanMakeInventoryRequest);
 
-        int requestedAmount = (int)Math.Min(requested, int.MaxValue);
-        var sourceMerge = ToStackMergeItem(source);
-        foreach (uint targetId in ExhaustiveContainedItems(containerId))
-        {
-            if (_objects.Get(targetId) is not { } target)
-                continue;
-            StackMergePlan? plan = StackMergePlanner.Plan(
-                sourceMerge,
-                ToStackMergeItem(target),
-                CanMakeInventoryRequest,
-                requestedAmount);
-            if (plan is { } complete && complete.Amount == requested)
-                return complete;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Everything a container holds, for finding a stack to join: its own
-    /// items in order, then the items of each pack inside it, pack by pack.
-    /// </summary>
-    private IEnumerable<uint> ExhaustiveContainedItems(uint containerId) =>
-        ExhaustiveContainedItems(containerId, new HashSet<uint>());
-
-    private IEnumerable<uint> ExhaustiveContainedItems(
-        uint containerId,
-        HashSet<uint> visitedContainers)
-    {
-        if (!visitedContainers.Add(containerId))
-            yield break;
-        var packs = new List<uint>();
-        foreach (uint itemId in _objects.GetContents(containerId))
-        {
-            if (_objects.Get(itemId) is { } held
-                && InventoryContainerPlacementPolicy.IsContainer(held))
-            {
-                packs.Add(itemId);
-                continue;
-            }
-            yield return itemId;
-        }
-        foreach (uint pack in packs)
-        {
-            foreach (uint itemId in ExhaustiveContainedItems(pack, visitedContainers))
-                yield return itemId;
-        }
-    }
-
-    private static StackMergeItem ToStackMergeItem(ClientObject item) => new(
-        item.ObjectId,
-        item.WeenieClassId,
-        item.StackSize,
-        item.StackSizeMax,
-        item.TradeState);
+    private static StackMergeItem ToStackMergeItem(ClientObject item)
+        => StackJoinSearch.ToStackMergeItem(item);
 
     public bool TryBeginPendingBackpackPlacement(
         uint itemGuid,

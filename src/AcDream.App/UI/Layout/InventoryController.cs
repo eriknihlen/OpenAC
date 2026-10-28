@@ -413,6 +413,10 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private void OnObjectsCleared()
     {
         _pendingListPlacement = null;
+        // The session ended: the pack that was open belonged to the character
+        // that left, so the window goes back to the main pack.
+        _openContainer = 0;
+        _contentsGrid?.Scroll.SetScrollY(0);
         Populate();
     }
 
@@ -476,50 +480,52 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         }
 
         // Flushing cells cancels a press in progress: UiRoot releases capture when the
-        // captured element leaves the tree.
-        if (TryRefreshCellsInPlace(visibleBags, visibleContents, pending, p, open))
+        // captured element leaves the tree. So each list is rebuilt only when what it
+        // shows changed: opening a pack changes the contents grid alone, and the pack
+        // cell that was pressed to open it stays to become a drag.
+        if (MatchesCells(_containerList, visibleBags, ContainerSlotTarget(p, visibleBags.Count)))
         {
-            ApplyIndicators();
-            RefreshBurden();
-            return;
+            RefreshCells(_containerList, visibleBags, isContainer: true, p, pending);
         }
-
-        _containerList?.Flush();
-        _contentsGrid?.Flush();
-
-        foreach (uint guid in visibleBags)
+        else if (_containerList is not null)
         {
-            AddCell(
-                _containerList,
-                guid,
-                isContainer: true,
-                IsWaiting(guid, p, pending));
-        }
-
-        foreach (uint guid in visibleContents)
-        {
-            AddCell(
-                _contentsGrid,
-                guid,
-                isContainer: false,
-                IsWaiting(guid, open, pending));
-        }
-
-        if (_contentsGrid is not null)
-        {
-            int cap = _objects.Get(open)?.ItemsCapacity ?? 0;
-            int slots = cap > 0 ? cap : (open == p ? MainPackSlots : SidePackSlots);
-            while (_contentsGrid.GetNumUIItems() < slots) AddEmptyCell(_contentsGrid);
-        }
-
-        if (_containerList is not null)
-        {
-            int bags = _containerList.GetNumUIItems();
-            int slots = ContainerSlotTarget(p, bags);
+            _containerList.Flush();
+            foreach (uint guid in visibleBags)
+            {
+                AddCell(
+                    _containerList,
+                    guid,
+                    isContainer: true,
+                    IsWaiting(guid, p, pending));
+            }
+            int slots = ContainerSlotTarget(p, _containerList.GetNumUIItems());
             while (_containerList.GetNumUIItems() < slots) AddEmptyCell(_containerList);
         }
 
-        if (_topContainer is not null)
+        if (MatchesCells(_contentsGrid, visibleContents, ContentsSlotTarget(open, p)))
+        {
+            RefreshCells(_contentsGrid, visibleContents, isContainer: false, open, pending);
+        }
+        else if (_contentsGrid is not null)
+        {
+            _contentsGrid.Flush();
+            foreach (uint guid in visibleContents)
+            {
+                AddCell(
+                    _contentsGrid,
+                    guid,
+                    isContainer: false,
+                    IsWaiting(guid, open, pending));
+            }
+            int slots = ContentsSlotTarget(open, p);
+            while (_contentsGrid.GetNumUIItems() < slots) AddEmptyCell(_contentsGrid);
+        }
+
+        if (_topContainer?.GetItem(0) is { } shownMain && shownMain.ItemId == p)
+        {
+            RefreshTopContainer(p);
+        }
+        else if (_topContainer is not null)
         {
             _topContainer.Flush();
             var main = new UiItemSlot
@@ -618,12 +624,14 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         return ItemListDropPlacement.Resolve(dropIndex, count, source, wholeStack);
     }
 
-    private int CountLooseContents(uint containerId)
+    private int CountLooseContents(uint containerId) => CountLooseContents(_objects, containerId);
+
+    private static int CountLooseContents(ClientObjectTable objects, uint containerId)
     {
         int count = 0;
-        foreach (uint guid in _objects.GetContents(containerId))
+        foreach (uint guid in objects.GetContents(containerId))
         {
-            if (_objects.Get(guid) is { } item
+            if (objects.Get(guid) is { } item
                 && item.CurrentlyEquippedLocation == EquipMask.None
                 && !IsBag(item))
             {
@@ -643,26 +651,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                 && projection.ContainerId == containerId
                 && projection.ItemId == guid);
 
-    /// <summary>False when anything structural moved, which needs the rebuild.</summary>
-    private bool TryRefreshCellsInPlace(
-        IReadOnlyList<uint> visibleBags,
-        IReadOnlyList<uint> visibleContents,
-        PendingListPlacement? pending,
-        uint player,
-        uint open)
-    {
-        if (!MatchesCells(_containerList, visibleBags, ContainerSlotTarget(player, visibleBags.Count))
-            || !MatchesCells(_contentsGrid, visibleContents, ContentsSlotTarget(open, player)))
-        {
-            return false;
-        }
-
-        RefreshCells(_containerList, visibleBags, isContainer: true, player, pending);
-        RefreshCells(_contentsGrid, visibleContents, isContainer: false, open, pending);
-        RefreshTopContainer(player);
-        return true;
-    }
-
+    /// <summary>False when anything structural moved in the list, which needs its rebuild.</summary>
     private static bool MatchesCells(UiItemList? list, IReadOnlyList<uint> guids, int slotTarget)
     {
         if (list is null) return guids.Count == 0;
@@ -860,12 +849,21 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     /// (a zero contents-to-capacity ratio hides it rather than drawing an empty rail).
     /// </summary>
     private void SetCapacityBar(UiItemSlot cell, uint containerGuid)
+        => cell.CapacityFill = CapacityFill(_objects, containerGuid);
+
+    /// <summary>
+    /// The fill of an item cell's container meter for
+    /// <paramref name="containerGuid"/>: loose items over item capacity, or
+    /// -1 (hidden) when it is no container with a positive item capacity or
+    /// holds nothing. Every item cell follows this rule, the toolbar's too.
+    /// </summary>
+    internal static float CapacityFill(ClientObjectTable objects, uint containerGuid)
     {
-        int cap = _objects.Get(containerGuid)?.ItemsCapacity ?? 0;
-        if (cap <= 0) { cell.CapacityFill = -1f; return; }
-        int n = CountLooseContents(containerGuid);
-        if (n == 0) { cell.CapacityFill = -1f; return; }
-        cell.CapacityFill = Math.Clamp(n / (float)cap, 0f, 1f);
+        int cap = objects.Get(containerGuid)?.ItemsCapacity ?? 0;
+        if (cap <= 0) return -1f;
+        int n = CountLooseContents(objects, containerGuid);
+        if (n == 0) return -1f;
+        return Math.Clamp(n / (float)cap, 0f, 1f);
     }
 
     private static void SetStructureBar(UiItemSlot cell, ClientObject? item)
@@ -944,6 +942,11 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             item,
             out _,
             out uint legalityDestination);
+        if ((legality == InventoryContainerPlacementRejection.None || IsCapacityRejection(legality))
+            && TryJoinStackInPack(targetList, targetCell, item))
+        {
+            return;
+        }
         uint fallthrough = 0u;
         if (IsCapacityRejection(legality))
         {
@@ -1137,11 +1140,54 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         if (plan is not { } merge)
             return false;
 
+        return DispatchMerge(merge);
+    }
+
+    /// <summary>
+    /// A drop on a pack's icon (a side pack or the main pack) first joins
+    /// the moving amount to the first stack in that pack, or in a pack inside
+    /// it, with room for all of it. Joining takes no slot, so this comes
+    /// before any room check. A drop on a cell of the contents grid never
+    /// searches like this.
+    /// </summary>
+    private bool TryJoinStackInPack(UiItemList targetList, UiItemSlot targetCell, uint item)
+    {
+        if (!ReferenceEquals(targetList, _containerList)
+            && !ReferenceEquals(targetList, _topContainer))
+        {
+            return false;
+        }
+        uint pack = targetCell.ItemId;
+        if (_sendStackableMerge is null
+            || pack == 0u
+            || pack == item
+            || _objects.Get(item) is not { } dragged
+            || IsBag(dragged)
+            || (_objects.Get(pack)?.ItemsCapacity ?? 0) <= 0)
+        {
+            return false;
+        }
+        uint fullStack = (uint)Math.Max(dragged.StackSize, 1);
+        uint requested = _stackSplitQuantity?.GetObjectSplitSize(
+            item, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
+        return StackJoinSearch.Plan(
+                _objects,
+                item,
+                pack,
+                requested,
+                _itemInteraction?.CanMakeInventoryRequest ?? true) is { } join
+            && DispatchMerge(join);
+    }
+
+    private bool DispatchMerge(StackMergePlan merge)
+    {
         return DispatchInventoryRequest(
             InventoryRequestKind.Merge,
             merge.SourceObjectId,
             () =>
             {
+                if (_sendStackableMerge is null)
+                    return false;
                 _sendStackableMerge(
                     merge.SourceObjectId,
                     merge.TargetObjectId,
