@@ -193,7 +193,7 @@ public sealed class LocalPlayerOutboundController
             teleportSequence: session.TeleportSequence,
             forcePositionSequence: session.ForcePositionSequence,
             contact: contactByte != 0,
-            standingLongjump: false);
+            standingLongjump: controller.StandingLongJump);
         _diagnostic.OnOutbound(
             "MTS",
             sequence,

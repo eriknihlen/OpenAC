@@ -333,6 +333,12 @@ public sealed class PlayerMovementController
 
     internal bool IsStandingStill => _motion.IsStandingStill();
 
+    /// <summary>
+    /// A standing long jump is charging (the charge began standing still on
+    /// the ground). The movement event carries it to the server.
+    /// </summary>
+    internal bool StandingLongJump => _motion.StandingLongJump;
+
     internal void FinishJump()
     {
         _jumpCharging = false;
