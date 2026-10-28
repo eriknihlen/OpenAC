@@ -120,9 +120,12 @@ public sealed class UiItemList : UiElement
     /// <summary>
     /// When set, every cell of a one-column vertical list is as wide as the list
     /// itself rather than <see cref="CellWidth"/>, so the rows stretch and shrink
-    /// with the list when its window is resized. Meant for lists whose row
-    /// template is authored exactly as wide as the list and anchored to both
-    /// sides; vertical placement and scrolling are unchanged.
+    /// with the list when its window is resized. Vertical placement and
+    /// scrolling are unchanged.
+    /// <para>Precondition: each row is authored exactly as wide as the list
+    /// (so filling the list is the same as growing by the list's width change),
+    /// and the row content's anchor margins are measured at that authored size
+    /// when the row is built, not at its first draw.</para>
     /// </summary>
     public bool CellsFillWidth { get; set; }
 

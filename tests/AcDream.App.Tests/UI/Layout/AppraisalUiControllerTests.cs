@@ -1152,110 +1152,183 @@ public sealed class AppraisalUiControllerTests
         // wider makes each of them 100 px wider in both layers, and the
         // right-justified value keeps its distance to the row's right edge. The
         // extra rows below are authored at a fixed size and stay as they are.
-        ImportedLayout layout = FixtureLoader.LoadExamination();
-        var objects = new ClientObjectTable();
-        objects.AddOrUpdate(new ClientObject
-        {
-            ObjectId = ObjectId,
-            Name = "Dww",
-            Type = ItemType.Creature,
-        });
-        using var interaction = NewInteraction(objects, []);
-        var templates = new CreatureAppraisalRowTemplateFactory(
-            FixtureLoader.LoadExaminationRowTemplateInfos(),
-            NoTexture,
-            defaultFont: null);
-        using AppraisalUiController controller = Bind(
-            layout, objects, interaction, new CombatState(), [], [],
-            () => { }, () => { }, templates)!;
-
-        interaction.ExamineSelectedOrEnterMode(ObjectId);
-        var properties = new PropertyBundle();
-        properties.Strings[5u] = "Template";
-        var armorLevels = new AppraiseInfoParser.ArmorLevel(
-            Head: 100, Chest: 110, Abdomen: 120,
-            UpperArm: 130, LowerArm: 140, Hand: 150,
-            UpperLeg: 160, LowerLeg: 170, Foot: 180);
-        Assert.True(controller.Apply(Parsed(
-            properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
-
-        UiElement statsHost = layout.FindElement(
-            AppraisalUiController.CreatureStatsListId)!;
-        UiElement extraHost = layout.FindElement(
-            AppraisalUiController.CreatureExtraListId)!;
-        UiElement creaturePanel = layout.FindElement(
-            AppraisalUiController.CreaturePanelId)!;
-        UiItemList statsForeground = Assert.Single(
-            creaturePanel.Children.OfType<UiItemList>(),
-            candidate => candidate.Top == statsHost.Top);
-        UiItemList statsBackground = Assert.Single(
-            statsHost.Children.OfType<UiItemList>());
-        UiItemList[] stats = [statsForeground, statsBackground];
-        UiItemList[] extras =
-        [
-            CreatureExtraList(layout),
-            Assert.Single(extraHost.Children.OfType<UiItemList>()),
-        ];
-        Assert.Equal(9, statsForeground.GetNumUIItems());
-        Assert.Equal(5, extras[0].GetNumUIItems());
-
-        var device = new RecordingGpuDevice();
-        var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
-        renderer.Begin(new Vector2(800f, 600f));
-        var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
-        layout.Root.DrawSelfAndChildren(ctx);
-
-        static (float RowWidth, float ValueRight) Measure(UiItemList list, int index)
-        {
-            var slot = Assert.IsType<UiTemplateListSlot>(list.GetItem(index));
-            UiElement value = slot.Content.FindElement(
-                CreatureAppraisalRowTemplateFactory.ValueId)!;
-            return (slot.Width, slot.Content.Root.Left + value.Left + value.Width);
-        }
-
-        static void AssertRows(UiItemList list, float rowWidth, float valueRight)
-        {
-            for (int index = 0; index < list.GetNumUIItems(); index++)
-            {
-                if (!list.GetItem(index)!.Visible)
-                    continue;
-                Assert.Equal((rowWidth, valueRight), Measure(list, index));
-                Assert.Equal(0f, list.GetItem(index)!.Left);
-                Assert.Equal(index * 20f - list.Scroll.ScrollY, list.GetItem(index)!.Top);
-            }
-        }
+        using var view = CreatureRowsView.Create();
+        view.Apply();
+        view.Draw();
 
         // Authored: 292 px rows, the value's right edge 9 px inside the row.
-        foreach (UiItemList list in stats.Concat(extras))
-            AssertRows(list, 292f, 283f);
+        foreach (UiItemList list in view.Stats.Concat(view.Extras))
+            AssertCreatureRows(list, 292f, 283f);
 
-        layout.Root.Width += 100f;
-        layout.Root.DrawSelfAndChildren(ctx);
+        view.Layout.Root.Width += 100f;
+        view.Draw();
 
-        foreach (UiItemList list in stats)
+        foreach (UiItemList list in view.Stats)
         {
             Assert.All(
                 Enumerable.Range(0, list.GetNumUIItems()),
                 index => Assert.True(list.GetItem(index)!.Visible));
-            AssertRows(list, 392f, 383f);
+            AssertCreatureRows(list, 392f, 383f);
         }
-        foreach (UiItemList list in extras)
-            AssertRows(list, 292f, 283f);
+        foreach (UiItemList list in view.Extras)
+            AssertCreatureRows(list, 292f, 283f);
 
-        // Scrolling still moves whole stretched rows; both layers share the
-        // offset. A shorter window leaves the nine rows taller than the list.
-        layout.Root.Height -= 120f;
-        layout.Root.DrawSelfAndChildren(ctx);
-        statsForeground.Scroll.SetScrollY(20);
-        layout.Root.DrawSelfAndChildren(ctx);
-        Assert.Equal(20, statsForeground.Scroll.ScrollY);
-        Assert.False(statsForeground.GetItem(0)!.Visible);
-        Assert.False(statsBackground.GetItem(0)!.Visible);
-        Assert.True(statsForeground.GetItem(1)!.Visible);
-        foreach (UiItemList list in stats)
-            AssertRows(list, 392f, 383f);
+        // Rows rebuilt in the wider window stretch the same way.
+        view.Apply();
+        view.Draw();
+        foreach (UiItemList list in view.Stats)
+            AssertCreatureRows(list, 392f, 383f);
+        foreach (UiItemList list in view.Extras)
+            AssertCreatureRows(list, 292f, 283f);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CreatureStatsRows_StretchWhenFirstDrawnInAWideWindow(bool builtWide)
+    {
+        // A window shorter than its nine stats rows leaves the last row undrawn
+        // until it is scrolled into view. Whether the window was already wide
+        // when the rows were built (a saved layout) or was widened after the
+        // first draw, a row drawn for the first time in the wide window
+        // stretches like the rest; both layers share the scroll offset.
+        using var view = CreatureRowsView.Create();
+        view.Layout.Root.Height -= 120f;
+        if (builtWide)
+            view.Layout.Root.Width += 100f;
+        view.Apply();
+        view.Draw();
+        Assert.False(view.StatsForeground.GetItem(8)!.Visible);
+        if (!builtWide)
+        {
+            foreach (UiItemList list in view.Stats)
+                AssertCreatureRows(list, 292f, 283f);
+            view.Layout.Root.Width += 100f;
+            view.Draw();
+        }
+        foreach (UiItemList list in view.Stats)
+            AssertCreatureRows(list, 392f, 383f);
+
+        view.StatsForeground.Scroll.SetScrollY(20);
+        view.Draw();
+        Assert.Equal(20, view.StatsForeground.Scroll.ScrollY);
+        Assert.False(view.StatsForeground.GetItem(0)!.Visible);
+        Assert.False(view.StatsBackground.GetItem(0)!.Visible);
+        Assert.True(view.StatsForeground.GetItem(8)!.Visible);
+        Assert.True(view.StatsBackground.GetItem(8)!.Visible);
+        foreach (UiItemList list in view.Stats)
+            AssertCreatureRows(list, 392f, 383f);
+    }
+
+    private static void AssertCreatureRows(
+        UiItemList list, float rowWidth, float valueRight)
+    {
+        for (int index = 0; index < list.GetNumUIItems(); index++)
+        {
+            UiItemSlot item = list.GetItem(index)!;
+            if (!item.Visible)
+                continue;
+            var slot = Assert.IsType<UiTemplateListSlot>(item);
+            UiElement value = slot.Content.FindElement(
+                CreatureAppraisalRowTemplateFactory.ValueId)!;
+            Assert.Equal(
+                (rowWidth, valueRight),
+                (slot.Width, slot.Content.Root.Left + value.Left + value.Width));
+            Assert.Equal(0f, slot.Left);
+            Assert.Equal(index * 20f - list.Scroll.ScrollY, slot.Top);
+        }
+    }
+
+    private sealed class CreatureRowsView : IDisposable
+    {
+        private readonly RuntimeItemInteraction _interaction;
+        private readonly AppraisalUiController _controller;
+        private readonly UiRenderContext _ctx;
+
+        private CreatureRowsView(
+            ImportedLayout layout,
+            RuntimeItemInteraction interaction,
+            AppraisalUiController controller,
+            UiRenderContext ctx)
+        {
+            Layout = layout;
+            _interaction = interaction;
+            _controller = controller;
+            _ctx = ctx;
+            UiElement statsHost = layout.FindElement(
+                AppraisalUiController.CreatureStatsListId)!;
+            UiElement extraHost = layout.FindElement(
+                AppraisalUiController.CreatureExtraListId)!;
+            UiElement creaturePanel = layout.FindElement(
+                AppraisalUiController.CreaturePanelId)!;
+            StatsForeground = Assert.Single(
+                creaturePanel.Children.OfType<UiItemList>(),
+                candidate => candidate.Top == statsHost.Top);
+            StatsBackground = Assert.Single(
+                statsHost.Children.OfType<UiItemList>());
+            Extras =
+            [
+                CreatureExtraList(layout),
+                Assert.Single(extraHost.Children.OfType<UiItemList>()),
+            ];
+        }
+
+        public ImportedLayout Layout { get; }
+        public UiItemList StatsForeground { get; }
+        public UiItemList StatsBackground { get; }
+        public UiItemList[] Stats => [StatsForeground, StatsBackground];
+        public UiItemList[] Extras { get; }
+
+        public static CreatureRowsView Create()
+        {
+            ImportedLayout layout = FixtureLoader.LoadExamination();
+            var objects = new ClientObjectTable();
+            objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = ObjectId,
+                Name = "Dww",
+                Type = ItemType.Creature,
+            });
+            var interaction = NewInteraction(objects, []);
+            var templates = new CreatureAppraisalRowTemplateFactory(
+                FixtureLoader.LoadExaminationRowTemplateInfos(),
+                NoTexture,
+                defaultFont: null);
+            AppraisalUiController controller = Bind(
+                layout, objects, interaction, new CombatState(), [], [],
+                () => { }, () => { }, templates)!;
+            interaction.ExamineSelectedOrEnterMode(ObjectId);
+
+            var device = new RecordingGpuDevice();
+            var renderer = new TextRenderer(device, new NullGpuFrameSource(), "unused");
+            renderer.Begin(new Vector2(800f, 600f));
+            var ctx = new UiRenderContext(renderer, new Vector2(800f, 600f));
+            return new CreatureRowsView(layout, interaction, controller, ctx);
+        }
+
+        public void Dispose()
+        {
+            _controller.Dispose();
+            _interaction.Dispose();
+        }
+
+        public void Apply()
+        {
+            var properties = new PropertyBundle();
+            properties.Strings[5u] = "Template";
+            var armorLevels = new AppraiseInfoParser.ArmorLevel(
+                Head: 100, Chest: 110, Abdomen: 120,
+                UpperArm: 130, LowerArm: 140, Hand: 150,
+                UpperLeg: 160, LowerLeg: 170, Foot: 180);
+            Assert.True(_controller.Apply(Parsed(
+                properties, MinimalCreatureProfile(), armorLevels: armorLevels)));
+            Assert.Equal(9, StatsForeground.GetNumUIItems());
+            Assert.Equal(9, StatsBackground.GetNumUIItems());
+            Assert.Equal(5, Extras[0].GetNumUIItems());
+        }
+
+        public void Draw() => Layout.Root.DrawSelfAndChildren(_ctx);
+    }
 
     [Fact]
     public void CharacterResponse_CombatRefreshRetainsArmorLevelRows()

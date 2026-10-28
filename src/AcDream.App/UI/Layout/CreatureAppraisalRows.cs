@@ -539,13 +539,19 @@ public sealed class CreatureAppraisalRowTemplateFactory
             root.MediaVisible = false;
         }
 
-        return new UiTemplateListSlot(
+        var slot = new UiTemplateListSlot(
             content,
             entryId: 0u,
             content.Root is IUiDatStateful stateful
                 ? stateful.ActiveRetailStateId
                 : UiStateInfo.DirectStateId,
             selectedState: null);
+        // Measure the row content's margins now, while the slot still has the
+        // template's own size. Left to its first draw, a row built or first
+        // shown in a widened window would take the extra width as a fixed
+        // right margin and never stretch.
+        content.Root.CaptureCurrentAnchorBaseline();
+        return slot;
     }
 
     private static Vector4 ResolveColor(
