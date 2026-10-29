@@ -1394,6 +1394,83 @@ public sealed class RuntimeLiveEntitySessionControllerTests
             body.LastServerPos);
     }
 
+    /// <summary>
+    /// An item the server creates inside an open corpse has no place in the
+    /// world, but loot rules test its colours before it is picked up, so it
+    /// reports the same colour swaps it would lying on the ground. Both the
+    /// no-window route and the one that projects spawns into a world run.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnItemInsideACorpseReportsTheColoursItWouldOnTheGround(
+        bool projectsIntoAWorld)
+    {
+        const uint corpse = 0x70000070u;
+        const uint inCorpse = 0x70000071u;
+        const uint onGround = 0x70000072u;
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = projectsIntoAWorld
+            ? new RuntimeLiveEntitySessionController(
+                runtime,
+                session,
+                worldProjection: new FixtureWorldProjection())
+            : new RuntimeLiveEntitySessionController(runtime, session);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        surface.BindPaletteColorResolver(new IndexAsRed());
+        CreateObject.SubPaletteSwap[] swaps =
+        [
+            new(0x04000123u, 3, 4),
+            new(0x04000456u, 0, 2),
+        ];
+
+        WorldSession.EntitySpawn ground =
+            SpawnAt(onGround, incarnation: 1, 0x01010001u) with
+            {
+                SubPalettes = swaps,
+            };
+        sink.Spawned(ground);
+        sink.Spawned(ground with
+        {
+            Guid = inCorpse,
+            Position = null,
+            Physics = ground.Physics!.Value with { Position = null },
+            ContainerId = corpse,
+        });
+
+        PluginInventoryItem contained = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = inCorpse, ContainerId = corpse });
+        PluginInventoryItem lying = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = onGround });
+
+        Assert.Equal(2, lying.Palettes.Count);
+        Assert.Equal(lying.Palettes, contained.Palettes);
+        Assert.Equal(
+            new PluginPaletteInfo(0x04000123u, 3, 4, 40, 0, 0),
+            contained.Palettes[0]);
+    }
+
+    /// <summary>Answers every colour with its own index in the red channel.</summary>
+    private sealed class IndexAsRed : AcDream.Core.CharGen.IChargenPaletteColorSource
+    {
+        public bool TryGetColor(
+            uint paletteId,
+            int index,
+            out AcDream.Core.CharGen.ChargenSwatchRgb color)
+        {
+            color = new AcDream.Core.CharGen.ChargenSwatchRgb((byte)index, 0, 0);
+            return true;
+        }
+    }
+
     /// <summary>Any landblock is serviceable; the fixture has one.</summary>
     private sealed class EveryDestination
         : IRuntimeRemotePlacementServiceWindow
