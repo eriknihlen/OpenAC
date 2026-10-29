@@ -428,34 +428,46 @@ public static class MarkupDocument
                     if (el.Attribute("iconkind") is not null)
                     {
                         throw new FormatException(
-                            "iconkind applies to button, tab and list; icon derives its kind from did/spell/item");
+                            "iconkind applies to button, tab and list; icon derives its kind from did/spell/item/file");
                     }
 
                     string? didAttr = (string?)el.Attribute("did");
                     string? spellAttr = (string?)el.Attribute("spell");
                     string? itemAttr = (string?)el.Attribute("item");
+                    string? fileAttr = (string?)el.Attribute("file");
                     int sourceCount = (didAttr is not null ? 1 : 0)
                         + (spellAttr is not null ? 1 : 0)
-                        + (itemAttr is not null ? 1 : 0);
+                        + (itemAttr is not null ? 1 : 0)
+                        + (fileAttr is not null ? 1 : 0);
                     if (sourceCount != 1)
                     {
                         throw new FormatException(
-                            "<icon> requires exactly one of did/spell/item");
+                            "<icon> requires exactly one of did/spell/item/file");
                     }
 
-                    string iconKind = didAttr is not null ? "did"
-                        : spellAttr is not null ? "spell"
-                        : "item";
-                    string iconExpression = didAttr ?? spellAttr ?? itemAttr!;
-                    Func<uint> iconReader = BindUintLiteralOrBinding(
-                        iconExpression, binding, $"icon {iconKind}");
+                    Func<(uint tex, int w, int h)> iconSource;
+                    if (fileAttr is not null)
+                    {
+                        iconSource = BuildFileIconSource(
+                            BindPathLiteralOrBinding(fileAttr, binding, "icon file"), icons);
+                    }
+                    else
+                    {
+                        string iconKind = didAttr is not null ? "did"
+                            : spellAttr is not null ? "spell"
+                            : "item";
+                        string iconExpression = didAttr ?? spellAttr ?? itemAttr!;
+                        Func<uint> iconReader = BindUintLiteralOrBinding(
+                            iconExpression, binding, $"icon {iconKind}");
+                        iconSource = BuildIconSource(iconKind, iconReader, icons);
+                    }
                     var icon = new UiMarkupIcon
                     {
                         Left = F(el, "x"),
                         Top = F(el, "y"),
                         Width = FOr(el, "w", 32f),
                         Height = FOr(el, "h", 32f),
-                        IconSource = BuildIconSource(iconKind, iconReader, icons),
+                        IconSource = iconSource,
                     };
                     ApplyCommon(icon, el, binding);
                     string? iconTooltip = (string?)el.Attribute("tooltip");
@@ -859,13 +871,26 @@ public static class MarkupDocument
                     if (!string.IsNullOrWhiteSpace(listIcons))
                     {
                         string? listIconKind = (string?)el.Attribute("iconkind");
-                        ValidateIconKind(listIconKind);
-                        Func<IReadOnlyList<uint>> listIconIdsReader =
-                            BindUintList(listIcons, binding, "list icons");
-                        if (icons is not null)
+                        if (ValidateIconKind(listIconKind) == "file")
                         {
-                            list.IconIdsSource = listIconIdsReader;
-                            list.IconResolve = BuildRowIconResolve(listIconKind, icons);
+                            Func<IReadOnlyList<string>> listPathsReader =
+                                BindStringList(listIcons, binding, "list icons");
+                            if (icons is not null)
+                            {
+                                var fileIds = new FileIconIds(icons);
+                                list.IconIdsSource = fileIds.Ids(listPathsReader);
+                                list.IconResolve = fileIds.Resolve;
+                            }
+                        }
+                        else
+                        {
+                            Func<IReadOnlyList<uint>> listIconIdsReader =
+                                BindUintList(listIcons, binding, "list icons");
+                            if (icons is not null)
+                            {
+                                list.IconIdsSource = listIconIdsReader;
+                                list.IconResolve = BuildRowIconResolve(listIconKind, icons);
+                            }
                         }
                     }
                 }
@@ -992,18 +1017,101 @@ public static class MarkupDocument
         if (iconExpression is null)
             return;
         string? iconKind = (string?)el.Attribute("iconkind");
-        ValidateIconKind(iconKind);
+        if (ValidateIconKind(iconKind) == "file")
+        {
+            Func<string?> pathReader = BindPathLiteralOrBinding(iconExpression, binding, context);
+            if (icons is not null)
+                button.IconSource = BuildFileIconSource(pathReader, icons);
+            return;
+        }
+
         Func<uint> iconReader = BindUintLiteralOrBinding(iconExpression, binding, context);
         if (icons is not null)
             button.IconSource = BuildIconSource(iconKind, iconReader, icons);
     }
 
+    private static Func<(uint tex, int w, int h)> BuildFileIconSource(
+        Func<string?> pathReader, IMarkupIconResolver? icons)
+    {
+        if (icons is null)
+            return static () => (0u, 0, 0);
+        return () => pathReader() is { } path && !string.IsNullOrWhiteSpace(path)
+            ? icons.ResolveFile(path)
+            : (0u, 0, 0);
+    }
+
+    /// <summary>
+    /// A file path written literally or bound to a string property. Like every
+    /// other binding, a missing property or one of the wrong type throws at
+    /// build; a null or blank path at draw time draws nothing.
+    /// </summary>
+    private static Func<string?> BindPathLiteralOrBinding(
+        string expression, MarkupBindingSource binding, string context)
+    {
+        if (!IsBinding(expression))
+            return () => expression;
+        PropertyInfo? property = binding.Property(expression[1..^1]);
+        if (property is null || property.PropertyType != typeof(string))
+        {
+            throw new FormatException(
+                $"{expression} did not resolve to a string property on "
+                + binding.TypeName + $" ({context})");
+        }
+        return () => (string?)binding.Read(property);
+    }
+
+    /// <summary>
+    /// Lists and columns carry icons as numbers, 0 meaning none. For file icons
+    /// each distinct path gets its own number here, so the list's drawing stays
+    /// the same for every kind of icon; a null or blank path is 0.
+    /// </summary>
+    private sealed class FileIconIds(IMarkupIconResolver? icons)
+    {
+        private const int MaximumPaths = 4096;
+        private readonly Dictionary<string, uint> _ids = new(StringComparer.Ordinal);
+        private readonly List<string> _paths = [];
+
+        internal Func<IReadOnlyList<uint>> Ids(Func<IReadOnlyList<string>> paths) => () =>
+        {
+            IReadOnlyList<string> current = paths();
+            // Forget every path at once rather than mid-list, so no number in
+            // one answer can point at a path a later row replaced.
+            if (_paths.Count + current.Count > MaximumPaths)
+            {
+                _ids.Clear();
+                _paths.Clear();
+            }
+            var ids = new uint[current.Count];
+            for (int i = 0; i < ids.Length; i++)
+                ids[i] = IdFor(current[i]);
+            return ids;
+        };
+
+        internal (uint tex, int w, int h) Resolve(uint id) =>
+            icons is not null && id != 0u && id <= _paths.Count
+                ? icons.ResolveFile(_paths[(int)id - 1])
+                : (0u, 0, 0);
+
+        private uint IdFor(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return 0u;
+            if (!_ids.TryGetValue(path, out uint id))
+            {
+                _paths.Add(path);
+                id = (uint)_paths.Count;
+                _ids[path] = id;
+            }
+            return id;
+        }
+    }
+
     private static string ValidateIconKind(string? iconKind, string context = "iconkind") =>
         (iconKind ?? "did") switch
         {
-            "did" or "spell" or "item" => iconKind ?? "did",
+            "did" or "spell" or "item" or "file" => iconKind ?? "did",
             var other => throw new FormatException(
-                $"{context} must be did, spell, or item (got \"{other}\")"),
+                $"{context} must be did, spell, item, or file (got \"{other}\")"),
         };
 
     private static bool ValidateArtStyle(string elementName, string? style) => style switch
@@ -1300,15 +1408,29 @@ public static class MarkupDocument
             }
             case "icon":
             {
-                var valuesSource = BindRequiredUintList(
-                    (string?)columnEl.Attribute("values"), binding, ColumnContext(index, "icon", "values"));
                 string? iconKind = (string?)columnEl.Attribute("iconkind");
-                ValidateIconKind(iconKind, ColumnContext(index, "icon", "iconkind"));
+                bool fileKind = ValidateIconKind(iconKind, ColumnContext(index, "icon", "iconkind")) == "file";
+                Func<IReadOnlyList<uint>> valuesSource;
+                Func<uint, (uint, int, int)>? resolve = null;
+                if (fileKind)
+                {
+                    string? valuesAttr = (string?)columnEl.Attribute("values");
+                    if (string.IsNullOrWhiteSpace(valuesAttr))
+                        throw new FormatException($"{ColumnContext(index, "icon", "values")} is required");
+                    Func<IReadOnlyList<string>> paths =
+                        BindStringList(valuesAttr, binding, ColumnContext(index, "icon", "values"));
+                    var fileIds = new FileIconIds(icons);
+                    valuesSource = fileIds.Ids(paths);
+                    if (icons is not null) resolve = fileIds.Resolve;
+                }
+                else
+                {
+                    valuesSource = BindRequiredUintList(
+                        (string?)columnEl.Attribute("values"), binding, ColumnContext(index, "icon", "values"));
+                    if (icons is not null) resolve = BuildRowIconResolve(iconKind, icons);
+                }
                 var onClick = BindRequiredIntAction(
                     (string?)columnEl.Attribute("onclick"), binding, ColumnContext(index, "icon", "onclick"));
-                Func<uint, (uint, int, int)>? resolve = icons is not null
-                    ? BuildRowIconResolve(iconKind, icons)
-                    : null;
                 return UiMarkupListColumn.Icon(width, valuesSource, resolve, onClick, isAutoWidth);
             }
             case "button":

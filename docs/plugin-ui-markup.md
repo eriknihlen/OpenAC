@@ -92,8 +92,9 @@ back at runtime instead.
 | `meter fill`, `slider value` | `float` | silent: 0 |
 | `list items`, `menu items` | `IEnumerable<string>` | throws |
 | `list colors` | `IEnumerable<uint>` or `IEnumerable<int>`, `0xRRGGBB` per row | silent when omitted; throws when mistyped |
-| `list icons` | `IEnumerable<uint>` or `IEnumerable<int>` | silent when omitted; throws when mistyped; a negative element draws no icon |
+| `list icons` | `IEnumerable<uint>` or `IEnumerable<int>`; `IEnumerable<string>` paths with `iconkind="file"` | silent when omitted; throws when mistyped; a negative element, or a null or blank path, draws no icon |
 | `icon did` / `spell` / `item`, `button icon` | any integral type | throws at build for a missing member; a negative or out-of-range value draws nothing |
+| `icon file`, `button icon` with `iconkind="file"` | `string`, a path in the plugin folder | throws at build for a missing or non-`string` member; a null or blank path draws nothing |
 | `list selected` | `int`; with `selectmode="multi"`, `IEnumerable<int>` of plugin rows | throws |
 | `tab selected`, `toggle checked`, `visible`, `enabled` | `bool` | throws |
 | `onclick` (button, tab, toggle) | `Action` | throws |
@@ -186,7 +187,7 @@ Unknown or miscased element names throw at build time.
 | `group` | Layout container | `x y w h background border scroll`, and the flex container attributes |
 | `label` | Text | `x y text color` |
 | `button` | Button with caption and optional icon | `x y w h text color background border onclick icon iconkind` |
-| `icon` | An icon | `x y w h did` or `spell` or `item`, `tooltip` |
+| `icon` | An icon | `x y w h did` or `spell` or `item` or `file`, `tooltip` |
 | `meter` | Nine-slice bar | `x y w h fill cur max color` plus the nine-slice `backleft backtile backright frontleft fronttile frontright` |
 | `tab` | Tab button with optional icon | `x y w h text selected onclick icon iconkind` |
 | `toggle` | On/off lamp | `x y w h text checked onclick color` |
@@ -1147,14 +1148,16 @@ Do not add the prefix to them.
 
 ## Icon sources
 
-An icon comes from one of three sources. On `<icon>` the source is whichever
-attribute is set; on `<button>`, `<tab>` and `<list>` it is `iconkind` (default `did`).
+An icon comes from one of four sources. On `<icon>` the source is whichever
+attribute is set; on `<button>`, `<tab>`, `<list>` and an icon `<column>` it is
+`iconkind` (default `did`).
 
 | Source | Draws |
 |---|---|
 | `did` | The art at that id, with the art's pure-white key color replaced the way the inventory draws a plain item |
 | `spell` | The composited spell icon for a spell id: power-level backing, art, tint, and the self/fellow overlay |
 | `item` | The composited icon for a live object id, read from the same object table the inventory uses |
+| `file` | A PNG or JPEG the plugin ships, by its path relative to the plugin's install folder (see "File icons") |
 
 ```xml
 <icon x="8"  y="8" w="32" h="32" did="7735" tooltip="An icon"/>
@@ -1166,7 +1169,7 @@ attribute is set; on `<button>`, `<tab>` and `<list>` it is `iconkind` (default 
 
 Rules:
 
-- Exactly one of `did`, `spell`, `item` on an `<icon>`; `iconkind` is not
+- Exactly one of `did`, `spell`, `item`, `file` on an `<icon>`; `iconkind` is not
   valid there.
 - `w` and `h` default to 32. Art is drawn nearest-filtered, aspect-preserved,
   and centered. An id of 0 or an unresolvable id draws nothing.
@@ -1178,6 +1181,58 @@ Rules:
 - A `<list>` with `icons` draws one square icon column at the left, one
   icon per row, using one `iconkind` for the whole list. Rows without a
   matching icon draw text only.
+
+## File icons
+
+A plugin can draw its own art: a PNG or JPEG in its install folder, named by
+a path relative to that folder, written literally or bound to a `string`
+property. On `<button>`, `<list>` and an icon `<column>`, set
+`iconkind="file"` and give paths where the other kinds take ids.
+
+```xml
+<icon x="8" y="8" w="24" h="24" file="icons/sword.png" tooltip="Melee"/>
+<icon x="40" y="8" w="24" h="24" file="{StatusIcon}"/>
+<button x="12" y="40" w="120" h="24" text="Loot" icon="icons/bag.png" iconkind="file" onclick="{Loot}"/>
+<list x="12" y="72" w="256" h="108" items="{Rows}" icons="{RowIconPaths}" iconkind="file" selected="{Selected}"/>
+```
+
+- **Paths** use `/` or `\`, must end in `.png`, `.jpg` or `.jpeg`, and must stay
+  inside the plugin folder once links are followed. A file icon in a window
+  registered without a plugin folder draws nothing.
+- **Limits:** at most 1 MiB per file and 512 pixels on a side; the file's
+  own bytes must be a PNG or a JPEG, whatever its name.
+- **Budget:** file icons are the plugin's own images, held in the same table
+  as the ones it asks for through `IUiRegistry.Images`, and count against the
+  same limits: 256 images and 32 MB of the plugin's own art, smaller copies
+  (mipmaps, about a third more) included. A file past them draws nothing, and
+  the log says why; it is tried again once the plugin lets go of another image.
+- **Drawing:** the element's `w` and `h` set the size; the image keeps its
+  aspect ratio, is centred in the element, and is scaled smoothly, unlike
+  client art. The client keeps smaller copies of every image (mipmaps), so a
+  large image in a small icon shrinks cleanly: a 512 x 512 file drawn at 24 x 24
+  looks right. Detail finer than the drawn size is still lost, so art made for
+  its size, at twice that for high-density displays (48 x 48 for a 24-point
+  icon), stays the sharpest. PNG transparency is kept, without dark fringes
+  where it shrinks; the image's own colours are drawn as they are.
+- **Bindings** are read every draw, so a window can switch icons by changing
+  the path it returns. A null or blank path draws nothing.
+- **Loading:** a file is read and decoded in the background the first time a
+  window draws it, so the icon appears a frame or so after the window does.
+  Each file is held once, however many elements and windows show it. A window
+  lets go of a file it has not drawn for 5 seconds (a hidden window or tab, a
+  bound path that moved on), and reads it again if it draws it
+  later. Everything is given back when the window is closed for good, rebuilt,
+  or unloaded with its plugin.
+- **Reloading:** a file that changed on disk is loaded again when its window
+  is built again, for example on a plugin hot reload. Another window still
+  showing the old image keeps it until that window is built again too.
+
+A file that cannot be used draws nothing, and the client log says why, once
+per file:
+
+```
+[UI] plugin image 'acme.hello/icons/sword.png' ignored: is wider or taller than 512 pixels
+```
 
 ## Columns
 
@@ -1203,8 +1258,8 @@ The two forms cannot be mixed on one list.
 | `onclick` | `text` | no | `Action<int>` with the row index; the click then does not select the row |
 | `values` | `check`, `checkbox` | yes | `IReadOnlyList<bool>` |
 | `onchange` | `check`, `checkbox` | yes | `Action<int>` with the row index; the plugin flips its own value |
-| `values` | `icon` | yes | `IReadOnlyList<uint>` or `<int>` |
-| `iconkind` | `icon` | no | `did` (default), `spell`, or `item` |
+| `values` | `icon` | yes | `IReadOnlyList<uint>` or `<int>`; `IReadOnlyList<string>` paths with `iconkind="file"` |
+| `iconkind` | `icon` | no | `did` (default), `spell`, `item`, or `file` |
 | `onclick` | `icon` | yes | `Action<int>` with the row index |
 | `items` | `button` | yes | `IReadOnlyList<string>`, each row's caption; an empty caption draws no button |
 | `header` | all | no | literal or bound string, the caption; `all` on a `checkbox` column is a select-all box |

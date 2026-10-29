@@ -12,6 +12,12 @@ public interface IMarkupIconResolver
     (uint tex, int w, int h) ResolveSpell(uint spellId);
 
     (uint tex, int w, int h) ResolveItem(uint objectId);
+
+    /// <summary>
+    /// A PNG or JPEG the plugin ships, by its path relative to the plugin's
+    /// install folder. Nothing on a resolver that serves no plugin folder.
+    /// </summary>
+    (uint tex, int w, int h) ResolveFile(string path) => (0u, 0, 0);
 }
 
 public sealed class RetailMarkupIconResolver : IMarkupIconResolver

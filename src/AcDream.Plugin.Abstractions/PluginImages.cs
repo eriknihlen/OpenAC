@@ -33,7 +33,9 @@ public readonly record struct PluginImage(int Handle, int Width, int Height)
 /// <see cref="MaximumDimension"/>, is refused with
 /// <see cref="PluginImage.None"/> and reported once in the client's log.
 /// Client art is shared with every other reader of the same surface and is
-/// not counted against the byte budget.</para>
+/// not counted against the byte budget. The file icons the plugin's markup
+/// draws (<c>&lt;icon file="..."/&gt;</c>) are held here too, under the same
+/// limits, while a window draws them.</para>
 ///
 /// <para>Call this only from the thread the plugin's own callbacks run on
 /// (the one that raises the tick); the host refuses any other. On a host
@@ -93,7 +95,11 @@ public interface IPluginImages
     /// <returns>False for an image this surface did not issue or has already let go of completely.</returns>
     bool Release(PluginImage image) => false;
 
-    /// <summary>How many distinct images the plugin currently holds.</summary>
+    /// <summary>
+    /// How many distinct images the plugin currently holds: the ones it asked for
+    /// here, and the file icons its markup windows are drawing, which count against
+    /// the same <see cref="MaximumCount"/> and <see cref="MaximumBytes"/>.
+    /// </summary>
     int Count => 0;
 
     /// <summary>The most distinct images the plugin may hold at once; 0 on a host that draws nothing.</summary>

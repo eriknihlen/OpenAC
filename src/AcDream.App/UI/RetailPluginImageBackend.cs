@@ -1,6 +1,7 @@
 using AcDream.App.Plugins;
 using AcDream.App.Rendering;
 using AcDream.Core.Items;
+using AcDream.Core.Textures;
 using AcDream.Content;
 using DatReaderWriter;
 using DatReaderWriter.DBObjs;
@@ -87,6 +88,9 @@ internal sealed class RetailPluginImageBackend : IPluginImageBackend
 
     public uint UploadOwned(byte[] rgba, int width, int height, string debugName) =>
         _textures.UploadReleasableRgba8(rgba, width, height, debugName);
+
+    public uint UploadOwned(IReadOnlyList<DecodedTexture> mipLevels, string debugName) =>
+        _textures.UploadReleasableRgba8(mipLevels, debugName);
 
     public bool ReleaseOwned(uint texture) => _textures.ReleaseUiTexture(texture);
 }

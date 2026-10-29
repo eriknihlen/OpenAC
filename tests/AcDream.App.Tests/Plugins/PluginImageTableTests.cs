@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using AcDream.App.Plugins;
+using AcDream.Core.Textures;
 using AcDream.Tests.Fixtures.PluginIcons;
 
 namespace AcDream.App.Tests.Plugins;
@@ -346,5 +347,93 @@ public sealed class PluginImageTableTests
 
         Assert.IsType<InvalidOperationException>(failure);
         Assert.Equal(0, table.Count);
+    }
+
+    private static PluginFileImage FileImage(string path, string version, int width, int height) =>
+        new(path, version, RgbaMipChain.Build(new byte[width * height * 4], width, height));
+
+    [Fact]
+    public void AFileIsOneImagePerPathAndVersionHeldOncePerAsker()
+    {
+        (PluginImageTable table, FakeBackend backend, _) = Bound();
+
+        PluginImageHandle first = table.AcquireFile(FileImage("icons/sword.png", "1", 16, 16));
+        PluginImageHandle second = table.AcquireFile(FileImage("icons/sword.png", "1", 16, 16));
+        PluginImageHandle changed = table.AcquireFile(FileImage("icons/sword.png", "2", 8, 8));
+
+        Assert.Equal(first, second);
+        Assert.NotEqual(first.Id, changed.Id);
+        Assert.Equal(2, backend.Uploads.Count);
+
+        // The window still showing the old version keeps it after another lets go.
+        Assert.True(table.Release(first));
+        Assert.True(table.TryResolve(second, out _, out _, out _));
+        Assert.True(table.Release(second));
+        Assert.False(table.TryResolve(second, out _, out _, out _));
+        Assert.True(table.TryResolve(changed, out _, out int width, out _));
+        Assert.Equal(8, width);
+        Assert.Single(backend.Released);
+    }
+
+    [Fact]
+    public void AFileAndAStreamOfTheSameNameAreDifferentImages()
+    {
+        (PluginImageTable table, FakeBackend backend, _) = Bound();
+
+        PluginImageHandle stream = table.AcquireDecoded("icons/sword.png", Png32());
+        PluginImageHandle file = table.AcquireFile(FileImage("icons/sword.png", "1", 16, 16));
+
+        Assert.NotEqual(stream.Id, file.Id);
+        Assert.Equal(2, backend.Uploads.Count);
+    }
+
+    [Fact]
+    public void AFilesSmallerLevelsCountAgainstTheByteBudget()
+    {
+        long image = 16L * 16L * 4L;
+        (PluginImageTable table, FakeBackend backend, List<string> reports) =
+            Bound(new PluginImageBudget(MaximumCount: 256, MaximumBytes: image + 1, MaximumDimension: 2048));
+
+        PluginImageHandle refused = table.AcquireFile(FileImage("icons/sword.png", "1", 16, 16));
+
+        Assert.False(refused.IsValid);
+        Assert.Empty(backend.Uploads);
+        Assert.Contains(reports, line => line.Contains("budget is", StringComparison.Ordinal));
+
+        Assert.True(table.AcquireFile(FileImage("icons/dot.png", "1", 1, 1)).IsValid);
+        Assert.Equal(4L, table.OwnedBytes);
+    }
+
+    [Fact]
+    public void FilesShareTheCountWithThePluginsOtherImages()
+    {
+        (PluginImageTable table, _, List<string> reports) =
+            Bound(new PluginImageBudget(MaximumCount: 2, MaximumBytes: 1024 * 1024, MaximumDimension: 2048));
+
+        Assert.True(table.AcquireDecoded("map", Png32()).IsValid);
+        Assert.True(table.AcquireFile(FileImage("icons/a.png", "1", 4, 4)).IsValid);
+        Assert.False(table.AcquireFile(FileImage("icons/b.png", "1", 4, 4)).IsValid);
+
+        Assert.Contains(reports, line => line.Contains("2 images", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AFileWiderThanTheMaximumDimensionIsRefused()
+    {
+        (PluginImageTable table, FakeBackend backend, List<string> reports) =
+            Bound(new PluginImageBudget(MaximumCount: 256, MaximumBytes: 1024 * 1024, MaximumDimension: 8));
+
+        Assert.False(table.AcquireFile(FileImage("icons/wide.png", "1", 16, 4)).IsValid);
+
+        Assert.Empty(backend.Uploads);
+        Assert.Contains(reports, line => line.Contains("16x4", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnboundAFileIsRefused()
+    {
+        var table = new PluginImageTable("example.plugin", PluginImageBudget.Default, _ => { });
+
+        Assert.False(table.AcquireFile(FileImage("icons/sword.png", "1", 4, 4)).IsValid);
     }
 }
