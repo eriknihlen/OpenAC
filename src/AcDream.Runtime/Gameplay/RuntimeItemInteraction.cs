@@ -64,6 +64,7 @@ public sealed class RuntimeItemInteraction : IDisposable
     private readonly Func<uint, IReadOnlyList<(int Amount, uint ItemGuid)>, uint, bool>? _sendBuyAll;
     private readonly Func<uint, IReadOnlyList<(int Amount, uint ItemGuid)>, bool>? _sendSell;
     private readonly Func<uint, IReadOnlyList<uint>, bool>? _sendSalvage;
+    private readonly Action<uint>? _beginGame;
     private readonly RuntimeInteractionTransactionState _runtimeTransactions;
     private readonly InventoryTransactionState _transactions;
 
@@ -112,7 +113,8 @@ public sealed class RuntimeItemInteraction : IDisposable
         Func<uint, IReadOnlyList<(int Amount, uint ItemGuid)>, bool>? sendSell = null,
         Action<string, RetailLogTextType>? interfaceText = null,
         Action<uint, uint, uint>? sendStackableMerge = null,
-        Func<uint, IReadOnlyList<uint>, bool>? sendSalvage = null)
+        Func<uint, IReadOnlyList<uint>, bool>? sendSalvage = null,
+        Action<uint>? beginGame = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _playerGuid = playerGuid ?? throw new ArgumentNullException(nameof(playerGuid));
@@ -150,6 +152,7 @@ public sealed class RuntimeItemInteraction : IDisposable
         _sendBuyAll = sendBuyAll;
         _sendSell = sendSell;
         _sendSalvage = sendSalvage;
+        _beginGame = beginGame;
         _interactionState = interactionState
             ?? throw new ArgumentNullException(nameof(interactionState));
         _runtimeTransactions = runtimeTransactions
@@ -1571,6 +1574,35 @@ public sealed class RuntimeItemInteraction : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// A game board out in the world is used by starting its game, not by
+    /// sending a use. True when using <paramref name="targetGuid"/> means
+    /// that; the game has then been begun here, whether or not anything is
+    /// drawn, and a window that shows the game has been told.
+    /// </summary>
+    public bool TryBeginGame(uint targetGuid)
+    {
+        if (ClassifyPrimaryUse(targetGuid) != ItemPrimaryUseResult.BeginGame)
+            return false;
+        BeginGame(new ItemPolicyAction(ItemPolicyActionKind.BeginGame, targetGuid));
+        return true;
+    }
+
+    /// <summary>
+    /// Begins the board's game (the join goes out from here, so every host
+    /// joins the same way), then lets a window that shows the game open.
+    /// False when nothing at all handled it.
+    /// </summary>
+    private bool BeginGame(ItemPolicyAction action)
+    {
+        _beginGame?.Invoke(action.ObjectId);
+        _auxiliaryAction?.Invoke(action);
+        PolicyActionRequested?.Invoke(action);
+        return _beginGame is not null
+            || _auxiliaryAction is not null
+            || PolicyActionRequested is not null;
+    }
+
     public bool PlaceSelectedIn3D(uint itemGuid, uint targetGuid)
         => PlaceIn3D(itemGuid, fromShortcutBar: false, targetGuid);
 
@@ -1693,6 +1725,18 @@ public sealed class RuntimeItemInteraction : IDisposable
                 case ItemPolicyActionKind.OpenSecureTrade:
                     SecureTradeRequested?.Invoke(action.ObjectId, 0u);
                     acted |= SecureTradeRequested is not null;
+                    break;
+                case ItemPolicyActionKind.BeginGame:
+                    if (BeginGame(action))
+                    {
+                        acted = true;
+                    }
+                    else
+                    {
+                        ReportClientLocal(PolicyActionMessage(action));
+                        acted |= _interfaceText is not null
+                            || _systemMessage is not null || _toast is not null;
+                    }
                     break;
                 default:
                     _auxiliaryAction?.Invoke(action);

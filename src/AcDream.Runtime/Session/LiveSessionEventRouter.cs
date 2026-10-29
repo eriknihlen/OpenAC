@@ -68,7 +68,8 @@ public sealed record LiveSocialSessionBindings(
     RuntimeContractState? Contracts = null,
     Func<uint>? PlayerGuid = null,
     Action<string>? OnLocalPlayerDeath = null,
-    RuntimeHousePurchaseState? HousePurchase = null);
+    RuntimeHousePurchaseState? HousePurchase = null,
+    RuntimeChessState? Chess = null);
 
 public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
 {
@@ -386,6 +387,24 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                     : null,
                 onHouseProfile: social.HousePurchase is { } housePurchase
                     ? housePurchase.ApplyProfile
+                    : null,
+                onChessJoinGameResponse: social.Chess is { } chessJoin
+                    ? chessJoin.ApplyJoinResponse
+                    : null,
+                onChessStartGame: social.Chess is { } chessStart
+                    ? chessStart.ApplyStartGame
+                    : null,
+                onChessMoveResponse: social.Chess is { } chessMove
+                    ? chessMove.ApplyMoveResponse
+                    : null,
+                onChessOpponentTurn: social.Chess is { } chessTurn
+                    ? chessTurn.ApplyOpponentTurn
+                    : null,
+                onChessOpponentStalemate: social.Chess is { } chessStalemate
+                    ? chessStalemate.ApplyOpponentStalemate
+                    : null,
+                onChessGameOver: social.Chess is { } chessOver
+                    ? chessOver.ApplyGameOver
                     : null,
                 onContractTable: social.Contracts is { } contractTable
                     ? contractTable.ApplyTable

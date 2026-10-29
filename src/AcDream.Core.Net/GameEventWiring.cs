@@ -70,7 +70,13 @@ public static class GameEventWiring
         Action<BookEvents.PageDataResponse>? onBookPageData = null,
         Action<BookEvents.PageResponse>? onBookAddPageResponse = null,
         Action<BookEvents.Inscription>? onBookInscription = null,
-        Action<string /*deathMessage*/>? onLocalPlayerDeath = null)
+        Action<string /*deathMessage*/>? onLocalPlayerDeath = null,
+        Action<GameEvents.ChessJoinGameResponse>? onChessJoinGameResponse = null,
+        Action<GameEvents.ChessStartGame>? onChessStartGame = null,
+        Action<GameEvents.ChessMoveResponse>? onChessMoveResponse = null,
+        Action<GameEvents.ChessOpponentTurn>? onChessOpponentTurn = null,
+        Action<GameEvents.ChessOpponentStalemate>? onChessOpponentStalemate = null,
+        Action<GameEvents.ChessGameOver>? onChessGameOver = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(items);
@@ -334,6 +340,55 @@ public static class GameEventWiring
             {
                 var p = GameEvents.ParseHouseProfile(e.Payload.Span);
                 if (p is not null) onHouseProfile(p.Value);
+            });
+        }
+
+        if (onChessJoinGameResponse is not null)
+        {
+            registrar.Register(GameEventType.JoinGameResponse, e =>
+            {
+                var p = GameEvents.ParseChessJoinGameResponse(e.Payload.Span);
+                if (p is not null) onChessJoinGameResponse(p.Value);
+            });
+        }
+        if (onChessStartGame is not null)
+        {
+            registrar.Register(GameEventType.StartGame, e =>
+            {
+                var p = GameEvents.ParseChessStartGame(e.Payload.Span);
+                if (p is not null) onChessStartGame(p.Value);
+            });
+        }
+        if (onChessMoveResponse is not null)
+        {
+            registrar.Register(GameEventType.MoveResponse, e =>
+            {
+                var p = GameEvents.ParseChessMoveResponse(e.Payload.Span);
+                if (p is not null) onChessMoveResponse(p.Value);
+            });
+        }
+        if (onChessOpponentTurn is not null)
+        {
+            registrar.Register(GameEventType.OpponentTurn, e =>
+            {
+                var p = GameEvents.ParseChessOpponentTurn(e.Payload.Span);
+                if (p is not null) onChessOpponentTurn(p.Value);
+            });
+        }
+        if (onChessOpponentStalemate is not null)
+        {
+            registrar.Register(GameEventType.OpponentStalemate, e =>
+            {
+                var p = GameEvents.ParseChessOpponentStalemate(e.Payload.Span);
+                if (p is not null) onChessOpponentStalemate(p.Value);
+            });
+        }
+        if (onChessGameOver is not null)
+        {
+            registrar.Register(GameEventType.GameOver, e =>
+            {
+                var p = GameEvents.ParseChessGameOver(e.Payload.Span);
+                if (p is not null) onChessGameOver(p.Value);
             });
         }
 

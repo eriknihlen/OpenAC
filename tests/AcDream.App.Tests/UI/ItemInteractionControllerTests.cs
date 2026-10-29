@@ -809,6 +809,33 @@ public sealed class ItemInteractionControllerTests
     }
 
     [Fact]
+    public void GameBoardInTheWorld_BeginsItsGameInsteadOfBeingUsed()
+    {
+        var h = new Harness();
+        const uint board = 0x7A9B4001u;
+        const uint ownedBoard = 0x50000A33u;
+        var actions = new List<ItemPolicyAction>();
+        h.Controller.PolicyActionRequested += actions.Add;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = board,
+            Name = "Chess Board",
+            Type = ItemType.Gameboard,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+        h.AddContained(ownedBoard, item => item.Type = ItemType.Gameboard);
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = 0x7A9B4002u, Type = ItemType.Misc });
+
+        Assert.True(h.Controller.TryBeginGame(board));
+        Assert.False(h.Controller.TryBeginGame(ownedBoard));
+        Assert.False(h.Controller.TryBeginGame(0x7A9B4002u));
+        Assert.False(h.Controller.TryBeginGame(0x7A9B4003u));
+
+        Assert.Equal([new ItemPolicyAction(ItemPolicyActionKind.BeginGame, board)], actions);
+        Assert.Empty(h.Uses);
+    }
+
+    [Fact]
     public void ZeroValuedUseabilityGem_sendsUseLikeBlackmoorsFavor()
     {
         var h = new Harness();

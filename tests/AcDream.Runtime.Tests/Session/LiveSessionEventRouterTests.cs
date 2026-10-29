@@ -1103,6 +1103,60 @@ public sealed class LiveSessionEventRouterTests : IDisposable
         router.Dispose();
     }
 
+    [Fact]
+    public void ChessEvents_RouteIntoTheSharedRuntimeOwner()
+    {
+        const uint board = 0x7A9B4001u;
+        using var session = NewSession();
+        var chess = new RuntimeChessState();
+        var router = new LiveSessionEventRouter(
+            session,
+            NoOpEntitySink(),
+            NoOpEnvironmentSink(),
+            new LiveInventorySessionBindings(
+                new ClientObjectTable(),
+                PlayerGuid: () => 0x50000001u,
+                OnShortcuts: null,
+                OnUseDone: null,
+                ItemMana: new ItemManaState(),
+                ExternalContainers: new ExternalContainerState()),
+            NewCharacterBindings(),
+            new LiveSocialSessionBindings(
+                new ChatLog(),
+                new TurbineChatState(),
+                new FriendsState(),
+                new SquelchState(),
+                Chess: chess),
+            NewActions());
+        router.Attach();
+        chess.Begin(board);
+
+        void Send(GameEventType type, params int[] values)
+        {
+            byte[] payload = new byte[4 + values.Length * 4];
+            BinaryPrimitives.WriteUInt32LittleEndian(payload, board);
+            for (int i = 0; i < values.Length; i++)
+                BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4 + i * 4), values[i]);
+            session.GameEvents.Dispatch(GameEventEnvelope.TryParse(
+                WrapGameEvent(type, payload))!.Value);
+        }
+
+        Send(GameEventType.JoinGameResponse, 1);
+        Send(GameEventType.StartGame, 0);
+        Assert.Equal(RuntimeChessStage.OpponentsTurn, chess.Snapshot.Stage);
+
+        Send(GameEventType.OpponentTurn, 0, (int)ChessMoveType.FromTo, 0x50000002, 4, 1, 4, 3);
+        Assert.Equal(RuntimeChessStage.MyTurn, chess.Snapshot.Stage);
+
+        chess.TryMove(new(4, 6), new(4, 4));
+        Send(GameEventType.MoveResponse, 1);
+        Assert.Equal(RuntimeChessStage.OpponentsTurn, chess.Snapshot.Stage);
+
+        Send(GameEventType.GameOver, 0);
+        Assert.Equal(RuntimeChessStage.NotPlaying, chess.Snapshot.Stage);
+        router.Dispose();
+    }
+
     /// <summary>
     /// The action state the router now requires. Both hosts hand it their
     /// own; a test only needs one that exists.

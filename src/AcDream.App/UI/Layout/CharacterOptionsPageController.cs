@@ -81,7 +81,7 @@ public static class CharacterOptionsPageController
             new(CharacterOptionId.DragItemOnPlayerOpensSecureTrade, "DragItemOnPlayerOpensSecureTrade", Live),
             new(CharacterOptionId.DisplayDateOfBirth, "DisplayDateOfBirth", StoreOnly), // Group A
             new(CharacterOptionId.DisplayAge, "DisplayAge", StoreOnly), // Group A
-            new(CharacterOptionId.DisplayChessRank, "DisplayChessRank", StoreOnly), // Group A
+            new(CharacterOptionId.DisplayChessRank, "DisplayChessRank", Live), // Group A, the server hides chess rank from appraisals when off
             new(CharacterOptionId.DisplayFishingSkill, "DisplayFishingSkill", StoreOnly), // Group A
             new(CharacterOptionId.DisplayNumberDeaths, "DisplayNumberDeaths", StoreOnly), // Group A
             new(CharacterOptionId.DisplayNumberCharacterTitles, "DisplayNumberCharacterTitles", StoreOnly), // Group A

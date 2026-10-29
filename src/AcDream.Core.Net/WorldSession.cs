@@ -2497,6 +2497,36 @@ public sealed partial class WorldSession : IDisposable
         SendGameAction(TradeRequests.BuildResetTrade(seq));
     }
 
+    public void SendChessJoin(uint boardGuid)
+    {
+        uint seq = NextGameActionSequence();
+        SendGameAction(ChessRequests.BuildJoin(seq, boardGuid));
+    }
+
+    public void SendChessQuit()
+    {
+        uint seq = NextGameActionSequence();
+        SendGameAction(ChessRequests.BuildQuit(seq));
+    }
+
+    public void SendChessMove(int fromX, int fromY, int toX, int toY)
+    {
+        uint seq = NextGameActionSequence();
+        SendGameAction(ChessRequests.BuildMove(seq, fromX, fromY, toX, toY));
+    }
+
+    public void SendChessMovePass()
+    {
+        uint seq = NextGameActionSequence();
+        SendGameAction(ChessRequests.BuildMovePass(seq));
+    }
+
+    public void SendChessStalemate(bool offer)
+    {
+        uint seq = NextGameActionSequence();
+        SendGameAction(ChessRequests.BuildStalemate(seq, offer));
+    }
+
     public void SendGiveObject(uint targetGuid, uint itemGuid, uint amount)
     {
         uint seq = NextGameActionSequence();

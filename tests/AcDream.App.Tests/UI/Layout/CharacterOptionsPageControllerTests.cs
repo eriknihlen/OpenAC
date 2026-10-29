@@ -609,11 +609,10 @@ public sealed class CharacterOptionsPageControllerTests
         CharacterOptionId.DisableHouseRestrictionEffects,
         // Group 3 (Grouping) — 1 of 6
         CharacterOptionId.DisplayAllegianceLogonNotifications,
-        // Group 4 (Other Players) — 7 of 11
+        // Group 4 (Other Players) — 6 of 11
         CharacterOptionId.UseDeception,
         CharacterOptionId.DisplayDateOfBirth,
         CharacterOptionId.DisplayAge,
-        CharacterOptionId.DisplayChessRank,
         CharacterOptionId.DisplayFishingSkill,
         CharacterOptionId.DisplayNumberDeaths,
         CharacterOptionId.DisplayNumberCharacterTitles,
@@ -632,8 +631,8 @@ public sealed class CharacterOptionsPageControllerTests
             .ToHashSet();
 
         Assert.Equal(ExpectedStoreOnlyIds, actualStoreOnly);
-        Assert.Equal(11, actualStoreOnly.Count);
-        Assert.Equal(39, 50 - actualStoreOnly.Count); // the 39 live rows
+        Assert.Equal(10, actualStoreOnly.Count);
+        Assert.Equal(40, 50 - actualStoreOnly.Count); // the 40 live rows
     }
 
     [Fact]
