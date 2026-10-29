@@ -674,6 +674,7 @@ internal sealed class SessionPlayerCompositionPhase
             deletion,
             firstEntryDrive,
             acceptedPositionDrive);
+        bindings.Adopt("first-entry watch of live hydration", hydration);
         bindings.Adopt(
             "landblock-loaded hydration",
             live.LandblockLoaded.Bind(hydration));
