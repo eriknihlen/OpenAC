@@ -35,13 +35,13 @@ internal sealed class PluginFileImageLoader
     private readonly Dictionary<(string Directory, string Path), Task<PluginFileImageResult>> _reading = [];
     private readonly HashSet<string> _reported = new(StringComparer.Ordinal);
 
-    /// <param name="report">Where refusals are logged.</param>
+    /// <param name="report">Where refusals are logged; the client log, as a warning, unless a test says otherwise.</param>
     /// <param name="run">Runs a read; a worker thread unless a test says otherwise.</param>
     internal PluginFileImageLoader(
         Action<string>? report = null,
         Func<Func<PluginFileImageResult>, Task<PluginFileImageResult>>? run = null)
     {
-        _report = report ?? Console.WriteLine;
+        _report = report ?? (line => Serilog.Log.Warning("{Line}", line));
         _run = run ?? Task.Run;
     }
 
