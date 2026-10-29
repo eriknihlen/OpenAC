@@ -22,7 +22,8 @@ public static class InventoryContainerPlacementPolicy
         ClientObjectTable objects,
         uint itemId,
         uint destinationId,
-        uint playerId)
+        uint playerId,
+        bool wholeStack = true)
     {
         ArgumentNullException.ThrowIfNull(objects);
         if (itemId == 0u || objects.Get(itemId) is not { } item)
@@ -67,10 +68,15 @@ public static class InventoryContainerPlacementPolicy
         }
         else
         {
-            int capacity = destination?.ItemsCapacity ?? 0;
-            if (!alreadyDirectlyContained
-                && capacity > 0
-                && CountItems(objects, destinationId) >= capacity)
+            // Part of a stack takes a slot of its own, even beside the rest
+            // of it: only the whole stack is a reorder. Only -1 is
+            // unbounded and 0 is no room (a description carries a capacity
+            // only when it is not zero); an undescribed player has no known
+            // capacity and takes anything.
+            if (destination is not null
+                && !(alreadyDirectlyContained && wholeStack)
+                && destination.ItemsCapacity != -1
+                && CountItems(objects, destinationId) >= destination.ItemsCapacity)
             {
                 return InventoryContainerPlacementRejection.ItemCapacityFull;
             }

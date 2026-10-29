@@ -259,6 +259,8 @@ public sealed class SelectionInteractionControllerTests
             {
                 ObjectId = Player,
                 Type = ItemType.Creature,
+                ItemsCapacity = 102,
+                ContainersCapacity = 7,
             });
             Objects.AddOrUpdate(new ClientObject
             {

@@ -118,6 +118,8 @@ public sealed class RetailItemConfirmationControllerTests
             ObjectId = Player,
             Name = "Player",
             Type = ItemType.Creature,
+            ItemsCapacity = 102,
+            ContainersCapacity = 7,
         });
         objects.AddOrUpdate(new ClientObject
         {
