@@ -240,10 +240,13 @@ public sealed class ChessBoardTests
     }
 
     [Fact]
-    public void CheckFromAPawnThatCanBeTakenEnPassant_IsNotCheckmate()
+    public void CheckFromAPawnThatCanOnlyBeTakenEnPassant_IsCheckmate()
     {
         // The pawn stepping to d4 checks the king on e5, whose other
-        // squares are all covered; only taking it en passant escapes.
+        // squares are all covered. Taking it en passant would get the king
+        // out of check, but that capture lands on d3, behind the pawn,
+        // which is neither the checking piece's square nor between it and
+        // the king, so the game does not count it and calls checkmate.
         var board = Position(ChessTeam.White, "h1", "e5",
             ("d2", White(ChessPieceType.Pawn)),
             ("e4", Black(ChessPieceType.Pawn)),
@@ -254,9 +257,28 @@ public sealed class ChessBoardTests
 
         ChessMoveResult result = Move(board, "d2", "d4");
 
-        Assert.True(result.GivesCheck());
-        Assert.False(result.GivesCheckmate());
+        Assert.Equal(ChessMoveResult.MovedToEmptySquare | ChessMoveResult.Checkmate, result);
         Assert.Equal(ChessMoveResult.CapturedEnPassant, Move(board, "e4", "d3"));
+    }
+
+    [Fact]
+    public void CheckThatAnEnPassantCaptureBlocks_IsNotCheckmate()
+    {
+        // The bishop on b1 checks the king on h7 along c2-d3-e4-f5-g6.
+        // Taking the pawn that just stepped to d4 en passant puts a pawn on
+        // d3, between the bishop and the king, so it counts as an escape.
+        var board = Position(ChessTeam.White, "h1", "h7",
+            ("b1", White(ChessPieceType.Bishop)),
+            ("d2", White(ChessPieceType.Pawn)),
+            ("c4", Black(ChessPieceType.Pawn)),
+            ("g1", White(ChessPieceType.Rook)),
+            ("a8", White(ChessPieceType.Rook)),
+            ("a6", White(ChessPieceType.Rook)));
+
+        ChessMoveResult result = Move(board, "d2", "d4");
+
+        Assert.Equal(ChessMoveResult.MovedToEmptySquare | ChessMoveResult.Check, result);
+        Assert.Equal(ChessMoveResult.CapturedEnPassant, Move(board, "c4", "d3"));
     }
 
     [Fact]

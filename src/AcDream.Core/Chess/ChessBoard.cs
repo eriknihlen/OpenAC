@@ -22,6 +22,11 @@ public sealed class ChessBoard
         ChessPieceType.King, ChessPieceType.Bishop, ChessPieceType.Knight, ChessPieceType.Rook,
     };
 
+    private static readonly (int Dx, int Dy)[] KingSteps =
+    {
+        (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1),
+    };
+
     private readonly ChessPiece?[] _squares = new ChessPiece?[Size * Size];
 
     /// <summary>The square a pawn skipped with its last move, which an
@@ -108,7 +113,7 @@ public sealed class ChessBoard
         Apply(plan);
         Turn = Opponent(Turn);
         if (IsInCheck(Turn))
-            result |= HasEscape(Turn) ? ChessMoveResult.Check : ChessMoveResult.Checkmate;
+            result |= IsCheckmated(Turn) ? ChessMoveResult.Checkmate : ChessMoveResult.Check;
         return result;
     }
 
@@ -262,23 +267,76 @@ public sealed class ChessBoard
         return false;
     }
 
-    /// <summary>Whether <paramref name="team"/> has any move that leaves its
-    /// king out of check. Castling never does, so it is not tried.</summary>
-    private bool HasEscape(ChessTeam team)
+    /// <summary>
+    /// Whether <paramref name="team"/>, in check, is checkmated. Two kinds
+    /// of answer are looked for: the king stepping to one of the eight
+    /// squares around it, or any piece moving onto the square of the piece
+    /// giving check or a square between it and the king. A move that ends
+    /// anywhere else does not count, so taking a checking pawn en passant,
+    /// which lands behind the pawn, is not an escape: the game calls that
+    /// checkmate. Castling is never tried.
+    /// </summary>
+    private bool IsCheckmated(ChessTeam team)
     {
-        foreach (var (from, piece) in Pieces)
+        if (KingOf(team) is not (ChessSquare king, ChessPiece kingPiece))
+            return false;
+
+        foreach (var (dx, dy) in KingSteps)
         {
-            if (piece.Team != team)
+            var to = new ChessSquare(king.X + dx, king.Y + dy);
+            var (result, plan) = PlanReach(king, to, kingPiece, allowEnPassant: true);
+            if (result.IsAccepted() && LeavesKingSafe(plan, team))
+                return false;
+        }
+
+        // Only the first piece found giving check is answered. With two
+        // pieces giving check, no single capture or block can stop both,
+        // so the other is never needed.
+        foreach (var (from, attacker) in Pieces)
+        {
+            if (attacker.Team == team
+                || !PlanReach(from, king, attacker, allowEnPassant: false).Item1.IsAccepted())
                 continue;
-            for (int i = 0; i < _squares.Length; i++)
+
+            foreach (ChessSquare square in SquaresUpToKing(from, king))
             {
-                var to = new ChessSquare(i % Size, i / Size);
-                var (result, plan) = PlanReach(from, to, piece, allowEnPassant: true);
-                if (result.IsAccepted() && LeavesKingSafe(plan, team))
-                    return true;
+                foreach (var (defenderFrom, defender) in Pieces)
+                {
+                    if (defender.Team != team)
+                        continue;
+                    var (result, plan) = PlanReach(defenderFrom, square, defender, allowEnPassant: true);
+                    if (result.IsAccepted() && LeavesKingSafe(plan, team))
+                        return false;
+                }
             }
+            return true;
         }
         return false;
+    }
+
+    /// <summary>The attacker's own square, then each square along its line
+    /// up to (not including) the king. A knight's check has no line, so it
+    /// is just the knight's square.</summary>
+    private static IEnumerable<ChessSquare> SquaresUpToKing(ChessSquare from, ChessSquare king)
+    {
+        int dx = king.X - from.X;
+        int dy = king.Y - from.Y;
+        bool line = dx == 0 || dy == 0 || Math.Abs(dx) == Math.Abs(dy);
+        int count = line ? Math.Max(Math.Abs(dx), Math.Abs(dy)) : 1;
+        int sx = Math.Sign(dx);
+        int sy = Math.Sign(dy);
+        for (int step = 0; step < count; step++)
+            yield return new ChessSquare(from.X + sx * step, from.Y + sy * step);
+    }
+
+    private (ChessSquare, ChessPiece)? KingOf(ChessTeam team)
+    {
+        foreach (var (square, piece) in Pieces)
+        {
+            if (piece.Type == ChessPieceType.King && piece.Team == team)
+                return (square, piece);
+        }
+        return null;
     }
 
     private bool LeavesKingSafe(PlannedMove plan, ChessTeam team)
