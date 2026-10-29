@@ -341,9 +341,15 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
                 Math.Clamp(pending.Placement, 0, visibleContents.Count),
                 pending.ItemId);
         }
+        int? packSlots = SlotCount(_objects.Get(root), packs: true);
+        int? itemSlots = SlotCount(_objects.Get(_openContainer), packs: false);
+
         // Flushing cells cancels a press in progress: UiRoot releases capture when the
-        // captured element leaves the tree.
-        if (TryRefreshCellsInPlace(root, visibleContainers, visibleContents))
+        // captured element leaves the tree. A strip whose cell count changed (another
+        // container opened, or its capacity changed) is rebuilt.
+        if (_containerList.FixedSlotCount == packSlots
+            && _contentsList.FixedSlotCount == itemSlots
+            && TryRefreshCellsInPlace(root, visibleContainers, visibleContents))
         {
             ApplyIndicators();
             return;
@@ -352,8 +358,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         _topContainer.Flush();
         _containerList.Flush();
         _contentsList.Flush();
-        _containerList.FixedSlotCount = SlotCount(_objects.Get(root), packs: true);
-        _contentsList.FixedSlotCount = SlotCount(_objects.Get(_openContainer), packs: false);
+        _containerList.FixedSlotCount = packSlots;
+        _contentsList.FixedSlotCount = itemSlots;
 
         AddRootCell(root);
         foreach (uint guid in visibleContainers)

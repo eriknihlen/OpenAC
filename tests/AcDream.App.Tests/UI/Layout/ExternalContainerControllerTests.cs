@@ -351,6 +351,39 @@ public sealed class ExternalContainerControllerTests
         Assert.False(h.Contents.GetItem(0)!.Visible);
     }
 
+    // Opening another pack that shows the same items (none) but holds a
+    // different number resizes the item strip to that pack's capacity.
+    [Fact]
+    public void OpeningAnotherEmptyPack_resizesTheItemStripToItsCapacity()
+    {
+        using var h = new Harness();
+        uint big = Item + 10u, small = Item + 11u, unlimited = Item + 12u;
+        foreach (var (id, capacity) in new[] { (big, 24), (small, 10), (unlimited, -1) })
+        {
+            h.Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = id,
+                Type = ItemType.Container,
+                ItemsCapacity = capacity,
+                PublicWeenieBitfield = (uint)PublicWeenieFlags.Openable,
+            });
+        }
+        h.Open(Chest, itemsCapacity: 24, containersCapacity: 3,
+            new ContainerContentEntry(big, 0u),
+            new ContainerContentEntry(small, 0u),
+            new ContainerContentEntry(unlimited, 0u));
+
+        h.Containers.PrimaryItemPressed!(big);
+        Assert.Equal(24, h.Contents.GetNumUIItems());
+
+        h.Containers.PrimaryItemPressed!(small);
+        Assert.Equal(10, h.Contents.GetNumUIItems());
+
+        h.Containers.PrimaryItemPressed!(unlimited);
+        Assert.Equal(24, h.Contents.GetNumUIItems());
+        Assert.Null(h.Contents.FixedSlotCount);
+    }
+
     // A negative capacity means no limit: the strips fill the window.
     [Fact]
     public void UnlimitedContainer_fillsTheVisibleWidth()
