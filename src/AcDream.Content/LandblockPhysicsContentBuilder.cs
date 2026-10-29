@@ -868,6 +868,12 @@ public static class LandblockPhysicsContentBuilder
     }
 
     /// <summary>
+    /// The physics state of an object made from the dats: static, so an
+    /// ethereal mover still collides with it.
+    /// </summary>
+    private const uint DatStaticState = (uint)PhysicsStateFlags.Static;
+
+    /// <summary>
     /// One static object's collision, registered with the engine's shadow
     /// objects in the landblock. The prepared objects must be in the cache.
     /// </summary>
@@ -906,7 +912,7 @@ public static class LandblockPhysicsContentBuilder
                 entity.Position,
                 entity.Rotation,
                 bspShapes,
-                0u,
+                DatStaticState,
                 EntityCollisionFlags.None,
                 worldOffsetX: origin.X,
                 worldOffsetY: origin.Y,
@@ -982,7 +988,7 @@ public static class LandblockPhysicsContentBuilder
             entity.Position,
             entity.Rotation,
             setupShapes,
-            0u,
+            DatStaticState,
             EntityCollisionFlags.None,
             worldOffsetX: origin.X,
             worldOffsetY: origin.Y,
@@ -1025,7 +1031,7 @@ public static class LandblockPhysicsContentBuilder
             entity.Position,
             entity.Rotation,
             Array.Empty<ShadowShape>(),
-            0u,
+            DatStaticState,
             EntityCollisionFlags.None,
             worldOffsetX: origin.X,
             worldOffsetY: origin.Y,

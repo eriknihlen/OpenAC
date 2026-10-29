@@ -726,6 +726,20 @@ public sealed class RuntimeLiveEntitySessionController
         if (!IsCurrent())
             return;
 
+        // A body touching nothing is settled onto the ground where it is when
+        // a movement arrives for it, as the client with a window does: a body
+        // that is never settled reads as airborne and never walks.
+        if (!remote.Body.InContact)
+        {
+            arming.SeatBodyIfUnseated(
+                record,
+                remote,
+                remote.Body.Position,
+                remote.CellId);
+            if (!IsCurrent())
+                return;
+        }
+
         AnimationSequencer? sequencer =
             Entities.Physics.EntityRemoteAnimation(update.Guid)?.Sequencer;
         IInterpretedMotionSink? sink = arming.EnsureRemoteMotionBindings(
@@ -787,21 +801,21 @@ public sealed class RuntimeLiveEntitySessionController
         // when that creature gets a body to move: a creature that arrives
         // after this client entered the world is never armed by anything
         // else, and one with no body cannot catch up to anything.
+        bool motionIsNew = record.RemoteMotion is null;
         RemoteMotion remote = Entities.Physics.GetOrCreateRemoteMotion(record);
         if (!Entities.Entities.IsCurrent(record)
             || !ReferenceEquals(record.RemoteMotion, remote))
         {
             return;
         }
-        if (!remote.Body.InContact)
+        if (motionIsNew)
         {
-            remote.Body.Position = worldPosition;
-            remote.Body.Orientation = wireRotation;
-            arming.SeatBodyIfUnseated(
-                record,
-                remote,
-                worldPosition,
-                update.Position.LandblockId);
+            // The body is in the world already (it was placed when the
+            // object entered it): where it is now stands as the last place
+            // the server had it, so this position is caught up to like any
+            // later one, as the client with a window does.
+            remote.LastServerPos = remote.Body.Position;
+            remote.LastServerPosTime = Entities.Physics.UtcNowSeconds;
         }
 
         ulong positionAuthority = record.PositionAuthorityVersion;
@@ -839,6 +853,9 @@ public sealed class RuntimeLiveEntitySessionController
             return;
         }
 
+        // A position never searches for ground under the body: a body in the
+        // air takes a position on the ground through the routing below alone,
+        // the same routing the client with a window runs.
         RuntimeRemoteServerPosition.DeriveVelocity(
             remote,
             update.Velocity,

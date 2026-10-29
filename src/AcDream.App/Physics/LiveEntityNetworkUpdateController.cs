@@ -1189,19 +1189,41 @@ internal sealed class LiveEntityNetworkUpdateController
                     out IRuntimeRemoteMotion? remoteRuntime)
                 || remoteRuntime is not RemoteMotion rmState)
             {
+                // A body the object already has (placed when it entered the
+                // world, or moving by its own physics since) stays where it
+                // is: the server's position routes for it below as for every
+                // body (caught up to when near and grounded, re-placed when
+                // far or teleported, ignored when sent off the ground). Only
+                // a body made just now starts at the server's position.
+                bool hadBody = acceptedPositionCanonical.PhysicsBody is not null;
                 rmState =
                     _liveEntities.GetOrCreateRemoteMotionRuntime(
                         update.Guid);
-                // Hard-snap orientation on first spawn so the per-tick
-                // slerp doesn't visibly rotate from Identity to truth.
-                rmState.Body.Orientation = rot;
-                rmState.Body.Position = worldPos;
-                SeedRemoteSpawnPlacement(
-                    rmState,
-                    update.Guid,
-                    entity,
-                    worldPos,
-                    update.Position.LandblockId);
+                if (!hadBody)
+                {
+                    // Hard-snap orientation on first spawn so the per-tick
+                    // slerp doesn't visibly rotate from Identity to truth.
+                    rmState.Body.Orientation = rot;
+                    rmState.Body.Position = worldPos;
+                    SeedRemoteSpawnPlacement(
+                        rmState,
+                        update.Guid,
+                        entity,
+                        worldPos,
+                        update.Position.LandblockId);
+                }
+                else
+                {
+                    // Where it is now stands as the last place the server
+                    // had it, so this position is caught up to like any
+                    // later one: the body is in the world already.
+                    rmState.LastServerPos = rmState.Body.Position;
+                    // A body in the air is left to the routing below and
+                    // its own physics: one sent off the ground is not moved
+                    // at all.
+                    rmState.LastServerPosTime =
+                        (now - System.DateTime.UnixEpoch).TotalSeconds;
+                }
             }
 
             if (!_liveEntities.IsCurrentPositionAuthority(

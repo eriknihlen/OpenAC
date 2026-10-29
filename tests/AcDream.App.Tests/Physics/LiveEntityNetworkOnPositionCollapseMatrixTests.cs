@@ -823,6 +823,144 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
         fixture.DrainPlacementFifo();
     }
 
+    // ── A body the object already has: the server's position routes ────
+    // An object nothing animates fell and lies on the ground, its body in
+    // contact on walkable ground (gravity no longer pulls it), and has no
+    // remote motion yet. The server then sends its position again, the spot
+    // 1 m up it was created at.
+
+    /// <summary>
+    /// Sent off the ground and no teleport: nothing happens to the body; it
+    /// keeps lying where it is, in contact. Put up there at once it hung in
+    /// the air with the contact it had on the ground.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_PositionSentOffTheGround_LeavesItWhereItLies()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        Vector3 lies = body.Position;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: false));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(lies, body.Position);
+        Assert.True(body.InContact);
+        Assert.True(body.OnWalkable);
+    }
+
+    /// <summary>
+    /// Sent on the ground and near: the body is not put there at once; the
+    /// position is queued for it to catch up to from where it lies.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_NearGroundedPosition_IsCaughtUpToNotSnapped()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        Vector3 lies = body.Position;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(lies, body.Position);
+        var remote = Assert.IsType<RemoteMotion>(canonical.RemoteMotion);
+        Assert.True(remote.Interp.IsActive);
+        Assert.True(body.InContact);
+    }
+
+    /// <summary>
+    /// A body the object already has, in the air just above the ground,
+    /// gets its first position sent off the ground: nothing moves it (it is
+    /// not settled where it is, nor put at the server's spot); its own
+    /// physics carries it on.
+    /// </summary>
+    [Fact]
+    public void AirborneOrdinaryBody_PositionSentOffTheGround_IsNotMoved()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var justAbove = new Vector3(10f, 10f, 0.3f);
+        body.SnapToCell(SourceCell, justAbove, justAbove);
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: false));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(justAbove, body.Position);
+        Assert.False(body.InContact);
+    }
+
+    /// <summary>
+    /// A body in the air just above the ground gets a position on the ground
+    /// nearby: it takes the position's pose, and nothing searches for ground
+    /// under it (a position never seats a body). The client with no window
+    /// does the same.
+    /// </summary>
+    [Fact]
+    public void AirborneOrdinaryBody_GroundedPosition_TakesThePoseWithoutSeating()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var justAbove = new Vector3(10f, 10f, 0.3f);
+        body.SnapToCell(SourceCell, justAbove, justAbove);
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+        var served = new Vector3(10.5f, 10f, 0.3f);
+
+        fixture.Controller.OnPosition(fixture.Update(
+            served, SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(served, body.Position);
+        Assert.False(body.InContact);
+    }
+
+    /// <summary>
+    /// Teleported there: the body is re-placed at the server's position, and
+    /// the placement says what it touches there: nothing, so it is out of
+    /// contact and gravity pulls it again.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_TeleportedIntoTheAir_IsPlacedOutOfContactAndFalls()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        fixture.PublishDestinationCollision();
+        fixture.ServiceWindow.Allow(DestinationLandblock);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var aloft = new Vector3(12f, 14f, SpawnHeight + 1f);
+
+        fixture.Controller.OnPosition(fixture.Update(
+            aloft, DestinationCell, teleportSequence: 5, guid: CreatureGuid,
+            isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(aloft + DestinationWorldOffset, body.Position);
+        Assert.False(body.InContact);
+        Assert.False(body.OnWalkable);
+        Assert.True(body.Acceleration.Z < 0f);
+    }
+
     private sealed class Fixture : IDisposable
     {
         internal RuntimeEntityObjectLifetime Lifetime { get; }
@@ -848,7 +986,8 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
             bool nullClassification = false,
             bool withAnimation = false,
             bool isMissile = false,
-            bool decliningMaterializer = false)
+            bool decliningMaterializer = false,
+            bool ordinaryBodyOnTheGround = false)
         {
             _guid = guid;
             _nullClassification = nullClassification;
@@ -893,7 +1032,8 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 ObjDesc: 1,
                 Instance: 1);
             PhysicsStateFlags baseState = PhysicsStateFlags.ReportCollisions
-                | (isMissile ? PhysicsStateFlags.Missile : PhysicsStateFlags.None);
+                | (isMissile ? PhysicsStateFlags.Missile : PhysicsStateFlags.None)
+                | (ordinaryBodyOnTheGround ? PhysicsStateFlags.Gravity : PhysicsStateFlags.None);
             var physics = new PhysicsSpawnData(
                 RawState: (uint)baseState,
                 Position: wirePosition,
@@ -958,6 +1098,41 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 Lifetime.Physics.AcknowledgeSpatialProjection(canonical, spatial: true);
                 Projectile = (RuntimeProjectile)Lifetime.Physics.BindProjectile(
                     canonical, body, new ProjectileCollisionSphere(Vector3.Zero, 0.1f, 1f));
+                Shadows.Register(
+                    Entity.Id,
+                    0x02000001u,
+                    Entity.Position,
+                    Entity.Rotation,
+                    radius: 0.1f,
+                    worldOffsetX: 0f,
+                    worldOffsetY: 0f,
+                    landblockId: SourceLandblock,
+                    collisionType: ShadowCollisionType.Sphere,
+                    state: (uint)baseState,
+                    seedCellId: SourceCell,
+                    isStatic: false);
+            }
+            else if (ordinaryBodyOnTheGround)
+            {
+                // A body of its own and no remote motion yet, lying in
+                // contact on walkable ground (as the ordinary step leaves a
+                // fallen object).
+                var body = new PhysicsBody
+                {
+                    Position = Entity.Position,
+                    Orientation = Entity.Rotation,
+                    LastUpdateTime = 1d,
+                    State = baseState,
+                    TransientState = TransientStateFlags.Active
+                        | TransientStateFlags.Contact
+                        | TransientStateFlags.OnWalkable,
+                    ContactPlaneValid = true,
+                };
+                body.SnapToCell(SourceCell, Entity.Position, Entity.Position);
+                RuntimeEntityRecord canonical = record.Canonical!;
+                Lifetime.Entities.SetPhysicsBody(canonical, body);
+                canonical.ObjectClock.Activate();
+                Lifetime.Physics.AcknowledgeSpatialProjection(canonical, spatial: true);
                 Shadows.Register(
                     Entity.Id,
                     0x02000001u,
