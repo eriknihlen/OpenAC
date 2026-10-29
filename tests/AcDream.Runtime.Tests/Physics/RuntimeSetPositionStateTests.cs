@@ -2102,6 +2102,42 @@ public sealed class RuntimeSetPositionStateTests
             placed.Token));
     }
 
+    /// <summary>
+    /// A portal's accepted position names the destination cell before the
+    /// character is put down there: the body still stands where it entered
+    /// the portal. When the destination landblock's collision is withdrawn
+    /// and published again, that character is not one of its residents. Set
+    /// aside as one, it held a placement mixing the destination cell with
+    /// the old landblock's place, which the portal arrival inherited and
+    /// could never put down (stuck in portal space, upstream issue 274).
+    /// </summary>
+    [Fact]
+    public void ABodyStillInTheOldLandblockIsNotSetAsideByTheDestinationLandblock()
+    {
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeEntityRecord traveller = CreateRecord(lifetime, 0x7000127Au, 1);
+        PhysicsBody body = AttachBody(lifetime, traveller, SourceCell);
+        lifetime.Entities.SetFullCell(
+            traveller,
+            DestinationIndoorCell,
+            DestinationLandblock | 0xFFFFu);
+        var observer = new PlacementObserver();
+        using IDisposable subscription = lifetime.Events.SubscribePlacement(observer);
+
+        lifetime.Physics.SetPosition.ParkCollisionResidents(
+            DestinationLandblock,
+            includeOutdoorCells: true);
+
+        Assert.Empty(observer.Deltas);
+        Assert.Equal(SourceCell, body.CellPosition.ObjCellId);
+        Assert.True(lifetime.Physics.SetPosition.BeginAcceptedPlacement(
+                traveller,
+                traveller.PositionAuthorityVersion,
+                RuntimeSetPositionOperationKind.LocalAuthoritative)
+            .IsValid);
+    }
+
     [Fact]
     public void RootAndCurrentDirectChildOwnIndependentExactLostDeadlines()
     {

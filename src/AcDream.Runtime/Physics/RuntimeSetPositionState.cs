@@ -3522,7 +3522,12 @@ internal sealed class RuntimeSetPositionState : IDisposable
         uint cellId = record.FullCellId;
         bool exactResidence = (cellId & 0xFFFF0000u) == prefix
             && (includeOutdoorCells || (cellId & 0xFFFFu) >= 0x0100u);
+        // A portal's accepted position names the destination cell before
+        // the body is put down there; until then the body stands in the
+        // landblock it left, and is no resident of the destination's.
+        uint bodyCellId = record.PhysicsBody?.CellPosition.ObjCellId ?? 0u;
         return exactResidence
+            && (bodyCellId == 0u || (bodyCellId & 0xFFFF0000u) == prefix)
             && record.Key is not null
             && _entities.IsCurrent(record)
             && record.PhysicsBody is not null

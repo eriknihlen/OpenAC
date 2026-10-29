@@ -149,7 +149,7 @@ internal sealed class DatLiveEntityProjectionMaterializer
         if (!_origin.TryEnsureAgreesWithRuntimeFrame(
                 _runtime.Physics.WorldFrameCenterLandblockId,
                 position.LandblockId,
-                transitInFlight: _transit.IsTeleportActive))
+                transitInFlight: _transit.IsTeleportInFlight))
         {
             return false;
         }

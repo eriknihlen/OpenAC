@@ -98,6 +98,14 @@ public sealed class RuntimeWorldTransitState
     public ushort ActiveTeleportSequence =>
         _teleportActive ? _activeTeleportSequence : (ushort)0;
     public bool HasPendingTeleportStart => _hasPendingTeleportStart;
+
+    /// <summary>
+    /// A teleport the server started, from the moment it is queued until it
+    /// lands: the runtime's frame may already have moved while the
+    /// presentation waits to begin.
+    /// </summary>
+    public bool IsTeleportInFlight =>
+        _teleportActive || _hasPendingTeleportStart;
     public bool HasAcceptedTeleportDestination => _hasAcceptedDestination;
     public int BufferedTeleportDestinationCount =>
         _bufferedDestinations.Count;

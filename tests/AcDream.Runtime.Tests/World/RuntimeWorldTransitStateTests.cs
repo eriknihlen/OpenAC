@@ -81,6 +81,27 @@ public sealed class RuntimeWorldTransitStateTests
             OutdoorCell));
     }
 
+    /// <summary>
+    /// A teleport the server has started is in flight from the moment it is
+    /// queued: the runtime's frame may already have moved to the destination
+    /// while the presentation waits to begin (a login still in hand, say),
+    /// and positions measured in the old frame are expected until it lands.
+    /// </summary>
+    [Fact]
+    public void TeleportIsInFlightFromTheMomentItIsQueued()
+    {
+        var state = new RuntimeWorldTransitState();
+        Assert.False(state.IsTeleportInFlight);
+
+        Assert.True(state.TryQueueTeleportStart(1));
+
+        Assert.False(state.IsTeleportActive);
+        Assert.True(state.IsTeleportInFlight);
+
+        Assert.True(state.ActivateQueuedTeleport());
+        Assert.True(state.IsTeleportInFlight);
+    }
+
     [Fact]
     public void BeginReveal_OwnsGenerationDestinationAndSimulationGate()
     {
