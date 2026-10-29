@@ -318,7 +318,40 @@ public sealed class ExternalContainerControllerTests
         Assert.Equal(2, h.Containers.GetNumUIItems());
     }
 
-    // Chests and corpses send -1 ("no limit"): the strips fill the window.
+    // A corpse sends its capacities like any container (here 120 items and
+    // 10 packs): the item strip gets 120 cells and scrolls along them, the
+    // pack strip 10.
+    [Fact]
+    public void Corpse_getsOneCellPerUnitOfCapacity_andTheItemStripScrolls()
+    {
+        using var h = new Harness
+        {
+            ContainerFlags = PublicWeenieFlags.Openable | PublicWeenieFlags.Corpse,
+        };
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, itemsCapacity: 120, containersCapacity: 10,
+            new ContainerContentEntry(Item, 0u));
+
+        Assert.Equal(120, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+        Assert.Equal(0u, h.Contents.GetItem(119)!.ItemId);
+        Assert.Equal(10, h.Containers.GetNumUIItems());
+
+        Assert.Equal(120 * 32, h.Contents.Scroll.ContentHeight);
+        Assert.Equal(784, h.Contents.Scroll.ViewHeight);
+        Assert.True(h.Contents.GetItem(0)!.Visible);
+        Assert.False(h.Contents.GetItem(119)!.Visible);
+
+        h.Contents.ScrollItemIntoView(119);
+        h.Contents.LayoutCells();
+
+        Assert.Equal(120 * 32 - 784, h.Contents.Scroll.ScrollY);
+        Assert.True(h.Contents.GetItem(119)!.Visible);
+        Assert.Equal(784f - 32f, h.Contents.GetItem(119)!.Left);
+        Assert.False(h.Contents.GetItem(0)!.Visible);
+    }
+
+    // A negative capacity means no limit: the strips fill the window.
     [Fact]
     public void UnlimitedContainer_fillsTheVisibleWidth()
     {
