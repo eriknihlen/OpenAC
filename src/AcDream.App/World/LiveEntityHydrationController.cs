@@ -179,9 +179,14 @@ internal sealed class LiveEntityHydrationController
             new(ReferenceEqualityComparer.Instance);
 
     // Creates that named a parent the client did not hold yet. The Runtime
-    // keeps each one and registers it when the parent arrives, but nothing
-    // shows it then, so it is shown from here once it is registered.
+    // keeps each one and registers it when the parent's first entry
+    // finishes, but nothing shows it then, so it is shown from here once it
+    // is registered. A guid stays only while the Runtime still holds a
+    // create waiting for its parent.
     private readonly HashSet<uint> _childrenAwaitingParent = [];
+    private readonly List<uint> _childSweepScratch = [];
+    private bool _sweepingChildren;
+    private bool _childSweepRequested;
     private readonly IDisposable? _firstEntryPasses;
 
     private sealed class CanonicalProjectionOperation
@@ -228,6 +233,9 @@ internal sealed class LiveEntityHydrationController
                 ProjectChildrenWhoseParentArrived();
         });
     }
+
+    /// <summary>The creates still waiting here for their parent to arrive.</summary>
+    internal int ChildrenAwaitingParentCount => _childrenAwaitingParent.Count;
 
     /// <summary>Stops watching the session's first entries.</summary>
     public void Dispose() => _firstEntryPasses?.Dispose();
@@ -369,27 +377,55 @@ AppearanceSynchronization:
 
     /// <summary>
     /// Shows every waiting child the Runtime has registered since its parent
-    /// arrived. A child that is still waiting stays in the set.
+    /// arrived, and forgets each child the Runtime no longer holds a waiting
+    /// create for (registered, or deleted before its parent came).
     /// </summary>
     private void ProjectChildrenWhoseParentArrived()
     {
         if (_childrenAwaitingParent.Count == 0)
             return;
-
-        foreach (uint guid in _childrenAwaitingParent.ToArray())
+        if (_sweepingChildren)
         {
-            if (!_runtime.TryGetCanonical(guid, out RuntimeEntityRecord canonical))
-                continue;
-
-            _childrenAwaitingParent.Remove(guid);
-            if (_runtime.TryGetProjection(canonical, out _))
-                continue;
-            ProjectExact(
-                canonical,
-                canonical.Snapshot,
-                LiveProjectionPurpose.SpatialRecovery,
-                canonical.CreateIntegrationVersion);
+            // Showing one child led back here: the outer pass looks again.
+            _childSweepRequested = true;
+            return;
         }
+
+        _sweepingChildren = true;
+        try
+        {
+            do
+            {
+                _childSweepRequested = false;
+                _childSweepScratch.Clear();
+                _childSweepScratch.AddRange(_childrenAwaitingParent);
+                foreach (uint guid in _childSweepScratch)
+                {
+                    if (_runtime.TryGetCanonical(guid, out RuntimeEntityRecord canonical)
+                        && !_runtime.TryGetProjection(canonical, out _))
+                    {
+                        ProjectExact(
+                            canonical,
+                            canonical.Snapshot,
+                            LiveProjectionPurpose.SpatialRecovery,
+                            canonical.CreateIntegrationVersion);
+                    }
+                    ForgetChildIfNoLongerWaiting(guid);
+                }
+            }
+            while (_childSweepRequested && _childrenAwaitingParent.Count > 0);
+        }
+        finally
+        {
+            _childSweepScratch.Clear();
+            _sweepingChildren = false;
+        }
+    }
+
+    private void ForgetChildIfNoLongerWaiting(uint guid)
+    {
+        if (!_runtime.ParentAttachments.HoldsDeferredCreate(guid))
+            _childrenAwaitingParent.Remove(guid);
     }
 
     public bool OnAppearance(ObjDescEvent.Parsed update)
@@ -452,7 +488,14 @@ AppearanceSynchronization:
 
     public bool OnDelete(DeleteObject.Parsed delete)
     {
-        return _deletion.Delete(delete);
+        bool deleted = _deletion.Delete(delete);
+        // A child deleted before its parent arrived is no longer waiting.
+        lock (_datLock)
+        {
+            if (_childrenAwaitingParent.Contains(delete.Guid))
+                ForgetChildIfNoLongerWaiting(delete.Guid);
+        }
+        return deleted;
     }
 
     public bool OnPrune(RuntimeEntityExpiryCandidate candidate) =>

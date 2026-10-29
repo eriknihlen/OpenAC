@@ -722,6 +722,7 @@ public sealed class LiveEntityHydrationControllerTests
 
         Assert.True(fixture.Runtime.TryGetCanonical(Guid, out _));
         Assert.Contains(Guid, handedOn);
+        Assert.Equal(0, fixture.Controller.ChildrenAwaitingParentCount);
     }
 
     [Fact]
@@ -754,6 +755,32 @@ public sealed class LiveEntityHydrationControllerTests
 
         Assert.True(fixture.Runtime.TryGetCanonical(Guid, out _));
         Assert.Contains(Guid, handedOn);
+        Assert.Equal(0, fixture.Controller.ChildrenAwaitingParentCount);
+    }
+
+    [Fact]
+    public void ChildDeletedBeforeItsParentArrives_LeavesNothingBehind()
+    {
+        using var fixture = new Fixture(originKnown: true);
+        const uint parentGuid = 0x70000002u;
+        var handedOn = new List<uint>();
+        fixture.Relationships.OnSpawnAction = spawn => handedOn.Add(spawn.Guid);
+
+        fixture.Controller.OnCreate(CelllessSpawn(
+            PositionSequence: 1,
+            parentGuid: parentGuid));
+        Assert.Equal(1, fixture.Controller.ChildrenAwaitingParentCount);
+
+        fixture.Controller.OnDelete(new DeleteObject.Parsed(Guid, 1));
+
+        Assert.Equal(0, fixture.Controller.ChildrenAwaitingParentCount);
+        Assert.False(fixture.Runtime.ParentAttachments.HoldsDeferredCreate(Guid));
+
+        fixture.Controller.OnCreate(
+            Spawn(Generation: 1, PositionSequence: 1) with { Guid = parentGuid });
+
+        Assert.False(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.DoesNotContain(Guid, handedOn);
     }
 
     [Fact]
