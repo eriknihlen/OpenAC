@@ -4,7 +4,7 @@ namespace AcDream.App.UI;
 
 /// <summary>
 /// The icon resolver one plugin window's markup draws through: the client's
-/// own icons from the shared retail resolver, and file icons from the
+/// own icons from the client's shared icon resolver, and file icons from the
 /// plugin's install folder. A file is read in the background the first time
 /// the window draws it, and draws nothing until it is ready. The image is
 /// then held in the plugin's image table, under the plugin's image budget,
@@ -51,7 +51,7 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
         internal long DrawnAt { get; set; } = drawnAt;
     }
 
-    private readonly IMarkupIconResolver _retail;
+    private readonly IMarkupIconResolver _clientIcons;
     private readonly PluginFileImageLoader _files;
     private readonly Func<PluginImageTable?> _imageTable;
     private readonly string _pluginId;
@@ -59,23 +59,24 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
     private readonly Func<long> _now;
     private readonly Dictionary<string, FileIcon> _icons = new(StringComparer.Ordinal);
     private long _lastReleaseCheck;
+    private bool _reportedNoFolder;
     private bool _disposed;
 
-    /// <param name="retail">Resolves the client's own icons.</param>
+    /// <param name="clientIcons">Resolves the client's own icons.</param>
     /// <param name="files">Reads the plugin's image files.</param>
     /// <param name="imageTable">The plugin's image table, where file icons are held.</param>
     /// <param name="pluginId">The plugin, for reports.</param>
     /// <param name="pluginDirectory">The plugin's install folder; null when the window has none.</param>
     /// <param name="clock">Milliseconds on a steady clock; <see cref="Environment.TickCount64"/> unless a test says otherwise.</param>
     internal PluginMarkupIconResolver(
-        IMarkupIconResolver retail,
+        IMarkupIconResolver clientIcons,
         PluginFileImageLoader files,
         Func<PluginImageTable?> imageTable,
         string pluginId,
         string? pluginDirectory,
         Func<long>? clock = null)
     {
-        _retail = retail;
+        _clientIcons = clientIcons;
         _files = files;
         _imageTable = imageTable;
         _pluginId = pluginId;
@@ -87,11 +88,11 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
     /// <summary>How many file paths the window remembers, held, being read or refused.</summary>
     internal int RememberedFileCount => _icons.Count;
 
-    public (uint tex, int w, int h) ResolveDid(uint did) => _retail.ResolveDid(did);
+    public (uint tex, int w, int h) ResolveDid(uint did) => _clientIcons.ResolveDid(did);
 
-    public (uint tex, int w, int h) ResolveSpell(uint spellId) => _retail.ResolveSpell(spellId);
+    public (uint tex, int w, int h) ResolveSpell(uint spellId) => _clientIcons.ResolveSpell(spellId);
 
-    public (uint tex, int w, int h) ResolveItem(uint objectId) => _retail.ResolveItem(objectId);
+    public (uint tex, int w, int h) ResolveItem(uint objectId) => _clientIcons.ResolveItem(objectId);
 
     public (uint tex, int w, int h) ResolveFile(string path)
     {
@@ -99,7 +100,12 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
             return (0u, 0, 0);
         if (_pluginDirectory is null)
         {
-            _files.Report(_pluginId, "*", "file icons need a plugin folder, and this window has no plugin folder");
+            // Said once per window, so drawing takes no lock and builds no text each frame.
+            if (!_reportedNoFolder)
+            {
+                _reportedNoFolder = true;
+                _files.Report(_pluginId, "*", "file icons need a plugin folder, and this window has no plugin folder");
+            }
             return (0u, 0, 0);
         }
 

@@ -34,7 +34,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
         Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class Retail : IMarkupIconResolver
+    private sealed class ClientIcons : IMarkupIconResolver
     {
         public (uint tex, int w, int h) ResolveDid(uint did) => (1u, 32, 32);
 
@@ -99,10 +99,10 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
     }
 
     private PluginMarkupIconResolver Resolver(PluginFileImageLoader loader) =>
-        new(new Retail(), loader, () => _table, "acme.hello", _root, () => _now);
+        new(new ClientIcons(), loader, () => _table, "acme.hello", _root, () => _now);
 
     [Fact]
-    public void ClientIconsGoToTheRetailResolver()
+    public void ClientIconsGoToTheClientsIconResolver()
     {
         using PluginMarkupIconResolver resolver = Resolver(Loader());
 
@@ -191,7 +191,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
     [Fact]
     public void AWindowWithNoPluginFolderDrawsNoFilesAndSaysWhyOnce()
     {
-        using var resolver = new PluginMarkupIconResolver(new Retail(), Loader(), () => _table, "acme.hello", null);
+        using var resolver = new PluginMarkupIconResolver(new ClientIcons(), Loader(), () => _table, "acme.hello", null);
 
         Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/sword.png"));
         Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/sword.png"));
@@ -261,7 +261,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
             new PluginImageBudget(MaximumCount: 1, MaximumBytes: 1024 * 1024, MaximumDimension: 2048),
             _reports.Add);
         table.Bind(_backend, Environment.CurrentManagedThreadId);
-        using var resolver = new PluginMarkupIconResolver(new Retail(), Loader(), () => table, "acme.hello", _root);
+        using var resolver = new PluginMarkupIconResolver(new ClientIcons(), Loader(), () => table, "acme.hello", _root);
 
         Assert.NotEqual(0u, resolver.ResolveFile("icons/sword.png").tex);
         Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/shield.png"));
@@ -279,7 +279,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
             _reports.Add);
         table.Bind(_backend, Environment.CurrentManagedThreadId);
         using var resolver = new PluginMarkupIconResolver(
-            new Retail(), Loader(), () => table, "acme.hello", _root, () => _now);
+            new ClientIcons(), Loader(), () => table, "acme.hello", _root, () => _now);
         for (int i = 0; i < 40; i++)
             File.WriteAllBytes(Path.Combine(_root, "icons", $"status{i}.png"), PngTestData.Sized(4, 4));
 
@@ -336,7 +336,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
             _reports.Add);
         table.Bind(_backend, Environment.CurrentManagedThreadId);
         using var resolver = new PluginMarkupIconResolver(
-            new Retail(), Loader(), () => table, "acme.hello", _root, () => _now);
+            new ClientIcons(), Loader(), () => table, "acme.hello", _root, () => _now);
         Assert.NotEqual(0u, resolver.ResolveFile("icons/sword.png").tex);
         Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/shield.png"));
 
@@ -363,8 +363,8 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
             _reports.Add);
         table.Bind(_backend, Environment.CurrentManagedThreadId);
         PluginFileImageLoader loader = Loader();
-        var first = new PluginMarkupIconResolver(new Retail(), loader, () => table, "acme.hello", _root, () => _now);
-        using var second = new PluginMarkupIconResolver(new Retail(), loader, () => table, "acme.hello", _root, () => _now);
+        var first = new PluginMarkupIconResolver(new ClientIcons(), loader, () => table, "acme.hello", _root, () => _now);
+        using var second = new PluginMarkupIconResolver(new ClientIcons(), loader, () => table, "acme.hello", _root, () => _now);
         Assert.NotEqual(0u, first.ResolveFile("icons/sword.png").tex);
         Assert.Equal((0u, 0, 0), second.ResolveFile("icons/shield.png"));
 
