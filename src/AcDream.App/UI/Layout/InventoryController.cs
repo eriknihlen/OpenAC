@@ -881,24 +881,23 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             return ItemDragAcceptance.None;
         InventoryContainerPlacementRejection legality = EvaluateDrop(
             targetList, targetCell, payload.ObjId, out bool sourceIsBag, out uint destination);
-        // An item held over a pack's own icon is answered for THAT pack: one
-        // with no room shows the refusal, even though letting go there still
-        // finds the item a place in another pack. Anywhere else a full pack
-        // is no refusal while the drop has somewhere to go, found by the
-        // same search the drop runs.
+        // An item held over a pack's own icon (a side pack or the main pack)
+        // is answered by THAT pack's free item slots alone: none refuses,
+        // even for a stack already inside it, and even though letting go
+        // there still finds the item a place in another pack. Something in
+        // the side column that carries nothing, a focus for one, has none.
         bool overAPackIcon = !sourceIsBag
-            && !ReferenceEquals(targetList, _contentsGrid);
-        // The side column also holds things that carry nothing at all, a
-        // focus for one. No slots is no room: it refuses like a full pack.
-        if (overAPackIcon
-            && legality == InventoryContainerPlacementRejection.None
-            && ReferenceEquals(targetList, _containerList)
-            && _objects.Get(targetCell.ItemId) is { ItemsCapacity: 0 })
+            && (ReferenceEquals(targetList, _containerList) || ReferenceEquals(targetList, _topContainer));
+        if (overAPackIcon)
         {
-            return ItemDragAcceptance.Reject;
+            return targetCell.ItemId != 0u
+                && InventoryPlacementSearch.EmptyItemSlots(_objects, targetCell.ItemId) != 0
+                ? ItemDragAcceptance.Accept
+                : ItemDragAcceptance.Reject;
         }
+        // Anywhere else a full pack is no refusal while the drop has
+        // somewhere to go, found by the same search the drop runs.
         if (IsCapacityRejection(legality)
-            && !overAPackIcon
             && ResolveFallthroughContainer(payload.ObjId, destination, destination, out _) != 0u)
         {
             legality = InventoryContainerPlacementRejection.None;
@@ -1055,13 +1054,11 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         }
         else return;
 
+        // The named pack was full; the pack the search found takes the item
+        // at the slot this drop named: the grid's drop slot, or the top for
+        // a pack's icon.
         if (fallthrough != 0u)
-        {
-            // The named pack was full; the pack that has room takes the item
-            // at its top, like any arrival from elsewhere.
             container = fallthrough;
-            requested = 0;
-        }
 
         if (requested is not int placement) return;                                            // the item is already there
         if (container == item) return;                                                         // never into itself

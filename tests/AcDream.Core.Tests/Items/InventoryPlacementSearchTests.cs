@@ -253,4 +253,20 @@ public sealed class InventoryPlacementSearchTests
 
         Assert.False(InventoryPlacementSearch.WillItemFitInContainer(objects, loot, 0x60000030u, Player));
     }
+
+    [Fact]
+    public void EmptyItemSlots_countPlainItemsOnly()
+    {
+        ClientObjectTable objects = PlayerWithPacks(mainCapacity: 3);
+        AddLoose(objects, 0x70000100u, Player);
+        Assert.Equal(2, InventoryPlacementSearch.EmptyItemSlots(objects, Player));      // the packs take no item slot
+        AddLoose(objects, 0x70000101u, SidePackA);
+        AddLoose(objects, 0x70000102u, SidePackA);
+        Assert.Equal(0, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackA));
+        AddLoose(objects, 0x70000103u, SidePackA);
+        Assert.Equal(-1, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackA));  // overfull
+        objects.Get(SidePackB)!.ItemsCapacity = -1;
+        Assert.Equal(-1, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackB));  // unbounded
+        Assert.Equal(0, InventoryPlacementSearch.EmptyItemSlots(objects, 0x7FFF0000u)); // unknown
+    }
 }

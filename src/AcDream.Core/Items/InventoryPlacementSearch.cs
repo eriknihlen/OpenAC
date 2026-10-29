@@ -91,6 +91,30 @@ public static class InventoryPlacementSearch
     }
 
     /// <summary>
+    /// How many item slots <paramref name="containerId"/> has free: its item
+    /// capacity less the plain items in it (packs take container slots). -1,
+    /// unbounded, stays -1; an overfull container comes out negative; an
+    /// unknown one has none. The hover over a pack's icon reads only this:
+    /// any value but 0 takes a plain item.
+    /// </summary>
+    public static int EmptyItemSlots(ClientObjectTable objects, uint containerId)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+        if (objects.Get(containerId) is not { } container)
+            return 0;
+        int capacity = container.ItemsCapacity;
+        if (IsUnboundedItemCapacity(capacity))
+            return capacity;
+        int items = 0;
+        foreach (uint id in objects.GetContents(containerId))
+        {
+            if (!IsContainer(objects.Get(id)))
+                items++;
+        }
+        return capacity - items;
+    }
+
+    /// <summary>
     /// The container to request for <paramref name="itemId"/>: the named
     /// <paramref name="targetId"/> if it fits there, else the root (the
     /// player's main pack), else the first of the root's packs with room, in

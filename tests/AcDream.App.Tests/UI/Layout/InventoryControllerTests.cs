@@ -2616,6 +2616,31 @@ public class InventoryControllerTests
         Assert.Empty(messages);
     }
 
+    // A grid drop that falls through to a side pack asks for the slot the
+    // grid named, not that pack's top: B dropped on E (slot 1) or on A
+    // (slot 0) of the full main pack goes to the side pack 0xC there.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    public void GridDrop_fallingThroughToASidePack_asksForTheGridSlot(int cellIndex)
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 2);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedContained(objects, 0xE, Player, slot: 1, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 2, capacity: 5);
+        SeedPack(objects, 0xD, slot: 3, capacity: 5);
+        SeedContained(objects, 0xB, 0xD, slot: 0, type: ItemType.Misc);
+        var puts = new List<(uint item, uint container, int placement)>();
+        using var controller = Bind(layout, objects, puts: puts);
+        UiItemSlot cell = grid.GetItem(cellIndex)!;
+
+        controller.HandleDropRelease(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Inventory, 0, cell));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, cellIndex) }, puts);
+    }
+
     [Fact]
     public void Drop_when_every_pack_is_full_reports_the_backpack_full_and_sends_nothing()
     {
@@ -3120,6 +3145,22 @@ public class InventoryControllerTests
         split.Reset(size);
         split.SetValue(amount);
         return split;
+    }
+
+    // Over a pack's icon the answer is that pack's free item slots alone:
+    // the whole stack already inside does not make the full pack take it.
+    [Fact]
+    public void OnDragOver_ownStackOverItsFullPacksIcon_refuses()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var ctrl = (IItemListDragHandler)Bind(layout, objects);
+
+        Assert.Equal(0xCu, containers.GetItem(0)!.ItemId);
+        Assert.Equal(ItemDragAcceptance.Reject,
+            ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xB)));
+        Assert.Equal(ItemDragAcceptance.Accept,
+            ctrl.OnDragOver(containers, containers.GetItem(1)!, Payload(0xB)));
     }
 
     [Fact]
