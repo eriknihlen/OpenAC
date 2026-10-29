@@ -158,7 +158,8 @@ internal interface ILiveEntityWorldOriginCoordinator
         uint playerCellId);
 }
 
-internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoadedSink
+internal sealed class LiveEntityHydrationController
+    : ILiveEntityLandblockLoadedSink, IDisposable
 {
     private readonly LiveEntityRuntime _runtime;
     private readonly RuntimeEntityObjectLifetime _entityObjects;
@@ -181,6 +182,7 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
     // keeps each one and registers it when the parent arrives, but nothing
     // shows it then, so it is shown from here once it is registered.
     private readonly HashSet<uint> _childrenAwaitingParent = [];
+    private readonly IDisposable? _firstEntryPasses;
 
     private sealed class CanonicalProjectionOperation
     {
@@ -217,7 +219,18 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
         _deletion = deletion ?? throw new ArgumentNullException(nameof(deletion));
         _firstEntry = firstEntry;
         _acceptedPositionDrive = acceptedPositionDrive;
+        // A parent's first entry can finish on any route that drives it
+        // (a create, or the per-frame retry once its landblock's collision
+        // is ready), so the waiting children are checked after every pass.
+        _firstEntryPasses = firstEntry?.ObservePasses(() =>
+        {
+            lock (_datLock)
+                ProjectChildrenWhoseParentArrived();
+        });
     }
+
+    /// <summary>Stops watching the session's first entries.</summary>
+    public void Dispose() => _firstEntryPasses?.Dispose();
 
     internal event Action<uint>? AppearanceApplied;
 
@@ -346,10 +359,11 @@ AppearanceSynchronization:
                     cleanupFailure);
             }
 
+            // A pass that finishes a parent's first entry shows the children
+            // that waited for it (see the constructor).
             _firstEntry?.DriveAll();
             // C4 route 2: same pump for a parked ForcePosition.
             _acceptedPositionDrive?.Advance();
-            ProjectChildrenWhoseParentArrived();
         }
     }
 

@@ -725,6 +725,38 @@ public sealed class LiveEntityHydrationControllerTests
     }
 
     [Fact]
+    public void ChildCreatedBeforeItsParent_IsHandedOnWhenTheFrameRetryFinishesTheParentsEntry()
+    {
+        // The holder's body cannot be placed until its shape can be read, so
+        // its first entry finishes on a later frame's retry, not on a create.
+        using var fixture = new Fixture(originKnown: true);
+        const uint parentGuid = 0x70000002u;
+        var handedOn = new List<uint>();
+        fixture.Relationships.OnSpawnAction = spawn => handedOn.Add(spawn.Guid);
+        var retries = new AcDream.App.Net.RuntimePlacementProjectionRetrySlot(
+            static () => new AcDream.Runtime.RuntimeGenerationToken(1UL));
+        using AcDream.App.Net.GraphicalSessionEventRoute route =
+            fixture.CreateRetryRoute(retries);
+        route.Attach();
+
+        fixture.Controller.OnCreate(CelllessSpawn(
+            PositionSequence: 1,
+            parentGuid: parentGuid));
+        fixture.Collision.SetupReady = false;
+        fixture.Controller.OnCreate(
+            Spawn(Generation: 1, PositionSequence: 1) with { Guid = parentGuid });
+
+        Assert.False(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.DoesNotContain(Guid, handedOn);
+
+        fixture.Collision.SetupReady = true;
+        retries.RetryPending();
+
+        Assert.True(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.Contains(Guid, handedOn);
+    }
+
+    [Fact]
     public void SameOlderNewerAndWrappedGenerations_RouteOrReplaceExactlyOnce()
     {
         using var fixture = new Fixture(originKnown: true);
@@ -2479,7 +2511,7 @@ public sealed class LiveEntityHydrationControllerTests
             FirstEntry = new AcDream.Runtime.Session.RuntimeFirstEntryDriveController(
                 EntityObjects,
                 new AcDream.Runtime.GameRuntimeClock(),
-                new HydrationNullCollisionSource(),
+                Collision,
                 () => AcDream.Runtime.Gameplay.PlayerMovementConstructionOptions.Fallback,
                 static _ => new AcDream.Runtime.Gameplay
                     .RuntimeLocalPlayerPhysicsActivationPreparation(
@@ -2582,9 +2614,35 @@ public sealed class LiveEntityHydrationControllerTests
         public AcDream.Runtime.Gameplay.RuntimeLocalPlayerMovementState Movement { get; }
         public AcDream.Runtime.Gameplay.RuntimeLocalPlayerIdentityState IdentityState { get; }
 
-        private sealed class HydrationNullCollisionSource
+        /// <summary>The collision the session's first entries read.</summary>
+        public HydrationNullCollisionSource Collision { get; } = new();
+
+        /// <summary>
+        /// The session route the window binds, pumped each frame through
+        /// <paramref name="retries"/>, driving this fixture's first entries.
+        /// </summary>
+        public AcDream.App.Net.GraphicalSessionEventRoute CreateRetryRoute(
+            AcDream.App.Net.RuntimePlacementProjectionRetrySlot retries) =>
+            new(
+                new NullEventRoute(),
+                () => _placements,
+                static () => new AcDream.Runtime.RuntimeGenerationToken(1UL),
+                retries,
+                FirstEntry);
+
+        private sealed class NullEventRoute
+            : AcDream.Runtime.Session.ILiveSessionEventRouting
+        {
+            public void Attach() { }
+            public void Dispose() { }
+        }
+
+        public sealed class HydrationNullCollisionSource
             : AcDream.Content.IPreparedCollisionSource
         {
+            /// <summary>Whether a body's shape can be read yet.</summary>
+            public bool SetupReady { get; set; } = true;
+
             public AcDream.Content.PreparedAssetPresence ProbeCollision(
                 AcDream.Content.Pak.PakAssetType type,
                 uint sourceFileId) =>
@@ -2594,17 +2652,20 @@ public sealed class LiveEntityHydrationControllerTests
                 AcDream.Core.Physics.FlatSetupCollision> ReadSetupCollision(
                     uint sourceFileId,
                     CancellationToken cancellationToken = default) =>
-                AcDream.Content.PreparedCollisionReadResult<
-                    AcDream.Core.Physics.FlatSetupCollision>.Loaded(
-                        new AcDream.Core.Physics.FlatSetupCollision(
-                            System.Collections.Immutable.ImmutableArray<
-                                AcDream.Core.Physics.FlatCollisionCylinder>.Empty,
-                            [new AcDream.Core.Physics.FlatCollisionSphere(
-                                System.Numerics.Vector3.Zero, 0.48f)],
-                            height: 0f,
-                            radius: 0f,
-                            stepUpHeight: 0.4f,
-                            stepDownHeight: 0.4f));
+                !SetupReady
+                    ? AcDream.Content.PreparedCollisionReadResult<
+                        AcDream.Core.Physics.FlatSetupCollision>.Missing
+                    : AcDream.Content.PreparedCollisionReadResult<
+                        AcDream.Core.Physics.FlatSetupCollision>.Loaded(
+                            new AcDream.Core.Physics.FlatSetupCollision(
+                                System.Collections.Immutable.ImmutableArray<
+                                    AcDream.Core.Physics.FlatCollisionCylinder>.Empty,
+                                [new AcDream.Core.Physics.FlatCollisionSphere(
+                                    System.Numerics.Vector3.Zero, 0.48f)],
+                                height: 0f,
+                                radius: 0f,
+                                stepUpHeight: 0.4f,
+                                stepDownHeight: 0.4f));
 
             public AcDream.Content.PreparedCollisionReadResult<
                 AcDream.Core.Physics.FlatGfxObjCollisionAsset>
