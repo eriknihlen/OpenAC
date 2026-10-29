@@ -759,6 +759,49 @@ public sealed class LiveEntityHydrationControllerTests
     }
 
     [Fact]
+    public void ChildCreatedBeforeItsParent_IsHandedOnWhenALandblockLoadsAfterTheParentArrived()
+    {
+        // The parent's first entry finishes on a route this window does not
+        // watch; the next landblock load shows the child that waited for it.
+        using var fixture = new Fixture(originKnown: true, watchFirstEntry: false);
+        const uint parentGuid = 0x70000002u;
+        var handedOn = new List<uint>();
+        fixture.Relationships.OnSpawnAction = spawn => handedOn.Add(spawn.Guid);
+
+        fixture.Controller.OnCreate(CelllessSpawn(
+            PositionSequence: 1,
+            parentGuid: parentGuid));
+        fixture.Controller.OnCreate(
+            Spawn(Generation: 1, PositionSequence: 1) with { Guid = parentGuid });
+        fixture.FirstEntry.DriveAll();
+
+        Assert.True(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.DoesNotContain(Guid, handedOn);
+
+        fixture.Controller.OnLandblockLoaded(Cell);
+
+        Assert.Contains(Guid, handedOn);
+        Assert.Equal(0, fixture.Controller.ChildrenAwaitingParentCount);
+    }
+
+    [Fact]
+    public void ChildWhoseParentHasNotArrived_KeepsWaitingAcrossALandblockLoad()
+    {
+        using var fixture = new Fixture(originKnown: true);
+        var handedOn = new List<uint>();
+        fixture.Relationships.OnSpawnAction = spawn => handedOn.Add(spawn.Guid);
+
+        fixture.Controller.OnCreate(CelllessSpawn(
+            PositionSequence: 1,
+            parentGuid: 0x70000002u));
+        fixture.Controller.OnLandblockLoaded(Cell);
+
+        Assert.False(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.DoesNotContain(Guid, handedOn);
+        Assert.Equal(1, fixture.Controller.ChildrenAwaitingParentCount);
+    }
+
+    [Fact]
     public void ChildDeletedBeforeItsParentArrives_LeavesNothingBehind()
     {
         using var fixture = new Fixture(originKnown: true);
@@ -2502,7 +2545,8 @@ public sealed class LiveEntityHydrationControllerTests
         public Fixture(
             bool originKnown,
             RecordingResources? resources = null,
-            uint playerGuid = 0u)
+            uint playerGuid = 0u,
+            bool watchFirstEntry = true)
         {
             Resources = resources ?? new RecordingResources();
             EntityObjects.BindEventContext(
@@ -2602,7 +2646,7 @@ public sealed class LiveEntityHydrationControllerTests
                 Timestamps,
                 identity,
                 deletion,
-                firstEntry: FirstEntry);
+                firstEntry: watchFirstEntry ? FirstEntry : null);
         }
 
         public AcDream.Runtime.Session.RuntimeFirstEntryDriveController FirstEntry { get; }
