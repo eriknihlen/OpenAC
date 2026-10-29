@@ -250,7 +250,10 @@ public sealed class AppraisalUiController : IRetainedPanelController
                 statsHost,
                 viewport,
                 creatureRowTemplates,
-                backgroundZOrder: viewport.ZOrder - 2);
+                backgroundZOrder: viewport.ZOrder - 2,
+                // Attribute and vital rows stretch with the window; the extra
+                // rows below keep their authored width.
+                stretchRows: true);
             _creatureExtra = CreatureAppraisalLayeredList.Create(
                 _creaturePanel,
                 extraHost,

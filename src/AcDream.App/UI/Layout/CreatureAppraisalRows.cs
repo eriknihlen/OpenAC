@@ -539,13 +539,19 @@ public sealed class CreatureAppraisalRowTemplateFactory
             root.MediaVisible = false;
         }
 
-        return new UiTemplateListSlot(
+        var slot = new UiTemplateListSlot(
             content,
             entryId: 0u,
             content.Root is IUiDatStateful stateful
                 ? stateful.ActiveRetailStateId
                 : UiStateInfo.DirectStateId,
             selectedState: null);
+        // Measure the row content's margins now, while the slot still has the
+        // template's own size. Left to its first draw, a row built or first
+        // shown in a widened window would take the extra width as a fixed
+        // right margin and never stretch.
+        content.Root.CaptureCurrentAnchorBaseline();
+        return slot;
     }
 
     private static Vector4 ResolveColor(
@@ -611,12 +617,18 @@ public sealed class CreatureAppraisalLayeredList
     public UiItemList Background { get; }
     public UiItemList Foreground { get; }
 
+    // stretchRows: the rows widen and narrow with the list when the window is
+    // resized. They are authored as wide as the list, so a window wider by N px
+    // makes each row (both layers) N px wider and the right-justified value
+    // keeps its distance to the row's right edge. Rows authored at a fixed size
+    // keep it.
     public static CreatureAppraisalLayeredList Create(
         UiElement panel,
         UiElement backgroundHost,
         UiViewport viewport,
         CreatureAppraisalRowTemplateFactory templates,
-        int backgroundZOrder)
+        int backgroundZOrder,
+        bool stretchRows = false)
     {
         ArgumentNullException.ThrowIfNull(panel);
         ArgumentNullException.ThrowIfNull(backgroundHost);
@@ -632,7 +644,8 @@ public sealed class CreatureAppraisalLayeredList
             width: templates.Width,
             height: backgroundHost.Height,
             zOrder: 0,
-            scroll: scroll);
+            scroll: scroll,
+            stretchRows: stretchRows);
         background.ClickThrough = true;
         backgroundHost.AddChild(background);
 
@@ -642,7 +655,8 @@ public sealed class CreatureAppraisalLayeredList
             width: templates.Width,
             height: backgroundHost.Height,
             zOrder: foregroundZOrder,
-            scroll: scroll);
+            scroll: scroll,
+            stretchRows: stretchRows);
         panel.AddChild(foreground);
 
         // Both layers reflow from the host's AUTHORED rect and parent size, the
@@ -718,7 +732,8 @@ public sealed class CreatureAppraisalLayeredList
         float width,
         float height,
         int zOrder,
-        UiScrollable scroll)
+        UiScrollable scroll,
+        bool stretchRows)
     {
         return new UiItemList(scroll: scroll)
         {
@@ -729,6 +744,7 @@ public sealed class CreatureAppraisalLayeredList
             ZOrder = zOrder,
             Columns = 1,
             CellWidth = width,
+            CellsFillWidth = stretchRows,
             CellHeight = 20f,
             Anchors = AnchorEdges.Left | AnchorEdges.Top,
         };
