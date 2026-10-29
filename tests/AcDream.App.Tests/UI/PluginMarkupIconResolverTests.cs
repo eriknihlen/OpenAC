@@ -145,6 +145,19 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
     }
 
     [Fact]
+    public void TwoSpellingsOfOneFileAreOneImage()
+    {
+        using PluginMarkupIconResolver resolver = Resolver(Loader());
+
+        Assert.Equal((501u, 20, 10), resolver.ResolveFile("icons/sword.png"));
+        Assert.Equal((501u, 20, 10), resolver.ResolveFile("./icons/sword.png"));
+        Assert.Equal((501u, 20, 10), resolver.ResolveFile(@"icons\sword.png"));
+
+        Assert.Single(_backend.Uploads);
+        Assert.Equal(1, _table.Count);
+    }
+
+    [Fact]
     public void AFileIsUploadedWithItsSmallerLevelsInThePluginsBudget()
     {
         using PluginMarkupIconResolver resolver = Resolver(Loader());

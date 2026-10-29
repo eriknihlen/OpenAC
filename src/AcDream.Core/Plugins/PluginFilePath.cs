@@ -66,6 +66,37 @@ public static class PluginFilePath
         }
     }
 
+    /// <summary>
+    /// The one spelling of a path a plugin names, so two spellings of the same file
+    /// (<c>./icons/a.png</c>, <c>icons//a.png</c>, <c>icons\a.png</c>) are one image:
+    /// separators become <c>/</c>, empty and <c>.</c> parts go, and each <c>..</c> folds
+    /// into the part before it, as <see cref="TryResolve"/> reads the path. A rooted path,
+    /// or one whose <c>..</c> climbs above the folder, comes back with only its separators
+    /// changed, for <see cref="TryResolve"/> to refuse. Letter case is kept as written.
+    /// </summary>
+    public static string Normalize(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        string path = relativePath.Replace('\\', '/');
+        if (path.StartsWith('/') || (path.Length >= 2 && path[1] == ':'))
+            return path;
+        var parts = new List<string>();
+        foreach (string part in path.Split('/'))
+        {
+            if (part.Length == 0 || part == ".")
+                continue;
+            if (part == "..")
+            {
+                if (parts.Count == 0)
+                    return path;
+                parts.RemoveAt(parts.Count - 1);
+                continue;
+            }
+            parts.Add(part);
+        }
+        return string.Join('/', parts);
+    }
+
     private static bool IsInside(string root, string path)
     {
         string prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;

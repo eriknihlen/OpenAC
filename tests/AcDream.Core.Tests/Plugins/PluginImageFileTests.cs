@@ -44,6 +44,20 @@ public sealed class PluginImageFileTests
         Assert.Contains(named, reason, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("icons/sword.png", "icons/sword.png")]
+    [InlineData("./icons/sword.png", "icons/sword.png")]
+    [InlineData("icons//./sword.png", "icons/sword.png")]
+    [InlineData(@"icons\sword.png", "icons/sword.png")]
+    [InlineData("art/../icons/sword.png", "icons/sword.png")]
+    [InlineData("../sword.png", "../sword.png")]
+    [InlineData("/etc/sword.png", "/etc/sword.png")]
+    [InlineData("C:sword.png", "C:sword.png")]
+    public void NormalizeGivesEverySpellingOfAFileOneSpelling(string written, string normalized)
+    {
+        Assert.Equal(normalized, PluginFilePath.Normalize(written));
+    }
+
     [Fact]
     public void LoadsAPngOfAnySizeUpToTheLimit()
     {

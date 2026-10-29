@@ -54,7 +54,8 @@ internal sealed class PluginFileImageLoader
     {
         ArgumentNullException.ThrowIfNull(pluginDirectory);
         ArgumentNullException.ThrowIfNull(relativePath);
-        string path = relativePath.Replace('\\', '/');
+        // One spelling per file, so its read, and the image it makes, are shared by every spelling.
+        string path = PluginFilePath.Normalize(relativePath);
         var key = (pluginDirectory, path);
         lock (_gate)
         {
