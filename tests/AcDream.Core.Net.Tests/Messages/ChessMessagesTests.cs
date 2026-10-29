@@ -90,7 +90,7 @@ public sealed class ChessMessagesTests
     [Fact]
     public void ParseOpponentTurn_ReadsAFromToMove()
     {
-        // ACE GameEventOpponentTurn: board, team, then ChessMoveData
+        // The opponent-turn event: board, team, then the move
         // (type, player, from x/y, to x/y).
         byte[] wire = new AceWireWriter()
             .Write(0x7A9B4001u).Write(1)
