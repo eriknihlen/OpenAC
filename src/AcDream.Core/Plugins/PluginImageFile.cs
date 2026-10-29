@@ -36,23 +36,11 @@ public static class PluginImageFile
         string fullPath, [NotNullWhen(true)] out DecodedTexture? texture, [NotNullWhen(false)] out string? reason)
     {
         texture = null;
-        byte[] bytes;
-        try
-        {
-            var file = new FileInfo(fullPath);
-            if (file.Exists && file.Length > MaximumBytes)
-            {
-                reason = "is larger than 1 MiB";
-                return false;
-            }
-            bytes = File.ReadAllBytes(file.FullName);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-                                       or NotSupportedException)
-        {
-            reason = "could not be read: " + ex.Message;
+        // One handle, a regular file only, and never more than one byte past
+        // the limit: a pipe, device or folder named like an image is refused
+        // without waiting on it, and a file that grows is refused, not read whole.
+        if (!RegularFileReader.TryRead(fullPath, MaximumBytes + 1, out byte[]? bytes, out reason))
             return false;
-        }
 
         if (bytes.Length > MaximumBytes)
         {

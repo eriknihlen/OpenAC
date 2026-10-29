@@ -117,6 +117,56 @@ public sealed class PluginImageFileTests
         Assert.Contains("could not be read", reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RefusesAFolderNamedLikeAnImage()
+    {
+        using var directory = new TemporaryDirectory();
+        string path = System.IO.Path.Combine(directory.Path, "folder.png");
+        Directory.CreateDirectory(path);
+
+        Assert.False(PluginImageFile.TryLoad(path, out _, out string? reason));
+        Assert.Contains("not a regular file", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Lane", "Unix")]
+    public async Task RefusesAPipeNamedLikeAnImageWithoutWaitingOnIt()
+    {
+        if (OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Lane=Unix requires a native Unix host.");
+        using var directory = new TemporaryDirectory();
+        string path = System.IO.Path.Combine(directory.Path, "pipe.png");
+        using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", [path]))
+        {
+            mkfifo.WaitForExit();
+            Assert.Equal(0, mkfifo.ExitCode);
+        }
+
+        // Nobody writes to the pipe, so a reader that opens it as a file waits forever.
+        string? reason = null;
+        Task<bool> load = Task.Factory.StartNew(
+            () => PluginImageFile.TryLoad(path, out _, out reason),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        try
+        {
+            Task first = await Task.WhenAny(load, Task.Delay(TimeSpan.FromSeconds(10)));
+            Assert.True(ReferenceEquals(first, load), "reading a pipe should not wait for a writer");
+            Assert.False(await load);
+            Assert.Contains("not a regular file", reason, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (!load.IsCompleted)
+            {
+                // Let a reader stuck on the pipe go: a writer opens and closes it.
+                using (new FileStream(path, FileMode.Open, FileAccess.Write)) { }
+                await Task.WhenAny(load, Task.Delay(TimeSpan.FromSeconds(10)));
+            }
+        }
+    }
+
     // Links: PluginFilePath follows every link on the way to a file, so none
     // can lead a plugin's markup out of its own folder. Windows needs extra
     // rights to make links, so these run where links can be made freely.
