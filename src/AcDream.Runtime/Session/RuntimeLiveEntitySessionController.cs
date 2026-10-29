@@ -726,6 +726,20 @@ public sealed class RuntimeLiveEntitySessionController
         if (!IsCurrent())
             return;
 
+        // A body touching nothing is settled onto the ground where it is when
+        // a movement arrives for it, as the client with a window does: a body
+        // that is never settled reads as airborne and never walks.
+        if (!remote.Body.InContact)
+        {
+            arming.SeatBodyIfUnseated(
+                record,
+                remote,
+                remote.Body.Position,
+                remote.CellId);
+            if (!IsCurrent())
+                return;
+        }
+
         AnimationSequencer? sequencer =
             Entities.Physics.EntityRemoteAnimation(update.Guid)?.Sequencer;
         IInterpretedMotionSink? sink = arming.EnsureRemoteMotionBindings(
@@ -839,23 +853,9 @@ public sealed class RuntimeLiveEntitySessionController
             return;
         }
 
-        // A body in the air takes a position the game moves it for (one on
-        // the ground, or a teleport) outright and is seated there; one sent
-        // off the ground was left alone above, as the client with a window
-        // leaves it.
-        if (!remote.Body.InContact)
-        {
-            remote.Body.Position = worldPosition;
-            remote.Body.Orientation = wireRotation;
-            arming.SeatBodyIfUnseated(
-                record,
-                remote,
-                worldPosition,
-                update.Position.LandblockId);
-            if (!IsCurrent())
-                return;
-        }
-
+        // A position never searches for ground under the body: a body in the
+        // air takes a position on the ground through the routing below alone,
+        // the same routing the client with a window runs.
         RuntimeRemoteServerPosition.DeriveVelocity(
             remote,
             update.Velocity,

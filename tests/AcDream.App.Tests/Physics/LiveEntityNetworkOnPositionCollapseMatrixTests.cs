@@ -906,6 +906,35 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
     }
 
     /// <summary>
+    /// A body in the air just above the ground gets a position on the ground
+    /// nearby: it takes the position's pose, and nothing searches for ground
+    /// under it (a position never seats a body). The client with no window
+    /// does the same.
+    /// </summary>
+    [Fact]
+    public void AirborneOrdinaryBody_GroundedPosition_TakesThePoseWithoutSeating()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var justAbove = new Vector3(10f, 10f, 0.3f);
+        body.SnapToCell(SourceCell, justAbove, justAbove);
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+        var served = new Vector3(10.5f, 10f, 0.3f);
+
+        fixture.Controller.OnPosition(fixture.Update(
+            served, SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(served, body.Position);
+        Assert.False(body.InContact);
+    }
+
+    /// <summary>
     /// Teleported there: the body is re-placed at the server's position, and
     /// the placement says what it touches there: nothing, so it is out of
     /// contact and gravity pulls it again.

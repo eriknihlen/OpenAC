@@ -1518,6 +1518,123 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.False(body.InContact);
     }
 
+    /// <summary>
+    /// As the client with a window: a body in the air just above the ground
+    /// gets a position on the ground nearby. It takes the position's pose,
+    /// and nothing searches for ground under it: a position never seats a
+    /// body. Seated, it was dropped onto the ground under the server's spot.
+    /// </summary>
+    [Fact]
+    public void AnAirborneBodysGroundedPosition_TakesThePoseWithoutSeatingIt()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        (RuntimeLiveEntitySessionController _, LiveEntitySessionSink sink) =
+            ArmedController(runtime, session, withPlayer: true);
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000063u, incarnation: 1, 0x01010001u);
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+        PhysicsBody body = remote.PhysicsBody!;
+        LiftOutOfContact(body, new System.Numerics.Vector3(10f, 10f, 0.3f));
+
+        sink.PositionUpdated(new WorldSession.EntityPositionUpdate(
+            spawn.Guid,
+            new CreateObject.ServerPosition(
+                0x01010001u, 10.5f, 10f, 0.3f, 1f, 0f, 0f, 0f),
+            Velocity: null,
+            PlacementId: null,
+            IsGrounded: true,
+            InstanceSequence: 1,
+            PositionSequence: 2,
+            TeleportSequence: 0,
+            ForcePositionSequence: 0));
+
+        Assert.Same(body, remote.PhysicsBody);
+        Assert.Equal(new System.Numerics.Vector3(10.5f, 10f, 0.3f), body.Position);
+        Assert.False(body.InContact);
+    }
+
+    /// <summary>
+    /// As the client with a window: a movement for a body touching nothing
+    /// settles it onto the ground where it is (the spawn settle, which a body
+    /// never seated would otherwise lack: it reads as airborne and never
+    /// walks).
+    /// </summary>
+    [Fact]
+    public void AMovementForABodyTouchingNothing_SeatsItWhereItIs()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        (RuntimeLiveEntitySessionController _, LiveEntitySessionSink sink) =
+            ArmedController(runtime, session, withPlayer: false);
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000064u, incarnation: 1, 0x01010001u);
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+        PhysicsBody body = remote.PhysicsBody!;
+        LiftOutOfContact(body, new System.Numerics.Vector3(10f, 10f, 0.3f));
+
+        sink.MotionUpdated(StanceFromServer(
+            spawn.Guid, stance: 0x3Du, autonomous: false, sequence: 2));
+
+        Assert.True(body.InContact);
+        Assert.True(MathF.Abs(body.Position.Z) < 0.01f, $"seated at {body.Position}");
+        Assert.Equal(10f, body.Position.X, 3);
+        Assert.Equal(10f, body.Position.Y, 3);
+    }
+
+    /// <summary>A controller with remote arming bound, and its sink.</summary>
+    private static (RuntimeLiveEntitySessionController Controller, LiveEntitySessionSink Sink)
+        ArmedController(GameRuntime runtime, WorldSession session, bool withPlayer)
+    {
+        if (withPlayer)
+        {
+            var player = new PlayerMovementController(new PhysicsEngine());
+            player.SeedPlacementForTest(
+                new System.Numerics.Vector3(12f, 10f, 5f),
+                0x01010001u,
+                new System.Numerics.Vector3(12f, 10f, 5f));
+            runtime.MovementOwner.Controller = player;
+        }
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        return (controller, controller.CreateSink());
+    }
+
+    /// <summary>Puts a body at <paramref name="at"/> touching nothing.</summary>
+    private static void LiftOutOfContact(PhysicsBody body, System.Numerics.Vector3 at)
+    {
+        body.SnapToCell(0x01010001u, at, at);
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+    }
+
     /// <summary>Any landblock is serviceable; the fixture has one.</summary>
     private sealed class EveryDestination
         : IRuntimeRemotePlacementServiceWindow
