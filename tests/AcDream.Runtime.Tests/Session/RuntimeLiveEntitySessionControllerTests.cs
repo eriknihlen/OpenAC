@@ -927,6 +927,46 @@ public sealed class RuntimeLiveEntitySessionControllerTests
     }
 
     [Fact]
+    public void DirectSink_HeldItemCreatedBeforeItsHolder_EntersTheObjectTableOnce()
+    {
+        // The server can send a held item before its holder. The item waits
+        // for the holder and is registered when the holder's first entry
+        // finishes; it must reach the object table then, and only then.
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        LiveEntitySessionSink sink = controller.CreateSink();
+        const uint holderGuid = 0x70000032u;
+        const uint itemGuid = 0x70000033u;
+        var added = new List<uint>();
+        runtime.EntityObjects.Objects.ObjectAdded += item => added.Add(item.ObjectId);
+
+        sink.Spawned(HeldSpawn(itemGuid, holderGuid));
+        drive.DriveAll();
+
+        Assert.False(runtime.EntityObjects.Entities.TryGetActive(itemGuid, out _));
+        Assert.Null(runtime.EntityObjects.Objects.Get(itemGuid));
+
+        sink.Spawned(Spawn(holderGuid, incarnation: 1));
+        drive.DriveAll();
+        DrainPlacementFifo(runtime);
+        drive.DriveAll();
+        DrainPlacementFifo(runtime);
+
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(itemGuid, out _));
+        Assert.Equal("held item", runtime.EntityObjects.Objects.Get(itemGuid)?.Name);
+        Assert.Equal(1, added.Count(guid => guid == itemGuid));
+    }
+
+    [Fact]
     public void FirstEntryDriveServesOneRouteAtATimeAndScopesClearToTheOwner()
     {
         using StartedRuntime started = StartRuntime();
@@ -1738,6 +1778,26 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         uint guid,
         ushort incarnation) =>
         SpawnAt(guid, incarnation, 0x01010001u);
+
+    /// <summary>An item held by <paramref name="holderGuid"/>, with no world position.</summary>
+    private static WorldSession.EntitySpawn HeldSpawn(uint guid, uint holderGuid)
+    {
+        WorldSession.EntitySpawn placed = Spawn(guid, incarnation: 1);
+        return placed with
+        {
+            Position = null,
+            Name = "held item",
+            ParentGuid = holderGuid,
+            ParentLocation = 1u,
+            PlacementId = 1u,
+            Physics = placed.Physics!.Value with
+            {
+                Position = null,
+                AnimationFrame = 1u,
+                Parent = new PhysicsAttachment(holderGuid, LocationId: 1u),
+            },
+        };
+    }
 
     private static WorldSession.EntitySpawn SpawnAt(
         uint guid,

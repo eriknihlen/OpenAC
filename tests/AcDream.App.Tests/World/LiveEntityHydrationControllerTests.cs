@@ -726,6 +726,31 @@ public sealed class LiveEntityHydrationControllerTests
     }
 
     [Fact]
+    public void ChildCreatedBeforeItsParent_EntersTheObjectTableOnceWhenTheParentArrives()
+    {
+        // A held item without an object-table entry has no name, cannot be
+        // selected and is missing from every list built from the table.
+        using var fixture = new Fixture(originKnown: true);
+        const uint parentGuid = 0x70000002u;
+        var added = new List<uint>();
+        fixture.Objects.ObjectAdded += item => added.Add(item.ObjectId);
+
+        fixture.Controller.OnCreate(CelllessSpawn(
+            PositionSequence: 1,
+            parentGuid: parentGuid));
+        Assert.Null(fixture.Objects.Get(Guid));
+
+        fixture.Controller.OnCreate(
+            Spawn(Generation: 1, PositionSequence: 1) with { Guid = parentGuid });
+        fixture.FirstEntry.DriveAll();
+        fixture.Controller.OnLandblockLoaded(Cell);
+
+        Assert.True(fixture.Runtime.TryGetCanonical(Guid, out _));
+        Assert.Equal("parented", fixture.Objects.Get(Guid)?.Name);
+        Assert.Equal(1, added.Count(guid => guid == Guid));
+    }
+
+    [Fact]
     public void ChildCreatedBeforeItsParent_IsHandedOnWhenTheFrameRetryFinishesTheParentsEntry()
     {
         // The holder's body cannot be placed until its shape can be read, so
