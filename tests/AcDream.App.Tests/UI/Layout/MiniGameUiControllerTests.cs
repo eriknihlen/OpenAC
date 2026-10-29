@@ -111,6 +111,38 @@ public sealed class MiniGameUiControllerTests
     }
 
     [Fact]
+    public void InterfaceShutdown_TakesTheBoardHandlerOffTheItemOwner()
+    {
+        var (controller, _) = Bind();
+        using var __ = controller;
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Board,
+            Type = ItemType.Gameboard,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+        using var items = new RuntimeItemInteraction(
+            objects,
+            new RuntimeInteractionTransactionState(
+                new InventoryTransactionState(objects, new VendorState())),
+            new InteractionState(),
+            playerGuid: () => 0x50000001u,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null);
+        items.PolicyActionRequested += controller.HandlePolicyAction;
+        Assert.True(items.TryBeginGame(Board));
+        Assert.Equal(1, _shows);
+
+        RetailUiRuntime.UnsubscribeItemPolicyHandlers(items, salvage: null, controller);
+        items.TryBeginGame(Board);
+
+        Assert.Equal(1, _shows);
+    }
+
+    [Fact]
     public void White_SeesItsBackRankAlongTheBottom()
     {
         var (controller, layout) = Bind();

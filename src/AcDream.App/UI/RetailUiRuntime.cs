@@ -5402,8 +5402,10 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Inventory.ItemInteraction.SecureTradeRequested -=
                         trade.RequestSecureTrade;
                 }
-                if (SalvageController is { } salvage)
-                    _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
+                UnsubscribeItemPolicyHandlers(
+                    _bindings.Inventory.ItemInteraction,
+                    SalvageController,
+                    MiniGameUiController);
                 _bindings.Plugins?.UnbindClientWindowControl();
                 // Open plugin dialogs are answered with their last button.
                 _pluginDialogs?.Dispose();
@@ -5439,6 +5441,23 @@ public sealed class RetailUiRuntime : IDisposable
             Host.Dispose);
         _shutdown.CompleteOrThrow();
         _disposed = _shutdown.IsComplete;
+    }
+
+    /// <summary>
+    /// Takes the windows' item-action handlers back off the item owner,
+    /// which outlives this interface; a handler left on it would keep
+    /// opening a window that is gone.
+    /// </summary>
+    internal static void UnsubscribeItemPolicyHandlers(
+        RuntimeItemInteraction items,
+        SalvageUiController? salvage,
+        MiniGameUiController? miniGame)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (salvage is not null)
+            items.PolicyActionRequested -= salvage.HandlePolicyAction;
+        if (miniGame is not null)
+            items.PolicyActionRequested -= miniGame.HandlePolicyAction;
     }
 
     internal static ResourceShutdownTransaction CreateShutdownTransaction(
