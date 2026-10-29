@@ -8,12 +8,15 @@ namespace AcDream.App.Plugins;
 /// An image file a plugin ships, read, decoded and given its smaller levels:
 /// what <see cref="PluginImageTable.AcquireFile"/> takes. <see cref="Path"/>
 /// is the path the plugin named; <see cref="Version"/> tells one version of
-/// the file on disk from the next.
+/// the file on disk from the next; <see cref="FullPath"/>, when known, is the
+/// file it was read from, so a holder can ask whether it has changed since
+/// (<see cref="PluginFileImageLoader.VersionOf"/>).
 /// </summary>
 internal sealed record PluginFileImage(
     string Path,
     string Version,
-    IReadOnlyList<DecodedTexture> MipLevels);
+    IReadOnlyList<DecodedTexture> MipLevels,
+    string? FullPath = null);
 
 /// <summary>What reading one image file came to: the image, or why there is none.</summary>
 internal readonly record struct PluginFileImageResult(PluginFileImage? Image, string? Reason);
@@ -94,6 +97,17 @@ internal sealed class PluginFileImageLoader
         _report($"[UI] plugin image '{label}' ignored: {reason}");
     }
 
+    /// <summary>
+    /// Which version of the file at <paramref name="fullPath"/> is on disk now:
+    /// its length and last write time, the same for the same content.
+    /// Throws when the file cannot be looked at.
+    /// </summary>
+    internal static string VersionOf(string fullPath)
+    {
+        var info = new FileInfo(fullPath);
+        return $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+    }
+
     private static PluginFileImageResult Read(string pluginDirectory, string path)
     {
         try
@@ -103,13 +117,12 @@ internal sealed class PluginFileImageLoader
 
             // Read before the content, so a file written while it is read is
             // at worst read again by the next window, never kept as current.
-            var info = new FileInfo(fullPath);
-            string version = $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+            string version = VersionOf(fullPath);
 
             if (!PluginImageFile.TryLoad(fullPath, out DecodedTexture? decoded, out reason))
                 return new PluginFileImageResult(null, reason);
             IReadOnlyList<DecodedTexture> levels = RgbaMipChain.Build(decoded.Rgba8, decoded.Width, decoded.Height);
-            return new PluginFileImageResult(new PluginFileImage(path, version, levels), null);
+            return new PluginFileImageResult(new PluginFileImage(path, version, levels, fullPath), null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

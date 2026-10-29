@@ -17,6 +17,17 @@ namespace AcDream.App.UI;
 /// plugin unloaded). Two windows showing the same file each hold it, so one
 /// window going does not take the image from the other. Used from the
 /// interface thread only.
+///
+/// <para>A file the table had no room for keeps its decoded image here,
+/// outside the budget, for as long as the window keeps drawing it. Once the
+/// table has let something go it is offered again, at most once every
+/// <see cref="ReleaseCheckIntervalMilliseconds"/>, without being read again
+/// unless the file on disk has changed.</para>
+///
+/// <para>Time here is the interface's own: each <see cref="ReleaseUndrawn"/>
+/// call, once a frame, moves it on by the time since the last call, but by no
+/// more than <see cref="MaximumFrameStepMilliseconds"/>, so a stall of the
+/// whole interface does not count as time a window spent not drawing.</para>
 /// </summary>
 internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposable
 {
@@ -26,8 +37,14 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
     /// <summary>A file the window has not drawn for this long, in milliseconds, is let go.</summary>
     internal const long ReleaseAfterMilliseconds = 5_000;
 
-    /// <summary>How often, at most, in milliseconds, <see cref="ReleaseUndrawn"/> looks for files to let go.</summary>
+    /// <summary>
+    /// How often, at most, in milliseconds, <see cref="ReleaseUndrawn"/> looks for
+    /// files to let go, and a file refused for want of room is offered again.
+    /// </summary>
     internal const long ReleaseCheckIntervalMilliseconds = 1_000;
+
+    /// <summary>The most one frame moves the interface's time on, in milliseconds.</summary>
+    internal const long MaximumFrameStepMilliseconds = 1_000;
 
     private sealed class FileIcon(Task<PluginFileImageResult> reading, long drawnAt)
     {
@@ -41,13 +58,16 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
 
         /// <summary>
         /// Set when the plugin's table had no room for the image (or there was
-        /// no table): the table and its <see cref="PluginImageTable.ReleaseGeneration"/>
-        /// at that moment. Once either has changed there may be room, and the
-        /// file is read again.
+        /// no table): the image, kept so a later offer need not read it again,
+        /// and the table and its <see cref="PluginImageTable.ReleaseGeneration"/>
+        /// at that moment. Once either has changed there may be room.
         /// </summary>
-        internal (PluginImageTable? Table, long Generation)? RefusedForRoom { get; set; }
+        internal (PluginFileImage Image, PluginImageTable? Table, long Generation)? RefusedForRoom { get; set; }
 
-        /// <summary>The clock reading of the last time the window drew this file.</summary>
+        /// <summary>The interface time of the last offer to the table.</summary>
+        internal long OfferedAt { get; set; }
+
+        /// <summary>The interface time of the last time the window drew this file.</summary>
         internal long DrawnAt { get; set; } = drawnAt;
     }
 
@@ -58,6 +78,8 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
     private readonly string? _pluginDirectory;
     private readonly Func<long> _now;
     private readonly Dictionary<string, FileIcon> _icons = new(StringComparer.Ordinal);
+    private long _lastFrame;
+    private long _time;
     private long _lastReleaseCheck;
     private bool _reportedNoFolder;
     private bool _disposed;
@@ -82,11 +104,14 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
         _pluginId = pluginId;
         _pluginDirectory = pluginDirectory;
         _now = clock ?? (static () => Environment.TickCount64);
-        _lastReleaseCheck = _now();
+        _lastFrame = _now();
     }
 
     /// <summary>How many file paths the window remembers, held, being read or refused.</summary>
     internal int RememberedFileCount => _icons.Count;
+
+    /// <summary>How many times a file refused for want of room has been offered to the table again.</summary>
+    internal int RoomRetries { get; private set; }
 
     public (uint tex, int w, int h) ResolveDid(uint did) => _clientIcons.ResolveDid(did);
 
@@ -109,23 +134,31 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
             return (0u, 0, 0);
         }
 
-        long now = _now();
         if (!_icons.TryGetValue(path, out FileIcon? icon))
         {
             if (_icons.Count >= MaximumRemembered)
                 ReleaseAll();
-            icon = new FileIcon(_files.Load(_pluginDirectory, path), now);
+            icon = new FileIcon(_files.Load(_pluginDirectory, path), _time);
             _icons[path] = icon;
         }
-        icon.DrawnAt = now;
+        icon.DrawnAt = _time;
 
         if (icon.RefusedForRoom is { } refused
+            && _time - icon.OfferedAt >= ReleaseCheckIntervalMilliseconds
             && _imageTable() is { } current
             && (!ReferenceEquals(current, refused.Table) || current.ReleaseGeneration != refused.Generation))
         {
             // Something was let go since the table said no: there may be room now.
             icon.RefusedForRoom = null;
-            icon.Reading = _files.Load(_pluginDirectory, path);
+            if (IsCurrent(refused.Image))
+            {
+                RoomRetries++;
+                Hold(icon, refused.Image);
+            }
+            else
+            {
+                icon.Reading = _files.Load(_pluginDirectory, path);
+            }
         }
 
         if (icon.Reading is { IsCompleted: true } reading)
@@ -146,24 +179,26 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
     }
 
     /// <summary>
-    /// Lets go of every file the window has not drawn for
-    /// <see cref="ReleaseAfterMilliseconds"/>; a later draw reads it again.
-    /// Called once a frame; looks at most once every
+    /// Moves the interface's time on (called once a frame) and lets go of every
+    /// file the window has not drawn for <see cref="ReleaseAfterMilliseconds"/>
+    /// of it; a later draw reads it again. Looks at most once every
     /// <see cref="ReleaseCheckIntervalMilliseconds"/>.
     /// </summary>
     internal void ReleaseUndrawn()
     {
-        if (_disposed || _icons.Count == 0)
+        if (_disposed)
             return;
         long now = _now();
-        if (now - _lastReleaseCheck < ReleaseCheckIntervalMilliseconds)
+        _time += Math.Clamp(now - _lastFrame, 0L, MaximumFrameStepMilliseconds);
+        _lastFrame = now;
+        if (_icons.Count == 0 || _time - _lastReleaseCheck < ReleaseCheckIntervalMilliseconds)
             return;
-        _lastReleaseCheck = now;
+        _lastReleaseCheck = _time;
 
         List<string>? undrawn = null;
         foreach ((string path, FileIcon icon) in _icons)
         {
-            if (now - icon.DrawnAt >= ReleaseAfterMilliseconds)
+            if (_time - icon.DrawnAt >= ReleaseAfterMilliseconds)
                 (undrawn ??= []).Add(path);
         }
         if (undrawn is null)
@@ -175,7 +210,7 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
         }
     }
 
-    /// <summary>Lets go of every image this window holds. Idempotent.</summary>
+    /// <summary>Lets go of every image this window holds, and drops any it kept. Idempotent.</summary>
     public void Dispose()
     {
         if (_disposed)
@@ -186,10 +221,11 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
 
     private void Hold(FileIcon icon, PluginFileImage image)
     {
+        icon.OfferedAt = _time;
         PluginImageTable? table = _imageTable();
         if (table is null)
         {
-            icon.RefusedForRoom = (null, 0L);
+            icon.RefusedForRoom = (image, null, 0L);
             return;
         }
         long generation = table.ReleaseGeneration;
@@ -201,7 +237,25 @@ internal sealed class PluginMarkupIconResolver : IMarkupIconResolver, IDisposabl
         }
         else
         {
-            icon.RefusedForRoom = (table, generation);
+            icon.RefusedForRoom = (image, table, generation);
+        }
+    }
+
+    /// <summary>
+    /// Whether a kept image is still what is on disk. One whose file cannot be
+    /// looked at is not, and is read again, which says why.
+    /// </summary>
+    private static bool IsCurrent(PluginFileImage image)
+    {
+        if (image.FullPath is null)
+            return true;
+        try
+        {
+            return PluginFileImageLoader.VersionOf(image.FullPath) == image.Version;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
