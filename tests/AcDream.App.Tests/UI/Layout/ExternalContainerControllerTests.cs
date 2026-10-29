@@ -689,7 +689,7 @@ public sealed class ExternalContainerControllerTests
         // The harness leaves the three lists at the origin; part them.
         h.Containers.Top = 40;
         h.Contents.Top = 80;
-        h.Open(Chest, itemsCapacity: 24, containersCapacity: 1,
+        h.Open(Chest, itemsCapacity: 24, containersCapacity: 7,
             new ContainerContentEntry(pack, 1u), new ContainerContentEntry(Item, 0u));
 
         UiItemSlot packCell = h.Containers.GetItem(0)!;
@@ -701,6 +701,7 @@ public sealed class ExternalContainerControllerTests
         h.Screen.OnMouseDown(UiMouseButton.Left, x, y);
 
         Assert.Equal(inPack, h.Contents.GetItem(0)!.ItemId);
+        Assert.Equal(10, h.Contents.GetNumUIItems());
         Assert.Same(packCell, h.Containers.GetItem(0));
         Assert.Same(chestCell, h.Top.GetItem(0));
         Assert.Same(packCell, h.Screen.Captured);
@@ -732,7 +733,7 @@ public sealed class ExternalContainerControllerTests
         var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
         source.SetItem(Item, 0u);
         var payload = new ItemDragPayload(Item, ItemDragSource.Ground, 0, source);
-        UiItemSlot target = h.Contents.GetItem(1)!;
+        UiItemSlot target = h.Contents.GetItem(0)!;
 
         Assert.Equal(ItemDragAcceptance.Reject,
             h.Controller.OnDragOver(h.Contents, target, payload));
