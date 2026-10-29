@@ -82,6 +82,21 @@ public sealed class TextureCacheReleasableUiTextureTests
     }
 
     [Fact]
+    public void AMipmappedUploadCountsEveryLevelInTheMemoryTrackerAndGivesThemAllBack()
+    {
+        (_, TextureCache cache, _) = Build();
+        long before = cache.TrackedTextureBytes;
+
+        uint handle = cache.UploadReleasableRgba8(RgbaMipChain.Build(new byte[8 * 4 * 4], 8, 4), "test-image");
+
+        // 8x4, 4x2, 2x1, 1x1.
+        Assert.Equal((8L * 4 + 4 * 2 + 2 * 1 + 1 * 1) * 4, cache.TrackedTextureBytes - before);
+
+        Assert.True(cache.ReleaseUiTexture(handle));
+        Assert.Equal(before, cache.TrackedTextureBytes);
+    }
+
+    [Fact]
     public void ASecondReleaseOfTheSameHandleIsRefused()
     {
         (_, TextureCache cache, HeldGpuRetirementQueue queue) = Build();

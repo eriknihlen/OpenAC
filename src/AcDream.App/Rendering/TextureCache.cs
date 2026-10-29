@@ -89,7 +89,10 @@ public sealed class TextureCache
         _uploadAllowance = allowance
             ?? throw new ArgumentNullException(nameof(allowance));
 
-    private readonly Dictionary<uint, (int Width, int Height, string Format)> _uploadMetadata = new();
+    private readonly Dictionary<uint, (int Width, int Height, string Format, long Bytes)> _uploadMetadata = new();
+
+    /// <summary>The bytes this cache has reported to the GPU memory tracker for the textures it holds, every level counted.</summary>
+    internal long TrackedTextureBytes { get; private set; }
 
     private int _dumpFrameCounter;
     private bool _surfaceHistogramAlreadyDumped;
@@ -366,7 +369,7 @@ public sealed class TextureCache
                     texture.Upload(level, 0, mipLevels[level].Rgba8);
             }
             uint glName = UploadAccountingName(texture);
-            TrackUploadedTexture(glName, width, height, format == GpuTextureFormat.R8Unorm ? 1 : 4);
+            TrackUploadedTexture(glName, width, height, format == GpuTextureFormat.R8Unorm ? 1 : 4, mipLevels);
 
             IGpuSampler sampler = _device.CreateSampler(
                 nearest ? UiNearestRepeat
@@ -704,7 +707,7 @@ public sealed class TextureCache
         {
             if (!seen.Add(name)) return;
             if (!_uploadMetadata.TryGetValue(name, out var meta)) return;
-            int bytes = meta.Width * meta.Height * (meta.Format == "R8_COVERAGE" ? 1 : 4);
+            long bytes = meta.Bytes;
             totalBytes += bytes;
             sb.AppendLine($"0x{surfaceId:X8}, {meta.Width}, {meta.Height}, {meta.Format}, {bytes}");
 
@@ -949,10 +952,22 @@ public sealed class TextureCache
         return true;
     }
 
-    private void TrackUploadedTexture(uint name, int width, int height, int bytesPerTexel = 4)
+    /// <summary>
+    /// Reports an upload to the GPU memory tracker: its size, every level of
+    /// <paramref name="mipLevels"/> when it has smaller levels, the top level alone otherwise.
+    /// </summary>
+    private void TrackUploadedTexture(
+        uint name, int width, int height, int bytesPerTexel = 4, IReadOnlyList<DecodedTexture>? mipLevels = null)
     {
-        _uploadMetadata[name] = (width, height, bytesPerTexel == 1 ? "R8_COVERAGE" : "RGBA8_DECODED");
         long bytes = checked((long)width * height * bytesPerTexel);
+        if (mipLevels is not null)
+        {
+            bytes = 0L;
+            foreach (DecodedTexture level in mipLevels)
+                bytes = checked(bytes + (long)level.Width * level.Height * bytesPerTexel);
+        }
+        _uploadMetadata[name] = (width, height, bytesPerTexel == 1 ? "R8_COVERAGE" : "RGBA8_DECODED", bytes);
+        TrackedTextureBytes += bytes;
         Wb.GpuMemoryTracker.TrackResourceAllocation(Wb.GpuResourceType.Texture);
         Wb.GpuMemoryTracker.TrackAllocation(bytes, Wb.GpuResourceType.Texture);
     }
@@ -961,8 +976,8 @@ public sealed class TextureCache
     {
         if (_uploadMetadata.Remove(name, out var metadata))
         {
-            long bytes = checked((long)metadata.Width * metadata.Height * (metadata.Format == "R8_COVERAGE" ? 1L : 4L));
-            Wb.GpuMemoryTracker.TrackDeallocation(bytes, Wb.GpuResourceType.Texture);
+            TrackedTextureBytes -= metadata.Bytes;
+            Wb.GpuMemoryTracker.TrackDeallocation(metadata.Bytes, Wb.GpuResourceType.Texture);
             Wb.GpuMemoryTracker.TrackResourceDeallocation(Wb.GpuResourceType.Texture);
         }
     }
