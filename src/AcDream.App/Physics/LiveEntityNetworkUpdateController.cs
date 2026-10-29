@@ -1212,14 +1212,23 @@ internal sealed class LiveEntityNetworkUpdateController
                         worldPos,
                         update.Position.LandblockId);
                 }
-                else if (!rmState.Body.InContact)
+                else
                 {
-                    SeedRemoteSpawnPlacement(
-                        rmState,
-                        update.Guid,
-                        entity,
-                        rmState.Body.Position,
-                        entity.VisibilityCellId ?? 0u);
+                    // Where it is now stands as the last place the server
+                    // had it, so this position is caught up to like any
+                    // later one: the body is in the world already.
+                    rmState.LastServerPos = rmState.Body.Position;
+                    rmState.LastServerPosTime =
+                        (now - System.DateTime.UnixEpoch).TotalSeconds;
+                    if (!rmState.Body.InContact)
+                    {
+                        SeedRemoteSpawnPlacement(
+                            rmState,
+                            update.Guid,
+                            entity,
+                            rmState.Body.Position,
+                            entity.VisibilityCellId ?? 0u);
+                    }
                 }
             }
 

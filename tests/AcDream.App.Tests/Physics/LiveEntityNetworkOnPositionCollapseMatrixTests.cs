@@ -854,6 +854,30 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
     }
 
     /// <summary>
+    /// Sent on the ground and near: the body is not put there at once; the
+    /// position is queued for it to catch up to from where it lies.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_NearGroundedPosition_IsCaughtUpToNotSnapped()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        Vector3 lies = body.Position;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(lies, body.Position);
+        var remote = Assert.IsType<RemoteMotion>(canonical.RemoteMotion);
+        Assert.True(remote.Interp.IsActive);
+        Assert.True(body.InContact);
+    }
+
+    /// <summary>
     /// Teleported there: the body is re-placed at the server's position, and
     /// the placement says what it touches there: nothing, so it is out of
     /// contact and gravity pulls it again.

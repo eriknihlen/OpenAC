@@ -787,11 +787,21 @@ public sealed class RuntimeLiveEntitySessionController
         // when that creature gets a body to move: a creature that arrives
         // after this client entered the world is never armed by anything
         // else, and one with no body cannot catch up to anything.
+        bool motionIsNew = record.RemoteMotion is null;
         RemoteMotion remote = Entities.Physics.GetOrCreateRemoteMotion(record);
         if (!Entities.Entities.IsCurrent(record)
             || !ReferenceEquals(record.RemoteMotion, remote))
         {
             return;
+        }
+        if (motionIsNew)
+        {
+            // The body is in the world already (it was placed when the
+            // object entered it): where it is now stands as the last place
+            // the server had it, so this position is caught up to like any
+            // later one, as the client with a window does.
+            remote.LastServerPos = remote.Body.Position;
+            remote.LastServerPosTime = Entities.Physics.UtcNowSeconds;
         }
         if (!remote.Body.InContact)
         {

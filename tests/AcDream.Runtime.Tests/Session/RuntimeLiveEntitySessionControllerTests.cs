@@ -1394,6 +1394,74 @@ public sealed class RuntimeLiveEntitySessionControllerTests
             body.LastServerPos);
     }
 
+    /// <summary>
+    /// Issue #21, as the client with a window does it: an object whose body
+    /// lies on the ground (in contact on walkable ground) and has no remote
+    /// motion yet gets a grounded position near the character, 1 m up. The
+    /// body is not put there at once with the contact it had; the position is
+    /// queued for it to catch up to from where it lies.
+    /// </summary>
+    [Fact]
+    public void ALyingBodysFirstNearGroundedPosition_IsCaughtUpToNotSnapped()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        var player = new PlayerMovementController(new PhysicsEngine());
+        player.SeedPlacementForTest(
+            new System.Numerics.Vector3(12f, 10f, 5f),
+            0x01010001u,
+            new System.Numerics.Vector3(12f, 10f, 5f));
+        runtime.MovementOwner.Controller = player;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000061u, incarnation: 1, 0x01010001u);
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+        PhysicsBody body = remote.PhysicsBody!;
+        Assert.Null(remote.RemoteMotion);
+        body.TransientState |= TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable;
+        body.ContactPlaneValid = true;
+        System.Numerics.Vector3 lies = body.Position;
+
+        sink.PositionUpdated(new WorldSession.EntityPositionUpdate(
+            spawn.Guid,
+            new CreateObject.ServerPosition(
+                0x01010001u, 10f, 10f, 6f, 1f, 0f, 0f, 0f),
+            Velocity: null,
+            PlacementId: null,
+            IsGrounded: true,
+            InstanceSequence: 1,
+            PositionSequence: 2,
+            TeleportSequence: 0,
+            ForcePositionSequence: 0));
+
+        Assert.Same(body, remote.PhysicsBody);
+        Assert.Equal(lies, body.Position);
+        Assert.True(body.InContact);
+        var motion = Assert.IsType<AcDream.Runtime.Physics.RemoteMotion>(
+            remote.RemoteMotion);
+        Assert.True(motion.Interp.IsActive);
+    }
+
     /// <summary>Any landblock is serviceable; the fixture has one.</summary>
     private sealed class EveryDestination
         : IRuntimeRemotePlacementServiceWindow
