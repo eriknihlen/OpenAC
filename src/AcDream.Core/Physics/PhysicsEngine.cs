@@ -1180,7 +1180,8 @@ public sealed class PhysicsEngine
                     ? PhysicsShadowCommitAction.Recalculate
                     : PhysicsShadowCommitAction.None,
                 CrossCellIds: ImmutableArray<uint>.Empty,
-                CollidedObjectIds: ImmutableArray<uint>.Empty);
+                CollidedObjectIds: ImmutableArray<uint>.Empty,
+                ForcedIntoCell: true);
         }
 
         transition.SpherePath.InitPath(

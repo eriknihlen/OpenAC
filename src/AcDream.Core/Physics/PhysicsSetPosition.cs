@@ -115,7 +115,8 @@ internal readonly record struct PhysicsSetPositionResult(
     PhysicsShadowCommitAction ShadowAction = PhysicsShadowCommitAction.None,
     ImmutableArray<uint> CrossCellIds = default,
     ImmutableArray<uint> CollidedObjectIds = default,
-    ImmutableArray<uint> QueriedCellIds = default)
+    ImmutableArray<uint> QueriedCellIds = default,
+    bool ForcedIntoCell = false)
 {
     internal bool IsSuccessful => Error == PhysicsSetPositionError.Ok;
     internal bool IsCommitted =>

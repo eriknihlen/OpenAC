@@ -3294,6 +3294,61 @@ public sealed class RuntimeSetPositionStateTests
             outcome.Projection));
     }
 
+    /// <summary>
+    /// A corpse (as a hook or a storage chest) is forced into its cell by its
+    /// placement, which sets only its frame and its cell: the body keeps the
+    /// contact it had. Taking the forced result's empty contact fields, it
+    /// lost it, and gravity pulled it out of the cell it was put in.
+    /// </summary>
+    [Fact]
+    public void AForcedIntoCellPlacement_KeepsTheContactTheBodyHad()
+    {
+        PhysicsEngine engine = FlatEngine(SourceLandblock, 0f);
+        using var lifetime = new RuntimeEntityObjectLifetime(engine);
+        RuntimeEntityRecord record = CreateRecord(lifetime, 0x70001103u, 1);
+        PhysicsBody body = AttachBody(lifetime, record, SourceCell);
+        body.TransientState |= TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable;
+        body.ContactPlaneValid = true;
+        RuntimeEntityPlacementToken token = lifetime.Physics.SetPosition
+            .BeginAuthoredPlacement(
+                record,
+                record.PositionAuthorityVersion,
+                RuntimeSetPositionOperationKind.RemoteAuthoritative);
+        Assert.True(token.IsValid);
+        var source = new FakeCollisionSource(
+            0x02000001u,
+            new FlatSetupCollision(
+                ImmutableArray<FlatCollisionCylinder>.Empty,
+                [new FlatCollisionSphere(new Vector3(0f, 0f, 0.5f), 0.4f)],
+                height: 0f,
+                radius: 0f,
+                stepUpHeight: 0.4f,
+                stepDownHeight: 0.35f));
+
+        Assert.Equal(
+            RuntimeSetPositionMoverPreparationStatus.Prepared,
+            lifetime.Physics.SetPosition.TryPrepareAndSubmitAuthoredPlacement(
+                record,
+                token,
+                RuntimeSetPositionOperationKind.RemoteAuthoritative,
+                PhysicsSetPositionFlags.Teleport
+                    | PhysicsSetPositionFlags.Slide,
+                source,
+                gameTime: 10d,
+                out RuntimeSetPositionOutcome outcome,
+                placementClass: PhysicsPlacementClass.Corpse));
+        Assert.Equal(
+            RuntimeSetPositionStatus.CommittedHostAcknowledgementPending,
+            outcome.Status);
+        Assert.True(lifetime.Physics.SetPosition.AcknowledgeProjection(
+            outcome.Projection));
+
+        Assert.True(body.InContact);
+        Assert.True(body.OnWalkable);
+        Assert.True(body.ContactPlaneValid);
+    }
+
     [Fact]
     public void TryPrepareAndSubmitAuthoredPlacement_YieldsRetryOnAMissingSetupReadWithoutMutatingStage()
     {
