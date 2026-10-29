@@ -10,12 +10,12 @@ namespace AcDream.Core.Items;
 public static class InventoryPlacementSearch
 {
     /// <summary>
-    /// Item slots: -1 means no limit and 0 means the server sent no capacity
-    /// (only the player and packs carry one), so both are unbounded here.
-    /// Container slots: -1 means no limit but 0 is real, since side packs
-    /// hold no packs.
+    /// Item slots: only -1 means no limit. 0 is real: a description carries
+    /// a capacity only when it is not zero, so a pack that sent none holds
+    /// nothing. Container slots: -1 means no limit and 0 is real too, since
+    /// side packs hold no packs.
     /// </summary>
-    private static bool IsUnboundedItemCapacity(int capacity) => capacity <= 0;
+    private static bool IsUnboundedItemCapacity(int capacity) => capacity == -1;
     private static bool IsUnboundedContainerCapacity(int capacity) => capacity < 0;
 
     private static bool IsContainer(ClientObject? item) =>
@@ -25,14 +25,17 @@ public static class InventoryPlacementSearch
     /// True when <paramref name="containerId"/> can take <paramref name="itemId"/>:
     /// the container must be the player or in the player's inventory and not
     /// being traded; a plain item needs a free item slot (an unbounded
-    /// capacity always fits, and an item already inside counts as fitting);
-    /// a pack needs a free container slot under the same rules.
+    /// capacity always fits, and an item already inside counts as fitting
+    /// only when <paramref name="wholeStack"/> moves, since part of a stack
+    /// needs a slot of its own); a pack needs a free container slot, and one
+    /// already inside fits.
     /// </summary>
     public static bool WillItemFitInContainer(
         ClientObjectTable objects,
         uint itemId,
         uint containerId,
-        uint playerId)
+        uint playerId,
+        bool wholeStack = true)
     {
         ArgumentNullException.ThrowIfNull(objects);
         if (containerId == 0u || itemId == containerId)
@@ -65,7 +68,7 @@ public static class InventoryPlacementSearch
             int loose = 0;
             foreach (uint id in contents)
             {
-                if (id == itemId)
+                if (id == itemId && wholeStack)
                     return true;
                 if (!IsContainer(objects.Get(id)))
                     loose++;
@@ -88,6 +91,30 @@ public static class InventoryPlacementSearch
     }
 
     /// <summary>
+    /// How many item slots <paramref name="containerId"/> has free: its item
+    /// capacity less the plain items in it (packs take container slots). -1,
+    /// unbounded, stays -1; an overfull container comes out negative; an
+    /// unknown one has none. The hover over a pack's icon reads only this:
+    /// any value but 0 takes a plain item.
+    /// </summary>
+    public static int EmptyItemSlots(ClientObjectTable objects, uint containerId)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+        if (objects.Get(containerId) is not { } container)
+            return 0;
+        int capacity = container.ItemsCapacity;
+        if (IsUnboundedItemCapacity(capacity))
+            return capacity;
+        int items = 0;
+        foreach (uint id in objects.GetContents(containerId))
+        {
+            if (!IsContainer(objects.Get(id)))
+                items++;
+        }
+        return capacity - items;
+    }
+
+    /// <summary>
     /// The container to request for <paramref name="itemId"/>: the named
     /// <paramref name="targetId"/> if it fits there, else the root (the
     /// player's main pack), else the first of the root's packs with room, in
@@ -101,13 +128,14 @@ public static class InventoryPlacementSearch
         uint rootId,
         uint targetId,
         uint playerId,
-        out InventoryContainerPlacementRejection refusal)
+        out InventoryContainerPlacementRejection refusal,
+        bool wholeStack = true)
     {
         ArgumentNullException.ThrowIfNull(objects);
         refusal = InventoryContainerPlacementRejection.None;
-        if (targetId != 0u && WillItemFitInContainer(objects, itemId, targetId, playerId))
+        if (targetId != 0u && WillItemFitInContainer(objects, itemId, targetId, playerId, wholeStack))
             return targetId;
-        if (rootId != 0u && WillItemFitInContainer(objects, itemId, rootId, playerId))
+        if (rootId != 0u && WillItemFitInContainer(objects, itemId, rootId, playerId, wholeStack))
             return rootId;
 
         if (rootId != 0u)
@@ -121,7 +149,7 @@ public static class InventoryPlacementSearch
             packs.Sort(static (a, b) => a.ContainerSlot.CompareTo(b.ContainerSlot));
             foreach (ClientObject pack in packs)
             {
-                if (WillItemFitInContainer(objects, itemId, pack.ObjectId, playerId))
+                if (WillItemFitInContainer(objects, itemId, pack.ObjectId, playerId, wholeStack))
                     return pack.ObjectId;
             }
         }

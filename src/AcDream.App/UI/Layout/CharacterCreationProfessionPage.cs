@@ -151,7 +151,7 @@ internal sealed class CharacterCreationProfessionPage : IDisposable
             // art; the lock is a toggle with no Normal/Highlight pair.
             uint lockState = snapshot.IsAttributeLocked(attribute) ? LockedState : UnlockedState;
             widgets.Lock?.TrySetRetailState(lockState);
-            widgets.Slider?.TrySetTrackState(lockState);
+            widgets.Slider?.TrySetThumbFillState(lockState);
         }
 
         SetDisplay(_availableValue, snapshot.RemainingAttributeCredits);

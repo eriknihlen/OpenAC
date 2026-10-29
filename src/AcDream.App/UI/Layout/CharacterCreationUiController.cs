@@ -399,6 +399,10 @@ internal sealed class CharacterCreationUiController : IDisposable
         if (_bindings.RandomizeCharacter?.Invoke().Status != RuntimeCommandStatus.Accepted)
             return;
 
+        // The appearance page starts on the face choice, which takes the
+        // rolled headgear off (kept for the clothes choice); then the
+        // gender turns over.
+        _appearancePage.SelectFaceChoice();
         uint gender = _bindings.View()?.Snapshot.GenderKey ?? 0u;
         if (gender == 1u)
             _bindings.SelectGender(2u);

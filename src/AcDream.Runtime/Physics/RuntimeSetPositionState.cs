@@ -2289,10 +2289,16 @@ internal sealed class RuntimeSetPositionState : IDisposable
         }
 
         bool previousOnWalkable = operation.PreviousOnWalkable;
-        bool hitGround = !previousOnWalkable
+        // A placement forced into its cell (a hook, a storage chest, a
+        // corpse) sets only the frame and the cell: the body keeps the
+        // contact it had.
+        bool forced = result.ForcedIntoCell;
+        bool hitGround = !forced
+            && !previousOnWalkable
             && result.InContact
             && result.OnWalkable;
-        bool leaveGround = previousOnWalkable
+        bool leaveGround = !forced
+            && previousOnWalkable
             && !(result.InContact && result.OnWalkable);
 
         UnindexDeferred(operation);
@@ -2302,17 +2308,20 @@ internal sealed class RuntimeSetPositionState : IDisposable
             result.Position,
             result.CellLocalPosition);
         body.LastUpdateTime = prepared.Evaluation.Command.GameTime;
-        body.ContactPlaneValid = result.InContact;
-        body.ContactPlane = result.ContactPlane;
-        body.ContactPlaneCellId = result.ContactPlaneCellId;
-        body.ContactPlaneIsWater = result.ContactPlaneIsWater;
-        if (result.InContact)
-            body.GroundNormal = result.ContactPlane.Normal;
-        _ = PhysicsObjUpdate.CommitSetPositionContactPrefix(
-            body,
-            result.InContact,
-            result.OnWalkable,
-            previousOnWalkable);
+        if (!forced)
+        {
+            body.ContactPlaneValid = result.InContact;
+            body.ContactPlane = result.ContactPlane;
+            body.ContactPlaneCellId = result.ContactPlaneCellId;
+            body.ContactPlaneIsWater = result.ContactPlaneIsWater;
+            if (result.InContact)
+                body.GroundNormal = result.ContactPlane.Normal;
+            _ = PhysicsObjUpdate.CommitSetPositionContactPrefix(
+                body,
+                result.InContact,
+                result.OnWalkable,
+                previousOnWalkable);
+        }
         operation.Result = result;
         operation.ExactCellId = result.CellId;
         operation.WakeableLostCell = false;
@@ -4387,17 +4396,24 @@ internal sealed class RuntimeSetPositionState : IDisposable
         }
         if (operation.EnteringWorldFromCelllessResidence && !isStatic)
             body.TransientState |= TransientStateFlags.Active;
-        body.ContactPlaneValid = result.InContact;
-        body.ContactPlane = result.ContactPlane;
-        body.ContactPlaneCellId = result.ContactPlaneCellId;
-        body.ContactPlaneIsWater = result.ContactPlaneIsWater;
-        if (result.InContact)
-            body.GroundNormal = result.ContactPlane.Normal;
-        body.SlidingNormal = result.SlidingNormal;
-        if (result.SlidingNormalValid)
-            body.TransientState |= TransientStateFlags.Sliding;
-        else
-            body.TransientState &= ~TransientStateFlags.Sliding;
+        // A placement forced into its cell (a hook, a storage chest, a
+        // corpse) sets only the frame and the cell: the body keeps the
+        // contact it had, and it collided with nothing.
+        bool forced = result.ForcedIntoCell;
+        if (!forced)
+        {
+            body.ContactPlaneValid = result.InContact;
+            body.ContactPlane = result.ContactPlane;
+            body.ContactPlaneCellId = result.ContactPlaneCellId;
+            body.ContactPlaneIsWater = result.ContactPlaneIsWater;
+            if (result.InContact)
+                body.GroundNormal = result.ContactPlane.Normal;
+            body.SlidingNormal = result.SlidingNormal;
+            if (result.SlidingNormalValid)
+                body.TransientState |= TransientStateFlags.Sliding;
+            else
+                body.TransientState &= ~TransientStateFlags.Sliding;
+        }
         IRuntimeRemotePlacement? remote =
             record.RemoteMotion as IRuntimeRemotePlacement;
         if (record.FullCellId != result.CellId)
@@ -4435,7 +4451,11 @@ internal sealed class RuntimeSetPositionState : IDisposable
                 requireSpatialRoot: false))
             return false;
         bool contactCommitted;
-        if (remote is null)
+        if (forced)
+        {
+            contactCommitted = true;
+        }
+        else if (remote is null)
         {
             contactCommitted = PhysicsObjUpdate.CommitSetPositionContactTransition(
                 body,

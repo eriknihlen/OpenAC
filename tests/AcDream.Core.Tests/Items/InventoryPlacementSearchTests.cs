@@ -179,6 +179,58 @@ public sealed class InventoryPlacementSearchTests
     }
 
     [Fact]
+    public void PartOfAStackAlreadyInAFullPack_NeedsASlotOfItsOwn()
+    {
+        // Only the whole stack counts as already fitting where it is.
+        ClientObjectTable objects = PlayerWithPacks(mainCapacity: 1);
+        uint inside = AddLoose(objects, 0x70000100u, Player);
+
+        Assert.True(InventoryPlacementSearch.WillItemFitInContainer(objects, inside, Player, Player, wholeStack: true));
+        Assert.False(InventoryPlacementSearch.WillItemFitInContainer(objects, inside, Player, Player, wholeStack: false));
+        Assert.Equal(InventoryContainerPlacementRejection.None,
+            InventoryContainerPlacementPolicy.Evaluate(objects, inside, Player, Player, wholeStack: true));
+        Assert.Equal(InventoryContainerPlacementRejection.ItemCapacityFull,
+            InventoryContainerPlacementPolicy.Evaluate(objects, inside, Player, Player, wholeStack: false));
+        Assert.Equal(SidePackA, InventoryPlacementSearch.ChooseContainer(
+            objects, inside, rootId: Player, targetId: Player, Player, out _, wholeStack: false));
+    }
+
+    [Fact]
+    public void AnItemCapacityOfZero_HasNoRoom()
+    {
+        // Only -1 is unbounded; a pack that carries no item slots is passed
+        // over by the search.
+        ClientObjectTable objects = PlayerWithPacks(mainCapacity: 1);
+        AddLoose(objects, 0x70000100u, Player);
+        AddPack(objects, SidePackA, "Pack A", 0, slot: 0);
+        uint loot = WorldItem(objects);
+
+        Assert.False(InventoryPlacementSearch.WillItemFitInContainer(objects, loot, SidePackA, Player));
+        Assert.Equal(SidePackB, InventoryPlacementSearch.ChooseContainer(
+            objects, loot, rootId: Player, targetId: Player, Player, out _));
+    }
+
+    [Fact]
+    public void TheLegalityCheck_ReadsAnItemCapacityOfZeroAsNoRoom()
+    {
+        ClientObjectTable objects = PlayerWithPacks();
+        AddPack(objects, SidePackA, "Pack A", 0, slot: 0);
+        uint loot = WorldItem(objects);
+
+        Assert.Equal(InventoryContainerPlacementRejection.ItemCapacityFull,
+            InventoryContainerPlacementPolicy.Evaluate(objects, loot, SidePackA, Player));
+
+        // -1 is unbounded; an undescribed player takes anything.
+        AddPack(objects, SidePackA, "Pack A", -1, slot: 0);
+        Assert.Equal(InventoryContainerPlacementRejection.None,
+            InventoryContainerPlacementPolicy.Evaluate(objects, loot, SidePackA, Player));
+        var lone = new ClientObjectTable();
+        uint alone = WorldItem(lone);
+        Assert.Equal(InventoryContainerPlacementRejection.None,
+            InventoryContainerPlacementPolicy.Evaluate(lone, alone, Player, Player));
+    }
+
+    [Fact]
     public void UnboundedCapacity_AlwaysFits()
     {
         ClientObjectTable objects = PlayerWithPacks(mainCapacity: -1);
@@ -200,5 +252,21 @@ public sealed class InventoryPlacementSearchTests
         uint loot = WorldItem(objects);
 
         Assert.False(InventoryPlacementSearch.WillItemFitInContainer(objects, loot, 0x60000030u, Player));
+    }
+
+    [Fact]
+    public void EmptyItemSlots_countPlainItemsOnly()
+    {
+        ClientObjectTable objects = PlayerWithPacks(mainCapacity: 3);
+        AddLoose(objects, 0x70000100u, Player);
+        Assert.Equal(2, InventoryPlacementSearch.EmptyItemSlots(objects, Player));      // the packs take no item slot
+        AddLoose(objects, 0x70000101u, SidePackA);
+        AddLoose(objects, 0x70000102u, SidePackA);
+        Assert.Equal(0, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackA));
+        AddLoose(objects, 0x70000103u, SidePackA);
+        Assert.Equal(-1, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackA));  // overfull
+        objects.Get(SidePackB)!.ItemsCapacity = -1;
+        Assert.Equal(-1, InventoryPlacementSearch.EmptyItemSlots(objects, SidePackB));  // unbounded
+        Assert.Equal(0, InventoryPlacementSearch.EmptyItemSlots(objects, 0x7FFF0000u)); // unknown
     }
 }

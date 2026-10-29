@@ -95,6 +95,18 @@ public sealed class CharacterSheetProviderTests
     }
 
 
+    [Fact]
+    public void BuildSheet_ChessRankWithoutTheProperty_Is1400()
+    {
+        var h = new Harness();
+        ClientObject player = h.AddPlayerObject();
+
+        Assert.Equal(1400, h.Provider.BuildSheet().ChessRank);
+
+        player.Properties.Ints[0xB5u] = 1_650;
+        Assert.Equal(1_650, h.Provider.BuildSheet().ChessRank);
+    }
+
     // OpenAC #137: at the top of the level table the experience to the next
     // level read 0. There is no next level, and the page says so in words.
     [Fact]

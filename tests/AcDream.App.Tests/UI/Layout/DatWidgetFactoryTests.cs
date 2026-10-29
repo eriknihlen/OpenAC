@@ -553,7 +553,7 @@ public class DatWidgetFactoryTests
     }
 
     [Fact]
-    public void Type11_HorizontalScrollbar_usesDirectRetailTrackAndThumbChildren()
+    public void Type11_HorizontalScrollbar_usesDirectRetailFillAndThumbChildren()
     {
         const uint Track = 0x06004CF6u;
         const uint Thumb = 0x06005DC3u;
@@ -570,7 +570,8 @@ public class DatWidgetFactoryTests
         var bar = Assert.IsType<UiScrollbar>(DatWidgetFactory.Create(info, NoTex, null));
 
         Assert.True(bar.Horizontal);
-        Assert.Equal(Track, bar.TrackSprite);
+        Assert.Equal(0u, bar.TrackSprite);
+        Assert.Equal(Track, bar.ThumbFillSprite);
         Assert.Equal(Thumb, bar.ThumbSprite);
         Assert.Equal(0u, bar.UpSprite);
         Assert.Equal(0u, bar.DownSprite);
@@ -781,7 +782,7 @@ public class DatWidgetFactoryTests
         Assert.True(entry.RightAligned);
         var bar = Assert.IsType<UiScrollbar>(layout.FindElement(0x100001A4u));
         Assert.True(bar.Horizontal);
-        Assert.Equal(0x06004CF6u, bar.TrackSprite);
+        Assert.Equal(0x06004CF6u, bar.ThumbFillSprite);
         Assert.Equal(0x06005DC3u, bar.ThumbSprite);
     }
 
@@ -1196,7 +1197,7 @@ public class DatWidgetFactoryTests
             DatWidgetFactory.Create(info, NoTex, null));
 
         Assert.True(bar.Horizontal);
-        Assert.Equal(0x06001919u, bar.TrackSprite);
+        Assert.Equal(0x06001919u, bar.ThumbFillSprite);
         Assert.Equal(0x06001923u, bar.ThumbSprite);
         Assert.Equal(0x06001200u, bar.ScalarFillSprite);
         Assert.Equal(0x0600715Eu, bar.ScalarRangeSprite);

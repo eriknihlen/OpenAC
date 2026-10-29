@@ -117,6 +117,18 @@ public sealed class UiItemList : UiElement
     public float CellWidth { get; set; }
     public float CellHeight { get; set; }
 
+    /// <summary>
+    /// When set, every cell of a one-column vertical list is as wide as the list
+    /// itself rather than <see cref="CellWidth"/>, so the rows stretch and shrink
+    /// with the list when its window is resized. Vertical placement and
+    /// scrolling are unchanged.
+    /// <para>Precondition: each row is authored exactly as wide as the list
+    /// (so filling the list is the same as growing by the list's width change),
+    /// and the row content's anchor margins are measured at that authored size
+    /// when the row is built, not at its first draw.</para>
+    /// </summary>
+    public bool CellsFillWidth { get; set; }
+
     public bool SingleRow { get; set; }
 
     public bool HorizontalScroll { get; set; }
@@ -206,13 +218,14 @@ public sealed class UiItemList : UiElement
         Scroll.ViewHeight = (int)MathF.Floor(Height);
         Scroll.SetScrollY(Scroll.ScrollY);
         float scrollY = Scroll.ScrollY;
+        float cellWidth = CellsFillWidth && cols == 1 ? Width : CellWidth;
 
         for (int i = 0; i < _cells.Count; i++)
         {
             var (x, baseY) = CellOffset(i, cols, _cells.Count, Flow, CellWidth, CellHeight);
             float top = baseY - scrollY;
             var cell = _cells[i];
-            cell.Left = x; cell.Top = top; cell.Width = CellWidth; cell.Height = CellHeight;
+            cell.Left = x; cell.Top = top; cell.Width = cellWidth; cell.Height = CellHeight;
             cell.Visible = top < Height && top + CellHeight > 0f;
         }
     }

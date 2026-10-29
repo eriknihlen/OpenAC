@@ -112,6 +112,23 @@ internal sealed class SilkRuntimeDisplayWindowTarget : IRuntimeDisplayWindowTarg
         bool haveResolution =
             TryParseResolution(display.Resolution, out int width, out int height);
 
+        if (display.Fullscreen && _modeSwitcher.CompositorFullscreen)
+        {
+            // The compositor shows the window at the monitor's own mode, so
+            // the chosen size has no effect and is not checked.
+            if (_modeSwitcher.IsFullscreen)
+                return CurrentResult();
+            if (!haveResolution)
+            {
+                width = _window.Size.X;
+                height = _window.Size.Y;
+            }
+            if (!_modeSwitcher.TryEnterFullscreen(width, height, out string? error))
+                Console.WriteLine(
+                    $"display: fullscreen failed ({error}) — window state unchanged");
+            return CurrentResult();
+        }
+
         if (display.Fullscreen)
         {
             if (!haveResolution)

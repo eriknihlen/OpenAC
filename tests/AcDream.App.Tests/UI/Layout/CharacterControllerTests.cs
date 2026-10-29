@@ -65,6 +65,49 @@ public sealed class CharacterControllerTests
         => Assert.Equal(expected, CharacterController.ResistanceGrade(
             value, 200, 260, 320, 380, 440));
 
+    // The grades read Strength and Endurance without enchantments (innate
+    // plus raised); the burden reads Strength with them.
+    [Fact]
+    public void Report_GradesReadAttributesWithoutEnchantments()
+    {
+        string report = Report(new CharacterSheet
+        {
+            // With enchantments 300 + 300 would be Indomitable for all three.
+            Strength = 300,
+            Endurance = 300,
+            AttributeBaseValues = [200, 50, 10, 10, 10, 10],
+            BurdenCurrent = 40_000,
+        });
+
+        // 200 + 50 = 250 and 200 + 2 * 50 = 300: both Poor.
+        Assert.Contains("Natural Resistances: Poor", report);
+        Assert.Contains("Drain Resistances: Poor", report);
+        Assert.Contains("Regeneration Bonus: Poor", report);
+        // Capacity at 300 Strength is 45,000 (at 200 it would be 30,000).
+        Assert.Contains("You are not overburdened at this time.", report);
+    }
+
+    // Every whole number is grouped by thousands; a character who never
+    // played chess is ranked 1400.
+    [Fact]
+    public void Report_GroupsIntegersAndRanksAnUnrankedChessPlayer1400()
+    {
+        Assert.Contains("Chess Rank: 1,400", Report(new CharacterSheet()));
+
+        string report = Report(new CharacterSheet
+        {
+            ChessRank = 1_850,
+            Deaths = 1_234,
+            FishingSkill = 2_000,
+        });
+        Assert.Contains("Chess Rank: 1,850", report);
+        Assert.Contains("died 1,234 times", report);
+        Assert.Contains("Fishing Skill: 2,000", report);
+
+        string burdened = Report(new CharacterSheet { Strength = 100, BurdenCurrent = 20_000 });
+        Assert.Contains("overburdened by 5,000 burden units", burdened);
+    }
+
     [Theory]
     [InlineData(0, "")]
     [InlineData(1, "1 second")]

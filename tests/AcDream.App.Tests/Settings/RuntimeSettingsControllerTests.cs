@@ -362,6 +362,7 @@ public sealed partial class RuntimeSettingsControllerTests
     {
         public bool IsFullscreen { get; set; }
         public (int Width, int Height)? CurrentFullscreenMode { get; set; }
+        public bool CompositorFullscreen { get; set; }
         public bool EnterSucceeds { get; set; } = true;
         public List<string> Calls { get; } = [];
 
@@ -518,6 +519,70 @@ public sealed partial class RuntimeSettingsControllerTests
 
         Assert.Equal(["leave:1600x900"], switcher.Calls);
         Assert.Equal(0, surface.Writes);   // the native exit sets the size itself
+    }
+
+    // The compositor keeps the monitor at its own mode, so the chosen size
+    // is not checked: the default 1280x720 is rarely in a Wayland monitor's
+    // list, which usually holds only the current mode.
+    [Fact]
+    public void DisplayApply_CompositorFullscreen_DoesNotNeedAnOfferedSize()
+    {
+        var surface = new FakeSizeSurface();
+        var switcher = new FakeModeSwitcher { CompositorFullscreen = true };
+        var target = new SilkRuntimeDisplayWindowTarget(
+            surface, switcher, _ => false);
+
+        RuntimeDisplayApplyResult result = target.Apply(DisplaySettings.Default with
+        {
+            Fullscreen = true,
+            Resolution = "1280x720",
+        });
+
+        Assert.True(result.Fullscreen);
+        Assert.Equal(["enter:1280x720"], switcher.Calls);
+        Assert.Equal(0, surface.Writes);
+    }
+
+    [Fact]
+    public void DisplayApply_CompositorFullscreen_DoesNotNeedAReadableSize()
+    {
+        var surface = new FakeSizeSurface { Size = new(1600, 900) };
+        var switcher = new FakeModeSwitcher { CompositorFullscreen = true };
+        var target = new SilkRuntimeDisplayWindowTarget(
+            surface, switcher, _ => true);
+
+        RuntimeDisplayApplyResult result = target.Apply(DisplaySettings.Default with
+        {
+            Fullscreen = true,
+            Resolution = "garbage",
+        });
+
+        Assert.True(result.Fullscreen);
+        Assert.Equal(["enter:1600x900"], switcher.Calls);
+    }
+
+    // Any chosen size is the compositor's fullscreen at the monitor's mode,
+    // so a window already fullscreen there is left alone.
+    [Fact]
+    public void DisplayApply_CompositorFullscreen_AlreadyFullscreen_IsANoOp()
+    {
+        var surface = new FakeSizeSurface();
+        var switcher = new FakeModeSwitcher
+        {
+            CompositorFullscreen = true,
+            IsFullscreen = true,
+            CurrentFullscreenMode = (2560, 1440),
+        };
+        var target = new SilkRuntimeDisplayWindowTarget(
+            surface, switcher, _ => true);
+
+        target.Apply(DisplaySettings.Default with
+        {
+            Fullscreen = true,
+            Resolution = "1920x1080",
+        });
+
+        Assert.Empty(switcher.Calls);
     }
 
     [Fact]

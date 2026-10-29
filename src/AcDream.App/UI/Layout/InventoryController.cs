@@ -413,6 +413,10 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private void OnObjectsCleared()
     {
         _pendingListPlacement = null;
+        // The session ended: the pack that was open belonged to the character
+        // that left, so the window goes back to the main pack.
+        _openContainer = 0;
+        _contentsGrid?.Scroll.SetScrollY(0);
         Populate();
     }
 
@@ -476,50 +480,52 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         }
 
         // Flushing cells cancels a press in progress: UiRoot releases capture when the
-        // captured element leaves the tree.
-        if (TryRefreshCellsInPlace(visibleBags, visibleContents, pending, p, open))
+        // captured element leaves the tree. So each list is rebuilt only when what it
+        // shows changed: opening a pack changes the contents grid alone, and the pack
+        // cell that was pressed to open it stays to become a drag.
+        if (MatchesCells(_containerList, visibleBags, ContainerSlotTarget(p, visibleBags.Count)))
         {
-            ApplyIndicators();
-            RefreshBurden();
-            return;
+            RefreshCells(_containerList, visibleBags, isContainer: true, p, pending);
         }
-
-        _containerList?.Flush();
-        _contentsGrid?.Flush();
-
-        foreach (uint guid in visibleBags)
+        else if (_containerList is not null)
         {
-            AddCell(
-                _containerList,
-                guid,
-                isContainer: true,
-                IsWaiting(guid, p, pending));
-        }
-
-        foreach (uint guid in visibleContents)
-        {
-            AddCell(
-                _contentsGrid,
-                guid,
-                isContainer: false,
-                IsWaiting(guid, open, pending));
-        }
-
-        if (_contentsGrid is not null)
-        {
-            int cap = _objects.Get(open)?.ItemsCapacity ?? 0;
-            int slots = cap > 0 ? cap : (open == p ? MainPackSlots : SidePackSlots);
-            while (_contentsGrid.GetNumUIItems() < slots) AddEmptyCell(_contentsGrid);
-        }
-
-        if (_containerList is not null)
-        {
-            int bags = _containerList.GetNumUIItems();
-            int slots = ContainerSlotTarget(p, bags);
+            _containerList.Flush();
+            foreach (uint guid in visibleBags)
+            {
+                AddCell(
+                    _containerList,
+                    guid,
+                    isContainer: true,
+                    IsWaiting(guid, p, pending));
+            }
+            int slots = ContainerSlotTarget(p, _containerList.GetNumUIItems());
             while (_containerList.GetNumUIItems() < slots) AddEmptyCell(_containerList);
         }
 
-        if (_topContainer is not null)
+        if (MatchesCells(_contentsGrid, visibleContents, ContentsSlotTarget(open, p)))
+        {
+            RefreshCells(_contentsGrid, visibleContents, isContainer: false, open, pending);
+        }
+        else if (_contentsGrid is not null)
+        {
+            _contentsGrid.Flush();
+            foreach (uint guid in visibleContents)
+            {
+                AddCell(
+                    _contentsGrid,
+                    guid,
+                    isContainer: false,
+                    IsWaiting(guid, open, pending));
+            }
+            int slots = ContentsSlotTarget(open, p);
+            while (_contentsGrid.GetNumUIItems() < slots) AddEmptyCell(_contentsGrid);
+        }
+
+        if (_topContainer?.GetItem(0) is { } shownMain && shownMain.ItemId == p)
+        {
+            RefreshTopContainer(p);
+        }
+        else if (_topContainer is not null)
         {
             _topContainer.Flush();
             var main = new UiItemSlot
@@ -618,12 +624,12 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         return ItemListDropPlacement.Resolve(dropIndex, count, source, wholeStack);
     }
 
-    private int CountLooseContents(uint containerId)
+    private static int CountLooseContents(ClientObjectTable objects, uint containerId)
     {
         int count = 0;
-        foreach (uint guid in _objects.GetContents(containerId))
+        foreach (uint guid in objects.GetContents(containerId))
         {
-            if (_objects.Get(guid) is { } item
+            if (objects.Get(guid) is { } item
                 && item.CurrentlyEquippedLocation == EquipMask.None
                 && !IsBag(item))
             {
@@ -643,26 +649,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                 && projection.ContainerId == containerId
                 && projection.ItemId == guid);
 
-    /// <summary>False when anything structural moved, which needs the rebuild.</summary>
-    private bool TryRefreshCellsInPlace(
-        IReadOnlyList<uint> visibleBags,
-        IReadOnlyList<uint> visibleContents,
-        PendingListPlacement? pending,
-        uint player,
-        uint open)
-    {
-        if (!MatchesCells(_containerList, visibleBags, ContainerSlotTarget(player, visibleBags.Count))
-            || !MatchesCells(_contentsGrid, visibleContents, ContentsSlotTarget(open, player)))
-        {
-            return false;
-        }
-
-        RefreshCells(_containerList, visibleBags, isContainer: true, player, pending);
-        RefreshCells(_contentsGrid, visibleContents, isContainer: false, open, pending);
-        RefreshTopContainer(player);
-        return true;
-    }
-
+    /// <summary>False when anything structural moved in the list, which needs its rebuild.</summary>
     private static bool MatchesCells(UiItemList? list, IReadOnlyList<uint> guids, int slotTarget)
     {
         if (list is null) return guids.Count == 0;
@@ -860,12 +847,21 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     /// (a zero contents-to-capacity ratio hides it rather than drawing an empty rail).
     /// </summary>
     private void SetCapacityBar(UiItemSlot cell, uint containerGuid)
+        => cell.CapacityFill = CapacityFill(_objects, containerGuid);
+
+    /// <summary>
+    /// The fill of an item cell's container meter for
+    /// <paramref name="containerGuid"/>: loose items over item capacity, or
+    /// -1 (hidden) when it is no container with a positive item capacity or
+    /// holds nothing. Every item cell follows this rule, the toolbar's too.
+    /// </summary>
+    internal static float CapacityFill(ClientObjectTable objects, uint containerGuid)
     {
-        int cap = _objects.Get(containerGuid)?.ItemsCapacity ?? 0;
-        if (cap <= 0) { cell.CapacityFill = -1f; return; }
-        int n = CountLooseContents(containerGuid);
-        if (n == 0) { cell.CapacityFill = -1f; return; }
-        cell.CapacityFill = Math.Clamp(n / (float)cap, 0f, 1f);
+        int cap = objects.Get(containerGuid)?.ItemsCapacity ?? 0;
+        if (cap <= 0) return -1f;
+        int n = CountLooseContents(objects, containerGuid);
+        if (n == 0) return -1f;
+        return Math.Clamp(n / (float)cap, 0f, 1f);
     }
 
     private static void SetStructureBar(UiItemSlot cell, ClientObject? item)
@@ -885,24 +881,24 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             return ItemDragAcceptance.None;
         InventoryContainerPlacementRejection legality = EvaluateDrop(
             targetList, targetCell, payload.ObjId, out bool sourceIsBag, out uint destination);
-        // An item held over a pack's own icon is answered for THAT pack: one
-        // with no room shows the refusal, even though letting go there still
-        // finds the item a place in another pack. Anywhere else a full pack
-        // is no refusal while the drop has somewhere to go.
+        // An item held over a pack's own icon (a side pack or the main pack)
+        // is answered by THAT pack's free item slots alone: none refuses,
+        // even for a stack already inside it, and even though letting go
+        // there still finds the item a place in another pack. Something in
+        // the side column that carries nothing, a focus for one, has none.
         bool overAPackIcon = !sourceIsBag
-            && !ReferenceEquals(targetList, _contentsGrid);
-        // The side column also holds things that carry nothing at all, a
-        // focus for one. No slots is no room: it refuses like a full pack.
-        if (overAPackIcon
-            && legality == InventoryContainerPlacementRejection.None
-            && ReferenceEquals(targetList, _containerList)
-            && _objects.Get(targetCell.ItemId) is { ItemsCapacity: 0 })
+            && (ReferenceEquals(targetList, _containerList) || ReferenceEquals(targetList, _topContainer));
+        if (overAPackIcon)
         {
-            return ItemDragAcceptance.Reject;
+            return targetCell.ItemId != 0u
+                && InventoryPlacementSearch.EmptyItemSlots(_objects, targetCell.ItemId) != 0
+                ? ItemDragAcceptance.Accept
+                : ItemDragAcceptance.Reject;
         }
+        // Anywhere else a full pack is no refusal while the drop has
+        // somewhere to go, found by the same search the drop runs.
         if (IsCapacityRejection(legality)
-            && !overAPackIcon
-            && ResolveFallthroughContainer(payload.ObjId, destination, out _) != 0u)
+            && ResolveFallthroughContainer(payload.ObjId, destination, destination, out _) != 0u)
         {
             legality = InventoryContainerPlacementRejection.None;
         }
@@ -916,19 +912,38 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             or InventoryContainerPlacementRejection.ContainerCapacityFull;
 
     /// <summary>
-    /// When the pack the player named has no room, the pack the item goes
-    /// to instead: the main pack, then the side packs in order (0 when none
-    /// has room, with the capacity rejection to report against the player).
+    /// How much of <paramref name="itemId"/> a drag moves, and whether that
+    /// is the whole stack: the selected stack's split quantity splits it,
+    /// wherever it comes from. Part of a stack needs a slot of its own, even
+    /// in the pack that holds the rest.
+    /// </summary>
+    private (uint SplitSize, bool WholeStack) MovingAmount(uint itemId)
+    {
+        ClientObject? dragged = _objects.Get(itemId);
+        uint fullStack = (uint)Math.Max(dragged?.StackSize ?? 1, 1);
+        uint splitSize = dragged is null
+            ? fullStack
+            : _stackSplitQuantity?.GetObjectSplitSize(
+                itemId, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
+        return (splitSize, splitSize >= fullStack);
+    }
+
+    /// <summary>
+    /// When the pack the player named has no room, the pack the item goes to
+    /// instead: the search from <paramref name="root"/>, the root then the
+    /// packs inside it (0 when none has room, with the capacity rejection to
+    /// report against the root). A drop starts from where it names: a pack's
+    /// icon from that pack, the grid from the pack shown open. So the main
+    /// pack reaches the side packs and a side pack reaches nothing else.
     /// </summary>
     private uint ResolveFallthroughContainer(
         uint itemId,
         uint namedContainer,
+        uint root,
         out InventoryContainerPlacementRejection refusal)
-    {
-        uint root = _playerGuid();
-        return InventoryPlacementSearch.ChooseContainer(
-            _objects, itemId, root, namedContainer, root, out refusal);
-    }
+        => InventoryPlacementSearch.ChooseContainer(
+            _objects, itemId, root, namedContainer, _playerGuid(), out refusal,
+            MovingAmount(itemId).WholeStack);
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
@@ -944,19 +959,30 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             item,
             out _,
             out uint legalityDestination);
+        if ((legality == InventoryContainerPlacementRejection.None || IsCapacityRejection(legality))
+            && TryJoinStackInPack(targetList, targetCell, item))
+        {
+            return;
+        }
         uint fallthrough = 0u;
         if (IsCapacityRejection(legality))
         {
+            // The search starts where the drop names: a pack's icon from
+            // that pack, the grid from the pack shown open (the whole
+            // inventory when that is the main pack, nothing more for a side
+            // pack, which holds no packs).
+            uint root = legalityDestination;
             fallthrough = ResolveFallthroughContainer(
-                item, legalityDestination, out InventoryContainerPlacementRejection noRoom);
+                item, legalityDestination, root, out InventoryContainerPlacementRejection noRoom);
             if (fallthrough == 0u)
             {
-                // Nothing in the inventory has room: the notice names the
-                // inventory as a whole, not the pack that was dropped on.
+                // Nowhere the search reached has room: the notice names
+                // where it started, the main pack or the side pack whose
+                // icon was dropped on.
                 if (InventoryContainerPlacementPolicy.ComposeClientLocal(
                         noRoom,
                         _objects.Get(item),
-                        _objects.Get(_playerGuid()),
+                        _objects.Get(root),
                         _playerGuid()) is { } fullNotice)
                 {
                     _itemInteraction?.ReportClientLocal(fullNotice);
@@ -964,7 +990,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                 return;
             }
             legality = InventoryContainerPlacementPolicy.Evaluate(
-                _objects, item, fallthrough, _playerGuid());
+                _objects, item, fallthrough, _playerGuid(), MovingAmount(item).WholeStack);
             legalityDestination = fallthrough;
         }
         if (legality != InventoryContainerPlacementRejection.None)
@@ -1000,12 +1026,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
 
         ClientObject? dragged = _objects.Get(item);
         bool sourceIsBag = dragged is not null && IsBag(dragged);
-        uint fullStack = (uint)Math.Max(dragged?.StackSize ?? 1, 1);
-        uint splitSize = dragged is null
-            ? fullStack
-            : _stackSplitQuantity?.GetObjectSplitSize(
-                item, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
-        bool wholeStack = splitSize >= fullStack;
+        (uint splitSize, bool wholeStack) = MovingAmount(item);
         uint container; int? requested;
         if (targetList == _contentsGrid)
         {
@@ -1028,19 +1049,16 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             {
                 if (targetCell.ItemId == 0 || targetCell.ItemId == item) return;
                 container = targetCell.ItemId;                                                  // the bag / main pack
-                if (IsContainerFull(container)) return;                                         // red already shown
-                requested = 0;                                                                  // a drop on a pack goes to its top
+                requested = 0;                                                                // a drop on a pack goes to its top
             }
         }
         else return;
 
+        // The named pack was full; the pack the search found takes the item
+        // at the slot this drop named: the grid's drop slot, or the top for
+        // a pack's icon.
         if (fallthrough != 0u)
-        {
-            // The named pack was full; the pack that has room takes the item
-            // at its top, like any arrival from elsewhere.
             container = fallthrough;
-            requested = 0;
-        }
 
         if (requested is not int placement) return;                                            // the item is already there
         if (container == item) return;                                                         // never into itself
@@ -1137,11 +1155,54 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         if (plan is not { } merge)
             return false;
 
+        return DispatchMerge(merge);
+    }
+
+    /// <summary>
+    /// A drop on a pack's icon (a side pack or the main pack) first joins
+    /// the moving amount to the first stack in that pack, or in a pack inside
+    /// it, with room for all of it. Joining takes no slot, so this comes
+    /// before any room check. A drop on a cell of the contents grid never
+    /// searches like this.
+    /// </summary>
+    private bool TryJoinStackInPack(UiItemList targetList, UiItemSlot targetCell, uint item)
+    {
+        if (!ReferenceEquals(targetList, _containerList)
+            && !ReferenceEquals(targetList, _topContainer))
+        {
+            return false;
+        }
+        uint pack = targetCell.ItemId;
+        if (_sendStackableMerge is null
+            || pack == 0u
+            || pack == item
+            || _objects.Get(item) is not { } dragged
+            || IsBag(dragged)
+            || (_objects.Get(pack)?.ItemsCapacity ?? 0) <= 0)
+        {
+            return false;
+        }
+        uint fullStack = (uint)Math.Max(dragged.StackSize, 1);
+        uint requested = _stackSplitQuantity?.GetObjectSplitSize(
+            item, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
+        return StackJoinSearch.Plan(
+                _objects,
+                item,
+                pack,
+                requested,
+                _itemInteraction?.CanMakeInventoryRequest ?? true) is { } join
+            && DispatchMerge(join);
+    }
+
+    private bool DispatchMerge(StackMergePlan merge)
+    {
         return DispatchInventoryRequest(
             InventoryRequestKind.Merge,
             merge.SourceObjectId,
             () =>
             {
+                if (_sendStackableMerge is null)
+                    return false;
                 _sendStackableMerge(
                     merge.SourceObjectId,
                     merge.TargetObjectId,
@@ -1158,13 +1219,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         Func<bool> dispatch)
         => _itemInteraction?.TryDispatchInventoryRequest(kind, itemId, dispatch)
             ?? dispatch();
-
-    private bool IsContainerFull(uint container)
-    {
-        int cap = _objects.Get(container)?.ItemsCapacity ?? 0;
-        if (cap <= 0) return false;
-        return CountLooseContents(container) >= cap;
-    }
 
     // The runtime has already moved the poured stack's shortcut for a
     // merge it sent itself; the panel only follows the selection.
@@ -1207,7 +1261,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             _objects,
             itemId,
             destinationId,
-            _playerGuid());
+            _playerGuid(),
+            MovingAmount(itemId).WholeStack);
     }
 
     private bool IsWaitingSource(uint itemGuid)

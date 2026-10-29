@@ -65,6 +65,8 @@ public sealed class ItemInteractionControllerTests
                 ObjectId = Player,
                 Name = "Player",
                 Type = ItemType.Creature,
+                ItemsCapacity = 102,
+                ContainersCapacity = 7,
             });
             Objects.AddOrUpdate(new ClientObject
             {

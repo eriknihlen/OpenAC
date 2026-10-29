@@ -302,6 +302,73 @@ public class ToolbarControllerTests
         Assert.Equal(0u, slots[Row1[0]].Cell.ItemId);
     }
 
+    // Every item cell shows a container's fullness meter, the toolbar's too:
+    // a pack holding something shows loose items over item capacity, an
+    // empty one and a plain item show none.
+    [Fact]
+    public void Populate_packShortcut_showsItsCapacityBar_andAnEmptyPackNone()
+    {
+        const uint player = 0x50000001u;
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0xC0u, Type = ItemType.Container, ItemsCapacity = 24 });
+        repo.MoveItem(0xC0u, player, 0);
+        for (uint i = 0; i < 6; i++)
+        {
+            repo.AddOrUpdate(new ClientObject { ObjectId = 0xB0u + i, Type = ItemType.Misc });
+            repo.MoveItem(0xB0u + i, 0xC0u, (int)i);
+        }
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0xC1u, Type = ItemType.Container, ItemsCapacity = 24 });
+        repo.MoveItem(0xC1u, player, 1);
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, WeenieClassId = 1u });
+        var shortcuts = new List<ShortcutEntry>
+        {
+            new(Index: 0, ObjectId: 0xC0u, SpellId: 0),
+            new(Index: 1, ObjectId: 0xC1u, SpellId: 0),
+            new(Index: 2, ObjectId: 0x5001u, SpellId: 0),
+        };
+
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_, _, _, _, _) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve,
+            playerGuid: () => player);
+
+        Assert.Equal(0.25f, slots[Row1[0]].Cell.CapacityFill);
+        Assert.Equal(-1f, slots[Row1[1]].Cell.CapacityFill);
+        Assert.Equal(-1f, slots[Row1[2]].Cell.CapacityFill);
+    }
+
+    [Fact]
+    public void ItemMovedIntoOrOutOfAPackShortcut_refreshesItsCapacityBar()
+    {
+        const uint player = 0x50000001u;
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0xC0u, Type = ItemType.Container, ItemsCapacity = 24 });
+        repo.MoveItem(0xC0u, player, 0);
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0xB0u, Type = ItemType.Misc });
+        repo.MoveItem(0xB0u, player, 1);
+        var shortcuts = new List<ShortcutEntry> { new(Index: 0, ObjectId: 0xC0u, SpellId: 0) };
+        ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_, _, _, _, _) => 0x77u, useItem: _ => { },
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve,
+            playerGuid: () => player);
+        Assert.Equal(-1f, slots[Row1[0]].Cell.CapacityFill);
+
+        repo.MoveItem(0xB0u, 0xC0u, 0);
+        Assert.Equal(1f / 24f, slots[Row1[0]].Cell.CapacityFill);
+
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0xB1u, Type = ItemType.Misc });
+        repo.MoveItem(0xB1u, 0xC0u, 1);
+        Assert.Equal(2f / 24f, slots[Row1[0]].Cell.CapacityFill);
+
+        repo.MoveItem(0xB0u, player, 1);
+        Assert.Equal(1f / 24f, slots[Row1[0]].Cell.CapacityFill);
+
+        repo.Remove(0xB1u);
+        Assert.Equal(-1f, slots[Row1[0]].Cell.CapacityFill);
+    }
+
     [Fact]
     public void DeferredRebind_whenItemArrivesLate()
     {

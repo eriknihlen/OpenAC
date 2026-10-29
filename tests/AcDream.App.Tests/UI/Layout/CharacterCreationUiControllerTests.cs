@@ -261,21 +261,21 @@ public sealed class CharacterCreationUiControllerTests
         UiScrollbar slider = Assert.IsType<UiScrollbar>(
             UiElement.FindDescendant(strengthContainer, 0x100002EEu));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.UnlockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.UnlockedFill, slider.ThumbFillSprite);
 
         lockButton.OnClick!();
         BumpRevisionAndTick(environment);
 
         Assert.True(environment.Runtime.View.Snapshot.IsAttributeLocked(ChargenAttributeId.Strength));
         Assert.Equal("Locked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.LockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.LockedFill, slider.ThumbFillSprite);
 
         lockButton.OnClick!();
         BumpRevisionAndTick(environment);
 
         Assert.False(environment.Runtime.View.Snapshot.IsAttributeLocked(ChargenAttributeId.Strength));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.UnlockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.UnlockedFill, slider.ThumbFillSprite);
     }
 
     [Fact]
@@ -875,10 +875,11 @@ public sealed class CharacterCreationUiControllerTests
         using var environment = new EnvironmentHarness();
         environment.Controller.Open();
         SelectAluvianMale(environment);
+        int callsBefore = environment.Runtime.AppearanceIndexCallCount;
 
         environment.Button(CharacterCreationAppearancePage.SkinSpinId).OnClick!();
 
-        Assert.Equal(0, environment.Runtime.AppearanceIndexCallCount);
+        Assert.Equal(callsBefore, environment.Runtime.AppearanceIndexCallCount);
     }
 
     [Fact]
@@ -1026,10 +1027,11 @@ public sealed class CharacterCreationUiControllerTests
         using var environment = new EnvironmentHarness();
         environment.Controller.Open();
         SelectAluvianMale(environment);
+        int callsBefore = environment.Runtime.AppearanceIndexCallCount;
 
         environment.Button(CharacterCreationAppearancePage.SwatchIds[^1]).OnClick!();
 
-        Assert.Equal(0, environment.Runtime.AppearanceIndexCallCount);
+        Assert.Equal(callsBefore, environment.Runtime.AppearanceIndexCallCount);
     }
 
     [Fact]
@@ -1227,6 +1229,37 @@ public sealed class CharacterCreationUiControllerTests
         // immediately inverts it to Female (2).
         Assert.Equal(2u, environment.Runtime.LastSelectedGender);
         Assert.Equal(2u, environment.Runtime.View.Snapshot.GenderKey);
+    }
+
+    // The wizard starts on the face choice, which takes the rolled headgear
+    // off so the hair shows; the clothes choice puts it back, and the face
+    // choice takes it off again.
+    [Fact]
+    public void Open_FaceChoiceTakesTheRolledHeadgearOff_ClothesChoicePutsItBack()
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Runtime.RandomizedHeritageId = AluvianId;
+        environment.Runtime.RandomizedGenderKey = GenderKey;
+        FakeView view = environment.Runtime.View;
+        view.Snapshot = view.Snapshot with
+        {
+            Appearance = view.Snapshot.Appearance with { HeadgearStyle = 1u },
+        };
+
+        environment.Controller.Open();
+        Assert.Equal(RuntimeCharacterCreationAppearance.Unset, view.Snapshot.Appearance.HeadgearStyle);
+
+        SelectAluvianMale(environment);
+        Assert.Equal(RuntimeCharacterCreationAppearance.Unset, view.Snapshot.Appearance.HeadgearStyle);
+
+        environment.Button(CharacterCreationAppearancePage.ClothesButtonId).OnClick!();
+        Assert.Equal(1u, view.Snapshot.Appearance.HeadgearStyle);
+
+        environment.Button(CharacterCreationAppearancePage.FaceButtonId).OnClick!();
+        Assert.Equal(RuntimeCharacterCreationAppearance.Unset, view.Snapshot.Appearance.HeadgearStyle);
+
+        environment.Button(CharacterCreationAppearancePage.ClothesButtonId).OnClick!();
+        Assert.Equal(1u, view.Snapshot.Appearance.HeadgearStyle);
     }
 
     [Fact]

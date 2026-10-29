@@ -231,6 +231,27 @@ public class InventoryControllerTests
         Assert.Equal(0u, containers.GetItem(0)!.ItemId);
     }
 
+    // The session ending forgets the character: the next one's inventory
+    // opens on its own main pack, not on a pack id of the last character.
+    [Fact]
+    public void SessionTableClear_returnsTheWindowToTheMainPack()
+    {
+        var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedContained(objects, 0xD0u, 0xC0u, slot: 0);
+        var uses = new List<uint>();
+        InventoryController controller = Bind(layout, objects, uses: uses);
+        containers.GetItem(0)!.Clicked!();
+        Assert.Equal(0xC0u, controller.CurrentOpenContainerId);
+
+        objects.Clear();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+
+        Assert.Equal(Player, controller.CurrentOpenContainerId);
+        Assert.Equal(0xAu, grid.GetItem(0)!.ItemId);
+    }
+
     [Fact]
     public void GenerationReplacementRemovesOldOwnedProjectionAndSelection()
     {
@@ -1023,6 +1044,45 @@ public class InventoryControllerTests
         Assert.Same(cell, root.DragSource);
         var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
         Assert.Equal(0xAu, payload.ObjId);
+    }
+
+    // Pressing a pack that is not open opens it, which changes only the
+    // contents grid: the pack's own cell stays, so the same press can still
+    // become a drag of the pack.
+    [Fact]
+    public void PressingAnUnopenedPack_opensIt_andTheSamePressDragsIt()
+    {
+        var (layout, grid, containers, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedContained(objects, 0xAu, Player, slot: 0);
+        SeedBag(objects, 0xC0u, slot: 1);
+        SeedContained(objects, 0xD0u, 0xC0u, slot: 0);
+        var uses = new List<uint>();
+        InventoryController controller = Bind(layout, objects, uses: uses);
+        // BuildLayout leaves everything at the origin; clear the pack column.
+        grid.Left = 40;
+        top.Left = 240;
+        containers.Top = 100;
+        var root = new UiRoot { Width = 800, Height = 600 };
+        root.AddChild(layout.Root);
+
+        UiItemSlot pack = containers.GetItem(0)!;
+        UiItemSlot mainPack = top.GetItem(0)!;
+        var (x, y) = AbsoluteCentre(pack);
+        root.OnMouseMove(x, y);
+        root.OnMouseDown(UiMouseButton.Left, x, y);
+
+        Assert.Equal(0xC0u, controller.CurrentOpenContainerId);
+        Assert.Equal(0xD0u, grid.GetItem(0)!.ItemId);
+        Assert.Same(pack, containers.GetItem(0));
+        Assert.Same(mainPack, top.GetItem(0));
+        Assert.Same(pack, root.Captured);
+
+        root.OnMouseMove(x + 12, y);
+
+        Assert.Same(pack, root.DragSource);
+        var payload = Assert.IsType<ItemDragPayload>(root.DragPayload);
+        Assert.Equal(0xC0u, payload.ObjId);
     }
 
     private static (int x, int y) AbsoluteCentre(UiElement element)
@@ -2556,6 +2616,31 @@ public class InventoryControllerTests
         Assert.Empty(messages);
     }
 
+    // A grid drop that falls through to a side pack asks for the slot the
+    // grid named, not that pack's top: B dropped on E (slot 1) or on A
+    // (slot 0) of the full main pack goes to the side pack 0xC there.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    public void GridDrop_fallingThroughToASidePack_asksForTheGridSlot(int cellIndex)
+    {
+        var (layout, grid, _, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 2);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedContained(objects, 0xE, Player, slot: 1, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 2, capacity: 5);
+        SeedPack(objects, 0xD, slot: 3, capacity: 5);
+        SeedContained(objects, 0xB, 0xD, slot: 0, type: ItemType.Misc);
+        var puts = new List<(uint item, uint container, int placement)>();
+        using var controller = Bind(layout, objects, puts: puts);
+        UiItemSlot cell = grid.GetItem(cellIndex)!;
+
+        controller.HandleDropRelease(grid, cell, new ItemDragPayload(0xB, ItemDragSource.Inventory, 0, cell));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, cellIndex) }, puts);
+    }
+
     [Fact]
     public void Drop_when_every_pack_is_full_reports_the_backpack_full_and_sends_nothing()
     {
@@ -2829,6 +2914,101 @@ public class InventoryControllerTests
         Assert.Equal(new[] { (0xC1u, Player, 1) }, puts);           // A B -> A C1 B
     }
 
+    private static void SeedStack(ClientObjectTable t, uint guid, uint container, int slot,
+        int size, int max = 100, uint wcid = 0x1234u)
+    {
+        t.AddOrUpdate(new ClientObject
+        {
+            ObjectId = guid,
+            WeenieClassId = wcid,
+            StackSize = size,
+            StackSizeMax = max,
+        });
+        t.MoveItem(guid, container, slot);
+    }
+
+    // A stack dropped on a pack's icon first joins the first stack in that
+    // pack with room for all of it; one with room for only part is passed over.
+    [Fact]
+    public void StackDroppedOnAPackIcon_joinsTheFirstStackThereWithRoomForAllOfIt()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 95);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 1, size: 50);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        var selection = new SelectionState();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges, selection: selection);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+        Assert.Equal(0xC2u, selection.SelectedObjectId);
+    }
+
+    // Joining a stack takes no slot: a full pack still takes the join.
+    [Fact]
+    public void StackDroppedOnAFullPackIcon_stillJoinsAStackInIt()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0, itemsCapacity: 2);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 5, wcid: 0x9999u);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 1, size: 50);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+    }
+
+    // The main pack's icon searches the main pack, then each side pack.
+    [Fact]
+    public void StackDroppedOnTheMainPackIcon_joinsAStackInASidePack()
+    {
+        var (layout, grid, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        objects.AddOrUpdate(new ClientObject { ObjectId = Player, ItemsCapacity = 102 });
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC2u, 0xC0u, slot: 0, size: 50);
+        SeedBag(objects, 0xC3u, slot: 1);
+        SeedStack(objects, 0xAu, 0xC3u, slot: 0, size: 10);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(top, top.GetItem(0)!, Payload(0xAu));
+
+        Assert.Equal(new[] { (0xAu, 0xC2u, 10u) }, merges);
+        Assert.Empty(puts);
+    }
+
+    [Fact]
+    public void StackDroppedOnAPackIcon_withNoStackWithRoomForAllOfIt_movesIntoThePack()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedStack(objects, 0xAu, Player, slot: 0, size: 10);
+        SeedBag(objects, 0xC0u, slot: 0);
+        SeedStack(objects, 0xC1u, 0xC0u, slot: 0, size: 95);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var merges = new List<(uint source, uint target, uint amount)>();
+        using var ctrl = Bind(layout, objects, puts: puts, merges: merges);
+
+        ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
+
+        Assert.Empty(merges);
+        Assert.Equal(new[] { (0xAu, 0xC0u, 0) }, puts);
+    }
+
     [Fact]
     public void MainGridItem_droppedOnAPackIcon_goesToThatPacksTop()
     {
@@ -2844,5 +3024,248 @@ public class InventoryControllerTests
         ctrl.HandleDropRelease(containers, containers.GetItem(0)!, Payload(0xAu));
 
         Assert.Equal(new[] { (0xAu, 0xC0u, 0) }, puts);
+    }
+
+    // A drop on a pack's icon searches from that pack: the pack, then the
+    // packs inside it. The main pack holds the side packs; a side pack holds
+    // none, so a full side pack is refused with its own name.
+
+    private const uint LootChest = 0x70000001u;
+    private const uint Loot = 0x70000002u;
+
+    private static RuntimeItemInteraction LootInteraction(
+        ClientObjectTable objects,
+        List<(uint item, uint container, int placement)> puts,
+        List<string> messages)
+    {
+        objects.AddOrUpdate(new ClientObject { ObjectId = LootChest, Type = ItemType.Container, ItemsCapacity = 10 });
+        SeedContained(objects, Loot, LootChest, slot: 0, type: ItemType.Misc);
+        return new RuntimeItemInteraction(
+            objects,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(objects)),
+            new InteractionState(),
+            playerGuid: () => Player,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            groundObjectId: () => LootChest,
+            systemMessage: messages.Add,
+            sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)));
+    }
+
+    private static ItemDragPayload LootPayload() => new(Loot, ItemDragSource.Ground, 0, new UiItemSlot());
+
+    [Fact]
+    public void Loot_droppedOnAFullMainPackIcon_goesToTheTopOfTheFirstSidePackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);      // main pack full
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);                          // empty
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot mainPack = top.GetItem(0)!;
+
+        // The icon still shows that the main pack itself has no room.
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(top, mainPack, LootPayload()));
+        controller.HandleDropRelease(top, mainPack, LootPayload());
+
+        Assert.Equal(new[] { (Loot, 0xCu, 0) }, puts);
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public void Loot_droppedOnAFullSidePackIcon_namesThatPackFull_andSendsNothing()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 10);                          // main pack has room
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);        // side pack full
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot sidePack = containers.GetItem(0)!;
+
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(containers, sidePack, LootPayload()));
+        controller.HandleDropRelease(containers, sidePack, LootPayload());
+
+        Assert.Empty(puts);
+        Assert.Equal(new[] { "The Pack C is completely full!" }, messages);
+    }
+
+    [Fact]
+    public void Loot_droppedOnTheMainPackIcon_withEveryPackFull_reportsTheBackpackFull()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedContained(objects, 0xE, 0xC, slot: 0, type: ItemType.Misc);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, itemInteraction: interaction);
+        UiItemSlot mainPack = top.GetItem(0)!;
+
+        controller.HandleDropRelease(top, mainPack, LootPayload());
+
+        Assert.Empty(puts);
+        Assert.Equal(new[] { "Backpack is completely full!" }, messages);
+    }
+
+    // The player's own stack moved onto the full main pack's icon. The whole
+    // stack counts as fitting in the pack that already holds it; part of a
+    // stack needs a free slot of its own, even in that pack.
+
+    /// <summary>
+    /// The stack 0xB of 10 in the side pack 0xC (room for one, so full), the
+    /// main pack full with 0xA, and the empty side pack 0xD.
+    /// </summary>
+    private static ClientObjectTable OwnStackInAFullSidePack()
+    {
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedPack(objects, 0xD, slot: 1, capacity: 2);
+        SeedStack(objects, 0xB, 0xC, slot: 0, size: 10);
+        return objects;
+    }
+
+    private static StackSplitQuantityState SplitOf(uint size, uint amount)
+    {
+        var split = new StackSplitQuantityState();
+        split.Reset(size);
+        split.SetValue(amount);
+        return split;
+    }
+
+    // Over a pack's icon the answer is that pack's free item slots alone:
+    // the whole stack already inside does not make the full pack take it.
+    [Fact]
+    public void OnDragOver_ownStackOverItsFullPacksIcon_refuses()
+    {
+        var (layout, _, containers, _, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var ctrl = (IItemListDragHandler)Bind(layout, objects);
+
+        Assert.Equal(0xCu, containers.GetItem(0)!.ItemId);
+        Assert.Equal(ItemDragAcceptance.Reject,
+            ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xB)));
+        Assert.Equal(ItemDragAcceptance.Accept,
+            ctrl.OnDragOver(containers, containers.GetItem(1)!, Payload(0xB)));
+    }
+
+    [Fact]
+    public void OwnStack_droppedWholeOnAFullMainPackIcon_movesToTheTopOfItsFullSidePack()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits);
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, 0) }, puts);
+        Assert.Empty(splits);
+    }
+
+    [Fact]
+    public void PartOfAnOwnStack_droppedOnAFullMainPackIcon_goesToTheNextPackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var selection = new SelectionState();
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u));
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xDu, 0u, 4u) }, splits);
+        Assert.Empty(puts);
+    }
+
+    [Fact]
+    public void PartOfAStack_droppedOnItsFullOpenSidePack_namesThatPackFull_andSendsNothing()
+    {
+        // A drop on the grid looks for room from the pack shown open: a side
+        // pack holds no packs, so a full one has nowhere else to look. The
+        // main pack is full and the side pack 0xD has room, but neither is
+        // where the drop looks.
+        var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        SeedPack(objects, 0xD, slot: 1, capacity: 2);
+        SeedStack(objects, 0xB, 0xC, slot: 0, size: 10);
+        SeedContained(objects, 0xE, 0xC, slot: 1, type: ItemType.Misc);
+        var selection = new SelectionState();
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u), itemInteraction: interaction);
+        containers.GetItem(0)!.Clicked!();
+        Assert.Equal(0xCu, controller.CurrentOpenContainerId);
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        UiItemSlot onTheOther = grid.GetItem(1)!;
+        Assert.Equal(0xEu, onTheOther.ItemId);
+
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(grid, onTheOther, Payload(0xB)));
+        controller.HandleDropRelease(grid, onTheOther, Payload(0xB));
+
+        Assert.Empty(puts);
+        Assert.Empty(splits);
+        Assert.Equal(new[] { "The Pack C is completely full!" }, messages);
+    }
+
+    [Fact]
+    public void AStackInTheFullMainPack_droppedWholeOnItsIcon_movesToItsTop()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedStack(objects, 0xB, Player, slot: 0, size: 10);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        var puts = new List<(uint item, uint container, int placement)>();
+        using var controller = Bind(layout, objects, puts: puts);
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, Player, 0) }, puts);
+    }
+
+    [Fact]
+    public void PartOfAStackInTheFullMainPack_droppedOnItsIcon_goesToASidePackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedStack(objects, 0xB, Player, slot: 0, size: 10);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        var selection = new SelectionState();
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u));
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, 0u, 4u) }, splits);
+        Assert.Empty(puts);
     }
 }
