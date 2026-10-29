@@ -28,6 +28,9 @@ public sealed class PluginImageFileTests
     [InlineData("icons/loot.svg", "not a .png or .jpg")]
     [InlineData("icons/loot.gif", "not a .png or .jpg")]
     [InlineData("missing.png", "does not exist")]
+    [InlineData("C:icon.png", "points outside")]
+    [InlineData(@"\\server\share\a.png", "points outside")]
+    [InlineData("//?/C:/a.png", "points outside")]
     public void ResolvePathRejectsAnythingElse(string relative, string named)
     {
         using var outer = new TemporaryDirectory();
