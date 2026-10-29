@@ -183,7 +183,8 @@ public sealed class PluginImageFileTests
             Task first = await Task.WhenAny(load, Task.Delay(TimeSpan.FromSeconds(10)));
             Assert.True(ReferenceEquals(first, load), "reading a pipe should not wait for a writer");
             Assert.False(await load);
-            Assert.Contains("not a regular file", reason, StringComparison.Ordinal);
+            // Opened without waiting, then refused by the read: a pipe has no length to read up to.
+            Assert.Contains("could not be read", reason, StringComparison.Ordinal);
         }
         finally
         {

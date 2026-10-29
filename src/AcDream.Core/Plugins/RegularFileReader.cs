@@ -5,12 +5,14 @@ using Microsoft.Win32.SafeHandles;
 namespace AcDream.Core.Plugins;
 
 /// <summary>
-/// Reads a small file a plugin ships through one open handle, and only when it
-/// is a regular file: never a directory, device, pipe (FIFO) or socket, whatever
-/// its name. Opening never waits: on Linux and macOS the file is opened without
-/// blocking, so a pipe nobody writes to cannot hold the reader up, and is then
-/// refused for what it is. What is read is what was checked, since the check
-/// and the read use the same handle.
+/// Reads a small file a plugin ships through one open handle, never waiting on
+/// it and never reading more than a limit. A folder is refused as not a regular
+/// file, and so, on Windows, is anything that is not a file on disk (a device or
+/// pipe). On Linux and macOS the file is opened without blocking, so a pipe
+/// (FIFO) nobody writes to cannot hold the reader up: it reads as empty, or its
+/// read fails, and a device that never ends (such as /dev/zero) fills the limit,
+/// so the caller refuses each for what it read. What is read is what was opened,
+/// through the one handle, never the path looked up a second time.
 /// </summary>
 internal static class RegularFileReader
 {
@@ -90,27 +92,20 @@ internal static class RegularFileReader
         return new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
     }
 
-    private static bool IsRegularFile(SafeFileHandle handle)
-    {
-        if (OperatingSystem.IsWindows())
-            return WindowsGetFileType(handle) == WindowsFileTypeDisk;
-
-        // The runtime's own file-status call, whose layout is the same on every
-        // Unix: a flags word, then the mode, whose type bits are the system's.
-        var status = new byte[512];
-        if (UnixFileStatus(handle, status) != 0)
-            throw new IOException(Marshal.GetLastPInvokeErrorMessage());
-        int mode = BitConverter.ToInt32(status, 4);
-        return (mode & UnixFileTypeMask) == UnixRegularFile;
-    }
+    /// <summary>
+    /// On Windows, whether the handle is a file on disk rather than a device or
+    /// pipe. Elsewhere there is no supported way to ask, and the non-blocking open
+    /// and the bounded read already keep anything else from waiting or running on.
+    /// </summary>
+    private static bool IsRegularFile(SafeFileHandle handle) =>
+        !OperatingSystem.IsWindows() || WindowsGetFileType(handle) == WindowsFileTypeDisk;
 
     // Read only, never waiting (a pipe with no writer opens at once), never
     // becoming the controlling terminal, closed on exec.
     private const int LinuxReadOnlyNonBlocking = 0x800 | 0x100 | 0x80000;
     private const int MacReadOnlyNonBlocking = 0x4 | 0x20000 | 0x1000000;
 
-    private const int UnixFileTypeMask = 0xF000;
-    private const int UnixRegularFile = 0x8000;
+
     private const int WindowsFileTypeDisk = 0x0001;
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
@@ -119,8 +114,6 @@ internal static class RegularFileReader
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "open", SetLastError = true)]
     private static extern int MacOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
-    [DllImport("libSystem.Native", EntryPoint = "SystemNative_FStat", SetLastError = true)]
-    private static extern int UnixFileStatus(SafeFileHandle handle, [Out] byte[] status);
 
     [DllImport("kernel32.dll", EntryPoint = "GetFileType", SetLastError = true)]
     private static extern int WindowsGetFileType(SafeFileHandle handle);
