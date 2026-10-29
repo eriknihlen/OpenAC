@@ -42,24 +42,26 @@ public sealed class MiniGameUiControllerTests
         return LayoutImporter.Build(info, _ => (0u, 0, 0), null).Root;
     }
 
+    private MiniGameUiController.ChessBindings Bindings() => new(
+        _chess,
+        CreateSquare,
+        SpriteTexture: sprite => sprite,
+        SendMove: (from, to) => _moves.Add((from, to)),
+        SendPass: () => { },
+        SendStalemate: _stalemates.Add,
+        SendQuit: () => _quits++,
+        Confirm: (message, completed) => (_confirmMessage, _confirm) = (message, completed),
+        ShowWindow: () => _shows++,
+        HideWindow: () => _hides++,
+        SetIndicatorActive: _indicator.Add);
+
     private (MiniGameUiController Controller, ImportedLayout Layout) Bind()
     {
         ImportedLayout layout = FixtureLoader.LoadMiniGame();
         MiniGameUiController controller = MiniGameUiController.Bind(
             layout,
             close: null,
-            new MiniGameUiController.ChessBindings(
-                _chess,
-                CreateSquare,
-                SpriteTexture: sprite => sprite,
-                SendMove: (from, to) => _moves.Add((from, to)),
-                SendPass: () => { },
-                SendStalemate: _stalemates.Add,
-                SendQuit: () => _quits++,
-                Confirm: (message, completed) => (_confirmMessage, _confirm) = (message, completed),
-                ShowWindow: () => _shows++,
-                HideWindow: () => _hides++,
-                SetIndicatorActive: _indicator.Add),
+            Bindings(),
             MiniGameUiController.ReadPieceImages(FixtureLoader.LoadMiniGameInfos()))!;
         return (controller, layout);
     }
@@ -116,10 +118,12 @@ public sealed class MiniGameUiControllerTests
     }
 
     [Fact]
-    public void InterfaceShutdown_TakesTheBoardHandlerOffTheItemOwner()
+    public void ClosingTheInterface_TakesTheBoardHandlerOffTheItemOwner()
     {
-        var (controller, _) = Bind();
-        using var __ = controller;
+        // Mounted and torn down the way the interface does it: the window
+        // is registered with its controller, and shutting the window manager
+        // down disposes that controller. The item owner lives on, and a
+        // later use of a board must no longer reach the old window.
         var objects = new ClientObjectTable();
         objects.AddOrUpdate(new ClientObject
         {
@@ -137,14 +141,57 @@ public sealed class MiniGameUiControllerTests
             sendUseWithTarget: null,
             sendWield: null,
             sendDrop: null);
-        items.PolicyActionRequested += controller.HandlePolicyAction;
+        ImportedLayout layout = FixtureLoader.LoadMiniGame();
+        MiniGameUiController controller = MiniGameUiController.Bind(
+            layout,
+            close: null,
+            Bindings(),
+            MiniGameUiController.ReadPieceImages(FixtureLoader.LoadMiniGameInfos()),
+            items)!;
+        var root = new UiRoot { Width = 1280, Height = 1024 };
+        RetailWindowFrame.Mount(
+            root,
+            layout.Root,
+            id => (id, 16, 16),
+            new RetailWindowFrame.Options
+            {
+                WindowName = WindowNames.MiniGame,
+                Visible = false,
+                Controller = controller,
+            });
         Assert.True(items.TryBeginGame(Board));
         Assert.Equal(1, _shows);
 
-        RetailUiRuntime.UnsubscribeItemPolicyHandlers(items, salvage: null, controller);
+        root.WindowManager.Dispose();
         items.TryBeginGame(Board);
 
         Assert.Equal(1, _shows);
+    }
+
+    [Fact]
+    public void APieceImageTooWideToBeAnId_DrawsNoPieceInsteadOfFailing()
+    {
+        ElementInfo info = FixtureLoader.LoadMiniGameInfos();
+        Assert.True(FindBoardInfo(info)!.TryGetEffectiveProperty(
+            MiniGameUiController.PieceImagesPropertyId, out UiPropertyValue list));
+        list.ArrayValue[0].UnsignedValue = 1UL << 40;
+
+        uint[] images = MiniGameUiController.ReadPieceImages(info);
+
+        Assert.Equal(0u, images[0]);
+        Assert.Equal(WhitePieceSprites + 1u, images[1]);
+    }
+
+    private static ElementInfo? FindBoardInfo(ElementInfo info)
+    {
+        if (info.Id == MiniGameUiController.BoardId)
+            return info;
+        foreach (ElementInfo child in info.Children)
+        {
+            if (FindBoardInfo(child) is { } found)
+                return found;
+        }
+        return null;
     }
 
     [Fact]

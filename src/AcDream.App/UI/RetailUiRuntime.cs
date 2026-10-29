@@ -2449,11 +2449,10 @@ public sealed class RetailUiRuntime : IDisposable
             layout,
             () => CloseWindow(WindowNames.MiniGame),
             _bindings.Chess is { } chess ? MiniGameChessBindings(chess) : null,
-            Layout.MiniGameUiController.ReadPieceImages(rootInfo));
+            Layout.MiniGameUiController.ReadPieceImages(rootInfo),
+            ItemInteraction);
         if (controller is null) return;
         MiniGameUiController = controller;
-        if (_bindings.Chess is not null)
-            ItemInteraction.PolicyActionRequested += controller.HandlePolicyAction;
         RegisterIndicatorDetailPanel(
             RetailPanelCatalog.MiniGame,
             WindowNames.MiniGame,
@@ -5403,10 +5402,8 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Inventory.ItemInteraction.SecureTradeRequested -=
                         trade.RequestSecureTrade;
                 }
-                UnsubscribeItemPolicyHandlers(
-                    _bindings.Inventory.ItemInteraction,
-                    SalvageController,
-                    MiniGameUiController);
+                if (SalvageController is { } salvage)
+                    _bindings.Inventory.ItemInteraction.PolicyActionRequested -= salvage.HandlePolicyAction;
                 _bindings.Plugins?.UnbindClientWindowControl();
                 // Open plugin dialogs are answered with their last button.
                 _pluginDialogs?.Dispose();
@@ -5442,23 +5439,6 @@ public sealed class RetailUiRuntime : IDisposable
             Host.Dispose);
         _shutdown.CompleteOrThrow();
         _disposed = _shutdown.IsComplete;
-    }
-
-    /// <summary>
-    /// Takes the windows' item-action handlers back off the item owner,
-    /// which outlives this interface; a handler left on it would keep
-    /// opening a window that is gone.
-    /// </summary>
-    internal static void UnsubscribeItemPolicyHandlers(
-        RuntimeItemInteraction items,
-        SalvageUiController? salvage,
-        MiniGameUiController? miniGame)
-    {
-        ArgumentNullException.ThrowIfNull(items);
-        if (salvage is not null)
-            items.PolicyActionRequested -= salvage.HandlePolicyAction;
-        if (miniGame is not null)
-            items.PolicyActionRequested -= miniGame.HandlePolicyAction;
     }
 
     internal static ResourceShutdownTransaction CreateShutdownTransaction(

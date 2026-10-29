@@ -53,6 +53,7 @@ public sealed class MiniGameUiController : IRetainedPanelController
     private readonly UiButton _close;
     private readonly ChessBindings? _chess;
     private readonly uint[] _pieceImages;
+    private readonly RuntimeItemInteraction? _items;
     private readonly UiButton? _resign;
     private readonly UiButton? _pass;
     private readonly UiButton? _stalemate;
@@ -69,7 +70,8 @@ public sealed class MiniGameUiController : IRetainedPanelController
         UiButton close,
         Action? closeWindow,
         ChessBindings? chess,
-        IReadOnlyList<uint>? pieceImages)
+        IReadOnlyList<uint>? pieceImages,
+        RuntimeItemInteraction? items)
     {
         _close = close;
         _close.OnClick = closeWindow;
@@ -98,17 +100,24 @@ public sealed class MiniGameUiController : IRetainedPanelController
 
         if (layout.FindElement(BoardId) is UiTemplateListBox board)
             BuildSquares(board, chess.CreateSquare);
+
+        // The item owner outlives this window, so the window takes its
+        // handler back off when it is disposed.
+        _items = items;
+        if (_items is not null)
+            _items.PolicyActionRequested += HandlePolicyAction;
     }
 
     public static MiniGameUiController? Bind(
         ImportedLayout layout,
         Action? close = null,
         ChessBindings? chess = null,
-        IReadOnlyList<uint>? pieceImages = null)
+        IReadOnlyList<uint>? pieceImages = null,
+        RuntimeItemInteraction? items = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         return layout.FindElement(CloseId) is UiButton button
-            ? new MiniGameUiController(layout, button, close, chess, pieceImages)
+            ? new MiniGameUiController(layout, button, close, chess, pieceImages, items)
             : null;
     }
 
@@ -175,6 +184,8 @@ public sealed class MiniGameUiController : IRetainedPanelController
 
     public void Dispose()
     {
+        if (_items is not null)
+            _items.PolicyActionRequested -= HandlePolicyAction;
         _close.OnClick = null;
         if (_resign is not null) _resign.OnClick = null;
         if (_pass is not null) _pass.OnClick = null;
@@ -219,7 +230,8 @@ public sealed class MiniGameUiController : IRetainedPanelController
     /// <summary>
     /// The twelve piece images listed on the board element of the window's
     /// layout, in the order <see cref="PieceSprite"/> reads them. An entry
-    /// the layout does not give as an image is zero.
+    /// the layout does not give as an image, or gives as a value too wide
+    /// to be one, is zero.
     /// </summary>
     public static uint[] ReadPieceImages(ElementInfo rootInfo)
     {
@@ -233,8 +245,10 @@ public sealed class MiniGameUiController : IRetainedPanelController
         for (int i = 0; i < images.Length && i < list.ArrayValue.Count; i++)
         {
             UiPropertyValue entry = list.ArrayValue[i];
-            if (entry.Kind == UiPropertyKind.DataId)
-                images[i] = checked((uint)entry.UnsignedValue);
+            // An image id is 32 bits; anything wider is not one, and draws
+            // no piece rather than stopping the window from mounting.
+            if (entry.Kind == UiPropertyKind.DataId && entry.UnsignedValue <= uint.MaxValue)
+                images[i] = (uint)entry.UnsignedValue;
         }
         return images;
     }
