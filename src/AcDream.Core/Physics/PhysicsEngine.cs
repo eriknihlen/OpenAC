@@ -1497,6 +1497,11 @@ public sealed class PhysicsEngine
             transition.ObjectInfo.SelfEntityId = movingEntityId;
             transition.ObjectInfo.MoverObjectId = movingObjectId;
             transition.ObjectInfo.MoverPhysicsState = body?.State ?? PhysicsStateFlags.None;
+            // Every move of a body takes its ethereal bit from the body's
+            // own state, as a placement does: an ethereal mover passes
+            // through objects that are not static.
+            transition.ObjectInfo.Ethereal =
+                (transition.ObjectInfo.MoverPhysicsState & PhysicsStateFlags.Ethereal) != 0;
             transition.ObjectInfo.TargetId = designatedTargetId;
 
             transition.ObjectInfo.State |= moverFlags;
