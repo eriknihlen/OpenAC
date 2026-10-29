@@ -56,10 +56,17 @@ public static class PluginImageFile
         try
         {
             // The header is read on its own first: a decode allocates the whole image, so an
-            // oversized one is refused on its declared size, before that allocation.
+            // oversized one is refused on its declared size, before that allocation. One whose
+            // size cannot be read from its header is refused too: its size is unknown until
+            // the decode has already allocated it.
             using (var header = new MemoryStream(bytes, writable: false))
             {
-                if (ImageInfo.FromStream(header) is { } info && !WithinMaximumDimension(info.Width, info.Height))
+                if (ImageInfo.FromStream(header) is not { } info)
+                {
+                    reason = UnreadableHeader;
+                    return false;
+                }
+                if (!WithinMaximumDimension(info.Width, info.Height))
                 {
                     reason = Oversized;
                     return false;
@@ -89,7 +96,9 @@ public static class PluginImageFile
         }
     }
 
-    private static string Oversized => $"is wider or taller than {MaximumDimension} pixels";
+    private const string UnreadableHeader = "has a header that does not say the image's size";
+
+    private static string Oversized =>$"is wider or taller than {MaximumDimension} pixels";
 
     private static bool WithinMaximumDimension(int width, int height) =>
         width <= MaximumDimension && height <= MaximumDimension;

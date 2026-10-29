@@ -117,6 +117,18 @@ public sealed class PluginImageFileTests
         Assert.Contains("could not be read", reason, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0, (byte)'n', (byte)'o', (byte)'p', (byte)'e', 1, 2, 3, 4 })]
+    [InlineData(new byte[] { 0xFF, 0xD8, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 })]
+    public void RefusesAnImageWhoseHeaderDoesNotSayItsSize(byte[] bytes)
+    {
+        using var directory = new TemporaryDirectory();
+        string path = Write(directory, "headless.png", bytes);
+
+        Assert.False(PluginImageFile.TryLoad(path, out _, out string? reason));
+        Assert.Contains("header that does not say", reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RefusesAFolderNamedLikeAnImage()
     {
