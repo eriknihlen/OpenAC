@@ -28,6 +28,7 @@ internal sealed class RuntimeFirstEntryDriveController
     private object? _routeOwner;
     private bool _handOverOpen;
     private Action<RuntimeEntityRecord>? _localPlayerCompleted;
+    private readonly List<Action> _passObservers = [];
 
     internal RuntimeFirstEntryDriveController(
         RuntimeEntityObjectLifetime entityObjects,
@@ -95,6 +96,35 @@ internal sealed class RuntimeFirstEntryDriveController
         {
             _driving = false;
         }
+
+        // Every first entry is driven here, whichever route pumps it, so a
+        // pass is the one place an entry can finish and register the objects
+        // that waited for it to arrive.
+        for (int index = 0; index < _passObservers.Count; index++)
+            _passObservers[index]();
+    }
+
+    /// <summary>
+    /// Calls <paramref name="observer"/> after every pass that drove a first
+    /// entry, from whichever route drove it, until the returned lease is
+    /// disposed. A pass may finish an entry and register the objects that
+    /// were held back until it arrived.
+    /// </summary>
+    internal IDisposable ObservePasses(Action observer)
+    {
+        ArgumentNullException.ThrowIfNull(observer);
+        _passObservers.Add(observer);
+        return new PassObservation(this, observer);
+    }
+
+    private sealed class PassObservation(
+        RuntimeFirstEntryDriveController owner,
+        Action observer) : IDisposable
+    {
+        private RuntimeFirstEntryDriveController? _owner = owner;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref _owner, null)?._passObservers.Remove(observer);
     }
 
     /// <summary>

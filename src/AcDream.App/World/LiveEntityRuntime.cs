@@ -311,7 +311,8 @@ public readonly record struct LiveEntityRegistrationResult(
     LiveEntityRecord? Projection,
     bool LogicalRegistrationCreated,
     bool ReplacedExistingGeneration,
-    Exception? PriorGenerationCleanupFailure = null);
+    Exception? PriorGenerationCleanupFailure = null,
+    bool DeferredForParent = false);
 
 public sealed class LiveEntityRuntime : ILiveEntityRadarSource
 {
@@ -484,7 +485,8 @@ public sealed class LiveEntityRuntime : ILiveEntityRadarSource
             projection,
             registration.LogicalRegistrationCreated,
             registration.ReplacedExistingGeneration,
-            registration.PriorGenerationCleanupFailure);
+            registration.PriorGenerationCleanupFailure,
+            registration.DeferredForParent);
     }
 
     public WorldEntity? MaterializeLiveEntity(

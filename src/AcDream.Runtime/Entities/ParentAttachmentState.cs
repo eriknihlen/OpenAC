@@ -163,6 +163,24 @@ public sealed class ParentAttachmentState
         _deferredCreatesByParent[window.ParentGuid] = restored;
     }
 
+    /// <summary>
+    /// True while a create of this object, of any generation, waits for its
+    /// parent to arrive.
+    /// </summary>
+    internal bool HoldsDeferredCreate(uint childGuid)
+    {
+        foreach (Queue<DeferredParentCreate> queue
+            in _deferredCreatesByParent.Values)
+        {
+            foreach (DeferredParentCreate candidate in queue)
+            {
+                if (candidate.Spawn.Guid == childGuid)
+                    return true;
+            }
+        }
+        return false;
+    }
+
     internal bool ContainsDeferredCreate(
         uint childGuid,
         ushort instanceSequence)

@@ -89,7 +89,10 @@ public sealed class TextureCache
         _uploadAllowance = allowance
             ?? throw new ArgumentNullException(nameof(allowance));
 
-    private readonly Dictionary<uint, (int Width, int Height, string Format)> _uploadMetadata = new();
+    private readonly Dictionary<uint, (int Width, int Height, string Format, long Bytes)> _uploadMetadata = new();
+
+    /// <summary>The bytes this cache has reported to the GPU memory tracker for the textures it holds, every level counted.</summary>
+    internal long TrackedTextureBytes { get; private set; }
 
     private int _dumpFrameCounter;
     private bool _surfaceHistogramAlreadyDumped;
@@ -320,7 +323,9 @@ public sealed class TextureCache
         && rs.SourceData is not null
         && rs.SourceData.Length >= rs.Width * rs.Height;
 
-    private GpuUiTextureEntry UploadUiTexture(DecodedTexture decoded, bool nearest, string debugName) =>
+    private GpuUiTextureEntry UploadUiTexture(
+        DecodedTexture decoded, bool nearest, string debugName, bool clamp = false,
+        IReadOnlyList<DecodedTexture>? mipLevels = null) =>
         UploadUiTexture(
             decoded.Rgba8,
             decoded.Width,
@@ -328,7 +333,9 @@ public sealed class TextureCache
             GpuTextureFormat.Rgba8Unorm,
             GpuTextureSwizzle.Identity,
             nearest,
-            debugName);
+            debugName,
+            clamp,
+            mipLevels);
 
     private GpuUiTextureEntry UploadUiTexture(
         ReadOnlySpan<byte> pixels,
@@ -337,7 +344,9 @@ public sealed class TextureCache
         GpuTextureFormat format,
         GpuTextureSwizzle swizzle,
         bool nearest,
-        string debugName)
+        string debugName,
+        bool clamp = false,
+        IReadOnlyList<DecodedTexture>? mipLevels = null)
     {
         IGpuTexture texture = _device.CreateTexture(new GpuTextureDescription(
             debugName,
@@ -346,15 +355,26 @@ public sealed class TextureCache
             Width: width,
             Height: height,
             LayerCount: 1,
-            MipLevelCount: 1,
+            MipLevelCount: mipLevels?.Count ?? 1,
             swizzle));
         try
         {
-            texture.Upload(0, 0, pixels);
+            if (mipLevels is null)
+            {
+                texture.Upload(0, 0, pixels);
+            }
+            else
+            {
+                for (int level = 0; level < mipLevels.Count; level++)
+                    texture.Upload(level, 0, mipLevels[level].Rgba8);
+            }
             uint glName = UploadAccountingName(texture);
-            TrackUploadedTexture(glName, width, height, format == GpuTextureFormat.R8Unorm ? 1 : 4);
+            TrackUploadedTexture(glName, width, height, format == GpuTextureFormat.R8Unorm ? 1 : 4, mipLevels);
 
-            IGpuSampler sampler = _device.CreateSampler(nearest ? UiNearestRepeat : GpuSamplerDescription.WorldRepeat);
+            IGpuSampler sampler = _device.CreateSampler(
+                nearest ? UiNearestRepeat
+                : clamp ? GpuSamplerDescription.WorldClamp
+                : GpuSamplerDescription.WorldRepeat);
             GpuTextureSlot slot = _device.RegisterTexture(texture, sampler);
             uint handle = UiTextureTableHandle.FromSlot(slot);
             if (nearest)
@@ -687,7 +707,7 @@ public sealed class TextureCache
         {
             if (!seen.Add(name)) return;
             if (!_uploadMetadata.TryGetValue(name, out var meta)) return;
-            int bytes = meta.Width * meta.Height * (meta.Format == "R8_COVERAGE" ? 1 : 4);
+            long bytes = meta.Bytes;
             totalBytes += bytes;
             sb.AppendLine($"0x{surfaceId:X8}, {meta.Width}, {meta.Height}, {meta.Format}, {bytes}");
 
@@ -872,14 +892,37 @@ public sealed class TextureCache
     /// Uploads an interface texture that the caller will give back through
     /// <see cref="ReleaseUiTexture"/>. The ad-hoc path keeps every upload for
     /// the life of the cache; this one is for art whose owner comes and goes,
-    /// such as a plugin's own images.
+    /// such as a plugin's own images. It is sampled linearly and clamped, so
+    /// a part cut from the edge of a sheet does not pick up the opposite
+    /// edge.
     /// </summary>
     internal uint UploadReleasableRgba8(byte[] rgba, int width, int height, string debugName)
     {
         ArgumentNullException.ThrowIfNull(rgba);
+        return UploadReleasable(new DecodedTexture(rgba, width, height), mipLevels: null, debugName);
+    }
+
+    /// <summary>
+    /// The same, with every smaller level as well, so art drawn far below its
+    /// own size, such as a large plugin image in a small icon, shrinks
+    /// smoothly instead of breaking up. <paramref name="mipLevels"/> is the
+    /// image and every level below it, as <see cref="RgbaMipChain.Build"/>
+    /// makes them; the caller builds them, so that work can stay off the
+    /// interface thread.
+    /// </summary>
+    internal uint UploadReleasableRgba8(IReadOnlyList<DecodedTexture> mipLevels, string debugName)
+    {
+        ArgumentNullException.ThrowIfNull(mipLevels);
+        ArgumentOutOfRangeException.ThrowIfZero(mipLevels.Count);
+        return UploadReleasable(mipLevels[0], mipLevels, debugName);
+    }
+
+    private uint UploadReleasable(
+        DecodedTexture image, IReadOnlyList<DecodedTexture>? mipLevels, string debugName)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(debugName);
         GpuUiTextureEntry entry = UploadUiTexture(
-            new DecodedTexture(rgba, width, height), nearest: false, debugName);
+            image, nearest: false, debugName, clamp: true, mipLevels: mipLevels);
         uint handle = UiTextureTableHandle.FromSlot(entry.Slot);
         _releasableUiTextures.Add(handle, entry);
         return handle;
@@ -909,10 +952,22 @@ public sealed class TextureCache
         return true;
     }
 
-    private void TrackUploadedTexture(uint name, int width, int height, int bytesPerTexel = 4)
+    /// <summary>
+    /// Reports an upload to the GPU memory tracker: its size, every level of
+    /// <paramref name="mipLevels"/> when it has smaller levels, the top level alone otherwise.
+    /// </summary>
+    private void TrackUploadedTexture(
+        uint name, int width, int height, int bytesPerTexel = 4, IReadOnlyList<DecodedTexture>? mipLevels = null)
     {
-        _uploadMetadata[name] = (width, height, bytesPerTexel == 1 ? "R8_COVERAGE" : "RGBA8_DECODED");
         long bytes = checked((long)width * height * bytesPerTexel);
+        if (mipLevels is not null)
+        {
+            bytes = 0L;
+            foreach (DecodedTexture level in mipLevels)
+                bytes = checked(bytes + (long)level.Width * level.Height * bytesPerTexel);
+        }
+        _uploadMetadata[name] = (width, height, bytesPerTexel == 1 ? "R8_COVERAGE" : "RGBA8_DECODED", bytes);
+        TrackedTextureBytes += bytes;
         Wb.GpuMemoryTracker.TrackResourceAllocation(Wb.GpuResourceType.Texture);
         Wb.GpuMemoryTracker.TrackAllocation(bytes, Wb.GpuResourceType.Texture);
     }
@@ -921,8 +976,8 @@ public sealed class TextureCache
     {
         if (_uploadMetadata.Remove(name, out var metadata))
         {
-            long bytes = checked((long)metadata.Width * metadata.Height * (metadata.Format == "R8_COVERAGE" ? 1L : 4L));
-            Wb.GpuMemoryTracker.TrackDeallocation(bytes, Wb.GpuResourceType.Texture);
+            TrackedTextureBytes -= metadata.Bytes;
+            Wb.GpuMemoryTracker.TrackDeallocation(metadata.Bytes, Wb.GpuResourceType.Texture);
             Wb.GpuMemoryTracker.TrackResourceDeallocation(Wb.GpuResourceType.Texture);
         }
     }

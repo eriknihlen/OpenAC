@@ -1942,6 +1942,47 @@ public sealed class GameEventWiringTests
     }
 
     [Fact]
+    public void WireAll_ChessEvents_ReachTheirCallbacks()
+    {
+        const uint board = 0x7A9B4001u;
+        var dispatcher = new GameEventDispatcher();
+        GameEvents.ChessJoinGameResponse? join = null;
+        GameEvents.ChessStartGame? start = null;
+        GameEvents.ChessMoveResponse? move = null;
+        GameEvents.ChessOpponentTurn? turn = null;
+        GameEvents.ChessOpponentStalemate? stalemate = null;
+        GameEvents.ChessGameOver? over = null;
+        GameEventWiring.WireAll(
+            dispatcher, new ClientObjectTable(), new CombatState(), new Spellbook(), new ChatLog(),
+            onChessJoinGameResponse: p => join = p,
+            onChessStartGame: p => start = p,
+            onChessMoveResponse: p => move = p,
+            onChessOpponentTurn: p => turn = p,
+            onChessOpponentStalemate: p => stalemate = p,
+            onChessGameOver: p => over = p);
+
+        void Send(GameEventType type, AceWireWriter wire)
+            => dispatcher.Dispatch(GameEventEnvelope.TryParse(
+                WrapEnvelope(type, wire.ToArray()))!.Value);
+        Send(GameEventType.JoinGameResponse, new AceWireWriter().Write(board).Write(0));
+        Send(GameEventType.StartGame, new AceWireWriter().Write(board).Write(0));
+        Send(GameEventType.MoveResponse, new AceWireWriter().Write(board).Write(1));
+        Send(GameEventType.OpponentTurn, new AceWireWriter().Write(board).Write(1)
+            .Write((uint)ChessMoveType.FromTo).Write(0x50000002u)
+            .Write(4).Write(6).Write(4).Write(4));
+        Send(GameEventType.OpponentStalemate, new AceWireWriter().Write(board).Write(1).Write(1));
+        Send(GameEventType.GameOver, new AceWireWriter().Write(board).Write(0));
+
+        Assert.Equal(0, join!.Value.Team);
+        Assert.Equal(0, start!.Value.FirstTeam);
+        Assert.Equal(AcDream.Core.Chess.ChessMoveResult.MovedToEmptySquare, move!.Value.Result);
+        Assert.Equal(4, turn!.Value.Move.ToY);
+        Assert.True(stalemate!.Value.Offered);
+        Assert.Equal(board, over!.Value.BoardGuid);
+        Assert.Equal(0, dispatcher.GetUnhandledCount(GameEventType.OpponentTurn));
+    }
+
+    [Fact]
     public void AGuestListReply_PrintsTheListInGreenAsOneText()
     {
         var lines = new List<(string Text, RetailLogTextType Type)>();

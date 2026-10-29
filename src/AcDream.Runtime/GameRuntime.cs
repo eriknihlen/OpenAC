@@ -109,6 +109,7 @@ internal enum GameRuntimeConstructionPoint
     JournalCreated,
     BookCreated,
     HouseCreated,
+    ChessCreated,
     MovementCreated,
     ActionsCreated,
     ItemInteractionCreated,
@@ -133,6 +134,7 @@ internal sealed class GameRuntimeConstructionContext
     public RuntimeBookState? Book { get; set; }
     public RuntimeHouseState? House { get; set; }
     public RuntimeHousePurchaseState? HousePurchase { get; set; }
+    public RuntimeChessState? Chess { get; set; }
     public RuntimeLocalPlayerMovementState? Movement { get; set; }
     public RuntimeActionState? Actions { get; set; }
     public RuntimeItemInteraction? ItemInteraction { get; set; }
@@ -321,6 +323,15 @@ public sealed class GameRuntime
                 context,
                 faultInjection);
 
+            context.Chess = new RuntimeChessState
+            {
+                OnInterfaceText = (text, type) => context.Communication.AddText(text, type),
+            };
+            Fault(
+                GameRuntimeConstructionPoint.ChessCreated,
+                context,
+                faultInjection);
+
             context.Movement = new RuntimeLocalPlayerMovementState();
             context.Movement.OnInterfaceText =
                 (text, type) => context.Communication.AddText(text, type);
@@ -355,6 +366,7 @@ public sealed class GameRuntime
                 context.Actions,
                 context.Character,
                 context.Communication,
+                context.Chess,
                 clock);
             construction.Own(context.ItemInteraction);
             // A merge any caller sends moves the poured stack's shortcut to
@@ -397,7 +409,8 @@ public sealed class GameRuntime
                 context.HousePurchase,
                 context.Contracts,
                 context.Journal,
-                context.Book);
+                context.Book,
+                context.Chess);
 
             context.Movement.AttachPhysicsPublication(
                 new RuntimeLocalPlayerPhysicsPublicationState(
@@ -441,6 +454,7 @@ public sealed class GameRuntime
             BookOwner = context.Book;
             HouseOwner = context.House;
             HousePurchaseOwner = context.HousePurchase;
+            ChessOwner = context.Chess;
             MovementOwner = context.Movement;
             ActionOwner = context.Actions;
             ItemInteractionOwner = context.ItemInteraction;
@@ -619,6 +633,7 @@ public sealed class GameRuntime
 
     public RuntimeHouseState HouseOwner { get; }
     public RuntimeHousePurchaseState HousePurchaseOwner { get; }
+    public RuntimeChessState ChessOwner { get; }
     public RuntimeActionState ActionOwner { get; }
 
     /// <summary>
@@ -802,6 +817,7 @@ public sealed class GameRuntime
 
     public IRuntimeTradeView Trade => TradeOwner.View;
     public IRuntimeHousePurchaseView HousePurchase => HousePurchaseOwner.View;
+    public IRuntimeChessView Chess => ChessOwner.View;
     public IRuntimeContractView Contracts => ContractsOwner.View;
     public IRuntimeJournalView Journal => JournalOwner.View;
     public IRuntimeBookView Book => BookOwner.View;

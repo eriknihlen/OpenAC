@@ -142,11 +142,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             InitialCreateResidences,
             Physics,
             Events,
-            (spawn, isLocalPlayer, replaceExisting) =>
-                RegisterEntityWithInitialResidence(
-                    spawn,
-                    isLocalPlayer,
-                    replaceExisting: replaceExisting),
+            RegisterReplayedDeferredChild,
             (canonical, version, spawn, replaceGeneration) =>
                 ApplyAcceptedSpawn(canonical, version, spawn, replaceGeneration));
         LocalPlayerFirstEntry = new RuntimeLocalPlayerFirstEntryState(
@@ -201,11 +197,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             InitialCreateResidences,
             Physics,
             Events,
-            (spawn, isLocalPlayer, replaceExisting) =>
-                RegisterEntityWithInitialResidence(
-                    spawn,
-                    isLocalPlayer,
-                    replaceExisting: replaceExisting),
+            RegisterReplayedDeferredChild,
             (canonical, version, spawn, replaceGeneration) =>
                 ApplyAcceptedSpawn(canonical, version, spawn, replaceGeneration));
         LocalPlayerFirstEntry = new RuntimeLocalPlayerFirstEntryState(
@@ -260,11 +252,7 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             InitialCreateResidences,
             Physics,
             Events,
-            (spawn, isLocalPlayer, replaceExisting) =>
-                RegisterEntityWithInitialResidence(
-                    spawn,
-                    isLocalPlayer,
-                    replaceExisting: replaceExisting),
+            RegisterReplayedDeferredChild,
             (canonical, version, spawn, replaceGeneration) =>
                 ApplyAcceptedSpawn(canonical, version, spawn, replaceGeneration));
         LocalPlayerFirstEntry = new RuntimeLocalPlayerFirstEntryState(
@@ -489,6 +477,38 @@ public sealed class RuntimeEntityObjectLifetime : IDisposable
             isLocalPlayer,
             retirePriorProjection,
             replaceExisting);
+
+    /// <summary>
+    /// Registers a create that waited for its parent, now that the parent's
+    /// first entry is finishing, and enters it in the object table. The host
+    /// that received the create stopped at the wait and entered nothing, so
+    /// this is the one place the object gets its entry (its name, and its
+    /// place in every list built from the table).
+    /// </summary>
+    private RuntimeEntityRegistrationResult RegisterReplayedDeferredChild(
+        WorldSession.EntitySpawn spawn,
+        bool isLocalPlayer,
+        bool replaceExisting)
+    {
+        RuntimeEntityRegistrationResult result =
+            RegisterEntityWithInitialResidence(
+                spawn,
+                isLocalPlayer,
+                replaceExisting: replaceExisting);
+        if (result.Canonical is { } canonical)
+        {
+            _ = ApplyAcceptedSpawn(
+                canonical,
+                canonical.CreateIntegrationVersion,
+                spawn,
+                // A re-sent description keeps the item record the object
+                // table already refreshed from it.
+                replaceGeneration: !replaceExisting
+                    && result.Inbound.Disposition
+                        is CreateObjectTimestampDisposition.NewGeneration);
+        }
+        return result;
+    }
 
     /// <summary>True while an object with this id is held.</summary>
     public bool IsKnown(uint guid)

@@ -34,15 +34,16 @@ public enum RuntimeGenerationResetStage
     Contracts = 16,
     Journal = 17,
     Book = 18,
-    BeginEntityRetirement = 19,
-    RetireEntities = 20,
-    DrainHostProjection = 21,
-    CompleteCanonicalEntities = 22,
-    CompleteHostProjection = 23,
-    ChatIdentity = 24,
-    PlayerSnapshots = 25,
-    PlayerIdentity = 26,
-    Complete = 27,
+    Chess = 19,
+    BeginEntityRetirement = 20,
+    RetireEntities = 21,
+    DrainHostProjection = 22,
+    CompleteCanonicalEntities = 23,
+    CompleteHostProjection = 24,
+    ChatIdentity = 25,
+    PlayerSnapshots = 26,
+    PlayerIdentity = 27,
+    Complete = 28,
 }
 
 public readonly record struct RuntimeGenerationResetSnapshot(
@@ -93,6 +94,7 @@ public sealed class RuntimeGenerationReset
     private readonly RuntimeHouseState _house;
     private readonly RuntimeHousePurchaseState _housePurchase;
     private readonly RuntimeBookState _book;
+    private readonly RuntimeChessState _chess;
     private ResetState? _state;
     private RuntimeGenerationToken _lastCompletedGeneration;
     private bool _hasCompletedGeneration;
@@ -115,7 +117,8 @@ public sealed class RuntimeGenerationReset
         RuntimeHousePurchaseState housePurchase,
         RuntimeContractState contracts,
         RuntimeJournalState journal,
-        RuntimeBookState book)
+        RuntimeBookState book,
+        RuntimeChessState chess)
     {
         _transit = transit ?? throw new ArgumentNullException(nameof(transit));
         _communication = communication
@@ -142,6 +145,7 @@ public sealed class RuntimeGenerationReset
             ?? throw new ArgumentNullException(nameof(contracts));
         _journal = journal ?? throw new ArgumentNullException(nameof(journal));
         _book = book ?? throw new ArgumentNullException(nameof(book));
+        _chess = chess ?? throw new ArgumentNullException(nameof(chess));
     }
 
     public RuntimeGenerationToken? ActiveRetiringGeneration =>
@@ -326,6 +330,9 @@ public sealed class RuntimeGenerationReset
                     break;
                 case RuntimeGenerationResetStage.Book:
                     Advance(state, _book.ResetSession);
+                    break;
+                case RuntimeGenerationResetStage.Chess:
+                    Advance(state, _chess.ResetSession);
                     break;
                 case RuntimeGenerationResetStage.BeginEntityRetirement:
                     _ = _entityObjects.BeginSessionClear();

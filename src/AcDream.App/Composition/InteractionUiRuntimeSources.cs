@@ -866,6 +866,18 @@ internal sealed class DeferredWorldLifecycleAutomationRuntime
         return false;
     }
 
+    public bool TryIsAutomationSignalPublished(
+        string name,
+        out bool published,
+        out string error)
+    {
+        if (!_deactivated && _target is { } target)
+            return target.TryIsAutomationSignalPublished(name, out published, out error);
+        published = false;
+        error = "world lifecycle automation is not bound";
+        return false;
+    }
+
     public IDisposable Bind(IRetailUiAutomationRuntime target)
     {
         ArgumentNullException.ThrowIfNull(target);

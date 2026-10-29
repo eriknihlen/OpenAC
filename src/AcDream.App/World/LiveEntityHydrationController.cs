@@ -158,7 +158,8 @@ internal interface ILiveEntityWorldOriginCoordinator
         uint playerCellId);
 }
 
-internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoadedSink
+internal sealed class LiveEntityHydrationController
+    : ILiveEntityLandblockLoadedSink, IDisposable
 {
     private readonly LiveEntityRuntime _runtime;
     private readonly RuntimeEntityObjectLifetime _entityObjects;
@@ -176,6 +177,17 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
     private readonly Dictionary<RuntimeEntityRecord, CanonicalProjectionOperation>
         _projectionOperations =
             new(ReferenceEqualityComparer.Instance);
+
+    // Creates that named a parent the client did not hold yet. The Runtime
+    // keeps each one and registers it when the parent's first entry
+    // finishes, but nothing shows it then, so it is shown from here once it
+    // is registered. A guid stays only while the Runtime still holds a
+    // create waiting for its parent.
+    private readonly HashSet<uint> _childrenAwaitingParent = [];
+    private readonly List<uint> _childSweepScratch = [];
+    private bool _sweepingChildren;
+    private bool _childSweepRequested;
+    private readonly IDisposable? _firstEntryPasses;
 
     private sealed class CanonicalProjectionOperation
     {
@@ -212,7 +224,21 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
         _deletion = deletion ?? throw new ArgumentNullException(nameof(deletion));
         _firstEntry = firstEntry;
         _acceptedPositionDrive = acceptedPositionDrive;
+        // A parent's first entry can finish on any route that drives it
+        // (a create, or the per-frame retry once its landblock's collision
+        // is ready), so the waiting children are checked after every pass.
+        _firstEntryPasses = firstEntry?.ObservePasses(() =>
+        {
+            lock (_datLock)
+                ProjectChildrenWhoseParentArrived();
+        });
     }
+
+    /// <summary>The creates still waiting here for their parent to arrive.</summary>
+    internal int ChildrenAwaitingParentCount => _childrenAwaitingParent.Count;
+
+    /// <summary>Stops watching the session's first entries.</summary>
+    public void Dispose() => _firstEntryPasses?.Dispose();
 
     internal event Action<uint>? AppearanceApplied;
 
@@ -232,6 +258,8 @@ internal sealed class LiveEntityHydrationController : ILiveEntityLandblockLoaded
             if (result.Disposition is
                 AcDream.Core.Physics.CreateObjectTimestampDisposition.StaleGeneration)
             {
+                if (registration.DeferredForParent)
+                    _childrenAwaitingParent.Add(spawn.Guid);
                 return;
             }
 
@@ -339,10 +367,65 @@ AppearanceSynchronization:
                     cleanupFailure);
             }
 
+            // A pass that finishes a parent's first entry shows the children
+            // that waited for it (see the constructor).
             _firstEntry?.DriveAll();
             // C4 route 2: same pump for a parked ForcePosition.
             _acceptedPositionDrive?.Advance();
         }
+    }
+
+    /// <summary>
+    /// Shows every waiting child the Runtime has registered since its parent
+    /// arrived, and forgets each child the Runtime no longer holds a waiting
+    /// create for (registered, or deleted before its parent came).
+    /// </summary>
+    private void ProjectChildrenWhoseParentArrived()
+    {
+        if (_childrenAwaitingParent.Count == 0)
+            return;
+        if (_sweepingChildren)
+        {
+            // Showing one child led back here: the outer pass looks again.
+            _childSweepRequested = true;
+            return;
+        }
+
+        _sweepingChildren = true;
+        try
+        {
+            do
+            {
+                _childSweepRequested = false;
+                _childSweepScratch.Clear();
+                _childSweepScratch.AddRange(_childrenAwaitingParent);
+                foreach (uint guid in _childSweepScratch)
+                {
+                    if (_runtime.TryGetCanonical(guid, out RuntimeEntityRecord canonical)
+                        && !_runtime.TryGetProjection(canonical, out _))
+                    {
+                        ProjectExact(
+                            canonical,
+                            canonical.Snapshot,
+                            LiveProjectionPurpose.SpatialRecovery,
+                            canonical.CreateIntegrationVersion);
+                    }
+                    ForgetChildIfNoLongerWaiting(guid);
+                }
+            }
+            while (_childSweepRequested && _childrenAwaitingParent.Count > 0);
+        }
+        finally
+        {
+            _childSweepScratch.Clear();
+            _sweepingChildren = false;
+        }
+    }
+
+    private void ForgetChildIfNoLongerWaiting(uint guid)
+    {
+        if (!_runtime.ParentAttachments.HoldsDeferredCreate(guid))
+            _childrenAwaitingParent.Remove(guid);
     }
 
     public bool OnAppearance(ObjDescEvent.Parsed update)
@@ -405,7 +488,14 @@ AppearanceSynchronization:
 
     public bool OnDelete(DeleteObject.Parsed delete)
     {
-        return _deletion.Delete(delete);
+        bool deleted = _deletion.Delete(delete);
+        // A child deleted before its parent arrived is no longer waiting.
+        lock (_datLock)
+        {
+            if (_childrenAwaitingParent.Contains(delete.Guid))
+                ForgetChildIfNoLongerWaiting(delete.Guid);
+        }
+        return deleted;
     }
 
     public bool OnPrune(RuntimeEntityExpiryCandidate candidate) =>
@@ -437,6 +527,8 @@ AppearanceSynchronization:
     /// </summary>
     public void OnLandblockLoaded(uint loadedLandblockId)
     {
+        lock (_datLock)
+            ProjectChildrenWhoseParentArrived();
         if (_runtime.Count == 0)
             return;
 
@@ -712,7 +804,11 @@ AppearanceSynchronization:
         }
     }
 
-    public void ResetSessionState() => _materializer.ResetSessionState();
+    public void ResetSessionState()
+    {
+        _childrenAwaitingParent.Clear();
+        _materializer.ResetSessionState();
+    }
 
     private bool SynchronizeAppearance(
         LiveEntityRecord expectedRecord,

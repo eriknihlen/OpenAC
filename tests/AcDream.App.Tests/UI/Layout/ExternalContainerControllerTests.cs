@@ -69,6 +69,7 @@ public sealed class ExternalContainerControllerTests
         public readonly ExternalContainerLifecycleController Lifecycle;
         public readonly ExternalContainerController Controller;
         public bool InRange = true;
+        public PublicWeenieFlags ContainerFlags = PublicWeenieFlags.Openable;
 
         public Harness()
         {
@@ -142,13 +143,22 @@ public sealed class ExternalContainerControllerTests
         }
 
         public void Open(uint id = Chest, params ContainerContentEntry[] contents)
+            => Open(id, itemsCapacity: 24, containersCapacity: 0, contents);
+
+        public void Open(
+            uint id,
+            int itemsCapacity,
+            int containersCapacity,
+            params ContainerContentEntry[] contents)
         {
             Objects.AddOrUpdate(new ClientObject
             {
                 ObjectId = id,
                 Type = ItemType.Container,
-                ItemsCapacity = 24,
+                ItemsCapacity = itemsCapacity,
+                ContainersCapacity = containersCapacity,
                 Useability = ItemUseability.Remote,
+                PublicWeenieBitfield = (uint)ContainerFlags,
             });
             State.RequestOpen(id);
             Objects.ReplaceContents(id, contents);
@@ -237,6 +247,178 @@ public sealed class ExternalContainerControllerTests
         Assert.True(h.Contents.HorizontalScroll);
         Assert.Same(h.Contents.Scroll,
             Assert.IsType<UiScrollbar>(h.Window.ContentRoot.Children.Last()).Model);
+    }
+
+    // A house hook holds one item, so it opens with one cell: the strips are
+    // sized from the container's capacities.
+    [Fact]
+    public void Hook_showsOneItemCell_andNoPackCells()
+    {
+        using var h = new Harness();
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0);
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(0u, h.Contents.GetItem(0)!.ItemId);
+        Assert.Equal(0, h.Containers.GetNumUIItems());
+
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0,
+            new ContainerContentEntry(Item, 0u));
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+    }
+
+    // The strip never shows more items than the container holds: the items
+    // past its capacity get no cell, and the cells still refresh in place.
+    [Fact]
+    public void ItemsPastTheCapacity_getNoCell_andCellsRefreshInPlace()
+    {
+        using var h = new Harness();
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 1u));
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0,
+            new ContainerContentEntry(Item, 0u),
+            new ContainerContentEntry(Item + 1u, 0u));
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        UiItemSlot cell = h.Contents.GetItem(0)!;
+        Assert.Equal(Item, cell.ItemId);
+
+        var properties = new PropertyBundle();
+        properties.Ints[1u] = 42;
+        Assert.True(h.Objects.UpdateAppraisal(Item, properties, Array.Empty<uint>()));
+
+        Assert.Same(cell, h.Contents.GetItem(0));
+    }
+
+    // A container that is not openable has capacity 0 whatever it sends: no
+    // item cells and no pack cells, even with something inside.
+    [Fact]
+    public void NotOpenableContainer_showsNoCells()
+    {
+        using var h = new Harness { ContainerFlags = PublicWeenieFlags.None };
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, itemsCapacity: 24, containersCapacity: 7,
+            new ContainerContentEntry(Item, 0u));
+
+        Assert.Equal(0, h.Contents.GetNumUIItems());
+        Assert.Equal(0, h.Containers.GetNumUIItems());
+    }
+
+    // The player is the one container whose capacity holds without the
+    // openable flag.
+    [Fact]
+    public void ThePlayer_keepsItsCapacity_withoutTheOpenableFlag()
+    {
+        using var h = new Harness { ContainerFlags = PublicWeenieFlags.Player };
+        h.Open(Player, itemsCapacity: 3, containersCapacity: 2);
+
+        Assert.Equal(3, h.Contents.GetNumUIItems());
+        Assert.Equal(2, h.Containers.GetNumUIItems());
+    }
+
+    // A corpse sends its capacities like any container (here 120 items and
+    // 10 packs): the item strip gets 120 cells and scrolls along them, the
+    // pack strip 10.
+    [Fact]
+    public void Corpse_getsOneCellPerUnitOfCapacity_andTheItemStripScrolls()
+    {
+        using var h = new Harness
+        {
+            ContainerFlags = PublicWeenieFlags.Openable | PublicWeenieFlags.Corpse,
+        };
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, itemsCapacity: 120, containersCapacity: 10,
+            new ContainerContentEntry(Item, 0u));
+
+        Assert.Equal(120, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+        Assert.Equal(0u, h.Contents.GetItem(119)!.ItemId);
+        Assert.Equal(10, h.Containers.GetNumUIItems());
+
+        Assert.Equal(120 * 32, h.Contents.Scroll.ContentHeight);
+        Assert.Equal(784, h.Contents.Scroll.ViewHeight);
+        Assert.True(h.Contents.GetItem(0)!.Visible);
+        Assert.False(h.Contents.GetItem(119)!.Visible);
+
+        h.Contents.ScrollItemIntoView(119);
+        h.Contents.LayoutCells();
+
+        Assert.Equal(120 * 32 - 784, h.Contents.Scroll.ScrollY);
+        Assert.True(h.Contents.GetItem(119)!.Visible);
+        Assert.Equal(784f - 32f, h.Contents.GetItem(119)!.Left);
+        Assert.False(h.Contents.GetItem(0)!.Visible);
+    }
+
+    // An item arriving in a full strip gets no cell and does not push out an
+    // item already shown: from the server, or as a pending placement.
+    [Fact]
+    public void ItemArrivingInAFullStrip_isNotShown_andTheShownItemStays()
+    {
+        using var h = new Harness();
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 1u));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 2u));
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0,
+            new ContainerContentEntry(Item, 0u));
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+
+        Assert.True(h.Objects.MoveItem(Item + 1u, Chest, 0));
+        Assert.Equal(Item + 1u, h.Objects.GetContents(Chest).First());
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+
+        Assert.True(h.Interaction.TryDispatchPendingBackpackPlacement(
+            Item + 2u, Chest, 0, InventoryRequestKind.PutInContainer, () => true));
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+    }
+
+    // Opening another pack that shows the same items (none) but holds a
+    // different number resizes the item strip to that pack's capacity.
+    [Fact]
+    public void OpeningAnotherEmptyPack_resizesTheItemStripToItsCapacity()
+    {
+        using var h = new Harness();
+        uint big = Item + 10u, small = Item + 11u, unlimited = Item + 12u;
+        foreach (var (id, capacity) in new[] { (big, 24), (small, 10), (unlimited, -1) })
+        {
+            h.Objects.AddOrUpdate(new ClientObject
+            {
+                ObjectId = id,
+                Type = ItemType.Container,
+                ItemsCapacity = capacity,
+                PublicWeenieBitfield = (uint)PublicWeenieFlags.Openable,
+            });
+        }
+        h.Open(Chest, itemsCapacity: 24, containersCapacity: 3,
+            new ContainerContentEntry(big, 0u),
+            new ContainerContentEntry(small, 0u),
+            new ContainerContentEntry(unlimited, 0u));
+
+        h.Containers.PrimaryItemPressed!(big);
+        Assert.Equal(24, h.Contents.GetNumUIItems());
+
+        h.Containers.PrimaryItemPressed!(small);
+        Assert.Equal(10, h.Contents.GetNumUIItems());
+
+        h.Containers.PrimaryItemPressed!(unlimited);
+        Assert.Equal(24, h.Contents.GetNumUIItems());
+        Assert.Null(h.Contents.FixedSlotCount);
+    }
+
+    // A negative capacity means no limit: the strips fill the window.
+    [Fact]
+    public void UnlimitedContainer_fillsTheVisibleWidth()
+    {
+        using var h = new Harness();
+        h.Open(Chest, itemsCapacity: -1, containersCapacity: -1);
+
+        Assert.Equal(24, h.Contents.GetNumUIItems());
+        Assert.Equal(18, h.Containers.GetNumUIItems());
     }
 
     [Fact]

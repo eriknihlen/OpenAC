@@ -37,6 +37,10 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     private readonly UiItemList _contentsList;
 
     private uint _openContainer;
+    // The containers whose items the strips show now, so an update keeps the
+    // shown items of a full strip instead of letting an arrival push one out.
+    private uint _packsShownFor;
+    private uint _contentsShownFor;
     private PendingBackpackPlacement? _pendingPlacement;
     private bool _closeRequested;
     private bool _disposed;
@@ -298,6 +302,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
 
         _openContainer = transition.ContainerId;
         _closeRequested = false;
+        _packsShownFor = 0u;
+        _contentsShownFor = 0u;
         ScrollToHome();
         Populate();
         _window.Show();
@@ -341,9 +347,21 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
                 Math.Clamp(pending.Placement, 0, visibleContents.Count),
                 pending.ItemId);
         }
+        int? packSlots = SlotCount(_objects.Get(root), packs: true);
+        int? itemSlots = SlotCount(_objects.Get(_openContainer), packs: false);
+        IReadOnlyList<uint> shownContainers = Shown(
+            visibleContainers, packSlots, _packsShownFor == root ? _containerList : null);
+        IReadOnlyList<uint> shownContents = Shown(
+            visibleContents, itemSlots, _contentsShownFor == _openContainer ? _contentsList : null);
+        _packsShownFor = root;
+        _contentsShownFor = _openContainer;
+
         // Flushing cells cancels a press in progress: UiRoot releases capture when the
-        // captured element leaves the tree.
-        if (TryRefreshCellsInPlace(root, visibleContainers, visibleContents))
+        // captured element leaves the tree. A strip whose cell count changed (another
+        // container opened, or its capacity changed) is rebuilt.
+        if (_containerList.FixedSlotCount == packSlots
+            && _contentsList.FixedSlotCount == itemSlots
+            && TryRefreshCellsInPlace(root, shownContainers, shownContents))
         {
             ApplyIndicators();
             return;
@@ -352,12 +370,14 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         _topContainer.Flush();
         _containerList.Flush();
         _contentsList.Flush();
+        _containerList.FixedSlotCount = packSlots;
+        _contentsList.FixedSlotCount = itemSlots;
 
         AddRootCell(root);
-        foreach (uint guid in visibleContainers)
+        foreach (uint guid in shownContainers)
             AddContainerCell(guid);
 
-        foreach (uint guid in visibleContents)
+        foreach (uint guid in shownContents)
             AddContentsCell(guid, IsWaiting(guid));
         ApplyIndicators();
     }
@@ -393,7 +413,38 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         return true;
     }
 
-    // The lists pad themselves with empty cells (FillVisibleEmptySlots).
+    /// <summary>
+    /// The guids a strip with <paramref name="slots"/> cells shows, in their
+    /// order. When there are more than its cells, an item it shows already
+    /// (<paramref name="current"/>, the strip as it stands for the same
+    /// container) keeps its cell, so an item arriving in a full strip is not
+    /// shown; the free cells go to the first of the others.
+    /// </summary>
+    private static IReadOnlyList<uint> Shown(
+        IReadOnlyList<uint> guids, int? slots, UiItemList? current)
+    {
+        if (slots is not int count || guids.Count <= Math.Max(0, count))
+            return guids;
+        count = Math.Max(0, count);
+        var keep = new HashSet<uint>();
+        if (current is not null)
+        {
+            for (int i = 0; i < current.GetNumUIItems() && keep.Count < count; i++)
+            {
+                if (current.GetItem(i)?.ItemId is uint id and not 0u && guids.Contains(id))
+                    keep.Add(id);
+            }
+        }
+        foreach (uint guid in guids)
+        {
+            if (keep.Count >= count) break;
+            keep.Add(guid);
+        }
+        return guids.Where(keep.Contains).ToArray();
+    }
+
+    // A list pads itself with empty cells past its items, to its width or to
+    // its fixed cell count.
     private static bool Matches(UiItemList list, IReadOnlyList<uint> guids)
     {
         if (list.GetNumUIItems() < guids.Count) return false;
@@ -551,6 +602,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
 
     private void ClearLists()
     {
+        _packsShownFor = 0u;
+        _contentsShownFor = 0u;
         _topContainer.Flush();
         _containerList.Flush();
         _contentsList.Flush();
@@ -685,6 +738,26 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         }
         int dropIndex = targetCell.ItemId != 0u ? targetCell.SlotIndex : int.MaxValue;   // an empty cell is past the last item
         return ItemListDropPlacement.Resolve(dropIndex, count, source, wholeStack);
+    }
+
+    /// <summary>
+    /// A container's strip has one cell per unit of its capacity: the pack
+    /// strip from its pack capacity, the item strip from its item capacity,
+    /// so a house hook (item capacity 1) shows one cell. A container that is
+    /// not openable (and is not the player) has capacity 0 and shows no
+    /// cells. A negative capacity means no limit: the strip fills its width
+    /// (null).
+    /// </summary>
+    private int? SlotCount(ClientObject? container, bool packs)
+    {
+        if (container is null)
+            return null;
+        bool openable = ((PublicWeenieFlags)(container.PublicWeenieBitfield ?? 0u)
+            & PublicWeenieFlags.Openable) != 0;
+        if (!openable && container.ObjectId != _itemInteraction.PlayerGuid)
+            return 0;
+        int capacity = packs ? container.ContainersCapacity : container.ItemsCapacity;
+        return capacity >= 0 ? capacity : null;
     }
 
     private static bool IsContainer(ClientObject? item)

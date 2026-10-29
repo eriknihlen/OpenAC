@@ -208,6 +208,14 @@ public sealed class BufferedUiRegistry : IScopedUiRegistry, IPluginDirectoryUiRe
         }
     }
 
+    /// <summary>
+    /// The image table of one plugin, made if the plugin has none yet: where
+    /// the file icons its markup draws are held, under the same budget as the
+    /// images it asks for itself.
+    /// </summary>
+    internal PluginImageTable ImageTableFor(PluginUiOwner owner) =>
+        ((PluginImages)ImagesFor(owner)).Table;
+
     /// <summary>The image surface of one plugin, or null when none was made.</summary>
     internal PluginImages? FindImages(PluginUiOwner owner)
     {

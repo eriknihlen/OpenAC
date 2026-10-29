@@ -23,6 +23,7 @@ internal static class RuntimeItemInteractionComposition
         RuntimeActionState actions,
         RuntimeCharacterState character,
         RuntimeCommunicationState communication,
+        RuntimeChessState chess,
         IGameRuntimeClock clock)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -31,6 +32,7 @@ internal static class RuntimeItemInteractionComposition
         ArgumentNullException.ThrowIfNull(actions);
         ArgumentNullException.ThrowIfNull(character);
         ArgumentNullException.ThrowIfNull(communication);
+        ArgumentNullException.ThrowIfNull(chess);
         ArgumentNullException.ThrowIfNull(clock);
 
         WorldSession? Live() => session.CurrentSession;
@@ -149,6 +151,13 @@ internal static class RuntimeItemInteractionComposition
                     return false;
                 live.SendSalvage(toolGuid, itemGuids);
                 return true;
+            },
+            // Using a board begins its game here, so a client with no window
+            // joins exactly as one with a window does.
+            beginGame: board =>
+            {
+                if (chess.Begin(board))
+                    Live()?.SendChessJoin(board);
             });
         return owner;
     }

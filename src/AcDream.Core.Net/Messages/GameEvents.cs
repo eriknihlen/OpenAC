@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Text;
+using AcDream.Core.Chess;
 using AcDream.Core.Items;
 
 namespace AcDream.Core.Net.Messages;
@@ -921,6 +922,127 @@ public static class GameEvents
                 maintenanceFree, type, ownerName, buy, rent);
         }
         catch { return null; }
+    }
+
+    // Chess.
+    // Every event leads with the board guid; "team" is the side, 0 or 1.
+
+    /// <summary>0x0281 JoinGameResponse: the team you joined as, or -1 when
+    /// you could not join.</summary>
+    public readonly record struct ChessJoinGameResponse(uint BoardGuid, int Team);
+
+    public static ChessJoinGameResponse? ParseChessJoinGameResponse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8) return null;
+        return new ChessJoinGameResponse(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4)));
+    }
+
+    /// <summary>0x0282 StartGame: the team that moves first.</summary>
+    public readonly record struct ChessStartGame(uint BoardGuid, int FirstTeam);
+
+    public static ChessStartGame? ParseChessStartGame(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8) return null;
+        return new ChessStartGame(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4)));
+    }
+
+    /// <summary>0x0283 MoveResponse: the server's verdict on your last move.</summary>
+    public readonly record struct ChessMoveResponse(uint BoardGuid, ChessMoveResult Result);
+
+    public static ChessMoveResponse? ParseChessMoveResponse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8) return null;
+        return new ChessMoveResponse(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            (ChessMoveResult)BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4)));
+    }
+
+    /// <summary>
+    /// One chess move. Which fields are set depends on
+    /// <see cref="Type"/>: a <see cref="ChessMoveType.Grid"/> square lands in
+    /// FromX/FromY, FromTo fills all four
+    /// coordinates, and SelectedPiece fills only PieceGuid.
+    /// </summary>
+    public readonly record struct ChessMove(
+        ChessMoveType Type,
+        uint PlayerGuid,
+        int FromX,
+        int FromY,
+        int ToX,
+        int ToY,
+        uint PieceGuid);
+
+    /// <summary>0x0284 OpponentTurn: the move the other side just made.</summary>
+    public readonly record struct ChessOpponentTurn(uint BoardGuid, int Team, ChessMove Move);
+
+    public static ChessOpponentTurn? ParseChessOpponentTurn(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 16) return null;
+        uint board = BinaryPrimitives.ReadUInt32LittleEndian(payload);
+        int team = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4));
+        var type = (ChessMoveType)BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(8));
+        uint player = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(12));
+        ReadOnlySpan<byte> rest = payload.Slice(16);
+
+        // Only these three types carry fields after the player guid.
+        int needed = type switch
+        {
+            ChessMoveType.Grid => 8,
+            ChessMoveType.FromTo => 16,
+            ChessMoveType.SelectedPiece => 4,
+            _ => 0,
+        };
+        if (rest.Length < needed) return null;
+
+        ChessMove move = type switch
+        {
+            ChessMoveType.Grid => new ChessMove(type, player,
+                BinaryPrimitives.ReadInt32LittleEndian(rest),
+                BinaryPrimitives.ReadInt32LittleEndian(rest.Slice(4)), 0, 0, 0u),
+            ChessMoveType.FromTo => new ChessMove(type, player,
+                BinaryPrimitives.ReadInt32LittleEndian(rest),
+                BinaryPrimitives.ReadInt32LittleEndian(rest.Slice(4)),
+                BinaryPrimitives.ReadInt32LittleEndian(rest.Slice(8)),
+                BinaryPrimitives.ReadInt32LittleEndian(rest.Slice(12)), 0u),
+            ChessMoveType.SelectedPiece => new ChessMove(type, player, 0, 0, 0, 0,
+                BinaryPrimitives.ReadUInt32LittleEndian(rest)),
+            _ => new ChessMove(type, player, 0, 0, 0, 0, 0u),
+        };
+        return new ChessOpponentTurn(board, team, move);
+    }
+
+    /// <summary>0x0285 OpponentStalemateState: the other side offered (true)
+    /// or withdrew (false) a draw.</summary>
+    public readonly record struct ChessOpponentStalemate(uint BoardGuid, int Team, bool Offered);
+
+    public static ChessOpponentStalemate? ParseChessOpponentStalemate(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 12) return null;
+        return new ChessOpponentStalemate(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4)),
+            BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(8)) != 0);
+    }
+
+    /// <summary>
+    /// 0x028C GameOver: the winning team, -1 for a stalemate, or -2 when the
+    /// game ended with no result (nobody won or lost).
+    /// </summary>
+    public readonly record struct ChessGameOver(uint BoardGuid, int Winner);
+
+    public const int ChessStalemateWinner = -1;
+    public const int ChessNoResultWinner = -2;
+
+    public static ChessGameOver? ParseChessGameOver(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 8) return null;
+        return new ChessGameOver(
+            BinaryPrimitives.ReadUInt32LittleEndian(payload),
+            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(4)));
     }
 
     private static List<HousePayment>? ReadHousePaymentList(ReadOnlySpan<byte> payload, ref int pos)

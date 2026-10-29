@@ -378,6 +378,14 @@ public readonly record struct PluginInventoryItem(
     public uint CoverageMask { get; init; }
 
     /// <summary>
+    /// The kinds of item a house hook will take, as the item-type bits the
+    /// server sends with the object; zero for anything that is not a hook,
+    /// and for a hook the server sent none for. The original client's macro
+    /// tools read this as the hook mask.
+    /// </summary>
+    public uint HookItemTypes { get; init; }
+
+    /// <summary>
     /// The item's name for more than one of it; an empty string when the
     /// server did not send one.
     /// </summary>

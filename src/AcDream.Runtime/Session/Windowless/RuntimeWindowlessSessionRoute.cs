@@ -269,6 +269,7 @@ internal sealed class RuntimeWindowlessSessionRoute : IDisposable
                 Allegiance: runtime.AllegianceOwner,
                 House: runtime.HouseOwner,
                 HousePurchase: runtime.HousePurchaseOwner,
+                Chess: runtime.ChessOwner,
                 Contracts: runtime.ContractsOwner,
                 PlayerGuid: () => runtime.PlayerIdentity.ServerGuid,
                 OnLocalPlayerDeath:

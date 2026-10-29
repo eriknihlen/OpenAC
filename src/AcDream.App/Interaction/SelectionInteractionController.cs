@@ -465,7 +465,8 @@ internal sealed class SelectionInteractionController
         // approach was previously armed -- the newest click wins.
         CancelPendingApproach();
 
-        if (_items.TryOpenSecureTradeWithPlayer(serverGuid))
+        if (_items.TryOpenSecureTradeWithPlayer(serverGuid)
+            || _items.TryBeginGame(serverGuid))
         {
             reservation?.CancelBeforeDispatch();
             return AutomationUseOutcome.Started;

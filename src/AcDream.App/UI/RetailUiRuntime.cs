@@ -296,6 +296,13 @@ public sealed record ConnectionRuntimeBindings(
     Action RequestExit,
     bool ShowProgress = true);
 
+public sealed record ChessRuntimeBindings(
+    AcDream.Runtime.Gameplay.RuntimeChessState Chess,
+    Action<int /*fromX*/, int /*fromY*/, int /*toX*/, int /*toY*/> SendMove,
+    Action SendPass,
+    Action<bool /*offer*/> SendStalemate,
+    Action SendQuit);
+
 public sealed record BookRuntimeBindings(
     AcDream.Runtime.Gameplay.IRuntimeBookView Book,
     AcDream.Runtime.Gameplay.RuntimeBookState Commands,
@@ -346,6 +353,7 @@ public sealed record RetailUiRuntimeBindings(
     Func<bool>? IsGameplayDisplay = null,
     Action? SynchronizeDisplayPhase = null,
     BookRuntimeBindings? Book = null,
+    ChessRuntimeBindings? Chess = null,
     Func<IReadOnlyList<PluginWorldLabel>>? WorldLabels = null,
     Func<uint, AcDream.App.Interaction.WorldLabelAnchor?>? WorldLabelAnchor = null,
     PluginCanvasHostServices? PluginCanvases = null,
@@ -424,6 +432,8 @@ public sealed class RetailUiRuntime : IDisposable
     private Func<ImportedLayout?>? _pluginDialogLayout;
     private UiNineSlicePanel? _pluginAppearance;
     private readonly Dictionary<string, (uint Texture, int Width, int Height)?> _pluginIcons = [];
+    private PluginFileImageLoader? _pluginFileImages;
+    private readonly List<PluginMarkupIconResolver> _pluginWindowIcons = [];
     private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
@@ -763,6 +773,7 @@ public sealed class RetailUiRuntime : IDisposable
         JumpPowerbarController?.Tick();
         SecureTradeController?.Tick();
         HousePurchaseController?.Tick();
+        MiniGameUiController?.Tick();
         SelectedObjectController?.Tick(deltaSeconds);
         ExternalContainerController?.Tick();
         SocialPanelController?.Tick();
@@ -778,6 +789,9 @@ public sealed class RetailUiRuntime : IDisposable
         CharacterCreationController?.Tick();
         DialogFactory?.Tick();
         _pluginDialogs?.Tick();
+        // Plugin windows let go of the file icons they have stopped drawing.
+        foreach (PluginMarkupIconResolver windowIcons in _pluginWindowIcons)
+            windowIcons.ReleaseUndrawn();
         // Windows a plugin registered after the UI came up (a server-fed panel
         // arrives once the character is in the world). Same path as the first
         // mount; each registration is drained once.
@@ -2438,7 +2452,10 @@ public sealed class RetailUiRuntime : IDisposable
 
         MiniGameUiController? controller = Layout.MiniGameUiController.Bind(
             layout,
-            () => CloseWindow(WindowNames.MiniGame));
+            () => CloseWindow(WindowNames.MiniGame),
+            _bindings.Chess is { } chess ? MiniGameChessBindings(chess) : null,
+            Layout.MiniGameUiController.ReadPieceImages(rootInfo),
+            ItemInteraction);
         if (controller is null) return;
         MiniGameUiController = controller;
         RegisterIndicatorDetailPanel(
@@ -2448,6 +2465,32 @@ public sealed class RetailUiRuntime : IDisposable
             layout.Root,
             controller);
     }
+
+    private MiniGameUiController.ChessBindings MiniGameChessBindings(ChessRuntimeBindings chess)
+        => new(
+            chess.Chess,
+            CreateSquare: () =>
+            {
+                lock (_bindings.Assets.DatLock)
+                {
+                    return LayoutImporter.Import(
+                        _bindings.Assets.Dats,
+                        MiniGameUiController.LayoutId,
+                        MiniGameUiController.SquareTemplateId,
+                        _bindings.Assets.ResolveSprite,
+                        _bindings.Assets.DefaultFont,
+                        _bindings.Assets.ResolveFont)?.Root;
+                }
+            },
+            SpriteTexture: sprite => _bindings.Assets.ResolveSprite(sprite).Texture,
+            SendMove: (from, to) => chess.SendMove(from.X, from.Y, to.X, to.Y),
+            SendPass: chess.SendPass,
+            SendStalemate: chess.SendStalemate,
+            SendQuit: chess.SendQuit,
+            Confirm: (message, completed) => ShowConfirmation(message, completed),
+            ShowWindow: () => ShowWindow(WindowNames.MiniGame),
+            HideWindow: () => HideWindow(WindowNames.MiniGame),
+            SetIndicatorActive: active => IndicatorBarController?.SetMiniGameActive(active));
 
     private void RegisterIndicatorDetailPanel(
         uint panelId,
@@ -4140,6 +4183,8 @@ public sealed class RetailUiRuntime : IDisposable
             _bindings.Assets.Dats,
             _bindings.Assets.Icons,
             _bindings.Toolbar.Objects);
+        // Plugin markup's file icons are read here and held in each plugin's image table.
+        _pluginFileImages ??= new PluginFileImageLoader();
 
         // Hotkey boxes show keys by the game's own names. The table reads go
         // through the dat lock like every other plugin-thread dat read.
@@ -4160,6 +4205,15 @@ public sealed class RetailUiRuntime : IDisposable
 
         foreach (var panel in _bindings.Plugins.Drain())
         {
+            PluginUiOwner owner = panel.Owner;
+            // The window's own hold on its file icons, let go when it is unmounted.
+            var windowIcons = new PluginMarkupIconResolver(
+                iconResolver,
+                _pluginFileImages,
+                () => _bindings.Plugins?.ImageTableFor(owner),
+                owner.Id,
+                panel.PluginDirectory);
+            _pluginWindowIcons.Add(windowIcons);
             try
             {
                 string xml = panel.MarkupContent
@@ -4170,7 +4224,8 @@ public sealed class RetailUiRuntime : IDisposable
                     _bindings.Assets.ResolveSprite,
                     _bindings.Assets.Controls,
                     _bindings.Assets.DefaultFont,
-                    iconResolver, _pluginThemes,
+                    windowIcons,
+                    _pluginThemes,
                     fallbackTitle: panel.Descriptor.Title,
                     controlState: _controlState.ForWindow(panel.WindowName),
                     describeKey: describeKey,
@@ -4202,7 +4257,12 @@ public sealed class RetailUiRuntime : IDisposable
                 RetailWindowHandle handle = window.Register(Host.WindowManager, panel.WindowName, visibility);
                 _bindings.Plugins.CompleteWindowMount(
                     panel,
-                    () => Host.WindowManager.Unregister(panel.WindowName));
+                    () =>
+                    {
+                        Host.WindowManager.Unregister(panel.WindowName);
+                        windowIcons.Dispose();
+                        _pluginWindowIcons.Remove(windowIcons);
+                    });
 
                 if (panel.Descriptor.ShowInSidePanel)
                 {
@@ -4233,6 +4293,8 @@ public sealed class RetailUiRuntime : IDisposable
             catch (Exception ex)
             {
                 _bindings.Plugins.FailMount(panel);
+                windowIcons.Dispose();
+                _pluginWindowIcons.Remove(windowIcons);
                 Console.WriteLine($"[UI] plugin UI panel '{panel.MarkupPath}' failed to load: {ex.Message}");
             }
         }

@@ -19,6 +19,8 @@ internal sealed class FakeAceTransport : IWorldSessionTransport
     private readonly SemaphoreSlim _deliverable = new(0);
     private readonly Queue<byte[]> _toClient = new();
     private readonly IPEndPoint _serverEndpoint = new(IPAddress.Loopback, 9000);
+    private int _asyncReceiveCalls;
+    private int _asyncReceived;
 
     public VirtualClock Clock { get; }
     public LossyLink Link { get; }
@@ -166,13 +168,38 @@ internal sealed class FakeAceTransport : IWorldSessionTransport
         Memory<byte> destination,
         CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _asyncReceiveCalls);
         await _deliverable.WaitAsync(cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
             byte[] datagram = _toClient.Dequeue();
             datagram.CopyTo(destination);
+            Interlocked.Increment(ref _asyncReceived);
             return new NetReceiveResult(datagram.Length, _serverEndpoint);
         }
+    }
+
+    /// <summary>
+    /// Waits until the session's background receiver has taken every datagram
+    /// sent to the client and is waiting for the next one, so each one it took
+    /// is already in the session's inbound queue. A test that drives the
+    /// session with the virtual clock calls this before <c>Tick()</c>; without
+    /// it, a busy host delays the receiver and the client reads packets late
+    /// in virtual time.
+    /// </summary>
+    public void WaitForReceiverIdle(TimeSpan? timeout = null)
+    {
+        bool Idle()
+        {
+            lock (_gate)
+            {
+                return _toClient.Count == 0
+                    && Volatile.Read(ref _asyncReceiveCalls) > Volatile.Read(ref _asyncReceived);
+            }
+        }
+
+        if (!SpinWait.SpinUntil(Idle, timeout ?? TimeSpan.FromSeconds(10)))
+            throw new TimeoutException("the session's receiver did not take every datagram");
     }
 
     public void Dispose()

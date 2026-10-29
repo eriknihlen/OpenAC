@@ -248,6 +248,7 @@ internal sealed class LiveSessionRuntimeFactory
                 Trade: _domain.Runtime.TradeOwner,
                 House: _domain.Runtime.HouseOwner,
                 HousePurchase: _domain.Runtime.HousePurchaseOwner,
+                Chess: _domain.Runtime.ChessOwner,
                 Contracts: _domain.Runtime.ContractsOwner,
                 PlayerGuid: () => _player.Identity.ServerGuid,
                 OnLocalPlayerDeath:

@@ -123,6 +123,14 @@ public sealed class UiItemList : UiElement
 
     public bool FillVisibleEmptySlots { get; set; }
 
+    /// <summary>
+    /// When set, the list holds exactly this many cells, whatever its width,
+    /// in place of <see cref="FillVisibleEmptySlots"/>: it pads with empty
+    /// cells, and drops the last cells past the count even when they hold
+    /// an item, so a container never shows more items than it can hold.
+    /// </summary>
+    public int? FixedSlotCount { get; set; }
+
     public Func<UiItemSlot>? EmptySlotFactory { get; set; }
 
     public static int RowCount(int cellCount, int columns)
@@ -152,6 +160,10 @@ public sealed class UiItemList : UiElement
 
     internal void LayoutCells()
     {
+        // A fixed cell count holds whatever the cell size; the width only
+        // decides how many cells fill the strip without one.
+        UpdateEmptySlots();
+
         if (CellWidth <= 0f)
         {
             if (_cells.Count > 0)
@@ -161,8 +173,6 @@ public sealed class UiItemList : UiElement
             }
             return;
         }
-
-        UpdateEmptySlots();
 
         int cols = SingleRow
             ? Math.Max(1, _cells.Count)
@@ -209,10 +219,13 @@ public sealed class UiItemList : UiElement
 
     private void UpdateEmptySlots()
     {
-        if (!FillVisibleEmptySlots || !SingleRow || CellWidth <= 0f)
+        if (FixedSlotCount is null
+            && (!FillVisibleEmptySlots || !SingleRow || CellWidth <= 0f))
             return;
 
-        int visibleCellCount = Math.Max(0, (int)MathF.Floor(Width / CellWidth));
+        int visibleCellCount = FixedSlotCount is int fixedCount
+            ? Math.Max(0, fixedCount)
+            : Math.Max(0, (int)MathF.Floor(Width / CellWidth));
         while (_cells.Count < visibleCellCount)
         {
             UiItemSlot cell = EmptySlotFactory?.Invoke() ?? new UiItemSlot();
@@ -225,7 +238,8 @@ public sealed class UiItemList : UiElement
             AddChild(cell);
         }
 
-        while (_cells.Count > visibleCellCount && _cells[^1].IsEmptySlot)
+        while (_cells.Count > visibleCellCount
+            && (FixedSlotCount is not null || _cells[^1].IsEmptySlot))
         {
             UiItemSlot cell = _cells[^1];
             _cells.RemoveAt(_cells.Count - 1);

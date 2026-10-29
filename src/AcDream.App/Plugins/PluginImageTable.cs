@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AcDream.Core.Textures;
 using StbImageSharp;
 
 namespace AcDream.App.Plugins;
@@ -59,6 +60,13 @@ internal interface IPluginImageBackend
     /// <summary>Uploads art the plugin supplied. The handle comes back through <see cref="ReleaseOwned"/>.</summary>
     uint UploadOwned(byte[] rgba, int width, int height, string debugName);
 
+    /// <summary>
+    /// Uploads art the plugin supplied together with its smaller levels, the
+    /// image first. A backend that draws no smaller levels uploads the image alone.
+    /// </summary>
+    uint UploadOwned(IReadOnlyList<DecodedTexture> mipLevels, string debugName) =>
+        UploadOwned(mipLevels[0].Rgba8, mipLevels[0].Width, mipLevels[0].Height, debugName);
+
     /// <summary>Gives back a texture from <see cref="UploadOwned"/>.</summary>
     bool ReleaseOwned(uint texture);
 }
@@ -84,6 +92,7 @@ internal sealed class PluginImageTable : IDisposable
         SpellIcon,
         ObjectIcon,
         Decoded,
+        File,
     }
 
     private readonly record struct Key(Kind Kind, uint Id, string? Name);
@@ -141,6 +150,13 @@ internal sealed class PluginImageTable : IDisposable
     internal bool IsBound => _backend is not null;
 
     /// <summary>
+    /// Moves on each time an image is let go of completely and each time the
+    /// table is bound: a request refused for want of room, or because the
+    /// table was not bound, may succeed once this has moved.
+    /// </summary>
+    internal long ReleaseGeneration { get; private set; }
+
+    /// <summary>
     /// Points the table at the interface's texture services.
     /// <paramref name="uiThreadId"/> is the interface thread, the only thread
     /// the table then accepts requests from. It is passed in rather than
@@ -156,6 +172,7 @@ internal sealed class PluginImageTable : IDisposable
             throw new InvalidOperationException("The image table is already bound.");
         _backend = backend;
         _uiThreadId = uiThreadId;
+        ReleaseGeneration++;
     }
 
     /// <summary>
@@ -273,19 +290,53 @@ internal sealed class PluginImageTable : IDisposable
             return PluginImageHandle.None;
 
         long bytes = checked((long)decoded.Width * decoded.Height * 4L);
-        if (_ownedBytes + bytes > Budget.MaximumBytes)
-        {
-            ReportOnce(
-                $"bytes:{name}",
-                $"image '{name}' would take the plugin's own art to "
-                + $"{_ownedBytes + bytes:N0} bytes; the budget is {Budget.MaximumBytes:N0}");
+        if (!IsWithinByteBudget(name, bytes))
             return PluginImageHandle.None;
-        }
 
         uint texture = backend.UploadOwned(
             decoded.Data, decoded.Width, decoded.Height, $"plugin-{_ownerId}-{name}");
         _ownedBytes += bytes;
         return Add(key, texture, decoded.Width, decoded.Height, bytes).Handle;
+    }
+
+    /// <summary>
+    /// An image file the plugin ships, which plugin markup names by path,
+    /// read and decoded already, away from the interface thread. It is held
+    /// under its path and the version of the file it was read from, so a
+    /// window built after the file changed gets the new image while a window
+    /// still showing the old one keeps it until that window lets go. Its
+    /// smaller levels count against the byte budget with the image itself.
+    /// </summary>
+    internal PluginImageHandle AcquireFile(PluginFileImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        ArgumentOutOfRangeException.ThrowIfZero(image.MipLevels.Count);
+        if (!TryEnter(out IPluginImageBackend? backend))
+            return PluginImageHandle.None;
+
+        var key = new Key(Kind.File, 0u, $"{image.Path}\n{image.Version}");
+        if (_byKey.TryGetValue(key, out Entry? held))
+        {
+            held.RefCount++;
+            return held.Handle;
+        }
+
+        string name = image.Path;
+        if (!HasRoomForOneMore($"image '{name}'"))
+            return PluginImageHandle.None;
+        DecodedTexture top = image.MipLevels[0];
+        if (!IsWithinMaximumDimension(name, top.Width, top.Height))
+            return PluginImageHandle.None;
+
+        long bytes = 0L;
+        foreach (DecodedTexture level in image.MipLevels)
+            bytes = checked(bytes + level.Rgba8.LongLength);
+        if (!IsWithinByteBudget(name, bytes))
+            return PluginImageHandle.None;
+
+        uint texture = backend.UploadOwned(image.MipLevels, $"plugin-{_ownerId}-{name}");
+        _ownedBytes += bytes;
+        return Add(key, texture, top.Width, top.Height, bytes).Handle;
     }
 
     /// <summary>
@@ -398,6 +449,17 @@ internal sealed class PluginImageTable : IDisposable
         return false;
     }
 
+    private bool IsWithinByteBudget(string name, long bytes)
+    {
+        if (_ownedBytes + bytes <= Budget.MaximumBytes)
+            return true;
+        ReportOnce(
+            $"bytes:{name}",
+            $"image '{name}' would take the plugin's own art to "
+            + $"{_ownedBytes + bytes:N0} bytes; the budget is {Budget.MaximumBytes:N0}");
+        return false;
+    }
+
     private bool HasRoomForOneMore(string what)
     {
         if (_byId.Count < Budget.MaximumCount)
@@ -421,6 +483,7 @@ internal sealed class PluginImageTable : IDisposable
     {
         _byKey.Remove(entry.Key);
         _byId.Remove(entry.Id);
+        ReleaseGeneration++;
         if (!entry.IsOwned)
             return;
         _ownedBytes -= entry.OwnedBytes;

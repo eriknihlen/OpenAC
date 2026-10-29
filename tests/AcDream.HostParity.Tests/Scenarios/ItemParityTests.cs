@@ -56,16 +56,20 @@ public sealed class ItemParityTests
             Assert.Equal(ParityWorld.KitIconUnderlay, kit.IconUnderlayId);
             Assert.Equal(ParityWorld.KitIconOverlay, kit.IconOverlayId);
             transcript.Record("kit.coverage", kit.CoverageMask);
+            transcript.Record("kit.hookItemTypes", kit.HookItemTypes);
             transcript.Record("kit.plural", kit.PluralName);
             Assert.Equal(ParityWorld.KitCoverage, kit.CoverageMask);
             Assert.Equal("Healing Kits", kit.PluralName);
+            Assert.Equal(ParityWorld.KitHookItemTypes, kit.HookItemTypes);
 
             // The same bits on the world-object record, before any appraisal.
             Assert.True(arm.Host.Automation.Objects.TryGet(
                 ParityWorld.Kit, out PluginWorldObject kitObject));
             transcript.Record("kit.worldCoverage", kitObject.CoverageMask);
             Assert.False(kitObject.HasAppraisalData);
+            transcript.Record("kit.worldHookItemTypes", kitObject.HookItemTypes);
             Assert.Equal(ParityWorld.KitCoverage, kitObject.CoverageMask);
+            Assert.Equal(ParityWorld.KitHookItemTypes, kitObject.HookItemTypes);
         });
 
     [Fact]

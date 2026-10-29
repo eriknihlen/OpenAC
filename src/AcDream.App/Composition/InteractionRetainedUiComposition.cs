@@ -36,7 +36,7 @@ namespace AcDream.App.Composition;
 internal sealed record InteractionRetainedUiDependencies(
     RuntimeOptions Options,
     GameWindowGraphics Graphics,
-    Func<int, int, byte[]> BackbufferReader,
+    Func<int, int, AcDream.App.Diagnostics.FrameCapture> BackbufferReader,
     IView Window,
     IInputContext Input,
     string ShadersDirectory,
@@ -1034,6 +1034,13 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                 Connection: new ConnectionRuntimeBindings(
                     () => late.GameRuntime.Connection, d.Window.Close,
                     ShowProgress: d.Options.LiveCharacterSelector is null),
+                Chess: new ChessRuntimeBindings(
+                    Chess: d.Runtime.ChessOwner,
+                    SendMove: (fromX, fromY, toX, toY) =>
+                        late.Session.CurrentSession?.SendChessMove(fromX, fromY, toX, toY),
+                    SendPass: () => late.Session.CurrentSession?.SendChessMovePass(),
+                    SendStalemate: offer => late.Session.CurrentSession?.SendChessStalemate(offer),
+                    SendQuit: () => late.Session.CurrentSession?.SendChessQuit()),
                 Book: new BookRuntimeBindings(
                     Book: d.Runtime.BookOwner.View,
                     Commands: d.Runtime.BookOwner,

@@ -1158,14 +1158,23 @@ public sealed class GameWindow :
         return platform;
     }
 
-    private static Func<int, int, byte[]> CreateBackbufferReader(
+    // The retained capture is the swapchain's size in pixels; the frame asks
+    // in the window's points, half that on a high-density display.
+    private static Func<int, int, AcDream.App.Diagnostics.FrameCapture> CreateBackbufferReader(
         GameWindowGraphics graphics,
         IGpuDevice device) =>
         (width, height) =>
-            AcDream.App.Diagnostics.FrameScreenshotController.FlipRows(
-                device.CaptureBackbuffer(width, height),
+        {
+            if (graphics.Vulkan is { Width: > 0u, Height: > 0u } vulkan)
+                (width, height) = ((int)vulkan.Width, (int)vulkan.Height);
+            return new AcDream.App.Diagnostics.FrameCapture(
+                AcDream.App.Diagnostics.FrameScreenshotController.FlipRows(
+                    device.CaptureBackbuffer(width, height),
+                    width,
+                    height),
                 width,
                 height);
+        };
 
     private GameWindowGraphics CreateGraphics()
     {

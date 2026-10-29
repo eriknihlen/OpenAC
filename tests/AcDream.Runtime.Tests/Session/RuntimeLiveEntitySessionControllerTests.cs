@@ -927,6 +927,46 @@ public sealed class RuntimeLiveEntitySessionControllerTests
     }
 
     [Fact]
+    public void DirectSink_HeldItemCreatedBeforeItsHolder_EntersTheObjectTableOnce()
+    {
+        // The server can send a held item before its holder. The item waits
+        // for the holder and is registered when the holder's first entry
+        // finishes; it must reach the object table then, and only then.
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        LiveEntitySessionSink sink = controller.CreateSink();
+        const uint holderGuid = 0x70000032u;
+        const uint itemGuid = 0x70000033u;
+        var added = new List<uint>();
+        runtime.EntityObjects.Objects.ObjectAdded += item => added.Add(item.ObjectId);
+
+        sink.Spawned(HeldSpawn(itemGuid, holderGuid));
+        drive.DriveAll();
+
+        Assert.False(runtime.EntityObjects.Entities.TryGetActive(itemGuid, out _));
+        Assert.Null(runtime.EntityObjects.Objects.Get(itemGuid));
+
+        sink.Spawned(Spawn(holderGuid, incarnation: 1));
+        drive.DriveAll();
+        DrainPlacementFifo(runtime);
+        drive.DriveAll();
+        DrainPlacementFifo(runtime);
+
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(itemGuid, out _));
+        Assert.Equal("held item", runtime.EntityObjects.Objects.Get(itemGuid)?.Name);
+        Assert.Equal(1, added.Count(guid => guid == itemGuid));
+    }
+
+    [Fact]
     public void FirstEntryDriveServesOneRouteAtATimeAndScopesClearToTheOwner()
     {
         using StartedRuntime started = StartRuntime();
@@ -1394,6 +1434,83 @@ public sealed class RuntimeLiveEntitySessionControllerTests
             body.LastServerPos);
     }
 
+    /// <summary>
+    /// An item the server creates inside an open corpse has no place in the
+    /// world, but loot rules test its colours before it is picked up, so it
+    /// reports the same colour swaps it would lying on the ground. Both the
+    /// no-window route and the one that projects spawns into a world run.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnItemInsideACorpseReportsTheColoursItWouldOnTheGround(
+        bool projectsIntoAWorld)
+    {
+        const uint corpse = 0x70000070u;
+        const uint inCorpse = 0x70000071u;
+        const uint onGround = 0x70000072u;
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = projectsIntoAWorld
+            ? new RuntimeLiveEntitySessionController(
+                runtime,
+                session,
+                worldProjection: new FixtureWorldProjection())
+            : new RuntimeLiveEntitySessionController(runtime, session);
+        LiveEntitySessionSink sink = controller.CreateSink();
+        using var surface = new RuntimeAutomationSurface();
+        surface.Bind(runtime, runtime.CharacterOwner, runtime.ActionOwner.SpellCast);
+        surface.BindPaletteColorResolver(new IndexAsRed());
+        CreateObject.SubPaletteSwap[] swaps =
+        [
+            new(0x04000123u, 3, 4),
+            new(0x04000456u, 0, 2),
+        ];
+
+        WorldSession.EntitySpawn ground =
+            SpawnAt(onGround, incarnation: 1, 0x01010001u) with
+            {
+                SubPalettes = swaps,
+            };
+        sink.Spawned(ground);
+        sink.Spawned(ground with
+        {
+            Guid = inCorpse,
+            Position = null,
+            Physics = ground.Physics!.Value with { Position = null },
+            ContainerId = corpse,
+        });
+
+        PluginInventoryItem contained = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = inCorpse, ContainerId = corpse });
+        PluginInventoryItem lying = surface.ProjectInventoryItem(
+            runtime,
+            new ClientObject { ObjectId = onGround });
+
+        Assert.Equal(2, lying.Palettes.Count);
+        Assert.Equal(lying.Palettes, contained.Palettes);
+        Assert.Equal(
+            new PluginPaletteInfo(0x04000123u, 3, 4, 40, 0, 0),
+            contained.Palettes[0]);
+    }
+
+    /// <summary>Answers every colour with its own index in the red channel.</summary>
+    private sealed class IndexAsRed : AcDream.Core.CharGen.IChargenPaletteColorSource
+    {
+        public bool TryGetColor(
+            uint paletteId,
+            int index,
+            out AcDream.Core.CharGen.ChargenSwatchRgb color)
+        {
+            color = new AcDream.Core.CharGen.ChargenSwatchRgb((byte)index, 0, 0);
+            return true;
+        }
+    }
+
     /// <summary>Any landblock is serviceable; the fixture has one.</summary>
     private sealed class EveryDestination
         : IRuntimeRemotePlacementServiceWindow
@@ -1661,6 +1778,26 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         uint guid,
         ushort incarnation) =>
         SpawnAt(guid, incarnation, 0x01010001u);
+
+    /// <summary>An item held by <paramref name="holderGuid"/>, with no world position.</summary>
+    private static WorldSession.EntitySpawn HeldSpawn(uint guid, uint holderGuid)
+    {
+        WorldSession.EntitySpawn placed = Spawn(guid, incarnation: 1);
+        return placed with
+        {
+            Position = null,
+            Name = "held item",
+            ParentGuid = holderGuid,
+            ParentLocation = 1u,
+            PlacementId = 1u,
+            Physics = placed.Physics!.Value with
+            {
+                Position = null,
+                AnimationFrame = 1u,
+                Parent = new PhysicsAttachment(holderGuid, LocationId: 1u),
+            },
+        };
+    }
 
     private static WorldSession.EntitySpawn SpawnAt(
         uint guid,
