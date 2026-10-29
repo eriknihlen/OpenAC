@@ -271,7 +271,7 @@ public sealed class InteractionRetainedUiCompositionTests
             Dependencies = new InteractionRetainedUiDependencies(
                 Options: options,
                 Graphics: null!,
-                BackbufferReader: static (_, _) => [],
+                BackbufferReader: static (width, height) => new AcDream.App.Diagnostics.FrameCapture([], width, height),
                 Window: null!,
                 Input: null!,
                 ShadersDirectory: "shaders",

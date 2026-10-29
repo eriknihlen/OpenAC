@@ -5,6 +5,13 @@ using AcDream.App.Rendering.Packs;
 
 namespace AcDream.App.Diagnostics;
 
+/// <summary>
+/// One frame read back from the GPU: its pixels, four bytes each, and the
+/// size they were read at. That is the backbuffer's size in pixels, which on
+/// a high-density display is twice the frame's size in points each way.
+/// </summary>
+internal readonly record struct FrameCapture(byte[] Rgba, int Width, int Height);
+
 internal sealed class FrameScreenshotController
 {
     private enum CaptureState
@@ -16,7 +23,7 @@ internal sealed class FrameScreenshotController
 
     private sealed record CaptureStatus(CaptureState State, string? Error = null);
 
-    private readonly Func<int, int, byte[]> _readRgba;
+    private readonly Func<int, int, FrameCapture> _read;
     private readonly string _directory;
     private readonly Action<string> _log;
     private readonly Func<RenderPackDiagnosticsSnapshot>? _renderPackMetadata;
@@ -24,13 +31,32 @@ internal sealed class FrameScreenshotController
     private readonly Dictionary<string, CaptureStatus> _status =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Takes captures read at exactly the frame's size.</summary>
     internal FrameScreenshotController(
         Func<int, int, byte[]> readRgba,
         string directory,
         Action<string>? log = null,
         Func<RenderPackDiagnosticsSnapshot>? renderPackMetadata = null)
+        : this(
+            ReadAtFrameSize(readRgba ?? throw new ArgumentNullException(nameof(readRgba))),
+            directory,
+            log,
+            renderPackMetadata)
     {
-        _readRgba = readRgba ?? throw new ArgumentNullException(nameof(readRgba));
+    }
+
+    /// <summary>
+    /// Takes captures from <paramref name="read"/>, which is given the frame's
+    /// size and answers with what it read and at what size; the screenshot is
+    /// that size.
+    /// </summary>
+    internal FrameScreenshotController(
+        Func<int, int, FrameCapture> read,
+        string directory,
+        Action<string>? log = null,
+        Func<RenderPackDiagnosticsSnapshot>? renderPackMetadata = null)
+    {
+        _read = read ?? throw new ArgumentNullException(nameof(read));
         _directory = string.IsNullOrWhiteSpace(directory)
             ? throw new ArgumentException("A screenshot directory is required.", nameof(directory))
             : Path.GetFullPath(directory);
@@ -96,7 +122,10 @@ internal sealed class FrameScreenshotController
             if (width <= 0 || height <= 0)
                 throw new InvalidOperationException($"invalid framebuffer size {width}x{height}");
 
-            byte[] pixels = _readRgba(width, height);
+            FrameCapture capture = _read(width, height);
+            (byte[] pixels, width, height) = capture;
+            if (width <= 0 || height <= 0)
+                throw new InvalidOperationException($"invalid capture size {width}x{height}");
             int expected = checked(width * height * 4);
             if (pixels.Length != expected)
                 throw new InvalidOperationException(
@@ -146,6 +175,9 @@ internal sealed class FrameScreenshotController
             return false;
         }
     }
+
+    private static Func<int, int, FrameCapture> ReadAtFrameSize(Func<int, int, byte[]> readRgba) =>
+        (width, height) => new FrameCapture(readRgba(width, height), width, height);
 
     private static void TryDelete(string path)
     {

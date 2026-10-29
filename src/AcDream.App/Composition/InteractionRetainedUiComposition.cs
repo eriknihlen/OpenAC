@@ -36,7 +36,7 @@ namespace AcDream.App.Composition;
 internal sealed record InteractionRetainedUiDependencies(
     RuntimeOptions Options,
     GameWindowGraphics Graphics,
-    Func<int, int, byte[]> BackbufferReader,
+    Func<int, int, AcDream.App.Diagnostics.FrameCapture> BackbufferReader,
     IView Window,
     IInputContext Input,
     string ShadersDirectory,
