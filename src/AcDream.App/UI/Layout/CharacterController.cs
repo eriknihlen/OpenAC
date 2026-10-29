@@ -165,10 +165,13 @@ public static class CharacterController
         }
         AppendSectionBreak(body);
 
-        string resist = ResistanceGrade(sheet.Strength + sheet.Endurance,
+        // The grades read Strength and Endurance without enchantments.
+        int baseStrength = sheet.AttributeBaseValues.Length > 0 ? sheet.AttributeBaseValues[0] : 0;
+        int baseEndurance = sheet.AttributeBaseValues.Length > 1 ? sheet.AttributeBaseValues[1] : 0;
+        string resist = ResistanceGrade(baseStrength + baseEndurance,
             200, 260, 320, 380, 440);
         string regeneration = ResistanceGrade(
-            sheet.Strength + (2 * sheet.Endurance),
+            baseStrength + (2 * baseEndurance),
             200, 346, 470, 580, 690);
         // ID_CharacterInfo_Resists references the named RESIST variable twice
         // (Natural and Drain) and REGEN once.
@@ -374,9 +377,18 @@ public static class CharacterController
                 : NumericValue(values[Math.Min(i, values.Length - 1)]);
             body.Append(ResolvePlural(tokens[i], pluralValue));
             if (i < tokens.Count - 1 && i < values.Length)
-                body.Append(Convert.ToString(values[i], CultureInfo.InvariantCulture));
+                body.Append(FormatValue(values[i]));
         }
     }
+
+    // Every whole number in the report is written with thousands
+    // separators ("1,400").
+    private static string FormatValue(object value) => value switch
+    {
+        byte or short or int or long => Convert.ToInt64(value, CultureInfo.InvariantCulture)
+            .ToString("N0", CultureInfo.InvariantCulture),
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+    };
 
     private static string ResolvePlural(string text, int value)
         => text.Replace("{time[1]|times}", value == 1 ? "time" : "times",

@@ -492,17 +492,17 @@ public sealed class CharacterCreationLiveDatTests
         UiButton lockButton = Assert.IsType<UiButton>(UiElement.FindDescendant(strength, 0x100002ECu));
         UiScrollbar slider = Assert.IsType<UiScrollbar>(UiElement.FindDescendant(strength, 0x100002EEu));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(0x06004D39u, slider.TrackSprite);
+        Assert.Equal(0x06004D39u, slider.ThumbFillSprite);
 
         Assert.True(lockButton.TrySetRetailState(locked));
-        Assert.True(slider.TrySetTrackState(locked));
+        Assert.True(slider.TrySetThumbFillState(locked));
         Assert.Equal("Locked", lockButton.ActiveState);
-        Assert.Equal(0x06004D3Au, slider.TrackSprite);
+        Assert.Equal(0x06004D3Au, slider.ThumbFillSprite);
 
         Assert.True(lockButton.TrySetRetailState(unlocked));
-        Assert.True(slider.TrySetTrackState(unlocked));
+        Assert.True(slider.TrySetThumbFillState(unlocked));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(0x06004D39u, slider.TrackSprite);
+        Assert.Equal(0x06004D39u, slider.ThumbFillSprite);
     }
 
     [InstalledDatFact]

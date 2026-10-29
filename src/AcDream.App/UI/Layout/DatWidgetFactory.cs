@@ -215,12 +215,12 @@ public static class DatWidgetFactory
                 bar.ThumbBotPressedSprite = ButtonStateImage(horizontalSlices[^1], "Normal_pressed");
             }
 
-            if (bar.TrackSprite == 0u)
+            // Child 4 is no track: it is the fill from the bar's start to the
+            // thumb's centre, and takes the bar's state art.
+            if (info.Children.FirstOrDefault(child => child.Id == 4u) is { } thumbFill)
             {
-                ElementInfo? authoredTrack = info.Children.FirstOrDefault(child => child.Id == 4u);
-                bar.TrackSprite = authoredTrack is null ? 0u : DefaultImage(authoredTrack);
-                if (authoredTrack is not null)
-                    bar.TrackSpritesByState = StateImages(authoredTrack);
+                bar.ThumbFillSprite = DefaultImage(thumbFill);
+                bar.ThumbFillSpritesByState = StateImages(thumbFill);
             }
 
             ElementInfo? meter = info.Children.FirstOrDefault(child => child.Type == 7u);

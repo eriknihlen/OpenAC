@@ -57,25 +57,39 @@ public sealed class UiScrollbar : UiElement
     public uint TrackSprite { get; set; }
 
     /// <summary>
-    /// Track art per bar state, for a bar whose track authors an image for
-    /// each state (an attribute slider draws another track while locked).
+    /// The fill a horizontal bar draws from its start to the thumb's centre
+    /// (0: none). It ends under the thumb, never past it.
     /// </summary>
-    public IReadOnlyDictionary<uint, uint>? TrackSpritesByState { get; set; }
+    public uint ThumbFillSprite { get; set; }
 
     /// <summary>
-    /// Enters bar state <paramref name="stateId"/>: the track shows that
-    /// state's art. False when the track authors no art for it.
+    /// The fill's art per bar state, for a fill that authors an image for
+    /// each state (an attribute slider fills in another colour while locked).
     /// </summary>
-    public bool TrySetTrackState(uint stateId)
+    public IReadOnlyDictionary<uint, uint>? ThumbFillSpritesByState { get; set; }
+
+    /// <summary>
+    /// Enters bar state <paramref name="stateId"/>: the fill shows that
+    /// state's art. False when the fill authors no art for it.
+    /// </summary>
+    public bool TrySetThumbFillState(uint stateId)
     {
-        if (TrackSpritesByState is null
-            || !TrackSpritesByState.TryGetValue(stateId, out uint sprite))
+        if (ThumbFillSpritesByState is null
+            || !ThumbFillSpritesByState.TryGetValue(stateId, out uint sprite))
         {
             return false;
         }
-        TrackSprite = sprite;
+        ThumbFillSprite = sprite;
         return true;
     }
+
+    /// <summary>
+    /// How far the fill before a horizontal thumb reaches: from the bar's
+    /// start to the thumb's centre, in whole pixels (the thumb's left edge
+    /// truncated, plus half its width rounded down).
+    /// </summary>
+    public static float ThumbFillWidth(float thumbX, float thumbWidth)
+        => Math.Max(0, (int)thumbX + (int)thumbWidth / 2);
 
     public uint ThumbSprite { get; set; }
 
@@ -221,11 +235,17 @@ public sealed class UiScrollbar : UiElement
                 return;
             }
             DrawTiled(ctx, resolve, TrackSprite, 0f, 0f, Width, Height);
+            float thumbWidth = ScalarThumbWidth(resolve);
+            float travel = MathF.Max(0f, Width - thumbWidth);
+            float x = travel * ScalarPosition;
+            // The fill under the thumb's left half: it ends at the thumb's
+            // centre, so what lies past the thumb never takes its colour.
+            DrawTiled(ctx, resolve, ThumbFillSprite,
+                0f, 0f, ThumbFillWidth(x, thumbWidth), Height);
             (float rangeLeft, float rangeWidth) = ScalarRangeRect();
             if (ScalarRangeSprite != 0)
                 DrawTiled(ctx, resolve, ScalarRangeSprite,
                     rangeLeft, 0f, rangeWidth, Height);
-            float thumbWidth = ScalarThumbWidth(resolve);
             if (ScalarFill() is float fill && ScalarFillSprite != 0)
             {
                 var (fillX, visibleWidth) = ScalarFillRect(
@@ -233,8 +253,6 @@ public sealed class UiScrollbar : UiElement
                 DrawTiledClipped(ctx, resolve, ScalarFillSprite,
                     0f, fillX, visibleWidth, Height);
             }
-            float travel = MathF.Max(0f, Width - thumbWidth);
-            float x = travel * ScalarPosition;
             DrawSprite(ctx, resolve, ActiveThumbSprite, x, 0f, thumbWidth, Height);
             return;
         }

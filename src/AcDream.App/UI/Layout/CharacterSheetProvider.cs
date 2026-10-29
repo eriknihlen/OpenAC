@@ -157,7 +157,9 @@ public sealed class CharacterSheetProvider
 
             UnspentSkillCredits = skillCredits,
             SpecializedSkillCredits = 0,
-            ChessRank = props.GetInt(0xB5u),
+            ChessRank = props.Ints.TryGetValue(0xB5u, out int chessRank)
+                ? chessRank
+                : CharacterSheet.UnrankedChessRank,
             FishingSkill = props.GetInt(0xC0u),
             BirthTimestamp = props.Ints.TryGetValue(0x62u, out int born)
                 ? born
