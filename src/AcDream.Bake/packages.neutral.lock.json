@@ -44,14 +44,14 @@
       "acdream.content": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.30, )",
+          "AcDream.Core": "[0.1.31, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.9, )"
         }
       },
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.30, )",
+          "AcDream.Plugin.Abstractions": "[0.1.31, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
           "Serilog": "[4.0.2, )",
