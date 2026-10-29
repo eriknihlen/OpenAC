@@ -878,6 +878,34 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
     }
 
     /// <summary>
+    /// A body the object already has, in the air just above the ground,
+    /// gets its first position sent off the ground: nothing moves it (it is
+    /// not settled where it is, nor put at the server's spot); its own
+    /// physics carries it on.
+    /// </summary>
+    [Fact]
+    public void AirborneOrdinaryBody_PositionSentOffTheGround_IsNotMoved()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var justAbove = new Vector3(10f, 10f, 0.3f);
+        body.SnapToCell(SourceCell, justAbove, justAbove);
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+
+        fixture.Controller.OnPosition(fixture.Update(
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: false));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(justAbove, body.Position);
+        Assert.False(body.InContact);
+    }
+
+    /// <summary>
     /// Teleported there: the body is re-placed at the server's position, and
     /// the placement says what it touches there: nothing, so it is out of
     /// contact and gravity pulls it again.

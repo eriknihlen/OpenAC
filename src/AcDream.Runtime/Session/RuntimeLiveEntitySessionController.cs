@@ -803,16 +803,6 @@ public sealed class RuntimeLiveEntitySessionController
             remote.LastServerPos = remote.Body.Position;
             remote.LastServerPosTime = Entities.Physics.UtcNowSeconds;
         }
-        if (!remote.Body.InContact)
-        {
-            remote.Body.Position = worldPosition;
-            remote.Body.Orientation = wireRotation;
-            arming.SeatBodyIfUnseated(
-                record,
-                remote,
-                worldPosition,
-                update.Position.LandblockId);
-        }
 
         ulong positionAuthority = record.PositionAuthorityVersion;
         bool IsCurrent() =>
@@ -847,6 +837,23 @@ public sealed class RuntimeLiveEntitySessionController
             RuntimeRemoteServerPosition.StampAirborneLeftover(
                 remote, update.Position.LandblockId, worldPosition, nowSeconds);
             return;
+        }
+
+        // A body in the air takes a position the game moves it for (one on
+        // the ground, or a teleport) outright and is seated there; one sent
+        // off the ground was left alone above, as the client with a window
+        // leaves it.
+        if (!remote.Body.InContact)
+        {
+            remote.Body.Position = worldPosition;
+            remote.Body.Orientation = wireRotation;
+            arming.SeatBodyIfUnseated(
+                record,
+                remote,
+                worldPosition,
+                update.Position.LandblockId);
+            if (!IsCurrent())
+                return;
         }
 
         RuntimeRemoteServerPosition.DeriveVelocity(

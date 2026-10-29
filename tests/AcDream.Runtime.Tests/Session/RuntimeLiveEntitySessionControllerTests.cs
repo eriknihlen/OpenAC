@@ -1462,6 +1462,62 @@ public sealed class RuntimeLiveEntitySessionControllerTests
         Assert.True(motion.Interp.IsActive);
     }
 
+    /// <summary>
+    /// As the client with a window: a body in the air gets a position sent
+    /// off the ground (no teleport). Nothing moves it; it is not put at the
+    /// server's spot.
+    /// </summary>
+    [Fact]
+    public void AnAirborneBodysPositionSentOffTheGround_DoesNotMoveIt()
+    {
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        CommitLandblockCollision(runtime, 0x01010000u);
+        RuntimeFirstEntryDriveController drive = CreateDrive(runtime);
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(
+            runtime,
+            session,
+            worldProjection: new FixtureWorldProjection());
+        controller.BindRemoteArming(
+            AcDream.Runtime.Physics.RuntimeRemoteArming.Create(
+                runtime.EntityObjects,
+                runtime.Clock,
+                new UnusedCollisionSource(),
+                new EveryDestination()));
+        LiveEntitySessionSink sink = controller.CreateSink();
+        WorldSession.EntitySpawn spawn =
+            SpawnAt(0x70000062u, incarnation: 1, 0x01010001u);
+        sink.Spawned(spawn);
+        DrainFirstEntry(runtime, drive);
+        Assert.True(runtime.EntityObjects.Entities.TryGetActive(
+            spawn.Guid,
+            out RuntimeEntityRecord remote));
+        PhysicsBody body = remote.PhysicsBody!;
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+        System.Numerics.Vector3 before = body.Position;
+
+        sink.PositionUpdated(new WorldSession.EntityPositionUpdate(
+            spawn.Guid,
+            new CreateObject.ServerPosition(
+                0x01010001u, 14f, 10f, 9f, 1f, 0f, 0f, 0f),
+            Velocity: null,
+            PlacementId: null,
+            IsGrounded: false,
+            InstanceSequence: 1,
+            PositionSequence: 2,
+            TeleportSequence: 0,
+            ForcePositionSequence: 0));
+
+        Assert.Same(body, remote.PhysicsBody);
+        Assert.Equal(before, body.Position);
+        Assert.False(body.InContact);
+    }
+
     /// <summary>Any landblock is serviceable; the fixture has one.</summary>
     private sealed class EveryDestination
         : IRuntimeRemotePlacementServiceWindow

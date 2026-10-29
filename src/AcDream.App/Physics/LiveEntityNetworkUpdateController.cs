@@ -1218,17 +1218,11 @@ internal sealed class LiveEntityNetworkUpdateController
                     // had it, so this position is caught up to like any
                     // later one: the body is in the world already.
                     rmState.LastServerPos = rmState.Body.Position;
+                    // A body in the air is left to the routing below and
+                    // its own physics: one sent off the ground is not moved
+                    // at all.
                     rmState.LastServerPosTime =
                         (now - System.DateTime.UnixEpoch).TotalSeconds;
-                    if (!rmState.Body.InContact)
-                    {
-                        SeedRemoteSpawnPlacement(
-                            rmState,
-                            update.Guid,
-                            entity,
-                            rmState.Body.Position,
-                            entity.VisibilityCellId ?? 0u);
-                    }
                 }
             }
 
