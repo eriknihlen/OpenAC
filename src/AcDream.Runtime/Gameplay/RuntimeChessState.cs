@@ -49,8 +49,8 @@ public interface IRuntimeChessView
 /// the way the game always has, through <see cref="OnInterfaceText"/>.
 /// </summary>
 /// <remarks>
-/// A move shown before the server confirms it is put back if the server
-/// refuses it. When a game ends the final position stays on the board until
+/// A move shown before the server confirms it has its squares put back if
+/// the server refuses it; the turn stays passed. When a game ends the final position stays on the board until
 /// the next game; <see cref="RuntimeChessSnapshot.GamesEnded"/> counts the
 /// games that ended by resigning or with no result, which close the window.
 /// </remarks>
@@ -244,8 +244,13 @@ public sealed class RuntimeChessState
             }
             else
             {
+                // The board is left as the game leaves it: the squares go
+                // back to how they were before the move, but the turn has
+                // already passed on the board and stays passed. The board
+                // looks unchanged, and every move the player tries after
+                // this is refused as not their piece until the game ends.
                 if (_beforeMove is not null)
-                    _board = _beforeMove;
+                    _board.RestoreSquares(_beforeMove);
                 _stage = RuntimeChessStage.MyTurn;
                 text = OwnMoveText(response.Result);
             }

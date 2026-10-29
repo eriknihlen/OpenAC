@@ -88,6 +88,17 @@ public sealed class ChessBoard
         return copy;
     }
 
+    /// <summary>
+    /// Puts every square back as it is on <paramref name="snapshot"/> and
+    /// nothing else: the side to move and the en passant chance stay as
+    /// they are now.
+    /// </summary>
+    public void RestoreSquares(ChessBoard snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        Array.Copy(snapshot._squares, _squares, _squares.Length);
+    }
+
     public bool IsInCheck(ChessTeam team)
     {
         foreach (var (square, piece) in Pieces)

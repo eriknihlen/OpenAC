@@ -144,8 +144,12 @@ public sealed class RuntimeChessStateTests
     }
 
     [Fact]
-    public void MoveTheServerRefuses_IsPutBack()
+    public void MoveTheServerRefuses_PutsTheSquaresBackButNotTheTurn()
     {
+        // The game puts back only the squares when the server refuses a
+        // move. The turn has already passed on the board, so the board looks
+        // as it did, but every move the player tries after it is refused as
+        // not their piece.
         RuntimeChessState chess = Seated(ChessTeam.White);
         chess.TryMove(Sq("e2"), Sq("e4"));
 
@@ -155,8 +159,13 @@ public sealed class RuntimeChessStateTests
         Assert.Equal(RuntimeChessStage.MyTurn, chess.Snapshot.Stage);
         Assert.Null(board[Sq("e4")]);
         Assert.Equal(new ChessPiece(ChessPieceType.Pawn, ChessTeam.White), board[Sq("e2")]);
-        Assert.Equal(ChessTeam.White, board.Turn);
         Assert.Equal("That move is invalid, try again.  It is your turn to move.", LastLine);
+        Assert.Equal(ChessTeam.Black, board.Turn);
+
+        Assert.Equal(ChessMoveResult.NotYours, chess.TryMove(Sq("e2"), Sq("e4")));
+        Assert.Equal(RuntimeChessState.OwnMoveText(ChessMoveResult.NotYours), LastLine);
+        Assert.Equal(RuntimeChessStage.MyTurn, chess.Snapshot.Stage);
+        Assert.Null(chess.View.Board[Sq("e4")]);
     }
 
     [Fact]
