@@ -10,6 +10,10 @@ public sealed class MiniGameUiControllerTests
 {
     private const uint Board = 0x7A9B4001u;
 
+    // The first white and first black piece image the window's layout lists.
+    private const uint WhitePieceSprites = 0x06004CFDu;
+    private const uint BlackPieceSprites = 0x06004D03u;
+
     private readonly RuntimeChessState _chess = new();
     private readonly List<(ChessSquare From, ChessSquare To)> _moves = [];
     private readonly List<bool> _stalemates = [];
@@ -55,7 +59,8 @@ public sealed class MiniGameUiControllerTests
                 Confirm: (message, completed) => (_confirmMessage, _confirm) = (message, completed),
                 ShowWindow: () => _shows++,
                 HideWindow: () => _hides++,
-                SetIndicatorActive: _indicator.Add))!;
+                SetIndicatorActive: _indicator.Add),
+            MiniGameUiController.ReadPieceImages(FixtureLoader.LoadMiniGameInfos()))!;
         return (controller, layout);
     }
 
@@ -151,8 +156,8 @@ public sealed class MiniGameUiControllerTests
 
         UiDatElement[] squares = Squares(layout);
 
-        Assert.Equal(MiniGameUiController.WhitePieceSprites + 5u, squares[60].RuntimeImageTexture); // e1 king
-        Assert.Equal(MiniGameUiController.BlackPieceSprites + 3u, squares[0].RuntimeImageTexture);  // a8 rook
+        Assert.Equal(WhitePieceSprites + 5u, squares[60].RuntimeImageTexture); // e1 king
+        Assert.Equal(BlackPieceSprites + 3u, squares[0].RuntimeImageTexture);  // a8 rook
         Assert.Equal(0u, squares[36].RuntimeImageTexture);                                         // e4 empty
     }
 
@@ -165,8 +170,8 @@ public sealed class MiniGameUiControllerTests
 
         UiDatElement[] squares = Squares(layout);
 
-        Assert.Equal(MiniGameUiController.WhitePieceSprites + 5u, squares[3].RuntimeImageTexture);  // e1 king
-        Assert.Equal(MiniGameUiController.BlackPieceSprites + 5u, squares[59].RuntimeImageTexture); // e8 king
+        Assert.Equal(WhitePieceSprites + 5u, squares[3].RuntimeImageTexture);  // e1 king
+        Assert.Equal(BlackPieceSprites + 5u, squares[59].RuntimeImageTexture); // e8 king
     }
 
     [Theory]
@@ -176,10 +181,32 @@ public sealed class MiniGameUiControllerTests
     [InlineData(ChessPieceType.Rook, 3u)]
     [InlineData(ChessPieceType.Queen, 4u)]
     [InlineData(ChessPieceType.King, 5u)]
-    public void PieceSprites_FollowTheGamesOrder(ChessPieceType type, uint offset)
+    public void PieceSprites_AreReadFromTheLayoutInTheGamesOrder(ChessPieceType type, uint offset)
     {
-        Assert.Equal(0x06004CFDu + offset, MiniGameUiController.PieceSprite(new(type, ChessTeam.White)));
-        Assert.Equal(0x06004D03u + offset, MiniGameUiController.PieceSprite(new(type, ChessTeam.Black)));
+        var (controller, _) = Bind();
+        using var __ = controller;
+
+        Assert.Equal(WhitePieceSprites + offset, controller.PieceSprite(new(type, ChessTeam.White)));
+        Assert.Equal(BlackPieceSprites + offset, controller.PieceSprite(new(type, ChessTeam.Black)));
+    }
+
+    [Fact]
+    public void ALayoutWithoutPieceImages_DrawsNoPieces()
+    {
+        ElementInfo info = FixtureLoader.LoadMiniGameInfos();
+        Assert.All(MiniGameUiController.ReadPieceImages(
+            new ElementInfo { Id = info.Id }), image => Assert.Equal(0u, image));
+
+        MiniGameUiController controller = MiniGameUiController.Bind(
+            FixtureLoader.LoadMiniGame(),
+            close: null,
+            new MiniGameUiController.ChessBindings(
+                _chess, CreateSquare, sprite => sprite,
+                (_, _) => { }, () => { }, _ => { }, () => { },
+                (_, _) => { }, () => { }, () => { }, _ => { }))!;
+        using var _ = controller;
+
+        Assert.Equal(0u, controller.PieceSprite(new(ChessPieceType.King, ChessTeam.White)));
     }
 
     [Fact]
@@ -200,7 +227,7 @@ public sealed class MiniGameUiControllerTests
         Assert.Equal([(Sq("e2"), Sq("e4"))], _moves);
         Assert.Null(controller.Selected);
         Assert.False(Highlighted(squares[52]));
-        Assert.Equal(MiniGameUiController.WhitePieceSprites, squares[36].RuntimeImageTexture);
+        Assert.Equal(WhitePieceSprites, squares[36].RuntimeImageTexture);
         Assert.Equal(0u, squares[52].RuntimeImageTexture);
     }
 

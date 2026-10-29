@@ -1,5 +1,6 @@
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
+using AcDream.Core.Chess;
 using AcDream.Runtime.Gameplay;
 using DatReaderWriter;
 using DatReaderWriter.Options;
@@ -18,6 +19,8 @@ public sealed class MiniGameLayoutInstalledDatTests
                 "Documents",
                 "Asheron's Call");
         using var dats = new DatCollection(datDirectory, DatAccessType.Read);
+        ElementInfo rootInfo = Assert.IsType<ElementInfo>(LayoutImporter.ImportInfos(
+            dats, MiniGameUiController.LayoutId, MiniGameUiController.RootId));
         ImportedLayout layout = Assert.IsType<ImportedLayout>(LayoutImporter.Import(
             dats, MiniGameUiController.LayoutId, MiniGameUiController.RootId, static _ => (0u, 0, 0), null));
 
@@ -47,7 +50,14 @@ public sealed class MiniGameLayoutInstalledDatTests
                     static _ => (0u, 0, 0), null)?.Root,
                 static sprite => sprite,
                 static (_, _) => { }, static () => { }, static _ => { }, static () => { },
-                static (_, _) => { }, static () => { }, static () => { }, static _ => { }))!;
+                static (_, _) => { }, static () => { }, static () => { }, static _ => { }),
+            MiniGameUiController.ReadPieceImages(rootInfo))!;
         Assert.Equal(64, Assert.Single(Assert.Single(board.Children).Children).Children.Count);
+
+        // White's pawn, bishop, knight, rook, queen and king, then Black's.
+        Assert.Equal(
+            Enumerable.Range(0, 12).Select(index => 0x06004CFDu + (uint)index),
+            MiniGameUiController.ReadPieceImages(rootInfo));
+        Assert.Equal(0x06004D08u, controller.PieceSprite(new(ChessPieceType.King, ChessTeam.Black)));
     }
 }

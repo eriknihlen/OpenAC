@@ -2448,7 +2448,8 @@ public sealed class RetailUiRuntime : IDisposable
         MiniGameUiController? controller = Layout.MiniGameUiController.Bind(
             layout,
             () => CloseWindow(WindowNames.MiniGame),
-            _bindings.Chess is { } chess ? MiniGameChessBindings(chess) : null);
+            _bindings.Chess is { } chess ? MiniGameChessBindings(chess) : null,
+            Layout.MiniGameUiController.ReadPieceImages(rootInfo));
         if (controller is null) return;
         MiniGameUiController = controller;
         if (_bindings.Chess is not null)

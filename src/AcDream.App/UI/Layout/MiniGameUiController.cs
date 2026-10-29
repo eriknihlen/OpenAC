@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using AcDream.Core.Chess;
 using AcDream.Core.Items;
 using AcDream.Runtime.Gameplay;
@@ -24,10 +25,10 @@ public sealed class MiniGameUiController : IRetainedPanelController
     public const uint SquareTemplateId = 0x10000178u;
     public const uint SelectionId = 0x10000179u;
 
-    /// <summary>Each side's piece sprites run pawn, bishop, knight, rook,
-    /// queen, king from these.</summary>
-    public const uint WhitePieceSprites = 0x06004CFDu;
-    public const uint BlackPieceSprites = 0x06004D03u;
+    /// <summary>The board's list of piece images: White's six, then
+    /// Black's, each running pawn, bishop, knight, rook, queen, king.</summary>
+    public const uint PieceImagesPropertyId = 0x10000021u;
+    private const int PiecesPerSide = 6;
 
     public const string ResignConfirmation =
         "If a game is in progress, resigning will be recorded as your loss. Are you sure you want to resign?";
@@ -51,6 +52,7 @@ public sealed class MiniGameUiController : IRetainedPanelController
 
     private readonly UiButton _close;
     private readonly ChessBindings? _chess;
+    private readonly uint[] _pieceImages;
     private readonly UiButton? _resign;
     private readonly UiButton? _pass;
     private readonly UiButton? _stalemate;
@@ -63,11 +65,21 @@ public sealed class MiniGameUiController : IRetainedPanelController
     private bool _confirmingResign;
 
     private MiniGameUiController(
-        ImportedLayout layout, UiButton close, Action? closeWindow, ChessBindings? chess)
+        ImportedLayout layout,
+        UiButton close,
+        Action? closeWindow,
+        ChessBindings? chess,
+        IReadOnlyList<uint>? pieceImages)
     {
         _close = close;
         _close.OnClick = closeWindow;
         _chess = chess;
+        _pieceImages = new uint[2 * PiecesPerSide];
+        if (pieceImages is not null)
+        {
+            for (int i = 0; i < _pieceImages.Length && i < pieceImages.Count; i++)
+                _pieceImages[i] = pieceImages[i];
+        }
         if (chess is null)
             return;
 
@@ -91,11 +103,12 @@ public sealed class MiniGameUiController : IRetainedPanelController
     public static MiniGameUiController? Bind(
         ImportedLayout layout,
         Action? close = null,
-        ChessBindings? chess = null)
+        ChessBindings? chess = null,
+        IReadOnlyList<uint>? pieceImages = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         return layout.FindElement(CloseId) is UiButton button
-            ? new MiniGameUiController(layout, button, close, chess)
+            ? new MiniGameUiController(layout, button, close, chess, pieceImages)
             : null;
     }
 
@@ -187,18 +200,55 @@ public sealed class MiniGameUiController : IRetainedPanelController
             : new ChessSquare(ChessBoard.Size - 1 - column, row);
     }
 
-    public static uint PieceSprite(ChessPiece piece)
+    /// <summary>The image the board's layout gives <paramref name="piece"/>,
+    /// or zero when it gives none.</summary>
+    public uint PieceSprite(ChessPiece piece)
     {
-        uint first = piece.Team == ChessTeam.White ? WhitePieceSprites : BlackPieceSprites;
-        return first + piece.Type switch
+        int side = piece.Team == ChessTeam.White ? 0 : PiecesPerSide;
+        return _pieceImages[side + piece.Type switch
         {
-            ChessPieceType.Pawn => 0u,
-            ChessPieceType.Bishop => 1u,
-            ChessPieceType.Knight => 2u,
-            ChessPieceType.Rook => 3u,
-            ChessPieceType.Queen => 4u,
-            _ => 5u,
-        };
+            ChessPieceType.Pawn => 0,
+            ChessPieceType.Bishop => 1,
+            ChessPieceType.Knight => 2,
+            ChessPieceType.Rook => 3,
+            ChessPieceType.Queen => 4,
+            _ => 5,
+        }];
+    }
+
+    /// <summary>
+    /// The twelve piece images listed on the board element of the window's
+    /// layout, in the order <see cref="PieceSprite"/> reads them. An entry
+    /// the layout does not give as an image is zero.
+    /// </summary>
+    public static uint[] ReadPieceImages(ElementInfo rootInfo)
+    {
+        ArgumentNullException.ThrowIfNull(rootInfo);
+        var images = new uint[2 * PiecesPerSide];
+        if (FindInfo(rootInfo, BoardId) is not { } board
+            || !board.TryGetEffectiveProperty(PieceImagesPropertyId, out UiPropertyValue list)
+            || list.Kind != UiPropertyKind.Array)
+            return images;
+
+        for (int i = 0; i < images.Length && i < list.ArrayValue.Count; i++)
+        {
+            UiPropertyValue entry = list.ArrayValue[i];
+            if (entry.Kind == UiPropertyKind.DataId)
+                images[i] = checked((uint)entry.UnsignedValue);
+        }
+        return images;
+    }
+
+    private static ElementInfo? FindInfo(ElementInfo info, uint id)
+    {
+        if (info.Id == id)
+            return info;
+        foreach (ElementInfo child in info.Children)
+        {
+            if (FindInfo(child, id) is { } found)
+                return found;
+        }
+        return null;
     }
 
     private void BuildSquares(UiTemplateListBox board, Func<UiElement?> createSquare)
@@ -235,8 +285,9 @@ public sealed class MiniGameUiController : IRetainedPanelController
             if (_squares[index] is { } element)
             {
                 element.RuntimeImageTexture = board[square] is { } piece
-                    ? _chess.SpriteTexture(PieceSprite(piece))
-                    : 0u;
+                    && PieceSprite(piece) is uint image && image != 0u
+                        ? _chess.SpriteTexture(image)
+                        : 0u;
             }
             if (_selections[index] is { } selection)
                 selection.Visible = _selected == square;
