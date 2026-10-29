@@ -12,6 +12,11 @@ internal interface IDisplayModeSwitcher
 
     (int Width, int Height)? CurrentFullscreenMode { get; }
 
+    /// <summary>True when fullscreen is the compositor's (Wayland): the
+    /// window covers the monitor at the monitor's own mode, so a client
+    /// cannot switch modes and the chosen size has no effect.</summary>
+    bool CompositorFullscreen { get; }
+
     bool TryEnterFullscreen(int width, int height, out string? error);
 
     bool TryLeaveFullscreen(int width, int height, out string? error);
@@ -50,6 +55,11 @@ internal sealed unsafe class GlfwDisplayModeSwitcher : IDisplayModeSwitcher
             }
         }
     }
+
+    public bool CompositorFullscreen =>
+        AcDream.App.Platform.GlfwNativePlatformProbe.GetActiveProtocol(
+            AcDream.App.Platform.GraphicalHostPlatformServices.DetectOperatingSystem())
+        == AcDream.App.Platform.GraphicalDisplayProtocol.Wayland;
 
     public (int Width, int Height)? CurrentFullscreenMode
     {
@@ -92,7 +102,23 @@ internal sealed unsafe class GlfwDisplayModeSwitcher : IDisplayModeSwitcher
                 return false;
             }
 
-            if (!TryFindRefreshRate(glfw, monitor, width, height, out int refresh))
+            int refresh;
+            bool compositor = CompositorFullscreen;
+            if (compositor)
+            {
+                // The monitor keeps its own mode; the chosen size has no
+                // effect, so the window takes the current mode.
+                Silk.NET.GLFW.VideoMode* current = glfw.GetVideoMode(monitor);
+                if (current is null)
+                {
+                    error = "the monitor reports no current mode";
+                    return false;
+                }
+                width = current->Width;
+                height = current->Height;
+                refresh = current->RefreshRate;
+            }
+            else if (!TryFindRefreshRate(glfw, monitor, width, height, out refresh))
             {
                 error = $"mode {width}x{height} is not in the monitor's mode list";
                 return false;
@@ -123,8 +149,9 @@ internal sealed unsafe class GlfwDisplayModeSwitcher : IDisplayModeSwitcher
                 return false;
             }
 
-            Console.WriteLine(
-                $"display: fullscreen mode switch {width}x{height}@{refresh}");
+            Console.WriteLine(compositor
+                ? $"display: fullscreen at the monitor's mode {width}x{height}@{refresh}"
+                : $"display: fullscreen mode switch {width}x{height}@{refresh}");
             return true;
         }
         catch (GlfwException ex)
