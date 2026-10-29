@@ -396,6 +396,14 @@ public readonly record struct PluginWorldObject(
     public uint CoverageMask { get; init; }
 
     /// <summary>
+    /// The kinds of item a house hook will take, as the item-type bits the
+    /// server sends when the object first appears -- the same value as
+    /// <see cref="PluginInventoryItem.HookItemTypes"/>. Zero for anything
+    /// that is not a hook.
+    /// </summary>
+    public uint HookItemTypes { get; init; }
+
+    /// <summary>
     /// The raw description words and optional values of the object's latest
     /// full description, as the server sent them; null for an object the
     /// client never received a description of, and on a host that does not

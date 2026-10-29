@@ -5593,6 +5593,7 @@ internal sealed class RuntimeAutomationSurface
             IconUnderlayId = item.IconUnderlayId,
             IconOverlayId = item.IconOverlayId,
             CoverageMask = item.Priority,
+            HookItemTypes = item.HookItemTypes,
             PluralName = item.PluralName,
             // The live object's own radius when it is out in the world, and
             // otherwise the one its description carried, so an item in a

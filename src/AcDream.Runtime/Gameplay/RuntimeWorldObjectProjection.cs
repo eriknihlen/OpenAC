@@ -86,6 +86,7 @@ public static class RuntimeWorldObjectProjection
             ActiveSpellIds = activeSpells,
             IconId = item?.IconId ?? 0u,
             CoverageMask = item?.Priority ?? 0u,
+            HookItemTypes = item?.HookItemTypes ?? 0u,
             Header = ProjectHeader(item?.Header),
             PortalDestination = objectClass == PluginObjectClass.Portal
                 && item is not null

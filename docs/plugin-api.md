@@ -656,6 +656,9 @@ piece of armor or clothing covers come with the object when it first
 appears, so `PluginWorldObject.CoverageMask` and
 `PluginInventoryItem.CoverageMask` carry those coverage bits for an item
 that has never been appraised; both are zero for anything that is not worn.
+The same goes for a house hook: `HookItemTypes` on both records carries the
+item-type bits saying what the hook will take (the macro tools' hook mask),
+and is zero for anything that is not a hook.
 
 For a plugin that reproduces another tool's record of an object, both
 records also carry `Header`, a `PluginObjectHeader` with the raw words the
