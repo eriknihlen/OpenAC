@@ -2,6 +2,9 @@
 
 | Page | What it is for |
 |---|---|
+| [getting-started.md](getting-started.md) | Downloading a client, the game data and a server, for both clients |
+| [whats-new.md](whats-new.md) | The latest releases of both clients, with credits; updated with every release |
+| [rust-client.md](rust-client.md) | What openac-rust is, how it differs from OpenAC, its plugin API versions |
 | [architecture.md](architecture.md) | The projects, what depends on what, and where a change belongs |
 | [building-and-running.md](building-and-running.md) | SDK, data files, the prepared package, launching the client and the headless host, the useful startup options |
 | [navigation.md](navigation.md) | Walks, moves and jumps: the grid, the router, the motor, `/nav` and `/motor`, and the plugin navigation API |

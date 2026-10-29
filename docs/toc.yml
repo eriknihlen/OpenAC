@@ -1,3 +1,9 @@
+- name: Getting started
+  href: getting-started.md
+- name: What's new
+  href: whats-new.md
+- name: The Rust client
+  href: rust-client.md
 - name: Writing a plugin
   href: plugin-development.md
 - name: Plugin API
