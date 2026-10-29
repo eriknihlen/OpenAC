@@ -175,6 +175,10 @@ public sealed class InteractionUiRuntimeSourcesTests
         Assert.False(source.TryRequestCheckpoint(
             "early", out _, out string earlyError));
         Assert.Contains("not bound", earlyError);
+        Assert.False(source.TryIsAutomationSignalPublished(
+            "go", out bool earlyPublished, out string earlySignalError));
+        Assert.False(earlyPublished);
+        Assert.Contains("not bound", earlySignalError);
 
         var target = new AutomationRuntime();
         IDisposable binding = source.Bind(target);
@@ -192,6 +196,10 @@ public sealed class InteractionUiRuntimeSourcesTests
         Assert.True(target.RenderPackReenabled);
         Assert.True(source.TryResizeFramebuffer(1024, 768, out _));
         Assert.Equal((1024, 768), target.LastFramebufferSize);
+        Assert.True(source.TryIsAutomationSignalPublished("go", out bool published, out _));
+        Assert.True(published);
+        Assert.True(source.TryIsAutomationSignalPublished("later", out bool notYet, out _));
+        Assert.False(notYet);
 
         binding.Dispose();
         Assert.False(source.IsWorldReady);
@@ -200,6 +208,7 @@ public sealed class InteractionUiRuntimeSourcesTests
             source.RenderPackStatus);
         Assert.False(source.TrySelectRenderPack("high", out string unboundError));
         Assert.Contains("not bound", unboundError);
+        Assert.False(source.TryIsAutomationSignalPublished("go", out _, out _));
         source.Deactivate();
         Assert.Throws<ObjectDisposedException>(() => source.Bind(target));
     }
@@ -546,6 +555,16 @@ public sealed class InteractionUiRuntimeSourcesTests
         }
 
         public bool IsScreenshotComplete(string name) => true;
+
+        public bool TryIsAutomationSignalPublished(
+            string name,
+            out bool published,
+            out string error)
+        {
+            published = name == "go";
+            error = string.Empty;
+            return true;
+        }
     }
 
     private sealed class RetryBinding(int failures) : IDisposable
