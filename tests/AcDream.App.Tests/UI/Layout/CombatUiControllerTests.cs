@@ -72,6 +72,28 @@ public sealed class CombatUiControllerTests
     }
 
     [Fact]
+    public void DraggingThePowerSlider_SetsTheDesiredPower()
+    {
+        var combat = new CombatState();
+        using var attacks = CreateAttacks(combat, () => 0d, []);
+        var (layout, _, _, power, _, _, _) = BuildLayout();
+        var options = new FakeOptionBindings();
+        using var controller = CombatUiController.Bind(
+            layout, combat, attacks, options.ToBindings(),
+            Labels, _ => { })!;
+        combat.SetCombatMode(CombatMode.Melee);
+
+        // Grab the thumb at half power and drag it past the bar's far end:
+        // the widget itself turns the drag into full power.
+        power.OnEvent(new UiEvent(0, power, UiEventType.MouseDown, Data1: 253, Data2: 7));
+        power.OnEvent(new UiEvent(0, power, UiEventType.MouseMove, Data1: 600, Data2: 7));
+        power.OnEvent(new UiEvent(0, power, UiEventType.MouseUp, Data1: 600, Data2: 7));
+
+        Assert.Equal(1f, power.ScalarPosition);
+        Assert.Equal(1f, attacks.DesiredPower);
+    }
+
+    [Fact]
     public void AuthoredOptionCheckbox_TogglesPersistedGameplayValue()
     {
         var combat = new CombatState();
