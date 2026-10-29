@@ -823,6 +823,39 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
         fixture.DrainPlacementFifo();
     }
 
+    /// <summary>
+    /// Issue #21: an object nothing animates (a token) fell and lies on the
+    /// ground, its body in contact on walkable ground, so gravity no longer
+    /// pulls it. The server then sends its position again, the spot in the
+    /// air it was created at. The body is put there, and there it touches
+    /// nothing: the contact it had on the ground does not come along, so
+    /// gravity pulls it again and it falls back. Keeping the old contact it
+    /// hung in the air with gravity off.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_ServerPositionInTheAir_DoesNotKeepItsGroundContact()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        Assert.True(body.InContact);
+        Assert.True(body.OnWalkable);
+
+        var aloft = new Vector3(10f, 10f, SpawnHeight + 1f);
+        fixture.Controller.OnPosition(fixture.Update(
+            aloft, SourceCell, teleportSequence: 1, guid: CreatureGuid,
+            isGrounded: false));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(aloft, body.Position);
+        Assert.False(body.InContact);
+        Assert.False(body.OnWalkable);
+        Assert.False(body.ContactPlaneValid);
+        body.calc_acceleration();
+        Assert.True(body.Acceleration.Z < 0f);
+    }
+
     private sealed class Fixture : IDisposable
     {
         internal RuntimeEntityObjectLifetime Lifetime { get; }
@@ -848,7 +881,8 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
             bool nullClassification = false,
             bool withAnimation = false,
             bool isMissile = false,
-            bool decliningMaterializer = false)
+            bool decliningMaterializer = false,
+            bool ordinaryBodyOnTheGround = false)
         {
             _guid = guid;
             _nullClassification = nullClassification;
@@ -893,7 +927,8 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 ObjDesc: 1,
                 Instance: 1);
             PhysicsStateFlags baseState = PhysicsStateFlags.ReportCollisions
-                | (isMissile ? PhysicsStateFlags.Missile : PhysicsStateFlags.None);
+                | (isMissile ? PhysicsStateFlags.Missile : PhysicsStateFlags.None)
+                | (ordinaryBodyOnTheGround ? PhysicsStateFlags.Gravity : PhysicsStateFlags.None);
             var physics = new PhysicsSpawnData(
                 RawState: (uint)baseState,
                 Position: wirePosition,
@@ -958,6 +993,40 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 Lifetime.Physics.AcknowledgeSpatialProjection(canonical, spatial: true);
                 Projectile = (RuntimeProjectile)Lifetime.Physics.BindProjectile(
                     canonical, body, new ProjectileCollisionSphere(Vector3.Zero, 0.1f, 1f));
+                Shadows.Register(
+                    Entity.Id,
+                    0x02000001u,
+                    Entity.Position,
+                    Entity.Rotation,
+                    radius: 0.1f,
+                    worldOffsetX: 0f,
+                    worldOffsetY: 0f,
+                    landblockId: SourceLandblock,
+                    collisionType: ShadowCollisionType.Sphere,
+                    state: (uint)baseState,
+                    seedCellId: SourceCell,
+                    isStatic: false);
+            }
+            else if (ordinaryBodyOnTheGround)
+            {
+                // A body of its own and no remote motion yet, lying in
+                // contact on walkable ground (as the ordinary step leaves a
+                // fallen object).
+                var body = new PhysicsBody
+                {
+                    Position = Entity.Position,
+                    Orientation = Entity.Rotation,
+                    LastUpdateTime = 1d,
+                    State = baseState,
+                    TransientState = TransientStateFlags.Active
+                        | TransientStateFlags.Contact
+                        | TransientStateFlags.OnWalkable,
+                    ContactPlaneValid = true,
+                };
+                body.SnapToCell(SourceCell, Entity.Position, Entity.Position);
+                RuntimeEntityRecord canonical = record.Canonical!;
+                Lifetime.Entities.SetPhysicsBody(canonical, body);
+                canonical.ObjectClock.Activate();
                 Shadows.Register(
                     Entity.Id,
                     0x02000001u,

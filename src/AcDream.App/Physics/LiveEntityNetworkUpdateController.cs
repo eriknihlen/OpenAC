@@ -176,6 +176,18 @@ internal sealed class LiveEntityNetworkUpdateController
 
     private static bool IsDoorName(string? name) => name == "Door";
 
+    /// <summary>
+    /// The body no longer touches anything: no contact, no walkable ground,
+    /// no contact plane, and its acceleration is worked out again.
+    /// </summary>
+    private static void DropContact(PhysicsBody body)
+    {
+        body.TransientState &= ~(TransientStateFlags.Contact
+            | TransientStateFlags.OnWalkable);
+        body.ContactPlaneValid = false;
+        body.calc_acceleration();
+    }
+
     private void SeedRemoteSpawnPlacement(
         RemoteMotion remote,
         uint serverGuid,
@@ -1195,6 +1207,13 @@ internal sealed class LiveEntityNetworkUpdateController
                 // Hard-snap orientation on first spawn so the per-tick
                 // slerp doesn't visibly rotate from Identity to truth.
                 rmState.Body.Orientation = rot;
+                // A body that already lay somewhere (an object that fell and
+                // landed under its own physics) does not bring the contact it
+                // had there to the server's spot: what it touches there is
+                // found again by the settle below, and without it gravity
+                // pulls it.
+                if (rmState.Body.Position != worldPos)
+                    DropContact(rmState.Body);
                 rmState.Body.Position = worldPos;
                 SeedRemoteSpawnPlacement(
                     rmState,
