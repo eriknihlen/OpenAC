@@ -182,6 +182,28 @@ public sealed class RuntimeChessStateTests
     }
 
     [Fact]
+    public void OpponentsMoveTheRulesRefuse_LeavesTheBoardAndLocksTheTurn()
+    {
+        // The game behaves this way too: the board stays as it was, nothing
+        // is said, the turn still passes to the local player, and since the
+        // board still has the opponent to move every move after it is
+        // refused as not the player's piece.
+        RuntimeChessState chess = Seated(ChessTeam.Black);
+        ChessBoard before = chess.View.Board;
+
+        chess.ApplyOpponentTurn(OpponentMove(0, "e2", "e5"));
+
+        Assert.Equal(RuntimeChessStage.MyTurn, chess.Snapshot.Stage);
+        Assert.Empty(_lines);
+        Assert.Equal(before.Pieces, chess.View.Board.Pieces);
+        Assert.Equal(ChessTeam.White, chess.View.Board.Turn);
+
+        Assert.Equal(ChessMoveResult.NotYours, chess.TryMove(Sq("e7"), Sq("e5")));
+        Assert.Equal(RuntimeChessState.OwnMoveText(ChessMoveResult.NotYours), LastLine);
+        Assert.Equal(RuntimeChessStage.MyTurn, chess.Snapshot.Stage);
+    }
+
+    [Fact]
     public void CheckAndCheckmate_AreAnnouncedToBothSides()
     {
         RuntimeChessState white = Seated(ChessTeam.White);

@@ -270,6 +270,11 @@ public sealed class RuntimeChessState
                 if (result.IsAccepted())
                     text = OpponentMoveText(result);
             }
+            // The turn passes even when the board's rules refuse a move the
+            // server accepted, and nothing is said. That is how the game
+            // behaves: the board keeps the opponent to move, so every move
+            // the player then tries is refused as not theirs until the game
+            // ends. Matching it keeps both clients in the same state.
             _stage = RuntimeChessStage.MyTurn;
             _revision++;
         }
