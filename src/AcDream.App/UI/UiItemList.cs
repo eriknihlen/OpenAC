@@ -124,9 +124,10 @@ public sealed class UiItemList : UiElement
     public bool FillVisibleEmptySlots { get; set; }
 
     /// <summary>
-    /// When set, the list pads itself with empty cells to exactly this many,
-    /// whatever its width, in place of <see cref="FillVisibleEmptySlots"/>.
-    /// A cell holding an item is never dropped to meet it.
+    /// When set, the list holds exactly this many cells, whatever its width,
+    /// in place of <see cref="FillVisibleEmptySlots"/>: it pads with empty
+    /// cells, and drops the last cells past the count even when they hold
+    /// an item, so a container never shows more items than it can hold.
     /// </summary>
     public int? FixedSlotCount { get; set; }
 
@@ -236,7 +237,8 @@ public sealed class UiItemList : UiElement
             AddChild(cell);
         }
 
-        while (_cells.Count > visibleCellCount && _cells[^1].IsEmptySlot)
+        while (_cells.Count > visibleCellCount
+            && (FixedSlotCount is not null || _cells[^1].IsEmptySlot))
         {
             UiItemSlot cell = _cells[^1];
             _cells.RemoveAt(_cells.Count - 1);

@@ -267,6 +267,29 @@ public sealed class ExternalContainerControllerTests
         Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
     }
 
+    // The strip never shows more items than the container holds: the items
+    // past its capacity get no cell, and the cells still refresh in place.
+    [Fact]
+    public void ItemsPastTheCapacity_getNoCell_andCellsRefreshInPlace()
+    {
+        using var h = new Harness();
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 1u));
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0,
+            new ContainerContentEntry(Item, 0u),
+            new ContainerContentEntry(Item + 1u, 0u));
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        UiItemSlot cell = h.Contents.GetItem(0)!;
+        Assert.Equal(Item, cell.ItemId);
+
+        var properties = new PropertyBundle();
+        properties.Ints[1u] = 42;
+        Assert.True(h.Objects.UpdateAppraisal(Item, properties, Array.Empty<uint>()));
+
+        Assert.Same(cell, h.Contents.GetItem(0));
+    }
+
     // Chests and corpses send -1 ("no limit"): the strips fill the window.
     [Fact]
     public void UnlimitedContainer_fillsTheVisibleWidth()

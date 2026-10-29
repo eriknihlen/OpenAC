@@ -376,6 +376,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         IReadOnlyList<uint> visibleContainers,
         IReadOnlyList<uint> visibleContents)
     {
+        visibleContainers = Shown(_containerList, visibleContainers);
+        visibleContents = Shown(_contentsList, visibleContents);
         if (_topContainer.GetNumUIItems() != 1
             || _topContainer.GetItem(0)?.ItemId != root
             || !Matches(_containerList, visibleContainers)
@@ -395,7 +397,17 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         return true;
     }
 
-    // The lists pad themselves with empty cells (FillVisibleEmptySlots).
+    /// <summary>
+    /// The guids a list shows: a list with a fixed cell count drops the items
+    /// past it.
+    /// </summary>
+    private static IReadOnlyList<uint> Shown(UiItemList list, IReadOnlyList<uint> guids)
+        => list.FixedSlotCount is int count && guids.Count > Math.Max(0, count)
+            ? guids.Take(Math.Max(0, count)).ToArray()
+            : guids;
+
+    // A list pads itself with empty cells past its items, to its width or to
+    // its fixed cell count.
     private static bool Matches(UiItemList list, IReadOnlyList<uint> guids)
     {
         if (list.GetNumUIItems() < guids.Count) return false;

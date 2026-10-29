@@ -133,19 +133,39 @@ public class UiItemListTests
         list.LayoutCells();
         Assert.Equal(6, list.GetNumUIItems());
 
-        // Never drops a cell that holds an item.
-        list.FixedSlotCount = 1;
-        using (list.DeferLayout())
-        {
-            list.Flush();
-            list.AddItem(new UiCatalogSlot { EntryId = 1u });
-            list.AddItem(new UiCatalogSlot { EntryId = 2u });
-        }
-        Assert.Equal(2, list.GetNumUIItems());
-
         list.FixedSlotCount = null;
         list.LayoutCells();
         Assert.Equal(4, list.GetNumUIItems());
+    }
+
+    [Fact]
+    public void FixedSlotCount_DropsTheLastCellsPastTheCount_EvenWithItems()
+    {
+        var list = new UiItemList
+        {
+            Width = 130f,
+            Height = 32f,
+            CellWidth = 32f,
+            CellHeight = 32f,
+            SingleRow = true,
+            FillVisibleEmptySlots = true,
+            FixedSlotCount = 1,
+            EmptySlotFactory = () => new UiCatalogSlot(),
+        };
+        var first = new UiCatalogSlot { EntryId = 1u };
+        using (list.DeferLayout())
+        {
+            list.Flush();
+            list.AddItem(first);
+            list.AddItem(new UiCatalogSlot { EntryId = 2u });
+        }
+
+        Assert.Equal(1, list.GetNumUIItems());
+        Assert.Same(first, list.GetItem(0));
+
+        list.FixedSlotCount = 0;
+        list.LayoutCells();
+        Assert.Equal(0, list.GetNumUIItems());
     }
 
     [Fact]
