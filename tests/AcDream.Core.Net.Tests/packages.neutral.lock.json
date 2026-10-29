@@ -117,7 +117,7 @@
       "acdream.core": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Plugin.Abstractions": "[0.1.30, )",
+          "AcDream.Plugin.Abstractions": "[0.1.31, )",
           "BCnEncoder.Net": "[2.2.1, )",
           "Chorizite.DatReaderWriter": "[2.1.7, )",
           "Serilog": "[4.0.2, )",
@@ -128,7 +128,7 @@
       "acdream.core.net": {
         "type": "Project",
         "dependencies": {
-          "AcDream.Core": "[0.1.30, )"
+          "AcDream.Core": "[0.1.31, )"
         }
       },
       "acdream.plugin.abstractions": {
