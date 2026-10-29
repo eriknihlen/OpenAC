@@ -1205,7 +1205,7 @@ property. On `<button>`, `<list>` and an icon `<column>`, set
   as the ones it asks for through `IUiRegistry.Images`, and count against the
   same limits: 256 images and 32 MB of the plugin's own art, smaller copies
   (mipmaps, about a third more) included. A file past them draws nothing, and
-  the log says why.
+  the log says why; it is tried again once the plugin lets go of another image.
 - **Drawing:** the element's `w` and `h` set the size; the image keeps its
   aspect ratio, is centred in the element, and is scaled smoothly, unlike
   client art. The client keeps smaller copies of every image (mipmaps), so a
@@ -1218,9 +1218,11 @@ property. On `<button>`, `<list>` and an icon `<column>`, set
   the path it returns. A null or blank path draws nothing.
 - **Loading:** a file is read and decoded in the background the first time a
   window draws it, so the icon appears a frame or so after the window does.
-  Each file is held once, however many elements and windows show it, and is
-  given back when the last window showing it is closed for good, rebuilt, or
-  unloaded with its plugin.
+  Each file is held once, however many elements and windows show it. A window
+  lets go of a file it has not drawn for 5 seconds (a hidden window or tab, a
+  bound path that moved on), and reads it again if it draws it
+  later. Everything is given back when the window is closed for good, rebuilt,
+  or unloaded with its plugin.
 - **Reloading:** a file that changed on disk is loaded again when its window
   is built again, for example on a plugin hot reload. Another window still
   showing the old image keeps it until that window is built again too.

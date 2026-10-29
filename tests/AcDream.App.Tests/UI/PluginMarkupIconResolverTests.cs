@@ -18,6 +18,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
     private readonly PluginImageTable _table;
     private readonly List<(Func<PluginFileImageResult> Read, TaskCompletionSource<PluginFileImageResult> Done)> _held = [];
     private bool _holdReads;
+    private long _now = 1_000_000;
 
     public PluginMarkupIconResolverTests()
     {
@@ -98,7 +99,7 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
     }
 
     private PluginMarkupIconResolver Resolver(PluginFileImageLoader loader) =>
-        new(new Retail(), loader, () => _table, "acme.hello", _root);
+        new(new Retail(), loader, () => _table, "acme.hello", _root, () => _now);
 
     [Fact]
     public void ClientIconsGoToTheRetailResolver()
@@ -253,6 +254,110 @@ public sealed class PluginMarkupIconResolverTests : IDisposable
         Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/shield.png"));
 
         Assert.Contains(_reports, line => line.Contains("1 images", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ABoundIconRunningThroughManyFilesKeepsOnlyRecentOnesHeld()
+    {
+        // A small budget, so a window holding every file it ever drew would fill it.
+        using var table = new PluginImageTable(
+            "acme.hello",
+            new PluginImageBudget(MaximumCount: 8, MaximumBytes: 1024 * 1024, MaximumDimension: 2048),
+            _reports.Add);
+        table.Bind(_backend, Environment.CurrentManagedThreadId);
+        using var resolver = new PluginMarkupIconResolver(
+            new Retail(), Loader(), () => table, "acme.hello", _root, () => _now);
+        for (int i = 0; i < 40; i++)
+            File.WriteAllBytes(Path.Combine(_root, "icons", $"status{i}.png"), PngTestData.Sized(4, 4));
+
+        // The bound path names a new file every second, and the window draws it every frame.
+        for (int i = 0; i < 40; i++)
+        {
+            Assert.NotEqual(0u, resolver.ResolveFile($"icons/status{i}.png").tex);
+            _now += PluginMarkupIconResolver.ReleaseCheckIntervalMilliseconds;
+            resolver.ReleaseUndrawn();
+            Assert.True(table.Count <= 6, $"the table holds {table.Count} images after file {i}");
+        }
+
+        Assert.DoesNotContain(_reports, line => line.Contains("refused", StringComparison.Ordinal));
+        Assert.True(resolver.RememberedFileCount <= 6);
+    }
+
+    [Fact]
+    public void AFileLetGoForNotBeingDrawnIsReadAgainWhenDrawnAgain()
+    {
+        int reads = 0;
+        var loader = new PluginFileImageLoader(_reports.Add, read =>
+        {
+            reads++;
+            return Task.FromResult(read());
+        });
+        using PluginMarkupIconResolver resolver = Resolver(loader);
+        Assert.Equal((501u, 20, 10), resolver.ResolveFile("icons/sword.png"));
+
+        // Drawn recently: kept.
+        _now += PluginMarkupIconResolver.ReleaseAfterMilliseconds - 1;
+        resolver.ReleaseUndrawn();
+        Assert.Equal(1, _table.Count);
+        Assert.Empty(_backend.Released);
+
+        // Not drawn for the whole wait: let go.
+        _now += PluginMarkupIconResolver.ReleaseCheckIntervalMilliseconds;
+        resolver.ReleaseUndrawn();
+        Assert.Equal([501u], _backend.Released);
+        Assert.Equal(0, _table.Count);
+        Assert.Equal(0, resolver.RememberedFileCount);
+
+        Assert.Equal((502u, 20, 10), resolver.ResolveFile("icons/sword.png"));
+        Assert.Equal(2, reads);
+        Assert.Equal(1, _table.Count);
+    }
+
+    [Fact]
+    public void AFileRefusedForWantOfRoomDrawsOnceAnotherIsLetGo()
+    {
+        File.WriteAllBytes(Path.Combine(_root, "icons", "shield.png"), PngTestData.Sized(4, 4));
+        using var table = new PluginImageTable(
+            "acme.hello",
+            new PluginImageBudget(MaximumCount: 1, MaximumBytes: 1024 * 1024, MaximumDimension: 2048),
+            _reports.Add);
+        table.Bind(_backend, Environment.CurrentManagedThreadId);
+        using var resolver = new PluginMarkupIconResolver(
+            new Retail(), Loader(), () => table, "acme.hello", _root, () => _now);
+        Assert.NotEqual(0u, resolver.ResolveFile("icons/sword.png").tex);
+        Assert.Equal((0u, 0, 0), resolver.ResolveFile("icons/shield.png"));
+
+        // The sword stops being drawn; the shield goes on being drawn.
+        for (long waited = 0; waited <= PluginMarkupIconResolver.ReleaseAfterMilliseconds;
+             waited += PluginMarkupIconResolver.ReleaseCheckIntervalMilliseconds)
+        {
+            _now += PluginMarkupIconResolver.ReleaseCheckIntervalMilliseconds;
+            resolver.ResolveFile("icons/shield.png");
+            resolver.ReleaseUndrawn();
+        }
+
+        Assert.Equal((502u, 4, 4), resolver.ResolveFile("icons/shield.png"));
+        Assert.Equal(1, table.Count);
+    }
+
+    [Fact]
+    public void AFileRefusedForWantOfRoomDrawsOnceAnotherWindowGoes()
+    {
+        File.WriteAllBytes(Path.Combine(_root, "icons", "shield.png"), PngTestData.Sized(4, 4));
+        using var table = new PluginImageTable(
+            "acme.hello",
+            new PluginImageBudget(MaximumCount: 1, MaximumBytes: 1024 * 1024, MaximumDimension: 2048),
+            _reports.Add);
+        table.Bind(_backend, Environment.CurrentManagedThreadId);
+        PluginFileImageLoader loader = Loader();
+        var first = new PluginMarkupIconResolver(new Retail(), loader, () => table, "acme.hello", _root, () => _now);
+        using var second = new PluginMarkupIconResolver(new Retail(), loader, () => table, "acme.hello", _root, () => _now);
+        Assert.NotEqual(0u, first.ResolveFile("icons/sword.png").tex);
+        Assert.Equal((0u, 0, 0), second.ResolveFile("icons/shield.png"));
+
+        first.Dispose();
+
+        Assert.Equal((502u, 4, 4), second.ResolveFile("icons/shield.png"));
     }
 
     [Fact]

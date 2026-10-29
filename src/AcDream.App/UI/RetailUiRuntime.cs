@@ -425,6 +425,7 @@ public sealed class RetailUiRuntime : IDisposable
     private UiNineSlicePanel? _pluginAppearance;
     private readonly Dictionary<string, (uint Texture, int Width, int Height)?> _pluginIcons = [];
     private PluginFileImageLoader? _pluginFileImages;
+    private readonly List<PluginMarkupIconResolver> _pluginWindowIcons = [];
     private bool _pluginsMounted;
     private IDisposable? _characterSheetSubscription;
     private Layout.CharacterTitlesController? _characterTitlesController;
@@ -779,6 +780,9 @@ public sealed class RetailUiRuntime : IDisposable
         CharacterCreationController?.Tick();
         DialogFactory?.Tick();
         _pluginDialogs?.Tick();
+        // Plugin windows let go of the file icons they have stopped drawing.
+        foreach (PluginMarkupIconResolver windowIcons in _pluginWindowIcons)
+            windowIcons.ReleaseUndrawn();
         // Windows a plugin registered after the UI came up (a server-fed panel
         // arrives once the character is in the world). Same path as the first
         // mount; each registration is drained once.
@@ -4171,6 +4175,7 @@ public sealed class RetailUiRuntime : IDisposable
                 () => _bindings.Plugins?.ImageTableFor(owner),
                 owner.Id,
                 panel.PluginDirectory);
+            _pluginWindowIcons.Add(windowIcons);
             try
             {
                 string xml = panel.MarkupContent
@@ -4218,6 +4223,7 @@ public sealed class RetailUiRuntime : IDisposable
                     {
                         Host.WindowManager.Unregister(panel.WindowName);
                         windowIcons.Dispose();
+                        _pluginWindowIcons.Remove(windowIcons);
                     });
 
                 if (panel.Descriptor.ShowInSidePanel)
@@ -4250,6 +4256,7 @@ public sealed class RetailUiRuntime : IDisposable
             {
                 _bindings.Plugins.FailMount(panel);
                 windowIcons.Dispose();
+                _pluginWindowIcons.Remove(windowIcons);
                 Console.WriteLine($"[UI] plugin UI panel '{panel.MarkupPath}' failed to load: {ex.Message}");
             }
         }

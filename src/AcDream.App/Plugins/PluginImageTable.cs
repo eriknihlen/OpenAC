@@ -150,6 +150,13 @@ internal sealed class PluginImageTable : IDisposable
     internal bool IsBound => _backend is not null;
 
     /// <summary>
+    /// Moves on each time an image is let go of completely and each time the
+    /// table is bound: a request refused for want of room, or because the
+    /// table was not bound, may succeed once this has moved.
+    /// </summary>
+    internal long ReleaseGeneration { get; private set; }
+
+    /// <summary>
     /// Points the table at the interface's texture services.
     /// <paramref name="uiThreadId"/> is the interface thread, the only thread
     /// the table then accepts requests from. It is passed in rather than
@@ -165,6 +172,7 @@ internal sealed class PluginImageTable : IDisposable
             throw new InvalidOperationException("The image table is already bound.");
         _backend = backend;
         _uiThreadId = uiThreadId;
+        ReleaseGeneration++;
     }
 
     /// <summary>
@@ -475,6 +483,7 @@ internal sealed class PluginImageTable : IDisposable
     {
         _byKey.Remove(entry.Key);
         _byId.Remove(entry.Id);
+        ReleaseGeneration++;
         if (!entry.IsOwned)
             return;
         _ownedBytes -= entry.OwnedBytes;
