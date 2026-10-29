@@ -249,8 +249,8 @@ public sealed class ExternalContainerControllerTests
             Assert.IsType<UiScrollbar>(h.Window.ContentRoot.Children.Last()).Model);
     }
 
-    // #93: a house hook holds one item, so it opens with one cell, the way
-    // retail sizes the strips from the container's capacities.
+    // A house hook holds one item, so it opens with one cell: the strips are
+    // sized from the container's capacities.
     [Fact]
     public void Hook_showsOneItemCell_andNoPackCells()
     {
