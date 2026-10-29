@@ -160,6 +160,10 @@ public sealed class UiItemList : UiElement
 
     internal void LayoutCells()
     {
+        // A fixed cell count holds whatever the cell size; the width only
+        // decides how many cells fill the strip without one.
+        UpdateEmptySlots();
+
         if (CellWidth <= 0f)
         {
             if (_cells.Count > 0)
@@ -169,8 +173,6 @@ public sealed class UiItemList : UiElement
             }
             return;
         }
-
-        UpdateEmptySlots();
 
         int cols = SingleRow
             ? Math.Max(1, _cells.Count)
@@ -217,9 +219,8 @@ public sealed class UiItemList : UiElement
 
     private void UpdateEmptySlots()
     {
-        if (CellWidth <= 0f)
-            return;
-        if (FixedSlotCount is null && (!FillVisibleEmptySlots || !SingleRow))
+        if (FixedSlotCount is null
+            && (!FillVisibleEmptySlots || !SingleRow || CellWidth <= 0f))
             return;
 
         int visibleCellCount = FixedSlotCount is int fixedCount

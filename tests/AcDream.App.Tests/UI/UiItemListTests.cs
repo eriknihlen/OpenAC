@@ -169,6 +169,28 @@ public class UiItemListTests
     }
 
     [Fact]
+    public void FixedSlotCount_HoldsBeforeTheCellSizeIsKnown()
+    {
+        var list = new UiItemList
+        {
+            FixedSlotCount = 2,
+            EmptySlotFactory = () => new UiCatalogSlot(),
+        };
+        using (list.DeferLayout())
+        {
+            list.Flush();
+            list.AddItem(new UiCatalogSlot { EntryId = 1u });
+            list.AddItem(new UiCatalogSlot { EntryId = 2u });
+            list.AddItem(new UiCatalogSlot { EntryId = 3u });
+        }
+        Assert.Equal(2, list.GetNumUIItems());
+
+        list.FixedSlotCount = 4;
+        list.LayoutCells();
+        Assert.Equal(4, list.GetNumUIItems());
+    }
+
+    [Fact]
     public void ScrollItemIntoView_moves_only_when_row_is_outside_viewport()
     {
         var list = new UiItemList

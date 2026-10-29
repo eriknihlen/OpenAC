@@ -351,6 +351,32 @@ public sealed class ExternalContainerControllerTests
         Assert.False(h.Contents.GetItem(0)!.Visible);
     }
 
+    // An item arriving in a full strip gets no cell and does not push out an
+    // item already shown: from the server, or as a pending placement.
+    [Fact]
+    public void ItemArrivingInAFullStrip_isNotShown_andTheShownItemStays()
+    {
+        using var h = new Harness();
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 1u));
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item + 2u));
+        h.Open(Chest, itemsCapacity: 1, containersCapacity: 0,
+            new ContainerContentEntry(Item, 0u));
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+
+        Assert.True(h.Objects.MoveItem(Item + 1u, Chest, 0));
+        Assert.Equal(Item + 1u, h.Objects.GetContents(Chest).First());
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+
+        Assert.True(h.Interaction.TryDispatchPendingBackpackPlacement(
+            Item + 2u, Chest, 0, InventoryRequestKind.PutInContainer, () => true));
+
+        Assert.Equal(1, h.Contents.GetNumUIItems());
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+    }
+
     // Opening another pack that shows the same items (none) but holds a
     // different number resizes the item strip to that pack's capacity.
     [Fact]
