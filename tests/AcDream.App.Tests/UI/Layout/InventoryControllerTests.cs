@@ -3094,4 +3094,101 @@ public class InventoryControllerTests
         Assert.Empty(puts);
         Assert.Equal(new[] { "Backpack is completely full!" }, messages);
     }
+
+    // The player's own stack moved onto the full main pack's icon. The whole
+    // stack counts as fitting in the pack that already holds it; part of a
+    // stack needs a free slot of its own, even in that pack.
+
+    /// <summary>
+    /// The stack 0xB of 10 in the side pack 0xC (room for one, so full), the
+    /// main pack full with 0xA, and the empty side pack 0xD.
+    /// </summary>
+    private static ClientObjectTable OwnStackInAFullSidePack()
+    {
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 1);
+        SeedPack(objects, 0xD, slot: 1, capacity: 2);
+        SeedStack(objects, 0xB, 0xC, slot: 0, size: 10);
+        return objects;
+    }
+
+    private static StackSplitQuantityState SplitOf(uint size, uint amount)
+    {
+        var split = new StackSplitQuantityState();
+        split.Reset(size);
+        split.SetValue(amount);
+        return split;
+    }
+
+    [Fact]
+    public void OwnStack_droppedWholeOnAFullMainPackIcon_movesToTheTopOfItsFullSidePack()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits);
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, 0) }, puts);
+        Assert.Empty(splits);
+    }
+
+    [Fact]
+    public void PartOfAnOwnStack_droppedOnAFullMainPackIcon_goesToTheNextPackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        ClientObjectTable objects = OwnStackInAFullSidePack();
+        var selection = new SelectionState();
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u));
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xDu, 0u, 4u) }, splits);
+        Assert.Empty(puts);
+    }
+
+    [Fact]
+    public void AStackInTheFullMainPack_droppedWholeOnItsIcon_movesToItsTop()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedStack(objects, 0xB, Player, slot: 0, size: 10);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        var puts = new List<(uint item, uint container, int placement)>();
+        using var controller = Bind(layout, objects, puts: puts);
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, Player, 0) }, puts);
+    }
+
+    [Fact]
+    public void PartOfAStackInTheFullMainPack_droppedOnItsIcon_goesToASidePackWithRoom()
+    {
+        var (layout, _, _, top, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedStack(objects, 0xB, Player, slot: 0, size: 10);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        var selection = new SelectionState();
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u));
+
+        controller.HandleDropRelease(top, top.GetItem(0)!, Payload(0xB));
+
+        Assert.Equal(new[] { (0xBu, 0xCu, 0u, 4u) }, splits);
+        Assert.Empty(puts);
+    }
 }

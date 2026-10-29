@@ -22,7 +22,8 @@ public static class InventoryContainerPlacementPolicy
         ClientObjectTable objects,
         uint itemId,
         uint destinationId,
-        uint playerId)
+        uint playerId,
+        bool wholeStack = true)
     {
         ArgumentNullException.ThrowIfNull(objects);
         if (itemId == 0u || objects.Get(itemId) is not { } item)
@@ -67,8 +68,10 @@ public static class InventoryContainerPlacementPolicy
         }
         else
         {
+            // Part of a stack takes a slot of its own, even beside the rest
+            // of it: only the whole stack is a reorder.
             int capacity = destination?.ItemsCapacity ?? 0;
-            if (!alreadyDirectlyContained
+            if (!(alreadyDirectlyContained && wholeStack)
                 && capacity > 0
                 && CountItems(objects, destinationId) >= capacity)
             {

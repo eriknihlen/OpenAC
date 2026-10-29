@@ -923,6 +923,23 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         => ResolveFallthroughContainer(itemId, namedContainer, _playerGuid(), out refusal);
 
     /// <summary>
+    /// How much of <paramref name="itemId"/> a drag moves, and whether that
+    /// is the whole stack: the selected stack's split quantity splits it,
+    /// wherever it comes from. Part of a stack needs a slot of its own, even
+    /// in the pack that holds the rest.
+    /// </summary>
+    private (uint SplitSize, bool WholeStack) MovingAmount(uint itemId)
+    {
+        ClientObject? dragged = _objects.Get(itemId);
+        uint fullStack = (uint)Math.Max(dragged?.StackSize ?? 1, 1);
+        uint splitSize = dragged is null
+            ? fullStack
+            : _stackSplitQuantity?.GetObjectSplitSize(
+                itemId, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
+        return (splitSize, splitSize >= fullStack);
+    }
+
+    /// <summary>
     /// The same search started from <paramref name="root"/>: the root, then
     /// the packs inside it. A drop on a pack's icon starts from that pack, so
     /// the main pack's icon reaches the side packs and a side pack's icon
@@ -934,7 +951,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint root,
         out InventoryContainerPlacementRejection refusal)
         => InventoryPlacementSearch.ChooseContainer(
-            _objects, itemId, root, namedContainer, _playerGuid(), out refusal);
+            _objects, itemId, root, namedContainer, _playerGuid(), out refusal,
+            MovingAmount(itemId).WholeStack);
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
@@ -982,7 +1000,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
                 return;
             }
             legality = InventoryContainerPlacementPolicy.Evaluate(
-                _objects, item, fallthrough, _playerGuid());
+                _objects, item, fallthrough, _playerGuid(), MovingAmount(item).WholeStack);
             legalityDestination = fallthrough;
         }
         if (legality != InventoryContainerPlacementRejection.None)
@@ -1018,12 +1036,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
 
         ClientObject? dragged = _objects.Get(item);
         bool sourceIsBag = dragged is not null && IsBag(dragged);
-        uint fullStack = (uint)Math.Max(dragged?.StackSize ?? 1, 1);
-        uint splitSize = dragged is null
-            ? fullStack
-            : _stackSplitQuantity?.GetObjectSplitSize(
-                item, _selection.SelectedObjectId ?? 0u, fullStack) ?? fullStack;
-        bool wholeStack = splitSize >= fullStack;
+        (uint splitSize, bool wholeStack) = MovingAmount(item);
         uint container; int? requested;
         if (targetList == _contentsGrid)
         {
@@ -1260,7 +1273,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             _objects,
             itemId,
             destinationId,
-            _playerGuid());
+            _playerGuid(),
+            MovingAmount(itemId).WholeStack);
     }
 
     private bool IsWaitingSource(uint itemGuid)

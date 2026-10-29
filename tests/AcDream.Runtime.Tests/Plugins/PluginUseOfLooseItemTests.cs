@@ -132,6 +132,8 @@ public sealed class PluginUseOfLooseItemTests
                 ObjectId = Player,
                 Name = "Player",
                 Type = ItemType.Creature,
+                ItemsCapacity = 102,
+                ContainersCapacity = 7,
             });
             Interaction = new RuntimeItemInteraction(
                 Objects,
