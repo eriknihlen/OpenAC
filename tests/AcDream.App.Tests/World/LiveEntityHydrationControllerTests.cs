@@ -695,7 +695,8 @@ public sealed class LiveEntityHydrationControllerTests
     {
         // A player you teleport to can arrive after the item in their hand:
         // the item waits for them, and must still be shown once they come.
-        // ACE can send the held item with the wielder's world position too.
+        // The server can also send the held item with the wielder's world
+        // position.
         using var fixture = new Fixture(originKnown: true);
         const uint parentGuid = 0x70000002u;
         var handedOn = new List<uint>();
