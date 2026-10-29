@@ -39,6 +39,9 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     private uint _openContainer;
     private PendingBackpackPlacement? _pendingPlacement;
     private bool _closeRequested;
+    // The lists were built for the container open now; false after they were
+    // emptied, so the next fill builds all three.
+    private bool _built;
     private bool _disposed;
 
     private ExternalContainerController(
@@ -235,22 +238,17 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         if (_objects.Get(payload.ObjId) is not { } item)
             return;
 
-        uint fullStack = (uint)Math.Max(1, item.StackSize);
-        uint amount = _stackSplitQuantity.GetObjectSplitSize(
-            item.ObjectId,
-            _selection.SelectedObjectId ?? 0u,
-            fullStack);
+        (uint amount, bool wholeStack) = MovingAmount(item.ObjectId);
         // Lands left of the hovered item, whether it is reordered inside the
         // container or arrives from the inventory.
-        int? requested = ContentsDropPlacement(
-            item.ObjectId, targetCell, wholeStack: amount >= fullStack);
+        int? requested = ContentsDropPlacement(item.ObjectId, targetCell, wholeStack);
         if (requested is not int placement)
             return;                                          // the item is already there
 
-        InventoryRequestKind kind = amount < fullStack
+        InventoryRequestKind kind = !wholeStack
             ? InventoryRequestKind.SplitToContainer
             : InventoryRequestKind.PutInContainer;
-        if (amount < fullStack)
+        if (!wholeStack)
         {
             _itemInteraction.TryDispatchInventoryRequest(
                 kind,
@@ -298,6 +296,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
 
         _openContainer = transition.ContainerId;
         _closeRequested = false;
+        _built = false;
         ScrollToHome();
         Populate();
         _window.Show();
@@ -342,23 +341,51 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
                 pending.ItemId);
         }
         // Flushing cells cancels a press in progress: UiRoot releases capture when the
-        // captured element leaves the tree.
-        if (TryRefreshCellsInPlace(root, visibleContainers, visibleContents))
+        // captured element leaves the tree. So each list is rebuilt only when what it
+        // shows changed (all three once when a container opens or the lists were
+        // emptied): opening a pack inside the container changes the contents row
+        // alone, and the pack cell that was pressed to open it stays to become a drag.
+        bool rebuildAll = !_built;
+        _built = true;
+
+        if (!rebuildAll
+            && _topContainer.GetNumUIItems() == 1
+            && _topContainer.GetItem(0)?.ItemId == root)
         {
-            ApplyIndicators();
-            return;
+            RefreshIcons(_topContainer, [root]);
+            SetCapacity(_topContainer.GetItem(0)!, root);
+        }
+        else
+        {
+            _topContainer.Flush();
+            AddRootCell(root);
         }
 
-        _topContainer.Flush();
-        _containerList.Flush();
-        _contentsList.Flush();
+        if (!rebuildAll && Matches(_containerList, visibleContainers))
+        {
+            RefreshIcons(_containerList, visibleContainers);
+            for (int i = 0; i < visibleContainers.Count; i++)
+                SetCapacity(_containerList.GetItem(i)!, visibleContainers[i]);
+        }
+        else
+        {
+            _containerList.Flush();
+            foreach (uint guid in visibleContainers)
+                AddContainerCell(guid);
+        }
 
-        AddRootCell(root);
-        foreach (uint guid in visibleContainers)
-            AddContainerCell(guid);
-
-        foreach (uint guid in visibleContents)
-            AddContentsCell(guid, IsWaiting(guid));
+        if (!rebuildAll && Matches(_contentsList, visibleContents))
+        {
+            RefreshIcons(_contentsList, visibleContents);
+            for (int i = 0; i < visibleContents.Count; i++)
+                _contentsList.GetItem(i)!.SetWaitingState(IsWaiting(visibleContents[i]));
+        }
+        else
+        {
+            _contentsList.Flush();
+            foreach (uint guid in visibleContents)
+                AddContentsCell(guid, IsWaiting(guid));
+        }
         ApplyIndicators();
     }
 
@@ -367,31 +394,6 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             || (_pendingPlacement is { } projection
                 && projection.ContainerId == _openContainer
                 && projection.ItemId == guid);
-
-    /// <summary>False when anything structural moved, which needs the rebuild.</summary>
-    private bool TryRefreshCellsInPlace(
-        uint root,
-        IReadOnlyList<uint> visibleContainers,
-        IReadOnlyList<uint> visibleContents)
-    {
-        if (_topContainer.GetNumUIItems() != 1
-            || _topContainer.GetItem(0)?.ItemId != root
-            || !Matches(_containerList, visibleContainers)
-            || !Matches(_contentsList, visibleContents))
-        {
-            return false;
-        }
-
-        RefreshIcons(_topContainer, [root]);
-        SetCapacity(_topContainer.GetItem(0)!, root);
-        RefreshIcons(_containerList, visibleContainers);
-        for (int i = 0; i < visibleContainers.Count; i++)
-            SetCapacity(_containerList.GetItem(i)!, visibleContainers[i]);
-        RefreshIcons(_contentsList, visibleContents);
-        for (int i = 0; i < visibleContents.Count; i++)
-            _contentsList.GetItem(i)!.SetWaitingState(IsWaiting(visibleContents[i]));
-        return true;
-    }
 
     // The lists pad themselves with empty cells (FillVisibleEmptySlots).
     private static bool Matches(UiItemList list, IReadOnlyList<uint> guids)
@@ -554,6 +556,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         _topContainer.Flush();
         _containerList.Flush();
         _contentsList.Flush();
+        _built = false;
         ScrollToHome();
     }
 
@@ -658,6 +661,10 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             Populate();
     }
 
+    /// <summary>
+    /// Whether the item may go into the open pack: a pack never does, and
+    /// part of a stack needs a slot of its own, even beside the rest of it.
+    /// </summary>
     private InventoryContainerPlacementRejection EvaluateDrop(uint itemId)
     {
         if (_objects.Get(itemId) is { } source && IsContainer(source))
@@ -666,7 +673,22 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
             _objects,
             itemId,
             _openContainer,
-            playerId: 0u);
+            playerId: 0u,
+            MovingAmount(itemId).WholeStack);
+    }
+
+    /// <summary>
+    /// How much of the item a drag moves, and whether that is the whole
+    /// stack: the selected stack's split quantity splits it.
+    /// </summary>
+    private (uint Amount, bool WholeStack) MovingAmount(uint itemId)
+    {
+        uint fullStack = (uint)Math.Max(1, _objects.Get(itemId)?.StackSize ?? 1);
+        uint amount = _stackSplitQuantity.GetObjectSplitSize(
+            itemId,
+            _selection.SelectedObjectId ?? 0u,
+            fullStack);
+        return (amount, amount >= fullStack);
     }
 
     /// <summary>

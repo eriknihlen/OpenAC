@@ -485,4 +485,87 @@ public sealed class ExternalContainerControllerTests
         h.Controller.HandleDropRelease(h.Contents, h.Contents.GetItem(2)!, payload);
         Assert.Equal(new[] { (first, Chest, 1) }, h.Puts);     // 1 2 3 -> 2 1 3
     }
+
+    // Opening a pack inside the container changes the contents row alone:
+    // the pressed pack cell stays, so the same press can become a drag.
+    [Fact]
+    public void PressingAPackInsideTheContainer_opensIt_andTheSamePressDragsIt()
+    {
+        using var h = new Harness();
+        const uint pack = 0x70000200u;
+        const uint inPack = 0x70000201u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = pack,
+            Type = ItemType.Container,
+            ItemsCapacity = 10,
+        });
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = Item, Type = ItemType.Misc });
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = inPack, Type = ItemType.Misc });
+        h.Objects.ReplaceContents(pack, [new ContainerContentEntry(inPack, 0u)]);
+        // The harness leaves the three lists at the origin; part them.
+        h.Containers.Top = 40;
+        h.Contents.Top = 80;
+        h.Open(Chest, new ContainerContentEntry(pack, 1u), new ContainerContentEntry(Item, 0u));
+
+        UiItemSlot packCell = h.Containers.GetItem(0)!;
+        UiItemSlot chestCell = h.Top.GetItem(0)!;
+        Assert.Equal(pack, packCell.ItemId);
+        Assert.Equal(Item, h.Contents.GetItem(0)!.ItemId);
+        var (x, y) = AbsoluteCentre(packCell);
+        h.Screen.OnMouseMove(x, y);
+        h.Screen.OnMouseDown(UiMouseButton.Left, x, y);
+
+        Assert.Equal(inPack, h.Contents.GetItem(0)!.ItemId);
+        Assert.Same(packCell, h.Containers.GetItem(0));
+        Assert.Same(chestCell, h.Top.GetItem(0));
+        Assert.Same(packCell, h.Screen.Captured);
+
+        h.Screen.OnMouseMove(x + 12, y);
+
+        Assert.Same(packCell, h.Screen.DragSource);
+        var payload = Assert.IsType<ItemDragPayload>(h.Screen.DragPayload);
+        Assert.Equal(pack, payload.ObjId);
+    }
+
+    // Part of a stack needs a slot of its own, even beside the rest of it:
+    // a split of a stack already in a full chest has nowhere to go.
+    [Fact]
+    public void PartOfAStackAlreadyInAFullChest_isRefused()
+    {
+        using var h = new Harness();
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = Item,
+            StackSize = 5,
+            Type = ItemType.Misc,
+            ContainerId = Chest,
+        });
+        h.Open(Chest, new ContainerContentEntry(Item, 0u));
+        h.Objects.Get(Chest)!.ItemsCapacity = 1;
+        h.Selection.Select(Item, SelectionChangeSource.ExternalContainer);
+        h.Split.Reset(5u, 2u);
+        var source = new UiItemSlot { SourceKind = ItemDragSource.Ground };
+        source.SetItem(Item, 0u);
+        var payload = new ItemDragPayload(Item, ItemDragSource.Ground, 0, source);
+        UiItemSlot target = h.Contents.GetItem(1)!;
+
+        Assert.Equal(ItemDragAcceptance.Reject,
+            h.Controller.OnDragOver(h.Contents, target, payload));
+        h.Controller.HandleDropRelease(h.Contents, target, payload);
+
+        Assert.Empty(h.Splits);
+        Assert.Empty(h.Puts);
+    }
+
+    private static (int x, int y) AbsoluteCentre(UiElement element)
+    {
+        float x = 0f, y = 0f;
+        for (UiElement? e = element; e is not null; e = e.Parent)
+        {
+            x += e.Left;
+            y += e.Top;
+        }
+        return ((int)(x + element.Width / 2f), (int)(y + element.Height / 2f));
+    }
 }
