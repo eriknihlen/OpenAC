@@ -3156,6 +3156,42 @@ public class InventoryControllerTests
     }
 
     [Fact]
+    public void PartOfAStack_droppedOnItsFullOpenSidePack_namesThatPackFull_andSendsNothing()
+    {
+        // A drop on the grid looks for room from the pack shown open: a side
+        // pack holds no packs, so a full one has nowhere else to look. The
+        // main pack is full and the side pack 0xD has room, but neither is
+        // where the drop looks.
+        var (layout, grid, containers, _, _, _, _, _) = BuildLayout();
+        var objects = new ClientObjectTable();
+        SeedPlayerAndPacks(objects, mainCapacity: 1);
+        SeedContained(objects, 0xA, Player, slot: 0, type: ItemType.Misc);
+        SeedPack(objects, 0xC, slot: 0, capacity: 2);
+        SeedPack(objects, 0xD, slot: 1, capacity: 2);
+        SeedStack(objects, 0xB, 0xC, slot: 0, size: 10);
+        SeedContained(objects, 0xE, 0xC, slot: 1, type: ItemType.Misc);
+        var selection = new SelectionState();
+        var puts = new List<(uint item, uint container, int placement)>();
+        var splits = new List<(uint item, uint container, uint placement, uint amount)>();
+        var messages = new List<string>();
+        using var interaction = LootInteraction(objects, puts, messages);
+        using var controller = Bind(layout, objects, puts: puts, splits: splits,
+            selection: selection, stackSplitQuantity: SplitOf(10u, 4u), itemInteraction: interaction);
+        containers.GetItem(0)!.Clicked!();
+        Assert.Equal(0xCu, controller.CurrentOpenContainerId);
+        selection.Select(0xBu, SelectionChangeSource.Inventory);
+        UiItemSlot onTheOther = grid.GetItem(1)!;
+        Assert.Equal(0xEu, onTheOther.ItemId);
+
+        Assert.Equal(ItemDragAcceptance.Reject, controller.OnDragOver(grid, onTheOther, Payload(0xB)));
+        controller.HandleDropRelease(grid, onTheOther, Payload(0xB));
+
+        Assert.Empty(puts);
+        Assert.Empty(splits);
+        Assert.Equal(new[] { "The Pack C is completely full!" }, messages);
+    }
+
+    [Fact]
     public void AStackInTheFullMainPack_droppedWholeOnItsIcon_movesToItsTop()
     {
         var (layout, _, _, top, _, _, _, _) = BuildLayout();

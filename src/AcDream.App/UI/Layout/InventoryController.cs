@@ -884,7 +884,8 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         // An item held over a pack's own icon is answered for THAT pack: one
         // with no room shows the refusal, even though letting go there still
         // finds the item a place in another pack. Anywhere else a full pack
-        // is no refusal while the drop has somewhere to go.
+        // is no refusal while the drop has somewhere to go, found by the
+        // same search the drop runs.
         bool overAPackIcon = !sourceIsBag
             && !ReferenceEquals(targetList, _contentsGrid);
         // The side column also holds things that carry nothing at all, a
@@ -898,7 +899,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         }
         if (IsCapacityRejection(legality)
             && !overAPackIcon
-            && ResolveFallthroughContainer(payload.ObjId, destination, out _) != 0u)
+            && ResolveFallthroughContainer(payload.ObjId, destination, destination, out _) != 0u)
         {
             legality = InventoryContainerPlacementRejection.None;
         }
@@ -910,17 +911,6 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     private static bool IsCapacityRejection(InventoryContainerPlacementRejection rejection) =>
         rejection is InventoryContainerPlacementRejection.ItemCapacityFull
             or InventoryContainerPlacementRejection.ContainerCapacityFull;
-
-    /// <summary>
-    /// When the pack the player named has no room, the pack the item goes
-    /// to instead: the main pack, then the side packs in order (0 when none
-    /// has room, with the capacity rejection to report against the player).
-    /// </summary>
-    private uint ResolveFallthroughContainer(
-        uint itemId,
-        uint namedContainer,
-        out InventoryContainerPlacementRejection refusal)
-        => ResolveFallthroughContainer(itemId, namedContainer, _playerGuid(), out refusal);
 
     /// <summary>
     /// How much of <paramref name="itemId"/> a drag moves, and whether that
@@ -940,10 +930,12 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
     }
 
     /// <summary>
-    /// The same search started from <paramref name="root"/>: the root, then
-    /// the packs inside it. A drop on a pack's icon starts from that pack, so
-    /// the main pack's icon reaches the side packs and a side pack's icon
-    /// reaches nothing else.
+    /// When the pack the player named has no room, the pack the item goes to
+    /// instead: the search from <paramref name="root"/>, the root then the
+    /// packs inside it (0 when none has room, with the capacity rejection to
+    /// report against the root). A drop starts from where it names: a pack's
+    /// icon from that pack, the grid from the pack shown open. So the main
+    /// pack reaches the side packs and a side pack reaches nothing else.
     /// </summary>
     private uint ResolveFallthroughContainer(
         uint itemId,
@@ -966,7 +958,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
             targetList,
             targetCell,
             item,
-            out bool droppedIsBag,
+            out _,
             out uint legalityDestination);
         if ((legality == InventoryContainerPlacementRejection.None || IsCapacityRejection(legality))
             && TryJoinStackInPack(targetList, targetCell, item))
@@ -976,12 +968,11 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
         uint fallthrough = 0u;
         if (IsCapacityRejection(legality))
         {
-            // An item let go on a pack's icon searches from that pack;
-            // anywhere else the search starts from the main pack.
-            bool onAPackIcon = !droppedIsBag
-                && (ReferenceEquals(targetList, _containerList)
-                    || ReferenceEquals(targetList, _topContainer));
-            uint root = onAPackIcon ? legalityDestination : _playerGuid();
+            // The search starts where the drop names: a pack's icon from
+            // that pack, the grid from the pack shown open (the whole
+            // inventory when that is the main pack, nothing more for a side
+            // pack, which holds no packs).
+            uint root = legalityDestination;
             fallthrough = ResolveFallthroughContainer(
                 item, legalityDestination, root, out InventoryContainerPlacementRejection noRoom);
             if (fallthrough == 0u)

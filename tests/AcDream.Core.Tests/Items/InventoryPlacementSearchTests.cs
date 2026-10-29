@@ -211,6 +211,26 @@ public sealed class InventoryPlacementSearchTests
     }
 
     [Fact]
+    public void TheLegalityCheck_ReadsAnItemCapacityOfZeroAsNoRoom()
+    {
+        ClientObjectTable objects = PlayerWithPacks();
+        AddPack(objects, SidePackA, "Pack A", 0, slot: 0);
+        uint loot = WorldItem(objects);
+
+        Assert.Equal(InventoryContainerPlacementRejection.ItemCapacityFull,
+            InventoryContainerPlacementPolicy.Evaluate(objects, loot, SidePackA, Player));
+
+        // -1 is unbounded; an undescribed player takes anything.
+        AddPack(objects, SidePackA, "Pack A", -1, slot: 0);
+        Assert.Equal(InventoryContainerPlacementRejection.None,
+            InventoryContainerPlacementPolicy.Evaluate(objects, loot, SidePackA, Player));
+        var lone = new ClientObjectTable();
+        uint alone = WorldItem(lone);
+        Assert.Equal(InventoryContainerPlacementRejection.None,
+            InventoryContainerPlacementPolicy.Evaluate(lone, alone, Player, Player));
+    }
+
+    [Fact]
     public void UnboundedCapacity_AlwaysFits()
     {
         ClientObjectTable objects = PlayerWithPacks(mainCapacity: -1);
