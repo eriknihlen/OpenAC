@@ -176,18 +176,6 @@ internal sealed class LiveEntityNetworkUpdateController
 
     private static bool IsDoorName(string? name) => name == "Door";
 
-    /// <summary>
-    /// The body no longer touches anything: no contact, no walkable ground,
-    /// no contact plane, and its acceleration is worked out again.
-    /// </summary>
-    private static void DropContact(PhysicsBody body)
-    {
-        body.TransientState &= ~(TransientStateFlags.Contact
-            | TransientStateFlags.OnWalkable);
-        body.ContactPlaneValid = false;
-        body.calc_acceleration();
-    }
-
     private void SeedRemoteSpawnPlacement(
         RemoteMotion remote,
         uint serverGuid,
@@ -1201,26 +1189,38 @@ internal sealed class LiveEntityNetworkUpdateController
                     out IRuntimeRemoteMotion? remoteRuntime)
                 || remoteRuntime is not RemoteMotion rmState)
             {
+                // A body the object already has (placed when it entered the
+                // world, or moving by its own physics since) stays where it
+                // is: the server's position routes for it below as for every
+                // body (caught up to when near and grounded, re-placed when
+                // far or teleported, ignored when sent off the ground). Only
+                // a body made just now starts at the server's position.
+                bool hadBody = acceptedPositionCanonical.PhysicsBody is not null;
                 rmState =
                     _liveEntities.GetOrCreateRemoteMotionRuntime(
                         update.Guid);
-                // Hard-snap orientation on first spawn so the per-tick
-                // slerp doesn't visibly rotate from Identity to truth.
-                rmState.Body.Orientation = rot;
-                // A body that already lay somewhere (an object that fell and
-                // landed under its own physics) does not bring the contact it
-                // had there to the server's spot: what it touches there is
-                // found again by the settle below, and without it gravity
-                // pulls it.
-                if (rmState.Body.Position != worldPos)
-                    DropContact(rmState.Body);
-                rmState.Body.Position = worldPos;
-                SeedRemoteSpawnPlacement(
-                    rmState,
-                    update.Guid,
-                    entity,
-                    worldPos,
-                    update.Position.LandblockId);
+                if (!hadBody)
+                {
+                    // Hard-snap orientation on first spawn so the per-tick
+                    // slerp doesn't visibly rotate from Identity to truth.
+                    rmState.Body.Orientation = rot;
+                    rmState.Body.Position = worldPos;
+                    SeedRemoteSpawnPlacement(
+                        rmState,
+                        update.Guid,
+                        entity,
+                        worldPos,
+                        update.Position.LandblockId);
+                }
+                else if (!rmState.Body.InContact)
+                {
+                    SeedRemoteSpawnPlacement(
+                        rmState,
+                        update.Guid,
+                        entity,
+                        rmState.Body.Position,
+                        entity.VisibilityCellId ?? 0u);
+                }
             }
 
             if (!_liveEntities.IsCurrentPositionAuthority(

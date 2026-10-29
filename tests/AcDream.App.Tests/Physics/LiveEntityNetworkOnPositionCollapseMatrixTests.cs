@@ -823,36 +823,60 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
         fixture.DrainPlacementFifo();
     }
 
+    // ── A body the object already has: the server's position routes ────
+    // An object nothing animates fell and lies on the ground, its body in
+    // contact on walkable ground (gravity no longer pulls it), and has no
+    // remote motion yet. The server then sends its position again, the spot
+    // 1 m up it was created at.
+
     /// <summary>
-    /// Issue #21: an object nothing animates (a token) fell and lies on the
-    /// ground, its body in contact on walkable ground, so gravity no longer
-    /// pulls it. The server then sends its position again, the spot in the
-    /// air it was created at. The body is put there, and there it touches
-    /// nothing: the contact it had on the ground does not come along, so
-    /// gravity pulls it again and it falls back. Keeping the old contact it
-    /// hung in the air with gravity off.
+    /// Sent off the ground and no teleport: nothing happens to the body; it
+    /// keeps lying where it is, in contact. Put up there at once it hung in
+    /// the air with the contact it had on the ground.
     /// </summary>
     [Fact]
-    public void LandedOrdinaryBody_ServerPositionInTheAir_DoesNotKeepItsGroundContact()
+    public void LandedOrdinaryBody_PositionSentOffTheGround_LeavesItWhereItLies()
     {
         using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
         Assert.True(fixture.Lifetime.Entities.TryGetActive(
             CreatureGuid, out RuntimeEntityRecord canonical));
         PhysicsBody body = canonical.PhysicsBody!;
-        Assert.True(body.InContact);
-        Assert.True(body.OnWalkable);
+        Vector3 lies = body.Position;
 
-        var aloft = new Vector3(10f, 10f, SpawnHeight + 1f);
         fixture.Controller.OnPosition(fixture.Update(
-            aloft, SourceCell, teleportSequence: 1, guid: CreatureGuid,
-            isGrounded: false));
+            new Vector3(10f, 10f, SpawnHeight + 1f), SourceCell,
+            teleportSequence: 1, guid: CreatureGuid, isGrounded: false));
 
         Assert.Same(body, canonical.PhysicsBody);
-        Assert.Equal(aloft, body.Position);
+        Assert.Equal(lies, body.Position);
+        Assert.True(body.InContact);
+        Assert.True(body.OnWalkable);
+    }
+
+    /// <summary>
+    /// Teleported there: the body is re-placed at the server's position, and
+    /// the placement says what it touches there: nothing, so it is out of
+    /// contact and gravity pulls it again.
+    /// </summary>
+    [Fact]
+    public void LandedOrdinaryBody_TeleportedIntoTheAir_IsPlacedOutOfContactAndFalls()
+    {
+        using var fixture = new Fixture(CreatureGuid, ordinaryBodyOnTheGround: true);
+        fixture.PublishDestinationCollision();
+        fixture.ServiceWindow.Allow(DestinationLandblock);
+        Assert.True(fixture.Lifetime.Entities.TryGetActive(
+            CreatureGuid, out RuntimeEntityRecord canonical));
+        PhysicsBody body = canonical.PhysicsBody!;
+        var aloft = new Vector3(12f, 14f, SpawnHeight + 1f);
+
+        fixture.Controller.OnPosition(fixture.Update(
+            aloft, DestinationCell, teleportSequence: 5, guid: CreatureGuid,
+            isGrounded: true));
+
+        Assert.Same(body, canonical.PhysicsBody);
+        Assert.Equal(aloft + DestinationWorldOffset, body.Position);
         Assert.False(body.InContact);
         Assert.False(body.OnWalkable);
-        Assert.False(body.ContactPlaneValid);
-        body.calc_acceleration();
         Assert.True(body.Acceleration.Z < 0f);
     }
 
@@ -1027,6 +1051,7 @@ public sealed class LiveEntityNetworkOnPositionCollapseMatrixTests
                 RuntimeEntityRecord canonical = record.Canonical!;
                 Lifetime.Entities.SetPhysicsBody(canonical, body);
                 canonical.ObjectClock.Activate();
+                Lifetime.Physics.AcknowledgeSpatialProjection(canonical, spatial: true);
                 Shadows.Register(
                     Entity.Id,
                     0x02000001u,
