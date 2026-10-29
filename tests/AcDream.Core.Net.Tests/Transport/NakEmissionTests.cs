@@ -641,6 +641,7 @@ public sealed class NakEmissionTests
                     BuildServerMessage($"s2c {i}"),
                     GameMessageGroup.UIQueue);
                 transport.PumpServer();
+                transport.WaitForReceiverIdle();
                 session.Tick();
 
                 if ((i & 15) == 0)
@@ -667,6 +668,7 @@ public sealed class NakEmissionTests
                 transport.Clock.Advance(TimeSpan.FromMilliseconds(500));
                 session.SendTalk($"trickle {trickle++}");
                 transport.PumpServer();
+                transport.WaitForReceiverIdle();
                 session.Tick();
                 await Task.Yield();
             }
@@ -682,6 +684,7 @@ public sealed class NakEmissionTests
                 }
 
                 transport.PumpServer();
+                transport.WaitForReceiverIdle();
                 session.Tick();
                 await Task.Yield();
 

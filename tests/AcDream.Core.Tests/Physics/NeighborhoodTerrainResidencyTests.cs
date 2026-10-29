@@ -17,14 +17,20 @@ public sealed class NeighborhoodTerrainResidencyTests
         for (int i = 0; i < 64; i++)
             Assert.True(engine.IsNeighborhoodTerrainResident(center, FarRadius));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1_000; i++)
-            Assert.True(engine.IsNeighborhoodTerrainResident(center, FarRadius));
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // The smallest of a few samples: under full-suite load a one-time
+        // cost (tier-up of a method mid-sample) can land inside one of them.
+        long allocated = long.MaxValue;
+        for (int sample = 0; sample < 4 && allocated != 0; sample++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1_000; i++)
+                Assert.True(engine.IsNeighborhoodTerrainResident(center, FarRadius));
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
 
         Assert.True(
             allocated == 0,
-            $"1,000 radius-{FarRadius} residency queries allocated "
+            $"1,000 radius-{FarRadius} residency queries allocated at least "
             + $"{allocated:N0} bytes");
     }
 
