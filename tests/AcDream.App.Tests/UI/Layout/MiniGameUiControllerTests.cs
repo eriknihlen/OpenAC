@@ -11,7 +11,6 @@ public sealed class MiniGameUiControllerTests
     private const uint Board = 0x7A9B4001u;
 
     private readonly RuntimeChessState _chess = new();
-    private readonly List<uint> _joins = [];
     private readonly List<(ChessSquare From, ChessSquare To)> _moves = [];
     private readonly List<bool> _stalemates = [];
     private readonly List<bool> _indicator = [];
@@ -49,7 +48,6 @@ public sealed class MiniGameUiControllerTests
                 _chess,
                 CreateSquare,
                 SpriteTexture: sprite => sprite,
-                SendJoin: _joins.Add,
                 SendMove: (from, to) => _moves.Add((from, to)),
                 SendPass: () => { },
                 SendStalemate: _stalemates.Add,
@@ -73,6 +71,7 @@ public sealed class MiniGameUiControllerTests
 
     private void Seat(MiniGameUiController controller, ChessTeam team)
     {
+        _chess.Begin(Board);
         controller.HandlePolicyAction(new ItemPolicyAction(ItemPolicyActionKind.BeginGame, Board));
         _chess.ApplyJoinResponse(new(Board, (int)team));
         _chess.ApplyStartGame(new(Board, (int)ChessTeam.White));
@@ -96,7 +95,7 @@ public sealed class MiniGameUiControllerTests
     }
 
     [Fact]
-    public void UsingABoard_OpensTheWindowAndJoinsOnce()
+    public void UsingABoard_OnlyOpensTheWindow()
     {
         var (controller, _) = Bind();
         using var __ = controller;
@@ -106,8 +105,9 @@ public sealed class MiniGameUiControllerTests
         controller.HandlePolicyAction(use);
         controller.HandlePolicyAction(new ItemPolicyAction(ItemPolicyActionKind.OpenSalvage, Board));
 
+        // Joining is the runtime's part; the window never begins a game.
         Assert.Equal(2, _shows);
-        Assert.Equal([Board], _joins);
+        Assert.Equal(RuntimeChessStage.NotPlaying, _chess.Snapshot.Stage);
     }
 
     [Fact]

@@ -298,7 +298,6 @@ public sealed record ConnectionRuntimeBindings(
 
 public sealed record ChessRuntimeBindings(
     AcDream.Runtime.Gameplay.RuntimeChessState Chess,
-    Action<uint /*boardGuid*/> SendJoin,
     Action<int /*fromX*/, int /*fromY*/, int /*toX*/, int /*toY*/> SendMove,
     Action SendPass,
     Action<bool /*offer*/> SendStalemate,
@@ -2479,7 +2478,6 @@ public sealed class RetailUiRuntime : IDisposable
                 }
             },
             SpriteTexture: sprite => _bindings.Assets.ResolveSprite(sprite).Texture,
-            SendJoin: chess.SendJoin,
             SendMove: (from, to) => chess.SendMove(from.X, from.Y, to.X, to.Y),
             SendPass: chess.SendPass,
             SendStalemate: chess.SendStalemate,

@@ -7,7 +7,7 @@ namespace AcDream.App.UI.Layout;
 
 /// <summary>
 /// The Game Center window: the chess board, plus the Resign, Pass and
-/// Stalemate buttons. Using a board in the world opens it and asks to join.
+/// Stalemate buttons. Using a board in the world joins its game and opens it.
 /// The board is drawn from the side the local player sits on; clicking one
 /// of their pieces on their turn selects it and clicking another square
 /// tries the move.
@@ -40,7 +40,6 @@ public sealed class MiniGameUiController : IRetainedPanelController
         RuntimeChessState Chess,
         Func<UiElement?> CreateSquare,
         Func<uint, uint> SpriteTexture,
-        Action<uint> SendJoin,
         Action<ChessSquare, ChessSquare> SendMove,
         Action SendPass,
         Action<bool> SendStalemate,
@@ -103,14 +102,12 @@ public sealed class MiniGameUiController : IRetainedPanelController
     /// <summary>The square the local player has picked up a piece from.</summary>
     public ChessSquare? Selected => _selected;
 
-    /// <summary>Using a game board opens the window and asks to join.</summary>
+    /// <summary>Using a game board opens the window. Joining its game is
+    /// the runtime's part and has already been done.</summary>
     public void HandlePolicyAction(ItemPolicyAction action)
     {
-        if (_chess is null || action.Kind != ItemPolicyActionKind.BeginGame)
-            return;
-        _chess.ShowWindow();
-        if (_chess.Chess.Begin(action.ObjectId))
-            _chess.SendJoin(action.ObjectId);
+        if (_chess is not null && action.Kind == ItemPolicyActionKind.BeginGame)
+            _chess.ShowWindow();
     }
 
     /// <summary>Clicks on the board's squares, numbered left to right and

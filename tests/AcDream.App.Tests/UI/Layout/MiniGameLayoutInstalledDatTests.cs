@@ -46,7 +46,7 @@ public sealed class MiniGameLayoutInstalledDatTests
                     dats, MiniGameUiController.LayoutId, MiniGameUiController.SquareTemplateId,
                     static _ => (0u, 0, 0), null)?.Root,
                 static sprite => sprite,
-                static _ => { }, static (_, _) => { }, static () => { }, static _ => { }, static () => { },
+                static (_, _) => { }, static () => { }, static _ => { }, static () => { },
                 static (_, _) => { }, static () => { }, static () => { }, static _ => { }))!;
         Assert.Equal(64, Assert.Single(Assert.Single(board.Children).Children).Children.Count);
     }

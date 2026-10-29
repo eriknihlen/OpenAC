@@ -1036,7 +1036,6 @@ internal sealed class RetailInteractionRetainedUiCompositionFactory
                     ShowProgress: d.Options.LiveCharacterSelector is null),
                 Chess: new ChessRuntimeBindings(
                     Chess: d.Runtime.ChessOwner,
-                    SendJoin: board => late.Session.CurrentSession?.SendChessJoin(board),
                     SendMove: (fromX, fromY, toX, toY) =>
                         late.Session.CurrentSession?.SendChessMove(fromX, fromY, toX, toY),
                     SendPass: () => late.Session.CurrentSession?.SendChessMovePass(),

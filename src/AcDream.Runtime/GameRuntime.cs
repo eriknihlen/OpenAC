@@ -366,6 +366,7 @@ public sealed class GameRuntime
                 context.Actions,
                 context.Character,
                 context.Communication,
+                context.Chess,
                 clock);
             construction.Own(context.ItemInteraction);
             // A merge any caller sends moves the poured stack's shortcut to

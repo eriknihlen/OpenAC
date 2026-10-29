@@ -816,7 +816,13 @@ public sealed class ItemInteractionControllerTests
         const uint ownedBoard = 0x50000A33u;
         var actions = new List<ItemPolicyAction>();
         h.Controller.PolicyActionRequested += actions.Add;
-        h.Objects.AddOrUpdate(new ClientObject { ObjectId = board, Name = "Chess Board", Type = ItemType.Gameboard });
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = board,
+            Name = "Chess Board",
+            Type = ItemType.Gameboard,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
         h.AddContained(ownedBoard, item => item.Type = ItemType.Gameboard);
         h.Objects.AddOrUpdate(new ClientObject { ObjectId = 0x7A9B4002u, Type = ItemType.Misc });
 

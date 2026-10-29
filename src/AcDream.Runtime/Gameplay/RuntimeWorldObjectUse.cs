@@ -214,7 +214,10 @@ internal sealed class RuntimeWorldObjectUse
             return AutomationUseOutcome.Busy;
         }
 
-        if (_items.TryOpenSecureTradeWithPlayer(serverGuid))
+        // A game board out in the world is used by joining its game, the
+        // same as when a person clicks it.
+        if (_items.TryOpenSecureTradeWithPlayer(serverGuid)
+            || _items.TryBeginGame(serverGuid))
         {
             reservation.CancelBeforeDispatch();
             return AutomationUseOutcome.Started;
