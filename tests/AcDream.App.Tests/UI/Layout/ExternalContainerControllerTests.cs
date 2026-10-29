@@ -69,6 +69,7 @@ public sealed class ExternalContainerControllerTests
         public readonly ExternalContainerLifecycleController Lifecycle;
         public readonly ExternalContainerController Controller;
         public bool InRange = true;
+        public PublicWeenieFlags ContainerFlags = PublicWeenieFlags.Openable;
 
         public Harness()
         {
@@ -157,6 +158,7 @@ public sealed class ExternalContainerControllerTests
                 ItemsCapacity = itemsCapacity,
                 ContainersCapacity = containersCapacity,
                 Useability = ItemUseability.Remote,
+                PublicWeenieBitfield = (uint)ContainerFlags,
             });
             State.RequestOpen(id);
             Objects.ReplaceContents(id, contents);
@@ -288,6 +290,32 @@ public sealed class ExternalContainerControllerTests
         Assert.True(h.Objects.UpdateAppraisal(Item, properties, Array.Empty<uint>()));
 
         Assert.Same(cell, h.Contents.GetItem(0));
+    }
+
+    // A container that is not openable has capacity 0 whatever it sends: no
+    // item cells and no pack cells, even with something inside.
+    [Fact]
+    public void NotOpenableContainer_showsNoCells()
+    {
+        using var h = new Harness { ContainerFlags = PublicWeenieFlags.None };
+        h.Objects.AddOrUpdate(ItemTooltipCaptionNames.Plain(Item));
+        h.Open(Chest, itemsCapacity: 24, containersCapacity: 7,
+            new ContainerContentEntry(Item, 0u));
+
+        Assert.Equal(0, h.Contents.GetNumUIItems());
+        Assert.Equal(0, h.Containers.GetNumUIItems());
+    }
+
+    // The player is the one container whose capacity holds without the
+    // openable flag.
+    [Fact]
+    public void ThePlayer_keepsItsCapacity_withoutTheOpenableFlag()
+    {
+        using var h = new Harness { ContainerFlags = PublicWeenieFlags.Player };
+        h.Open(Player, itemsCapacity: 3, containersCapacity: 2);
+
+        Assert.Equal(3, h.Contents.GetNumUIItems());
+        Assert.Equal(2, h.Containers.GetNumUIItems());
     }
 
     // Chests and corpses send -1 ("no limit"): the strips fill the window.

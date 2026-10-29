@@ -352,8 +352,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         _topContainer.Flush();
         _containerList.Flush();
         _contentsList.Flush();
-        _containerList.FixedSlotCount = SlotCount(_objects.Get(root)?.ContainersCapacity);
-        _contentsList.FixedSlotCount = SlotCount(_objects.Get(_openContainer)?.ItemsCapacity);
+        _containerList.FixedSlotCount = SlotCount(_objects.Get(root), packs: true);
+        _contentsList.FixedSlotCount = SlotCount(_objects.Get(_openContainer), packs: false);
 
         AddRootCell(root);
         foreach (uint guid in visibleContainers)
@@ -702,12 +702,24 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
     }
 
     /// <summary>
-    /// Retail gives a container's strip one cell per unit of capacity, so a
-    /// house hook (capacity 1) shows one cell. A negative capacity, which
-    /// chests and corpses send, means no limit: the strip fills its width.
+    /// A container's strip has one cell per unit of its capacity: the pack
+    /// strip from its pack capacity, the item strip from its item capacity,
+    /// so a house hook (item capacity 1) shows one cell. A container that is
+    /// not openable (and is not the player) has capacity 0 and shows no
+    /// cells. A negative capacity means no limit: the strip fills its width
+    /// (null).
     /// </summary>
-    private static int? SlotCount(int? capacity)
-        => capacity is >= 0 ? capacity : null;
+    private int? SlotCount(ClientObject? container, bool packs)
+    {
+        if (container is null)
+            return null;
+        bool openable = ((PublicWeenieFlags)(container.PublicWeenieBitfield ?? 0u)
+            & PublicWeenieFlags.Openable) != 0;
+        if (!openable && container.ObjectId != _itemInteraction.PlayerGuid)
+            return 0;
+        int capacity = packs ? container.ContainersCapacity : container.ItemsCapacity;
+        return capacity >= 0 ? capacity : null;
+    }
 
     private static bool IsContainer(ClientObject? item)
         => item is not null
