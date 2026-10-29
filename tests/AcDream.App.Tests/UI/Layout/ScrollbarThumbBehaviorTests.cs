@@ -68,12 +68,12 @@ internal static class ScrollbarFixtures
 
     public const uint UnlockedState = 0x10000018u;
     public const uint LockedState = 0x10000019u;
-    public const uint UnlockedTrack = 0x06004D39u;
-    public const uint LockedTrack = 0x06004D3Au;
+    public const uint UnlockedFill = 0x06004D39u;
+    public const uint LockedFill = 0x06004D3Au;
 
     /// <summary>
     /// A character-creation attribute slider as authored: a 291 x 39 scalar
-    /// bar starting Unlocked, its thumb, and a track child that authors an
+    /// bar starting Unlocked, its thumb, and a fill child (4) that authors an
     /// image for each of the Unlocked and Locked states.
     /// </summary>
     public static ElementInfo LockableScalarBar()
@@ -91,16 +91,16 @@ internal static class ScrollbarFixtures
             Image = new UiImageMedia(0x06004D34u, 3),
         };
         bar.Children.Add(thumb);
-        var track = new ElementInfo { Id = 4u, Type = 3u, Width = 291f, Height = 39f, DefaultStateName = "Unlocked", DefaultStateId = UnlockedState };
-        track.States[UnlockedState] = new UiStateInfo
+        var fill = new ElementInfo { Id = 4u, Type = 3u, Width = 100f, Height = 39f, DefaultStateName = "Unlocked", DefaultStateId = UnlockedState };
+        fill.States[UnlockedState] = new UiStateInfo
         {
-            Id = UnlockedState, Name = "Unlocked", Image = new UiImageMedia(UnlockedTrack, 3),
+            Id = UnlockedState, Name = "Unlocked", Image = new UiImageMedia(UnlockedFill, 3),
         };
-        track.States[LockedState] = new UiStateInfo
+        fill.States[LockedState] = new UiStateInfo
         {
-            Id = LockedState, Name = "Locked", Image = new UiImageMedia(LockedTrack, 3),
+            Id = LockedState, Name = "Locked", Image = new UiImageMedia(LockedFill, 3),
         };
-        bar.Children.Add(track);
+        bar.Children.Add(fill);
         return bar;
     }
 

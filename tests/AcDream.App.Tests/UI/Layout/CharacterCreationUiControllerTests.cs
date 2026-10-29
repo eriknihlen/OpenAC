@@ -261,21 +261,21 @@ public sealed class CharacterCreationUiControllerTests
         UiScrollbar slider = Assert.IsType<UiScrollbar>(
             UiElement.FindDescendant(strengthContainer, 0x100002EEu));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.UnlockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.UnlockedFill, slider.ThumbFillSprite);
 
         lockButton.OnClick!();
         BumpRevisionAndTick(environment);
 
         Assert.True(environment.Runtime.View.Snapshot.IsAttributeLocked(ChargenAttributeId.Strength));
         Assert.Equal("Locked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.LockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.LockedFill, slider.ThumbFillSprite);
 
         lockButton.OnClick!();
         BumpRevisionAndTick(environment);
 
         Assert.False(environment.Runtime.View.Snapshot.IsAttributeLocked(ChargenAttributeId.Strength));
         Assert.Equal("Unlocked", lockButton.ActiveState);
-        Assert.Equal(ScrollbarFixtures.UnlockedTrack, slider.TrackSprite);
+        Assert.Equal(ScrollbarFixtures.UnlockedFill, slider.ThumbFillSprite);
     }
 
     [Fact]
