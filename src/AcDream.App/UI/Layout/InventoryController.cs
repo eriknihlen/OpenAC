@@ -877,7 +877,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
 
     public ItemDragAcceptance OnDragOver(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
-        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.SourceKind.IsAlias())
             return ItemDragAcceptance.None;
         InventoryContainerPlacementRejection legality = EvaluateDrop(
             targetList, targetCell, payload.ObjId, out bool sourceIsBag, out uint destination);
@@ -947,7 +947,7 @@ public sealed class InventoryController : IItemListDragHandler, IRetainedPanelCo
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
-        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.SourceKind.IsAlias())
             return;
 
         uint item = payload.ObjId;

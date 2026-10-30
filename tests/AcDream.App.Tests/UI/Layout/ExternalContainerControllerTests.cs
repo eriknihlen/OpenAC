@@ -541,6 +541,30 @@ public sealed class ExternalContainerControllerTests
         Assert.Empty(h.Puts);
     }
 
+    // An alias (a shortcut, or a vendor, house or salvage list cell) gets no answer over
+    // the contents and moves nothing into the chest.
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void AliasDropIntoChest_isNeutralAndMovesNothing(ItemDragSource source)
+    {
+        using var h = new Harness();
+        h.Open();
+        h.Objects.AddOrUpdate(new ClientObject { ObjectId = Item, Type = ItemType.Misc });
+        h.Objects.MoveItem(Item, Player, 0);
+        var payload = new ItemDragPayload(Item, source, 0, new UiItemSlot());
+        UiItemSlot target = h.Contents.GetItem(0)!;
+
+        Assert.Equal(ItemDragAcceptance.None,
+            h.Controller.OnDragOver(h.Contents, target, payload));
+        h.Controller.HandleDropRelease(h.Contents, target, payload);
+
+        Assert.Empty(h.Puts);
+        Assert.Empty(h.Splits);
+        Assert.Equal(Player, h.Objects.Get(Item)!.ContainerId);
+    }
+
     [Fact]
     public void PendingPickupRejectsOwnedDropIntoChest()
     {

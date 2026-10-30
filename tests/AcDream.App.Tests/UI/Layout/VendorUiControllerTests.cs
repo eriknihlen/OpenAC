@@ -1914,6 +1914,65 @@ public sealed class VendorUiControllerTests
         Assert.Equal(ItemDragAcceptance.Accept, result);
     }
 
+    // An alias (a shortcut, or a vendor, house or salvage list cell) is no item to sell:
+    // the selling list gives it no answer and stages nothing.
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void AnAliasOverTheSellingList_IsNeutralAndStagesNothing(ItemDragSource source)
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakePlayerOwned(h, PlayerOwnedArmorGuid, ItemType.Armor, 100);
+        var alias = new ItemDragPayload(PlayerOwnedArmorGuid, source, 0, new UiItemSlot());
+
+        Assert.Equal(ItemDragAcceptance.None,
+            h.Controller.OnDragOver(h.SellingList, new UiItemSlot(), alias));
+        h.Controller.HandleDropRelease(h.SellingList, new UiItemSlot(), alias);
+
+        Assert.Equal(0, h.SellingList.GetNumUIItems());
+        Assert.Empty(h.SystemMessages);
+    }
+
+    // A selling-list cell's drag stands for the item, so the world and the
+    // item windows refuse it: lifting it only takes it off the list.
+    [Fact]
+    public void ASellingListCell_DragsAsAnAlias()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakePlayerOwned(h, PlayerOwnedArmorGuid, ItemType.Armor, 100);
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+
+        var payload = Assert.IsType<ItemDragPayload>(h.SellingList.GetItem(0)!.GetDragPayload());
+        Assert.Equal(ItemDragSource.Vendor, payload.SourceKind);
+        Assert.True(payload.SourceKind.IsAlias());
+    }
+
+    // The selling list refuses an alias too: an item lifted off it and let
+    // go over the list again stays off it.
+    [Fact]
+    public void ASellingListItem_DroppedBackOnTheList_StaysOffIt()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, SellProfile((uint)ItemType.Armor), Array.Empty<VendorShopItem>());
+        MakePlayerOwned(h, PlayerOwnedArmorGuid, ItemType.Armor, 100);
+        h.Controller.HandleDropRelease(
+            h.SellingList, new UiItemSlot(), DragFromInventory(PlayerOwnedArmorGuid));
+        UiItemSlot lifted = h.SellingList.GetItem(0)!;
+        var payload = Assert.IsType<ItemDragPayload>(lifted.GetDragPayload());
+
+        h.Controller.OnDragLift(h.SellingList, lifted, payload);
+        Assert.Equal(0, h.SellingList.GetNumUIItems());
+        Assert.NotEqual(ItemDragAcceptance.Accept,
+            h.Controller.OnDragOver(h.SellingList, new UiItemSlot(), payload));
+        h.Controller.HandleDropRelease(h.SellingList, new UiItemSlot(), payload);
+
+        Assert.Equal(0, h.SellingList.GetNumUIItems());
+    }
+
     [Fact]
     public void OnDragOver_UnacceptableItemOverSellingList_RejectsSilently()
     {

@@ -1463,7 +1463,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SpriteResolve = list.SpriteResolve,
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = true,
-                    SourceKind = ItemDragSource.Inventory,
+                    SourceKind = ItemDragSource.Vendor,
                     TooltipTextResolve = g => ItemTooltipCaption.Resolve(
                         _objects, g, _resolveAppropriateName),
                 };
@@ -1539,6 +1539,9 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
+        // A shortcut, or a vendor, house or salvage list cell, is no item to sell.
+        if (payload.SourceKind.IsAlias())
+            return ItemDragAcceptance.None;
         if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u)
             return ItemDragAcceptance.Reject;
 
@@ -1567,7 +1570,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
-        if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u)
+        if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u
+            || payload.SourceKind.IsAlias())
             return;
 
         VendorSellRejection rejection = EvaluateSellAcceptability(payload.ObjId, out int quantity);

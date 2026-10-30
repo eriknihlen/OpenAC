@@ -2373,8 +2373,13 @@ public class InventoryControllerTests
             ctrl.OnDragOver(containers, containers.GetItem(0)!, Payload(0xFFFFu)));
     }
 
-    [Fact]
-    public void ShortcutAliasDropOnInventory_removesOnlyAlias_andNeverMovesEquippedItem()
+    // An alias (a shortcut, or a vendor, house or salvage list cell) gets no answer and
+    // moves nothing.
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void AliasDropOnInventory_removesOnlyAlias_andNeverMovesEquippedItem(ItemDragSource source)
     {
         var (layout, grid, _, _, _, _, _, _) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -2390,7 +2395,7 @@ public class InventoryControllerTests
         var ctrl = (IItemListDragHandler)Bind(layout, objects, puts: puts);
         var payload = new ItemDragPayload(
             helmet,
-            ItemDragSource.ShortcutBar,
+            source,
             SourceSlot: 3,
             SourceCell: new UiItemSlot());
 

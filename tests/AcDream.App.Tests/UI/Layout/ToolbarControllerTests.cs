@@ -766,8 +766,13 @@ public class ToolbarControllerTests
         Assert.Equal(new[] { (item, sidePack, 0) }, puts);
     }
 
-    [Fact]
-    public void InventoryButton_shortcutAliasDrop_staysNeutralAndDoesNotMovePhysicalItem()
+    // An alias (a shortcut, or a vendor, house or salvage list cell) stays neutral and
+    // moves nothing.
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void InventoryButton_aliasDrop_staysNeutralAndDoesNotMovePhysicalItem(ItemDragSource source)
     {
         const uint player = 0x5000u;
         const uint item = 0x5001u;
@@ -783,7 +788,7 @@ public class ToolbarControllerTests
             sendPutItemInContainer: (i, c, p) => puts.Add((i, c, p)),
             resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
         var button = (UiButton)layout.FindElement(InventoryButtonId)!;
-        var payload = new ItemDragPayload(item, ItemDragSource.ShortcutBar, 3, new UiItemSlot());
+        var payload = new ItemDragPayload(item, source, 3, new UiItemSlot());
 
         button.OnEvent(new UiEvent(0u, button, UiEventType.DragEnter, Payload: payload));
         Assert.Equal(ItemDragAcceptance.None, button.ItemDragAcceptanceForTest);
@@ -1704,6 +1709,34 @@ public class ToolbarControllerTests
         var list = slots[Row1[0]];
         var payload = new ItemDragPayload(0u, ItemDragSource.Inventory, 0, new UiItemSlot());
         Assert.Equal(ItemDragAcceptance.None, ctrl.OnDragOver(list, list.Cell, payload));
+    }
+
+    // A slot takes an item or a shortcut moved along the bar, but no other
+    // alias: a vendor, house or salvage list cell makes no shortcut.
+    [Theory]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void ListAliasDrag_isNeutral_andMakesNoShortcut(ItemDragSource source)
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, IconId = 1u });
+        var store = new ShortcutStore();
+        var (adds, removes) = NewSpies(out var add, out var rem);
+        var ctrl = ToolbarController.Bind(layout, repo, store,
+            iconIds: (_, _, _, _, _) => 1u, useItem: _ => { },
+            sendAddShortcut: add, sendRemoveShortcut: rem,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        var list = slots[Row1[2]];
+        var payload = new ItemDragPayload(0x5001u, source, 0, new UiItemSlot());
+        Assert.Equal(ItemDragAcceptance.None, ctrl.OnDragOver(list, list.Cell, payload));
+        ctrl.HandleDropRelease(list, list.Cell, payload);
+
+        Assert.Empty(adds);
+        Assert.Empty(removes);
+        Assert.Equal(0u, list.Cell.ItemId);
+        Assert.Equal(0, store.Count);
     }
 
     // ── B.2: live drag handler (store + reorder/remove + wire) ───────────────

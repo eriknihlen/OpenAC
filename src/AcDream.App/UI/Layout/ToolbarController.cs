@@ -453,13 +453,13 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     }
 
     private static ItemDragAcceptance InventoryButtonDragOver(ItemDragPayload payload)
-        => payload.ObjId != 0 && payload.SourceKind != ItemDragSource.ShortcutBar
+        => payload.ObjId != 0 && !payload.SourceKind.IsAlias()
             ? ItemDragAcceptance.Accept
             : ItemDragAcceptance.None;
 
     private void HandleInventoryButtonDrop(ItemDragPayload payload)
     {
-        if (payload.ObjId == 0 || payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.ObjId == 0 || payload.SourceKind.IsAlias())
             return;
         uint player = _playerGuid?.Invoke() ?? 0u;
         if (player == 0 || _repo.Get(payload.ObjId) is null)
@@ -584,11 +584,21 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     /// <inheritdoc/>
     public ItemDragAcceptance OnDragOver(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
-        => payload.ObjId != 0 ? ItemDragAcceptance.Accept : ItemDragAcceptance.None;
+        => payload.ObjId != 0 && TakesShortcutDrop(payload)
+            ? ItemDragAcceptance.Accept
+            : ItemDragAcceptance.None;
+
+    /// <summary>Whether a slot takes the drag: an item itself, or a shortcut
+    /// moved along the bar. Any other alias (a vendor, house or salvage list
+    /// cell) is refused.</summary>
+    private static bool TakesShortcutDrop(ItemDragPayload payload)
+        => !payload.SourceKind.IsAlias() || payload.SourceKind == ItemDragSource.ShortcutBar;
 
     /// <inheritdoc/>
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
+        if (!TakesShortcutDrop(payload))
+            return;
         ShortcutDropSource source = payload.SourceKind == ItemDragSource.ShortcutBar
             ? ShortcutDropSource.ShortcutAlias
             : ShortcutDropSource.FreshItem;
