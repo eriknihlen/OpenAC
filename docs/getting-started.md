@@ -31,9 +31,11 @@ From the [latest openac-rust release](https://github.com/eriknihlen/openac-rust/
 |---|---|---|
 | Windows | `openac-win-x64.zip` | Unzip it anywhere and run `openac-launcher.exe`. |
 | Linux | `openac-linux-x64.zip` | Unzip it anywhere and run `./openac-launcher`. |
-| macOS (Apple silicon) | none yet | Build it from source; see [Building openac-rust](https://github.com/eriknihlen/openac-rust/blob/main/docs/building-and-running.md). |
+| macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | Unzip it, drag `OpenAC.app` to Applications, then open it. |
 
 The zip holds both programs; the launcher starts the `openac` client beside it.
+The first time you open `OpenAC.app`, macOS blocks it: open System Settings →
+Privacy & Security and click Open Anyway.
 
 ## 2. Your game data
 
@@ -53,7 +55,8 @@ trying things out.
 - **OpenAC:** a GPU and driver with Vulkan. On macOS the launcher brings its
   own Vulkan layer; nothing to install.
 - **openac-rust:** a GPU and driver with Direct3D 12 (Windows) or Vulkan
-  (Windows or Linux). On macOS it draws through Metal.
+  (Windows or Linux). On macOS (14 or later, Apple silicon) it draws through
+  Metal.
 - On Linux, an X11 or Wayland desktop.
 
 ## Problems?

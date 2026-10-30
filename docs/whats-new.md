@@ -5,6 +5,33 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## openac-rust 0.1.8 (2026-10-30)
+
+**New**
+
+- **macOS downloads (Apple silicon, macOS 14 or later):** `OpenAC.app`,
+  sized right and sharp on Retina screens. The first time, allow it under
+  System Settings → Privacy & Security → Open Anyway. *(David Smith)*
+
+**Fixed**
+
+- Decorations that should not be selectable can't be clicked, cycled to or
+  seen on the radar. *(David Smith, reported by Rumpadump)*
+- Dragging out of the salvage window or a vendor's sell list no longer drops
+  the item on the ground. *(David Smith, reported by Rumpadump)*
+- Items on the ground drag into the inventory or onto the hotbar.
+  *(reported by David Smith)*
+- Character creation: the face and clothes choices zoom the preview, and
+  Gearknight and Olthoi colours stay picked. *(David Smith, reported by
+  Rumpadump)*
+- Picking up an item into a stack shows the stack's count; the examination
+  window fits large creatures; the default camera sits as far back as in the
+  original game; clicking the chat window no longer stops a run; a newly
+  identified Aetheria moves to the top-left slot of its pack.
+  *(reported by Rumpadump)*
+- Buffs and debuffs add up in the attribute and skill panels as in the
+  original game. *(reported by evantaylor)*
+
 ## openac-rust 0.1.7 (2026-10-29)
 
 - **macOS (Apple silicon):** the client builds and plays on Macs with Apple

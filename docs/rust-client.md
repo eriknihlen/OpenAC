@@ -39,9 +39,8 @@ To use a newer version, move the plugin's SDK to that release and set
 ## Platforms
 
 Windows 10 and 11 (64-bit) is where it is played most. Linux (64-bit, X11 or
-Wayland) builds and runs, with less time in front of players. macOS on Apple
-silicon builds and plays from source since 0.1.7; there are no Mac downloads
-yet.
+Wayland) builds and runs, with less time in front of players. macOS 14 or
+later on Apple silicon has downloads since 0.1.8; there is no Intel Mac build.
 
 ## More
 

@@ -8,7 +8,7 @@ side and kept in step, both MIT licensed:
 |---|---|---|
 | Latest release | [![OpenAC release](https://img.shields.io/github/v/release/eriknihlen/OpenAC?display_name=tag&label=)](https://github.com/eriknihlen/OpenAC/releases/latest) | [![openac-rust release](https://img.shields.io/github/v/release/eriknihlen/openac-rust?display_name=tag&label=)](https://github.com/eriknihlen/openac-rust/releases/latest) |
 | Built with | .NET 10, Vulkan | Rust 1.95, wgpu (Direct3D 12, Vulkan, Metal) |
-| Downloads for | Windows, Linux, macOS (Apple silicon and Intel) | Windows, Linux; macOS from source |
+| Downloads for | Windows, Linux, macOS (Apple silicon and Intel) | Windows, Linux, macOS (Apple silicon) |
 | Plugins | .NET plugins | WebAssembly plugins |
 | Headless host | yes | yes, the same program with or without a window |
 | Source | [github.com/eriknihlen/OpenAC](https://github.com/eriknihlen/OpenAC) | [github.com/eriknihlen/openac-rust](https://github.com/eriknihlen/openac-rust) |
