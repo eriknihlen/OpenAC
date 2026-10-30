@@ -218,9 +218,20 @@ internal sealed class WorldSelectionQuery
                 found.ServerGuid,
                 found.LocalEntityId,
                 out _)
+            && !IsHiddenFromUi(found.ServerGuid)
             ? found.ServerGuid
             : null;
     }
+
+    /// <summary>
+    /// Whether the object is flagged hidden from the UI (traps and decoration
+    /// such as acid pools or fire spurts), so a pick on it finds nothing: it
+    /// is neither selected, used nor named under the pointer. The pick does
+    /// not fall through to whatever lies behind it.
+    /// </summary>
+    private bool IsHiddenFromUi(uint serverGuid)
+        => ((PublicWeenieFlags)(_objects.Get(serverGuid)?.PublicWeenieBitfield ?? 0u)
+            & PublicWeenieFlags.UiHidden) != 0;
 
     public void BeginLightingPulse(uint serverGuid)
     {

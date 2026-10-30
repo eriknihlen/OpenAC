@@ -297,6 +297,71 @@ public sealed class WorldSelectionQueryTests
         Assert.Null(h.Query.PickAtCursor(includeSelf: false));
     }
 
+    // Trap and decoration objects (acid pools, vats, fire spurts) carry the
+    // hidden-from-the-UI bit: the pointer neither selects, uses nor names them.
+
+    [Theory]
+    [InlineData((uint)PublicWeenieFlags.UiHidden)]
+    [InlineData((uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck))]
+    [InlineData((uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Attackable))]
+    public void PickFindsNothingOnAnObjectHiddenFromTheUi(uint publicFlags)
+    {
+        var h = new Harness();
+        WorldEntity hidden = h.Add(
+            Target, new Vector3(0f, 0f, -5f), ItemType.Misc, publicFlags);
+        h.Publish(hidden);
+
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+        Assert.Null(h.Query.PickAt(400f, 300f, includeSelf: true));
+    }
+
+    [Fact]
+    public void PickOfAHiddenObjectInFrontDoesNotPassThroughToTheObjectBehind()
+    {
+        var h = new Harness();
+        WorldEntity behind = h.Add(
+            Wielder,
+            new Vector3(0f, 0f, -10f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+        WorldEntity hidden = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.PublishParts((behind, behind.Position), (hidden, hidden.Position));
+
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
+    public void PickFindsAnObjectOnceItsHiddenBitIsCleared()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(target);
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+
+        h.Objects.Get(Target)!.PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck;
+
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
+    public void PickTreatsOnlyTheHiddenBitAsHiddenNotTheTopBit()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target, new Vector3(0f, 0f, -5f), ItemType.Misc, 0x8000_0000u);
+        h.Publish(target);
+
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
+    }
+
     [Fact]
     public void ClosestTargetIncludesOnlyVisibleLivingHostileMonsters()
     {
