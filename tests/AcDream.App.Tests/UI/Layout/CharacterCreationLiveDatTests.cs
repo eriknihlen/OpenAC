@@ -4,6 +4,9 @@ using System.Numerics;
 using AcDream.App.UI;
 using AcDream.App.UI.Layout;
 using AcDream.Content;
+using AcDream.Content.CharGen;
+using AcDream.Core.CharGen;
+using AcDream.Runtime.Session;
 using DatReaderWriter;
 using DatReaderWriter.Options;
 
@@ -1442,6 +1445,82 @@ public sealed class CharacterCreationLiveDatTests
         Assert.True(
             blankCounts.black < spotCounts.black / 10,
             $"blank template has {blankCounts.black} black pixels, expected far fewer than the spot's {spotCounts.black}");
+    }
+
+    [InstalledDatFact]
+    public void AppearancePage_SkinSpin_TakesTheAuthoredNoseSpinsPlace_ForAHeritageWithoutClothes()
+    {
+        using var dats = new DatCollection(DatDirectory, DatAccessType.Read);
+        uint layoutId = RetailDataIdResolver.Resolve(
+            dats, CharacterCreationUiController.RootEnum, 5u);
+        ImportedLayout screen = BuildSelected(
+            dats, layoutId, CharacterCreationUiController.RootElementId);
+        UiElement appearanceRoot = Assert.IsAssignableFrom<UiElement>(
+            screen.FindElement(CharacterCreationUiController.AppearancePageElementId));
+        UiButton nose = AssertButton(appearanceRoot, CharacterCreationAppearancePage.NoseSpinId);
+        UiButton skin = AssertButton(appearanceRoot, CharacterCreationAppearancePage.SkinSpinId);
+
+        // The two places the page moves the skin spin between are the ones
+        // the layout authors for the nose spin and for the skin spin.
+        Assert.Same(nose.Parent, skin.Parent);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTopWithoutNose), (nose.Left, nose.Top));
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+
+        ChargenOptions options = ChargenTableReader.Load(dats);
+        var view = new AppearanceView(options);
+        var bindings = new CharacterCreationRuntimeBindings(
+            () => view,
+            _ => default,
+            _ => default,
+            _ => default,
+            (_, _) => default,
+            (_, _) => default,
+            _ => default,
+            _ => default,
+            _ => default,
+            _ => default,
+            _ => default,
+            () => { });
+        using var page = new CharacterCreationAppearancePage(appearanceRoot, bindings);
+
+        view.Show((uint)ChargenHeritageGroup.Olthoi);
+        page.Refresh(view, view.Snapshot);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTopWithoutNose), (skin.Left, skin.Top));
+
+        view.Show((uint)ChargenHeritageGroup.Aluvian);
+        page.Refresh(view, view.Snapshot);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+    }
+
+    private sealed class AppearanceView(ChargenOptions options) : IRuntimeCharacterCreationView
+    {
+        public RuntimeCharacterCreationSnapshot Snapshot { get; private set; }
+
+        public ChargenOptions Options { get; } = options;
+
+        public void Show(uint heritageId)
+        {
+            Assert.True(Options.TryGetHeritage(heritageId, out ChargenHeritageOptions? heritage));
+            Snapshot = Snapshot with
+            {
+                IsActive = true,
+                Revision = Snapshot.Revision + 1,
+                HeritageId = heritageId,
+                GenderKey = (uint)heritage!.GendersByKey.Keys.First(),
+                Appearance = RuntimeCharacterCreationAppearance.Default,
+            };
+        }
+
+        public ChargenSkillAdvancementClass GetSkillLevel(uint skillId) =>
+            ChargenSkillAdvancementClass.Inactive;
+
+        public IDisposable Subscribe(IRuntimeCharacterCreationObserver observer) =>
+            new NoSubscription();
+
+        private sealed class NoSubscription : IDisposable
+        {
+            public void Dispose() { }
+        }
     }
 
     private static void AssertButton(ImportedLayout layout, uint elementId) =>

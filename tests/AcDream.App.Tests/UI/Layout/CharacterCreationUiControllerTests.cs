@@ -972,6 +972,66 @@ public sealed class CharacterCreationUiControllerTests
     }
 
     [Fact]
+    public void AppearancePage_WithoutClothes_TheEyesAndSkinSpinsStayPicked_AcrossTheChangesRefresh()
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Controller.Open();
+        environment.Runtime.SelectHeritageDirect(OlthoiId);
+        environment.TabButton(CharacterCreationUiController.AppearanceTabElementId).OnClick!();
+        environment.Button(CharacterCreationAppearancePage.MaleButtonId).OnClick!();
+        BumpRevisionAndTick(environment);
+
+        // The eyes spin's colour, then the refresh that change brings.
+        environment.Button(CharacterCreationAppearancePage.EyesSpinId).OnClick!();
+        environment.Button(CharacterCreationAppearancePage.SwatchIds[1]).OnClick!();
+        BumpRevisionAndTick(environment);
+        environment.Button(CharacterCreationAppearancePage.SwatchIds[0]).OnClick!();
+
+        Assert.Equal(ChargenAppearanceSlot.EyeColor, environment.Runtime.LastAppearanceSlot);
+
+        // The skin spin's shade, likewise.
+        environment.Button(CharacterCreationAppearancePage.SkinSpinId).OnClick!();
+        environment.ShadeScroll().ScalarChanged!(0.25f);
+        BumpRevisionAndTick(environment);
+        environment.ShadeScroll().ScalarChanged!(0.5f);
+
+        Assert.Equal(ChargenShadeSlot.Skin, environment.Runtime.LastShadeSlot);
+    }
+
+    [Fact]
+    public void AppearancePage_WithoutClothes_ANoseSpinPickedBeforeGoesBackToTheHair()
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Controller.Open();
+        SelectAluvianMale(environment);
+        environment.Button(CharacterCreationAppearancePage.NoseSpinId).OnClick!();
+
+        environment.Runtime.SelectHeritageDirect(OlthoiId);
+        BumpRevisionAndTick(environment);
+        environment.ShadeScroll().ScalarChanged!(0.5f);
+
+        Assert.Equal(ChargenShadeSlot.Hair, environment.Runtime.LastShadeSlot);
+    }
+
+    [Fact]
+    public void AppearancePage_WithoutClothes_TheSkinSpinMovesUpIntoTheNosesPlace_AndBack()
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Controller.Open();
+        SelectAluvianMale(environment);
+        UiButton skin = environment.Button(CharacterCreationAppearancePage.SkinSpinId);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+
+        environment.Runtime.SelectHeritageDirect(OlthoiId);
+        BumpRevisionAndTick(environment);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTopWithoutNose), (skin.Left, skin.Top));
+
+        environment.Runtime.SelectHeritageDirect(AluvianId);
+        BumpRevisionAndTick(environment);
+        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+    }
+
+    [Fact]
     public void AppearancePage_AluvianGenderPick_LeavesTheZoomAlone()
     {
         using var environment = new EnvironmentHarness();

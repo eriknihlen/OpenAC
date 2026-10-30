@@ -7,7 +7,7 @@ internal sealed class ChargenPreviewZoomController
     private const double InvalidDurationSentinel = -0.1;
 
     private readonly uint _heritageId;
-    private readonly ChargenPreviewAnimator _animator;
+    private ChargenPreviewAnimator _animator;
     private Vector3 _startEye;
     private Vector3 _targetEye;
     private double _animStartTime;
@@ -26,6 +26,16 @@ internal sealed class ChargenPreviewZoomController
     public ChargenPreviewCamera Camera { get; }
 
     public bool IsZoomedIn => _animator.IsZoomedIn;
+
+    /// <summary>
+    /// Zooms <paramref name="animator"/>'s figure from now on, a new look of
+    /// the same body; a slide under way carries on.
+    /// </summary>
+    public void ShowFigure(ChargenPreviewAnimator animator)
+    {
+        ArgumentNullException.ThrowIfNull(animator);
+        _animator = animator;
+    }
 
     public void ZoomIn()
     {
