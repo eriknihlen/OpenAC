@@ -442,6 +442,7 @@ public sealed class RetailUiRuntime : IDisposable
     // The main panel frame's element tree, read once: the shared panel frame
     // and the character window's size limits both come from it.
     private ElementInfo? _mainPanelFrameInfo;
+    private int _requestedUiScalePercent = 100;
 
     internal bool IsDisposalComplete => _disposed;
 
@@ -467,6 +468,11 @@ public sealed class RetailUiRuntime : IDisposable
             bindings.Toolbar.Objects));
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
+        _requestedUiScalePercent = DisplaySettings.NormalizeUiScalePercent(
+            bindings.Options.LoadDisplay().UiScalePercent);
+        bindings.Host.Root.GameplayUiScale = (bindings.IsGameplayDisplay?.Invoke() ?? true)
+            ? _requestedUiScalePercent / 100f
+            : 1f;
         WindowLockPresentation = new RetailWindowLockPresentationController(
             bindings.Host.Root.WindowManager);
         WindowOpacity = new RetailWindowOpacityController(
@@ -548,7 +554,9 @@ public sealed class RetailUiRuntime : IDisposable
                 Host.WindowManager,
                 persistence?.Store,
                 persistence?.CharacterKey ?? (() => "default"),
-                persistence?.ScreenSize ?? (() => ((int)Host.Root.Width, (int)Host.Root.Height)),
+                persistence is { } bound
+                    ? () => Host.Root.GameplayCanvasSize(bound.ScreenSize())
+                    : () => ((int)Host.Root.Width, (int)Host.Root.Height),
                 stateManagedVisibilityWindows:
                 [
                     WindowNames.Combat,
@@ -755,7 +763,7 @@ public sealed class RetailUiRuntime : IDisposable
     public void Tick(double deltaSeconds)
     {
         _bindings.SynchronizeDisplayPhase?.Invoke();
-        _persistence?.SetGameplayActive(_bindings.IsGameplayDisplay?.Invoke() ?? true);
+        SyncGameplayUiScale();
         Layout.UiMediaClock.Advance(deltaSeconds);
         FpsController?.Tick();
         _vividTargetIndicator?.Tick();
@@ -811,10 +819,10 @@ public sealed class RetailUiRuntime : IDisposable
 
     public void Draw(System.Numerics.Vector2 screenSize)
     {
+        SyncGameplayUiScale();
         if (screenSize != _lastScreenSize)
         {
-            Host.Root.Width = screenSize.X;
-            Host.Root.Height = screenSize.Y;
+            Host.Root.SetScreenSize(screenSize);
             bool gameplay = _bindings.IsGameplayDisplay?.Invoke() ?? true;
             _persistence?.SetGameplayActive(gameplay);
             if (gameplay) _persistence?.ReflowToScreen();
@@ -1217,8 +1225,7 @@ public sealed class RetailUiRuntime : IDisposable
         if (_bindings.Persistence is { } persistence)
         {
             var screen = persistence.ScreenSize();
-            Host.Root.Width = screen.Width;
-            Host.Root.Height = screen.Height;
+            Host.Root.SetScreenSize(new System.Numerics.Vector2(screen.Width, screen.Height));
             _lastScreenSize = new System.Numerics.Vector2(screen.Width, screen.Height);
         }
         _persistence?.RestoreAll();
@@ -1458,11 +1465,23 @@ public sealed class RetailUiRuntime : IDisposable
         _vividTargetIndicator = VividTargetIndicatorController.Mount(
             Host.Root,
             _bindings.Assets,
-            _bindings.VividTarget);
+            _bindings.VividTarget with { Camera = UiSpaceCamera });
         Console.WriteLine(_vividTargetIndicator is null
             ? "[UI] vivid target indicator DAT surfaces unavailable."
             : "[UI] vivid target indicator mounted from client-enum category 0x10000009.");
     }
+
+    /// <summary>
+    /// The world camera with its viewport measured in interface units. A
+    /// projection is linear in the viewport, so projecting through this
+    /// camera is the projected pixel divided by the interface scale: the
+    /// target indicator, plugin world labels and projectile markers are
+    /// placed where the interface draws, and the draw-time scale puts them
+    /// back on the creature's pixel.
+    /// </summary>
+    private (System.Numerics.Matrix4x4 View, System.Numerics.Matrix4x4 Projection,
+        System.Numerics.Vector2 Viewport) UiSpaceCamera()
+        => Host.Root.ToUiSpace(_bindings.VividTarget.Camera());
 
     private void MountProjectileDebugOverlay()
     {
@@ -1471,7 +1490,7 @@ public sealed class RetailUiRuntime : IDisposable
         _projectileDebugOverlay = ProjectileDebugOverlayController.Mount(
             OverlayHost,
             samples,
-            _bindings.VividTarget.Camera);
+            UiSpaceCamera);
         Console.WriteLine(
             "[PluginUI] projectile collision debug overlay mounted.");
     }
@@ -1494,7 +1513,7 @@ public sealed class RetailUiRuntime : IDisposable
             font,
             labels,
             anchor,
-            _bindings.VividTarget.Camera);
+            UiSpaceCamera);
         Console.WriteLine("[PluginUI] world label overlay mounted.");
     }
 
@@ -1811,6 +1830,24 @@ public sealed class RetailUiRuntime : IDisposable
         _chatWindowController?.ApplyChatFont(font);
         foreach (FloatingChatWindowController? floating in _floatingChatControllers)
             floating?.ApplyChatFont(font);
+    }
+
+    private void ApplyUiScale(int percent)
+    {
+        _requestedUiScalePercent = DisplaySettings.NormalizeUiScalePercent(percent);
+        SyncGameplayUiScale();
+    }
+
+    private void SyncGameplayUiScale()
+    {
+        bool gameplay = _bindings.IsGameplayDisplay?.Invoke() ?? true;
+        _persistence?.SetGameplayActive(gameplay);
+        float desired = gameplay ? _requestedUiScalePercent / 100f : 1f;
+        if (Host.Root.GameplayUiScale == desired)
+            return;
+        Host.Root.GameplayUiScale = desired;
+        if (gameplay)
+            _persistence?.ReflowToScreen();
     }
 
     private void MountToolbar()
@@ -2858,6 +2895,7 @@ public sealed class RetailUiRuntime : IDisposable
                         }
                         : null,
                     ApplyChatFont = ApplyChatFont,
+                    ApplyUiScale = ApplyUiScale,
                 },
                 resolveSprite: _bindings.Assets.ResolveSprite,
                 datFont: _bindings.Assets.DefaultFont,

@@ -121,6 +121,9 @@ public static class ConfigOptionsPageController
         /// <summary>Applies a chat face/size pair to the live chat windows, called after
         /// <see cref="SaveChat"/> so the choice is both stored and live.</summary>
         public Action<int, int>? ApplyChatFont { get; init; }
+
+        /// <summary>Applies the stored gameplay UI scale to the live canvas.</summary>
+        public Action<int>? ApplyUiScale { get; init; }
     }
 
     /// <summary>
@@ -1083,6 +1086,8 @@ public static class ConfigOptionsPageController
                 + "Texture detail, anti-aliasing and the memory pools change at "
                 + "the next start.");
 
+        BuildUiScaleRow(listBox, page, bindings);
+
         // UI Only: the world is not drawn and the streaming window shrinks to
         // the landblocks the simulation needs; panels, chat, radar and plugins
         // keep working. For the clients of an army that nobody is looking at.
@@ -1326,6 +1331,50 @@ public static class ConfigOptionsPageController
             resolveSprite, datFont, debugFont);
 
         chat = bindings.LoadChat();
+    }
+
+    /// <summary>
+    /// The interface scale, an acdream-only display row: every gameplay
+    /// window, its text and its controls drawn larger or smaller together.
+    /// Moving the slider only picks a value; it takes effect when the page
+    /// is applied, because rescaling the interface while the slider is being
+    /// dragged would move the slider out from under the pointer.
+    /// </summary>
+    private static void BuildUiScaleRow(
+        UiTemplateListBox listBox,
+        OptionPage page,
+        Bindings bindings)
+    {
+        int pendingPercent = bindings.LoadDisplay().UiScalePercent;
+        page.BeforeApply += () =>
+        {
+            if (pendingPercent == bindings.LoadDisplay().UiScalePercent)
+                return;
+            bindings.SaveDisplay(bindings.LoadDisplay() with { UiScalePercent = pendingPercent });
+            bindings.ApplyUiScale?.Invoke(pendingPercent);
+        };
+        BuildExplicitNumericSliderRow(
+            listBox,
+            "UI Scale",
+            min: DisplaySettings.MinimumUiScalePercent,
+            max: DisplaySettings.MaximumUiScalePercent,
+            step: DisplaySettings.UiScaleStepPercent,
+            integer: true,
+            defaultValue: DisplaySettings.DefaultUiScalePercent,
+            page,
+            read: () => pendingPercent = bindings.LoadDisplay().UiScalePercent,
+            apply: value =>
+            {
+                pendingPercent = DisplaySettings.NormalizeUiScalePercent((int)Math.Round(value));
+                return true;
+            },
+            isCurrent: static () => true,
+            tooltip:
+                "Draw every window, its text and its controls larger or smaller "
+                + "together. Takes effect when you press Apply.",
+            rangeLowText: "50%",
+            rangeHighText: "300%",
+            dynamicLabel: () => $"UI Scale ({pendingPercent}%)");
     }
 
     // ── Row builders (shared shapes) ────────────────────────────────────
@@ -1924,7 +1973,8 @@ public static class ConfigOptionsPageController
         string? tooltip = null,
         Func<bool>? dimmed = null,
         string? rangeLowText = null,
-        string? rangeHighText = null)
+        string? rangeHighText = null,
+        Func<string>? dynamicLabel = null)
     {
         UiElement? row = listBox.AddItemFromTemplateList(RangedSliderTemplateIndex);
         if (row is null)
@@ -1939,7 +1989,7 @@ public static class ConfigOptionsPageController
             label.LinesProvider = () =>
             [
                 new UiText.Line(
-                    labelText,
+                    dynamicLabel?.Invoke() ?? labelText,
                     dimmed?.Invoke() == true
                         ? UiRenderContext.StoreOnlyCaptionColor
                         : label.DefaultColor),
@@ -1977,8 +2027,13 @@ public static class ConfigOptionsPageController
             {
                 double snapped = SnapExplicitNumber(value, min, max, step, integer);
                 slider.SetScalarPosition((float)((snapped - min) / (max - min)));
-                if (!isCurrent() || apply(snapped))
+                if (!isCurrent())
                     return;
+                if (apply(snapped))
+                {
+                    option!.RefreshFromLink((float)snapped);
+                    return;
+                }
                 double stored = SnapExplicitNumber(read(), min, max, step, integer);
                 slider.SetScalarPosition((float)((stored - min) / (max - min)));
                 option!.RefreshFromLink((float)stored);

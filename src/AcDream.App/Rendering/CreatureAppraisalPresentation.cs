@@ -150,8 +150,7 @@ internal sealed class RetailCreatureAppraisalFrameView :
             return false;
 
         serverGuid = _controller.CurrentObjectId;
-        width = (int)_viewport.Width;
-        height = (int)_viewport.Height;
+        (width, height) = _viewport.RenderTargetSize;
         return width > 0 && height > 0;
     }
 

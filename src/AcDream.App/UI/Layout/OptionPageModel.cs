@@ -443,6 +443,9 @@ public sealed class OptionPage
 
     public Action? AfterApply { get; set; }
 
+    /// <summary>Commits settings whose live effect must wait for Apply.</summary>
+    public Action? BeforeApply { get; set; }
+
     public Action? OnOptionChanged { get; set; }
 
     public void Register(IOptionRow row)
@@ -468,6 +471,7 @@ public sealed class OptionPage
 
     public void Apply()
     {
+        BeforeApply?.Invoke();
         foreach (IOptionRow row in _rows.ToArray())
             if (_rows.Contains(row))
                 row.SaveCurrentValue();

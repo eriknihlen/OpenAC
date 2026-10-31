@@ -166,8 +166,7 @@ internal sealed class RetailPaperdollFrameView : IPaperdollFrameView
             return false;
         }
 
-        width = (int)_viewport.Width;
-        height = (int)_viewport.Height;
+        (width, height) = _viewport.RenderTargetSize;
         return true;
     }
 

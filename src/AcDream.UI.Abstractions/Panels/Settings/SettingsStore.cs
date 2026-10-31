@@ -76,7 +76,9 @@ public sealed class SettingsStore
                 KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
                 PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode),
                 UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly),
-                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused))
+                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused),
+                UiScalePercent:          DisplaySettings.NormalizeUiScalePercent(
+                    ReadInt(disp, "uiScalePercent", d.UiScalePercent)))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -904,6 +906,7 @@ public sealed class SettingsStore
             ["potatoMode"]  = d.PotatoMode,
             ["uiOnly"]      = d.UiOnly,
             ["uiOnlyWhenUnfocused"] = d.UiOnlyWhenUnfocused,
+            ["uiScalePercent"] = d.UiScalePercent,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,
