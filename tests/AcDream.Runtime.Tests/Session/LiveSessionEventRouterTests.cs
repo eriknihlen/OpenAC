@@ -811,7 +811,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             LayerId: 1u,
             Duration: 60d,
             CasterGuid: playerGuid,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: 1u,
             StatModValue: 1.2f,
             Bucket: 1u));

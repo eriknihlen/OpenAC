@@ -228,7 +228,7 @@ public sealed class LocalPlayerState
 
         var mod = _spellbook?.GetVitalMod(StatKeyForKind(kind))
                   ?? EnchantmentMath.VitalMod.Identity;
-        float buffed = (unbuffed * mod.Multiplier) + mod.Additive;
+        float buffed = mod.Apply(unbuffed);
         uint minFloor = unbuffed >= 5 ? 5u : 1u;
         if (buffed < minFloor) buffed = minFloor;
         // Add half before conversion so fractional maxima agree with the
