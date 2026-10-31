@@ -5,6 +5,28 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## openac-rust 0.1.9 (2026-10-31)
+
+**New**
+
+- **UI Scale:** Options → Display, 50–300 %. *(mightbemyname)*
+- **Modern mouse turning:** Options → Camera. Your character turns with the
+  camera, and both mouse buttons run forward. *(mightbemyname)*
+- **Plugins can draw in the world:** markers, lines, triangles, icons and
+  ground shapes (plugin API 1.3). *(David Smith)*
+- Ctrl+drag works on plugin canvases. *(David Smith)*
+- The window title shows your character's name and labelled stats, and
+  `/window` brings it to the front. *(reported by Rumpadump)*
+
+**Fixed**
+
+- Buying from a vendor keeps the shop list's scroll position and tab;
+  allegiance members show as boxes on the radar; texture detail and Potato
+  Mode apply at once; long text in character creation wraps and starts at the
+  top; the camera resets to its default after relogging.
+  *(reported by Rumpadump)*
+- Health no longer shows above its maximum on enlightened characters.
+
 ## openac-rust 0.1.8 (2026-10-30)
 
 **New**
