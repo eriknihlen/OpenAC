@@ -20,6 +20,7 @@ public sealed class WorldSessionUpdateObjectTests
     private const uint UnderlayDataId = 52u;
     private const uint OverlayDataId = 50u;
     private const uint RendUnderlay = 0x06001234u;
+    private const uint UiHiddenBool = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
 
     private sealed class NullTransport : IWorldSessionTransport
     {
@@ -278,19 +279,6 @@ public sealed class WorldSessionUpdateObjectTests
         Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(ItemGuid)!.PublicWeenieBitfield);
     }
 
-    private const uint UiHiddenBool = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
-
-    private static byte[] BuildBool(uint opcode, uint? guid, uint property, bool value)
-    {
-        var b = new List<byte>();
-        WriteU32(b, opcode);
-        b.Add(1);
-        if (guid is uint g) WriteU32(b, g);
-        WriteU32(b, property);
-        WriteU32(b, value ? 1u : 0u);
-        return b.ToArray();
-    }
-
     [Fact]
     public void PublicStringUpdate_StoresTheNameButKeepsTheShownName()
     {
@@ -362,6 +350,17 @@ public sealed class WorldSessionUpdateObjectTests
 
     private static WorldSession CreateSession() =>
         new(new IPEndPoint(IPAddress.Loopback, 9000), new NullTransport());
+
+    private static byte[] BuildBool(uint opcode, uint? guid, uint property, bool value)
+    {
+        var b = new List<byte>();
+        WriteU32(b, opcode);
+        b.Add(1);
+        if (guid is uint g) WriteU32(b, g);
+        WriteU32(b, property);
+        WriteU32(b, value ? 1u : 0u);
+        return b.ToArray();
+    }
 
     private static byte[] BuildPublicDataId(uint guid, uint property, uint value)
     {
