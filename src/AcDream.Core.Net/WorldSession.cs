@@ -292,6 +292,19 @@ public sealed partial class WorldSession : IDisposable
     /// PropertyString changed on the player.</summary>
     public event Action<PlayerStringPropertyUpdate>? PlayerStringPropertyUpdated;
 
+    public readonly record struct ObjectBoolPropertyUpdate(
+        uint Guid, uint Property, bool Value);
+
+    /// <summary>Fires when the session parses a public bool property update
+    /// (0x02D2) — one PropertyBool changed on a visible object.</summary>
+    public event Action<ObjectBoolPropertyUpdate>? ObjectBoolPropertyUpdated;
+
+    public readonly record struct PlayerBoolPropertyUpdate(uint Property, bool Value);
+
+    /// <summary>Fires when the session parses a private bool property update
+    /// (0x02D1) — one PropertyBool changed on the player.</summary>
+    public event Action<PlayerBoolPropertyUpdate>? PlayerBoolPropertyUpdated;
+
     public readonly record struct ObjectInstanceIdPropertyUpdate(
         uint Guid, uint Property, uint Value);
 
@@ -1566,6 +1579,21 @@ public sealed partial class WorldSession : IDisposable
                 if (p is not null)
                     PlayerStringPropertyUpdated?.Invoke(
                         new PlayerStringPropertyUpdate(p.Value.Property, p.Value.Value));
+            }
+            else if (op == PublicUpdatePropertyBool.Opcode)
+            {
+                var p = PublicUpdatePropertyBool.TryParse(body);
+                if (p is not null)
+                    ObjectBoolPropertyUpdated?.Invoke(
+                        new ObjectBoolPropertyUpdate(
+                            p.Value.Guid, p.Value.Property, p.Value.Value));
+            }
+            else if (op == PrivateUpdatePropertyBool.Opcode)
+            {
+                var p = PrivateUpdatePropertyBool.TryParse(body);
+                if (p is not null)
+                    PlayerBoolPropertyUpdated?.Invoke(
+                        new PlayerBoolPropertyUpdate(p.Value.Property, p.Value.Value));
             }
             else if (op == PublicUpdatePropertyInstanceId.Opcode)
             {

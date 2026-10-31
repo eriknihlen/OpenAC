@@ -167,6 +167,77 @@ public sealed class WorldSessionUpdateObjectTests
     }
 
     [Fact]
+    public void PublicUiHiddenBoolUpdate_MovesTheDescriptionsHiddenBit()
+    {
+        // A trap the server unhides (or hides) says so with the UI-hidden
+        // bool (24); the pick, the radar and the selection keys read the
+        // description's hidden bit (0x80), so the bool has to move it.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            PublicWeenieBitfield = (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck),
+        });
+
+        var republished = new List<uint>();
+        table.ObjectUpdated += o => republished.Add(o.ObjectId);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, UiHiddenBool, false)));
+
+        Assert.Equal(ItemGuid, Assert.Single(republished));
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(ItemGuid)!.PublicWeenieBitfield);
+        Assert.False(table.Get(ItemGuid)!.Properties.Bools[UiHiddenBool]);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, UiHiddenBool, true)));
+
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck),
+            table.Get(ItemGuid)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void PrivateBoolUpdate_LandsOnThePlayer()
+    {
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(
+            session, table, playerGuid: () => 0x50000001u);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+        });
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PrivateUpdatePropertyBool.Opcode, null, UiHiddenBool, true)));
+
+        Assert.True(table.Get(0x50000001u)!.Properties.Bools[UiHiddenBool]);
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.Player | PublicWeenieFlags.UiHidden),
+            table.Get(0x50000001u)!.PublicWeenieBitfield);
+    }
+
+    private const uint UiHiddenBool = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
+
+    private static byte[] BuildBool(uint opcode, uint? guid, uint property, bool value)
+    {
+        var b = new List<byte>();
+        WriteU32(b, opcode);
+        b.Add(1);
+        if (guid is uint g) WriteU32(b, g);
+        WriteU32(b, property);
+        WriteU32(b, value ? 1u : 0u);
+        return b.ToArray();
+    }
+
+    [Fact]
     public void PublicStringUpdate_StoresTheNameButKeepsTheShownName()
     {
         using var session = CreateSession();

@@ -352,6 +352,26 @@ public sealed class WorldSelectionQueryTests
     }
 
     [Fact]
+    public void PickFollowsTheServerHidingAndUnhidingAnObject()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(target);
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+
+        const uint uiHidden = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
+        Assert.True(h.Objects.UpdateBoolProperty(Target, uiHidden, value: false));
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
+
+        Assert.True(h.Objects.UpdateBoolProperty(Target, uiHidden, value: true));
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
     public void PickTreatsOnlyTheHiddenBitAsHiddenNotTheTopBit()
     {
         var h = new Harness();

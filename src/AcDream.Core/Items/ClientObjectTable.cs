@@ -194,6 +194,7 @@ public sealed class ClientObjectTable
     public const uint PlayerKillerStatusPropertyId = 134u;
     public const uint MaxStructurePropertyId = 91u;
     public const uint StructurePropertyId = 92u;
+    public const uint UiHiddenPropertyId = (uint)Properties.PropertyBool.UiHidden;
 
     public int ObjectCount => _objects.Count;
     public int ContainerCount => _containers.Count;
@@ -787,6 +788,28 @@ public sealed class ClientObjectTable
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         ServerShowedObject(item);
         item.Properties.Strings[propertyId] = value;
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies one true/false property the server changed on an object we
+    /// already hold. The UI-hidden one is also the description's hidden bit,
+    /// which decides whether the object can be picked, cycled to or shown on
+    /// the radar, so it moves the bit with it.
+    /// </summary>
+    public bool UpdateBoolProperty(uint itemId, uint propertyId, bool value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
+        item.Properties.Bools[propertyId] = value;
+        if (propertyId == UiHiddenPropertyId)
+        {
+            uint bitfield = item.PublicWeenieBitfield ?? 0u;
+            item.PublicWeenieBitfield = value
+                ? bitfield | (uint)PublicWeenieFlags.UiHidden
+                : bitfield & ~(uint)PublicWeenieFlags.UiHidden;
+        }
         ObjectUpdated?.Invoke(item);
         return true;
     }

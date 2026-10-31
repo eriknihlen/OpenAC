@@ -1,5 +1,6 @@
 using System.Linq;
 using AcDream.Core.Items;
+using AcDream.Core.Properties;
 using Xunit;
 
 namespace AcDream.Core.Tests.Items;
@@ -515,6 +516,68 @@ public sealed class ClientObjectTableTests
             ClientObjectTable.HouseOwnerPropertyId,
             value: 0u));
         Assert.Null(house.HouseOwnerId);
+    }
+
+    [Fact]
+    public void UiHiddenBoolUpdate_SetsAndClearsTheDescriptionsHiddenBit()
+    {
+        // Whether an object can be picked, cycled to or shown on the radar
+        // is read from the description's hidden bit; the server changes it
+        // later with the UI-hidden bool, and every other bit stays.
+        const uint trap = 0x7E166001u;
+        const uint stuck = (uint)PublicWeenieFlags.Stuck;
+        const uint hidden = (uint)PublicWeenieFlags.UiHidden;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = trap,
+            PublicWeenieBitfield = stuck,
+        });
+        ClientObject? fired = null;
+        table.ObjectUpdated += o => fired = o;
+
+        Assert.True(table.UpdateBoolProperty(
+            trap, (uint)PropertyBool.UiHidden, value: true));
+        Assert.Equal(stuck | hidden, table.Get(trap)!.PublicWeenieBitfield);
+        Assert.True(table.Get(trap)!.Properties.Bools[(uint)PropertyBool.UiHidden]);
+        Assert.NotNull(fired);
+
+        Assert.True(table.UpdateBoolProperty(
+            trap, (uint)PropertyBool.UiHidden, value: false));
+        Assert.Equal(stuck, table.Get(trap)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void UiHiddenBoolUpdate_OnAnObjectWithNoBitsYet_StartsFromNone()
+    {
+        const uint trap = 0x7E166002u;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = trap });
+
+        Assert.True(table.UpdateBoolProperty(
+            trap, (uint)PropertyBool.UiHidden, value: true));
+
+        Assert.Equal((uint)PublicWeenieFlags.UiHidden, table.Get(trap)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void OtherBoolUpdate_StoresTheValueAndLeavesTheDescriptionBits()
+    {
+        const uint door = 0x7E166003u;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = door,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+
+        Assert.True(table.UpdateBoolProperty(
+            door, (uint)PropertyBool.Open, value: true));
+
+        Assert.True(table.Get(door)!.Properties.Bools[(uint)PropertyBool.Open]);
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(door)!.PublicWeenieBitfield);
+        Assert.False(table.UpdateBoolProperty(
+            0x7E1660FFu, (uint)PropertyBool.UiHidden, value: true));
     }
 
     [Fact]
