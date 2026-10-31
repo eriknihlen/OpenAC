@@ -632,6 +632,7 @@ public sealed class ClientObjectTable
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         MergeProperties(item, incoming);
         item.AppraisalAnswered = true;
+        item.AppraisalSucceeded = true;
         item.LastAppraisalUnsuccessful = false;
         item.AppraisedSpellIds = spellIds.Count == 0
             ? Array.Empty<uint>()
