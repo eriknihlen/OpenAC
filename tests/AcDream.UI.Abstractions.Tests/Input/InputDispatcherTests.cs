@@ -386,9 +386,12 @@ public class InputDispatcherTests
         var (dispatcher, _, mouse, _, fired) = Build();
         Assert.True(dispatcher.TrySetAutomationActionHeld(InputAction.MovementForward, true));
 
+        // A hold begun before a field took the keyboard goes on, as a held
+        // key does, until it is let go.
         mouse.WantCaptureKeyboard = true;
-        Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
+        Assert.True(dispatcher.IsActionHeld(InputAction.MovementForward));
         Assert.True(dispatcher.TrySetAutomationActionHeld(InputAction.MovementForward, false));
+        Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
 
         Assert.Equal(
             [

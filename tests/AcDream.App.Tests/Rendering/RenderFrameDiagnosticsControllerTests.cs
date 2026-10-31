@@ -17,14 +17,15 @@ public sealed class RenderFrameDiagnosticsControllerTests
             ScreenshotCaptured: true));
 
     private static readonly RenderFrameTitleFacts TitleFacts = new(
+        InWorld: true,
+        CharacterName: "+Aldric",
         EntityCount: 3721,
         AnimatedEntityCount: 226,
         Calendar: new DerethDateTime.Calendar(
             117,
             DerethDateTime.MonthName.Leafcull,
             22,
-            DerethDateTime.HourName.DawnsongAndHalf),
-        DayFraction: 0.3125);
+            DerethDateTime.HourName.DawnsongAndHalf));
 
     [Fact]
     public void Snapshot_StartsAtTheAcceptedRuntimeDefaults()
@@ -68,8 +69,9 @@ public sealed class RenderFrameDiagnosticsControllerTests
 
         Assert.Equal(["facts", "title", "resources", "log"], harness.Calls);
         Assert.Equal(
-            $"acdream {RenderFrameDiagnosticsController.ProductVersion} | 4 fps | 250.0 ms | lb 17/43 | ent 3721/anim 226 | "
-            + "PY117 Leafcull 22 DawnsongAndHalf (df=0.3125)",
+            $"+Aldric — OpenAC {RenderFrameDiagnosticsController.ProductVersion} | "
+            + "4 fps, 250.0 ms a frame | landblocks 17 of 43 drawn | "
+            + "objects 3721, 226 animated | PY 117 Leafcull 22, Dawnsong-and-Half",
             harness.Title);
         Assert.Equal(
             new RenderFrameDiagnosticsSnapshot(
@@ -83,6 +85,47 @@ public sealed class RenderFrameDiagnosticsControllerTests
         Assert.Equal(
             RenderFrameDiagnosticsController.FormatGpuStream(ResourceFacts),
             harness.Line);
+    }
+
+    [Fact]
+    public void Title_InTheWorldNamesTheCharacterFirstThenLabelledNumbers()
+    {
+        // Another culture's decimal comma does not reach the title.
+        using var culture = new CultureScope(CultureInfo.GetCultureInfo("sv-SE"));
+        var facts = TitleFacts with
+        {
+            Calendar = TitleFacts.Calendar with { Hour = DerethDateTime.HourName.Darktide },
+        };
+
+        string title = RenderFrameDiagnosticsController.FormatTitle(
+            165.2, 6.06, 574, 2652, facts);
+
+        Assert.Equal(
+            $"+Aldric — OpenAC {RenderFrameDiagnosticsController.ProductVersion} | "
+            + "165 fps, 6.1 ms a frame | landblocks 574 of 2652 drawn | "
+            + "objects 3721, 226 animated | PY 117 Leafcull 22, Darktide",
+            title);
+    }
+
+    [Fact]
+    public void Title_BeforeTheWorldIsTheProgramAndItsVersion()
+    {
+        string title = RenderFrameDiagnosticsController.FormatTitle(
+            165.2, 6.06, 574, 2652, TitleFacts with { InWorld = false });
+
+        Assert.Equal($"OpenAC {RenderFrameDiagnosticsController.ProductVersion}", title);
+    }
+
+    [Fact]
+    public void Title_InTheWorldWithoutAKnownNameLeadsWithTheProgram()
+    {
+        string title = RenderFrameDiagnosticsController.FormatTitle(
+            165.2, 6.06, 574, 2652, TitleFacts with { CharacterName = null });
+
+        Assert.StartsWith(
+            $"OpenAC {RenderFrameDiagnosticsController.ProductVersion} | 165 fps",
+            title,
+            StringComparison.Ordinal);
     }
 
     [Fact]

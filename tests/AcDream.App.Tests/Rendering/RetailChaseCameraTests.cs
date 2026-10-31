@@ -1124,6 +1124,42 @@ public class RetailChaseCameraTests
             4);
     }
 
+    [Fact]
+    public void NewCamera_StartsInTheScaledDefaultView()
+    {
+        // In play the default view is scaled by 1.1: 2.75 m back, 0.825 m up.
+        var cam = new RetailChaseCamera();
+
+        Assert.Equal(2.75f, cam.Distance * MathF.Cos(cam.Pitch), 4);
+        Assert.Equal(0.825f, cam.Distance * MathF.Sin(cam.Pitch), 4);
+        // The scale lengthens the boom but keeps its angle (16.7 degrees).
+        Assert.Equal(MathF.Atan2(0.75f, 2.5f), cam.Pitch, 5);
+    }
+
+    [Fact]
+    public void SetRetailDefaultView_ReturnsToTheScaledDefaultView()
+    {
+        var cam = new RetailChaseCamera { Distance = 7f, Pitch = 0.5f, YawOffset = 1f };
+
+        cam.SetRetailDefaultView();
+
+        Assert.Equal(2.75f, cam.Distance * MathF.Cos(cam.Pitch), 4);
+        Assert.Equal(0.825f, cam.Distance * MathF.Sin(cam.Pitch), 4);
+        Assert.Equal(0f, cam.YawOffset);
+    }
+
+    [Fact]
+    public void LookDownView_KeepsItsUnscaledOffset()
+    {
+        // Only the default view takes the scale: look-down sits 2 m back, 0.75 m up.
+        var cam = new RetailChaseCamera();
+
+        cam.ToggleRetailLookDownView();
+
+        Assert.Equal(2f, cam.Distance * MathF.Cos(cam.Pitch), 4);
+        Assert.Equal(0.75f, cam.Distance * MathF.Sin(cam.Pitch), 4);
+    }
+
     // ── View rules and orbit ──────────────────────────────────────────
 
     [Fact]
