@@ -20,6 +20,7 @@ public sealed class WorldSessionUpdateObjectTests
     private const uint UnderlayDataId = 52u;
     private const uint OverlayDataId = 50u;
     private const uint RendUnderlay = 0x06001234u;
+    private const uint UiHiddenBool = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
 
     private sealed class NullTransport : IWorldSessionTransport
     {
@@ -105,6 +106,29 @@ public sealed class WorldSessionUpdateObjectTests
     }
 
     [Fact]
+    public void UpdateObject_WithoutAMonarch_ClearsTheMonarch()
+    {
+        // The server leaves the monarch out of a description when there is
+        // none, and a fresh description replaces the whole description, so
+        // one without a monarch means the object has left its allegiance.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            Name = "Sword",
+            MonarchId = 0x50000777u,
+        });
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildDescription(CreateObject.UpdateOpcode, name: "Sword")));
+
+        Assert.Null(table.Get(ItemGuid)!.MonarchId);
+    }
+
+    [Fact]
     public void PublicDataIdUpdate_RepublishesTheItemWithItsNewOverlay()
     {
         using var session = CreateSession();
@@ -164,6 +188,95 @@ public sealed class WorldSessionUpdateObjectTests
 
         Assert.Equal(ItemGuid, Assert.Single(republished));
         Assert.Equal(0x50000001u, table.Get(ItemGuid)!.Properties.InstanceIds[3u]);
+    }
+
+    [Fact]
+    public void PublicUiHiddenBoolUpdate_MovesTheDescriptionsHiddenBit()
+    {
+        // A trap the server unhides (or hides) says so with the UI-hidden
+        // bool (24); the pick, the radar and the selection keys read the
+        // description's hidden bit (0x80), so the bool has to move it.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            PublicWeenieBitfield = (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck),
+        });
+
+        var republished = new List<uint>();
+        table.ObjectUpdated += o => republished.Add(o.ObjectId);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, UiHiddenBool, false)));
+
+        Assert.Equal(ItemGuid, Assert.Single(republished));
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(ItemGuid)!.PublicWeenieBitfield);
+        Assert.False(table.Get(ItemGuid)!.Properties.Bools[UiHiddenBool]);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, UiHiddenBool, true)));
+
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck),
+            table.Get(ItemGuid)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void PrivateBoolUpdate_LandsOnThePlayer()
+    {
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(
+            session, table, playerGuid: () => 0x50000001u);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = 0x50000001u,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+        });
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PrivateUpdatePropertyBool.Opcode, null, UiHiddenBool, true)));
+
+        Assert.True(table.Get(0x50000001u)!.Properties.Bools[UiHiddenBool]);
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.Player | PublicWeenieFlags.UiHidden),
+            table.Get(0x50000001u)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void PublicLockedBoolUpdate_MakesAnUnlockedChestOpenable()
+    {
+        // A lockpick unlock is the Locked bool going false. Everything that
+        // asks whether a container can be opened or filled reads the
+        // description's openable bit, which is the inverse of Locked.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+        const uint locked = (uint)AcDream.Core.Properties.PropertyBool.Locked;
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, locked, false)));
+
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.Stuck | PublicWeenieFlags.Openable),
+            table.Get(ItemGuid)!.PublicWeenieBitfield);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, locked, true)));
+
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(ItemGuid)!.PublicWeenieBitfield);
     }
 
     [Fact]
@@ -237,6 +350,17 @@ public sealed class WorldSessionUpdateObjectTests
 
     private static WorldSession CreateSession() =>
         new(new IPEndPoint(IPAddress.Loopback, 9000), new NullTransport());
+
+    private static byte[] BuildBool(uint opcode, uint? guid, uint property, bool value)
+    {
+        var b = new List<byte>();
+        WriteU32(b, opcode);
+        b.Add(1);
+        if (guid is uint g) WriteU32(b, g);
+        WriteU32(b, property);
+        WriteU32(b, value ? 1u : 0u);
+        return b.ToArray();
+    }
 
     private static byte[] BuildPublicDataId(uint guid, uint property, uint value)
     {

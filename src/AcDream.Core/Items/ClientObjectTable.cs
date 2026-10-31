@@ -189,6 +189,7 @@ public sealed class ClientObjectTable
     public const uint HookTypePropertyId = 151u;
     public const uint HookItemTypesPropertyId = 152u;
     public const uint HouseOwnerPropertyId = 32u;
+    public const uint MonarchPropertyId = (uint)Properties.PropertyInstanceId.Monarch;
     public const uint SharedCooldownPropertyId = 280u;
     public const uint CooldownDurationPropertyId = 167u;
     public const uint PlayerKillerStatusPropertyId = 134u;
@@ -792,9 +793,53 @@ public sealed class ClientObjectTable
     }
 
     /// <summary>
+    /// Applies one true/false property the server changed on an object we
+    /// already hold. Some of these are also a bit of the public description,
+    /// which is what everything else reads (whether the object can be picked
+    /// or shown on the radar, whether a container can be opened), so the bit
+    /// moves with the bool. Locked is the inverse of openable: an unlock
+    /// makes a chest openable.
+    /// </summary>
+    public bool UpdateBoolProperty(uint itemId, uint propertyId, bool value)
+    {
+        if (!_objects.TryGetValue(itemId, out var item)) return false;
+        ServerShowedObject(item);
+        item.Properties.Bools[propertyId] = value;
+        if (DescriptionBitOf(propertyId) is { } described)
+        {
+            uint bit = (uint)described.Bit;
+            bool set = described.Inverted ? !value : value;
+            uint bitfield = item.PublicWeenieBitfield ?? 0u;
+            item.PublicWeenieBitfield = set ? bitfield | bit : bitfield & ~bit;
+        }
+        ObjectUpdated?.Invoke(item);
+        return true;
+    }
+
+    /// <summary>
+    /// The public description bit a true/false property stands for, if any,
+    /// and whether the bit is set when the property is false.
+    /// </summary>
+    private static (PublicWeenieFlags Bit, bool Inverted)? DescriptionBitOf(uint propertyId)
+        => (Properties.PropertyBool)propertyId switch
+        {
+            Properties.PropertyBool.Stuck => (PublicWeenieFlags.Stuck, false),
+            Properties.PropertyBool.Locked => (PublicWeenieFlags.Openable, true),
+            Properties.PropertyBool.Inscribable => (PublicWeenieFlags.Inscribable, false),
+            Properties.PropertyBool.UiHidden => (PublicWeenieFlags.UiHidden, false),
+            Properties.PropertyBool.IgnoreHouseBarriers =>
+                (PublicWeenieFlags.ImmuneCellRestrictions, false),
+            Properties.PropertyBool.HiddenAdmin => (PublicWeenieFlags.HiddenAdmin, false),
+            _ => null,
+        };
+
+    /// <summary>
     /// Applies one instance-id property the server changed on an object we
     /// already hold. Placement (container, wielder) has its own ordered routes,
-    /// so this only records the value and republishes the object.
+    /// so this records the value and republishes the object. A house's owner
+    /// (announced this way on a purchase or an abandon) and an object's
+    /// monarch (announced this way on swearing or breaking allegiance) also
+    /// move the typed fields the entry gate and the radar read; 0 means none.
     /// </summary>
     public bool UpdateInstanceIdProperty(uint itemId, uint propertyId, uint value)
     {
@@ -802,6 +847,7 @@ public sealed class ClientObjectTable
         ServerShowedObject(item);
         item.Properties.InstanceIds[propertyId] = value;
         if (propertyId == HouseOwnerPropertyId) item.HouseOwnerId = value == 0u ? null : value;
+        if (propertyId == MonarchPropertyId) item.MonarchId = value == 0u ? null : value;
         ObjectUpdated?.Invoke(item);
         return true;
     }
@@ -886,7 +932,13 @@ public sealed class ClientObjectTable
         if (d.Workmanship is { } wm) obj.Workmanship = wm;
         if (d.MaterialType is { } materialType) obj.MaterialType = materialType;
         if (d.HouseOwnerId is { } houseOwnerId) obj.HouseOwnerId = houseOwnerId;
-        if (d.MonarchId is { } monarchId) obj.MonarchId = monarchId;
+        // A description off the wire replaces the whole description, and the
+        // server leaves the monarch out when there is none: no monarch there
+        // means the object is in no allegiance.
+        if (d.Header is not null)
+            obj.MonarchId = d.MonarchId is { } sent && sent != 0u ? sent : null;
+        else if (d.MonarchId is { } monarchId)
+            obj.MonarchId = monarchId;
         if (d.Restrictions is { } restrictions) obj.Restrictions = restrictions;
         // A full description replaces the whole header: a value it did not
         // carry is one the object no longer has on record.

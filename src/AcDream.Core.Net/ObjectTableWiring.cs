@@ -92,6 +92,25 @@ public static class ObjectTableWiring
         subscriptions.Add(
             () => session.PlayerStringPropertyUpdated -= playerStringUpdated);
 
+        Action<WorldSession.ObjectBoolPropertyUpdate> objectBoolUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            table.UpdateBoolProperty(u.Guid, u.Property, u.Value);
+        };
+        session.ObjectBoolPropertyUpdated += objectBoolUpdated;
+        subscriptions.Add(
+            () => session.ObjectBoolPropertyUpdated -= objectBoolUpdated);
+
+        Action<WorldSession.PlayerBoolPropertyUpdate> playerBoolUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            if (playerGuid is not null)
+                table.UpdateBoolProperty(playerGuid(), u.Property, u.Value);
+        };
+        session.PlayerBoolPropertyUpdated += playerBoolUpdated;
+        subscriptions.Add(
+            () => session.PlayerBoolPropertyUpdated -= playerBoolUpdated);
+
         Action<WorldSession.ObjectInstanceIdPropertyUpdate> objectInstanceIdUpdated = u =>
         {
             if (accepting?.Invoke() == false) return;

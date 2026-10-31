@@ -183,6 +183,33 @@ public sealed class WorldSelectionQueryTests
         }
     }
 
+    /// <summary>A refreshed description of an object carrying its public bits.</summary>
+    private static WeenieData Description(uint guid, uint publicFlags)
+        => new(
+            guid,
+            Name: null,
+            Type: null,
+            WeenieClassId: 0u,
+            IconId: 0u,
+            IconOverlayId: 0u,
+            IconUnderlayId: 0u,
+            Effects: 0u,
+            Value: null,
+            StackSize: null,
+            StackSizeMax: null,
+            Burden: null,
+            ContainerId: null,
+            WielderId: null,
+            ValidLocations: null,
+            CurrentWieldedLocation: null,
+            Priority: null,
+            ItemsCapacity: null,
+            ContainersCapacity: null,
+            Structure: null,
+            MaxStructure: null,
+            Workmanship: null,
+            PublicWeenieBitfield: publicFlags);
+
     // ── World label anchor: the height chain ────────────────────────────
     // Physics cylinder first (already scaled by its owner), then the
     // selection sphere, then the model's own bounds, then a fixed 1.1 m.
@@ -295,6 +322,94 @@ public sealed class WorldSelectionQueryTests
         }
 
         Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    // Trap and decoration objects (acid pools, vats, fire spurts) carry the
+    // hidden-from-the-UI bit: the pointer neither selects, uses nor names them.
+
+    [Theory]
+    [InlineData((uint)PublicWeenieFlags.UiHidden)]
+    [InlineData((uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck))]
+    [InlineData((uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Attackable))]
+    public void PickFindsNothingOnAnObjectHiddenFromTheUi(uint publicFlags)
+    {
+        var h = new Harness();
+        WorldEntity hidden = h.Add(
+            Target, new Vector3(0f, 0f, -5f), ItemType.Misc, publicFlags);
+        h.Publish(hidden);
+
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+        Assert.Null(h.Query.PickAt(400f, 300f, includeSelf: true));
+    }
+
+    [Fact]
+    public void PickOfAHiddenObjectInFrontDoesNotPassThroughToTheObjectBehind()
+    {
+        var h = new Harness();
+        WorldEntity behind = h.Add(
+            Wielder,
+            new Vector3(0f, 0f, -10f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+        WorldEntity hidden = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(behind);
+        Assert.Equal(Wielder, h.Query.PickAtCursor(includeSelf: false));
+
+        h.PublishParts((behind, behind.Position), (hidden, hidden.Position));
+
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
+    public void PickFindsAnObjectOnceItsHiddenBitIsCleared()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(target);
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+
+        h.Objects.Ingest(Description(Target, (uint)PublicWeenieFlags.Stuck));
+
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
+    public void PickFollowsTheServerHidingAndUnhidingAnObject()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target,
+            new Vector3(0f, 0f, -5f),
+            ItemType.Misc,
+            (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(target);
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+
+        const uint uiHidden = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
+        Assert.True(h.Objects.UpdateBoolProperty(Target, uiHidden, value: false));
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
+
+        Assert.True(h.Objects.UpdateBoolProperty(Target, uiHidden, value: true));
+        Assert.Null(h.Query.PickAtCursor(includeSelf: false));
+    }
+
+    [Fact]
+    public void PickTreatsOnlyTheHiddenBitAsHiddenNotTheTopBit()
+    {
+        var h = new Harness();
+        WorldEntity target = h.Add(
+            Target, new Vector3(0f, 0f, -5f), ItemType.Misc, 0x8000_0000u);
+        h.Publish(target);
+
+        Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
     }
 
     [Fact]
@@ -568,6 +683,76 @@ public sealed class WorldSelectionQueryTests
         // Exactly on the edge is outside for this one: the range is strict.
         entity.Position = new Vector3(75f, 0f, 0f);
         Assert.Null(h.Query.FindLastAttacker());
+    }
+
+    // Auto-target skips what the closest-monster key skips: a cloaked
+    // creature and one hidden from the UI.
+    [Fact]
+    public void ClosestCombatTargetSkipsCloakedAndUiHiddenMonsters()
+    {
+        var h = new Harness();
+        const uint cloaked = 0x7000_0080u;
+        const uint trap = 0x7000_0081u;
+        const uint visible = 0x7000_0082u;
+        h.Add(
+            cloaked,
+            new Vector3(1f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+        Assert.True(h.Runtime.TryApplyState(
+            new SetState.Parsed(
+                cloaked,
+                (uint)(PhysicsStateFlags.ReportCollisions | PhysicsStateFlags.Cloaked),
+                InstanceSequence: 1,
+                StateSequence: 2),
+            out _));
+        h.Add(
+            trap,
+            new Vector3(2f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable | (uint)PublicWeenieFlags.UiHidden);
+        h.Add(
+            visible,
+            new Vector3(3f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+
+        Assert.Equal(visible, h.Query.FindClosestHostileMonster()?.ServerGuid);
+    }
+
+    // A trap hidden from the UI (bit 0x80 of its description) is never a
+    // candidate for the selection keys; the top bit of the field is no such
+    // mark.
+    [Fact]
+    public void SelectionKeysSkipAnObjectHiddenFromTheUi()
+    {
+        var h = new Harness();
+        const uint trap = 0x7000_0070u;
+        const uint marked = 0x7000_0071u;
+        h.Add(
+            trap,
+            new Vector3(1f, 0f, 0f),
+            ItemType.Creature,
+            publicFlags: (uint)(PublicWeenieFlags.Attackable | PublicWeenieFlags.UiHidden),
+            radarBehavior: (byte)RadarBehavior.ShowAlways);
+        h.Add(
+            marked,
+            new Vector3(2f, 0f, 0f),
+            ItemType.Creature,
+            publicFlags: (uint)PublicWeenieFlags.Attackable | 0x8000_0000u,
+            radarBehavior: (byte)RadarBehavior.ShowAlways);
+
+        foreach (RetailSelectionKind kind in new[]
+                 {
+                     RetailSelectionKind.Monster,
+                     RetailSelectionKind.CompassItem,
+                 })
+        {
+            Assert.Equal(
+                marked,
+                h.Query.FindSelectionTarget(
+                    kind, RetailSelectionDirection.Closest, anchor: null));
+        }
     }
 
     private static WorldEntity AddMonster(Harness h, uint guid, Vector3 position)
@@ -895,6 +1080,9 @@ public sealed class WorldSelectionQueryTests
             ItemType.MeleeWeapon,
             wielderId: Wielder,
             childRoot: Matrix4x4.CreateTranslation(0f, 0f, -5f));
+        h.Publish(wielder);
+        Assert.Equal(Wielder, h.Query.PickAtCursor(includeSelf: false));
+
         h.PublishParts(
             (wielder, wielder.Position),
             (weapon, new Vector3(0f, 0f, -5f)));

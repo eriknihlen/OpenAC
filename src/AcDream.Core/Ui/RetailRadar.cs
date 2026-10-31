@@ -85,6 +85,15 @@ public static class RetailRadar
         => hasPhysicsObject && behavior is
             RadarBehavior.ShowMovement or RadarBehavior.ShowAttacking or RadarBehavior.ShowAlways;
 
+    /// <summary>
+    /// Whether an object whose allegiance's monarch is
+    /// <paramref name="objectMonarch"/> is in the allegiance of a player whose
+    /// monarch is <paramref name="playerMonarch"/>: it has a monarch, and it
+    /// is the player's. Two objects in no allegiance are not in the same one.
+    /// </summary>
+    public static bool IsAllegianceMember(uint? objectMonarch, uint? playerMonarch)
+        => objectMonarch is { } monarch && monarch != 0u && monarch == playerMonarch;
+
     public static RadarBlipShape GetBlipShape(
         RadarObjectTraits target,
         RadarRelationshipTraits relationship = default)

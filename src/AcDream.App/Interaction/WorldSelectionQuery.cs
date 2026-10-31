@@ -218,9 +218,20 @@ internal sealed class WorldSelectionQuery
                 found.ServerGuid,
                 found.LocalEntityId,
                 out _)
+            && !IsHiddenFromUi(found.ServerGuid)
             ? found.ServerGuid
             : null;
     }
+
+    /// <summary>
+    /// Whether the object is flagged hidden from the UI (traps and decoration
+    /// such as acid pools or fire spurts), so a pick on it finds nothing: it
+    /// is neither selected, used nor named under the pointer. The pick does
+    /// not fall through to whatever lies behind it.
+    /// </summary>
+    private bool IsHiddenFromUi(uint serverGuid)
+        => ((PublicWeenieFlags)(_objects.Get(serverGuid)?.PublicWeenieBitfield ?? 0u)
+            & PublicWeenieFlags.UiHidden) != 0;
 
     public void BeginLightingPulse(uint serverGuid)
     {
@@ -320,7 +331,10 @@ internal sealed class WorldSelectionQuery
         {
             uint guid = record.ServerGuid;
             WorldEntity entity = record.WorldEntity!;
-            if (!IsHostileMonster(guid))
+            if (!IsHostileMonster(guid)
+                || SelectionEligibility.IsHiddenFromSelection(
+                    record.FinalPhysicsState,
+                    _objects.Get(guid)?.PublicWeenieBitfield))
                 continue;
             float distanceSquared = Vector3.DistanceSquared(entity.Position, player.Position);
             if (best is null || distanceSquared < best.Value.DistanceSquared)
@@ -457,8 +471,8 @@ internal sealed class WorldSelectionQuery
                 | PublicWeenieFlags.Bindstone)) != 0;
 
         if (obj.ContainerId != 0u
-            || (physicsState & PhysicsStateFlags.Cloaked) != 0
-            || (((uint)flags & 0x8000_0000u) != 0))
+            || SelectionEligibility.IsHiddenFromSelection(
+                physicsState, obj.PublicWeenieBitfield))
             return false;
 
         return kind switch

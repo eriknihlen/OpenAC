@@ -54,6 +54,32 @@ public sealed class RetailRadarTests
     }
 
     [Fact]
+    public void AllegianceMembership_IsASharedNonZeroMonarch()
+    {
+        Assert.True(RetailRadar.IsAllegianceMember(0x50000777u, 0x50000777u));
+        Assert.False(RetailRadar.IsAllegianceMember(0x50000777u, 0x50000778u));
+        Assert.False(RetailRadar.IsAllegianceMember(0x50000777u, null));
+        Assert.False(RetailRadar.IsAllegianceMember(null, 0x50000777u));
+        // Neither in an allegiance is not "the same allegiance".
+        Assert.False(RetailRadar.IsAllegianceMember(null, null));
+        Assert.False(RetailRadar.IsAllegianceMember(0u, 0u));
+    }
+
+    [Fact]
+    public void AnObjectHiddenFromTheUi_GetsNoBlip_TheTopBitIsNoSuchMark()
+    {
+        // Bit 0x80 of the description hides an object (traps and decoration)
+        // from the radar; an object with only the top bit set is shown.
+        var trap = RadarObjectTraits.FromPublicWeenieDescription(0x10u, 0x0000_0094u);
+        Assert.False(trap.IsValid);
+        Assert.Equal(RadarBlipShape.Undef, RetailRadar.GetBlipShape(trap));
+
+        var topBit = RadarObjectTraits.FromPublicWeenieDescription(0x10u, 0x8000_0014u);
+        Assert.True(topBit.IsValid);
+        Assert.Equal(RadarBlipShape.Default, RetailRadar.GetBlipShape(topBit));
+    }
+
+    [Fact]
     public void BlipPixelShapes_MatchRetailDrawRoutines()
     {
         AssertOffsets(RadarBlipShape.Circle, [(0, 0)]);

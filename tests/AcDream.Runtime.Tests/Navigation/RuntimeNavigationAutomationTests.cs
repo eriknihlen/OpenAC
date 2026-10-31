@@ -154,6 +154,42 @@ public sealed class RuntimeNavigationAutomationTests
         Assert.False(appraised.IsLocked);
     }
 
+    /// <summary>
+    /// A door's lock is also known from the server's Locked update (a
+    /// lockpick unlock, a key lock), with no appraisal. The plugin view of the
+    /// door and the walk that meets it read the lock the same way.
+    /// </summary>
+    [Fact]
+    public void ALockedUpdateTellsTheLockWithoutAnAppraisal_ForThePluginViewAndTheWalk()
+    {
+        const uint doorId = 0x7A000002u;
+        const uint locked = (uint)PropertyBool.Locked;
+        using GameRuntime runtime = Gameplay.UseRangeTestWorld.Create();
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = doorId,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Door,
+        });
+        var doors = new RuntimeNavigationDoors(new PhysicsEngine(), runtime, _ => { });
+        PluginNavigationObject View() => RuntimeNavigationProjection.Enrich(
+            new PluginNavigationObject(doorId, "Door", default),
+            objects.Get(doorId),
+            PhysicsStateFlags.None);
+
+        Assert.Null(doors.IsLocked(doorId));
+        Assert.False(View().HasLockState);
+
+        Assert.True(objects.UpdateBoolProperty(doorId, locked, value: true));
+        Assert.True(doors.IsLocked(doorId));
+        Assert.True(View().HasLockState);
+        Assert.True(View().IsLocked);
+
+        Assert.True(objects.UpdateBoolProperty(doorId, locked, value: false));
+        Assert.False(doors.IsLocked(doorId));
+        Assert.False(View().IsLocked);
+    }
+
     [Fact]
     public void WalksWaitOnWhatAPluginSaysItNeedsUntilThePluginLetsGo()
     {

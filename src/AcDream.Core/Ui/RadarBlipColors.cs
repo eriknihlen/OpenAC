@@ -20,6 +20,7 @@ public readonly record struct RadarObjectTraits(
     private const uint BfAttackable = 0x00000010u;
     private const uint BfPlayerKiller = 0x00000020u;
     private const uint BfHiddenAdmin = 0x00000040u;
+    private const uint BfUiHidden = 0x00000080u;
     private const uint BfVendor = 0x00000200u;
     private const uint BfPortal = 0x00040000u;
     private const uint BfAdmin = 0x00100000u;
@@ -31,7 +32,7 @@ public readonly record struct RadarObjectTraits(
         uint bitfield,
         byte blipColorOverride = 0)
         => new(
-            IsValid: (bitfield & 0x80000000u) == 0,
+            IsValid: (bitfield & BfUiHidden) == 0,
             BlipColorOverride: blipColorOverride,
             IsPortal: (bitfield & BfPortal) != 0,
             IsVendor: (bitfield & BfVendor) != 0,

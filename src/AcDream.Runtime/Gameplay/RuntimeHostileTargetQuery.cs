@@ -5,6 +5,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.Properties;
+using AcDream.Core.Selection;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Physics;
 
@@ -87,19 +88,25 @@ public static class RuntimeHostileTargetQuery
             return false;
         }
         return scope == HostileTargetScope.Classified
-            || CanBeSeenAndIsAlive(record, runtime);
+            || CanBeSeenAndIsAlive(record, candidate, runtime);
     }
 
     /// <summary>
     /// The two terms a person picking a target expects of anything they pick:
-    /// it can be seen, and it is not already dead.
+    /// it can be seen, and it is not already dead. "Seen" also leaves out a
+    /// cloaked creature and one hidden from the UI (bit 0x80 of its
+    /// description), the same two the selection keys skip.
     /// </summary>
     private static bool CanBeSeenAndIsAlive(
         RuntimeEntityRecord record,
+        ClientObject? candidate,
         GameRuntime runtime)
     {
         if ((record.FinalPhysicsState
-            & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0)
+            & (PhysicsStateFlags.Hidden | PhysicsStateFlags.NoDraw)) != 0
+            || SelectionEligibility.IsHiddenFromSelection(
+                record.FinalPhysicsState,
+                candidate?.PublicWeenieBitfield))
         {
             return false;
         }
@@ -140,7 +147,7 @@ public static class RuntimeHostileTargetQuery
                 objects.Get(playerGuid),
                 objectId,
                 objects.Get(objectId))
-            && CanBeSeenAndIsAlive(record, runtime);
+            && CanBeSeenAndIsAlive(record, objects.Get(objectId), runtime);
     }
 
     public static IReadOnlyList<RuntimeHostileTargetSnapshot> Capture(
