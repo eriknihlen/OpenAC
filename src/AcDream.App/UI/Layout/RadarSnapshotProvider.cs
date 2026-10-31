@@ -127,6 +127,8 @@ public sealed class RadarSnapshotProvider
             var relationship = _relationshipFor?.Invoke(guid) ?? default;
             relationship = relationship with
             {
+                IsAllegianceMember = RetailRadar.IsAllegianceMember(
+                    clientObject?.MonarchId, playerObject?.MonarchId),
                 PlayerIsPlayerKiller = playerTraits.IsPlayerKiller,
                 PlayerIsPkLite = playerTraits.IsPkLite,
             };

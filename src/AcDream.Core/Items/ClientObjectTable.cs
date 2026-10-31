@@ -189,6 +189,7 @@ public sealed class ClientObjectTable
     public const uint HookTypePropertyId = 151u;
     public const uint HookItemTypesPropertyId = 152u;
     public const uint HouseOwnerPropertyId = 32u;
+    public const uint MonarchPropertyId = (uint)Properties.PropertyInstanceId.Monarch;
     public const uint SharedCooldownPropertyId = 280u;
     public const uint CooldownDurationPropertyId = 167u;
     public const uint PlayerKillerStatusPropertyId = 134u;
@@ -817,7 +818,10 @@ public sealed class ClientObjectTable
     /// <summary>
     /// Applies one instance-id property the server changed on an object we
     /// already hold. Placement (container, wielder) has its own ordered routes,
-    /// so this only records the value and republishes the object.
+    /// so this records the value and republishes the object. A house's owner
+    /// (announced this way on a purchase or an abandon) and an object's
+    /// monarch (announced this way on swearing or breaking allegiance) also
+    /// move the typed fields the entry gate and the radar read; 0 means none.
     /// </summary>
     public bool UpdateInstanceIdProperty(uint itemId, uint propertyId, uint value)
     {
@@ -825,6 +829,7 @@ public sealed class ClientObjectTable
         ServerShowedObject(item);
         item.Properties.InstanceIds[propertyId] = value;
         if (propertyId == HouseOwnerPropertyId) item.HouseOwnerId = value == 0u ? null : value;
+        if (propertyId == MonarchPropertyId) item.MonarchId = value == 0u ? null : value;
         ObjectUpdated?.Invoke(item);
         return true;
     }

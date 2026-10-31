@@ -519,6 +519,28 @@ public sealed class ClientObjectTableTests
     }
 
     [Fact]
+    public void MonarchInstanceIdUpdate_SetsAndClearsMonarchId()
+    {
+        // Swearing or breaking allegiance announces the new monarch with an
+        // instance-id update; the radar's allegiance box and the house entry
+        // gate read MonarchId. 0 means no allegiance.
+        const uint personGuid = 0x50000005u;
+        const uint monarchGuid = 0x50000777u;
+        var table = new ClientObjectTable();
+        ClientObject person = table.Ingest(FullWeenie(personGuid));
+        Assert.Null(person.MonarchId);
+
+        Assert.True(table.UpdateInstanceIdProperty(
+            personGuid, (uint)PropertyInstanceId.Monarch, monarchGuid));
+        Assert.Equal(monarchGuid, person.MonarchId);
+        Assert.Equal(monarchGuid, person.Properties.InstanceIds[(uint)PropertyInstanceId.Monarch]);
+
+        Assert.True(table.UpdateInstanceIdProperty(
+            personGuid, (uint)PropertyInstanceId.Monarch, value: 0u));
+        Assert.Null(person.MonarchId);
+    }
+
+    [Fact]
     public void UiHiddenBoolUpdate_SetsAndClearsTheDescriptionsHiddenBit()
     {
         // Whether an object can be picked, cycled to or shown on the radar

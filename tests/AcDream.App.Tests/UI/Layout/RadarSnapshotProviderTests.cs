@@ -106,6 +106,72 @@ public sealed class RadarSnapshotProviderTests
         Assert.Equal(trap, Assert.Single(provider.BuildSnapshot().Blips).ObjectId);
     }
 
+    // Members of the player's allegiance (the same monarch as the player) are
+    // drawn as boxes; the fellowship's own shapes still win, and someone
+    // swearing in later becomes a box when the server announces the monarch.
+    [Fact]
+    public void BuildSnapshot_DrawsThePlayersAllegianceAsBoxes()
+    {
+        const uint player = 1u;
+        const uint member = 2u;
+        const uint outsider = 3u;
+        const uint fellowMember = 4u;
+        const uint recruit = 5u;
+        const uint monarch = 0x50000777u;
+        var objects = new ClientObjectTable();
+        objects.Ingest(Weenie(player, "Player", ItemType.Creature) with { MonarchId = monarch });
+        foreach ((uint guid, uint? monarchId) in new (uint, uint?)[]
+                 {
+                     (member, monarch),
+                     (outsider, 0x50000778u),
+                     (fellowMember, monarch),
+                     (recruit, null),
+                 })
+        {
+            objects.Ingest(Weenie(guid, $"P{guid}", ItemType.Creature) with
+            {
+                RadarBehavior = (byte)RadarBehavior.ShowAlways,
+                PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+                MonarchId = monarchId,
+            });
+        }
+        var entities = new Dictionary<uint, WorldEntity>
+        {
+            [player] = Entity(player, Vector3.Zero, Quaternion.Identity),
+            [member] = Entity(member, new Vector3(0f, 15f, 0f), Quaternion.Identity),
+            [outsider] = Entity(outsider, new Vector3(15f, 0f, 0f), Quaternion.Identity),
+            [fellowMember] = Entity(fellowMember, new Vector3(-15f, 0f, 0f), Quaternion.Identity),
+            [recruit] = Entity(recruit, new Vector3(0f, -15f, 0f), Quaternion.Identity),
+        };
+        var spawns = new Dictionary<uint, WorldSession.EntitySpawn>();
+        var provider = new RadarSnapshotProvider(
+            objects, new RadarEntities(() => entities), () => spawns,
+            playerGuid: () => player,
+            playerYawRadians: () => 0f,
+            playerCellId: () => 0xA9B40001u,
+            selectedGuid: () => null,
+            coordinatesOnRadar: () => false,
+            uiLocked: () => false,
+            relationshipFor: guid => new RadarRelationshipTraits(
+                IsFellowshipMember: guid == fellowMember));
+
+        RadarBlipShape Shape(uint guid) => Assert.Single(
+            provider.BuildSnapshot().Blips, blip => blip.ObjectId == guid).Shape;
+
+        Assert.Equal(RadarBlipShape.AllegianceMember, Shape(member));
+        Assert.Equal(RadarBlipShape.Default, Shape(outsider));
+        Assert.Equal(RadarBlipShape.Fellowship, Shape(fellowMember));
+        Assert.Equal(RadarBlipShape.Default, Shape(recruit));
+
+        Assert.True(objects.UpdateInstanceIdProperty(
+            recruit, (uint)AcDream.Core.Properties.PropertyInstanceId.Monarch, monarch));
+        Assert.Equal(RadarBlipShape.AllegianceMember, Shape(recruit));
+
+        Assert.True(objects.UpdateInstanceIdProperty(
+            member, (uint)AcDream.Core.Properties.PropertyInstanceId.Monarch, 0u));
+        Assert.Equal(RadarBlipShape.Default, Shape(member));
+    }
+
     // OpenAC #47: a fellow's blip and the leader's blip take their own
     // colours; another player at the same range keeps the default colour.
     [Fact]
