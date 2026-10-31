@@ -559,41 +559,18 @@ public sealed class ClientObjectTableTests
         const uint other = (uint)(PublicWeenieFlags.Attackable | PublicWeenieFlags.Bindstone);
         var table = new ClientObjectTable();
         table.AddOrUpdate(new ClientObject { ObjectId = guid, PublicWeenieBitfield = other });
+        int updates = 0;
+        table.ObjectUpdated += _ => updates++;
 
         Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: !inverted));
         Assert.Equal(other | (uint)bit, table.Get(guid)!.PublicWeenieBitfield);
+        Assert.Equal(!inverted, table.Get(guid)!.Properties.Bools[(uint)property]);
+        Assert.Equal(1, updates);
 
         Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: inverted));
         Assert.Equal(other, table.Get(guid)!.PublicWeenieBitfield);
-    }
-
-    [Fact]
-    public void UiHiddenBoolUpdate_SetsAndClearsTheDescriptionsHiddenBit()
-    {
-        // Whether an object can be picked, cycled to or shown on the radar
-        // is read from the description's hidden bit; the server changes it
-        // later with the UI-hidden bool, and every other bit stays.
-        const uint trap = 0x7E166001u;
-        const uint stuck = (uint)PublicWeenieFlags.Stuck;
-        const uint hidden = (uint)PublicWeenieFlags.UiHidden;
-        var table = new ClientObjectTable();
-        table.AddOrUpdate(new ClientObject
-        {
-            ObjectId = trap,
-            PublicWeenieBitfield = stuck,
-        });
-        ClientObject? fired = null;
-        table.ObjectUpdated += o => fired = o;
-
-        Assert.True(table.UpdateBoolProperty(
-            trap, (uint)PropertyBool.UiHidden, value: true));
-        Assert.Equal(stuck | hidden, table.Get(trap)!.PublicWeenieBitfield);
-        Assert.True(table.Get(trap)!.Properties.Bools[(uint)PropertyBool.UiHidden]);
-        Assert.NotNull(fired);
-
-        Assert.True(table.UpdateBoolProperty(
-            trap, (uint)PropertyBool.UiHidden, value: false));
-        Assert.Equal(stuck, table.Get(trap)!.PublicWeenieBitfield);
+        Assert.Equal(inverted, table.Get(guid)!.Properties.Bools[(uint)property]);
+        Assert.Equal(2, updates);
     }
 
     [Fact]
