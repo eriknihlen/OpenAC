@@ -835,6 +835,84 @@ public sealed class VendorUiControllerTests
         Assert.Equal("Chainmail", GetText(h.ItemNameText));
     }
 
+    /// <summary>A shop with more armor than the row shows at once.</summary>
+    private static VendorShopItem[] LongArmorRow(int count = 20)
+        => Enumerable.Range(0, count)
+            .Select(i => new VendorShopItem(
+                0x60000300u + (uint)i, -1, 2u, "Buckler", (uint)ItemType.Armor, 900u + (uint)i, 40))
+            .ToArray();
+
+    // The shop sent again after a purchase keeps the row scrolled where it
+    // was, so listings far along it can be bought one after another.
+    [Fact]
+    public void Refreshed_SameVendor_KeepsTheRowsSidewaysScroll()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(), LongArmorRow());
+        h.ItemList.Scroll.SetScrollY(160);
+        Assert.Equal(160, h.ItemList.Scroll.ScrollY);
+
+        h.State.Apply(VendorGuid, Profile(), LongArmorRow());
+
+        Assert.Equal(160, h.ItemList.Scroll.ScrollY);
+    }
+
+    // A refill with fewer listings keeps as much of the scroll as still fits.
+    [Fact]
+    public void Refreshed_WithAShorterRow_ClampsTheKeptScroll()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(), LongArmorRow());
+        h.ItemList.Scroll.ScrollToEnd();
+        int longEnd = h.ItemList.Scroll.ScrollY;
+
+        h.State.Apply(VendorGuid, Profile(), LongArmorRow(14));
+
+        int shortEnd = h.ItemList.Scroll.MaxScroll;
+        Assert.InRange(shortEnd, 1, longEnd - 1);
+        Assert.Equal(shortEnd, h.ItemList.Scroll.ScrollY);
+    }
+
+    // Another shop opening starts its row at the beginning.
+    [Fact]
+    public void Opened_WithAnotherVendor_StartsTheRowAtTheBeginning()
+    {
+        var h = new Harness();
+        h.State.Apply(VendorGuid, Profile(), LongArmorRow());
+        h.ItemList.Scroll.SetScrollY(160);
+
+        h.State.Apply(0x70000020u, Profile(), LongArmorRow());
+
+        Assert.Equal(0, h.ItemList.Scroll.ScrollY);
+    }
+
+    // The shop sent again after a sale leaves the window on the page the
+    // player was on; only a newly opened shop picks its page.
+    [Fact]
+    public void Refreshed_SameVendor_KeepsTheOpenTab()
+    {
+        var h = new Harness();
+        var items = new[]
+        {
+            new VendorShopItem(ArmorItemGuid, -1, 2u, "Chainmail", (uint)ItemType.Armor, 200u, 500),
+            new VendorShopItem(FoodItemGuid, -1, 1u, "Bread", (uint)ItemType.Food, 100u, 5),
+        };
+        h.State.Apply(VendorGuid, Profile(), items);
+        h.SellingTab.OnClick!.Invoke();
+        Assert.True(h.SellingPage.Visible);
+
+        h.State.Apply(VendorGuid, Profile(), items);
+
+        Assert.True(h.SellingPage.Visible);
+        Assert.False(h.ItemsPage.Visible);
+        // The listing row is still refilled behind the open page.
+        Assert.Equal(ArmorItemGuid, h.ItemList.GetItem(0)!.ItemId);
+
+        h.State.Apply(0x70000020u, Profile(), items);
+        Assert.True(h.ItemsPage.Visible);
+        Assert.False(h.SellingPage.Visible);
+    }
+
     [Fact]
     public void CategoryMenu_OpensAndSelectsThroughRealHitPath_UsingAuthoredPopupGeometry()
     {

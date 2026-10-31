@@ -530,12 +530,19 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                 _window.Show();
                 break;
             case VendorStateTransitionKind.Refreshed:
+            {
+                // The open shop sent again (after a purchase or a sale): the
+                // window stays on the page the player was on, and the listing
+                // row keeps how far it was scrolled sideways, clamped to the
+                // refilled row.
                 ResetAlternateCurrencyTracking();
                 RefreshMoneyText();
-                ShowTab(VendorPanelTab.Items);
+                int scrollX = _itemList.Scroll.ScrollY;
                 RebuildCategories();
+                _itemList.Scroll.SetScrollY(scrollX);
                 _window.Show();
                 break;
+            }
             case VendorStateTransitionKind.Closed:
             case VendorStateTransitionKind.Reset:
                 _buyStaging.Clear();
