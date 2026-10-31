@@ -123,6 +123,90 @@ public sealed class DatWidgetFactoryAuthoredTextTests
         Assert.Equal(text.Scroll.MaxScroll, text.Scroll.ScrollY);
     }
 
+    [Fact]
+    public void AnAuthoredProviderPutBack_IsShownFromItsFirstLineAgain()
+    {
+        // A panel that shows its own line for a while and then puts the
+        // element's string back (the connection screen's update line).
+        UiText text = Build(TextInfo(), "one\ntwo\nthree");
+        text.DatFont = DatFont();
+        Func<IReadOnlyList<UiText.Line>> authored = text.LinesProvider;
+        UiText.Line[] status = [new("Checking", Vector4.One)];
+        text.LinesProvider = () => status;
+        Draw(text);
+
+        text.LinesProvider = authored;
+        Draw(text);
+
+        Assert.True(text.Scroll.MaxScroll > 0);
+        Assert.Equal(0, text.Scroll.ScrollY);
+    }
+
+    [Fact]
+    public void AOneLineElement_NeverBreaks_EvenAtALineBreak()
+    {
+        UiText text = Build(TextInfo((0x20u, Bool(true))), "one\ntwo");
+
+        Assert.Equal("one\ntwo", Assert.Single(text.LinesProvider()).Text);
+    }
+
+    [Fact]
+    public void ResizingTheElement_ReWrapsItsAuthoredText()
+    {
+        UiText text = Build(TextInfo(), Sentence);
+        Assert.Equal(3, text.LinesProvider().Count);
+
+        text.Width = 400f;
+
+        Assert.Equal(Sentence, Assert.Single(text.LinesProvider()).Text);
+    }
+
+    [Fact]
+    public void ChangingTheFont_ReWrapsItsAuthoredText()
+    {
+        // No font measures eight pixels a character; this font's glyphless
+        // characters measure nothing, so the sentence fits on one line.
+        UiText text = Build(TextInfo(), Sentence);
+        Assert.Equal(3, text.LinesProvider().Count);
+
+        text.DatFont = DatFont();
+
+        Assert.Equal(Sentence, Assert.Single(text.LinesProvider()).Text);
+    }
+
+    [Theory]
+    [InlineData("padding")]
+    [InlineData("left")]
+    [InlineData("right")]
+    public void ChangingThePaddingOrAMargin_ReWrapsItsAuthoredText(string inset)
+    {
+        // Twelve characters fill the 100-pixel element exactly; any inset
+        // pushes the last word to a second line.
+        UiText text = Build(TextInfo(), "abcd efgh ij");
+        Assert.Single(text.LinesProvider());
+
+        switch (inset)
+        {
+            case "padding": text.Padding = 5f; break;
+            case "left": text.MarginLeft = 10f; break;
+            default: text.MarginRight = 10f; break;
+        }
+
+        Assert.Equal(
+            new[] { "abcd efgh", "ij" },
+            text.LinesProvider().Select(static line => line.Text));
+    }
+
+    [Fact]
+    public void UnchangedInputs_ReturnTheSameLines()
+    {
+        UiText text = Build(TextInfo(), Sentence);
+
+        IReadOnlyList<UiText.Line> first = text.LinesProvider();
+
+        Assert.Same(first, text.LinesProvider());
+    }
+
     private static UiText Build(
         ElementInfo info,
         string authored,

@@ -300,7 +300,7 @@ public sealed class UiText : UiElement, IUiDatStateful
     private string _authoredText = string.Empty;
     private Line[]? _authoredLines;
     private Vector4 _authoredLinesColor;
-    private float _authoredLinesWidth = float.NaN;
+    private float _authoredLinesRoom = float.NaN;
     private UiDatFont? _authoredLinesFont;
     private bool _authoredLinesOneLine;
     private Func<IReadOnlyList<Line>>? _authoredLinesProvider;
@@ -309,8 +309,9 @@ public sealed class UiText : UiElement, IUiDatStateful
 
     /// <summary>
     /// Show the element's own string the way the element lays it out:
-    /// word-wrapped to its width between the margins unless it is one line.
-    /// A line break in the string always starts a new line.
+    /// word-wrapped to its width between the margins, where a line break in
+    /// the string also starts a new line, unless it is one line, which never
+    /// breaks.
     /// </summary>
     internal void SetAuthoredText(string text)
     {
@@ -324,21 +325,24 @@ public sealed class UiText : UiElement, IUiDatStateful
         => _authoredLinesProvider is not null
             && ReferenceEquals(LinesProvider, _authoredLinesProvider);
 
-    // Cached and rebuilt only when the string, width, font, colour or one-line
-    // flag changes: a fresh array per call would be an allocation per frame
-    // for every authored label in the interface.
+    // Cached and rebuilt only when the string, the room between the margins,
+    // the font, the colour or the one-line flag changes: a fresh array per call
+    // would be an allocation per frame for every authored label in the interface.
     private IReadOnlyList<Line> AuthoredLines()
     {
-        bool wrap = !OneLine || _authoredText.Contains('\n');
+        bool wrap = !OneLine;
+        float room = Math.Max(
+            1f,
+            Width - (Padding + MarginLeft) - (Padding + MarginRight));
         if (_authoredLines is null
             || _authoredLinesColor != DefaultColor
             || _authoredLinesOneLine != OneLine
-            || (wrap && (_authoredLinesWidth != Width
+            || (wrap && (_authoredLinesRoom != room
                          || !ReferenceEquals(_authoredLinesFont, DatFont))))
         {
             _authoredLinesColor = DefaultColor;
             _authoredLinesOneLine = OneLine;
-            _authoredLinesWidth = Width;
+            _authoredLinesRoom = room;
             _authoredLinesFont = DatFont;
             if (!wrap)
             {
@@ -346,13 +350,10 @@ public sealed class UiText : UiElement, IUiDatStateful
             }
             else
             {
-                float maximumWidth = Math.Max(
-                    1f,
-                    Width - (Padding + MarginLeft) - (Padding + MarginRight));
                 Func<string, float> measure = DatFont is { } font
                     ? font.MeasureWidth
                     : static value => value.Length * 8f;
-                IReadOnlyList<string> wrapped = WrapWords(_authoredText, measure, maximumWidth);
+                IReadOnlyList<string> wrapped = WrapWords(_authoredText, measure, room);
                 var lines = new Line[wrapped.Count];
                 for (int i = 0; i < lines.Length; i++)
                     lines[i] = new Line(wrapped[i], DefaultColor);
