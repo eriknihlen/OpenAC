@@ -226,14 +226,14 @@ public sealed class PlayerMouseLookMovementTests
         Assert.Equal(MotionCommand.TurnLeft, entry.TurnCommand);
         Assert.Null(entry.SidestepCommand);
 
-        controller.SubmitMouseTurnAdjustment(-0.5f, keyboard);
+        controller.SetMouseLookFacingTarget(controller.Yaw - 0.5f);
         MovementResult combined = controller.Update(0.01f, keyboard);
         Assert.Equal(MotionCommand.TurnLeft, combined.TurnCommand);
         Assert.Null(combined.SidestepCommand);
         Assert.False(combined.TurnUsesRunHold);
 
         var releasedKeyboard = new MovementInput(Run: true);
-        controller.SubmitMouseTurnAdjustment(-0.5f, releasedKeyboard);
+        controller.SetMouseLookFacingTarget(controller.Yaw - 0.5f);
         MovementResult mouseOnly = controller.Update(0.01f, releasedKeyboard);
         Assert.Equal(MotionCommand.TurnRight, mouseOnly.TurnCommand);
         Assert.True(mouseOnly.TurnUsesRunHold);
@@ -242,6 +242,73 @@ public sealed class PlayerMouseLookMovementTests
         MovementResult mouseReleased = controller.CaptureMovementResult(mouseLookEvent: false);
         Assert.Equal(MotionCommand.TurnLeft, mouseReleased.TurnCommand);
         Assert.Null(mouseReleased.SidestepCommand);
+    }
+
+    // Modern mouse turning turns the character like a held turn key: one
+    // full-rate turn that the server hears start and stop, never re-issued at
+    // a new speed, and it ends exactly on the view without turning past it.
+    [Fact]
+    public void ModernFacingTurn_IsOneSteadyTurnThatStopsExactlyOnTheView()
+    {
+        var controller = CreateController();
+        var input = new MovementInput(Run: true);
+        Assert.True(controller.BeginMouseLook(input, modern: true));
+        controller.NoteMovementSent(controller.SimTimeSeconds);
+        float target = controller.Yaw - 0.6f; // About 34 degrees to the right.
+
+        var sent = new List<MovementResult>();
+        var turns = new List<(uint? Command, float? Speed)>();
+        for (int frame = 0; frame < 144; frame++)
+        {
+            controller.SetMouseLookFacingTarget(target);
+            MovementResult result = controller.Update(1f / 144f, input);
+            turns.Add((result.TurnCommand, result.TurnSpeed));
+            if (result.ShouldSendMovementEvent)
+            {
+                sent.Add(result);
+                controller.NoteMovementSent(controller.SimTimeSeconds);
+            }
+        }
+
+        Assert.All(
+            turns.Where(t => t.Command.HasValue),
+            t => Assert.Equal((MotionCommand.TurnRight, 1f), (t.Command, t.Speed)));
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(MotionCommand.TurnRight, sent[0].TurnCommand);
+        Assert.True(sent[0].TurnUsesRunHold);
+        Assert.Null(sent[1].TurnCommand);
+        Assert.Null(turns[^1].Command);
+        Assert.True(MathF.Abs(MathF.IEEERemainder(target - controller.Yaw, 2f * MathF.PI)) < 1e-4f);
+        Assert.True(controller.MouseLookFacingSettled);
+    }
+
+    [Fact]
+    public void ModernFacingTurn_ViewSwungBackPastTheFacing_TurnsTheOtherWay()
+    {
+        var controller = CreateController();
+        var input = new MovementInput(Run: true);
+        Assert.True(controller.BeginMouseLook(input, modern: true));
+        float start = controller.Yaw;
+
+        controller.SetMouseLookFacingTarget(start + 1f);
+        Assert.Equal(MotionCommand.TurnLeft, controller.Update(1f / 30f, input).TurnCommand);
+
+        controller.SetMouseLookFacingTarget(start - 1f);
+        Assert.Equal(MotionCommand.TurnRight, controller.Update(1f / 144f, input).TurnCommand);
+        Assert.False(controller.MouseLookFacingSettled);
+    }
+
+    [Fact]
+    public void ModernFacingTarget_IsIgnoredOutsideAModernMouseLook()
+    {
+        var controller = CreateController();
+        var input = new MovementInput(Run: true);
+        controller.SetMouseLookFacingTarget(controller.Yaw + 1f);
+        Assert.Null(controller.Update(1f / 30f, input).TurnCommand);
+
+        Assert.True(controller.BeginMouseLook(input));
+        controller.SetMouseLookFacingTarget(controller.Yaw + 1f);
+        Assert.Null(controller.Update(1f / 30f, input).TurnCommand);
     }
 
     [Fact]

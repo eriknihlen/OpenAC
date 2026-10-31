@@ -245,6 +245,155 @@ public sealed class MouseLookControllerTests
         Assert.True(error < 0.08f, $"character/view yaw error: {error}");
     }
 
+    // The character's turn moves its heading in whole animation keyframes
+    // (the human turn cycle turns 0.05 rad, about 2.9 degrees, per keyframe,
+    // 30 keyframes a second at turn speed 1), applied on 30 Hz physics steps.
+    // A view that comes to rest between two keyframe headings must not make
+    // the character swing back and forth around it, and the turn must not be
+    // stopped and restarted at a new speed every frame.
+    [Fact]
+    public void ModernRmb_ViewRestingBetweenTurnSteps_CharacterSettlesWithoutHunting()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        AttachKeyframedTurn(harness.Player);
+        var input = new MovementInput(Run: true);
+        for (int i = 0; i < 10; i++)
+            harness.Player.Update(1f / 60f, input);
+
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        Assert.True(harness.Chase.RmbOrbitHeld);
+
+        const float FrameSeconds = 1f / 144f;
+        float start = harness.Chase.ModernViewYaw;
+        int reversals = 0;
+        int turnEdges = 0;
+        uint? lastTurn = null;
+        uint? turnAtRest = null;
+        for (int frame = 0; frame < 144 * 3; frame++)
+        {
+            // Drag left at 2.05 rad/s (about 117 degrees a second) for half a
+            // second, then hold the mouse still: the view rests at 1.025 rad,
+            // between two of the character's keyframe headings.
+            if (frame < 72)
+                harness.Chase.ModernViewYaw = start + 2.05f * FrameSeconds * (frame + 1);
+            harness.Owner.Tick();
+            MovementResult result = harness.Player.Update(FrameSeconds, input);
+            if (result.TurnCommand != lastTurn)
+            {
+                turnEdges++;
+                if (lastTurn.HasValue && result.TurnCommand.HasValue)
+                    reversals++;
+            }
+            lastTurn = result.TurnCommand;
+            if (frame == 144 * 3 - 1)
+                turnAtRest = result.TurnCommand;
+        }
+
+        float error = MathF.IEEERemainder(
+            harness.Chase.ModernViewYaw - harness.Player.Yaw, 2f * MathF.PI);
+        Assert.Equal(0, reversals);
+        Assert.Null(turnAtRest);
+        Assert.True(MathF.Abs(error) < 0.001f, $"character/view yaw error: {error}");
+        // One left turn: it starts once and stops once.
+        Assert.Equal(2, turnEdges);
+    }
+
+    [Fact]
+    public void ModernRmb_ReleaseLetsTheCharacterFinishTurningToTheView()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        AttachKeyframedTurn(harness.Player);
+        var input = new MovementInput(Run: true);
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        float view = harness.Chase.ModernViewYaw + 2f;
+        harness.Chase.ModernViewYaw = view;
+        harness.Owner.Tick();
+        harness.Player.Update(1f / 30f, input);
+
+        // Released long before a 115 degree turn can finish: the view stays
+        // the camera's, and the character carries on to it.
+        harness.Mouse.RightHeld = false;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Release);
+        Assert.False(harness.Chase.RmbOrbitHeld);
+        Assert.True(harness.Chase.ModernViewActive);
+        Assert.Equal(1, harness.Cursor.RestoreCount);
+
+        for (int frame = 0; frame < 144 * 2; frame++)
+        {
+            harness.Owner.Tick();
+            harness.Player.Update(1f / 144f, input);
+        }
+
+        Assert.False(harness.Chase.ModernViewActive);
+        Assert.False(harness.Player.EndMouseLook(input));
+        Assert.True(MathF.Abs(MathF.IEEERemainder(view - harness.Player.Yaw, 2f * MathF.PI)) < 0.001f);
+        Assert.Equal(1, harness.Cursor.RestoreCount);
+    }
+
+    [Fact]
+    public void ModernRmb_TurnKeyAfterReleaseHandsTheTurnBackAtOnce()
+    {
+        Harness harness = CreateHarness();
+        harness.Mode.IsPlayerMode = true;
+        harness.EnterChase();
+        harness.Chase.ModernMouseTurning = true;
+        harness.Mouse.RightHeld = true;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Press);
+        harness.Chase.ModernViewYaw += 2f;
+        harness.Owner.Tick();
+        harness.Player.Update(1f / 30f, new MovementInput(Run: true));
+        harness.Mouse.RightHeld = false;
+        harness.Owner.HandlePointerAction(
+            InputAction.AcdreamRmbOrbitHold, ActivationType.Release);
+        Assert.True(harness.Chase.ModernViewActive);
+
+        harness.Movement.Input = new MovementInput(Run: true, TurnRight: true);
+        harness.Owner.Tick();
+
+        Assert.False(harness.Chase.ModernViewActive);
+        MovementResult keys = harness.Player.Update(1f / 60f, harness.Movement.Input);
+        Assert.Equal(MotionCommand.TurnRight, keys.TurnCommand);
+        Assert.False(keys.TurnUsesRunHold);
+    }
+
+    // Root motion for a turn the way the human turn cycle delivers it: whole
+    // keyframes of 0.05 rad, 30 a second at speed 1.
+    private static void AttachKeyframedTurn(PlayerMovementController player)
+    {
+        float keyframes = 0f;
+        AcDream.Core.Physics.MotionInterpreter motion = player.Motion;
+        player.AttachAnimationRootMotionSource((dt, delta) =>
+        {
+            var state = motion.InterpretedState;
+            if (state.TurnCommand != MotionCommand.TurnRight
+                || state.TurnSpeed == 0f)
+            {
+                keyframes = 0f;
+                return;
+            }
+
+            keyframes += dt * 30f * MathF.Abs(state.TurnSpeed);
+            int whole = (int)keyframes;
+            keyframes -= whole;
+            if (whole > 0)
+                delta.Orientation = Quaternion.CreateFromAxisAngle(
+                    Vector3.UnitZ,
+                    -MathF.Sign(state.TurnSpeed) * 0.05f * whole);
+        });
+    }
+
     [Fact]
     public void ModernRmb_LifecycleExitRestoresCursorOnce()
     {
@@ -405,7 +554,7 @@ public sealed class MouseLookControllerTests
             session,
             cursor,
             clock);
-        return new Harness(owner, mode, player, camera, chase, mouse, cursor, clock, session);
+        return new Harness(owner, mode, player, camera, chase, mouse, cursor, clock, session, movement);
     }
 
     private static PlayerMovementController CreatePlayer()
@@ -437,7 +586,8 @@ public sealed class MouseLookControllerTests
         FakeMouse Mouse,
         FakeCursor Cursor,
         FakeClock Clock,
-        NullSessionSource Session)
+        NullSessionSource Session,
+        FixedMovementInputSource Movement)
     {
         public void EnterChase() =>
             Camera.EnterChaseMode(new ChaseCamera(), new RetailChaseCamera());
@@ -445,7 +595,8 @@ public sealed class MouseLookControllerTests
 
     private sealed class FixedMovementInputSource : IMovementInputSource
     {
-        public MovementInput Capture() => new(Run: true);
+        public MovementInput Input { get; set; } = new(Run: true);
+        public MovementInput Capture() => Input;
     }
 
     private sealed class FakeClock : IInputMonotonicClock
