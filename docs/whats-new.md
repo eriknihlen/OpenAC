@@ -5,6 +5,49 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## OpenAC 0.1.32 (2026-10-31)
+
+Brings OpenAC level with openac-rust 0.1.8 and the fixes since.
+
+**New**
+
+- **UI Scale:** the interface at 50% to 300%, under Display beside Potato
+  Mode; it applies when you let go of the slider. *(mightbemyname)*
+- **Modern mouse turning** and **both mouse buttons run forward**: opt-in
+  camera options; off by default. *(mightbemyname)*
+- The window title names your character and shows readable statistics, and a
+  window opened onto a running session comes to the front.
+  *(reported by Rumpadump)*
+
+**Fixed**
+
+- Decorations that should not be selectable can't be clicked, cycled to with
+  the selection keys or seen on the radar. *(David Smith, reported by
+  Rumpadump)*
+- Allegiance members show as squares on the radar. *(reported by Rumpadump)*
+- Dragging out of the salvage window, a vendor's sell list or the house
+  window no longer drops the item on the ground. *(David Smith, reported by
+  Rumpadump)*
+- Items on the ground drag into the inventory or onto the hotbar.
+  *(reported by David Smith)*
+- A newly identified Aetheria moves to the top-left slot of its pack.
+  *(reported by Rumpadump)*
+- A vendor keeps its tab and its row's scroll when the shop refreshes after a
+  purchase. *(reported by Rumpadump)*
+- Character creation: the face and clothes choices zoom the preview, and
+  Gearknight and Olthoi colours stay picked. *(David Smith, reported by
+  Rumpadump)*
+- Long text in the game's own windows wraps and starts at its first line
+  (the profession help in character creation, for one).
+  *(reported by Rumpadump)*
+- The default camera sits as far back as in the original game; clicking the
+  chat window no longer stops a run. *(reported by Rumpadump)*
+- Buffs and debuffs add up in the attribute, vital and skill panels as in the
+  original game, including spells the client doesn't know.
+  *(reported by evantaylor)*
+- Maximum health counts Enlightenment.
+- A chest you unlock stops reading as locked.
+
 ## openac-rust 0.1.8 (2026-10-30)
 
 **New**
