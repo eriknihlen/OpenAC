@@ -55,6 +55,24 @@ public sealed class EnchantmentMathTests
     }
 
     [Fact]
+    public void VitalMod_TimesOnePlusZero_IsTheIdentity()
+    {
+        Assert.Equal(VitalMod.Identity, new VitalMod(1f, 0f));
+        Assert.Equal([EnchantStep.Multiply(1.1f)], new VitalMod(1.1f, 0f).Steps);
+        Assert.Equal([EnchantStep.Add(5f)], new VitalMod(1f, 5f).Steps);
+    }
+
+    [Fact]
+    public void VitalMod_StepsCannotBeChangedFromOutside()
+    {
+        VitalMod mod = VitalModOf([MakeAddRecord(1u, 1u, statKey: 5u, val: 10f)], StatKey.MaxMana);
+        Assert.False(mod.Steps is EnchantStep[]);
+        Assert.Throws<NotSupportedException>(
+            () => ((IList<EnchantStep>)mod.Steps)[0] = EnchantStep.Add(99f));
+        Assert.Equal(10f, mod.Additive);
+    }
+
+    [Fact]
     public void GetMod_MultiplicativeRecords_Multiply()
     {
         var mod = VitalModOf(
@@ -98,6 +116,15 @@ public sealed class EnchantmentMathTests
     {
         var mod = VitalModOf([MakeVitaeRecord(666u, 0u, statKey: 0u, val: 0.95f)], StatKey.MaxStamina);
         Assert.Equal(0.95f, mod.Multiplier, precision: 3);
+    }
+
+    [Fact]
+    public void GetMod_VitaeWithNeitherOperationBit_DoesNothing()
+    {
+        ActiveEnchantmentRecord vitae = MakeVitaeRecord(667u, 0u, statKey: 0u, val: 0.95f)
+            with { StatModType = 0u };
+        Assert.Equal(VitalMod.Identity, VitalModOf([vitae], StatKey.MaxStamina));
+        Assert.Equal(VitalMod.Identity, GetSkillMod([vitae], skillId: 24u));
     }
 
     [Fact]
@@ -427,5 +454,5 @@ public sealed class EnchantmentMathTests
         Record(spellId, layer, bucket: 2u, (uint)EnchantmentTypeFlag.Skill, skillId, val);
 
     private static ActiveEnchantmentRecord MakeVitaeRecord(uint spellId, uint layer, uint statKey, float val) =>
-        new(spellId, layer, -1d, 0u, StatModType: 0u, StatModKey: statKey, StatModValue: val, Bucket: 4u);
+        new(spellId, layer, -1d, 0u, StatModType: Multiply, StatModKey: statKey, StatModValue: val, Bucket: 4u);
 }

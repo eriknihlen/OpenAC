@@ -93,7 +93,7 @@ public sealed class SkillLevelConformanceTests
             LayerId: 1u,
             Duration: 0d,
             CasterGuid: 0u,
-            StatModType: null,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative,
             StatModKey: null,
             StatModValue: 0.95f,
             Bucket: 4u));

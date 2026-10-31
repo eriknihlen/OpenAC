@@ -33,7 +33,7 @@ public sealed class EnchantmentRegistryProjectionTests
     }
 
     [Fact]
-    public void GetEnchantmentsInEffect_PowerComparisonUsesRetailSignedInt()
+    public void GetEnchantmentsInEffect_PowerComparisonUsesSignedInt()
     {
         IReadOnlyList<ActiveEnchantmentRecord> result =
             EnchantmentRegistryProjection.GetEnchantmentsInEffect(
@@ -86,7 +86,7 @@ public sealed class EnchantmentRegistryProjectionTests
     }
 
     [Fact]
-    public void GetEnchantmentsInEffect_ReplacingWinner_AppendsInRetailOrder()
+    public void GetEnchantmentsInEffect_ReplacingWinner_AppendsAtTheEnd()
     {
         IReadOnlyList<ActiveEnchantmentRecord> result =
             EnchantmentRegistryProjection.GetEnchantmentsInEffect(

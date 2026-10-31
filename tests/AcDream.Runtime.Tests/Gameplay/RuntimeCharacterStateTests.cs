@@ -1044,7 +1044,7 @@ public sealed class RuntimeCharacterStateTests
     private static ActiveEnchantmentRecord MakeVitae(uint spellId, float val) =>
         new(
             spellId, LayerId: 0u, Duration: -1f, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: val, Bucket: 4u);
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative, StatModKey: 0u, StatModValue: val, Bucket: 4u);
 
     private static SpellTable SpellTableWith(
         params (uint id, string name, uint family)[] rows)

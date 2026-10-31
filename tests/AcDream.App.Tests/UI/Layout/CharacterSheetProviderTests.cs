@@ -390,7 +390,7 @@ public sealed class CharacterSheetProviderTests
         h.Player.OnAttributeUpdate(atType: 1u, ranks: 100u, start: 100u, xp: 0u);   // Strength, base 200
         h.Book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
 
         var sheet = h.Provider.BuildSheet();
 
@@ -406,7 +406,7 @@ public sealed class CharacterSheetProviderTests
             init: 3u, resistance: 0u, lastUsed: 0d, formulaBonus: 0u);   // base 303
         h.Book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
 
         var sheet = h.Provider.BuildSheet();
 
@@ -463,7 +463,7 @@ public sealed class CharacterSheetProviderTests
             LayerId: 1u,
             Duration: -1d,
             CasterGuid: 0u,
-            StatModType: 0u,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative,
             StatModKey: 0u,
             StatModValue: 0.8f,
             Bucket: 4u));
@@ -504,7 +504,7 @@ public sealed class CharacterSheetProviderTests
 
         h.Book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
 
         Assert.Equal(0, changed);
     }

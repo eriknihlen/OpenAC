@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace AcDream.Core.Spells;
 
@@ -50,16 +51,31 @@ public static class EnchantmentMath
     public readonly struct VitalMod : IEquatable<VitalMod>
     {
         private readonly EnchantStep[]? _steps;
+        private readonly ReadOnlyCollection<EnchantStep>? _view;
 
-        /// <summary>A multiplication followed by an addition.</summary>
+        /// <summary>
+        /// A multiplication followed by an addition. A factor of 1 and an
+        /// amount of 0 change no value, so they take no step:
+        /// <c>new VitalMod(1, 0)</c> is <see cref="Identity"/>.
+        /// </summary>
         public VitalMod(float multiplier, float additive)
-            : this([EnchantStep.Multiply(multiplier), EnchantStep.Add(additive)])
+            : this(StepsOf(multiplier, additive))
         {
         }
 
         private VitalMod(EnchantStep[] steps)
         {
-            _steps = steps.Length == 0 ? null : steps;
+            if (steps.Length == 0) return;
+            _steps = steps;
+            _view = Array.AsReadOnly(steps);
+        }
+
+        private static EnchantStep[] StepsOf(float multiplier, float additive)
+        {
+            var steps = new List<EnchantStep>(2);
+            if (multiplier != 1.0f) steps.Add(EnchantStep.Multiply(multiplier));
+            if (additive != 0.0f) steps.Add(EnchantStep.Add(additive));
+            return [.. steps];
         }
 
         /// <summary>No enchantment applies.</summary>
@@ -72,8 +88,8 @@ public static class EnchantmentMath
             return new VitalMod([.. steps]);
         }
 
-        /// <summary>The steps, in the order they are taken.</summary>
-        public IReadOnlyList<EnchantStep> Steps => _steps ?? [];
+        /// <summary>The steps, in the order they are taken (a read-only view).</summary>
+        public IReadOnlyList<EnchantStep> Steps => _view ?? ReadOnlyCollection<EnchantStep>.Empty;
 
         /// <summary>The product of the multiplications (1 with none).</summary>
         public float Multiplier
@@ -120,8 +136,20 @@ public static class EnchantmentMath
             return hash.ToHashCode();
         }
 
-        public override string ToString() =>
-            $"VitalMod [{string.Join(", ", Steps)}]";
+        /// <summary>The steps in order, e.g. <c>x0.9500 x1.1000 +10.0</c>, or <c>none</c>.</summary>
+        public override string ToString()
+        {
+            if (_steps is null) return "none";
+            var parts = new string[_steps.Length];
+            for (int index = 0; index < _steps.Length; index++)
+            {
+                EnchantStep step = _steps[index];
+                parts[index] = step.Kind == EnchantStepKind.Add
+                    ? FormattableString.Invariant($"{step.Value:+0.0;-0.0}")
+                    : FormattableString.Invariant($"x{step.Value:F4}");
+            }
+            return string.Join(' ', parts);
+        }
 
         public static bool operator ==(VitalMod left, VitalMod right) => left.Equals(right);
 
@@ -163,10 +191,11 @@ public static class EnchantmentMath
     /// The modifier the active enchantments give one stat.
     /// <paramref name="enchantments"/> are in list order: each list (the
     /// multiplicative, the additive and the vitae records) from its head.
-    /// With <paramref name="includeVitae"/>, each vitae record multiplies
+    /// With <paramref name="includeVitae"/>, each vitae record takes its step
     /// first; then the records in effect for the stat
-    /// (<see cref="CullEnchantments"/>) take their steps
-    /// (<see cref="EnchantStep.Of"/>) in the order they ended up in.
+    /// (<see cref="CullEnchantments"/>) take theirs in the order they ended
+    /// up in. A record's type bits decide its step
+    /// (<see cref="EnchantStep.Of"/>), vitae included.
     /// </summary>
     public static VitalMod GetMod(
         IEnumerable<ActiveEnchantmentRecord> enchantments,
@@ -182,8 +211,8 @@ public static class EnchantmentMath
         {
             foreach (ActiveEnchantmentRecord record in source)
             {
-                if (record.Bucket == 4u && record.StatModValue is float penalty)
-                    steps.Add(EnchantStep.Multiply(penalty));
+                if (record.Bucket == 4u && EnchantStep.Of(record) is EnchantStep vitae)
+                    steps.Add(vitae);
             }
         }
         foreach (ActiveEnchantmentRecord record in CullEnchantments(source, family, statKey))

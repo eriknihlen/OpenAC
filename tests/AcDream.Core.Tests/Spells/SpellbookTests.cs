@@ -147,7 +147,7 @@ public sealed class SpellbookTests
     // challenger takes an exact tie.
 
     [Fact]
-    public void LiveEnchantments_NewIdentityInsertsAtRetailListHead()
+    public void LiveEnchantments_NewIdentityInsertsAtListHead()
     {
         var book = new Spellbook();
         book.OnEnchantmentAdded(Effect(1u, layer: 1u, category: 12u));

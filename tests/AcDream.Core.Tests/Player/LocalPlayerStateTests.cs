@@ -206,7 +206,7 @@ public sealed class LocalPlayerStateTests
     {
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
-            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: 0.97f, Bucket: 4u));
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.97f, Bucket: 4u));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             2u, 2u, 60d, 0u, StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt | AdditiveBit,
             StatModKey: key, StatModValue: 23f, Bucket: 2u));
@@ -228,7 +228,7 @@ public sealed class LocalPlayerStateTests
     {
         var book = new Spellbook(SpellTable.Create([TestSpell(1u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
-            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: vitae, Bucket: 4u));
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: vitae, Bucket: 4u));
         var state = new LocalPlayerState(book);
         state.OnVitalUpdate(1u, baseValue, 0u, 0u, 0u);
         Assert.Equal(maximum, state.GetMaxApprox(LocalPlayerState.VitalKind.Health));
@@ -486,7 +486,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
         var s = new LocalPlayerState(book);
         s.OnAttributeUpdate(atType: 1u, ranks: 100u, start: 100u, xp: 0u);   // Strength, base 200
 
@@ -559,7 +559,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
         var s = new LocalPlayerState(book);
         s.OnSkillUpdate(skillId: 6u, ranks: 300u, status: 2u, xp: 0u,
             init: 3u, resistance: 0u, lastUsed: 0d, formulaBonus: 0u);   // base 303
@@ -574,7 +574,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
             StatModType: SkillType | AdditiveBit,
@@ -862,7 +862,7 @@ public sealed class LocalPlayerStateTests
         // 200 x 0.95 = 190, x 1.1 = 209 exactly in single precision; scaling
         // by the product 0.95 x 1.1 first gives 208.99998, shown as 208.
         ActiveEnchantmentRecord vitae = new(
-            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: 0.95f, Bucket: 4u);
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.95f, Bucket: 4u);
         Assert.Equal(209, SkillWith(
             MeleeDefense, 200u, vitae, Typed(2u, 2u, SkillType, MeleeDefense, 1.1f, bucket: 1u)));
     }
