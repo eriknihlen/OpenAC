@@ -331,7 +331,10 @@ internal sealed class WorldSelectionQuery
         {
             uint guid = record.ServerGuid;
             WorldEntity entity = record.WorldEntity!;
-            if (!IsHostileMonster(guid))
+            if (!IsHostileMonster(guid)
+                || SelectionEligibility.IsHiddenFromSelection(
+                    record.FinalPhysicsState,
+                    _objects.Get(guid)?.PublicWeenieBitfield))
                 continue;
             float distanceSquared = Vector3.DistanceSquared(entity.Position, player.Position);
             if (best is null || distanceSquared < best.Value.DistanceSquared)
@@ -468,8 +471,8 @@ internal sealed class WorldSelectionQuery
                 | PublicWeenieFlags.Bindstone)) != 0;
 
         if (obj.ContainerId != 0u
-            || (physicsState & PhysicsStateFlags.Cloaked) != 0
-            || (flags & PublicWeenieFlags.UiHidden) != 0)
+            || SelectionEligibility.IsHiddenFromSelection(
+                physicsState, obj.PublicWeenieBitfield))
             return false;
 
         return kind switch

@@ -685,6 +685,41 @@ public sealed class WorldSelectionQueryTests
         Assert.Null(h.Query.FindLastAttacker());
     }
 
+    // Auto-target skips what the closest-monster key skips: a cloaked
+    // creature and one hidden from the UI.
+    [Fact]
+    public void ClosestCombatTargetSkipsCloakedAndUiHiddenMonsters()
+    {
+        var h = new Harness();
+        const uint cloaked = 0x7000_0080u;
+        const uint trap = 0x7000_0081u;
+        const uint visible = 0x7000_0082u;
+        h.Add(
+            cloaked,
+            new Vector3(1f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+        Assert.True(h.Runtime.TryApplyState(
+            new SetState.Parsed(
+                cloaked,
+                (uint)(PhysicsStateFlags.ReportCollisions | PhysicsStateFlags.Cloaked),
+                InstanceSequence: 1,
+                StateSequence: 2),
+            out _));
+        h.Add(
+            trap,
+            new Vector3(2f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable | (uint)PublicWeenieFlags.UiHidden);
+        h.Add(
+            visible,
+            new Vector3(3f, 0f, 0f),
+            ItemType.Creature,
+            SelectedObjectHealthPolicy.BfAttackable);
+
+        Assert.Equal(visible, h.Query.FindClosestHostileMonster()?.ServerGuid);
+    }
+
     // A trap hidden from the UI (bit 0x80 of its description) is never a
     // candidate for the selection keys; the top bit of the field is no such
     // mark.

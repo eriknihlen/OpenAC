@@ -181,6 +181,49 @@ public sealed class RuntimeHostileTargetQueryTests
             HostileTargetScope.Selectable));
     }
 
+    /// <summary>
+    /// The closest-monster key and auto-target skip a cloaked creature and
+    /// one hidden from the UI (bit 0x80 of its description), as the windowed
+    /// selection keys do; the classification alone still lists both.
+    /// </summary>
+    [Fact]
+    public void SelectableScope_SkipsCloakedAndUiHiddenMonsters()
+    {
+        const uint cloaked = 0x50000020u;
+        const uint uiHidden = 0x50000021u;
+        const uint visible = 0x50000022u;
+        using GameRuntime runtime = Create();
+        runtime.PlayerIdentity.ServerGuid = Player;
+        Add(runtime, Player, 0x01010001u, 10f, 10f, PlayerObject(Player));
+        Add(
+            runtime,
+            cloaked,
+            0x01010001u,
+            11f,
+            10f,
+            Hostile(cloaked),
+            PhysicsStateFlags.Cloaked);
+        ClientObject hiddenTrap = Hostile(uiHidden);
+        hiddenTrap.PublicWeenieBitfield |= (uint)PublicWeenieFlags.UiHidden;
+        Add(runtime, uiHidden, 0x01010001u, 12f, 10f, hiddenTrap);
+        Add(runtime, visible, 0x01010001u, 13f, 10f, Hostile(visible));
+
+        Assert.Equal(
+            visible,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Selectable));
+        Assert.False(RuntimeHostileTargetQuery.IsHostile(
+            runtime, cloaked, HostileTargetScope.Selectable));
+        Assert.False(RuntimeHostileTargetQuery.IsHostile(
+            runtime, uiHidden, HostileTargetScope.Selectable));
+        Assert.Equal(
+            cloaked,
+            RuntimeHostileTargetQuery.FindClosest(
+                runtime,
+                HostileTargetScope.Classified));
+    }
+
     [Fact]
     public void Capture_MeasuresTheVerticalSeparationToo()
     {

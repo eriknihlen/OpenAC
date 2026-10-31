@@ -184,8 +184,8 @@ public sealed class RuntimeSelectionCycle
     {
         var flags = (PublicWeenieFlags)(candidate.PublicWeenieBitfield ?? 0u);
         if (candidate.ContainerId != 0u
-            || (physicsState & PhysicsStateFlags.Cloaked) != 0
-            || (flags & PublicWeenieFlags.UiHidden) != 0)
+            || SelectionEligibility.IsHiddenFromSelection(
+                physicsState, candidate.PublicWeenieBitfield))
         {
             return false;
         }
