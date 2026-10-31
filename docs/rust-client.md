@@ -32,6 +32,7 @@ keeps loading and receives exactly what it did before:
 | 1.0 | 0.1.0 | the core API |
 | 1.1 | 0.1.3 | status-line notices (`StatusTextReceived`) |
 | 1.2 | 0.1.6 | a house hook's accepted item types on items and world objects |
+| 1.3 | 0.1.9 | drawing in the world: markers, lines, triangles, icons and ground shapes |
 
 To use a newer version, move the plugin's SDK to that release and set
 `"apiVersion"` in its `plugin.json`.
