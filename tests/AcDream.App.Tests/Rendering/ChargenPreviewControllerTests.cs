@@ -137,6 +137,40 @@ public sealed class ChargenPreviewControllerTests
     }
 
     [InstalledDatFact]
+    public void Rebuild_AppearanceOnlyChange_KeepsTheZoomSlideInProgress()
+    {
+        if (!TryOpen(out DatCollection? dats, out DatCollectionAdapter? adapter))
+            Assert.Fail("Lane=InstalledDat requires an installed retail DAT directory; see docs/release-gate.md.");
+        using (dats)
+        using (adapter)
+        {
+            (ChargenOptions options, ChargenAppearanceCatalog catalog) = LoadFixture(adapter!);
+            double now = 0.0;
+            var controller = new ChargenPreviewController(
+                new FakeChargenRenderer(), new ChargenPreviewCamera(), new FakeChargenView(),
+                adapter!, new RetailAnimationLoader(adapter!), catalog, catalog, new object(),
+                clock: () => now);
+
+            // The page opens zoomed in; the clothes choice then pulls back
+            // and, in the same click, puts the headgear back on, so a new
+            // look of the same body arrives while the slide is under way.
+            controller.ZoomIn();
+            ChargenAppearanceSelection first = DefaultSelection(options, AluvianId, 1);
+            Assert.True(controller.Rebuild(options, AluvianId, 1, first));
+            controller.ZoomOut();
+            now = 1.0;
+            controller.Render();
+
+            Assert.True(controller.Rebuild(options, AluvianId, 1, first with { SkinShade = 0.9 }));
+            now = 10.0;
+            controller.Render();
+
+            Assert.Equal(ChargenPreviewCamera.ResolveZoomedOutEye(AluvianId), controller.CameraEye);
+            Assert.False(controller.IsZoomedIn);
+        }
+    }
+
+    [InstalledDatFact]
     public void ZoomIn_BeforeTheFirstCompose_IsKept_SoZoomOutWorksRightAfter()
     {
         if (!TryOpen(out DatCollection? dats, out DatCollectionAdapter? adapter))

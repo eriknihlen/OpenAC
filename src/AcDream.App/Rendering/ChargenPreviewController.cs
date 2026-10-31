@@ -101,7 +101,7 @@ internal sealed class ChargenPreviewController :
     private readonly bool _useZoomedOutEye;
     private readonly uint _renderId;
     private readonly uint _backdropRenderId;
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private readonly Func<double> _clock;
 
     private ChargenPreviewAnimator? _animator;
     private ChargenPreviewZoomController? _zoom;
@@ -127,8 +127,15 @@ internal sealed class ChargenPreviewController :
         object datLock,
         bool useZoomedOutEye = false,
         uint renderId = ChargenPreviewEntityBuilder.PreviewRenderId,
-        uint backdropRenderId = ChargenPreviewEntityBuilder.PreviewBackdropRenderId)
+        uint backdropRenderId = ChargenPreviewEntityBuilder.PreviewBackdropRenderId,
+        Func<double>? clock = null)
     {
+        if (clock is null)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            clock = () => stopwatch.Elapsed.TotalSeconds;
+        }
+        _clock = clock;
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _camera = camera ?? throw new ArgumentNullException(nameof(camera));
         _view = view ?? throw new ArgumentNullException(nameof(view));
@@ -211,7 +218,14 @@ internal sealed class ChargenPreviewController :
             _renderer.SetBackdrop(backdrop);
         }
 
-        _zoom = new ChargenPreviewZoomController(heritageId, _camera, _animator);
+        // The zoom slide belongs to the page, not to the figure: a new look
+        // of the same body (the face and clothes choices change the
+        // headgear as they zoom) keeps a slide under way. A new body starts
+        // from its own eye, so its slide starts over.
+        if (_zoom is null || heritageOrGenderChanged)
+            _zoom = new ChargenPreviewZoomController(heritageId, _camera, _animator);
+        else
+            _zoom.ShowFigure(_animator);
 
         _renderer.SetPreview(_animator.Entity);
         _hasComposed = true;
@@ -240,7 +254,7 @@ internal sealed class ChargenPreviewController :
         if (_disposed || !_view.TryGetVisibleSize(out int width, out int height))
             return;
 
-        double now = _clock.Elapsed.TotalSeconds;
+        double now = _clock();
         float deltaSeconds = (float)Math.Max(0.0, now - _lastElapsedSeconds);
         _lastElapsedSeconds = now;
 

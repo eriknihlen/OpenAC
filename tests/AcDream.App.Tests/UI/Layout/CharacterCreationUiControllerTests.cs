@@ -972,6 +972,57 @@ public sealed class CharacterCreationUiControllerTests
     }
 
     [Fact]
+    public void AppearancePage_WithoutClothes_TheEyesAndSkinSpinsStayPicked_AcrossTheChangesRefresh()
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Controller.Open();
+        environment.Runtime.SelectHeritageDirect(OlthoiId);
+        environment.TabButton(CharacterCreationUiController.AppearanceTabElementId).OnClick!();
+        environment.Button(CharacterCreationAppearancePage.MaleButtonId).OnClick!();
+        BumpRevisionAndTick(environment);
+
+        // The eyes spin's colour, then the refresh that change brings.
+        environment.Button(CharacterCreationAppearancePage.EyesSpinId).OnClick!();
+        environment.Button(CharacterCreationAppearancePage.SwatchIds[1]).OnClick!();
+        BumpRevisionAndTick(environment);
+        environment.Button(CharacterCreationAppearancePage.SwatchIds[0]).OnClick!();
+
+        Assert.Equal(ChargenAppearanceSlot.EyeColor, environment.Runtime.LastAppearanceSlot);
+
+        // The skin spin's shade, likewise.
+        environment.Button(CharacterCreationAppearancePage.SkinSpinId).OnClick!();
+        environment.ShadeScroll().ScalarChanged!(0.25f);
+        BumpRevisionAndTick(environment);
+        environment.ShadeScroll().ScalarChanged!(0.5f);
+
+        Assert.Equal(ChargenShadeSlot.Skin, environment.Runtime.LastShadeSlot);
+    }
+
+    [Theory]
+    [InlineData((uint)ChargenHeritageGroup.Gearknight, true)]
+    [InlineData((uint)ChargenHeritageGroup.Olthoi, true)]
+    [InlineData((uint)ChargenHeritageGroup.OlthoiAcid, true)]
+    [InlineData((uint)ChargenHeritageGroup.Aluvian, false)]
+    public void AppearancePage_TheSkinSpinTakesTheNoseSpinsPlace_OnlyWithoutClothes(
+        uint heritageId, bool withoutNose)
+    {
+        using var environment = new EnvironmentHarness();
+        environment.Controller.Open();
+        UiButton skin = environment.Button(CharacterCreationAppearancePage.SkinSpinId);
+
+        // From a heritage of the other kind first, so each row is a move.
+        environment.Runtime.SelectHeritageDirect(withoutNose ? AluvianId : OlthoiId);
+        BumpRevisionAndTick(environment);
+        environment.Runtime.SelectHeritageDirect(heritageId);
+        BumpRevisionAndTick(environment);
+
+        float expectedTop = withoutNose
+            ? CharacterCreationAppearancePage.SkinSpinTopWithoutNose
+            : CharacterCreationAppearancePage.SkinSpinTop;
+        Assert.Equal((0f, expectedTop), (skin.Left, skin.Top));
+    }
+
+    [Fact]
     public void AppearancePage_AluvianGenderPick_LeavesTheZoomAlone()
     {
         using var environment = new EnvironmentHarness();
