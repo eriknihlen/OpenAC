@@ -464,6 +464,13 @@ AppearanceSynchronization:
     /// the world is replaced the same way. One not held is left to the object
     /// table.
     /// </summary>
+    /// <summary>True while an object with this id is held in the world.</summary>
+    public bool IsHeld(uint guid)
+    {
+        lock (_datLock)
+            return _entityObjects.IsKnown(guid);
+    }
+
     public bool OnDescriptionRefresh(WorldSession.EntitySpawn update)
     {
         lock (_datLock)

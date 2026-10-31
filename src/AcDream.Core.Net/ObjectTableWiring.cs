@@ -14,7 +14,8 @@ public static class ObjectTableWiring
         ClientObjectTable table,
         Func<uint>? playerGuid = null,
         LocalPlayerState? localPlayer = null,
-        Func<bool>? accepting = null)
+        Func<bool>? accepting = null,
+        Func<uint, bool>? isHeld = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(table);
@@ -44,11 +45,18 @@ public static class ObjectTableWiring
         // A re-sent description refreshes an object we already hold — the icon
         // underlay a rend adds, the overlay an imbue adds, a revealed Aetheria.
         // It carries the same fields a first-time description does, so the same
-        // ingest applies it; it must not run the arrival of a new object.
+        // ingest applies it; it must not run the arrival of a new object. An
+        // object held in the world (isHeld) is deleted and created again, so
+        // it takes the first place in the container the description names;
+        // one known only to the table refreshes where it is.
         Action<WorldSession.EntitySpawn> descriptionRefreshed = spawn =>
         {
             if (accepting?.Invoke() == false) return;
-            table.Ingest(ToWeenieData(spawn));
+            WeenieData data = ToWeenieData(spawn);
+            if (isHeld?.Invoke(spawn.Guid) == true)
+                table.IngestRecreated(data);
+            else
+                table.Ingest(data);
         };
         session.EntityDescriptionRefreshed += descriptionRefreshed;
         subscriptions.Add(

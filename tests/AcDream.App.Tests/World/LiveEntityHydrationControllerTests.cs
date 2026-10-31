@@ -1049,6 +1049,36 @@ public sealed class LiveEntityHydrationControllerTests
         Assert.NotNull(fixture.Record.WorldEntity);
     }
 
+    // The object table puts a re-described held item first in its pack
+    // (it is created again); the object's own re-creation that follows
+    // takes the same description and must leave it there.
+    [Fact]
+    public void DescriptionRefresh_OfAHeldItem_KeepsTheFirstPlaceTheTableGaveIt()
+    {
+        const uint pack = 0x500000C9u;
+        uint[] others = [0x70000101u, 0x70000102u];
+        using var fixture = new Fixture(originKnown: true);
+        WorldSession.EntitySpawn item = Spawn(Generation: 1, PositionSequence: 1)
+            with { ContainerId = pack };
+        Assert.False(fixture.Controller.IsHeld(Guid));
+        fixture.Controller.OnCreate(item);
+        Assert.True(fixture.Controller.IsHeld(Guid));
+        for (int slot = 0; slot < others.Length; slot++)
+        {
+            fixture.Objects.AddOrUpdate(new ClientObject { ObjectId = others[slot] });
+            Assert.True(fixture.Objects.ApplyServerMove(others[slot], pack, 0u, slot));
+        }
+        Assert.True(fixture.Objects.ApplyServerMove(Guid, pack, 0u, 2));
+
+        WorldSession.EntitySpawn update = item with { Name = "Aetheria" };
+        fixture.Objects.IngestRecreated(ObjectTableWiring.ToWeenieData(update));
+        Assert.True(fixture.Controller.OnDescriptionRefresh(update));
+
+        Assert.Equal([Guid, others[0], others[1]], fixture.Objects.GetContents(pack));
+        Assert.Equal(0, fixture.Objects.Get(Guid)!.ContainerSlot);
+        Assert.Equal("Aetheria", fixture.Objects.Get(Guid)!.Name);
+    }
+
     [Fact]
     public void DescriptionRefresh_ForAnUnknownObject_IsLeftToTheObjectTable()
     {
