@@ -393,6 +393,74 @@ public class RetailChaseCameraTests
     }
 
     [Fact]
+    public void DirectOrbit_ImmediatelyUsesCharacterPivotAndAbsoluteViewHeading()
+    {
+        var camera = new RetailChaseCamera
+        {
+            Distance = 5f,
+            Pitch = 0.25f,
+            YawOffset = 0.4f,
+        };
+        var position = new Vector3(10f, 20f, 3f);
+
+        camera.Update(position, 0f, Vector3.Zero, true, Vector3.UnitZ,
+            1f / 60f, directOrbit: true);
+        var pivot = position + new Vector3(0f, 0f, camera.PivotHeight);
+        var first = RetailChaseCamera.ComputeDesiredPose(
+            pivot,
+            new Vector3(MathF.Cos(0.4f), MathF.Sin(0.4f), 0f),
+            camera.Distance, camera.Pitch, 0f);
+        Assert.Equal(first.eye.X, camera.Position.X, 5);
+        Assert.Equal(first.eye.Y, camera.Position.Y, 5);
+        Assert.Equal(first.eye.Z, camera.Position.Z, 5);
+
+        camera.YawOffset = -0.4f;
+        camera.Update(position, 0f, Vector3.Zero, true, Vector3.UnitZ,
+            1f / 60f, directOrbit: true);
+        var second = RetailChaseCamera.ComputeDesiredPose(
+            pivot,
+            new Vector3(MathF.Cos(-0.4f), MathF.Sin(-0.4f), 0f),
+            camera.Distance, camera.Pitch, 0f);
+        Assert.Equal(second.eye.X, camera.Position.X, 5);
+        Assert.Equal(second.eye.Y, camera.Position.Y, 5);
+        Assert.Equal(second.eye.Z, camera.Position.Z, 5);
+    }
+
+    [Fact]
+    public void DirectOrbit_IgnoresSlopeAlignmentAndTrackedTarget()
+    {
+        bool savedAlign = CameraDiagnostics.AlignToSlope;
+        try
+        {
+            CameraDiagnostics.AlignToSlope = true;
+            var camera = new RetailChaseCamera
+            {
+                Distance = 5f,
+                Pitch = 0.25f,
+                YawOffset = 0.4f,
+            };
+            var position = new Vector3(10f, 20f, 3f);
+            var slopeNormal = Vector3.Normalize(new Vector3(-0.3f, 0f, 1f));
+
+            camera.Update(position, 0f, new Vector3(1f, 0f, 0.3f), true,
+                slopeNormal, 1f / 60f,
+                trackedTargetPoint: position + new Vector3(0f, 10f, 0f),
+                directOrbit: true);
+
+            var pivot = position + new Vector3(0f, 0f, camera.PivotHeight);
+            var (expectedEye, _) = RetailChaseCamera.ComputeDesiredPose(
+                pivot, Vector3.UnitX, camera.Distance, camera.Pitch, camera.YawOffset);
+            Assert.Equal(expectedEye.X, camera.Position.X, 5);
+            Assert.Equal(expectedEye.Y, camera.Position.Y, 5);
+            Assert.Equal(expectedEye.Z, camera.Position.Z, 5);
+        }
+        finally
+        {
+            CameraDiagnostics.AlignToSlope = savedAlign;
+        }
+    }
+
+    [Fact]
     public void DesiredPose_TrackedHeadingRetainsViewerOffsetOrbitAndLooksAtPivot()
     {
         var pivot = new Vector3(10f, 20f, 1.5f);

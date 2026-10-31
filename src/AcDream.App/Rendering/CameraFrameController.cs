@@ -121,11 +121,22 @@ internal sealed class CameraFrameController : ICameraFramePhase
 
         MovementResult result = playerFrame.Movement;
         float cameraDt = controller.PresentedDeltaSeconds;
+        if (_chase.ModernMouseTurning)
+        {
+            float yawOffset = _chase.RmbOrbitHeld
+                ? MathF.IEEERemainder(
+                    _chase.ModernViewYaw - controller.Yaw, 2f * MathF.PI)
+                : 0f;
+            legacy.YawOffset = yawOffset;
+            if (retail is not null)
+                retail.YawOffset = yawOffset;
+        }
         legacy.Update(
             result.RenderPosition,
             controller.Yaw,
             isOnGround: result.IsOnGround,
-            dt: cameraDt);
+            dt: cameraDt,
+            directOrbit: _chase.ModernMouseTurning);
 
         retail?.Update(
             result.RenderPosition,
@@ -136,7 +147,9 @@ internal sealed class CameraFrameController : ICameraFramePhase
             dt: cameraDt,
             cellId: controller.CellId,
             selfEntityId: controller.LocalEntityId,
-            trackedTargetPoint: _combatTarget.GetTrackedTargetPoint());
+            trackedTargetPoint: _chase.ModernMouseTurning
+                ? null : _combatTarget.GetTrackedTargetPoint(),
+            directOrbit: _chase.ModernMouseTurning);
     }
 
     // One step re-targets the turn from the current heading, so a held rotate

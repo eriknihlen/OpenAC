@@ -32,6 +32,7 @@ internal interface IMouseLookCursor
 {
     bool HasSavedMode { get; }
     void Hide();
+    void CaptureRaw() => Hide();
     void Restore();
 }
 
@@ -62,6 +63,12 @@ internal sealed class SilkMouseLookCursor : IMouseLookCursor
         _mouse.Cursor.CursorMode = CursorMode.Hidden;
     }
 
+    public void CaptureRaw()
+    {
+        _savedMode = _mouse.Cursor.CursorMode;
+        _mouse.Cursor.CursorMode = CursorMode.Raw;
+    }
+
     public void Restore()
     {
         _mouse.Cursor.CursorMode = _savedMode ?? CursorMode.Normal;
@@ -73,6 +80,9 @@ internal interface IChaseCameraSource
 {
     ChaseCamera? Legacy { get; }
     RetailChaseCamera? Retail { get; }
+    bool ModernMouseTurning => false;
+    bool RmbOrbitHeld => false;
+    float ModernViewYaw => 0f;
 }
 
 internal sealed class ChaseCameraInputState : IChaseCameraSource
@@ -82,6 +92,11 @@ internal sealed class ChaseCameraInputState : IChaseCameraSource
     public float Sensitivity { get; set; } = 0.15f;
     public bool InvertMouseLookYAxis { get; set; }
     public bool RmbOrbitHeld { get; set; }
+    public bool ModernMouseTurning { get; set; }
+    public bool BothMouseButtonsRunForward { get; set; }
+    public bool ModernMouseForward { get; set; }
+    public float ModernViewYaw { get; set; }
+    public bool IgnoreNextMouseMove { get; set; }
 }
 
 internal sealed class MouseLookController : IMouseLookInputFrameController
@@ -99,6 +114,8 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
     private readonly IInputMonotonicClock _clock;
     private readonly MouseLookState _state;
     private bool _lastWantCaptureMouse;
+    private bool _modernRmbCaptured;
+    private bool _modernTurnMoving;
 
     public MouseLookController(
         IMouseSource mouseSource,
@@ -135,7 +152,16 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
     {
         if (action == InputAction.AcdreamRmbOrbitHold)
         {
-            if (activation == ActivationType.Press)
+            if (_modernRmbCaptured && activation == ActivationType.Release)
+                EndModernRmb();
+            else if (_chase.ModernMouseTurning)
+            {
+                if (activation == ActivationType.Press)
+                    BeginModernRmb();
+                else if (activation == ActivationType.Release)
+                    EndModernRmb();
+            }
+            else if (activation == ActivationType.Press)
                 _chase.RmbOrbitHeld = _playerMode.IsPlayerMode && _camera.IsChaseMode;
             else if (activation == ActivationType.Release)
                 _chase.RmbOrbitHeld = false;
@@ -158,6 +184,17 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
 
     public void Tick()
     {
+        _chase.ModernMouseForward = _chase.ModernMouseTurning
+            && _chase.BothMouseButtonsRunForward
+            && _modernRmbCaptured
+            && _mouseSource.IsHeld(MouseButton.Right)
+            && _mouseSource.IsHeld(MouseButton.Left)
+            && _mouseSource.WasPressedOverWorld(MouseButton.Left);
+        if (_chase.ModernMouseTurning && _chase.RmbOrbitHeld)
+            TickModernRmb();
+        else if (_modernRmbCaptured)
+            EndModernRmb();
+
         bool wantCaptureMouse = _mouseSource.WantCaptureMouse;
         if (wantCaptureMouse != _lastWantCaptureMouse)
         {
@@ -190,6 +227,9 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
 
     public void EndAndRestoreCursor()
     {
+        if (_modernRmbCaptured)
+            return;
+
         bool stateWasActive = _state.Active;
         _state.Release();
 
@@ -210,14 +250,18 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
     public void EndForLifecycle()
     {
         EndAndRestoreCursor();
+        EndModernRmb();
         _chase.RmbOrbitHeld = false;
+        _chase.ModernMouseForward = false;
     }
 
     public void ResetSession()
     {
         bool stateWasActive = _state.Active;
         _state.Release();
+        EndModernRmb(sendMovement: false);
         _chase.RmbOrbitHeld = false;
+        _chase.ModernMouseForward = false;
         _lastWantCaptureMouse = false;
         if (stateWasActive || _cursor.HasSavedMode)
             _cursor.Restore();
@@ -259,4 +303,86 @@ internal sealed class MouseLookController : IMouseLookInputFrameController
         _playerController.Controller?.SubmitMouseTurnAdjustment(
             adjustment,
             _movementInput.Capture());
+
+    private void BeginModernRmb()
+    {
+        PlayerMovementController? controller = _playerController.Controller;
+        // The dispatcher only fires a world press, but check again because a
+        // UI capture may have been established by another event handler.
+        if (_mouseSource.WantCaptureMouse
+            || !_mouseSource.WasPressedOverWorld(MouseButton.Right)
+            || !_playerMode.IsPlayerMode
+            || !_camera.IsChaseMode
+            || controller is not { State: PlayerState.InWorld }
+            || _chase.RmbOrbitHeld)
+            return;
+
+        MovementInput input = _movementInput.Capture();
+        if (!controller.BeginMouseLook(input, modern: true))
+            return;
+
+        _chase.ModernViewYaw = MathF.IEEERemainder(
+            controller.Yaw + (CameraDiagnostics.UseRetailChaseCamera
+                ? _chase.Retail?.YawOffset ?? 0f
+                : _chase.Legacy?.YawOffset ?? 0f),
+            2f * MathF.PI);
+        _chase.RmbOrbitHeld = true;
+        _chase.IgnoreNextMouseMove = true;
+        _modernRmbCaptured = true;
+        _outbound.TrySendMovement(
+            _session.CurrentSession, controller,
+            controller.CaptureMovementResult(mouseLookEvent: false));
+        _cursor.CaptureRaw();
+    }
+
+    private void TickModernRmb()
+    {
+        PlayerMovementController? controller = _playerController.Controller;
+        if (!_playerMode.IsPlayerMode || !_camera.IsChaseMode
+            || controller is not { State: PlayerState.InWorld }
+            || !_mouseSource.IsHeld(MouseButton.Right))
+        {
+            EndModernRmb();
+            return;
+        }
+
+        MovementInput input = _movementInput.Capture();
+        if (input.TurnLeft != input.TurnRight)
+            return;
+
+        float difference = MathF.IEEERemainder(
+            _chase.ModernViewYaw - controller.Yaw, 2f * MathF.PI);
+        if (MathF.Abs(difference) < 0.015f)
+        {
+            if (_modernTurnMoving)
+                controller.StopMouseDrift(input);
+            _modernTurnMoving = false;
+        }
+        else
+        {
+            controller.SubmitMouseTurnAdjustment(
+                Math.Clamp(difference * 3f, -0.75f, 0.75f), input);
+            _modernTurnMoving = true;
+        }
+    }
+
+    private void EndModernRmb(bool sendMovement = true)
+    {
+        if (!_modernRmbCaptured)
+            return;
+
+        _modernRmbCaptured = false;
+        _modernTurnMoving = false;
+        _chase.RmbOrbitHeld = false;
+        _chase.ModernMouseForward = false;
+        _chase.IgnoreNextMouseMove = false;
+        PlayerMovementController? controller = _playerController.Controller;
+        if (controller is { CanExecuteLiveMovement: true }
+            && controller.EndMouseLook(_movementInput.Capture())
+            && sendMovement)
+            _outbound.TrySendMovement(
+                _session.CurrentSession, controller,
+                controller.CaptureMovementResult(mouseLookEvent: false));
+        _cursor.Restore();
+    }
 }

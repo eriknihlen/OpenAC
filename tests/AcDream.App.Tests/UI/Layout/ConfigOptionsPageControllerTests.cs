@@ -55,6 +55,8 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.True(d.AlignToSlope);
         Assert.False(d.InvertMouseLookYAxis);
         Assert.False(d.UseMouseTurning);
+        Assert.False(d.ModernMouseTurning);
+        Assert.False(d.BothMouseButtonsRunForward);
     }
 
     [Fact]
@@ -318,12 +320,12 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
-    public void Bind_Succeeds_AndRegistersExactly39Rows()
+    public void Bind_Succeeds_AndRegistersExactly41Rows()
     {
         (OptionsPanelController controller, _, bool bound) = BindReal();
 
         Assert.True(bound);
-        Assert.Equal(39, controller.ConfigPage.Rows.Count);
+        Assert.Equal(41, controller.ConfigPage.Rows.Count);
     }
 
     [Fact]
@@ -369,9 +371,11 @@ public sealed class ConfigOptionsPageControllerTests
             typeof(BoolOptionRow),                              // Building Detail Textures
             typeof(BoolOptionRow),                              // Multi-Pass Alpha
 
+            typeof(BoolOptionRow),                              // Modern Mouse Turning
             typeof(FloatOptionRow),                             // Mouse Look Sensitivity
             typeof(BoolOptionRow),                              // Invert Mouselook Y Axis
             typeof(BoolOptionRow),                              // Use Mouse Turning
+            typeof(BoolOptionRow),                              // Both Mouse Buttons Run Forward
 
             typeof(IntOptionRow),
             typeof(IntOptionRow),
@@ -382,7 +386,7 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
-    public void Bind_ListBoxStacks48Items_SixHeaders_SixSeparators_36OptionRows()
+    public void Bind_ListBoxStacks50Items_SixHeaders_SixSeparators_38OptionRows()
     {
         ImportedLayout layout = FixtureLoader.LoadOptionsPanelHost();
         OptionsPanelController controller = OptionsPanelController.Bind(
@@ -404,7 +408,7 @@ public sealed class ConfigOptionsPageControllerTests
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
 
         UiElement viewport = Assert.Single(listBox.Children);
-        Assert.Equal(48, viewport.Children.Count);
+        Assert.Equal(50, viewport.Children.Count);
     }
 
     [Fact]
@@ -468,8 +472,8 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        Assert.Equal(52, Assert.Single(listBox.Children).Children.Count);
-        Assert.Equal(41, controller.ConfigPage.Rows.Count);
+        Assert.Equal(54, Assert.Single(listBox.Children).Children.Count);
+        Assert.Equal(43, controller.ConfigPage.Rows.Count);
 
         List<UiMenu> menus = CollectMenus(configSlot);
         UiMenu packMenu = menus[^2];
@@ -558,7 +562,7 @@ public sealed class ConfigOptionsPageControllerTests
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
         UiMenu packMenu = CollectMenus(configSlot)[^2];
-        Assert.Equal(53, listBox.ItemCount);
+        Assert.Equal(55, listBox.ItemCount);
         Assert.Contains(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
 
         discovered = [beta];
@@ -568,8 +572,8 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.DoesNotContain(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
         Assert.Contains(packMenu.Items, item => Equals(item.Payload, "pack.beta"));
         Assert.Equal(RenderPackSelectionSettings.RetailPackId, packMenu.Selected);
-        Assert.Equal(52, listBox.ItemCount);
-        Assert.Equal(41, controller.ConfigPage.Rows.Count);
+        Assert.Equal(54, listBox.ItemCount);
+        Assert.Equal(43, controller.ConfigPage.Rows.Count);
         controller.ConfigPage.Reset();
         Assert.Equal(RenderPackSelectionSettings.RetailPackId, packMenu.Selected);
         Assert.DoesNotContain(packMenu.Items, item => Equals(item.Payload, "pack.alpha"));
@@ -583,7 +587,7 @@ public sealed class ConfigOptionsPageControllerTests
         packMenu.BeforeOpen!();
 
         Assert.Equal("pack.beta", packMenu.Selected);
-        Assert.Equal(52, listBox.ItemCount);
+        Assert.Equal(54, listBox.ItemCount);
         Assert.Equal("Medium", CollectMenus(configSlot)[^1].Items.Single().Label);
     }
 
@@ -655,16 +659,16 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        Assert.Equal(56, listBox.ItemCount);
-        Assert.Equal(45, controller.ConfigPage.Rows.Count);
+        Assert.Equal(58, listBox.ItemCount);
+        Assert.Equal(47, controller.ConfigPage.Rows.Count);
 
         IReadOnlyList<UiElement> items = listBox.ViewportForTest!.Children;
         var enabled = Assert.IsType<UiButton>(
-            UiElement.FindDescendant(items[51], 0x10000219u));
+            UiElement.FindDescendant(items[53], 0x10000219u));
         var strength = Assert.IsType<UiScrollbar>(
-            UiElement.FindDescendant(items[52], 0x1000021Cu));
+            UiElement.FindDescendant(items[54], 0x1000021Cu));
         var samples = Assert.IsType<UiScrollbar>(
-            UiElement.FindDescendant(items[53], 0x1000021Cu));
+            UiElement.FindDescendant(items[55], 0x1000021Cu));
         List<UiMenu> menus = CollectMenus(configSlot);
         UiMenu packMenu = menus[^3];
         UiMenu presetMenu = menus[^2];
@@ -686,8 +690,8 @@ public sealed class ConfigOptionsPageControllerTests
         presetMenu.OnSelect!("high");
         Assert.Equal("high", fake.Display.RenderPack.PresetId);
         Assert.Equal(4, fake.Display.RenderPack.SettingOverrides.Count);
-        Assert.Equal(56, listBox.ItemCount);
-        Assert.Equal(45, controller.ConfigPage.Rows.Count);
+        Assert.Equal(58, listBox.ItemCount);
+        Assert.Equal(47, controller.ConfigPage.Rows.Count);
         int savesBeforeStaleWidget = fake.DisplaySaves.Count;
         oldModeMenu.OnSelect!("low");
         Assert.Equal(savesBeforeStaleWidget, fake.DisplaySaves.Count);
@@ -697,21 +701,21 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.Equal("2.0.0", fake.Display.RenderPack.PackVersion);
         Assert.Equal("default", fake.Display.RenderPack.PresetId);
         Assert.Empty(fake.Display.RenderPack.SettingOverrides);
-        Assert.Equal(53, listBox.ItemCount); // header + pack + preset + one setting + separator
-        Assert.Equal(42, controller.ConfigPage.Rows.Count);
+        Assert.Equal(55, listBox.ItemCount); // header + pack + preset + one setting + separator
+        Assert.Equal(44, controller.ConfigPage.Rows.Count);
 
         oldModeMenu.OnSelect!("high");
         Assert.Empty(fake.Display.RenderPack.SettingOverrides);
 
         controller.ConfigPage.Reset();
         Assert.Equal("pack.alpha", fake.Display.RenderPack.PackId);
-        Assert.Equal(56, listBox.ItemCount);
-        Assert.Equal(45, controller.ConfigPage.Rows.Count);
+        Assert.Equal(58, listBox.ItemCount);
+        Assert.Equal(47, controller.ConfigPage.Rows.Count);
 
         controller.ConfigPage.Defaults();
         Assert.True(fake.Display.RenderPack.IsRetail);
-        Assert.Equal(52, listBox.ItemCount);
-        Assert.Equal(41, controller.ConfigPage.Rows.Count);
+        Assert.Equal(54, listBox.ItemCount);
+        Assert.Equal(43, controller.ConfigPage.Rows.Count);
     }
 
     [Fact]
@@ -766,7 +770,7 @@ public sealed class ConfigOptionsPageControllerTests
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
-        UiElement enabledRow = listBox.ViewportForTest!.Children[51];
+        UiElement enabledRow = listBox.ViewportForTest!.Children[53];
         var enabled = Assert.IsType<UiButton>(
             UiElement.FindDescendant(enabledRow, 0x10000219u));
         enabled.Selected = true;
@@ -933,7 +937,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void ToggleRow_UseMouseTurning_WritesTheConfigTabOwnPreference_NotTheWireBit()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (BoolOptionRow)controller.ConfigPage.Rows[36]; // Use Mouse Turning
+        var row = (BoolOptionRow)controller.ConfigPage.Rows[37]; // Use Mouse Turning
 
         row.SetCurrentValue(true);
 
@@ -941,10 +945,70 @@ public sealed class ConfigOptionsPageControllerTests
     }
 
     [Fact]
+    public void ModernMouseTurning_DisablesLegacyUseMouseTurningUntilSwitchedOff()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
+        IReadOnlyList<UiElement> items = listBox.ViewportForTest!.Children;
+        var modern = Assert.IsType<UiButton>(
+            UiElement.FindDescendant(items[40], 0x10000219u));
+        var legacy = Assert.IsType<UiButton>(
+            UiElement.FindDescendant(items[43], 0x10000219u));
+
+        Assert.True(legacy.EnabledSource!());
+        modern.Selected = true;
+        modern.OnClick!();
+        Assert.True(bindings.CameraTurning.ModernMouseTurning);
+        Assert.False(legacy.EnabledSource!());
+
+        int saves = bindings.CameraTurningSaves.Count;
+        legacy.Selected = true;
+        legacy.OnClick!();
+        Assert.Equal(saves, bindings.CameraTurningSaves.Count);
+
+        modern.Selected = false;
+        modern.OnClick!();
+        Assert.True(legacy.EnabledSource!());
+    }
+
+    [Fact]
+    public void BothButtonRunOption_IsOnlyAvailableInModernMode()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
+        var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
+        IReadOnlyList<UiElement> items = listBox.ViewportForTest!.Children;
+        var modern = Assert.IsType<UiButton>(
+            UiElement.FindDescendant(items[40], 0x10000219u));
+        var both = Assert.IsType<UiButton>(
+            UiElement.FindDescendant(items[44], 0x10000219u));
+
+        Assert.False(both.EnabledSource!());
+        both.Selected = true;
+        both.OnClick!();
+        Assert.False(bindings.CameraTurning.BothMouseButtonsRunForward);
+
+        modern.Selected = true;
+        modern.OnClick!();
+        Assert.True(both.EnabledSource!());
+        both.Selected = true;
+        both.OnClick!();
+        Assert.True(bindings.CameraTurning.BothMouseButtonsRunForward);
+
+        modern.Selected = false;
+        modern.OnClick!();
+        Assert.False(both.EnabledSource!());
+        Assert.True(bindings.CameraTurning.BothMouseButtonsRunForward);
+    }
+
+    [Fact]
     public void MenuRow_ChatFontSize_WritesThroughChatBindings_WithoutTouchingHearFlags()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[38];
+        var row = (IntOptionRow)controller.ConfigPage.Rows[40];
 
         row.SetCurrentValue(3);
 
@@ -956,7 +1020,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontFace_ReachesApplyChatFont_WithNoApplyButton_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[37]; // Chat Font Face
+        var row = (IntOptionRow)controller.ConfigPage.Rows[39]; // Chat Font Face
 
         row.SetCurrentValue(0);
 
@@ -967,7 +1031,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontSize_ReachesApplyChatFont_WithNoApplyButton_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[38]; // Chat Font Size
+        var row = (IntOptionRow)controller.ConfigPage.Rows[40]; // Chat Font Size
 
         row.SetCurrentValue(3);
 
@@ -978,7 +1042,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void ChatFontRows_ResetAndDefaults_ReachApplyChatFont_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var faceRow = (IntOptionRow)controller.ConfigPage.Rows[37];
+        var faceRow = (IntOptionRow)controller.ConfigPage.Rows[39];
 
         faceRow.SetCurrentValue(0);
         bindings.ChatFontApplies.Clear();
@@ -1050,7 +1114,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, _, _) = BindReal();
         IReadOnlyList<IOptionRow> rows = controller.ConfigPage.Rows;
-        Assert.Equal(39, rows.Count);
+        Assert.Equal(41, rows.Count);
 
         object[] expected =
         [
@@ -1092,9 +1156,11 @@ public sealed class ConfigOptionsPageControllerTests
             true,               // 32 Building Detail Textures
             false,              // 33 Multi-Pass Alpha
 
-            0.55f,              // 34 Mouse Look Sensitivity
+            false,              // 34 Modern Mouse Turning
+            0.55f,              // 35 Mouse Look Sensitivity
             false,              // 35 Invert Mouselook Y Axis
             false,              // 36 Use Mouse Turning
+            false,              // 37 Both Mouse Buttons Run Forward
 
             2,
             1,
@@ -1387,7 +1453,7 @@ public sealed class ConfigOptionsPageControllerTests
         (OptionsPanelController controller, _, bool bound) = BindReal(resolveString: (_, _) => null);
 
         Assert.True(bound);
-        Assert.Equal(39, controller.ConfigPage.Rows.Count);
+        Assert.Equal(41, controller.ConfigPage.Rows.Count);
     }
 
 
@@ -1434,11 +1500,13 @@ public sealed class ConfigOptionsPageControllerTests
         (35, RowKind.Menu, false, "Landscape Draw Distance"),
         (36, RowKind.Toggle, false, "Building Detail Textures"),
         (37, RowKind.Toggle, true, "Multi-Pass Alpha"),
-        (40, RowKind.Slider, false, "Mouse Look Sensitivity"),          // LIVE
-        (41, RowKind.Toggle, false, "Invert Mouselook Y Axis"),        // LIVE
-        (42, RowKind.Toggle, true, "Use Mouse Turning"),
-        (45, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
-        (46, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
+        (40, RowKind.Toggle, false, "Modern Mouse Turning"),
+        (41, RowKind.Slider, false, "Mouse Look Sensitivity"),          // LIVE
+        (42, RowKind.Toggle, false, "Invert Mouselook Y Axis"),        // LIVE
+        (43, RowKind.Toggle, true, "Use Mouse Turning"),
+        (44, RowKind.Toggle, false, "Both Mouse Buttons Run Forward"),
+        (47, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
+        (48, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
     };
 
     private static Vector4? FindTextLineColor(UiElement root, uint elementId)
@@ -1461,7 +1529,7 @@ public sealed class ConfigOptionsPageControllerTests
             UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
         UiElement viewport = Assert.Single(listBox.Children);
         IReadOnlyList<UiElement> items = viewport.Children.ToList();
-        Assert.Equal(48, items.Count);
+        Assert.Equal(50, items.Count);
 
         const uint ToggleCheckboxElementId = 0x10000219u;
         const uint SliderLabelElementId = 0x1000021Bu;
@@ -1771,8 +1839,8 @@ public sealed class ConfigOptionsPageControllerTests
         // Nine rows more than the authored retail page has on its own: these
         // four, plus the Graphics block's Keep Distant Buildings, Graphics
         // Profile, Potato Mode, UI Only and UI Only in Background.
-        Assert.Equal(48, items.Count);
-        Assert.Equal(39, panel.ConfigPage.Rows.Count);
+        Assert.Equal(50, items.Count);
+        Assert.Equal(41, panel.ConfigPage.Rows.Count);
 
         Assert.Equal("Retail Mixer", Checkbox(items[RetailMixerItem]).Label);
         Assert.Equal("Voices", TextLine(items[VoicesItem], SliderCaptionId).Text);
