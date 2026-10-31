@@ -67,7 +67,7 @@ public sealed class GameWindow :
         return defaults with
         {
             Size = size,
-            Title = "acdream — Vulkan",
+            Title = RenderFrameDiagnosticsController.Product,
             VSync = useVSync,
             WindowBorder = border,
             IsVisible = !exactAutomationFramebuffer,
@@ -1546,7 +1546,8 @@ public sealed class GameWindow :
             frameRoots => new SessionStartCompositionPhase(
                 new SessionStartDependencies(
                     Console.WriteLine,
-                    JoinPlayingSession))
+                    JoinPlayingSession,
+                    () => WindowFocusRequest.BringToFront(_window!, Console.WriteLine)))
                 .Start(frameRoots));
 
         ApplyPluginAutomationBindings();

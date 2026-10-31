@@ -15,22 +15,35 @@ internal sealed class RuntimeRenderFrameTitleFactsSource : IRenderFrameTitleFact
     private readonly GpuWorldState _world;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
     private readonly WorldTimeService _time;
+    private readonly AcDream.Runtime.GameRuntime _runtime;
+    private readonly AcDream.App.Input.ILocalPlayerIdentitySource _player;
 
     public RuntimeRenderFrameTitleFactsSource(
         GpuWorldState world,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
-        WorldTimeService time)
+        WorldTimeService time,
+        AcDream.Runtime.GameRuntime runtime,
+        AcDream.App.Input.ILocalPlayerIdentitySource player)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));
         _time = time ?? throw new ArgumentNullException(nameof(time));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _player = player ?? throw new ArgumentNullException(nameof(player));
     }
 
-    public RenderFrameTitleFacts Capture() => new(
-        _world.Entities.Count,
-        _animations.Count,
-        _time.CurrentCalendar,
-        _time.DayFraction);
+    public RenderFrameTitleFacts Capture()
+    {
+        RenderFrameTitleSubject subject = RenderFrameTitleSubject.Of(
+            _runtime.CharacterSelection,
+            _player.ServerGuid);
+        return new RenderFrameTitleFacts(
+            subject.InWorld,
+            subject.CharacterName,
+            _world.Entities.Count,
+            _animations.Count,
+            _time.CurrentCalendar);
+    }
 }
 
 internal sealed class SilkRenderFrameTitleSink : IRenderFrameTitleSink

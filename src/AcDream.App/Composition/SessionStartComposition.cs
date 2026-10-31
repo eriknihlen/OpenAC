@@ -8,9 +8,15 @@ namespace AcDream.App.Composition;
 /// Asked first: true when the window joined a session that had already
 /// started without it, which then is not started again.
 /// </param>
+/// <param name="BringWindowToFront">
+/// Asked when the window joined a playing session: it was opened by a
+/// command (the console's or the launcher's), not by the player's click, so
+/// it asks for the keyboard itself.
+/// </param>
 internal sealed record SessionStartDependencies(
     Action<string> Log,
-    Func<bool>? JoinPlayingSession = null);
+    Func<bool>? JoinPlayingSession = null,
+    Action? BringWindowToFront = null);
 
 internal sealed class SessionStartCompositionPhase
     : ISessionStartCompositionPhase<FrameRootResult>
@@ -25,7 +31,10 @@ internal sealed class SessionStartCompositionPhase
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (_dependencies.JoinPlayingSession?.Invoke() == true)
+        {
+            _dependencies.BringWindowToFront?.Invoke();
             return;
+        }
         RuntimeSessionStartResult result =
             frame.GameRuntime.Session.Start(frame.GameRuntime.Generation);
         Report(result, _dependencies.Log);

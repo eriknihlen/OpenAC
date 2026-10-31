@@ -219,7 +219,7 @@ public sealed class MapPageController
     internal static string FormatDateTime(DerethDateTime.Calendar calendar) =>
         $"Date: {calendar.Month} {calendar.Day}, {calendar.Year} P.Y.\nTime: {FormatHourName(calendar.Hour)}";
 
-    private static string FormatHourName(DerethDateTime.HourName hour)
+    internal static string FormatHourName(DerethDateTime.HourName hour)
     {
         string name = hour.ToString();
         const string suffix = "AndHalf";
