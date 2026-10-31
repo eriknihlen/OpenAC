@@ -436,7 +436,11 @@ internal sealed class CameraPointerInputController
         if (Volatile.Read(ref _active) == 0)
             return;
 
-        if (_capture.WantCaptureMouse)
+        // A drag that began over the world remains navigation even when the
+        // pointer subsequently crosses UI. The press itself is gated by the
+        // dispatcher and MouseLookController.
+        if (_capture.WantCaptureMouse
+            && !(_chase.ModernMouseTurning && _chase.RmbOrbitHeld))
         {
             _pointer.X = position.X;
             _pointer.Y = position.Y;
@@ -445,6 +449,14 @@ internal sealed class CameraPointerInputController
 
         float dx = position.X - _pointer.X;
         float dy = position.Y - _pointer.Y;
+        if (_chase.ModernMouseTurning && _chase.RmbOrbitHeld
+            && _chase.IgnoreNextMouseMove)
+        {
+            _chase.IgnoreNextMouseMove = false;
+            _pointer.X = position.X;
+            _pointer.Y = position.Y;
+            return;
+        }
 
         if (_playerMode.IsPlayerMode && _camera.IsChaseMode
             && _chase.Legacy is not null)
@@ -457,7 +469,24 @@ internal sealed class CameraPointerInputController
             }
             else if (_chase.RmbOrbitHeld)
             {
-                if (CameraDiagnostics.UseRetailChaseCamera
+                if (_chase.ModernMouseTurning)
+                {
+                    // Raw mode can report a synthetic position change when
+                    // entered. Keep a bounded, finite delta per callback.
+                    if (float.IsFinite(dx) && float.IsFinite(dy)
+                        && MathF.Abs(dx) <= 250f && MathF.Abs(dy) <= 250f)
+                    {
+                        _chase.ModernViewYaw = MathF.IEEERemainder(
+                            _chase.ModernViewYaw - dx * 0.004f * sensitivity,
+                            2f * MathF.PI);
+                        if (CameraDiagnostics.UseRetailChaseCamera
+                            && _chase.Retail is { } modernRetail)
+                            modernRetail.AdjustPitch(invertSign * dy * sensitivity * 0.0666666701f);
+                        else
+                            _chase.Legacy.AdjustPitch(invertSign * dy * 0.003f * sensitivity);
+                    }
+                }
+                else if (CameraDiagnostics.UseRetailChaseCamera
                     && _chase.Retail is not null)
                 {
                     var (filteredDx, filteredDy) = _chase.Retail.FilterMouseDelta(
@@ -501,10 +530,14 @@ internal sealed class CameraPointerInputController
         if (Volatile.Read(ref _active) == 0)
             return;
 
-        if (_gameplayFrame?.MouseLookActive == true && !_camera.IsChaseMode)
-            _gameplayFrame.EndMouseLook();
+        if ((_gameplayFrame?.MouseLookActive == true
+            || _chase.ModernMouseTurning && _chase.RmbOrbitHeld)
+            && !_camera.IsChaseMode)
+            _gameplayFrame?.EndMouseLook();
 
-        _cursor.CursorMode = _camera.IsFlyMode
+        _cursor.CursorMode = _chase.ModernMouseTurning && _chase.RmbOrbitHeld
+            ? CursorMode.Raw
+            : _camera.IsFlyMode
             ? CursorMode.Raw
             : CursorMode.Normal;
     }

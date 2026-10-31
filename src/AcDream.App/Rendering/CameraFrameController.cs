@@ -71,6 +71,11 @@ internal sealed class CameraFrameController : ICameraFramePhase
         ChaseCameraAdjustmentInput input = keysAvailable
             ? _input.CaptureChaseAdjustment()
             : default;
+        // While a modern mouse drag owns the view (held, or finishing its turn)
+        // the mouse is the only thing that rotates it.
+        bool modernView = _chase.ModernMouseTurning && _chase.ModernViewActive;
+        if (modernView)
+            input = input with { RotateLeft = false, RotateRight = false };
         if (CameraDiagnostics.UseRetailChaseCamera && retail is not null)
         {
             float adjustment = CameraDiagnostics.CameraAdjustmentSpeed
@@ -121,11 +126,24 @@ internal sealed class CameraFrameController : ICameraFramePhase
 
         MovementResult result = playerFrame.Movement;
         float cameraDt = controller.PresentedDeltaSeconds;
+        if (modernView)
+        {
+            // The orbit is the view yaw measured from the character's facing,
+            // so the eye follows the mouse alone and never the facing's steps.
+            // When the drag ends the last offset stays, so the ordinary
+            // camera takes over from exactly where the view was.
+            float yawOffset = MathF.IEEERemainder(
+                _chase.ModernViewYaw - controller.Yaw, 2f * MathF.PI);
+            legacy.YawOffset = yawOffset;
+            if (retail is not null)
+                retail.YawOffset = yawOffset;
+        }
         legacy.Update(
             result.RenderPosition,
             controller.Yaw,
             isOnGround: result.IsOnGround,
-            dt: cameraDt);
+            dt: cameraDt,
+            directOrbit: modernView);
 
         retail?.Update(
             result.RenderPosition,
@@ -136,7 +154,11 @@ internal sealed class CameraFrameController : ICameraFramePhase
             dt: cameraDt,
             cellId: controller.CellId,
             selfEntityId: controller.LocalEntityId,
-            trackedTargetPoint: _combatTarget.GetTrackedTargetPoint());
+            trackedTargetPoint: modernView
+                ? null : _combatTarget.GetTrackedTargetPoint(),
+            // The head view looks out of the character's eyes, which turn at
+            // the character's rate; it keeps its ordinary smoothing.
+            directOrbit: modernView && !retail.IsInHead);
     }
 
     // One step re-targets the turn from the current heading, so a held rotate

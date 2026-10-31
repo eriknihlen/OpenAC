@@ -50,11 +50,17 @@ public sealed class ChaseCamera : ICamera
     public Matrix4x4 Projection =>
         Matrix4x4.CreatePerspectiveFieldOfView(FovY, Aspect, 0.1f, 5000f);
 
-    public void Update(Vector3 playerPosition, float playerYaw, bool isOnGround = true, float dt = 1f / 60f)
+    public void Update(Vector3 playerPosition, float playerYaw, bool isOnGround = true,
+        float dt = 1f / 60f, bool directOrbit = false)
     {
         _playerYaw = playerYaw;
 
-        if (!_trackedZInitialised)
+        if (directOrbit)
+        {
+            _trackedZ = playerPosition.Z;
+            _trackedZInitialised = true;
+        }
+        else if (!_trackedZInitialised)
         {
             _trackedZ = playerPosition.Z;
             _trackedZInitialised = true;

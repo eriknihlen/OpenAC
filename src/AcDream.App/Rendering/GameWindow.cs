@@ -535,7 +535,8 @@ public sealed class GameWindow :
             _retainedInputCapture);
         _movementInput = new AcDream.App.Input.DispatcherMovementInputSource(
             _playerControllerSlot,
-            _inputCapture);
+            _inputCapture,
+            _chaseCameraInput);
         _framebufferResize = new FramebufferResizeController(_viewportAspect);
         _datDir = options.DatDir;
         _worldGameState = host.WorldGameState;
