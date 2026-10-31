@@ -254,6 +254,9 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     public uint PlayerGuid => _playerGuid();
 
+    /// <summary>The vendor whose shop window is open; 0 when none.</summary>
+    public uint ActiveVendorId => _activeVendorId();
+
     public InteractionState InteractionState => _interactionState;
     public RuntimeInteractionTransactionState RuntimeTransactions =>
         _runtimeTransactions;

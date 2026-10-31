@@ -1861,8 +1861,12 @@ public class ToolbarControllerTests
     {
         var (layout, slots, _) = FakeToolbar();
         var repo = new ClientObjectTable();
+        const uint player = 0x5000u;
+        repo.AddOrUpdate(new ClientObject { ObjectId = player, Type = ItemType.Creature });
         repo.AddOrUpdate(new ClientObject { ObjectId = 0x5001u, IconId = 1u });
         repo.AddOrUpdate(new ClientObject { ObjectId = 0x5002u, IconId = 2u });
+        repo.MoveItem(0x5001u, player, 0);
+        repo.MoveItem(0x5002u, player, 1);
         var shortcuts = new[]
         {
             new ShortcutEntry(5, 0x5002u, 0xA5C31234u),
@@ -1873,6 +1877,7 @@ public class ToolbarControllerTests
             useItem: _ => { },
             sendAddShortcut: entry => wire.Add($"add:{entry.Index}:{entry.ObjectId:X8}:{entry.SpellId:X8}"),
             sendRemoveShortcut: slot => wire.Add($"remove:{slot}"),
+            playerGuid: () => player,
             resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
 
         var payload = new ItemDragPayload(
@@ -1912,6 +1917,136 @@ public class ToolbarControllerTests
         Assert.Contains(new ShortcutEntry(3, 0x5001u, 0u), adds); // AddShortcut(3, A) sent
         Assert.Single(removes);   // exactly RemoveShortcut(3) [from the lift]
         Assert.Single(adds);      // exactly AddShortcut(3, A) [the re-place]
+    }
+
+    private const uint GroundPlayer = 0x50000A01u;
+    private const uint GroundLoot = 0x70005001u;
+    private const uint GroundOccupant = 0x70005002u;
+
+    /// <summary>A bar with <paramref name="occupant"/> (one of the player's
+    /// items) in slot 4, after a drop of a loose item lying on the ground
+    /// (with <paramref name="setup"/> applied) on slot 4: what went out, in
+    /// order, and the bar's slots 4 and 5.</summary>
+    private static (List<string> Wire, uint Slot4, uint Slot5) DropFromTheGroundOnSlot4(
+        uint? occupant,
+        Action<ClientObject>? setup = null,
+        uint openVendor = 0u,
+        uint alreadyInFlight = 0u)
+    {
+        var (layout, slots, _) = FakeToolbar();
+        var repo = new ClientObjectTable();
+        repo.AddOrUpdate(new ClientObject
+        {
+            ObjectId = GroundPlayer,
+            Type = ItemType.Creature,
+            ItemsCapacity = 102,
+            ContainersCapacity = 7,
+        });
+        repo.AddOrUpdate(new ClientObject { ObjectId = GroundOccupant, Type = ItemType.Misc, IconId = 2u });
+        repo.MoveItem(GroundOccupant, GroundPlayer, 0);
+        var loot = new ClientObject { ObjectId = GroundLoot, Type = ItemType.Misc, IconId = 1u };
+        setup?.Invoke(loot);
+        repo.AddOrUpdate(loot);
+        var wire = new List<string>();
+        var interaction = new RuntimeItemInteraction(
+            repo,
+            new AcDream.Runtime.Gameplay.RuntimeInteractionTransactionState(new InventoryTransactionState(repo)),
+            new InteractionState(),
+            playerGuid: () => GroundPlayer,
+            sendUse: null,
+            sendUseWithTarget: null,
+            sendWield: null,
+            sendDrop: null,
+            activeVendorId: () => openVendor,
+            placeInBackpack: (i, c, p) => wire.Add($"put:{i:X8}:{c:X8}:{p}"));
+        if (alreadyInFlight != 0u)
+            repo.AddOrUpdate(new ClientObject { ObjectId = alreadyInFlight, Type = ItemType.Misc });
+        if (alreadyInFlight != 0u)
+            Assert.True(interaction.TryPlaceWorldItemInBackpack(alreadyInFlight)
+                == AcDream.Runtime.Gameplay.RuntimeBackpackPlacementOutcome.Sent);
+        wire.Clear();
+        var shortcuts = occupant is { } id
+            ? new[] { new ShortcutEntry(4, id, 0u) }
+            : Array.Empty<ShortcutEntry>();
+        var ctrl = ToolbarController.Bind(layout, repo, Store(shortcuts),
+            iconIds: (_, _, _, _, _) => 1u,
+            useItem: _ => { },
+            itemInteraction: interaction,
+            sendAddShortcut: entry => wire.Add($"add:{entry.Index}:{entry.ObjectId:X8}"),
+            sendRemoveShortcut: slot => wire.Add($"remove:{slot}"),
+            playerGuid: () => GroundPlayer,
+            resolveAppropriateName: ItemTooltipCaptionNames.Resolve);
+
+        var payload = new ItemDragPayload(GroundLoot, ItemDragSource.Ground, 0, SourceCell: null);
+        var target = slots[Row1[4]];
+        Assert.Equal(ItemDragAcceptance.Accept, ctrl.OnDragOver(target, target.Cell, payload));
+        ctrl.HandleDropRelease(target, target.Cell, payload);
+        return (wire, slots[Row1[4]].Cell.ItemId, slots[Row1[5]].Cell.ItemId);
+    }
+
+    // A loose item dropped on the bar is picked up into the preferred pack
+    // first, as the use key picks it up; its shortcut follows the request.
+    // The slot's shortcut makes way to the first empty slot on its right.
+    [Fact]
+    public void GroundItemDroppedOnASlot_isPickedUpFirst_thenGetsTheShortcut()
+    {
+        var (wire, slot4, _) = DropFromTheGroundOnSlot4(occupant: null);
+        Assert.Equal(new[]
+        {
+            $"put:{GroundLoot:X8}:{GroundPlayer:X8}:0",
+            $"add:4:{GroundLoot:X8}",
+        }, wire);
+        Assert.Equal(GroundLoot, slot4);
+
+        (wire, slot4, uint slot5) = DropFromTheGroundOnSlot4(occupant: GroundOccupant);
+        Assert.Equal(new[]
+        {
+            "remove:4",
+            $"put:{GroundLoot:X8}:{GroundPlayer:X8}:0",
+            $"add:4:{GroundLoot:X8}",
+            $"add:5:{GroundOccupant:X8}",
+        }, wire);
+        Assert.Equal((GroundLoot, GroundOccupant), (slot4, slot5));
+    }
+
+    // When the pickup cannot go out (another request is in flight) the item
+    // gets no shortcut; the slot's shortcut has still made way.
+    [Fact]
+    public void GroundItemDroppedOnASlot_whoseRequestCannotGoOut_getsNoShortcut()
+    {
+        const uint other = 0x70005009u;
+        var (wire, slot4, slot5) = DropFromTheGroundOnSlot4(
+            occupant: GroundOccupant,
+            alreadyInFlight: other,
+            setup: null);
+
+        Assert.Equal(new[] { "remove:4", $"add:5:{GroundOccupant:X8}" }, wire);
+        Assert.Equal((0u, GroundOccupant), (slot4, slot5));
+    }
+
+    // A stuck object, a creature or an item in the open vendor's stock may
+    // not have a shortcut: nothing is picked up or added, but the slot's
+    // shortcut has made way, as it does before the dropped object is judged.
+    [Fact]
+    public void StuckCreatureOrVendorItemDroppedOnASlot_getsNoShortcut()
+    {
+        const uint vendor = 0x70009000u;
+        var refused = new (Action<ClientObject> Setup, uint Vendor)[]
+        {
+            (o => o.PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck, 0u),
+            (o => o.Type = ItemType.Creature, 0u),
+            (o => o.ContainerId = vendor, vendor),
+        };
+        foreach (var (setup, openVendor) in refused)
+        {
+            var (wire, slot4, _) = DropFromTheGroundOnSlot4(null, setup, openVendor);
+            Assert.Empty(wire);
+            Assert.Equal(0u, slot4);
+
+            (wire, slot4, uint slot5) = DropFromTheGroundOnSlot4(GroundOccupant, setup, openVendor);
+            Assert.Equal(new[] { "remove:4", $"add:5:{GroundOccupant:X8}" }, wire);
+            Assert.Equal((0u, GroundOccupant), (slot4, slot5));
+        }
     }
 
     [Fact]

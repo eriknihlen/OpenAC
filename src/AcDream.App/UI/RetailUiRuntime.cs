@@ -4494,6 +4494,8 @@ public sealed class RetailUiRuntime : IDisposable
                 worldDrag.ObjectAt(x, y) ?? 0u,
                 b.PlayerGuid(),
                 worldDrag.OutOfCombat(),
+                b.Objects,
+                b.ItemInteraction.IsPendingInventorySource,
                 b.ResolveIcon,
                 b.ResolveDragIcon);
         }
