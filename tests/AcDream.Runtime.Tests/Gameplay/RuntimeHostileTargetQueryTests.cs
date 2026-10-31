@@ -182,12 +182,14 @@ public sealed class RuntimeHostileTargetQueryTests
     }
 
     /// <summary>
-    /// The closest-monster key and auto-target skip a cloaked creature and
-    /// one hidden from the UI (bit 0x80 of its description), as the windowed
-    /// selection keys do; the classification alone still lists both.
+    /// The closest-monster scan (the key without a window, and auto-target)
+    /// passes over a cloaked creature and one hidden from the UI (bit 0x80 of
+    /// its description), as the windowed selection keys do. Only the scan
+    /// does: a creature like that the player already has selected may still
+    /// be attacked, and the walk still counts it as a hostile in its way.
     /// </summary>
     [Fact]
-    public void SelectableScope_SkipsCloakedAndUiHiddenMonsters()
+    public void ClosestScanSkipsCloakedAndUiHiddenMonsters_TheAttackCheckDoesNot()
     {
         const uint cloaked = 0x50000020u;
         const uint uiHidden = 0x50000021u;
@@ -213,15 +215,24 @@ public sealed class RuntimeHostileTargetQueryTests
             RuntimeHostileTargetQuery.FindClosest(
                 runtime,
                 HostileTargetScope.Selectable));
-        Assert.False(RuntimeHostileTargetQuery.IsHostile(
-            runtime, cloaked, HostileTargetScope.Selectable));
-        Assert.False(RuntimeHostileTargetQuery.IsHostile(
-            runtime, uiHidden, HostileTargetScope.Selectable));
+        Assert.Equal(
+            [visible],
+            RuntimeHostileTargetQuery
+                .Capture(runtime, 10f, HostileTargetScope.Selectable)
+                .Select(static target => target.ObjectId));
         Assert.Equal(
             cloaked,
             RuntimeHostileTargetQuery.FindClosest(
                 runtime,
                 HostileTargetScope.Classified));
+        foreach (uint selected in (uint[])[cloaked, uiHidden])
+        {
+            Assert.True(RuntimeHostileTargetQuery.IsAttackableSelection(
+                runtime, selected));
+            // What the walk reads for a blocker's hostile flag.
+            Assert.True(RuntimeHostileTargetQuery.IsHostile(
+                runtime, selected, HostileTargetScope.Selectable));
+        }
     }
 
     [Fact]

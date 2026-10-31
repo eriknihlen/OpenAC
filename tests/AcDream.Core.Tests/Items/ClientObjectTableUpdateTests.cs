@@ -81,6 +81,22 @@ public sealed class ClientObjectTableUpdateTests
     }
 
     [Fact]
+    public void AppraisalSucceeded_onlyASuccessfulAnswerSetsIt_ARefusalLaterKeepsIt()
+    {
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = 0x701u });
+
+        Assert.True(table.RecordUnsuccessfulAppraisal(0x701u));
+        Assert.False(table.Get(0x701u)!.AppraisalSucceeded);
+
+        Assert.True(table.UpdateAppraisal(0x701u, new PropertyBundle(), [], 0d));
+        Assert.True(table.Get(0x701u)!.AppraisalSucceeded);
+
+        Assert.True(table.RecordUnsuccessfulAppraisal(0x701u));
+        Assert.True(table.Get(0x701u)!.AppraisalSucceeded);
+    }
+
+    [Fact]
     public void UpdateAppraisal_retainsWeaponAndArmorProfilesAndSurvivesLaterPropertyUpdate()
     {
         var table = new ClientObjectTable();

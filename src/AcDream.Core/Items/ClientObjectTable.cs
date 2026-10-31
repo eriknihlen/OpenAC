@@ -196,6 +196,9 @@ public sealed class ClientObjectTable
     public const uint MaxStructurePropertyId = 91u;
     public const uint StructurePropertyId = 92u;
 
+    /// <summary>The description header bit that says a monarch value follows.</summary>
+    private const uint MonarchHeaderFlag = 0x00000040u;
+
     public int ObjectCount => _objects.Count;
     public int ContainerCount => _containers.Count;
     public int ContainerProjectionCount => _containerIndex.Count;
@@ -629,6 +632,7 @@ public sealed class ClientObjectTable
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         MergeProperties(item, incoming);
         item.AppraisalAnswered = true;
+        item.AppraisalSucceeded = true;
         item.LastAppraisalUnsuccessful = false;
         item.AppraisedSpellIds = spellIds.Count == 0
             ? Array.Empty<uint>()
@@ -933,12 +937,14 @@ public sealed class ClientObjectTable
         if (d.MaterialType is { } materialType) obj.MaterialType = materialType;
         if (d.HouseOwnerId is { } houseOwnerId) obj.HouseOwnerId = houseOwnerId;
         // A description off the wire replaces the whole description, and the
-        // server leaves the monarch out when there is none: no monarch there
-        // means the object is in no allegiance.
-        if (d.Header is not null)
-            obj.MonarchId = d.MonarchId is { } sent && sent != 0u ? sent : null;
-        else if (d.MonarchId is { } monarchId)
-            obj.MonarchId = monarchId;
+        // server leaves the monarch out when there is none: a header that says
+        // no monarch follows means the object is in no allegiance. A header
+        // that says one follows, with no value, was cut short and says nothing.
+        if (d.MonarchId is { } monarchId)
+            obj.MonarchId = monarchId != 0u ? monarchId : null;
+        else if (d.Header?.WeenieHeaderFlags is { } weenieFlags
+            && (weenieFlags & MonarchHeaderFlag) == 0u)
+            obj.MonarchId = null;
         if (d.Restrictions is { } restrictions) obj.Restrictions = restrictions;
         // A full description replaces the whole header: a value it did not
         // carry is one the object no longer has on record.

@@ -642,14 +642,14 @@ internal static class RuntimeNavigationProjection
     /// Whether the object is locked, or null while the client does not know. The Locked property
     /// says so, whether an appraisal brought it or the server's update when the lock changed (a
     /// lockpick unlock, a key lock). Without it the lock is known to be off once the object has been
-    /// appraised (an appraisal of something unlocked may name no lock at all) or its Open property
-    /// is known.
+    /// appraised successfully (an appraisal of something unlocked may name no lock at all) or its
+    /// Open property is known.
     /// </summary>
     internal static bool? KnownLock(ClientObject item)
     {
         if (item.Properties.Bools.TryGetValue((uint)PropertyBool.Locked, out bool locked))
             return locked;
-        return item.LastAppraisalTimeMs > 0
+        return item.AppraisalSucceeded
             || item.Properties.Bools.ContainsKey((uint)PropertyBool.Open)
                 ? false
                 : null;
