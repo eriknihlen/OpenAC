@@ -361,6 +361,7 @@ public sealed class ConfigOptionsPageControllerTests
             typeof(BoolOptionRow),                              // Keep Distant Buildings
             typeof(StringOptionRow),                            // Graphics Profile
             typeof(BoolOptionRow),                              // Potato Mode
+            typeof(FloatOptionRow),                             // UI Scale
             typeof(BoolOptionRow),                              // UI Only
             typeof(BoolOptionRow),                              // UI Only in Background
 
@@ -377,7 +378,6 @@ public sealed class ConfigOptionsPageControllerTests
 
             typeof(IntOptionRow),
             typeof(IntOptionRow),
-            typeof(FloatOptionRow),                            // UI Scale
         ];
 
         Type[] actual = controller.ConfigPage.Rows.Select(r => r.GetType()).ToArray();
@@ -936,7 +936,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void ToggleRow_UseMouseTurning_WritesTheConfigTabOwnPreference_NotTheWireBit()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (BoolOptionRow)controller.ConfigPage.Rows[36]; // Use Mouse Turning
+        var row = (BoolOptionRow)controller.ConfigPage.Rows[37]; // Use Mouse Turning
 
         row.SetCurrentValue(true);
 
@@ -947,7 +947,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontSize_WritesThroughChatBindings_WithoutTouchingHearFlags()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[38];
+        var row = (IntOptionRow)controller.ConfigPage.Rows[39];
 
         row.SetCurrentValue(3);
 
@@ -959,7 +959,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontFace_ReachesApplyChatFont_WithNoApplyButton_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[37]; // Chat Font Face
+        var row = (IntOptionRow)controller.ConfigPage.Rows[38]; // Chat Font Face
 
         row.SetCurrentValue(0);
 
@@ -970,43 +970,79 @@ public sealed class ConfigOptionsPageControllerTests
     public void MenuRow_ChatFontSize_ReachesApplyChatFont_WithNoApplyButton_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = (IntOptionRow)controller.ConfigPage.Rows[38]; // Chat Font Size
+        var row = (IntOptionRow)controller.ConfigPage.Rows[39]; // Chat Font Size
 
         row.SetCurrentValue(3);
 
         Assert.Equal((ChatSettings.Default.ChatFontFace, 3), bindings.ChatFontApplies[^1]);
     }
 
+    // The UI Scale row sits in the Graphics block straight after Potato Mode.
+    private const int UiScaleRow = 26;
+
+    [Fact]
+    public void UiScaleRow_SitsBesidePotatoMode_AndCoversFiftyToThreeHundredPercent()
+    {
+        (OptionsPanelController controller, FakeBindings bindings, _) =
+            BindReal(resolveString: (_, _) => "x");
+        var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
+        var listBox = Assert.IsType<UiTemplateListBox>(
+            UiElement.FindDescendant(configSlot, ConfigOptionsPageController.ListBoxElementId));
+        IReadOnlyList<UiElement> items = Assert.Single(listBox.Children).Children;
+
+        Assert.Equal("Potato Mode", Checkbox(items[27]).Label);
+        Assert.Equal("UI Scale (100%)", TextLine(items[28], SliderCaptionId).Text);
+        Assert.Equal("50%", TextLine(items[28], SliderRangeLowId).Text);
+        Assert.Equal("300%", TextLine(items[28], SliderRangeHighId).Text);
+        Assert.Equal("UI Only", Checkbox(items[29]).Label);
+
+        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[UiScaleRow]);
+        UiScrollbar slider = Slider(items[28]);
+        slider.ScalarChanged!(0f);
+        Assert.Equal(50f, row.Current);
+        controller.ConfigPage.Apply();
+        Assert.Equal(50, bindings.Display.UiScalePercent);
+
+        slider.ScalarChanged!(1f);
+        Assert.Equal(300f, row.Current);
+        Assert.Equal("UI Scale (300%)", TextLine(items[28], SliderCaptionId).Text);
+        controller.ConfigPage.Apply();
+        Assert.Equal(300, bindings.Display.UiScalePercent);
+        Assert.Equal([50, 300], bindings.UiScaleApplies);
+    }
+
     [Fact]
     public void UiScaleSlider_SnapsToTenPercent_ButAppliesOnlyOnApply()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[39]);
+        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[UiScaleRow]);
 
         row.SetCurrentValue(154f);
 
-        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Equal(100, bindings.Display.UiScalePercent);
         Assert.Empty(bindings.UiScaleApplies);
         Assert.Equal(150f, row.Current);
         Assert.True(controller.ConfigPage.Changed);
 
         controller.ConfigPage.Apply();
 
-        Assert.Equal(150, bindings.Chat.UiScalePercent);
+        Assert.Equal(150, bindings.Display.UiScalePercent);
         Assert.Equal([150], bindings.UiScaleApplies);
         Assert.False(controller.ConfigPage.Changed);
+        // A display setting: nothing about it is written to the chat section.
+        Assert.Empty(bindings.ChatSaves);
     }
 
     [Fact]
     public void UiScaleSlider_ResetAndDefaults_DoNotResizeUntilApply()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[39]);
+        var row = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[UiScaleRow]);
 
         row.SetCurrentValue(230f);
         controller.ConfigPage.Reset();
         Assert.Equal(100f, row.Current);
-        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Equal(100, bindings.Display.UiScalePercent);
         Assert.Empty(bindings.UiScaleApplies);
 
         row.SetCurrentValue(180f);
@@ -1016,16 +1052,16 @@ public sealed class ConfigOptionsPageControllerTests
 
         row.SetCurrentValue(180f);
         controller.ConfigPage.Apply();
-        Assert.Equal(180, bindings.Chat.UiScalePercent);
+        Assert.Equal(180, bindings.Display.UiScalePercent);
         bindings.UiScaleApplies.Clear();
 
         controller.ConfigPage.Defaults();
         Assert.Equal(100f, row.Current);
-        Assert.Equal(180, bindings.Chat.UiScalePercent);
+        Assert.Equal(180, bindings.Display.UiScalePercent);
         Assert.Empty(bindings.UiScaleApplies);
 
         controller.ConfigPage.Apply();
-        Assert.Equal(100, bindings.Chat.UiScalePercent);
+        Assert.Equal(100, bindings.Display.UiScalePercent);
         Assert.Equal([100], bindings.UiScaleApplies);
     }
 
@@ -1033,7 +1069,7 @@ public sealed class ConfigOptionsPageControllerTests
     public void ChatFontRows_ResetAndDefaults_ReachApplyChatFont_Issue72()
     {
         (OptionsPanelController controller, FakeBindings bindings, _) = BindReal();
-        var faceRow = (IntOptionRow)controller.ConfigPage.Rows[37];
+        var faceRow = (IntOptionRow)controller.ConfigPage.Rows[38];
 
         faceRow.SetCurrentValue(0);
         bindings.ChatFontApplies.Clear();
@@ -1137,8 +1173,9 @@ public sealed class ConfigOptionsPageControllerTests
             true,               // 23 Keep Distant Buildings (acdream-only)
             "High",             // 24 Graphics Profile (acdream-only)
             false,              // 25 Potato Mode (acdream-only)
-            false,              // 26 UI Only (acdream-only)
-            false,              // 27 UI Only in Background (acdream-only)
+            100f,               // 26 UI Scale (acdream-only)
+            false,              // 27 UI Only (acdream-only)
+            false,              // 28 UI Only in Background (acdream-only)
 
             0,                  // 28 Landscape Texture Detail (acdream: full; the original 2 is half size)
             1,                  // 29 Environment Texture Detail
@@ -1153,7 +1190,6 @@ public sealed class ConfigOptionsPageControllerTests
 
             2,
             1,
-            100f,               // 39 UI Scale
         ];
 
         for (int i = 0; i < rows.Count; i++)
@@ -1206,9 +1242,10 @@ public sealed class ConfigOptionsPageControllerTests
         var keep = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[23]);
         Assert.IsType<StringOptionRow>(controller.ConfigPage.Rows[24]);
         Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[25]);
-        Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[26]);
+        Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[26]);
         Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[27]);
-        Assert.IsType<IntOptionRow>(controller.ConfigPage.Rows[28]);
+        Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[28]);
+        Assert.IsType<IntOptionRow>(controller.ConfigPage.Rows[29]);
 
         var configSlot = UiElement.FindDescendant(controller.TabPanel, ConfigPageSlotId)!;
         var listBox = Assert.IsType<UiTemplateListBox>(
@@ -1480,21 +1517,24 @@ public sealed class ConfigOptionsPageControllerTests
         // The graphics profile and Potato Mode, also acdream-only and LIVE.
         (26, RowKind.Menu, false, "Graphics Profile"),
         (27, RowKind.Toggle, false, "Potato Mode"),
-        (28, RowKind.Toggle, false, "UI Only"),
-        (29, RowKind.Toggle, false, "UI Only in Background"),
+        // The interface scale, a display row beside Potato Mode. Not dimmed:
+        // it takes effect when the page is applied.
+        (28, RowKind.Slider, false, "UI Scale"),
+        (29, RowKind.Toggle, false, "UI Only"),
+        (30, RowKind.Toggle, false, "UI Only in Background"),
         // Consumed since the texture-detail port: LIVE captions, applied at
         // the next world start.
-        (32, RowKind.Menu, false, "Landscape Texture Detail"),
-        (33, RowKind.Menu, false, "Environment Texture Detail"),
-        (34, RowKind.Menu, true, "Texture Filtering"),
-        (35, RowKind.Menu, false, "Landscape Draw Distance"),
-        (36, RowKind.Toggle, false, "Building Detail Textures"),
-        (37, RowKind.Toggle, true, "Multi-Pass Alpha"),
-        (40, RowKind.Slider, false, "Mouse Look Sensitivity"),          // LIVE
-        (41, RowKind.Toggle, false, "Invert Mouselook Y Axis"),        // LIVE
-        (42, RowKind.Toggle, true, "Use Mouse Turning"),
-        (45, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
-        (46, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
+        (33, RowKind.Menu, false, "Landscape Texture Detail"),
+        (34, RowKind.Menu, false, "Environment Texture Detail"),
+        (35, RowKind.Menu, true, "Texture Filtering"),
+        (36, RowKind.Menu, false, "Landscape Draw Distance"),
+        (37, RowKind.Toggle, false, "Building Detail Textures"),
+        (38, RowKind.Toggle, true, "Multi-Pass Alpha"),
+        (41, RowKind.Slider, false, "Mouse Look Sensitivity"),          // LIVE
+        (42, RowKind.Toggle, false, "Invert Mouselook Y Axis"),        // LIVE
+        (43, RowKind.Toggle, true, "Use Mouse Turning"),
+        (46, RowKind.Menu, false, "Chat Font Face"),                  // LIVE
+        (47, RowKind.Menu, false, "Chat Font Size"),                  // LIVE
     };
 
     private static Vector4? FindTextLineColor(UiElement root, uint elementId)
@@ -1622,7 +1662,7 @@ public sealed class ConfigOptionsPageControllerTests
     {
         (OptionsPanelController controller, FakeBindings bindings, bool bound) = BindReal();
         Assert.True(bound);
-        var row = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[26]);
+        var row = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[27]);
         Assert.False(row.DefaultValue);
 
         row.SetCurrentValue(true);
@@ -1634,7 +1674,7 @@ public sealed class ConfigOptionsPageControllerTests
         row.SetCurrentValue(false);
         Assert.False(bindings.DisplaySaves[^1].UiOnly);
 
-        var background = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[27]);
+        var background = Assert.IsType<BoolOptionRow>(controller.ConfigPage.Rows[28]);
         background.SetCurrentValue(true);
         Assert.True(bindings.DisplaySaves[^1].UiOnlyWhenUnfocused);
         Assert.False(bindings.DisplaySaves[^1].UiOnly);
@@ -1973,6 +2013,114 @@ public sealed class ConfigOptionsPageControllerTests
         Assert.True(mixer.Stored.UseAuthoredPriority);
         Assert.True(priority.Selected);
         Assert.True(((BoolOptionRow)panel.ConfigPage.Rows[PriorityRow]).Current);
+    }
+
+    // The numeric slider rows share one builder: the two mixer sliders, every
+    // number a render pack declares, and UI Scale. A value handed to such a
+    // row off its step is applied snapped, and the row itself then holds the
+    // snapped value, so Changed, Reset and Defaults compare and restore what
+    // was really stored rather than the raw number.
+    [Fact]
+    public void TheMixerSliders_HoldTheSnappedValue_ThroughApplyResetAndDefaults()
+    {
+        var mixer = new FakeMixer();
+        (OptionsPanelController panel, IReadOnlyList<UiElement> items) =
+            BindWithMixer(mixer.Bindings);
+        var voices = (FloatOptionRow)panel.ConfigPage.Rows[VoicesRow];
+        var perSound = (FloatOptionRow)panel.ConfigPage.Rows[VoicesPerSoundRow];
+
+        voices.SetCurrentValue(40.4f);
+        perSound.SetCurrentValue(2.4f);
+
+        Assert.Equal(40f, voices.Current);
+        Assert.Equal(2f, perSound.Current);
+        Assert.Equal(40, mixer.Stored.VoiceCount);
+        Assert.Equal(2, mixer.Stored.MaxVoicesPerWave);
+        Assert.InRange(Slider(items[VoicesItem]).ScalarPosition, 0.499f, 0.501f);
+        Assert.True(panel.ConfigPage.Changed);
+
+        panel.ConfigPage.Apply();
+        Assert.False(panel.ConfigPage.Changed);
+
+        voices.SetCurrentValue(63.6f);
+        Assert.Equal(64f, voices.Current);
+        Assert.Equal(64, mixer.Stored.VoiceCount);
+
+        panel.ConfigPage.Reset();
+        Assert.Equal(40f, voices.Current);
+        Assert.Equal(40, mixer.Stored.VoiceCount);
+        Assert.False(panel.ConfigPage.Changed);
+
+        panel.ConfigPage.Defaults();
+        Assert.Equal((float)AudioMixerOptions.DefaultVoiceCount, voices.Current);
+        Assert.Equal(AudioMixerOptions.DefaultVoiceCount, mixer.Stored.VoiceCount);
+        Assert.Equal(AudioMixerOptions.DefaultMaxVoicesPerWave, mixer.Stored.MaxVoicesPerWave);
+    }
+
+    [Fact]
+    public void RenderPackNumberRows_HoldTheSnappedValue_ThroughApplyAndReset()
+    {
+        ImportedLayout layout = FixtureLoader.LoadOptionsPanelHost();
+        OptionsPanelController controller = OptionsPanelController.Bind(
+            layout,
+            new OptionsPanelController.Callbacks(
+                Toggle: () => { },
+                RequestExitToCharacterSelection: () => { },
+                ExitGame: () => { },
+                UseMouseTurningSettings: () => { },
+                DisplaySystemMessage: _ => { }))!;
+        var fake = new FakeBindings
+        {
+            Display = DisplaySettings.Default with
+            {
+                RenderPack = new RenderPackSelectionSettings("pack.alpha", "1.0.0", "low"),
+            },
+        };
+        var pack = new ConfigOptionsPageController.RenderPackChoice(
+            "pack.alpha", "Alpha", "1.0.0", true, null,
+            [new("low", "Low", true, null)])
+        {
+            Settings =
+            [
+                new RenderSettingDeclaration(
+                    "strength", "Strength", RenderSettingKind.Float,
+                    "0.5", 0, 1, 0.25, []),
+                new RenderSettingDeclaration(
+                    "samples", "Samples", RenderSettingKind.Integer,
+                    "2", 0, 10, 2, []),
+            ],
+        };
+        Assert.True(ConfigOptionsPageController.Bind(
+            layout,
+            controller.ConfigPage,
+            MakeTemplateResolver(),
+            (_, _) => null,
+            fake.ToBindings(new ConfigOptionsPageController.RenderPackBindings(() => [pack]))));
+
+        var strength = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[^2]);
+        var samples = Assert.IsType<FloatOptionRow>(controller.ConfigPage.Rows[^1]);
+        Assert.Equal(0.5f, strength.Current);
+        Assert.Equal(2f, samples.Current);
+
+        strength.SetCurrentValue(0.62f);
+        samples.SetCurrentValue(3.3f);
+
+        Assert.Equal(0.5f, strength.Current);
+        Assert.Equal(4f, samples.Current);
+        Assert.Equal("0.5", fake.Display.RenderPack.SettingOverrides["strength"]);
+        Assert.Equal("4", fake.Display.RenderPack.SettingOverrides["samples"]);
+
+        controller.ConfigPage.Apply();
+        Assert.False(controller.ConfigPage.Changed);
+
+        samples.SetCurrentValue(8.9f);
+        Assert.Equal(8f, samples.Current);
+        Assert.Equal("8", fake.Display.RenderPack.SettingOverrides["samples"]);
+
+        controller.ConfigPage.Reset();
+        Assert.Equal(4f, samples.Current);
+        Assert.Equal("4", fake.Display.RenderPack.SettingOverrides["samples"]);
+        Assert.False(controller.ConfigPage.Changed);
     }
 
     // The command and the row share one ceiling for the per-sound cap. When

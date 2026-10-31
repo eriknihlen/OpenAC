@@ -1086,6 +1086,8 @@ public static class ConfigOptionsPageController
                 + "Texture detail, anti-aliasing and the memory pools change at "
                 + "the next start.");
 
+        BuildUiScaleRow(listBox, page, bindings);
+
         // UI Only: the world is not drawn and the streaming window shrinks to
         // the landblocks the simulation needs; panels, chat, radar and plugins
         // keep working. For the clients of an army that nobody is looking at.
@@ -1328,36 +1330,51 @@ public static class ConfigOptionsPageController
             storeOnly: false,
             resolveSprite, datFont, debugFont);
 
-        int currentScalePercent = bindings.LoadChat().UiScalePercent;
+        chat = bindings.LoadChat();
+    }
+
+    /// <summary>
+    /// The interface scale, an acdream-only display row: every gameplay
+    /// window, its text and its controls drawn larger or smaller together.
+    /// Moving the slider only picks a value; it takes effect when the page
+    /// is applied, because rescaling the interface while the slider is being
+    /// dragged would move the slider out from under the pointer.
+    /// </summary>
+    private static void BuildUiScaleRow(
+        UiTemplateListBox listBox,
+        OptionPage page,
+        Bindings bindings)
+    {
+        int pendingPercent = bindings.LoadDisplay().UiScalePercent;
         page.BeforeApply += () =>
         {
-            if (currentScalePercent == bindings.LoadChat().UiScalePercent)
+            if (pendingPercent == bindings.LoadDisplay().UiScalePercent)
                 return;
-            bindings.SaveChat(bindings.LoadChat() with { UiScalePercent = currentScalePercent });
-            bindings.ApplyUiScale?.Invoke(currentScalePercent);
+            bindings.SaveDisplay(bindings.LoadDisplay() with { UiScalePercent = pendingPercent });
+            bindings.ApplyUiScale?.Invoke(pendingPercent);
         };
         BuildExplicitNumericSliderRow(
             listBox,
             "UI Scale",
-            min: 50,
-            max: 300,
-            step: 10,
+            min: DisplaySettings.MinimumUiScalePercent,
+            max: DisplaySettings.MaximumUiScalePercent,
+            step: DisplaySettings.UiScaleStepPercent,
             integer: true,
-            defaultValue: 100,
+            defaultValue: DisplaySettings.DefaultUiScalePercent,
             page,
-            read: () => currentScalePercent = bindings.LoadChat().UiScalePercent,
+            read: () => pendingPercent = bindings.LoadDisplay().UiScalePercent,
             apply: value =>
             {
-                currentScalePercent = (int)value;
+                pendingPercent = DisplaySettings.NormalizeUiScalePercent((int)Math.Round(value));
                 return true;
             },
-            isCurrent: () => true,
-            tooltip: "Scale gameplay frames, text, and controls together after Apply.",
+            isCurrent: static () => true,
+            tooltip:
+                "Draw every window, its text and its controls larger or smaller "
+                + "together. Takes effect when you press Apply.",
             rangeLowText: "50%",
             rangeHighText: "300%",
-            dynamicLabel: () => $"UI Scale ({currentScalePercent}%)");
-
-        chat = bindings.LoadChat();
+            dynamicLabel: () => $"UI Scale ({pendingPercent}%)");
     }
 
     // ── Row builders (shared shapes) ────────────────────────────────────

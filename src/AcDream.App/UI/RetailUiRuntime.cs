@@ -468,7 +468,8 @@ public sealed class RetailUiRuntime : IDisposable
             bindings.Toolbar.Objects));
 
         ChatSettings chatSettings = bindings.Chat.Store?.LoadChat() ?? ChatSettings.Default;
-        _requestedUiScalePercent = Math.Clamp(chatSettings.UiScalePercent, 50, 300);
+        _requestedUiScalePercent = DisplaySettings.NormalizeUiScalePercent(
+            bindings.Options.LoadDisplay().UiScalePercent);
         bindings.Host.Root.GameplayUiScale = (bindings.IsGameplayDisplay?.Invoke() ?? true)
             ? _requestedUiScalePercent / 100f
             : 1f;
@@ -1819,7 +1820,7 @@ public sealed class RetailUiRuntime : IDisposable
 
     private void ApplyUiScale(int percent)
     {
-        _requestedUiScalePercent = Math.Clamp(percent, 50, 300);
+        _requestedUiScalePercent = DisplaySettings.NormalizeUiScalePercent(percent);
         SyncGameplayUiScale();
     }
 

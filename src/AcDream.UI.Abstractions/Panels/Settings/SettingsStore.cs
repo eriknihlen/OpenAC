@@ -76,7 +76,9 @@ public sealed class SettingsStore
                 KeepDistantBuildings:    ReadBool (disp, "keepDistantBuildings",    d.KeepDistantBuildings),
                 PotatoMode:              ReadBool (disp, "potatoMode",              d.PotatoMode),
                 UiOnly:                  ReadBool (disp, "uiOnly",                  d.UiOnly),
-                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused))
+                UiOnlyWhenUnfocused:     ReadBool (disp, "uiOnlyWhenUnfocused",     d.UiOnlyWhenUnfocused),
+                UiScalePercent:          DisplaySettings.NormalizeUiScalePercent(
+                    ReadInt(disp, "uiScalePercent", d.UiScalePercent)))
             {
                 RenderPack = ReadRenderPackSelection(disp, d.RenderPack),
             };
@@ -206,8 +208,7 @@ public sealed class SettingsStore
                 DefaultOpacity:   ReadFloat(chat, "defaultOpacity",   d.DefaultOpacity),
                 ActiveOpacity:    ReadFloat(chat, "activeOpacity",    d.ActiveOpacity),
                 ChatFontFace:      ReadInt(chat, "chatFontFace",      d.ChatFontFace),
-                ChatFontSizeIndex: ReadInt(chat, "chatFontSizeIndex", d.ChatFontSizeIndex),
-                UiScalePercent: Math.Clamp(ReadInt(chat, "uiScalePercent", d.UiScalePercent), 50, 300));
+                ChatFontSizeIndex: ReadInt(chat, "chatFontSizeIndex", d.ChatFontSizeIndex));
         }
         catch (Exception ex)
         {
@@ -870,7 +871,6 @@ public sealed class SettingsStore
             ["appearOffline"]     = c.AppearOffline,
             ["chatFontFace"]      = c.ChatFontFace,
             ["chatFontSizeIndex"] = c.ChatFontSizeIndex,
-            ["uiScalePercent"] = c.UiScalePercent,
             ["chatWindow1Filter"] = c.ChatWindow1Filter,
             ["chatWindow2Filter"] = c.ChatWindow2Filter,
             ["chatWindow3Filter"] = c.ChatWindow3Filter,
@@ -906,6 +906,7 @@ public sealed class SettingsStore
             ["potatoMode"]  = d.PotatoMode,
             ["uiOnly"]      = d.UiOnly,
             ["uiOnlyWhenUnfocused"] = d.UiOnlyWhenUnfocused,
+            ["uiScalePercent"] = d.UiScalePercent,
             ["quality"]     = d.Quality.ToString(),
             ["renderPack"]  = BuildRenderPackObject(d.RenderPack),
             ["resolution"]  = d.Resolution,

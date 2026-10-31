@@ -18,8 +18,7 @@ public sealed record ChatSettings(
     float DefaultOpacity = 1.0f,
     float ActiveOpacity = 1.0f,
     int ChatFontFace = 2,
-    int ChatFontSizeIndex = 1,
-    int UiScalePercent = 100)
+    int ChatFontSizeIndex = 1)
 {
     public static ChatSettings Default { get; } = new(
         HearGeneralChat:    true,

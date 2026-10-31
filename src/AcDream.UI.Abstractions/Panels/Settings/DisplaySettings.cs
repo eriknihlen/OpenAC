@@ -130,8 +130,35 @@ public sealed record DisplaySettings(
     bool KeepDistantBuildings = true,
     bool PotatoMode = false,
     bool UiOnly = false,
-    bool UiOnlyWhenUnfocused = false)
+    bool UiOnlyWhenUnfocused = false,
+    int UiScalePercent = DisplaySettings.DefaultUiScalePercent)
 {
+    /// <summary>The smallest interface scale, in percent.</summary>
+    public const int MinimumUiScalePercent = 50;
+
+    /// <summary>The largest interface scale, in percent.</summary>
+    public const int MaximumUiScalePercent = 300;
+
+    /// <summary>The interface scale moves in steps of this many percent.</summary>
+    public const int UiScaleStepPercent = 10;
+
+    /// <summary>The interface drawn at its authored size.</summary>
+    public const int DefaultUiScalePercent = 100;
+
+    /// <summary>
+    /// A stored or requested interface scale made valid: held inside
+    /// 50..300 and moved to the nearest 10 percent step; a value exactly
+    /// between two steps goes up to the larger one.
+    /// </summary>
+    public static int NormalizeUiScalePercent(int percent)
+    {
+        int clamped = Math.Clamp(percent, MinimumUiScalePercent, MaximumUiScalePercent);
+        double steps = Math.Round(
+            (clamped - MinimumUiScalePercent) / (double)UiScaleStepPercent,
+            MidpointRounding.AwayFromZero);
+        return MinimumUiScalePercent + (int)steps * UiScaleStepPercent;
+    }
+
     public RenderPackSelectionSettings RenderPack { get; init; } =
         RenderPackSelectionSettings.Retail;
 

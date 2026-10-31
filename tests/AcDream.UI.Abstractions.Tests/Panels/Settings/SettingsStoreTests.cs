@@ -490,14 +490,39 @@ public sealed class SettingsStoreTests : System.IDisposable
     }
 
     [Fact]
-    public void UiScale_round_trips_and_defaults_to_one_hundred_percent()
+    public void UiScale_round_trips_in_the_display_section_and_defaults_to_one_hundred_percent()
     {
         var store = new SettingsStore(_tempPath);
-        Assert.Equal(100, store.LoadChat().UiScalePercent);
+        Assert.Equal(100, store.LoadDisplay().UiScalePercent);
 
-        store.SaveChat(store.LoadChat() with { UiScalePercent = 230 });
+        store.SaveDisplay(store.LoadDisplay() with { UiScalePercent = 230 });
+        // Another section's save carries the display section through untouched.
+        store.SaveChat(store.LoadChat());
 
-        Assert.Equal(230, store.LoadChat().UiScalePercent);
+        Assert.Equal(230, store.LoadDisplay().UiScalePercent);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_tempPath))!;
+        Assert.Equal(230, (int)root["display"]!["uiScalePercent"]!);
+        Assert.Null(root["chat"]!["uiScalePercent"]);
+    }
+
+    [Theory]
+    [InlineData(10, 50)]
+    [InlineData(49, 50)]
+    [InlineData(154, 150)]
+    [InlineData(156, 160)]
+    [InlineData(145, 150)]   // exactly between two steps: the larger one
+    [InlineData(155, 160)]
+    [InlineData(1000, 300)]
+    public void UiScale_read_from_a_hand_edited_file_is_held_to_the_slider_range_and_steps(
+        int written, int expected)
+    {
+        File.WriteAllText(
+            _tempPath,
+            "{\"version\":4,\"display\":{\"uiScalePercent\":"
+            + written.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + "}}");
+
+        Assert.Equal(expected, new SettingsStore(_tempPath).LoadDisplay().UiScalePercent);
     }
 
 
