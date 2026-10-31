@@ -76,8 +76,7 @@ internal sealed class RetailChargenPreviewFrameView : IChargenPreviewFrameView
         if (!_viewport.Visible || !_page.IsVisible)
             return false;
 
-        width = (int)_viewport.Width;
-        height = (int)_viewport.Height;
+        (width, height) = _viewport.RenderTargetSize;
         return true;
     }
 

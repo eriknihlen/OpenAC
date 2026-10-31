@@ -32,8 +32,16 @@ public sealed class UiRoot : UiElement
         set
         {
             _gameplayUiScale = Math.Clamp(value, 0.5f, 3f);
-            SetScreenSize(PhysicalScreenSize);
+            ReapplyScreenSize();
         }
+    }
+
+    // A canvas or scale change re-derives the logical size from the window,
+    // once a window size has been given; a root sized by hand keeps its size.
+    private void ReapplyScreenSize()
+    {
+        if (PhysicalScreenSize != Vector2.Zero)
+            SetScreenSize(PhysicalScreenSize);
     }
 
     public void SetScreenSize(Vector2 screenSize)
@@ -72,7 +80,7 @@ public sealed class UiRoot : UiElement
 
         _fixedCanvasDeclarations[owner] = size;
         FixedCanvasSize = size;
-        SetScreenSize(PhysicalScreenSize);
+        ReapplyScreenSize();
     }
 
     public void RevokeFixedCanvas(object owner)
@@ -84,14 +92,14 @@ public sealed class UiRoot : UiElement
         if (_fixedCanvasDeclarations.Count == 0)
         {
             FixedCanvasSize = null;
-            SetScreenSize(PhysicalScreenSize);
+            ReapplyScreenSize();
             return;
         }
 
         foreach (Vector2 declared in _fixedCanvasDeclarations.Values)
         {
             FixedCanvasSize = declared;
-            SetScreenSize(PhysicalScreenSize);
+            ReapplyScreenSize();
             break;
         }
     }
@@ -109,6 +117,67 @@ public sealed class UiRoot : UiElement
                 (PhysicalScreenSize.X > 0f ? PhysicalScreenSize.X : Width) / canvas.X,
                 (PhysicalScreenSize.Y > 0f ? PhysicalScreenSize.Y : Height) / canvas.Y)
             : new Vector2(_gameplayUiScale);
+
+    /// <summary>
+    /// The one conversion from window pixels to interface units: divide by
+    /// <see cref="CanvasScale"/>. Anything the world puts on the screen (a
+    /// projected creature, the pointer) is in pixels and goes through this
+    /// before it becomes an element's position; drawing multiplies by the
+    /// scale again, so it lands back on the same pixel.
+    /// </summary>
+    public Vector2 PixelToUi(Vector2 pixel)
+    {
+        Vector2 scale = CanvasScale;
+        return scale == Vector2.One ? pixel : pixel / scale;
+    }
+
+    /// <summary>
+    /// A world camera whose viewport is given in window pixels, with the
+    /// viewport measured in interface units instead. A projection is linear
+    /// in the viewport, so a point projected through the result is exactly
+    /// <see cref="PixelToUi"/> of the point projected through the original:
+    /// everything placed over the world from a projection (the target
+    /// indicator, plugin world labels, projectile markers) goes through this.
+    /// </summary>
+    public (Matrix4x4 View, Matrix4x4 Projection, Vector2 Viewport) ToUiSpace(
+        (Matrix4x4 View, Matrix4x4 Projection, Vector2 Viewport) camera)
+        => camera with { Viewport = PixelToUi(camera.Viewport) };
+
+    /// <summary>The inverse of <see cref="PixelToUi"/>: interface units to window pixels.</summary>
+    public Vector2 UiToPixel(Vector2 ui)
+    {
+        Vector2 scale = CanvasScale;
+        return scale == Vector2.One ? ui : ui * scale;
+    }
+
+    /// <summary>
+    /// A window size in pixels as the gameplay interface measures it: divided
+    /// by the interface scale, unchanged at 100% and on the fixed login
+    /// canvases. Window placements are kept in these units, so a placement
+    /// saved at one scale is projected onto the canvas of another.
+    /// </summary>
+    public (int Width, int Height) GameplayCanvasSize((int Width, int Height) pixels)
+    {
+        float scale = FixedCanvasSize is null ? _gameplayUiScale : 1f;
+        return scale == 1f
+            ? pixels
+            : ((int)(pixels.Width / scale), (int)(pixels.Height / scale));
+    }
+
+    /// <summary>
+    /// True while the gameplay interface is drawn at a scale other than 100%:
+    /// quads snap to whole pixels, and sprites are filtered smoothly only when
+    /// the scale is fractional.
+    /// </summary>
+    internal bool GameplayScaled => FixedCanvasSize is null && _gameplayUiScale != 1f;
+
+    /// <summary>
+    /// How many pixels one interface unit covers for an off-screen image
+    /// drawn into the interface (the paperdoll, examined creature and
+    /// character-creation figures): the gameplay interface scale, or 1 on a
+    /// fixed login canvas, which the interface scale does not touch.
+    /// </summary>
+    internal float GameplayRenderScale => FixedCanvasSize is null ? _gameplayUiScale : 1f;
 
     private (int x, int y) MapWindowToCanvas(int x, int y)
     {
@@ -267,26 +336,34 @@ public sealed class UiRoot : UiElement
 
     public long NowMs => _nowMs;
 
+    /// <summary>A press or release over no interface element, at the pointer's window pixel.</summary>
     public event Action<UiMouseButton, int, int, uint>? WorldMouseFallThrough;
 
     public event Action<int /*vk*/, uint /*lparam*/>? WorldKeyFallThrough;
 
+    /// <summary>A pointer move over no interface element, at its window pixel.</summary>
     public event Action<int, int>? WorldMouseMoveFallThrough;
 
     /// <summary>Raised on scroll fall-through (world zoom, etc.).</summary>
     public event Action<int /*dy*/>? WorldScrollFallThrough;
 
-    /// <summary>Raised when a drag is released over no UI element.</summary>
+    /// <summary>Raised when a drag is released over no UI element, at the release's window pixel.</summary>
     public event Action<object /*payload*/, int /*x*/, int /*y*/>? DragReleasedOutsideUi;
 
     /// <summary>Asked when a left press on the world (over no UI element) moves
     /// past the drag distance: what the press point lifts, if anything. The
     /// point is the press, not where the pointer is now, so the lift is the
-    /// object that was under the pointer when the button went down.</summary>
+    /// object that was under the pointer when the button went down. The point
+    /// is in window pixels, which is what a world pick takes.</summary>
     public Func<int /*x*/, int /*y*/, WorldDragStart?>? WorldDragRequested { get; set; }
 
     /// <summary>A left press on the world that may still become a drag.</summary>
     private bool _worldDragCandidate;
+
+    // The pointer and the last press in window pixels, before they become
+    // interface units: what the world-facing events report.
+    private int _pointerPixelX, _pointerPixelY;
+    private int _pressPixelX, _pressPixelY;
 
     /// <summary>Raised after a registered top-level window finishes moving.</summary>
     public event Action<string, UiElement>? WindowMoved;
@@ -447,16 +524,28 @@ public sealed class UiRoot : UiElement
 
     public void Draw(UiRenderContext ctx)
     {
-        ctx.TextRenderer.CanvasScale = CanvasScale;
+        Vector2 scale = CanvasScale;
+        bool gameplayScaled = GameplayScaled;
+        ctx.TextRenderer.CanvasScale = scale;
+        ctx.TextRenderer.SnapScaledQuadsToPixels = gameplayScaled;
+        ctx.TextRenderer.SmoothScaledSprites =
+            !gameplayScaled || !IsWholeNumber(scale.X) || !IsWholeNumber(scale.Y);
+        Vector2 canvasSize = ctx.CanvasSize;
+        ctx.SetCanvasSize(PixelToUi(ctx.ScreenSize));
         try
         {
             DrawCore(ctx);
         }
         finally
         {
+            ctx.SetCanvasSize(canvasSize);
             ctx.TextRenderer.CanvasScale = Vector2.One;
+            ctx.TextRenderer.SnapScaledQuadsToPixels = false;
+            ctx.TextRenderer.SmoothScaledSprites = true;
         }
     }
+
+    private static bool IsWholeNumber(float value) => value == MathF.Round(value);
 
     private void DrawCore(UiRenderContext ctx)
     {
@@ -479,6 +568,7 @@ public sealed class UiRoot : UiElement
 
     public void OnMouseMove(int x, int y)
     {
+        (_pointerPixelX, _pointerPixelY) = (x, y);
         (x, y) = MapWindowToCanvas(x, y);
         int dx = x - MouseX;
         int dy = y - MouseY;
@@ -558,7 +648,7 @@ public sealed class UiRoot : UiElement
                 || Math.Abs(y - _pressY) > DragDistanceThreshold))
         {
             _worldDragCandidate = false;
-            if (WorldDragRequested?.Invoke(_pressX, _pressY) is { } start)
+            if (WorldDragRequested?.Invoke(_pressPixelX, _pressPixelY) is { } start)
             {
                 BeginWorldDrag(start);
                 UpdateDragHover(x, y);
@@ -567,7 +657,7 @@ public sealed class UiRoot : UiElement
         }
 
         UpdateHover(x, y);
-        WorldMouseMoveFallThrough?.Invoke(x, y);
+        WorldMouseMoveFallThrough?.Invoke(_pointerPixelX, _pointerPixelY);
     }
 
     /// <summary>A drag lifted off the world has no element to start from, so the
@@ -723,6 +813,8 @@ public sealed class UiRoot : UiElement
 
     public void OnMouseDown(UiMouseButton btn, int x, int y, uint flags = 0)
     {
+        (_pointerPixelX, _pointerPixelY) = (x, y);
+        (_pressPixelX, _pressPixelY) = (x, y);
         (x, y) = MapWindowToCanvas(x, y);
         MouseX = x; MouseY = y;
         UpdateButtonFlag(btn, down: true);
@@ -761,7 +853,7 @@ public sealed class UiRoot : UiElement
         {
             if (btn == UiMouseButton.Left) SetKeyboardFocus(null);
             _worldDragCandidate = btn == UiMouseButton.Left;
-            WorldMouseFallThrough?.Invoke(btn, x, y, flags);
+            WorldMouseFallThrough?.Invoke(btn, _pointerPixelX, _pointerPixelY, flags);
             return;
         }
 
@@ -855,6 +947,7 @@ public sealed class UiRoot : UiElement
 
     public void OnMouseUp(UiMouseButton btn, int x, int y, uint flags = 0)
     {
+        (_pointerPixelX, _pointerPixelY) = (x, y);
         (x, y) = MapWindowToCanvas(x, y);
         MouseX = x; MouseY = y;
         UpdateButtonFlag(btn, down: false);
@@ -948,7 +1041,7 @@ public sealed class UiRoot : UiElement
             return;
         }
 
-        WorldMouseFallThrough?.Invoke(btn, x, y, flags);
+        WorldMouseFallThrough?.Invoke(btn, _pointerPixelX, _pointerPixelY, flags);
     }
 
     /// <summary>A vertical wheel step: +1 up, -1 down.</summary>
@@ -1348,7 +1441,7 @@ public sealed class UiRoot : UiElement
         }
         else if (payload is not null)
         {
-            DragReleasedOutsideUi?.Invoke(payload, x, y);
+            DragReleasedOutsideUi?.Invoke(payload, _pointerPixelX, _pointerPixelY);
         }
         DragSource = null;
         DragPayload = null;

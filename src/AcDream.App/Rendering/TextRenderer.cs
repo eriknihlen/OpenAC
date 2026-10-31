@@ -63,6 +63,21 @@ public sealed class TextRenderer : IDisposable
         }
     }
 
+    /// <summary>The overlay layer's runs (popups, drag ghosts), for tests.</summary>
+    internal IReadOnlyList<(uint Texture, IReadOnlyList<float> Verts)> DebugOverlaySpriteSegmentVerts
+    {
+        get
+        {
+            var result = new List<(uint, IReadOnlyList<float>)>(_overlaySegUsed);
+            for (int i = 0; i < _overlaySegUsed; i++)
+            {
+                SpriteSeg seg = _overlaySpriteSegs[i];
+                result.Add((seg.Texture, seg.Verts.ToArray()));
+            }
+            return result;
+        }
+    }
+
     internal (int VertexCount, float Alpha) DebugTextBuffer
         => (_textVerts, _textBuf.Count > 0 ? _textBuf[7] : 0f);
 
@@ -99,6 +114,21 @@ public sealed class TextRenderer : IDisposable
     }
 
     internal Vector2 CanvasScale = Vector2.One;
+
+    /// <summary>
+    /// While the canvas is scaled, snap every upright quad's edges to whole
+    /// pixels, so window-border pieces meet without a seam or a blended
+    /// half-pixel edge. Set for the gameplay interface scale; the fixed
+    /// login canvases leave it off and draw exactly as they always have.
+    /// </summary>
+    internal bool SnapScaledQuadsToPixels;
+
+    /// <summary>
+    /// While the canvas is scaled, draw sprites through their smooth-filtered
+    /// twins. Off at a whole-number gameplay scale (200%, 300%), where every
+    /// texel covers a whole block of pixels and plain filtering stays sharp.
+    /// </summary>
+    internal bool SmoothScaledSprites = true;
 
     internal Func<uint, uint>? LinearTwinResolver { get; set; }
 
@@ -216,7 +246,7 @@ public sealed class TextRenderer : IDisposable
     public void DrawSprite(uint texture, float x, float y, float w, float h,
         float u0, float v0, float u1, float v1, Vector4 tint)
     {
-        if (CanvasScale != Vector2.One && LinearTwinResolver is { } resolve)
+        if (CanvasScale != Vector2.One && SmoothScaledSprites && LinearTwinResolver is { } resolve)
             texture = resolve(texture);
 
         SpriteSeg seg = OverlayMode
@@ -239,7 +269,7 @@ public sealed class TextRenderer : IDisposable
     {
         if (polygon.Length < 3)
             return;
-        if (CanvasScale != Vector2.One && LinearTwinResolver is { } resolve)
+        if (CanvasScale != Vector2.One && SmoothScaledSprites && LinearTwinResolver is { } resolve)
             texture = resolve(texture);
 
         SpriteSeg seg = OverlayMode
@@ -296,10 +326,18 @@ public sealed class TextRenderer : IDisposable
     {
         if (CanvasScale != Vector2.One)
         {
-            x *= CanvasScale.X;
-            y *= CanvasScale.Y;
-            w *= CanvasScale.X;
-            h *= CanvasScale.Y;
+            if (SnapScaledQuadsToPixels)
+            {
+                (x, w) = SnapSpan(x, w, CanvasScale.X);
+                (y, h) = SnapSpan(y, h, CanvasScale.Y);
+            }
+            else
+            {
+                x *= CanvasScale.X;
+                y *= CanvasScale.Y;
+                w *= CanvasScale.X;
+                h *= CanvasScale.Y;
+            }
         }
         void V(float px, float py, float pu, float pv)
         {
@@ -313,6 +351,24 @@ public sealed class TextRenderer : IDisposable
         V(x,     y,     u0, v0);
         V(x,     y + h, u0, v1);
         V(x + w, y + h, u1, v1);
+    }
+
+    /// <summary>
+    /// One axis of a quad scaled and snapped: both edges are scaled and
+    /// rounded to the nearest whole pixel (halves up), so two pieces that
+    /// share an edge in interface units share it on the screen too. Something
+    /// that has a size never snaps away to nothing: below 100% a one-unit
+    /// border keeps one pixel.
+    /// </summary>
+    internal static (float Start, float Length) SnapSpan(float start, float length, float scale)
+    {
+        float first = MathF.Floor(start * scale + 0.5f);
+        float last = MathF.Floor((start + length) * scale + 0.5f);
+        if (length > 0f && last <= first)
+            last = first + 1f;
+        else if (length < 0f && last >= first)
+            last = first - 1f;
+        return (first, last - first);
     }
 
     /// <summary>Upload + draw accumulated rects + text. font may be null if only DrawRect was used.</summary>

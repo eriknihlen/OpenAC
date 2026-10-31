@@ -273,10 +273,8 @@ public sealed class RetailUiAutomationProbe
 
     private (int x, int y) CanvasToWindow(int x, int y)
     {
-        Vector2 scale = _root.CanvasScale;
-        return scale == Vector2.One
-            ? (x, y)
-            : ((int)MathF.Round(x * scale.X), (int)MathF.Round(y * scale.Y));
+        Vector2 pixel = _root.UiToPixel(new Vector2(x, y));
+        return ((int)MathF.Round(pixel.X), (int)MathF.Round(pixel.Y));
     }
 
     private void ClickAt(int x, int y)

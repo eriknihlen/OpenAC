@@ -554,7 +554,9 @@ public sealed class RetailUiRuntime : IDisposable
                 Host.WindowManager,
                 persistence?.Store,
                 persistence?.CharacterKey ?? (() => "default"),
-                () => ((int)Host.Root.EffectiveCanvasSize.X, (int)Host.Root.EffectiveCanvasSize.Y),
+                persistence is { } bound
+                    ? () => Host.Root.GameplayCanvasSize(bound.ScreenSize())
+                    : () => ((int)Host.Root.Width, (int)Host.Root.Height),
                 stateManagedVisibilityWindows:
                 [
                     WindowNames.Combat,
@@ -1463,11 +1465,23 @@ public sealed class RetailUiRuntime : IDisposable
         _vividTargetIndicator = VividTargetIndicatorController.Mount(
             Host.Root,
             _bindings.Assets,
-            _bindings.VividTarget);
+            _bindings.VividTarget with { Camera = UiSpaceCamera });
         Console.WriteLine(_vividTargetIndicator is null
             ? "[UI] vivid target indicator DAT surfaces unavailable."
             : "[UI] vivid target indicator mounted from client-enum category 0x10000009.");
     }
+
+    /// <summary>
+    /// The world camera with its viewport measured in interface units. A
+    /// projection is linear in the viewport, so projecting through this
+    /// camera is the projected pixel divided by the interface scale: the
+    /// target indicator, plugin world labels and projectile markers are
+    /// placed where the interface draws, and the draw-time scale puts them
+    /// back on the creature's pixel.
+    /// </summary>
+    private (System.Numerics.Matrix4x4 View, System.Numerics.Matrix4x4 Projection,
+        System.Numerics.Vector2 Viewport) UiSpaceCamera()
+        => Host.Root.ToUiSpace(_bindings.VividTarget.Camera());
 
     private void MountProjectileDebugOverlay()
     {
@@ -1476,7 +1490,7 @@ public sealed class RetailUiRuntime : IDisposable
         _projectileDebugOverlay = ProjectileDebugOverlayController.Mount(
             OverlayHost,
             samples,
-            _bindings.VividTarget.Camera);
+            UiSpaceCamera);
         Console.WriteLine(
             "[PluginUI] projectile collision debug overlay mounted.");
     }
@@ -1499,7 +1513,7 @@ public sealed class RetailUiRuntime : IDisposable
             font,
             labels,
             anchor,
-            _bindings.VividTarget.Camera);
+            UiSpaceCamera);
         Console.WriteLine("[PluginUI] world label overlay mounted.");
     }
 
