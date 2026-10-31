@@ -183,6 +183,33 @@ public sealed class WorldSelectionQueryTests
         }
     }
 
+    /// <summary>A refreshed description of an object carrying its public bits.</summary>
+    private static WeenieData Description(uint guid, uint publicFlags)
+        => new(
+            guid,
+            Name: null,
+            Type: null,
+            WeenieClassId: 0u,
+            IconId: 0u,
+            IconOverlayId: 0u,
+            IconUnderlayId: 0u,
+            Effects: 0u,
+            Value: null,
+            StackSize: null,
+            StackSizeMax: null,
+            Burden: null,
+            ContainerId: null,
+            WielderId: null,
+            ValidLocations: null,
+            CurrentWieldedLocation: null,
+            Priority: null,
+            ItemsCapacity: null,
+            ContainersCapacity: null,
+            Structure: null,
+            MaxStructure: null,
+            Workmanship: null,
+            PublicWeenieBitfield: publicFlags);
+
     // ── World label anchor: the height chain ────────────────────────────
     // Physics cylinder first (already scaled by its owner), then the
     // selection sphere, then the model's own bounds, then a fixed 1.1 m.
@@ -329,6 +356,9 @@ public sealed class WorldSelectionQueryTests
             new Vector3(0f, 0f, -5f),
             ItemType.Misc,
             (uint)(PublicWeenieFlags.UiHidden | PublicWeenieFlags.Stuck));
+        h.Publish(behind);
+        Assert.Equal(Wielder, h.Query.PickAtCursor(includeSelf: false));
+
         h.PublishParts((behind, behind.Position), (hidden, hidden.Position));
 
         Assert.Null(h.Query.PickAtCursor(includeSelf: false));
@@ -346,7 +376,7 @@ public sealed class WorldSelectionQueryTests
         h.Publish(target);
         Assert.Null(h.Query.PickAtCursor(includeSelf: false));
 
-        h.Objects.Get(Target)!.PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck;
+        h.Objects.Ingest(Description(Target, (uint)PublicWeenieFlags.Stuck));
 
         Assert.Equal(Target, h.Query.PickAtCursor(includeSelf: false));
     }
@@ -980,6 +1010,9 @@ public sealed class WorldSelectionQueryTests
             ItemType.MeleeWeapon,
             wielderId: Wielder,
             childRoot: Matrix4x4.CreateTranslation(0f, 0f, -5f));
+        h.Publish(wielder);
+        Assert.Equal(Wielder, h.Query.PickAtCursor(includeSelf: false));
+
         h.PublishParts(
             (wielder, wielder.Position),
             (weapon, new Vector3(0f, 0f, -5f)));
