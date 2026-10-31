@@ -303,6 +303,38 @@ public sealed class ItemInteractionPolicyTests
         Assert.Equal(ItemPolicyActionKind.PlaceInContainer, Assert.Single(placed.Actions).Kind);
     }
 
+    [Fact]
+    public void Placement_followsTheServerUnlockingAndLockingAChest()
+    {
+        // A lockpick unlock arrives as the Locked bool going false; the
+        // chest's openable bit is what placement reads, so the bool has to
+        // move it, and locking it again takes it away.
+        const uint locked = (uint)AcDream.Core.Properties.PropertyBool.Locked;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = GroundContainer,
+            Type = ItemType.Container,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+        ItemPlacementPolicyInput PlaceIntoChest()
+        {
+            ItemPolicyObject chest = Obj(GroundContainer) with
+            {
+                IsContainer = true,
+                Flags = (PublicWeenieFlags)table.Get(GroundContainer)!.PublicWeenieBitfield!.Value,
+            };
+            return Place(OwnedDirect(), chest) with { GroundObjectId = GroundContainer };
+        }
+        Assert.False(ItemInteractionPolicy.DecidePlacement(PlaceIntoChest()).ReturnValue);
+
+        Assert.True(table.UpdateBoolProperty(GroundContainer, locked, value: false));
+        Assert.True(ItemInteractionPolicy.DecidePlacement(PlaceIntoChest()).ReturnValue);
+
+        Assert.True(table.UpdateBoolProperty(GroundContainer, locked, value: true));
+        Assert.False(ItemInteractionPolicy.DecidePlacement(PlaceIntoChest()).ReturnValue);
+    }
+
     private static ItemPrimaryUseResult Determine(ItemPolicyObject item)
         => ItemInteractionPolicy.DetermineUseResult(item, Player, 0);
 

@@ -540,6 +540,33 @@ public sealed class ClientObjectTableTests
         Assert.Null(person.MonarchId);
     }
 
+    // Each of these bools is also a bit of the public description, and the
+    // update moves that bit with it, leaving every other bit alone. Locked is
+    // the inverse of openable.
+    [Theory]
+    [InlineData(PropertyBool.Stuck, PublicWeenieFlags.Stuck, false)]
+    [InlineData(PropertyBool.Locked, PublicWeenieFlags.Openable, true)]
+    [InlineData(PropertyBool.Inscribable, PublicWeenieFlags.Inscribable, false)]
+    [InlineData(PropertyBool.UiHidden, PublicWeenieFlags.UiHidden, false)]
+    [InlineData(PropertyBool.IgnoreHouseBarriers, PublicWeenieFlags.ImmuneCellRestrictions, false)]
+    [InlineData(PropertyBool.HiddenAdmin, PublicWeenieFlags.HiddenAdmin, false)]
+    public void DescriptionBoolUpdate_MovesItsDescriptionBit(
+        PropertyBool property,
+        PublicWeenieFlags bit,
+        bool inverted)
+    {
+        const uint guid = 0x7E166010u;
+        const uint other = (uint)(PublicWeenieFlags.Attackable | PublicWeenieFlags.Bindstone);
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = guid, PublicWeenieBitfield = other });
+
+        Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: !inverted));
+        Assert.Equal(other | (uint)bit, table.Get(guid)!.PublicWeenieBitfield);
+
+        Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: inverted));
+        Assert.Equal(other, table.Get(guid)!.PublicWeenieBitfield);
+    }
+
     [Fact]
     public void UiHiddenBoolUpdate_SetsAndClearsTheDescriptionsHiddenBit()
     {

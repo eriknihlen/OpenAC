@@ -195,7 +195,6 @@ public sealed class ClientObjectTable
     public const uint PlayerKillerStatusPropertyId = 134u;
     public const uint MaxStructurePropertyId = 91u;
     public const uint StructurePropertyId = 92u;
-    public const uint UiHiddenPropertyId = (uint)Properties.PropertyBool.UiHidden;
 
     public int ObjectCount => _objects.Count;
     public int ContainerCount => _containers.Count;
@@ -795,25 +794,44 @@ public sealed class ClientObjectTable
 
     /// <summary>
     /// Applies one true/false property the server changed on an object we
-    /// already hold. The UI-hidden one is also the description's hidden bit,
-    /// which decides whether the object can be picked, cycled to or shown on
-    /// the radar, so it moves the bit with it.
+    /// already hold. Some of these are also a bit of the public description,
+    /// which is what everything else reads (whether the object can be picked
+    /// or shown on the radar, whether a container can be opened), so the bit
+    /// moves with the bool. Locked is the inverse of openable: an unlock
+    /// makes a chest openable.
     /// </summary>
     public bool UpdateBoolProperty(uint itemId, uint propertyId, bool value)
     {
         if (!_objects.TryGetValue(itemId, out var item)) return false;
         ServerShowedObject(item);
         item.Properties.Bools[propertyId] = value;
-        if (propertyId == UiHiddenPropertyId)
+        if (DescriptionBitOf(propertyId) is { } described)
         {
+            uint bit = (uint)described.Bit;
+            bool set = described.Inverted ? !value : value;
             uint bitfield = item.PublicWeenieBitfield ?? 0u;
-            item.PublicWeenieBitfield = value
-                ? bitfield | (uint)PublicWeenieFlags.UiHidden
-                : bitfield & ~(uint)PublicWeenieFlags.UiHidden;
+            item.PublicWeenieBitfield = set ? bitfield | bit : bitfield & ~bit;
         }
         ObjectUpdated?.Invoke(item);
         return true;
     }
+
+    /// <summary>
+    /// The public description bit a true/false property stands for, if any,
+    /// and whether the bit is set when the property is false.
+    /// </summary>
+    private static (PublicWeenieFlags Bit, bool Inverted)? DescriptionBitOf(uint propertyId)
+        => (Properties.PropertyBool)propertyId switch
+        {
+            Properties.PropertyBool.Stuck => (PublicWeenieFlags.Stuck, false),
+            Properties.PropertyBool.Locked => (PublicWeenieFlags.Openable, true),
+            Properties.PropertyBool.Inscribable => (PublicWeenieFlags.Inscribable, false),
+            Properties.PropertyBool.UiHidden => (PublicWeenieFlags.UiHidden, false),
+            Properties.PropertyBool.IgnoreHouseBarriers =>
+                (PublicWeenieFlags.ImmuneCellRestrictions, false),
+            Properties.PropertyBool.HiddenAdmin => (PublicWeenieFlags.HiddenAdmin, false),
+            _ => null,
+        };
 
     /// <summary>
     /// Applies one instance-id property the server changed on an object we

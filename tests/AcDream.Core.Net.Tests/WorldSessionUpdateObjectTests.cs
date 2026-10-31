@@ -224,6 +224,37 @@ public sealed class WorldSessionUpdateObjectTests
             table.Get(0x50000001u)!.PublicWeenieBitfield);
     }
 
+    [Fact]
+    public void PublicLockedBoolUpdate_MakesAnUnlockedChestOpenable()
+    {
+        // A lockpick unlock is the Locked bool going false. Everything that
+        // asks whether a container can be opened or filled reads the
+        // description's openable bit, which is the inverse of Locked.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+        const uint locked = (uint)AcDream.Core.Properties.PropertyBool.Locked;
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, locked, false)));
+
+        Assert.Equal(
+            (uint)(PublicWeenieFlags.Stuck | PublicWeenieFlags.Openable),
+            table.Get(ItemGuid)!.PublicWeenieBitfield);
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildBool(PublicUpdatePropertyBool.Opcode, ItemGuid, locked, true)));
+
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(ItemGuid)!.PublicWeenieBitfield);
+    }
+
     private const uint UiHiddenBool = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
 
     private static byte[] BuildBool(uint opcode, uint? guid, uint property, bool value)
