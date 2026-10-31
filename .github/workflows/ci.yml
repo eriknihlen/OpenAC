@@ -106,9 +106,9 @@ jobs:
           done
 
   macos-portable:
-    # GitHub documents macos-14 as an Apple-silicon hosted image. Keep this
+    # GitHub documents macos-15 as an Apple-silicon hosted image. Keep this
     # hosted for pushes as well as PRs: the repository has no self-hosted Mac.
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
