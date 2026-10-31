@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           brew install molten-vk vulkan-loader
           test "$(brew info --json=v2 molten-vk | jq -r '.formulae[0].installed[] | select(.version == "1.4.2") | .version')" = 1.4.2
-          test "$(brew info --json=v2 vulkan-loader | jq -r '.formulae[0].installed[] | select(.version == "1.4.357.0") | .version')" = 1.4.357.0
+          test "$(brew info --json=v2 vulkan-loader | jq -r '.formulae[0].installed[] | select(.version == "1.4.363.0") | .version')" = 1.4.363.0
 
       - name: Build the macOS native test and launcher closures
         shell: pwsh

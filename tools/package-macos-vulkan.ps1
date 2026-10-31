@@ -12,7 +12,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsMacOS) {
 
 $expected = @{
     'molten-vk' = '1.4.2'
-    'vulkan-loader' = '1.4.357.0'
+    'vulkan-loader' = '1.4.363.0'
 }
 $client = [IO.Path]::GetFullPath($ClientDirectory)
 if (-not (Test-Path -LiteralPath $client -PathType Container)) {
