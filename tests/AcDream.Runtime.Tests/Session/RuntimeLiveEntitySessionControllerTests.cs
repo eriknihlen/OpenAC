@@ -18,6 +18,91 @@ namespace AcDream.Runtime.Tests.Session;
 public sealed class RuntimeLiveEntitySessionControllerTests
 {
     /// <summary>
+    /// A re-sent description of an item this client holds, through the
+    /// windowless client's own entity sink and the shared session route: the
+    /// item is created again, so it takes the first place in its pack. The
+    /// sink is what tells the route the item is held.
+    /// </summary>
+    [Fact]
+    public void AResentDescriptionPutsAHeldItemFirstInItsPack()
+    {
+        const uint pack = 0x500000C9u;
+        const uint item = 0x70000A03u;
+        uint[] others = [0x70000A01u, 0x70000A02u];
+        using StartedRuntime started = StartRuntime();
+        GameRuntime runtime = started.Runtime;
+        runtime.PlayerIdentity.ServerGuid = 0x50000001u;
+        using var session = new WorldSession(
+            new IPEndPoint(IPAddress.Loopback, 9000),
+            new FixtureTransport());
+        var controller = new RuntimeLiveEntitySessionController(runtime, session);
+        ClientObjectTable objects = runtime.InventoryOwner.Objects;
+        var router = new LiveSessionEventRouter(
+            session,
+            controller.CreateSink(),
+            new LiveEnvironmentSessionSink(_ => { }, _ => { }),
+            new LiveInventorySessionBindings(
+                objects,
+                () => runtime.PlayerIdentity.ServerGuid,
+                OnShortcuts: null,
+                OnUseDone: null,
+                ItemMana: null,
+                ExternalContainers: null),
+            new LiveCharacterSessionBindings(
+                new CombatState(),
+                new RuntimeCharacterState(),
+                ResolveSkillFormulaBonus: null,
+                OnSkillsUpdated: null,
+                OnConfirmationRequest: null,
+                OnConfirmationDone: null,
+                ClientTime: () => 0d),
+            new LiveSocialSessionBindings(
+                new AcDream.Core.Chat.ChatLog(),
+                new AcDream.Core.Chat.TurbineChatState(),
+                new AcDream.Core.Social.FriendsState(),
+                new AcDream.Core.Social.SquelchState()),
+            runtime.ActionOwner);
+        router.Attach();
+        try
+        {
+            WorldSession.EntitySpawn description = Spawn(item, incarnation: 1) with
+            {
+                Name = "Coalesced Aetheria",
+                ContainerId = pack,
+            };
+            SessionEvent<Action<WorldSession.EntitySpawn>>(
+                session, nameof(session.EntitySpawned))(description);
+            Assert.True(runtime.EntityObjects.IsKnown(item));
+            for (int slot = 0; slot < others.Length; slot++)
+            {
+                objects.AddOrUpdate(new ClientObject { ObjectId = others[slot] });
+                Assert.True(objects.ApplyServerMove(others[slot], pack, 0u, slot));
+            }
+            Assert.True(objects.ApplyServerMove(item, pack, 0u, 2));
+
+            SessionEvent<Action<WorldSession.EntitySpawn>>(
+                session, nameof(session.EntityDescriptionRefreshed))(
+                description with { Name = "Aetheria" });
+
+            Assert.Equal([item, others[0], others[1]], objects.GetContents(pack));
+            Assert.Equal(0, objects.Get(item)!.ContainerSlot);
+            Assert.Equal("Aetheria", objects.Get(item)!.Name);
+        }
+        finally
+        {
+            router.Dispose();
+        }
+    }
+
+    /// <summary>The handlers subscribed to one of the session's events.</summary>
+    private static TDelegate SessionEvent<TDelegate>(WorldSession session, string name)
+        where TDelegate : Delegate =>
+        Assert.IsType<TDelegate>(typeof(WorldSession)
+            .GetField(name, System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic)?
+            .GetValue(session));
+
+    /// <summary>
     /// Mutation pin: compare the header flag byte to zero instead of the
     /// packed motion word. The first accepted receipt is lost, and a packed
     /// nonzero receipt may be accepted.

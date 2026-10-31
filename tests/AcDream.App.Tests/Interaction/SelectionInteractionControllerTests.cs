@@ -1658,6 +1658,31 @@ public sealed class SelectionInteractionControllerTests
         Assert.Null(h.Selection.SelectedObjectId);
     }
 
+    // An alias (a shortcut, or a vendor, house or salvage list cell) let go
+    // over the world places nothing, so no object is looked for or pulsed.
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void AliasDragReleaseOverTheWorldPulsesNothing(ItemDragSource source)
+    {
+        var h = new Harness();
+        h.Query.Picked = Target;
+        const uint item = 0x7000_0002u;
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = item,
+            Name = "Dragged",
+            Type = ItemType.Misc,
+        });
+        var payload = new ItemDragPayload(item, source, SourceSlot: 0, new UiItemSlot());
+
+        h.Controller.PlaceDraggedItem(payload, 10f, 20f);
+
+        Assert.DoesNotContain("pulse", h.Query.Events);
+        Assert.Null(h.Selection.SelectedObjectId);
+    }
+
     [Fact]
     public void RejectedTargetModeClickConsumesTheFollowingDoubleClick()
     {

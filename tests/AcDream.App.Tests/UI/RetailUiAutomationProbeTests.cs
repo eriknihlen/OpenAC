@@ -322,6 +322,35 @@ public sealed class RetailUiAutomationProbeTests
         }
     }
 
+    // A script can name a vendor or salvage list cell as the item's source:
+    // the cell from that list is the one acted on, and a pack cell is not.
+    [Theory]
+    [InlineData("vendor", ItemDragSource.Vendor)]
+    [InlineData("salvage", ItemDragSource.Salvage)]
+    public void ScriptRunner_namesVendorAndSalvageCellsAsSources(string name, ItemDragSource kind)
+    {
+        foreach ((ItemDragSource cellKind, bool expected) in new[] { (kind, true), (ItemDragSource.Inventory, false) })
+        {
+            var (root, source, _, _, objects) = RootWithTwoItemLists();
+            source.Cell.SourceKind = cellKind;
+            bool doubleClicked = false;
+            source.Cell.DoubleClicked = () => doubleClicked = true;
+            var probe = new RetailUiAutomationProbe(root, objects);
+            string path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".ui-probe.txt");
+            File.WriteAllLines(path, new[] { $"doubleclick item 0x5001 {name}" });
+            try
+            {
+                var runner = new RetailUiAutomationScriptRunner(probe, path, dumpOnStart: false, _ => { });
+                runner.Tick(0.016);
+                Assert.Equal(expected, doubleClicked);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     [Fact]
     public void ScriptRunner_command_routesThroughInjectedClientSubmitPath()
     {

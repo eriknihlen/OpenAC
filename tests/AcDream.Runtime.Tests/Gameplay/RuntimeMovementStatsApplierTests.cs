@@ -42,7 +42,7 @@ public sealed class RuntimeMovementStatsApplierTests
                 new LiveEntitySessionSink(
                     _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
                     _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
-                    _ => { }, _ => { }),
+                    _ => { }, _ => { }, _ => false),
                 new LiveEnvironmentSessionSink(_ => { }, _ => { }),
                 new LiveInventorySessionBindings(
                     Objects,

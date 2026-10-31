@@ -42,7 +42,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             new LiveEntitySessionSink(
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
-                _ => { }, _ => { }),
+                _ => { }, _ => { }, _ => false),
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
@@ -133,7 +133,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             new LiveEntitySessionSink(
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
-                _ => { }, _ => { }),
+                _ => { }, _ => { }, _ => false),
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
@@ -1079,7 +1079,8 @@ public sealed class LiveSessionEventRouterTests : IDisposable
         DescriptionRefreshed: _ => { },
         PlayPhysicsScript: _ => { },
         PlayPhysicsScriptType: _ => { },
-        SoundEvent: _ => { });
+        SoundEvent: _ => { },
+        IsHeld: _ => false);
 
     [Fact]
     public void HouseRentNotices_RouteIntoTheSharedRuntimeOwner()
@@ -1242,7 +1243,8 @@ public sealed class LiveSessionEventRouterTests : IDisposable
                 DescriptionRefreshed: _ => { },
                 PlayPhysicsScript: _ => { },
                 PlayPhysicsScriptType: _ => { },
-                SoundEvent: _ => { }),
+                SoundEvent: _ => { },
+                IsHeld: _ => false),
             new LiveEnvironmentSessionSink(
                 EnvironChanged: _ => { },
                 ServerTimeUpdated: _ =>

@@ -457,13 +457,6 @@ AppearanceSynchronization:
         }
     }
 
-    /// <summary>
-    /// A re-sent description (0xF7DB) of an object already held deletes it
-    /// and creates it again from the full new description: its setup,
-    /// physics state, parent and position. An object still waiting to enter
-    /// the world is replaced the same way. One not held is left to the object
-    /// table.
-    /// </summary>
     /// <summary>True while an object with this id is held in the world.</summary>
     public bool IsHeld(uint guid)
     {
@@ -471,6 +464,13 @@ AppearanceSynchronization:
             return _entityObjects.IsKnown(guid);
     }
 
+    /// <summary>
+    /// A re-sent description (0xF7DB) of an object already held deletes it
+    /// and creates it again from the full new description: its setup,
+    /// physics state, parent and position. An object still waiting to enter
+    /// the world is replaced the same way. One not held is left to the object
+    /// table.
+    /// </summary>
     public bool OnDescriptionRefresh(WorldSession.EntitySpawn update)
     {
         lock (_datLock)
