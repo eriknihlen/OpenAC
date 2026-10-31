@@ -209,7 +209,7 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
-        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.SourceKind.IsAlias())
             return ItemDragAcceptance.None;
         if (!ReferenceEquals(targetList, _contentsList)
             || _openContainer == 0u)
@@ -224,6 +224,8 @@ public sealed class ExternalContainerController : IItemListDragHandler, IRetaine
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
+        if (payload.SourceKind.IsAlias())
+            return;
         InventoryContainerPlacementRejection legality = EvaluateDrop(payload.ObjId);
         if (legality != InventoryContainerPlacementRejection.None)
         {

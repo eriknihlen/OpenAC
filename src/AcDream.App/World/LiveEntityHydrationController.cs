@@ -457,6 +457,13 @@ AppearanceSynchronization:
         }
     }
 
+    /// <summary>True while an object with this id is held in the world.</summary>
+    public bool IsHeld(uint guid)
+    {
+        lock (_datLock)
+            return _entityObjects.IsKnown(guid);
+    }
+
     /// <summary>
     /// A re-sent description (0xF7DB) of an object already held deletes it
     /// and creates it again from the full new description: its setup,

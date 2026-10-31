@@ -217,7 +217,7 @@ public sealed class HousePurchaseUiController : IRetainedPanelController, IItemL
                     SlotIndex = page.List.GetNumUIItems(),
                     SpriteResolve = page.List.SpriteResolve,
                     AllowDragSource = true,
-                    SourceKind = ItemDragSource.Inventory,
+                    SourceKind = ItemDragSource.Vendor,
                     ShowTradeOverlay = true,
                     TradeOverlaySprite = TradeOverlaySprite,
                     TooltipTextResolve = id => ItemTooltipCaption.Resolve(
@@ -319,7 +319,8 @@ public sealed class HousePurchaseUiController : IRetainedPanelController, IItemL
             : ItemDragAcceptance.Reject;
 
     // A drop from the ground, a chest or a corpse still reaches the state,
-    // which refuses it with the one printed refusal. Shortcuts never do.
+    // which refuses it with the one printed refusal. An alias (a shortcut,
+    // or a vendor, house or salvage list cell) never does.
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
         if (PageFor(targetList) is not { } page

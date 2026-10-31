@@ -967,6 +967,23 @@ public sealed class ClientObjectTable
         return obj;
     }
 
+    /// <summary>
+    /// A re-sent description of an object the client holds (a revealed
+    /// Aetheria, a tinkered or tailored item). The object is deleted and
+    /// created again: deleting takes it out of its container's list, so the
+    /// container the new description names has no place for it and puts it
+    /// first among its own kind (items or packs). A re-sent item therefore
+    /// lands in its pack's top-left slot. A description that names no
+    /// container leaves the object where it is.
+    /// </summary>
+    public ClientObject IngestRecreated(WeenieData d)
+    {
+        ClientObject obj = Ingest(d);
+        if (d.ContainerId is { } containerId and not 0u)
+            ApplyServerMove(d.Guid, containerId, 0u, 0);
+        return obj;
+    }
+
     public ClientObject RecordMembership(uint guid, uint containerId = 0,
         EquipMask equip = EquipMask.None, uint? containerTypeHint = null,
         uint? priority = null)

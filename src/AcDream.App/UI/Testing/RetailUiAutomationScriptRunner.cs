@@ -981,6 +981,12 @@ public sealed class RetailUiAutomationScriptRunner : IDisposable
             case "ground":
                 source = ItemDragSource.Ground;
                 return true;
+            case "vendor":
+                source = ItemDragSource.Vendor;
+                return true;
+            case "salvage":
+                source = ItemDragSource.Salvage;
+                return true;
             default:
                 source = default;
                 return false;

@@ -254,6 +254,9 @@ public sealed class RuntimeItemInteraction : IDisposable
 
     public uint PlayerGuid => _playerGuid();
 
+    /// <summary>The vendor whose shop window is open; 0 when none.</summary>
+    public uint ActiveVendorId => _activeVendorId();
+
     public InteractionState InteractionState => _interactionState;
     public RuntimeInteractionTransactionState RuntimeTransactions =>
         _runtimeTransactions;
@@ -1548,19 +1551,20 @@ public sealed class RuntimeItemInteraction : IDisposable
     }
 
     public bool PlaceSelectedIn3D(uint itemGuid, uint targetGuid)
-        => PlaceIn3D(itemGuid, fromShortcutBar: false, targetGuid);
+        => PlaceIn3D(itemGuid, isAlias: false, targetGuid);
 
     /// <summary>
     /// Places an item into the world, either on the ground or onto another
-    /// object. A shortcut-bar slot holds an alias, not the item, so nothing
-    /// can be placed out of one.
+    /// object. A drag that only stands for the item (a shortcut-bar slot, or
+    /// a vendor, house or salvage list cell) carries no item, so nothing is
+    /// placed out of one.
     /// </summary>
     public bool PlaceIn3D(
         uint itemGuid,
-        bool fromShortcutBar,
+        bool isAlias,
         uint targetGuid)
     {
-        if (fromShortcutBar)
+        if (isAlias)
             return false;
         if (itemGuid == 0 || _objects.Get(itemGuid) is not { } item)
             return false;

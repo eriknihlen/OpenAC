@@ -140,7 +140,8 @@ public sealed class HeadlessCreatureDeathParityTests
         DescriptionRefreshed: _ => { },
         PlayPhysicsScript: _ => { },
         PlayPhysicsScriptType: _ => { },
-        SoundEvent: _ => { });
+        SoundEvent: _ => { },
+        IsHeld: _ => false);
 
     private static void FireMotion(
         WorldSession session,

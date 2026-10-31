@@ -149,6 +149,39 @@ public sealed class ShortcutDropPlannerTests
             new ShortcutEntry(0, 0u, 0u)));
     }
 
+    // An object that may not have a shortcut adds none, but the target's
+    // shortcut has already made way: it goes to the first empty slot on its
+    // right, the emptied target itself last.
+    [Fact]
+    public void RefusedDrop_AddsNothing_ButTheTargetStillMakesWayToTheRight()
+    {
+        Assert.Empty(ShortcutDropPlanner.PlanRefusedDrop(Empty(), 4, 0xA001u));
+
+        var slots = Empty();
+        slots[5] = new ShortcutEntry(5, 0xB001u, 0x11223344u);
+        Assert.Equal(new[]
+        {
+            ShortcutMutation.Remove(5),
+            ShortcutMutation.Add(new ShortcutEntry(6, 0xB001u, 0x11223344u)),
+        }, ShortcutDropPlanner.PlanRefusedDrop(slots, 5, 0xA001u));
+
+        // Its own shortcut is only taken off.
+        Assert.Equal(
+            new[] { ShortcutMutation.Remove(5) },
+            ShortcutDropPlanner.PlanRefusedDrop(slots, 5, 0xB001u));
+
+        // With every other slot full it wraps round to the target itself.
+        var full = Full();
+        full[5] = new ShortcutEntry(5, 0xB001u, 0u);
+        Assert.Equal(new[]
+        {
+            ShortcutMutation.Remove(5),
+            ShortcutMutation.Add(new ShortcutEntry(5, 0xB001u, 0u)),
+        }, ShortcutDropPlanner.PlanRefusedDrop(full, 5, 0xA001u));
+
+        Assert.Empty(ShortcutDropPlanner.PlanRefusedDrop(full, ShortcutStore.SlotCount, 0xA001u));
+    }
+
     private static ShortcutEntry?[] Empty() => new ShortcutEntry?[ShortcutStore.SlotCount];
 
     private static ShortcutEntry?[] Full()

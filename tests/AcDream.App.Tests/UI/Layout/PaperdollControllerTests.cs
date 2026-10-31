@@ -324,8 +324,11 @@ public class PaperdollControllerTests
             ctrl.OnDragOver(lists[ShieldSlot], lists[ShieldSlot].Cell, payload)); // helm → shield NO
     }
 
-    [Fact]
-    public void ShortcutAlias_isNeutral_andNeverWieldsThroughPaperdoll()
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void Alias_isNeutral_andNeverWieldsThroughPaperdoll(ItemDragSource source)
     {
         var (layout, lists) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -333,7 +336,7 @@ public class PaperdollControllerTests
         var wields = new List<(uint item, uint mask)>();
         var ctrl = Bind(layout, objects, wields);
         var payload = new ItemDragPayload(
-            0xC02u, ItemDragSource.ShortcutBar, 2, lists[HeadSlot].Cell);
+            0xC02u, source, 2, lists[HeadSlot].Cell);
 
         Assert.Equal(ItemDragAcceptance.None,
             ctrl.OnDragOver(lists[HeadSlot], lists[HeadSlot].Cell, payload));
@@ -975,8 +978,11 @@ public class PaperdollControllerTests
         Assert.Equal(ItemDragAcceptance.None, ctrl.DollDragAcceptance);
     }
 
-    [Fact]
-    public void DollDrop_ofAShortcutAlias_neverWields()
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void DollDrop_ofAnAlias_neverWields(ItemDragSource source)
     {
         var (layout, _) = BuildLayout();
         var objects = new ClientObjectTable();
@@ -985,7 +991,7 @@ public class PaperdollControllerTests
         var ctrl = Bind(layout, objects, wields, clickMap: DollClickMap());
 
         UiElement mask = DollMask(layout);
-        var payload = new ItemDragPayload(0xC13u, ItemDragSource.ShortcutBar, 2, SourceCell: null);
+        var payload = new ItemDragPayload(0xC13u, source, 2, SourceCell: null);
         DragOver(mask, HeadX, payload);
         Assert.Equal(ItemDragAcceptance.None, ctrl.DollDragAcceptance);
 

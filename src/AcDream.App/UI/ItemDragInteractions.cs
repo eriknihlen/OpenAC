@@ -24,7 +24,7 @@ public static class ItemDragInteractions
         ArgumentNullException.ThrowIfNull(payload);
         return items.PlaceIn3D(
             payload.ObjId,
-            fromShortcutBar: payload.SourceKind == ItemDragSource.ShortcutBar,
+            isAlias: payload.SourceKind.IsAlias(),
             targetGuid);
     }
 }

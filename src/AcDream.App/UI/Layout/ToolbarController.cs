@@ -453,13 +453,13 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
     }
 
     private static ItemDragAcceptance InventoryButtonDragOver(ItemDragPayload payload)
-        => payload.ObjId != 0 && payload.SourceKind != ItemDragSource.ShortcutBar
+        => payload.ObjId != 0 && !payload.SourceKind.IsAlias()
             ? ItemDragAcceptance.Accept
             : ItemDragAcceptance.None;
 
     private void HandleInventoryButtonDrop(ItemDragPayload payload)
     {
-        if (payload.ObjId == 0 || payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.ObjId == 0 || payload.SourceKind.IsAlias())
             return;
         uint player = _playerGuid?.Invoke() ?? 0u;
         if (player == 0 || _repo.Get(payload.ObjId) is null)
@@ -539,12 +539,7 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         if (itemId == 0 || _repo.Get(itemId) is not { } item)
             return false;
 
-        var flags = (PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u);
-        bool isPlayer = itemId == _itemInteraction?.PlayerGuid
-            || (flags & PublicWeenieFlags.Player) != 0;
-        if ((flags & PublicWeenieFlags.Stuck) != 0 && !isPlayer)
-            return false;
-        if ((item.Type & ItemType.Creature) != 0 && !isPlayer)
+        if (!IsShortcutEligible(item))
             return false;
         if (_itemInteraction?.IsOwnedByPlayer(itemId) != true)
             return false;
@@ -571,6 +566,27 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
         return true;
     }
 
+    private uint PlayerId() => _playerGuid?.Invoke() ?? _itemInteraction?.PlayerGuid ?? 0u;
+
+    private bool IsPlayer(ClientObject item)
+        => item.ObjectId == PlayerId()
+            || ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u) & PublicWeenieFlags.Player) != 0;
+
+    /// <summary>Whether <paramref name="item"/> may have a shortcut: it is not
+    /// stuck in place, not a creature and not in the open vendor's stock,
+    /// unless it is a player.</summary>
+    private bool IsShortcutEligible(ClientObject item)
+    {
+        var flags = (PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u);
+        bool isPlayer = IsPlayer(item);
+        if ((flags & PublicWeenieFlags.Stuck) != 0 && !isPlayer)
+            return false;
+        if ((item.Type & ItemType.Creature) != 0 && !isPlayer)
+            return false;
+        uint vendor = _itemInteraction?.ActiveVendorId ?? 0u;
+        return item.ContainerId == 0u || item.ContainerId != vendor;
+    }
+
 
     /// <inheritdoc/>
     public void OnDragLift(UiItemList sourceList, UiItemSlot sourceCell, ItemDragPayload payload)
@@ -584,20 +600,70 @@ public sealed class ToolbarController : IItemListDragHandler, IRetainedPanelCont
 
     /// <inheritdoc/>
     public ItemDragAcceptance OnDragOver(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
-        => payload.ObjId != 0 ? ItemDragAcceptance.Accept : ItemDragAcceptance.None;
+        => payload.ObjId != 0 && TakesShortcutDrop(payload)
+            ? ItemDragAcceptance.Accept
+            : ItemDragAcceptance.None;
+
+    /// <summary>Whether a slot takes the drag: an item itself, or a shortcut
+    /// moved along the bar. Any other alias (a vendor, house or salvage list
+    /// cell) is refused.</summary>
+    private static bool TakesShortcutDrop(ItemDragPayload payload)
+        => !payload.SourceKind.IsAlias() || payload.SourceKind == ItemDragSource.ShortcutBar;
 
     /// <inheritdoc/>
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
-        ShortcutDropSource source = payload.SourceKind == ItemDragSource.ShortcutBar
-            ? ShortcutDropSource.ShortcutAlias
-            : ShortcutDropSource.FreshItem;
+        if (!TakesShortcutDrop(payload))
+            return;
         ShortcutEntry dragged = payload.Shortcut
             ?? new ShortcutEntry(payload.SourceSlot, payload.ObjId, 0u);
-        ShortcutMutation[] plan = ShortcutDropPlanner.PlanDrop(
-            _store.Snapshot(), source, payload.SourceSlot, targetCell.SlotIndex, dragged);
+        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        {
+            ApplyShortcutPlan(ShortcutDropPlanner.PlanDrop(
+                _store.Snapshot(), ShortcutDropSource.ShortcutAlias,
+                payload.SourceSlot, targetCell.SlotIndex, dragged));
+            return;
+        }
+        DropFreshItem(targetCell.SlotIndex, payload, dragged);
+    }
 
-        ApplyShortcutPlan(plan);
+    /// <summary>
+    /// An item from outside the bar dropped on <paramref name="targetSlot"/>.
+    /// The slot's shortcut makes way (to the first empty slot on its right)
+    /// whatever the item is. An item that may not have a shortcut gets none;
+    /// one of the player's gets it at once; anything else (on the ground, in
+    /// an outside container) is picked up into the preferred pack first and
+    /// gets it once that request has gone out.
+    /// </summary>
+    private void DropFreshItem(int targetSlot, ItemDragPayload payload, ShortcutEntry dragged)
+    {
+        uint itemId = payload.ObjId;
+        if (itemId == 0u)
+            return;
+        IReadOnlyList<ShortcutEntry?> slots = _store.Snapshot();
+        ShortcutMutation[] refused = ShortcutDropPlanner.PlanRefusedDrop(slots, targetSlot, itemId);
+        if (_repo.Get(itemId) is not { } item || !IsShortcutEligible(item))
+        {
+            ApplyShortcutPlan(refused);
+            return;
+        }
+
+        ShortcutMutation[] taken = ShortcutDropPlanner.PlanDrop(
+            slots, ShortcutDropSource.FreshItem, payload.SourceSlot, targetSlot, dragged);
+        if (IsPlayer(item) || _repo.IsOwnedByObject(itemId, PlayerId()))
+        {
+            ApplyShortcutPlan(taken);
+            return;
+        }
+
+        // Both plans open with the slot's own shortcut coming off; it goes
+        // before the pickup is asked for, and the rest follows its outcome.
+        int lead = refused.Length > 0
+            && refused[0] == ShortcutMutation.Remove(targetSlot) ? 1 : 0;
+        ApplyShortcutPlan(refused[..lead]);
+        bool sent = _itemInteraction?.TryPlaceWorldItemInBackpack(itemId)
+            == RuntimeBackpackPlacementOutcome.Sent;
+        ApplyShortcutPlan((sent ? taken : refused)[lead..]);
     }
 
     private void ApplyShortcutPlan(IReadOnlyList<ShortcutMutation> plan)

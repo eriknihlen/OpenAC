@@ -348,4 +348,93 @@ public sealed class ClientObjectTableUpdateTests
 
         Assert.True(table.Get(Carried)!.LastAppraisalUnsuccessful);
     }
+
+    // A re-sent description re-creates the object: deleting it takes it out
+    // of its container's list, so the container has no place for it and puts
+    // it first among its own kind (items or packs). Revealing a coalesced
+    // Aetheria's sigil sends one, so the revealed Aetheria lands in its
+    // pack's top-left slot.
+    private const uint RecreatePack = 0x500000C9u;
+
+    private static WeenieData Described(uint guid, uint? container, string name = "Item") => new(
+        Guid: guid, Name: name, Type: ItemType.Misc, WeenieClassId: 2,
+        IconId: 0, IconOverlayId: 0, IconUnderlayId: 0, Effects: 0,
+        Value: null, StackSize: null, StackSizeMax: null, Burden: null,
+        ContainerId: container, WielderId: null, ValidLocations: null,
+        CurrentWieldedLocation: null, Priority: null,
+        ItemsCapacity: null, ContainersCapacity: null,
+        Structure: null, MaxStructure: null, Workmanship: null);
+
+    [Fact]
+    public void IngestRecreated_PutsTheItemFirstInItsPack()
+    {
+        uint[] items = { 0x70000A01u, 0x70000A02u, 0x70000A03u };
+        var table = new ClientObjectTable();
+        for (int slot = 0; slot < items.Length; slot++)
+        {
+            table.Ingest(Described(items[slot], RecreatePack, "Coalesced Aetheria"));
+            Assert.True(table.ApplyServerMove(items[slot], RecreatePack, 0u, slot));
+        }
+        Assert.Equal(items, table.GetContents(RecreatePack));
+        var moves = new List<ClientObjectMove>();
+        table.ObjectMoved += moves.Add;
+
+        table.IngestRecreated(Described(items[2], RecreatePack, "Aetheria"));
+
+        Assert.Equal(new[] { items[2], items[0], items[1] }, table.GetContents(RecreatePack));
+        Assert.Equal(
+            new[] { 0, 1, 2 },
+            new[] { items[2], items[0], items[1] }.Select(id => table.Get(id)!.ContainerSlot));
+        Assert.Equal("Aetheria", table.Get(items[2])!.Name);
+        ClientObjectMove moved = Assert.Single(moves);
+        Assert.Equal(items[2], moved.ItemId);
+        Assert.Equal(0, moved.Current.ContainerSlot);
+    }
+
+    [Fact]
+    public void IngestRecreated_PutsAPackFirstAmongPacks_AndLeavesTheItems()
+    {
+        const uint player = 0x50000001u;
+        const uint itemA = 0x70000B01u, itemB = 0x70000B02u;
+        const uint packA = 0x70000B11u, packB = 0x70000B12u;
+        var table = new ClientObjectTable();
+        foreach ((uint id, int slot) in new[] { (itemA, 0), (itemB, 1) })
+        {
+            table.Ingest(Described(id, player));
+            Assert.True(table.ApplyServerMove(id, player, 0u, slot));
+        }
+        foreach ((uint id, int slot) in new[] { (packA, 0), (packB, 1) })
+        {
+            table.Ingest(Described(id, player));
+            Assert.True(table.ApplyServerMove(id, player, 0u, slot, containerTypeHint: 1u));
+        }
+
+        table.IngestRecreated(Described(packB, player));
+
+        IReadOnlyList<uint> order = table.GetContents(player);
+        Assert.Equal(new[] { packB, packA }, order.Where(id => id is packA or packB));
+        Assert.Equal(new[] { itemA, itemB }, order.Where(id => id is itemA or itemB));
+        Assert.Equal(0, table.Get(packB)!.ContainerSlot);
+        Assert.Equal(1, table.Get(packA)!.ContainerSlot);
+        Assert.Equal(0, table.Get(itemA)!.ContainerSlot);
+        Assert.Equal(1, table.Get(itemB)!.ContainerSlot);
+    }
+
+    [Fact]
+    public void IngestRecreated_WithoutAContainer_KeepsWhereTheObjectIs()
+    {
+        const uint player = 0x50000001u;
+        const uint sword = 0x70000C01u;
+        var table = new ClientObjectTable();
+        table.Ingest(Described(sword, container: null));
+        Assert.True(table.ApplyServerMove(sword, 0u, player, -1, EquipMask.MeleeWeapon));
+        var moves = new List<ClientObjectMove>();
+        table.ObjectMoved += moves.Add;
+
+        table.IngestRecreated(Described(sword, container: null, "Sword"));
+
+        Assert.Equal(player, table.Get(sword)!.WielderId);
+        Assert.Equal(EquipMask.MeleeWeapon, table.Get(sword)!.CurrentlyEquippedLocation);
+        Assert.Empty(moves);
+    }
 }

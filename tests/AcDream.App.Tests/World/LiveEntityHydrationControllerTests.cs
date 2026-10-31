@@ -1049,6 +1049,123 @@ public sealed class LiveEntityHydrationControllerTests
         Assert.NotNull(fixture.Record.WorldEntity);
     }
 
+    /// <summary>
+    /// A re-sent description of an item this client holds, through the
+    /// windowed client's own entity sink and the shared session route: the
+    /// item is created again, so it takes the first place in its pack, and
+    /// the object's own re-creation that follows leaves it there. The sink is
+    /// what tells the route the item is held.
+    /// </summary>
+    [Fact]
+    public void AResentDescriptionThroughTheWindowedRoute_PutsAHeldItemFirstInItsPack()
+    {
+        const uint pack = 0x500000C9u;
+        uint[] others = [0x70000101u, 0x70000102u];
+        using var fixture = new Fixture(originKnown: true);
+        using AcDream.Runtime.GameRuntime actions = GameRuntimeTestFactory.Create();
+        using var session = new WorldSession(
+            new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 9000),
+            new NoTransport());
+        var effects = new AcDream.App.Rendering.Vfx.EntityEffectController(
+            fixture.Runtime,
+            new AcDream.Core.Vfx.PhysicsScriptRunner(
+                static _ => null,
+                new AnimationHookRouter(),
+                randomUnit: static () => 0.5),
+            new AcDream.Core.Vfx.PhysicsScriptTableResolver(static _ => null),
+            new AcDream.App.Rendering.Vfx.EntityEffectPoseRegistry());
+        // The description path never reaches the network-update controller;
+        // the sink only needs one to exist.
+        var updates = (AcDream.App.Physics.LiveEntityNetworkUpdateController)
+            System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+                typeof(AcDream.App.Physics.LiveEntityNetworkUpdateController));
+        var entities = new AcDream.App.Net.LiveEntitySessionController(
+            new RetailInboundEventDispatcher(),
+            fixture.Controller,
+            updates,
+            new DeferredLocalPlayerTeleportNetworkSink(),
+            effects);
+        var router = new AcDream.Runtime.Session.LiveSessionEventRouter(
+            session,
+            entities.CreateSink(),
+            new AcDream.Runtime.Session.LiveEnvironmentSessionSink(_ => { }, _ => { }),
+            new AcDream.Runtime.Session.LiveInventorySessionBindings(
+                fixture.Objects,
+                () => 0x50000001u,
+                OnShortcuts: null,
+                OnUseDone: null,
+                ItemMana: null,
+                ExternalContainers: null),
+            new AcDream.Runtime.Session.LiveCharacterSessionBindings(
+                new AcDream.Core.Combat.CombatState(),
+                new RuntimeCharacterState(),
+                ResolveSkillFormulaBonus: null,
+                OnSkillsUpdated: null,
+                OnConfirmationRequest: null,
+                OnConfirmationDone: null,
+                ClientTime: () => 0d),
+            new AcDream.Runtime.Session.LiveSocialSessionBindings(
+                new AcDream.Core.Chat.ChatLog(),
+                new AcDream.Core.Chat.TurbineChatState(),
+                new AcDream.Core.Social.FriendsState(),
+                new AcDream.Core.Social.SquelchState()),
+            actions.ActionOwner);
+        router.Attach();
+        try
+        {
+            WorldSession.EntitySpawn item = Spawn(Generation: 1, PositionSequence: 1)
+                with { ContainerId = pack };
+            SessionEvent<Action<WorldSession.EntitySpawn>>(
+                session, nameof(session.EntitySpawned))(item);
+            Assert.True(fixture.Controller.IsHeld(Guid));
+            for (int slot = 0; slot < others.Length; slot++)
+            {
+                fixture.Objects.AddOrUpdate(new ClientObject { ObjectId = others[slot] });
+                Assert.True(fixture.Objects.ApplyServerMove(others[slot], pack, 0u, slot));
+            }
+            Assert.True(fixture.Objects.ApplyServerMove(Guid, pack, 0u, 2));
+
+            SessionEvent<Action<WorldSession.EntitySpawn>>(
+                session, nameof(session.EntityDescriptionRefreshed))(
+                item with { Name = "Aetheria" });
+
+            Assert.Equal([Guid, others[0], others[1]], fixture.Objects.GetContents(pack));
+            Assert.Equal(0, fixture.Objects.Get(Guid)!.ContainerSlot);
+            Assert.Equal("Aetheria", fixture.Objects.Get(Guid)!.Name);
+        }
+        finally
+        {
+            router.Dispose();
+        }
+    }
+
+    /// <summary>The handlers subscribed to one of the session's events.</summary>
+    private static TDelegate SessionEvent<TDelegate>(WorldSession session, string name)
+        where TDelegate : Delegate =>
+        Assert.IsType<TDelegate>(typeof(WorldSession)
+            .GetField(name, System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic)?
+            .GetValue(session));
+
+    private sealed class NoTransport : IWorldSessionTransport
+    {
+        public void Send(ReadOnlySpan<byte> datagram) { }
+        public void Send(System.Net.IPEndPoint remote, ReadOnlySpan<byte> datagram) { }
+
+        public int Receive(Span<byte> destination, TimeSpan timeout, out System.Net.IPEndPoint? from)
+        {
+            from = null;
+            return -1;
+        }
+
+        public ValueTask<NetReceiveResult> ReceiveAsync(
+            Memory<byte> destination,
+            CancellationToken cancellationToken) =>
+            throw new OperationCanceledException(cancellationToken);
+
+        public void Dispose() { }
+    }
+
     [Fact]
     public void DescriptionRefresh_ForAnUnknownObject_IsLeftToTheObjectTable()
     {

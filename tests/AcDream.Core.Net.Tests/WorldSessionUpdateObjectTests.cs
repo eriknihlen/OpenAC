@@ -105,6 +105,41 @@ public sealed class WorldSessionUpdateObjectTests
         Assert.Equal(RendUnderlay, table.Get(ItemGuid)!.IconUnderlayId);
     }
 
+    // A re-sent description of an object the client holds deletes it and
+    // creates it again, so it takes the first place in the container the
+    // description names: a revealed Aetheria moves to its pack's top-left
+    // slot. One the client does not hold only refreshes where it is.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UpdateObject_PutsAHeldItemFirstInItsPack(bool held)
+    {
+        const uint pack = 0x500000C9u;
+        uint[] items = { 0x50000101u, 0x50000102u, ItemGuid };
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(
+            session, table, isHeld: guid => held && guid == ItemGuid);
+        for (int slot = 0; slot < items.Length; slot++)
+        {
+            table.AddOrUpdate(new ClientObject { ObjectId = items[slot], Name = "Coalesced Aetheria" });
+            Assert.True(table.ApplyServerMove(items[slot], pack, 0u, slot));
+        }
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildDescription(
+                CreateObject.UpdateOpcode,
+                name: "Aetheria",
+                containerId: pack)));
+
+        Assert.Equal("Aetheria", table.Get(ItemGuid)!.Name);
+        Assert.Equal(
+            held ? new[] { ItemGuid, items[0], items[1] } : items,
+            table.GetContents(pack));
+        Assert.Equal(held ? 0 : 2, table.Get(ItemGuid)!.ContainerSlot);
+    }
+
     [Fact]
     public void UpdateObject_WithoutAMonarch_ClearsTheMonarch()
     {
@@ -401,11 +436,13 @@ public sealed class WorldSessionUpdateObjectTests
     private static byte[] BuildDescription(
         uint opcode,
         string name,
-        uint iconUnderlayId = 0)
+        uint iconUnderlayId = 0,
+        uint guid = ItemGuid,
+        uint containerId = 0)
     {
         var bytes = new List<byte>();
         WriteU32(bytes, opcode);
-        WriteU32(bytes, ItemGuid);
+        WriteU32(bytes, guid);
 
         bytes.Add(0x11);
         bytes.Add(0);
@@ -422,7 +459,7 @@ public sealed class WorldSessionUpdateObjectTests
         uint objectDescriptionFlags = iconUnderlayId != 0 ? 0x04000000u : 0u;
         uint weenieFlags2 = iconUnderlayId != 0 ? 0x00000001u : 0u;
 
-        WriteU32(bytes, 0u);              // weenie flags
+        WriteU32(bytes, containerId != 0 ? 0x00004000u : 0u); // weenie flags
         WriteString16L(bytes, name);
         WritePackedDword(bytes, 0x1234u); // weenie class id
         WritePackedDword(bytes, 0u);      // icon
@@ -432,6 +469,8 @@ public sealed class WorldSessionUpdateObjectTests
 
         if (objectDescriptionFlags != 0)
             WriteU32(bytes, weenieFlags2);
+        if (containerId != 0)
+            WriteU32(bytes, containerId);
         if ((weenieFlags2 & 0x00000001u) != 0)
             WritePackedDword(bytes, iconUnderlayId);
         Align4(bytes);

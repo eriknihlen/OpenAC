@@ -150,7 +150,8 @@ public sealed class HeadlessSkillFormulaBindingTests
         DescriptionRefreshed: _ => { },
         PlayPhysicsScript: _ => { },
         PlayPhysicsScriptType: _ => { },
-        SoundEvent: _ => { });
+        SoundEvent: _ => { },
+        IsHeld: _ => false);
 
     // ── Fixture ───────────────────────────────────────────────────────────
 
