@@ -683,6 +683,27 @@ public sealed class ClientObjectTableTests
     }
 
     [Fact]
+    public void Ingest_FullDescriptionWithoutAMonarch_ClearsIt_APartialOneKeepsIt()
+    {
+        // A description off the wire (one that carries its header) replaces
+        // the whole description, and the server leaves the monarch out when
+        // there is none. Partial data with no header leaves it alone.
+        const uint guid = 0x500000B5u;
+        const uint monarch = 0x50000777u;
+        var fromWire = new ClientObjectHeader(
+            0u, null, 0u, 0u, 0u, null, null, null, null, null, null);
+        var table = new ClientObjectTable();
+        table.Ingest(FullWeenie(guid) with { MonarchId = monarch, Header = fromWire });
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
+
+        table.Ingest(FullWeenie(guid));
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
+
+        table.Ingest(FullWeenie(guid) with { Header = fromWire });
+        Assert.Null(table.Get(guid)!.MonarchId);
+    }
+
+    [Fact]
     public void Ingest_Existing_PatchesInPlace_PreservesPropertyBundle()
     {
         var table = new ClientObjectTable();

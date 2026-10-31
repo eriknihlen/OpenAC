@@ -932,7 +932,13 @@ public sealed class ClientObjectTable
         if (d.Workmanship is { } wm) obj.Workmanship = wm;
         if (d.MaterialType is { } materialType) obj.MaterialType = materialType;
         if (d.HouseOwnerId is { } houseOwnerId) obj.HouseOwnerId = houseOwnerId;
-        if (d.MonarchId is { } monarchId) obj.MonarchId = monarchId;
+        // A description off the wire replaces the whole description, and the
+        // server leaves the monarch out when there is none: no monarch there
+        // means the object is in no allegiance.
+        if (d.Header is not null)
+            obj.MonarchId = d.MonarchId is { } sent && sent != 0u ? sent : null;
+        else if (d.MonarchId is { } monarchId)
+            obj.MonarchId = monarchId;
         if (d.Restrictions is { } restrictions) obj.Restrictions = restrictions;
         // A full description replaces the whole header: a value it did not
         // carry is one the object no longer has on record.

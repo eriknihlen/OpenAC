@@ -105,6 +105,29 @@ public sealed class WorldSessionUpdateObjectTests
     }
 
     [Fact]
+    public void UpdateObject_WithoutAMonarch_ClearsTheMonarch()
+    {
+        // The server leaves the monarch out of a description when there is
+        // none, and a fresh description replaces the whole description, so
+        // one without a monarch means the object has left its allegiance.
+        using var session = CreateSession();
+        var table = new ClientObjectTable();
+        using IDisposable wiring = ObjectTableWiring.Wire(session, table);
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = ItemGuid,
+            Name = "Sword",
+            MonarchId = 0x50000777u,
+        });
+
+        InvokeProcessDatagram(
+            session,
+            BuildPacket(BuildDescription(CreateObject.UpdateOpcode, name: "Sword")));
+
+        Assert.Null(table.Get(ItemGuid)!.MonarchId);
+    }
+
+    [Fact]
     public void PublicDataIdUpdate_RepublishesTheItemWithItsNewOverlay()
     {
         using var session = CreateSession();
