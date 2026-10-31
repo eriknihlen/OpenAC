@@ -50,7 +50,7 @@ public sealed class DispatcherMovementInputSourceTests
     }
 
     [Fact]
-    public void RetainedKeyboardCaptureSilencesHeldKeysButDoesNotCancelAutorun()
+    public void RetainedKeyboardCaptureKeepsAHoldBegunBeforeItAndDoesNotCancelAutorun()
     {
         var (dispatcher, _, mouse) = CreateDispatcher();
         var source = CreateSource();
@@ -64,9 +64,11 @@ public sealed class DispatcherMovementInputSourceTests
         Assert.True(captured.Forward);
         Assert.True(source.AutoRunActive);
 
+        // With autorun off the hold still moves the character until let go.
         source.HandlePressedAction(InputAction.MovementRunLock);
-        captured = source.Capture();
-        Assert.False(captured.Forward);
+        Assert.True(source.Capture().Forward);
+        dispatcher.TrySetAutomationActionHeld(InputAction.MovementForward, held: false);
+        Assert.False(source.Capture().Forward);
     }
 
     [Fact]

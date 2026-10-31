@@ -14,6 +14,12 @@ public sealed class InputDispatcher : IDisposable
     private InputScope? _combatScope;
     private bool _cameraAlternateScope;
     private readonly HashSet<KeyChord> _heldHoldChords = new();
+    // The keys and buttons (mouse buttons as their chord keys) whose press the
+    // dispatcher took and that have not come up since: only these hold an
+    // action. A press the interface kept (a text field, a rebind capture, the
+    // pointer over a window) holds nothing, and one taken before a field got
+    // the keyboard holds until it is released.
+    private readonly HashSet<Key> _pressedKeys = new();
     private readonly HashSet<InputAction> _automationHeldActions = new();
     private readonly Dictionary<MouseButton, float> _mouseClickTravel = new();
     private readonly bool[] _sourceAttached = new bool[6];
@@ -119,6 +125,7 @@ public sealed class InputDispatcher : IDisposable
         _captureCallback = null;
         _captureModifierCandidate = null;
         _heldHoldChords.Clear();
+        _pressedKeys.Clear();
         _automationHeldActions.Clear();
         _mouseClickTravel.Clear();
         _cameraAlternateScope = false;
@@ -274,10 +281,17 @@ public sealed class InputDispatcher : IDisposable
 
     public KeyBindings Bindings => _bindings;
 
+    /// <summary>
+    /// True while one of the action's chords is down with its modifiers, its
+    /// key's press was taken here, and it resolves to the action in the
+    /// active scopes; or automation holds it. A held action ends when its key
+    /// comes up, not when a text field takes the keyboard: a character running
+    /// on a held key keeps running while the chat entry has the keyboard, and
+    /// a key typed into the entry moves nothing.
+    /// </summary>
     public bool IsActionHeld(InputAction action)
     {
         if (Volatile.Read(ref _active) == 0 || action == InputAction.None) return false;
-        if (_mouse.WantCaptureKeyboard) return false;
         if (_automationHeldActions.Contains(action)) return true;
         // Indexed over the binding list rather than ForAction's iterator: this
         // is polled for several actions every frame, and the iterator would
@@ -287,6 +301,7 @@ public sealed class InputDispatcher : IDisposable
         {
             Binding b = bindings[i];
             if (b.Action != action) continue;
+            if (!_pressedKeys.Contains(b.Chord.Key)) continue;
             if (!IsChordHeld(b.Chord)) continue;
             Binding? active = FindActiveHeld(b.Chord, b.Activation);
             if (active?.Action == action) return true;
@@ -412,6 +427,7 @@ public sealed class InputDispatcher : IDisposable
         }
 
         if (_mouse.ClaimsKey(key)) return;
+        _pressedKeys.Add(key);
         var chord = KeyboardChord(key, mods);
         _currentPhysicalChord = chord;
         try
@@ -448,6 +464,7 @@ public sealed class InputDispatcher : IDisposable
     private void OnKeyUp(Key key, ModifierMask mods)
     {
         if (Volatile.Read(ref _active) == 0) return;
+        _pressedKeys.Remove(key);
         if (_captureCallback is not null)
         {
             if (_captureModifierCandidate == key)
@@ -495,6 +512,7 @@ public sealed class InputDispatcher : IDisposable
             return;
         }
         if (_mouse.WantCaptureMouse) return;
+        _pressedKeys.Add(MouseButtonToKey(button));
         var chord = new KeyChord(MouseButtonToKey(button), mods, Device: 1);
 
         foreach (Binding press in FindActiveBindings(chord, ActivationType.Press))
@@ -529,6 +547,7 @@ public sealed class InputDispatcher : IDisposable
     private void OnMouseUp(MouseButton button, ModifierMask mods)
     {
         if (Volatile.Read(ref _active) == 0) return;
+        _pressedKeys.Remove(MouseButtonToKey(button));
         var chord = new KeyChord(MouseButtonToKey(button), mods, Device: 1);
         bool wasClickCandidate = _mouseClickTravel.Remove(button, out float travel);
 
