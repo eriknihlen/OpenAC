@@ -54,6 +54,20 @@ public sealed class RetailRadarTests
     }
 
     [Fact]
+    public void AnObjectHiddenFromTheUi_GetsNoBlip_TheTopBitIsNoSuchMark()
+    {
+        // Bit 0x80 of the description hides an object (traps and decoration)
+        // from the radar; an object with only the top bit set is shown.
+        var trap = RadarObjectTraits.FromPublicWeenieDescription(0x10u, 0x0000_0094u);
+        Assert.False(trap.IsValid);
+        Assert.Equal(RadarBlipShape.Undef, RetailRadar.GetBlipShape(trap));
+
+        var topBit = RadarObjectTraits.FromPublicWeenieDescription(0x10u, 0x8000_0014u);
+        Assert.True(topBit.IsValid);
+        Assert.Equal(RadarBlipShape.Default, RetailRadar.GetBlipShape(topBit));
+    }
+
+    [Fact]
     public void BlipPixelShapes_MatchRetailDrawRoutines()
     {
         AssertOffsets(RadarBlipShape.Circle, [(0, 0)]);

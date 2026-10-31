@@ -71,11 +71,11 @@ public sealed class RadarSnapshotProvider
             ? playerCoordinates.CombinedText
             : null;
 
-        uint playerPwd = spawns.TryGetValue(playerGuid, out var playerSpawn)
-            ? playerSpawn.ObjectDescriptionFlags ?? 0u
-            : 0u;
+        spawns.TryGetValue(playerGuid, out var playerSpawn);
+        ClientObject? playerObject = _objects.Get(playerGuid);
         var playerTraits = RadarObjectTraits.FromPublicWeenieDescription(
-            (uint)(_objects.Get(playerGuid)?.Type ?? ItemType.None), playerPwd);
+            (uint)(playerObject?.Type ?? ItemType.None),
+            DescriptionBits(playerObject, playerSpawn));
         float range = RetailRadar.GetRangeMeters(isOutside);
 
         _candidateScratch.Clear();
@@ -119,7 +119,7 @@ public sealed class RadarSnapshotProvider
             uint itemType = (uint)(clientObject?.Type ?? ItemType.None);
             if (itemType == 0u)
                 itemType = spawn.ItemType ?? 0u;
-            uint pwd = spawn.ObjectDescriptionFlags ?? 0u;
+            uint pwd = DescriptionBits(clientObject, spawn);
             byte colorOverride = clientObject?.RadarBlipColor ?? spawn.RadarBlipColor ?? 0;
             var traits = RadarObjectTraits.FromPublicWeenieDescription(
                 itemType, pwd, colorOverride);
@@ -170,4 +170,14 @@ public sealed class RadarSnapshotProvider
             BlankBlips: false,
             UiLocked: uiLocked);
     }
+
+    /// <summary>
+    /// The object's public description bits as they stand now. The object
+    /// table follows the server's later changes (hidden from the UI, player
+    /// killer status); the bits the object was created with are the fallback.
+    /// </summary>
+    private static uint DescriptionBits(
+        ClientObject? clientObject,
+        WorldSession.EntitySpawn spawn)
+        => clientObject?.PublicWeenieBitfield ?? spawn.ObjectDescriptionFlags ?? 0u;
 }

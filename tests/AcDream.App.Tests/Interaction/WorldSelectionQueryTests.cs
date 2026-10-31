@@ -685,6 +685,41 @@ public sealed class WorldSelectionQueryTests
         Assert.Null(h.Query.FindLastAttacker());
     }
 
+    // A trap hidden from the UI (bit 0x80 of its description) is never a
+    // candidate for the selection keys; the top bit of the field is no such
+    // mark.
+    [Fact]
+    public void SelectionKeysSkipAnObjectHiddenFromTheUi()
+    {
+        var h = new Harness();
+        const uint trap = 0x7000_0070u;
+        const uint marked = 0x7000_0071u;
+        h.Add(
+            trap,
+            new Vector3(1f, 0f, 0f),
+            ItemType.Creature,
+            publicFlags: (uint)(PublicWeenieFlags.Attackable | PublicWeenieFlags.UiHidden),
+            radarBehavior: (byte)RadarBehavior.ShowAlways);
+        h.Add(
+            marked,
+            new Vector3(2f, 0f, 0f),
+            ItemType.Creature,
+            publicFlags: (uint)PublicWeenieFlags.Attackable | 0x8000_0000u,
+            radarBehavior: (byte)RadarBehavior.ShowAlways);
+
+        foreach (RetailSelectionKind kind in new[]
+                 {
+                     RetailSelectionKind.Monster,
+                     RetailSelectionKind.CompassItem,
+                 })
+        {
+            Assert.Equal(
+                marked,
+                h.Query.FindSelectionTarget(
+                    kind, RetailSelectionDirection.Closest, anchor: null));
+        }
+    }
+
     private static WorldEntity AddMonster(Harness h, uint guid, Vector3 position)
         => h.Add(
             guid,

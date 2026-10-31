@@ -469,7 +469,7 @@ internal sealed class WorldSelectionQuery
 
         if (obj.ContainerId != 0u
             || (physicsState & PhysicsStateFlags.Cloaked) != 0
-            || (((uint)flags & 0x8000_0000u) != 0))
+            || (flags & PublicWeenieFlags.UiHidden) != 0)
             return false;
 
         return kind switch

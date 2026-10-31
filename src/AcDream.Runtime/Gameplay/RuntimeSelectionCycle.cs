@@ -41,9 +41,6 @@ public enum RuntimeSelectionCycleDirection
 /// </remarks>
 public sealed class RuntimeSelectionCycle
 {
-    /// <summary>The server's "do not show this at all" bit.</summary>
-    private const uint NeverShowFlag = 0x8000_0000u;
-
     private readonly GameRuntime _runtime;
 
     internal RuntimeSelectionCycle(GameRuntime runtime)
@@ -179,7 +176,7 @@ public sealed class RuntimeSelectionCycle
 
     /// <summary>
     /// Another person, shown on the radar, out in the world rather than in
-    /// somebody's pack, and not hidden.
+    /// somebody's pack, and not hidden (cloaked, or hidden from the UI).
     /// </summary>
     private static bool IsSelectableCharacter(
         ClientObject candidate,
@@ -188,7 +185,7 @@ public sealed class RuntimeSelectionCycle
         var flags = (PublicWeenieFlags)(candidate.PublicWeenieBitfield ?? 0u);
         if (candidate.ContainerId != 0u
             || (physicsState & PhysicsStateFlags.Cloaked) != 0
-            || ((uint)flags & NeverShowFlag) != 0)
+            || (flags & PublicWeenieFlags.UiHidden) != 0)
         {
             return false;
         }

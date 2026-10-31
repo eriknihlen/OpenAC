@@ -61,6 +61,51 @@ public sealed class RadarSnapshotProviderTests
         Assert.Equal(RadarBlipColors.Gold.Green * 0.65f, blip.Color.Y, 5);
     }
 
+    // A trap hidden from the UI has no blip, and the radar follows the server
+    // hiding or unhiding it later rather than the bits it was created with.
+    [Fact]
+    public void BuildSnapshot_LeavesOffAnObjectTheServerHidesFromTheUi()
+    {
+        const uint player = 1u;
+        const uint trap = 2u;
+        const uint uiHidden = (uint)AcDream.Core.Properties.PropertyBool.UiHidden;
+        var objects = new ClientObjectTable();
+        objects.Ingest(Weenie(player, "Player", ItemType.Creature) with
+        {
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Player,
+        });
+        objects.Ingest(Weenie(trap, "Acid", ItemType.Creature) with
+        {
+            RadarBehavior = (byte)RadarBehavior.ShowAlways,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Attackable,
+        });
+        var entities = new Dictionary<uint, WorldEntity>
+        {
+            [player] = Entity(player, Vector3.Zero, Quaternion.Identity),
+            [trap] = Entity(trap, new Vector3(0f, 15f, 0f), Quaternion.Identity),
+        };
+        var spawns = new Dictionary<uint, WorldSession.EntitySpawn>
+        {
+            [player] = Spawn(player) with { ObjectDescriptionFlags = (uint)PublicWeenieFlags.Player },
+            [trap] = Spawn(trap) with { ObjectDescriptionFlags = (uint)PublicWeenieFlags.Attackable },
+        };
+        var provider = new RadarSnapshotProvider(
+            objects, new RadarEntities(() => entities), () => spawns,
+            playerGuid: () => player,
+            playerYawRadians: () => 0f,
+            playerCellId: () => 0xA9B40001u,
+            selectedGuid: () => null,
+            coordinatesOnRadar: () => false,
+            uiLocked: () => false);
+        Assert.Equal(trap, Assert.Single(provider.BuildSnapshot().Blips).ObjectId);
+
+        Assert.True(objects.UpdateBoolProperty(trap, uiHidden, value: true));
+        Assert.Empty(provider.BuildSnapshot().Blips);
+
+        Assert.True(objects.UpdateBoolProperty(trap, uiHidden, value: false));
+        Assert.Equal(trap, Assert.Single(provider.BuildSnapshot().Blips).ObjectId);
+    }
+
     // OpenAC #47: a fellow's blip and the leader's blip take their own
     // colours; another player at the same range keeps the default colour.
     [Fact]
