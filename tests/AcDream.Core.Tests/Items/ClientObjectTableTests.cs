@@ -704,6 +704,25 @@ public sealed class ClientObjectTableTests
     }
 
     [Fact]
+    public void Ingest_DescriptionThatSaysItHasAMonarchButWasCutShort_KeepsTheMonarch()
+    {
+        // The description's header says a monarch follows (0x40), but the
+        // value never arrived: that is no word that the monarch is gone.
+        const uint guid = 0x500000B6u;
+        const uint monarch = 0x50000777u;
+        var table = new ClientObjectTable();
+        table.Ingest(FullWeenie(guid) with { MonarchId = monarch });
+
+        table.Ingest(FullWeenie(guid) with
+        {
+            Header = new ClientObjectHeader(
+                0x40u, null, 0u, 0u, 0u, null, null, null, null, null, null),
+        });
+
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
+    }
+
+    [Fact]
     public void Ingest_Existing_PatchesInPlace_PreservesPropertyBundle()
     {
         var table = new ClientObjectTable();
