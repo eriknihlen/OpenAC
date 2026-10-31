@@ -998,37 +998,28 @@ public sealed class CharacterCreationUiControllerTests
         Assert.Equal(ChargenShadeSlot.Skin, environment.Runtime.LastShadeSlot);
     }
 
-    [Fact]
-    public void AppearancePage_WithoutClothes_ANoseSpinPickedBeforeGoesBackToTheHair()
+    [Theory]
+    [InlineData((uint)ChargenHeritageGroup.Gearknight, true)]
+    [InlineData((uint)ChargenHeritageGroup.Olthoi, true)]
+    [InlineData((uint)ChargenHeritageGroup.OlthoiAcid, true)]
+    [InlineData((uint)ChargenHeritageGroup.Aluvian, false)]
+    public void AppearancePage_TheSkinSpinTakesTheNoseSpinsPlace_OnlyWithoutClothes(
+        uint heritageId, bool withoutNose)
     {
         using var environment = new EnvironmentHarness();
         environment.Controller.Open();
-        SelectAluvianMale(environment);
-        environment.Button(CharacterCreationAppearancePage.NoseSpinId).OnClick!();
-
-        environment.Runtime.SelectHeritageDirect(OlthoiId);
-        BumpRevisionAndTick(environment);
-        environment.ShadeScroll().ScalarChanged!(0.5f);
-
-        Assert.Equal(ChargenShadeSlot.Hair, environment.Runtime.LastShadeSlot);
-    }
-
-    [Fact]
-    public void AppearancePage_WithoutClothes_TheSkinSpinMovesUpIntoTheNosesPlace_AndBack()
-    {
-        using var environment = new EnvironmentHarness();
-        environment.Controller.Open();
-        SelectAluvianMale(environment);
         UiButton skin = environment.Button(CharacterCreationAppearancePage.SkinSpinId);
-        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
 
-        environment.Runtime.SelectHeritageDirect(OlthoiId);
+        // From a heritage of the other kind first, so each row is a move.
+        environment.Runtime.SelectHeritageDirect(withoutNose ? AluvianId : OlthoiId);
         BumpRevisionAndTick(environment);
-        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTopWithoutNose), (skin.Left, skin.Top));
+        environment.Runtime.SelectHeritageDirect(heritageId);
+        BumpRevisionAndTick(environment);
 
-        environment.Runtime.SelectHeritageDirect(AluvianId);
-        BumpRevisionAndTick(environment);
-        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+        float expectedTop = withoutNose
+            ? CharacterCreationAppearancePage.SkinSpinTopWithoutNose
+            : CharacterCreationAppearancePage.SkinSpinTop;
+        Assert.Equal((0f, expectedTop), (skin.Left, skin.Top));
     }
 
     [Fact]

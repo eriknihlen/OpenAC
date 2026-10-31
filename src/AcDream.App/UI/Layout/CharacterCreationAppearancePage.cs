@@ -243,16 +243,9 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
             skinSpin.ResetAnchorCapture();
         }
         SetArrowsEnabled(Part.Eyes, !clothesHidden);
-        // A change's refresh lets go only of a choice or part this heritage
-        // does not offer; the eyes and skin spins stay picked while their
-        // colour and shade change. The full page update puts these
-        // heritages back on the hair.
-        if (clothesHidden
-            && (_currentChoice == Choice.Clothes || !IsOfferedWithoutClothes(_currentPart)))
-        {
-            _currentChoice = Choice.Face;
-            _currentPart = Part.Hair;
-        }
+        // The choice and part stay as picked: only the full page update puts
+        // a heritage without clothes back on the face, so the eyes and skin
+        // spins stay picked while their colour and shade change.
         ApplyChoiceVisibility();
 
         // GF-6: heritage-flavored, index-independent — no gender needed.
@@ -904,9 +897,6 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
         heritageId == (uint)ChargenHeritageGroup.Gearknight
         || heritageId == (uint)ChargenHeritageGroup.Olthoi
         || heritageId == (uint)ChargenHeritageGroup.OlthoiAcid;
-
-    private static bool IsOfferedWithoutClothes(Part part) =>
-        part is Part.Hair or Part.Eyes or Part.Skin;
 
     private static bool TryGetGender(
         IRuntimeCharacterCreationView view,

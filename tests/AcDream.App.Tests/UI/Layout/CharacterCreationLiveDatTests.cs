@@ -1447,8 +1447,13 @@ public sealed class CharacterCreationLiveDatTests
             $"blank template has {blankCounts.black} black pixels, expected far fewer than the spot's {spotCounts.black}");
     }
 
-    [InstalledDatFact]
-    public void AppearancePage_SkinSpin_TakesTheAuthoredNoseSpinsPlace_ForAHeritageWithoutClothes()
+    [InstalledDatTheory]
+    [InlineData((uint)ChargenHeritageGroup.Gearknight, true)]
+    [InlineData((uint)ChargenHeritageGroup.Olthoi, true)]
+    [InlineData((uint)ChargenHeritageGroup.OlthoiAcid, true)]
+    [InlineData((uint)ChargenHeritageGroup.Aluvian, false)]
+    public void AppearancePage_SkinSpin_TakesTheAuthoredNoseSpinsPlace_ForAHeritageWithoutClothes(
+        uint heritageId, bool withoutNose)
     {
         using var dats = new DatCollection(DatDirectory, DatAccessType.Read);
         uint layoutId = RetailDataIdResolver.Resolve(
@@ -1483,13 +1488,16 @@ public sealed class CharacterCreationLiveDatTests
             () => { });
         using var page = new CharacterCreationAppearancePage(appearanceRoot, bindings);
 
-        view.Show((uint)ChargenHeritageGroup.Olthoi);
+        // From a heritage of the other kind first, so each row is a move.
+        view.Show(withoutNose ? (uint)ChargenHeritageGroup.Aluvian : (uint)ChargenHeritageGroup.Olthoi);
         page.Refresh(view, view.Snapshot);
-        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTopWithoutNose), (skin.Left, skin.Top));
+        view.Show(heritageId);
+        page.Refresh(view, view.Snapshot);
 
-        view.Show((uint)ChargenHeritageGroup.Aluvian);
-        page.Refresh(view, view.Snapshot);
-        Assert.Equal((0f, CharacterCreationAppearancePage.SkinSpinTop), (skin.Left, skin.Top));
+        float expectedTop = withoutNose
+            ? CharacterCreationAppearancePage.SkinSpinTopWithoutNose
+            : CharacterCreationAppearancePage.SkinSpinTop;
+        Assert.Equal((0f, expectedTop), (skin.Left, skin.Top));
     }
 
     private sealed class AppearanceView(ChargenOptions options) : IRuntimeCharacterCreationView
