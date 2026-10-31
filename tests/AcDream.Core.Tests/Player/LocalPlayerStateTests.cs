@@ -276,6 +276,25 @@ public sealed class LocalPlayerStateTests
     }
 
     [Fact]
+    public void GetMaxApprox_HealthAddsTwoPerEnlightenmentBeforeVitae()
+    {
+        var book = new Spellbook(SpellTable.Create([TestSpell(1u)]));
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: 0.95f, Bucket: 4u));
+        var s = new LocalPlayerState(book);
+        var properties = new PropertyBundle();
+        properties.Ints[(uint)PropertyInt.Enlightenment] = 4;
+        s.OnProperties(properties);
+        s.OnVitalUpdate(vitalId: 1u, ranks: 100u, start: 0u, xp: 0u, current: 103u);
+        s.OnVitalUpdate(vitalId: 3u, ranks: 100u, start: 0u, xp: 0u, current: 95u);
+
+        // (100 + 4 x 2) x 0.95 = 102.6, shown as 103; stamina has no such term.
+        Assert.Equal(108u, s.GetBaseMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(103u, s.GetMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(95u, s.GetMaxApprox(LocalPlayerState.VitalKind.Stamina));
+    }
+
+    [Fact]
     public void GetMaxApprox_HealthRoundsHalfEnduranceAndIncludesGearMaxHealth()
     {
         var s = new LocalPlayerState();

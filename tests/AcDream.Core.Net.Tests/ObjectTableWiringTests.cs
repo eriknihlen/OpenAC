@@ -2,6 +2,7 @@ using AcDream.Core.Items;
 using AcDream.Core.Net;
 using AcDream.Core.Net.Messages;
 using AcDream.Core.Player;
+using AcDream.Core.Properties;
 
 namespace AcDream.Core.Net.Tests;
 
@@ -142,6 +143,30 @@ public sealed class ObjectTableWiringTests
         Assert.Equal(75_000L, table.Get(playerGuid)!.Properties.GetInt64(2u));
         Assert.Equal(75_000L, localPlayer.Properties.GetInt64(2u));
         Assert.Equal(1, tableChanges);
+        Assert.Equal(1, playerChanges);
+    }
+
+    [Fact]
+    public void ApplyPlayerIntPropertyUpdate_ReachesTheLocalPlayersMaxHealth()
+    {
+        const uint playerGuid = 0x50000001u;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = playerGuid });
+
+        var localPlayer = new LocalPlayerState();
+        localPlayer.OnProperties(new PropertyBundle());
+        localPlayer.OnVitalUpdate(vitalId: 7u, ranks: 0u, start: 100u, xp: 0u, current: 100u);
+        int playerChanges = 0;
+        localPlayer.CharacterChanged += () => playerChanges++;
+
+        ObjectTableWiring.ApplyPlayerIntPropertyUpdate(
+            table,
+            localPlayer,
+            playerGuid,
+            new WorldSession.PlayerIntPropertyUpdate((uint)PropertyInt.GearMaxHealth, 12));
+
+        Assert.Equal(12, table.Get(playerGuid)!.Properties.GetInt((uint)PropertyInt.GearMaxHealth));
+        Assert.Equal(112u, localPlayer.GetMaxApprox(LocalPlayerState.VitalKind.Health));
         Assert.Equal(1, playerChanges);
     }
 

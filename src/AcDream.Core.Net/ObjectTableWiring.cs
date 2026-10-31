@@ -35,8 +35,8 @@ public static class ObjectTableWiring
         Action<WorldSession.PlayerIntPropertyUpdate> playerIntUpdated = u =>
         {
             if (accepting?.Invoke() == false) return;
-            if (playerGuid is not null)
-                table.UpdateIntProperty(playerGuid(), u.Property, u.Value);
+            ApplyPlayerIntPropertyUpdate(
+                table, localPlayer, playerGuid?.Invoke() ?? 0u, u);
         };
         session.PlayerIntPropertyUpdated += playerIntUpdated;
         subscriptions.Add(() => session.PlayerIntPropertyUpdated -= playerIntUpdated);
@@ -197,6 +197,19 @@ public static class ObjectTableWiring
             wire.LandblockId,
             new System.Numerics.Vector3(wire.X, wire.Y, wire.Z),
             new System.Numerics.Quaternion(wire.Qx, wire.Qy, wire.Qz, wire.Qw));
+
+    // The player's own ints feed both the object table and the local
+    // player's numbers (the gear Max Health rating changes on every equip).
+    internal static void ApplyPlayerIntPropertyUpdate(
+        ClientObjectTable table,
+        LocalPlayerState? localPlayer,
+        uint playerGuid,
+        WorldSession.PlayerIntPropertyUpdate update)
+    {
+        if (playerGuid != 0u)
+            table.UpdateIntProperty(playerGuid, update.Property, update.Value);
+        localPlayer?.OnIntPropertyUpdate(update.Property, update.Value);
+    }
 
     internal static void ApplyPlayerInt64PropertyUpdate(
         ClientObjectTable table,

@@ -243,7 +243,7 @@ public sealed class LocalPlayerState
         return vital.Value.Ranks
             + vital.Value.Start
             + AttributeContribution(kind, effective: false)
-            + GearHealthBonus(kind);
+            + HealthBonus(kind);
     }
 
     private uint? GetMaxBeforeSecondaryEnchantments(VitalKind kind)
@@ -253,7 +253,7 @@ public sealed class LocalPlayerState
         return vital.Value.Ranks
             + vital.Value.Start
             + AttributeContribution(kind, effective: true)
-            + GearHealthBonus(kind);
+            + HealthBonus(kind);
     }
 
     public int GetVitalVitaeModifier(VitalKind kind)
@@ -367,6 +367,12 @@ public sealed class LocalPlayerState
         _properties = properties.Clone();
         HasDescription = true;
         DescriptionRevision++;
+        CharacterChanged?.Invoke();
+    }
+
+    public void OnIntPropertyUpdate(uint propertyId, int value)
+    {
+        _properties.Ints[propertyId] = value;
         CharacterChanged?.Invoke();
     }
 
@@ -500,10 +506,13 @@ public sealed class LocalPlayerState
         return value > 0 ? (uint)value : 0u;
     }
 
-    private uint GearHealthBonus(VitalKind kind)
+    // Health also counts the gear Max Health rating and 2 per Enlightenment
+    // level, both before the vital spells and vitae, as the server does.
+    private uint HealthBonus(VitalKind kind)
     {
         if (kind != VitalKind.Health) return 0u;
-        int value = _properties.GetInt((uint)PropertyInt.GearMaxHealth);
-        return value > 0 ? (uint)value : 0u;
+        int gear = _properties.GetInt((uint)PropertyInt.GearMaxHealth);
+        int enlightenment = _properties.GetInt((uint)PropertyInt.Enlightenment);
+        return (gear > 0 ? (uint)gear : 0u) + (enlightenment > 0 ? 2u * (uint)enlightenment : 0u);
     }
 }
