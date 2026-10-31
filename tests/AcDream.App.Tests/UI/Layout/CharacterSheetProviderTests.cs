@@ -374,7 +374,7 @@ public sealed class CharacterSheetProviderTests
         h.Player.OnAttributeUpdate(atType: 1u, ranks: 100u, start: 100u, xp: 0u);   // Strength, base 200
         h.Book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: 1u, StatModValue: 1.1f, Bucket: 1u));
 
         var sheet = h.Provider.BuildSheet();
@@ -487,7 +487,7 @@ public sealed class CharacterSheetProviderTests
 
         h.Book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: 1u, StatModValue: 1.1f, Bucket: 1u));
 
         Assert.True(changed >= 1);                              // live-refresh notice fired

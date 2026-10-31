@@ -103,7 +103,7 @@ public sealed class SpellbookTests
             LayerId: 7u,
             Duration: 300f,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.SecondAtt | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: EnchantmentMath.StatKey.MaxHealth,
             StatModValue: 1.5f,
             Bucket: 1u));
@@ -132,7 +132,7 @@ public sealed class SpellbookTests
             LayerId: 7u,
             Duration: 300f,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.SecondAtt | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: EnchantmentMath.StatKey.MaxHealth,
             StatModValue: 1.25f,
             Bucket: 1u));
@@ -142,6 +142,10 @@ public sealed class SpellbookTests
             book.GetVitalMod(EnchantmentMath.StatKey.MaxHealth).Multiplier);
     }
 
+    // The records below tie exactly (same category, power and start), so
+    // the list order decides: the list is walked from its head and the later
+    // challenger takes an exact tie.
+
     [Fact]
     public void LiveEnchantments_NewIdentityInsertsAtRetailListHead()
     {
@@ -149,7 +153,8 @@ public sealed class SpellbookTests
         book.OnEnchantmentAdded(Effect(1u, layer: 1u, category: 12u));
         book.OnEnchantmentAdded(Effect(2u, layer: 2u, category: 12u));
 
-        Assert.Equal(2u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
+        // List [2, 1]: the record that arrived first is the challenger.
+        Assert.Equal(1u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
     }
 
     [Fact]
@@ -160,7 +165,8 @@ public sealed class SpellbookTests
         book.OnEnchantmentAdded(Effect(2u, layer: 2u, category: 12u));
         book.OnEnchantmentAdded(Effect(1u, layer: 1u, category: 12u));
 
-        Assert.Equal(2u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
+        // Still [2, 1]; moving the refresh to the head would make it [1, 2].
+        Assert.Equal(1u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
     }
 
     [Fact]
@@ -174,7 +180,35 @@ public sealed class SpellbookTests
             [],
             0x3FFFu);
 
-        Assert.Equal(1u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
+        // [1, 2] as received.
+        Assert.Equal(2u, Assert.Single(book.EnchantmentsInEffectSnapshot).SpellId);
+    }
+
+    [Fact]
+    public void StatQueriesWalkTheListsInTheirOrder()
+    {
+        static ActiveEnchantmentRecord Health(uint spellId, float value) =>
+            Effect(spellId, layer: spellId, category: 12u) with
+            {
+                StatModType = (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt | 0x8000u,
+                StatModKey = EnchantmentMath.StatKey.MaxHealth,
+                StatModValue = value,
+                Bucket = 2u,
+            };
+
+        var live = new Spellbook();
+        live.OnEnchantmentAdded(Health(1u, 10f));
+        live.OnEnchantmentAdded(Health(2u, 20f));
+        Assert.Equal(10f, live.GetVitalMod(EnchantmentMath.StatKey.MaxHealth).Additive);
+
+        var manifest = new Spellbook();
+        manifest.ReplaceManifest(
+            new Dictionary<uint, float>(),
+            [Health(1u, 10f), Health(2u, 20f)],
+            [],
+            [],
+            0x3FFFu);
+        Assert.Equal(20f, manifest.GetVitalMod(EnchantmentMath.StatKey.MaxHealth).Additive);
     }
 
     [Fact]

@@ -58,8 +58,7 @@ public sealed class Spellbook
         }
 
         EnchantmentMath.VitalMod calculated = EnchantmentMath.GetMod(
-            ActiveEnchantments,
-            _table,
+            StatEnchantmentsInListOrder(),
             statKey,
             EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
             includeVitae: true);
@@ -77,8 +76,7 @@ public sealed class Spellbook
         }
 
         EnchantmentMath.VitalMod calculated = EnchantmentMath.GetMod(
-            ActiveEnchantments,
-            _table,
+            StatEnchantmentsInListOrder(),
             attributeId,
             EnchantmentMath.EnchantmentTypeFlag.Attribute,
             includeVitae: false);
@@ -96,7 +94,7 @@ public sealed class Spellbook
         }
 
         EnchantmentMath.VitalMod calculated =
-            EnchantmentMath.GetSkillMod(ActiveEnchantments, _table, skillId);
+            EnchantmentMath.GetSkillMod(StatEnchantmentsInListOrder(), skillId);
         _skillModCache.Add(skillId, calculated);
         return calculated;
     }
@@ -425,6 +423,20 @@ public sealed class Spellbook
         _skillModCache.Clear();
         EnchantmentsChanged?.Invoke();
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// The multiplicative, additive and vitae records, each list head to
+    /// tail: the order the stat math takes them in, which decides exact
+    /// stacking ties.
+    /// </summary>
+    private List<ActiveEnchantmentRecord> StatEnchantmentsInListOrder()
+    {
+        var ordered = new List<ActiveEnchantmentRecord>(_activeById.Count);
+        AppendBucket(bucket: 1u, ordered);
+        AppendBucket(bucket: 2u, ordered);
+        AppendBucket(bucket: 4u, ordered);
+        return ordered;
     }
 
     private void AppendBucket(uint bucket, List<ActiveEnchantmentRecord> destination)
