@@ -61,8 +61,7 @@ public sealed class UiHost : System.IDisposable
     public void Draw(Vector2 screenSize)
     {
         // Set UiRoot bounds to full screen so HitTestTopDown works.
-        Root.Width = screenSize.X;
-        Root.Height = screenSize.Y;
+        Root.SetScreenSize(screenSize);
         UiRenderContext ctx = _renderContext;
         ctx.Begin(screenSize, DefaultFont);
         TextRenderer.Begin(screenSize);

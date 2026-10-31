@@ -21,6 +21,29 @@ public sealed class UiRoot : UiElement
 
     public Vector2? FixedCanvasSize { get; set; }
 
+    /// <summary>Physical viewport size, before gameplay UI scaling.</summary>
+    public Vector2 PhysicalScreenSize { get; private set; }
+
+    private float _gameplayUiScale = 1f;
+
+    public float GameplayUiScale
+    {
+        get => _gameplayUiScale;
+        set
+        {
+            _gameplayUiScale = Math.Clamp(value, 0.5f, 3f);
+            SetScreenSize(PhysicalScreenSize);
+        }
+    }
+
+    public void SetScreenSize(Vector2 screenSize)
+    {
+        PhysicalScreenSize = screenSize;
+        float scale = FixedCanvasSize is null ? _gameplayUiScale : 1f;
+        Width = screenSize.X / scale;
+        Height = screenSize.Y / scale;
+    }
+
     private readonly Dictionary<object, Vector2> _fixedCanvasDeclarations = new();
 
     public void DeclareFixedCanvas(object owner, Vector2 size)
@@ -49,6 +72,7 @@ public sealed class UiRoot : UiElement
 
         _fixedCanvasDeclarations[owner] = size;
         FixedCanvasSize = size;
+        SetScreenSize(PhysicalScreenSize);
     }
 
     public void RevokeFixedCanvas(object owner)
@@ -60,12 +84,14 @@ public sealed class UiRoot : UiElement
         if (_fixedCanvasDeclarations.Count == 0)
         {
             FixedCanvasSize = null;
+            SetScreenSize(PhysicalScreenSize);
             return;
         }
 
         foreach (Vector2 declared in _fixedCanvasDeclarations.Values)
         {
             FixedCanvasSize = declared;
+            SetScreenSize(PhysicalScreenSize);
             break;
         }
     }
@@ -76,9 +102,13 @@ public sealed class UiRoot : UiElement
             : new Vector2(Width, Height);
 
     public Vector2 CanvasScale =>
-        FixedCanvasSize is { X: > 0f, Y: > 0f } canvas && Width > 0f && Height > 0f
-            ? new Vector2(Width / canvas.X, Height / canvas.Y)
-            : Vector2.One;
+        FixedCanvasSize is { X: > 0f, Y: > 0f } canvas
+            && (PhysicalScreenSize.X > 0f || Width > 0f)
+            && (PhysicalScreenSize.Y > 0f || Height > 0f)
+            ? new Vector2(
+                (PhysicalScreenSize.X > 0f ? PhysicalScreenSize.X : Width) / canvas.X,
+                (PhysicalScreenSize.Y > 0f ? PhysicalScreenSize.Y : Height) / canvas.Y)
+            : new Vector2(_gameplayUiScale);
 
     private (int x, int y) MapWindowToCanvas(int x, int y)
     {
