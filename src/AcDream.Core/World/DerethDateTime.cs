@@ -90,6 +90,19 @@ public static class DerethDateTime
         return h >= (int)HourName.Dawnsong && h <= (int)HourName.WarmtideAndHalf;
     }
 
+    /// <summary>
+    /// An hour's name as players read it: "Dawnsong", a second half
+    /// "Morntide-and-Half".
+    /// </summary>
+    public static string HourText(HourName hour)
+    {
+        string name = hour.ToString();
+        const string suffix = "AndHalf";
+        return name.EndsWith(suffix, StringComparison.Ordinal)
+            ? string.Concat(name.AsSpan(0, name.Length - suffix.Length), "-and-Half")
+            : name;
+    }
+
     public readonly record struct Calendar(int Year, MonthName Month, int Day, HourName Hour);
 
     public static Calendar ToCalendar(double ticks)

@@ -6,6 +6,16 @@ namespace AcDream.Core.Tests.World;
 [Collection(DerethDateTimeCollection.Name)]
 public sealed class DerethDateTimeTests
 {
+    [Theory]
+    [InlineData(DerethDateTime.HourName.Darktide, "Darktide")]
+    [InlineData(DerethDateTime.HourName.MorntideAndHalf, "Morntide-and-Half")]
+    [InlineData(DerethDateTime.HourName.GloamingAndHalf, "Gloaming-and-Half")]
+    public void HourText_SpellsTheSecondHalfWithHyphens(
+        DerethDateTime.HourName hour,
+        string expected)
+    {
+        Assert.Equal(expected, DerethDateTime.HourText(hour));
+    }
 
     [Fact]
     public void DayFraction_AtTick0_IsMorntideAndHalf()

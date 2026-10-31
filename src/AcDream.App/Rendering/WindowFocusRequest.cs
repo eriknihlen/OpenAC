@@ -4,10 +4,15 @@ using Silk.NET.Windowing;
 namespace AcDream.App.Rendering;
 
 /// <summary>
-/// Brings a window to the front with the keyboard. A desktop may refuse:
-/// Wayland gives focus only to a request it handed a token for, and some X11
-/// window managers prevent focus stealing. The window then stays where it
-/// opened, as it would without the request, and the refusal is logged.
+/// Asks for a window opened onto a playing session to come to the front with
+/// the keyboard. GLFW already asks once when it shows a new window; this asks
+/// again once the window has joined the session. The desktop decides either
+/// way: Windows lets a process take the foreground only while it is allowed
+/// to, Wayland gives focus only to a request it handed a token for, and some
+/// X11 window managers prevent focus stealing. A refused request leaves the
+/// window where it opened and is not reported (Windows refuses without an
+/// error); only an error GLFW itself raises is logged, so it cannot end the
+/// window's start.
 /// </summary>
 internal static class WindowFocusRequest
 {
@@ -19,9 +24,9 @@ internal static class WindowFocusRequest
         {
             window.Focus();
         }
-        catch (GlfwException refused)
+        catch (GlfwException error)
         {
-            log($"window: the desktop kept the keyboard elsewhere ({refused.Message})");
+            log($"window: asking for the keyboard failed ({error.Message})");
         }
     }
 }

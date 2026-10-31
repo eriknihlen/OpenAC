@@ -1,3 +1,4 @@
+using AcDream.App.Input;
 using AcDream.App.Rendering.Vfx;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Streaming;
@@ -6,6 +7,7 @@ using AcDream.Content;
 using AcDream.Core.Physics;
 using AcDream.Core.Vfx;
 using AcDream.Core.World;
+using AcDream.Runtime;
 using Silk.NET.Windowing;
 
 namespace AcDream.App.Rendering;
@@ -15,15 +17,15 @@ internal sealed class RuntimeRenderFrameTitleFactsSource : IRenderFrameTitleFact
     private readonly GpuWorldState _world;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
     private readonly WorldTimeService _time;
-    private readonly AcDream.Runtime.GameRuntime _runtime;
-    private readonly AcDream.App.Input.ILocalPlayerIdentitySource _player;
+    private readonly GameRuntime _runtime;
+    private readonly ILocalPlayerIdentitySource _player;
 
     public RuntimeRenderFrameTitleFactsSource(
         GpuWorldState world,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
         WorldTimeService time,
-        AcDream.Runtime.GameRuntime runtime,
-        AcDream.App.Input.ILocalPlayerIdentitySource player)
+        GameRuntime runtime,
+        ILocalPlayerIdentitySource player)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));

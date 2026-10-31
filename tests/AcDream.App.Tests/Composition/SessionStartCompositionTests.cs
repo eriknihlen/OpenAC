@@ -23,6 +23,20 @@ public sealed class SessionStartCompositionTests
     }
 
     [Fact]
+    public void AWindowStartingTheSession_DoesNotAskForTheFront()
+    {
+        // The window the player's own launch opened already has the keyboard.
+        int broughtToFront = 0;
+        var phase = new SessionStartCompositionPhase(new SessionStartDependencies(
+            static _ => { },
+            JoinPlayingSession: static () => false,
+            BringWindowToFront: () => broughtToFront++));
+
+        Assert.False(phase.TryJoinPlayingSession());
+        Assert.Equal(0, broughtToFront);
+    }
+
+    [Fact]
     public void DiagnosticsPreserveMissingCredentialAndFailureMessagesOnly()
     {
         var messages = new List<string>();

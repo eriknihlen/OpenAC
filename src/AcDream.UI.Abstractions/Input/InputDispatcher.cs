@@ -251,8 +251,10 @@ public sealed class InputDispatcher : IDisposable
     /// <summary>
     /// True while the keyboard is going into text rather than driving the
     /// character - the chat entry or another text field has it, or a rebind
-    /// capture is open. Every gameplay binding is suppressed while it is set,
-    /// so automation that steers by holding keys has to ask first.
+    /// capture is open. While it is set no new press reaches a gameplay
+    /// binding and an automation hold cannot begin, so automation that steers
+    /// by holding keys has to ask first; a key or automation hold that began
+    /// before it goes on until it is released.
     /// </summary>
     public bool WantsTextInput =>
         _captureCallback is not null || _mouse.WantCaptureKeyboard;
@@ -383,6 +385,9 @@ public sealed class InputDispatcher : IDisposable
 
     public void Tick()
     {
+        // The repeat ticks of hold bindings pause while a text field has the
+        // keyboard, though the hold itself stays held (IsActionHeld) and its
+        // release still fires when the key comes up.
         if (Volatile.Read(ref _active) == 0 || _mouse.WantCaptureKeyboard) return;
 
         // Snapshot to avoid issues if a subscriber mutates _heldHoldChords.

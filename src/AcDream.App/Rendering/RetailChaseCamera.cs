@@ -12,7 +12,7 @@ public sealed class RetailChaseCamera : ICamera
     // In play the default view is scaled by 1.1 (2.75 m back, 0.825 m up).
     // Only the default view takes it: look-down, map and leaving the head
     // keep their unscaled offsets.
-    internal const float DefaultViewScale = 1.1f;
+    private const float DefaultViewScale = 1.1f;
     private const float DefaultViewBack = RetailDefaultBack * DefaultViewScale;
     private const float DefaultViewUp = RetailDefaultUp * DefaultViewScale;
     private const float RetailLookDownBack = 2f;

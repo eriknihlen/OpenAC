@@ -217,16 +217,7 @@ public sealed class MapPageController
     }
 
     internal static string FormatDateTime(DerethDateTime.Calendar calendar) =>
-        $"Date: {calendar.Month} {calendar.Day}, {calendar.Year} P.Y.\nTime: {FormatHourName(calendar.Hour)}";
-
-    internal static string FormatHourName(DerethDateTime.HourName hour)
-    {
-        string name = hour.ToString();
-        const string suffix = "AndHalf";
-        return name.EndsWith(suffix, StringComparison.Ordinal)
-            ? string.Concat(name.AsSpan(0, name.Length - suffix.Length), "-and-Half")
-            : name;
-    }
+        $"Date: {calendar.Month} {calendar.Day}, {calendar.Year} P.Y.\nTime: {DerethDateTime.HourText(calendar.Hour)}";
 
     private void RefreshCoordinatesAndPlayerMarker()
     {

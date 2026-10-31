@@ -30,14 +30,23 @@ internal sealed class SessionStartCompositionPhase
     public void Start(FrameRootResult frame)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        if (_dependencies.JoinPlayingSession?.Invoke() == true)
-        {
-            _dependencies.BringWindowToFront?.Invoke();
+        if (TryJoinPlayingSession())
             return;
-        }
         RuntimeSessionStartResult result =
             frame.GameRuntime.Session.Start(frame.GameRuntime.Generation);
         Report(result, _dependencies.Log);
+    }
+
+    /// <summary>
+    /// Joins a session already playing without this window, which then asks
+    /// for the front; false when there is none and the window starts one.
+    /// </summary>
+    internal bool TryJoinPlayingSession()
+    {
+        if (_dependencies.JoinPlayingSession?.Invoke() != true)
+            return false;
+        _dependencies.BringWindowToFront?.Invoke();
+        return true;
     }
 
     internal static void Report(

@@ -1,7 +1,6 @@
 using System.Globalization;
 using AcDream.Core.World;
 using AcDream.App.Rendering.Packs;
-using AcDream.App.UI.Layout;
 using AcDream.Runtime.Session;
 
 namespace AcDream.App.Rendering;
@@ -264,7 +263,7 @@ internal sealed class RenderFrameDiagnosticsController :
     }
 
     /// <summary>The program and its version, as the title names them.</summary>
-    internal static string Product => $"OpenAC {ProductVersion}";
+    internal static readonly string Product = $"OpenAC {ProductVersion}";
 
     /// <summary>
     /// The window title: whose window it is and, in the world, how the frames
@@ -293,7 +292,7 @@ internal sealed class RenderFrameDiagnosticsController :
             + $"landblocks {visibleLandblocks} of {totalLandblocks} drawn | "
             + $"objects {facts.EntityCount}, {facts.AnimatedEntityCount} animated | "
             + $"PY {calendar.Year} {calendar.Month} {calendar.Day}, "
-            + $"{MapPageController.FormatHourName(calendar.Hour)}");
+            + $"{DerethDateTime.HourText(calendar.Hour)}");
     }
 
     internal static string FormatGpuStream(RenderFrameResourceDiagnosticsSnapshot snapshot)
