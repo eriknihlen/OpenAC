@@ -30,6 +30,16 @@ public sealed class UiRenderContext
     public BitmapFont? DefaultFont { get; set; }
     public Vector2 ScreenSize { get; private set; }
 
+    /// <summary>
+    /// The whole window in interface units: what a popup's unbounded clip
+    /// opens up to. It is the screen size until the root says the interface
+    /// is drawn scaled; at 50% a 1920-pixel window is 3840 units wide.
+    /// </summary>
+    internal Vector2 CanvasSize { get; private set; }
+
+    /// <summary>Sets <see cref="CanvasSize"/> for the frame being drawn.</summary>
+    internal void SetCanvasSize(Vector2 canvasSize) => CanvasSize = canvasSize;
+
     private readonly System.Collections.Generic.List<Vector2> _stack = new();
     private Vector2 _current;
     private readonly System.Collections.Generic.List<UiClipRect?> _clipStack = new();
@@ -69,6 +79,7 @@ public sealed class UiRenderContext
     public void Begin(Vector2 screenSize, BitmapFont? defaultFont)
     {
         ScreenSize = screenSize;
+        CanvasSize = screenSize;
         DefaultFont = defaultFont;
         _stack.Clear();
         _current = default;
@@ -125,7 +136,7 @@ public sealed class UiRenderContext
     public void PushClipUnbounded()
     {
         _clipStack.Add(_clip);
-        _clip = new UiClipRect(0f, 0f, ScreenSize.X, ScreenSize.Y);
+        _clip = new UiClipRect(0f, 0f, CanvasSize.X, CanvasSize.Y);
     }
 
     /// <summary>

@@ -5,6 +5,7 @@ using AcDream.Core.Net.Messages;
 using AcDream.Core.Physics;
 using AcDream.Core.Physics.Motion;
 using AcDream.Core.Properties;
+using AcDream.Core.Selection;
 using AcDream.Runtime.Entities;
 using AcDream.Runtime.Physics;
 
@@ -68,7 +69,9 @@ public enum HostileTargetScope
 /// The hostile-monster view a client scans. Every entry point answers the
 /// same predicate for a given <see cref="HostileTargetScope"/>, so a caller
 /// can never pick a target that <see cref="IsHostile"/> would then refuse at
-/// the same scope.
+/// the same scope. At the selectable scope the scans are stricter still: they
+/// pass over what the selection keys skip, which <see cref="IsHostile"/> and
+/// the attack check do not.
 /// </summary>
 public static class RuntimeHostileTargetQuery
 {
@@ -89,6 +92,21 @@ public static class RuntimeHostileTargetQuery
         return scope == HostileTargetScope.Classified
             || CanBeSeenAndIsAlive(record, runtime);
     }
+
+    /// <summary>
+    /// What a scan for a monster to select also passes over: a cloaked
+    /// creature and one hidden from the UI, the two the selection keys skip.
+    /// Only the scans apply it. A creature like that the player already has
+    /// selected may still be attacked, and is still a hostile to the walk.
+    /// </summary>
+    private static bool ScanPassesOver(
+        RuntimeEntityRecord record,
+        ClientObject? candidate,
+        HostileTargetScope scope)
+        => scope == HostileTargetScope.Selectable
+            && SelectionEligibility.IsHiddenFromSelection(
+                record.FinalPhysicsState,
+                candidate?.PublicWeenieBitfield);
 
     /// <summary>
     /// The two terms a person picking a target expects of anything they pick:
@@ -177,7 +195,8 @@ public static class RuntimeHostileTargetQuery
                     record,
                     candidate,
                     runtime,
-                    scope))
+                    scope)
+                || ScanPassesOver(record, candidate, scope))
             {
                 continue;
             }
@@ -259,14 +278,16 @@ public static class RuntimeHostileTargetQuery
         foreach (RuntimeEntityRecord record
             in runtime.EntityObjects.Entities.ActiveRecords)
         {
+            ClientObject? candidate = objects.Get(record.ServerGuid);
             if (!TryGetWorld(record, out Vector3 targetWorld)
                 || !IsEligible(
                     playerGuid,
                     player,
                     record,
-                    objects.Get(record.ServerGuid),
+                    candidate,
                     runtime,
-                    scope))
+                    scope)
+                || ScanPassesOver(record, candidate, scope))
             {
                 continue;
             }

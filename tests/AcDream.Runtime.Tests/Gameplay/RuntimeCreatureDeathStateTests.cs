@@ -287,7 +287,8 @@ public sealed class RuntimeCreatureDeathStateTests
         DescriptionRefreshed: _ => { },
         PlayPhysicsScript: _ => { },
         PlayPhysicsScriptType: _ => { },
-        SoundEvent: _ => { });
+        SoundEvent: _ => { },
+        IsHeld: _ => false);
 
     internal static void FireMotion(
         WorldSession session,

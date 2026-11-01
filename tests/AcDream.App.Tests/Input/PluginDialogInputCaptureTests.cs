@@ -106,12 +106,35 @@ public sealed class PluginDialogInputCaptureTests
         Assert.True(h.Mouse.WantCaptureKeyboard);
         Assert.True(h.Mouse.ClaimsKey(Key.W));
         Assert.True(h.Mouse.ClaimsKey(Key.Enter));
-        Assert.False(h.Dispatcher.IsActionHeld(InputAction.MovementForward));
         h.Fired.Clear();
         h.Press(Key.F9);
         h.Press(Key.Escape);   // claimed by the dispatcher check before the field lets go of focus
         Assert.Empty(h.Fired);
         Assert.Equal(0, f9);
+    }
+
+    [Fact]
+    public void AKeyHeldWhenAFieldTakesTheKeyboardKeepsMovingUntilReleased()
+    {
+        // Clicking the chat entry while running: the run goes on until the
+        // key comes up, and a key typed into the field moves nothing.
+        var h = new Harness();
+        var field = new UiField { Left = 10f, Top = 10f, Width = 200f, Height = 20f };
+        h.Root.AddChild(field);
+        h.Down(Key.W);
+
+        h.Root.SetKeyboardFocus(field);
+
+        Assert.True(h.Mouse.WantCaptureKeyboard);
+        Assert.True(h.Dispatcher.IsActionHeld(InputAction.MovementForward));
+        h.Up(Key.W);
+        Assert.False(h.Dispatcher.IsActionHeld(InputAction.MovementForward));
+
+        h.Down(Key.W);
+        Assert.False(h.Dispatcher.IsActionHeld(InputAction.MovementForward));
+        h.Root.SetKeyboardFocus(null);
+        Assert.False(h.Mouse.WantCaptureKeyboard);
+        Assert.False(h.Dispatcher.IsActionHeld(InputAction.MovementForward));
     }
 
     private sealed class Harness

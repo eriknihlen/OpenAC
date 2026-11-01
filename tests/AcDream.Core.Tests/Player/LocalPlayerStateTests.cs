@@ -157,7 +157,7 @@ public sealed class LocalPlayerStateTests
             LayerId: 1u,
             Duration: 60d,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | MultiplicativeBit,
             StatModKey: 1u,
             StatModValue: 0.99999f,
             Bucket: 1u));
@@ -183,7 +183,7 @@ public sealed class LocalPlayerStateTests
             LayerId: 1u,
             Duration: 60d,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt | AdditiveBit,
             StatModKey: EnchantmentMath.StatKey.MaxHealth,
             StatModValue: 0.75f,
             Bucket: 2u));
@@ -206,9 +206,9 @@ public sealed class LocalPlayerStateTests
     {
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
-            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: 0.97f, Bucket: 4u));
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.97f, Bucket: 4u));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
-            2u, 2u, 60d, 0u, StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
+            2u, 2u, 60d, 0u, StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt | AdditiveBit,
             StatModKey: key, StatModValue: 23f, Bucket: 2u));
         var state = new LocalPlayerState(book);
         state.OnVitalUpdate(key, 180u, 0u, 0u, 198u);
@@ -228,7 +228,7 @@ public sealed class LocalPlayerStateTests
     {
         var book = new Spellbook(SpellTable.Create([TestSpell(1u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
-            1u, 1u, -1d, 0u, StatModType: 0u, StatModKey: 0u, StatModValue: vitae, Bucket: 4u));
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: vitae, Bucket: 4u));
         var state = new LocalPlayerState(book);
         state.OnVitalUpdate(1u, baseValue, 0u, 0u, 0u);
         Assert.Equal(maximum, state.GetMaxApprox(LocalPlayerState.VitalKind.Health));
@@ -244,7 +244,7 @@ public sealed class LocalPlayerStateTests
             LayerId: 1u,
             Duration: 60d,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | AdditiveBit,
             StatModKey: 2u, // Endurance
             StatModValue: 15f,
             Bucket: 2u));
@@ -253,7 +253,7 @@ public sealed class LocalPlayerStateTests
             LayerId: 2u,
             Duration: 60d,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | AdditiveBit,
             StatModKey: 6u, // Self
             StatModValue: 15f,
             Bucket: 2u));
@@ -273,6 +273,25 @@ public sealed class LocalPlayerStateTests
         Assert.Equal(1f, s.HealthPercent);
         Assert.Equal(1f, s.StaminaPercent);
         Assert.Equal(1f, s.ManaPercent);
+    }
+
+    [Fact]
+    public void GetMaxApprox_HealthAddsTwoPerEnlightenmentBeforeVitae()
+    {
+        var book = new Spellbook(SpellTable.Create([TestSpell(1u)]));
+        book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.95f, Bucket: 4u));
+        var s = new LocalPlayerState(book);
+        var properties = new PropertyBundle();
+        properties.Ints[(uint)PropertyInt.Enlightenment] = 4;
+        s.OnProperties(properties);
+        s.OnVitalUpdate(vitalId: 1u, ranks: 100u, start: 0u, xp: 0u, current: 103u);
+        s.OnVitalUpdate(vitalId: 3u, ranks: 100u, start: 0u, xp: 0u, current: 95u);
+
+        // (100 + 4 x 2) x 0.95 = 102.6, shown as 103; stamina has no such term.
+        Assert.Equal(108u, s.GetBaseMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(103u, s.GetMaxApprox(LocalPlayerState.VitalKind.Health));
+        Assert.Equal(95u, s.GetMaxApprox(LocalPlayerState.VitalKind.Stamina));
     }
 
     [Fact]
@@ -486,7 +505,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
         var s = new LocalPlayerState(book);
         s.OnAttributeUpdate(atType: 1u, ranks: 100u, start: 100u, xp: 0u);   // Strength, base 200
 
@@ -499,7 +518,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | MultiplicativeBit,
             StatModKey: 1u /* Strength */, StatModValue: 1.1f, Bucket: 1u));
         var s = new LocalPlayerState(book);
         s.OnAttributeUpdate(atType: 1u, ranks: 100u, start: 100u, xp: 0u);   // Strength, base 200
@@ -514,13 +533,13 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
-            StatModKey: 1u /* Strength */, StatModValue: 40f, Bucket: 2u));
+            StatModType: AttributeType | AdditiveBit,
+            StatModKey: 1u /* Strength */, StatModValue: 40f, Bucket: 2u, SpellCategory: 1u));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
             StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
-                | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
-            StatModKey: 0u, StatModValue: 9f, Bucket: 2u));   // Society Knight's Blessing
+                | EnchantmentMath.EnchantmentTypeFlag.MultipleStat) | AdditiveBit,
+            StatModKey: 0u, StatModValue: 9f, Bucket: 2u, SpellCategory: 2u));   // Society Knight's Blessing
         var s = new LocalPlayerState(book);
         s.SkillFormulaBonusResolver = (skillId, status, attrs) => attrs[2u];   // Endurance, unscaled
         s.OnAttributeUpdate(atType: 1u, ranks: 0u, start: 300u, xp: 0u);   // Strength base 300
@@ -559,7 +578,7 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));
         var s = new LocalPlayerState(book);
         s.OnSkillUpdate(skillId: 6u, ranks: 300u, status: 2u, xp: 0u,
             init: 3u, resistance: 0u, lastUsed: 0d, formulaBonus: 0u);   // base 303
@@ -574,10 +593,10 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: -1d, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
+            StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.67f, Bucket: 4u));   // 33% vitae
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
+            StatModType: SkillType | AdditiveBit,
             StatModKey: 6u, StatModValue: 50f, Bucket: 2u));   // +50 additive buff
         var s = new LocalPlayerState(book);
         s.OnSkillUpdate(skillId: 6u, ranks: 297u, status: 2u, xp: 0u,
@@ -593,15 +612,15 @@ public sealed class LocalPlayerStateTests
         var book = new Spellbook(SpellTable.Create([TestSpell(1u), TestSpell(2u), TestSpell(3u)]));
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | AdditiveBit,
             StatModKey: 5u, StatModValue: 45f, Bucket: 2u));   // Focus VII
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 2u, LayerId: 2u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | AdditiveBit,
             StatModKey: 6u, StatModValue: 45f, Bucket: 2u));   // Self VII
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 3u, LayerId: 3u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
+            StatModType: SkillType | AdditiveBit,
             StatModKey: 0x1Fu, StatModValue: 50f, Bucket: 2u));
         var s = new LocalPlayerState(book);
         s.SkillFormulaBonusResolver = (skillId, status, attrs) => skillId == 0x1Fu
@@ -637,7 +656,7 @@ public sealed class LocalPlayerStateTests
 
         book.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: AttributeType | AdditiveBit,
             StatModKey: 3u, StatModValue: 20f, Bucket: 2u));   // Quickness +20
         Assert.Equal(20, s.AttributeEnchantmentSkillDelta(24u));
         Assert.Equal(170, s.GetEffectiveSkill(24u));
@@ -710,5 +729,224 @@ public sealed class LocalPlayerStateTests
             init: 0u, resistance: 0u, lastUsed: 0d);
 
         Assert.Equal(20u, s.Skills[33u].FormulaBonus); // 80 / 4
+    }
+
+    // Stacking for the attribute, vital and skill panels: the records that
+    // apply to the stat are culled from the multiplicative list, then the
+    // additive list, each walked from its head (the newest record), into one
+    // list holding one record per spell category.
+
+    private const uint Strength = 1u;
+    private const uint MeleeDefense = 6u;
+    private const uint MultiplicativeBit = 0x4000u;
+    private const uint AdditiveBit = 0x8000u;
+    private const uint AttributeType = (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute;
+    private const uint SkillType = (uint)EnchantmentMath.EnchantmentTypeFlag.Skill;
+
+    [Fact]
+    public void Stacking_ASpellMissingFromTheSpellTableCounts()
+    {
+        ActiveEnchantmentRecord record = Typed(9999u, 1u, AttributeType, Strength, 40f, bucket: 2u);
+        Assert.Equal(240, StrengthIn(BookWithTable(SpellTable.Empty, record)));
+    }
+
+    [Fact]
+    public void Stacking_RecordsGroupByTheirOwnSpellCategory()
+    {
+        // Both records name category 7; the table's family (0 here, which
+        // would keep them apart) plays no part. The stronger one counts alone.
+        ActiveEnchantmentRecord weak = Ranked(
+            Typed(1u, 1u, AttributeType, Strength, 40f, bucket: 2u), category: 7u, power: 400u);
+        ActiveEnchantmentRecord strong = Ranked(
+            Typed(2u, 2u, AttributeType, Strength, 56f, bucket: 2u), category: 7u, power: 16300u);
+        static SpellTable Table() => SpellTable.Create([TestSpell(1u), TestSpell(2u)]);
+
+        Assert.Equal(256, StrengthIn(BookWithTable(Table(), weak, strong)));
+        Assert.Equal(256, StrengthIn(BookWithTable(Table(), strong, weak)));
+    }
+
+    [Fact]
+    public void Stacking_SpellCategoryZeroIsACategoryLikeAnyOther()
+    {
+        ActiveEnchantmentRecord first = Ranked(
+            Typed(1u, 1u, AttributeType, Strength, 40f, bucket: 2u), category: 0u, power: 1u);
+        ActiveEnchantmentRecord second = Ranked(
+            Typed(2u, 2u, AttributeType, Strength, 30f, bucket: 2u), category: 0u, power: 2u);
+
+        Assert.Equal(230, StrengthWith(first, second));
+    }
+
+    [Fact]
+    public void Stacking_AHigherPowerLevelBeatsAHigherSpellId()
+    {
+        // A +56 timed buff of high power against a +45 permanent one of a
+        // higher spell id, same category.
+        ActiveEnchantmentRecord timed = Ranked(
+            Typed(2245u, 2u, SkillType, MeleeDefense, 56f, bucket: 2u), category: 37u, power: 16300u);
+        ActiveEnchantmentRecord permanent = Ranked(
+            Typed(4560u, 1u, SkillType, MeleeDefense, 45f, bucket: 2u), category: 37u, power: 400u);
+
+        Assert.Equal(630, SkillWith(MeleeDefense, 574u, timed, permanent));
+        Assert.Equal(630, SkillWith(MeleeDefense, 574u, permanent, timed));
+    }
+
+    [Fact]
+    public void Stacking_AtEqualPowerTheLaterStartWins()
+    {
+        ActiveEnchantmentRecord earlier = Ranked(
+            Typed(4560u, 1u, SkillType, MeleeDefense, 45f, bucket: 2u), category: 37u, power: 400u, start: 10d);
+        ActiveEnchantmentRecord later = Ranked(
+            Typed(2245u, 2u, SkillType, MeleeDefense, 56f, bucket: 2u), category: 37u, power: 400u, start: 20d);
+
+        Assert.Equal(630, SkillWith(MeleeDefense, 574u, earlier, later));
+        Assert.Equal(630, SkillWith(MeleeDefense, 574u, later, earlier));
+    }
+
+    [Fact]
+    public void Stacking_AnExactTieGoesToTheOlderRecord()
+    {
+        // A new record goes to the head of its list and the head is culled
+        // first, so the record that arrived first is the later challenger and
+        // takes an exact tie. The spell id plays no part.
+        ActiveEnchantmentRecord older = Ranked(
+            Typed(1u, 1u, AttributeType, Strength, 40f, bucket: 2u), category: 7u, power: 400u, start: 5d);
+        ActiveEnchantmentRecord newer = Ranked(
+            Typed(2u, 2u, AttributeType, Strength, 56f, bucket: 2u), category: 7u, power: 400u, start: 5d);
+
+        Assert.Equal(240, StrengthWith(older, newer));
+        Assert.Equal(256, StrengthWith(newer, older));
+    }
+
+    [Fact]
+    public void Stacking_AMultiplierAndAnAdditionOfOneCategoryCompete()
+    {
+        ActiveEnchantmentRecord scale = Ranked(
+            Typed(1u, 1u, AttributeType, Strength, 1.1f, bucket: 1u), category: 5u, power: 10u);
+        ActiveEnchantmentRecord add = Ranked(
+            Typed(2u, 2u, AttributeType, Strength, 10f, bucket: 2u), category: 5u, power: 5u);
+
+        Assert.Equal(220, StrengthWith(scale, add));
+        Assert.Equal(210, StrengthWith(scale, add with { PowerLevel = 20u }));
+    }
+
+    [Fact]
+    public void Stacking_AMultipleStatRecordAppliesWhateverItsKey()
+    {
+        ActiveEnchantmentRecord blessing = Typed(
+            1u, 1u,
+            (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute
+                | EnchantmentMath.EnchantmentTypeFlag.MultipleStat),
+            key: 3u, 9f, bucket: 2u);
+
+        Assert.Equal(209, StrengthWith(blessing));
+    }
+
+    [Fact]
+    public void Stacking_AnAllAttackSkillsRecordRaisesTheAttackSkillsOnly()
+    {
+        ActiveEnchantmentRecord attack = Typed(1u, 1u, SkillType | 0x10000u, 0u, 10f, bucket: 2u);
+        foreach (uint skill in new uint[] { 33, 34, 41, 43, 44, 45, 46, 47, 49 })
+            Assert.True(SkillWith(skill, 100u, attack) == 110, $"skill {skill}");
+        foreach (uint skill in new uint[] { 1, 6, 24, 35, 36, 42, 48, 50 })
+            Assert.True(SkillWith(skill, 100u, attack) == 100, $"skill {skill}");
+    }
+
+    [Fact]
+    public void Stacking_AnAllDefenseSkillsRecordRaisesTheDefenseSkillsOnly()
+    {
+        ActiveEnchantmentRecord defense = Typed(1u, 1u, SkillType | 0x20000u, 0u, 10f, bucket: 2u);
+        foreach (uint skill in new uint[] { 6, 7, 15, 48 })
+            Assert.True(SkillWith(skill, 100u, defense) == 110, $"skill {skill}");
+        foreach (uint skill in new uint[] { 5, 8, 14, 16, 24, 45, 47, 49 })
+            Assert.True(SkillWith(skill, 100u, defense) == 100, $"skill {skill}");
+    }
+
+    [Fact]
+    public void Stacking_TheTypeBitsDecideAddOrMultiplyWithAddFirst()
+    {
+        // A record carrying both operation bits adds, whichever list holds it.
+        ActiveEnchantmentRecord both = Typed(1u, 1u, AttributeType, Strength, 10f, bucket: 1u)
+            with { StatModType = AttributeType | MultiplicativeBit | AdditiveBit };
+        Assert.Equal(210, StrengthWith(both));
+
+        // One with neither bit changes nothing.
+        ActiveEnchantmentRecord neither = Typed(2u, 2u, AttributeType, Strength, 10f, bucket: 2u)
+            with { StatModType = AttributeType };
+        Assert.Equal(200, StrengthWith(neither));
+    }
+
+    [Fact]
+    public void Stacking_VitaeThenEachRecordRoundsToAFloatInTurn()
+    {
+        // 200 x 0.95 = 190, x 1.1 = 209 exactly in single precision; scaling
+        // by the product 0.95 x 1.1 first gives 208.99998, shown as 208.
+        ActiveEnchantmentRecord vitae = new(
+            1u, 1u, -1d, 0u, StatModType: MultiplicativeBit, StatModKey: 0u, StatModValue: 0.95f, Bucket: 4u);
+        Assert.Equal(209, SkillWith(
+            MeleeDefense, 200u, vitae, Typed(2u, 2u, SkillType, MeleeDefense, 1.1f, bucket: 1u)));
+    }
+
+    /// <summary>
+    /// A record as the server sends one: its operation bit (multiply or add)
+    /// matches its list, and its spell category is its own (the spell id).
+    /// </summary>
+    private static ActiveEnchantmentRecord Typed(
+        uint spellId, uint layer, uint statModType, uint key, float value, uint bucket)
+    {
+        uint operation = bucket switch
+        {
+            1u => MultiplicativeBit,
+            2u => AdditiveBit,
+            _ => 0u,
+        };
+        return new ActiveEnchantmentRecord(
+            spellId, layer, 60d, 0u,
+            StatModType: statModType | operation,
+            StatModKey: key,
+            StatModValue: value,
+            Bucket: bucket,
+            SpellCategory: spellId);
+    }
+
+    private static ActiveEnchantmentRecord Ranked(
+        ActiveEnchantmentRecord record, uint category, uint power, double start = 0d) =>
+        record with { SpellCategory = category, PowerLevel = power, StartTime = start };
+
+    /// <summary>
+    /// A spellbook holding <paramref name="records"/> (each arriving in
+    /// turn), whose spell table knows every spell, with the record's own
+    /// category as its family.
+    /// </summary>
+    private static Spellbook BookHolding(params ActiveEnchantmentRecord[] records) =>
+        BookWithTable(
+            SpellTable.Create(records
+                .Select(record => TestSpell(record.SpellId) with { Family = record.SpellCategory })
+                .ToArray()),
+            records);
+
+    private static Spellbook BookWithTable(SpellTable table, params ActiveEnchantmentRecord[] records)
+    {
+        var book = new Spellbook(table);
+        foreach (ActiveEnchantmentRecord record in records)
+            book.OnEnchantmentAdded(record);
+        return book;
+    }
+
+    private static int? StrengthIn(Spellbook book)
+    {
+        var s = new LocalPlayerState(book);
+        s.OnAttributeUpdate(atType: Strength, ranks: 100u, start: 100u, xp: 0u);
+        return s.GetEffectiveAttribute(LocalPlayerState.AttributeKind.Strength);
+    }
+
+    private static int? StrengthWith(params ActiveEnchantmentRecord[] records) =>
+        StrengthIn(BookHolding(records));
+
+    private static int? SkillWith(uint skillId, uint baseLevel, params ActiveEnchantmentRecord[] records)
+    {
+        var s = new LocalPlayerState(BookHolding(records));
+        s.OnSkillUpdate(skillId, ranks: baseLevel, status: 2u, xp: 0u,
+            init: 0u, resistance: 0u, lastUsed: 0d, formulaBonus: 0u);
+        return s.GetEffectiveSkill(skillId);
     }
 }

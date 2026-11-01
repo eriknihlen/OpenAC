@@ -14,7 +14,8 @@ public static class ObjectTableWiring
         ClientObjectTable table,
         Func<uint>? playerGuid = null,
         LocalPlayerState? localPlayer = null,
-        Func<bool>? accepting = null)
+        Func<bool>? accepting = null,
+        Func<uint, bool>? isHeld = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(table);
@@ -35,8 +36,8 @@ public static class ObjectTableWiring
         Action<WorldSession.PlayerIntPropertyUpdate> playerIntUpdated = u =>
         {
             if (accepting?.Invoke() == false) return;
-            if (playerGuid is not null)
-                table.UpdateIntProperty(playerGuid(), u.Property, u.Value);
+            ApplyPlayerIntPropertyUpdate(
+                table, localPlayer, playerGuid?.Invoke() ?? 0u, u);
         };
         session.PlayerIntPropertyUpdated += playerIntUpdated;
         subscriptions.Add(() => session.PlayerIntPropertyUpdated -= playerIntUpdated);
@@ -44,11 +45,18 @@ public static class ObjectTableWiring
         // A re-sent description refreshes an object we already hold — the icon
         // underlay a rend adds, the overlay an imbue adds, a revealed Aetheria.
         // It carries the same fields a first-time description does, so the same
-        // ingest applies it; it must not run the arrival of a new object.
+        // ingest applies it; it must not run the arrival of a new object. An
+        // object held in the world (isHeld) is deleted and created again, so
+        // it takes the first place in the container the description names;
+        // one known only to the table refreshes where it is.
         Action<WorldSession.EntitySpawn> descriptionRefreshed = spawn =>
         {
             if (accepting?.Invoke() == false) return;
-            table.Ingest(ToWeenieData(spawn));
+            WeenieData data = ToWeenieData(spawn);
+            if (isHeld?.Invoke(spawn.Guid) == true)
+                table.IngestRecreated(data);
+            else
+                table.Ingest(data);
         };
         session.EntityDescriptionRefreshed += descriptionRefreshed;
         subscriptions.Add(
@@ -91,6 +99,25 @@ public static class ObjectTableWiring
         session.PlayerStringPropertyUpdated += playerStringUpdated;
         subscriptions.Add(
             () => session.PlayerStringPropertyUpdated -= playerStringUpdated);
+
+        Action<WorldSession.ObjectBoolPropertyUpdate> objectBoolUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            table.UpdateBoolProperty(u.Guid, u.Property, u.Value);
+        };
+        session.ObjectBoolPropertyUpdated += objectBoolUpdated;
+        subscriptions.Add(
+            () => session.ObjectBoolPropertyUpdated -= objectBoolUpdated);
+
+        Action<WorldSession.PlayerBoolPropertyUpdate> playerBoolUpdated = u =>
+        {
+            if (accepting?.Invoke() == false) return;
+            if (playerGuid is not null)
+                table.UpdateBoolProperty(playerGuid(), u.Property, u.Value);
+        };
+        session.PlayerBoolPropertyUpdated += playerBoolUpdated;
+        subscriptions.Add(
+            () => session.PlayerBoolPropertyUpdated -= playerBoolUpdated);
 
         Action<WorldSession.ObjectInstanceIdPropertyUpdate> objectInstanceIdUpdated = u =>
         {
@@ -197,6 +224,19 @@ public static class ObjectTableWiring
             wire.LandblockId,
             new System.Numerics.Vector3(wire.X, wire.Y, wire.Z),
             new System.Numerics.Quaternion(wire.Qx, wire.Qy, wire.Qz, wire.Qw));
+
+    // The player's own ints feed both the object table and the local
+    // player's numbers (the gear Max Health rating changes on every equip).
+    internal static void ApplyPlayerIntPropertyUpdate(
+        ClientObjectTable table,
+        LocalPlayerState? localPlayer,
+        uint playerGuid,
+        WorldSession.PlayerIntPropertyUpdate update)
+    {
+        if (playerGuid != 0u)
+            table.UpdateIntProperty(playerGuid, update.Property, update.Value);
+        localPlayer?.OnIntPropertyUpdate(update.Property, update.Value);
+    }
 
     internal static void ApplyPlayerInt64PropertyUpdate(
         ClientObjectTable table,

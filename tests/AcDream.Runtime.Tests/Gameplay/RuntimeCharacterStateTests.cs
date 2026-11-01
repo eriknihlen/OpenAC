@@ -94,7 +94,7 @@ public sealed class RuntimeCharacterStateTests
             Duration: 60f,
             CasterGuid: 2u,
             Bucket: 2u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.SecondAtt,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.SecondAtt | EnchantmentMath.EnchantmentTypeFlag.Additive),
             StatModKey: EnchantmentMath.StatKey.MaxHealth,
             StatModValue: 25f));
         state.Spellbook.SetDesiredComponent(0x68000001u, 12u);
@@ -825,7 +825,7 @@ public sealed class RuntimeCharacterStateTests
 
         state.Spellbook.OnEnchantmentAdded(new ActiveEnchantmentRecord(
             SpellId: 1u, LayerId: 1u, Duration: 60d, CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute | EnchantmentMath.EnchantmentTypeFlag.Additive),
             StatModKey: 3u, StatModValue: 20f, Bucket: 2u));
 
         // formula(120) + ranks 50 = 170.
@@ -857,7 +857,7 @@ public sealed class RuntimeCharacterStateTests
             LayerId: 1u,
             Duration: 60f,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Skill | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: RuntimeCharacterState.RunSkillId,
             StatModValue: 1.5f,
             Bucket: 1u));
@@ -1044,7 +1044,7 @@ public sealed class RuntimeCharacterStateTests
     private static ActiveEnchantmentRecord MakeVitae(uint spellId, float val) =>
         new(
             spellId, LayerId: 0u, Duration: -1f, CasterGuid: 0u,
-            StatModType: 0u, StatModKey: 0u, StatModValue: val, Bucket: 4u);
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative, StatModKey: 0u, StatModValue: val, Bucket: 4u);
 
     private static SpellTable SpellTableWith(
         params (uint id, string name, uint family)[] rows)

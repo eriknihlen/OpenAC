@@ -31,6 +31,25 @@ public sealed class UiViewport : UiElement
 
     internal GpuTextureSlot TextureSlot { get; set; } = GpuTextureSlot.Unassigned;
 
+    /// <summary>
+    /// The size, in pixels, to render this viewport's off-screen image at:
+    /// its interface size times the gameplay interface scale, so at 200% the
+    /// figure is rendered at twice the size instead of being stretched up
+    /// and soft. At 100%, and on the fixed login canvases, it is the
+    /// interface size as it always was.
+    /// </summary>
+    public (int Width, int Height) RenderTargetSize
+    {
+        get
+        {
+            float scale = FindRoot()?.GameplayRenderScale ?? 1f;
+            return (ScaledPixels(Width, scale), ScaledPixels(Height, scale));
+        }
+    }
+
+    internal static int ScaledPixels(float units, float scale) =>
+        scale == 1f ? (int)units : (int)MathF.Floor(units * scale + 0.5f);
+
     protected override void OnDraw(UiRenderContext ctx)
     {
         if (!Visible || !TextureSlot.IsAssigned) return;

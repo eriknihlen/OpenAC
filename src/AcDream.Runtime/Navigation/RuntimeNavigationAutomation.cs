@@ -617,7 +617,7 @@ internal static class RuntimeNavigationProjection
     /// An object with what the client knows of a door it is: open, locked, and how hard its lock
     /// is. A door stands open when the world shows it passable, as <paramref name="physicsState"/>
     /// says, since its Open property comes with an appraisal and does not follow the door opening
-    /// and closing afterwards. Its lock is known once it has been appraised.
+    /// and closing afterwards. Its lock is as <see cref="KnownLock"/> reads it.
     /// </summary>
     public static PluginNavigationObject Enrich(in PluginNavigationObject value, ClientObject? item, PhysicsStateFlags? physicsState)
     {
@@ -625,17 +625,34 @@ internal static class RuntimeNavigationProjection
             return value;
         bool door = ((PublicWeenieFlags)(item.PublicWeenieBitfield ?? 0u) & PublicWeenieFlags.Door) != 0;
         bool hasOpen = item.Properties.Bools.TryGetValue((uint)PropertyBool.Open, out bool isOpen);
-        bool hasLocked = item.Properties.Bools.TryGetValue((uint)PropertyBool.Locked, out bool isLocked);
+        bool? locked = KnownLock(item);
         return value with
         {
             IsDoor = door,
             IsOpen = door && physicsState is { } state
                 ? state.HasFlag(PhysicsStateFlags.Ethereal)
                 : hasOpen && isOpen,
-            IsLocked = hasLocked && isLocked,
-            HasLockState = hasOpen || hasLocked || item.LastAppraisalTimeMs > 0,
+            IsLocked = locked == true,
+            HasLockState = locked is not null,
             LockDifficulty = item.Properties.GetInt((uint)PropertyInt.ResistLockpick),
         };
+    }
+
+    /// <summary>
+    /// Whether the object is locked, or null while the client does not know. The Locked property
+    /// says so, whether an appraisal brought it or the server's update when the lock changed (a
+    /// lockpick unlock, a key lock). Without it the lock is known to be off once the object has been
+    /// appraised successfully (an appraisal of something unlocked may name no lock at all) or its
+    /// Open property is known.
+    /// </summary>
+    internal static bool? KnownLock(ClientObject item)
+    {
+        if (item.Properties.Bools.TryGetValue((uint)PropertyBool.Locked, out bool locked))
+            return locked;
+        return item.AppraisalSucceeded
+            || item.Properties.Bools.ContainsKey((uint)PropertyBool.Open)
+                ? false
+                : null;
     }
 
     public static RuntimeMoveRequest? MoveRequest(

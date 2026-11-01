@@ -9,6 +9,12 @@ public sealed class RetailChaseCamera : ICamera
 {
     private const float RetailDefaultBack = 2.5f;
     private const float RetailDefaultUp = 0.75f;
+    // In play the default view is scaled by 1.1 (2.75 m back, 0.825 m up).
+    // Only the default view takes it: look-down, map and leaving the head
+    // keep their unscaled offsets.
+    private const float DefaultViewScale = 1.1f;
+    private const float DefaultViewBack = RetailDefaultBack * DefaultViewScale;
+    private const float DefaultViewUp = RetailDefaultUp * DefaultViewScale;
     private const float RetailLookDownBack = 2f;
     private const float RetailMapBack = 450f;
     private const float RetailFirstPersonForward = 0.18f;
@@ -45,9 +51,10 @@ public sealed class RetailChaseCamera : ICamera
 
     // ── Public tunables (per-instance) ──────────────────────────────
 
-    public float Distance { get; set; } = 2.61f;
+    public float Distance { get; set; } =
+        MathF.Sqrt(DefaultViewBack * DefaultViewBack + DefaultViewUp * DefaultViewUp);
 
-    public float Pitch { get; set; } = 0.291f;
+    public float Pitch { get; set; } = MathF.Atan2(DefaultViewUp, DefaultViewBack);
 
     public float YawOffset { get; set; } = 0f;
 
@@ -99,13 +106,16 @@ public sealed class RetailChaseCamera : ICamera
         float dt,
         uint cellId = 0,
         uint selfEntityId = 0,
-        Vector3? trackedTargetPoint = null)
+        Vector3? trackedTargetPoint = null,
+        bool directOrbit = false)
     {
         Vector3 pivotWorld = playerPosition + new Vector3(0f, 0f, PivotHeight);
-        Vector3? trackedHeading = ComputeTrackedHeading(pivotWorld, trackedTargetPoint);
+        Vector3? trackedHeading = directOrbit
+            ? null : ComputeTrackedHeading(pivotWorld, trackedTargetPoint);
 
         // Look-down, map mode and a wide orbit see the flat facing; the head view always tilts.
         bool alignmentApplies = CameraDiagnostics.AlignToSlope
+            && !directOrbit
             && !_lookingDown
             && !_mapMode
             && (_inHead
@@ -122,7 +132,9 @@ public sealed class RetailChaseCamera : ICamera
             ? playerYaw + YawOffset
             : playerYaw;
 
-        Vector3 heading = trackedHeading
+        Vector3 heading = directOrbit
+            ? new Vector3(MathF.Cos(headingYaw), MathF.Sin(headingYaw), 0f)
+            : trackedHeading
             ?? ComputeHeading(
                 avgVel,
                 headingYaw,
@@ -138,7 +150,7 @@ public sealed class RetailChaseCamera : ICamera
             : ComputeDesiredPose(
                 pivotWorld, heading, Distance, Pitch, YawOffset);
 
-        if (!_initialised)
+        if (directOrbit || !_initialised)
         {
             _soughtEye     = targetEye;
             _publishedEye  = targetEye;
@@ -171,6 +183,13 @@ public sealed class RetailChaseCamera : ICamera
             }
         }
         _publishedEye = publishedEye;
+
+        if (directOrbit && !_inHead && _targetDirectionLocal is null)
+        {
+            Vector3 toPivot = pivotWorld - publishedEye;
+            if (toPivot.LengthSquared() > 0.000001f)
+                _dampedForward = Vector3.Normalize(toPivot);
+        }
 
         Position = publishedEye;
         View     = Matrix4x4.CreateLookAt(publishedEye, publishedEye + _dampedForward, new Vector3(0f, 0f, 1f));
@@ -296,7 +315,7 @@ public sealed class RetailChaseCamera : ICamera
         _targetDirectionLocal = null;
         YawOffset = 0f;
         PivotHeight = 1.5f;
-        SetViewerOffset(RetailDefaultBack, RetailDefaultUp);
+        SetViewerOffset(DefaultViewBack, DefaultViewUp);
     }
 
     public void SetRetailFirstPersonView()

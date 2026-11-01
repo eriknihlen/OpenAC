@@ -93,7 +93,7 @@ public sealed class SkillLevelConformanceTests
             LayerId: 1u,
             Duration: 0d,
             CasterGuid: 0u,
-            StatModType: null,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative,
             StatModKey: null,
             StatModValue: 0.95f,
             Bucket: 4u));
@@ -160,10 +160,14 @@ public sealed class SkillLevelConformanceTests
             LayerId: layerId,
             Duration: 60d,
             CasterGuid: 0u,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill,
+            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Skill
+                | (uint)(bucket == 1u
+                    ? EnchantmentMath.EnchantmentTypeFlag.Multiplicative
+                    : EnchantmentMath.EnchantmentTypeFlag.Additive),
             StatModKey: SkillId,
             StatModValue: value,
-            Bucket: bucket);
+            Bucket: bucket,
+            SpellCategory: spellId);
 
     private static SpellMetadata TestSpell(uint spellId) => new(
         spellId, "Test", "War Magic", 0u, 0u, "", 0f, 0,

@@ -648,42 +648,7 @@ public static class DatWidgetFactory
             t.OutlineColor = info.OutlineColor.Value;
 
         if (ResolveAuthoredString(info, stringResolve) is { Length: > 0 } authored)
-        {
-            if (authored.Contains('\n'))
-            {
-                float cachedWidth = float.NaN;
-                UiDatFont? cachedFont = null;
-                System.Numerics.Vector4 cachedColor = default;
-                UiText.Line[]? cachedLines = null;
-                t.LinesProvider = () =>
-                {
-                    if (cachedLines is null
-                        || cachedWidth != t.Width
-                        || !ReferenceEquals(cachedFont, t.DatFont)
-                        || cachedColor != t.DefaultColor)
-                    {
-                        cachedWidth = t.Width;
-                        cachedFont = t.DatFont;
-                        cachedColor = t.DefaultColor;
-                        float maximumWidth = Math.Max(
-                            1f,
-                            t.Width - (t.Padding + t.MarginLeft) - (t.Padding + t.MarginRight));
-                        Func<string, float> measure = t.DatFont is { } font
-                            ? font.MeasureWidth
-                            : static value => value.Length * 8f;
-                        cachedLines = [.. UiText
-                            .WrapWords(authored, measure, maximumWidth)
-                            .Select(line => new UiText.Line(line, t.DefaultColor))];
-                    }
-                    return cachedLines;
-                };
-            }
-            else
-            {
-                t.LinesProvider = () =>
-                    [new UiText.Line(authored, t.DefaultColor)];
-            }
-        }
+            t.SetAuthoredText(authored);
 
         Dictionary<uint, string>? stateStrings = null;
         foreach (var (stateId, state) in info.States)

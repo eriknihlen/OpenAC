@@ -26,20 +26,39 @@ public static class EnchantmentRegistryProjection
         {
             ActiveEnchantmentRecord candidate = source[sourceIndex];
             if (candidate.Bucket != bucket) continue;
-
-            int incumbentIndex = result.FindIndex(existing =>
-                existing.SpellCategory == candidate.SpellCategory);
-            if (incumbentIndex >= 0)
-            {
-                ActiveEnchantmentRecord incumbent = result[incumbentIndex];
-                if (!CandidateWins(incumbent, candidate))
-                    continue;
-                result.RemoveAt(incumbentIndex);
-            }
-            result.Add(candidate);
+            Duel(candidate, result);
         }
     }
 
+    /// <summary>
+    /// Enters <paramref name="candidate"/> into <paramref name="inEffect"/>.
+    /// When the first record there of the candidate's spell category beats
+    /// it, nothing changes; otherwise that record is taken out (unless its
+    /// identity is zero) and the candidate is appended.
+    /// </summary>
+    internal static void Duel(
+        ActiveEnchantmentRecord candidate,
+        List<ActiveEnchantmentRecord> inEffect)
+    {
+        int incumbentIndex = inEffect.FindIndex(existing =>
+            existing.SpellCategory == candidate.SpellCategory);
+        if (incumbentIndex >= 0)
+        {
+            ActiveEnchantmentRecord incumbent = inEffect[incumbentIndex];
+            if (!CandidateWins(incumbent, candidate))
+                return;
+            if (incumbent.Identity != 0u)
+                inEffect.RemoveAt(incumbentIndex);
+        }
+        inEffect.Add(candidate);
+    }
+
+    /// <summary>
+    /// The higher power level wins (compared as signed values); at equal
+    /// power the candidate wins unless it started strictly earlier. Lists are
+    /// walked from the head, where new records go, so an exact tie goes to
+    /// the record that arrived first.
+    /// </summary>
     private static bool CandidateWins(
         ActiveEnchantmentRecord incumbent,
         ActiveEnchantmentRecord candidate)
@@ -48,6 +67,6 @@ public static class EnchantmentRegistryProjection
         int candidatePower = unchecked((int)candidate.PowerLevel);
         return candidatePower > incumbentPower
             || (candidatePower == incumbentPower
-                && candidate.StartTime > incumbent.StartTime);
+                && candidate.StartTime >= incumbent.StartTime);
     }
 }

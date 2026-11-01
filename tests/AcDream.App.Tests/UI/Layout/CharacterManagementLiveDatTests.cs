@@ -305,17 +305,27 @@ public sealed class CharacterManagementLiveDatTests
 
 internal sealed class InstalledDatFactAttribute : FactAttribute
 {
-    public InstalledDatFactAttribute()
+    public InstalledDatFactAttribute() => Skip = InstalledDatLane.SkipReason();
+}
+
+internal sealed class InstalledDatTheoryAttribute : TheoryAttribute
+{
+    public InstalledDatTheoryAttribute() => Skip = InstalledDatLane.SkipReason();
+}
+
+internal static class InstalledDatLane
+{
+    /// <summary>Why an installed-DAT test is skipped, or null to run it.</summary>
+    public static string? SkipReason()
     {
         bool requested = Environment.GetEnvironmentVariable(
                 "ACDREAM_RUN_INSTALLED_DAT_TESTS") == "1"
             || Environment.GetEnvironmentVariable("ACDREAM_PROBE_LIVE_MOUNT") == "1";
         if (!requested)
         {
-            Skip = "Installed-DAT lane not requested; set "
+            return "Installed-DAT lane not requested; set "
                 + "ACDREAM_RUN_INSTALLED_DAT_TESTS=1. The legacy "
                 + "ACDREAM_PROBE_LIVE_MOUNT=1 switch is also accepted.";
-            return;
         }
 
         string datDirectory = Environment.GetEnvironmentVariable("ACDREAM_DAT_DIR")
@@ -323,7 +333,8 @@ internal sealed class InstalledDatFactAttribute : FactAttribute
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "Documents",
                 "Asheron's Call");
-        if (!File.Exists(Path.Combine(datDirectory, "client_portal.dat")))
-            Skip = $"Installed client_portal.dat is required at '{datDirectory}'.";
+        return File.Exists(Path.Combine(datDirectory, "client_portal.dat"))
+            ? null
+            : $"Installed client_portal.dat is required at '{datDirectory}'.";
     }
 }

@@ -1336,7 +1336,9 @@ internal sealed class LivePresentationCompositionPhase
             new RuntimeRenderFrameTitleFactsSource(
                 worldState,
                 d.AnimatedEntities,
-                d.WorldTime),
+                d.WorldTime,
+                d.Runtime,
+                d.PlayerIdentity),
             new SilkRenderFrameTitleSink(d.Window),
             d.RenderDiagnosticLog,
             d.Options.UiProbeDump,

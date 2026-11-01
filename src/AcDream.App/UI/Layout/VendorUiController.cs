@@ -530,12 +530,19 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                 _window.Show();
                 break;
             case VendorStateTransitionKind.Refreshed:
+            {
+                // The open shop sent again (after a purchase or a sale): the
+                // window stays on the page the player was on, and the listing
+                // row keeps how far it was scrolled sideways, clamped to the
+                // refilled row.
                 ResetAlternateCurrencyTracking();
                 RefreshMoneyText();
-                ShowTab(VendorPanelTab.Items);
+                int scrollX = _itemList.Scroll.ScrollY;
                 RebuildCategories();
+                _itemList.Scroll.SetScrollY(scrollX);
                 _window.Show();
                 break;
+            }
             case VendorStateTransitionKind.Closed:
             case VendorStateTransitionKind.Reset:
                 _buyStaging.Clear();
@@ -1463,7 +1470,7 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
                     SpriteResolve = list.SpriteResolve,
                     SlotIndex = list.GetNumUIItems(),
                     AllowDragSource = true,
-                    SourceKind = ItemDragSource.Inventory,
+                    SourceKind = ItemDragSource.Vendor,
                     TooltipTextResolve = g => ItemTooltipCaption.Resolve(
                         _objects, g, _resolveAppropriateName),
                 };
@@ -1539,6 +1546,9 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
+        // A shortcut, or a vendor, house or salvage list cell, is no item to sell.
+        if (payload.SourceKind.IsAlias())
+            return ItemDragAcceptance.None;
         if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u)
             return ItemDragAcceptance.Reject;
 
@@ -1567,7 +1577,8 @@ public sealed class VendorUiController : IRetainedPanelController, IItemListDrag
         UiItemSlot targetCell,
         ItemDragPayload payload)
     {
-        if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u)
+        if (!ReferenceEquals(targetList, _sellingList) || payload.ObjId == 0u
+            || payload.SourceKind.IsAlias())
             return;
 
         VendorSellRejection rejection = EvaluateSellAcceptability(payload.ObjId, out int quantity);

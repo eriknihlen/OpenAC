@@ -2075,6 +2075,40 @@ public sealed class ItemInteractionControllerTests
         Assert.Equal(Pack, h.Objects.Get(0x50000A08u)!.ContainerId);
     }
 
+    // An item dragged out of a vendor, house or salvage list and let go over the
+    // world only takes it off the list: it goes neither to the ground nor onto
+    // an object.
+    [Theory]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void ListAliasDragOutsideUi_placesNothing(ItemDragSource source)
+    {
+        var h = new Harness();
+        const uint itemId = 0x50000A09u;
+        const uint chest = 0x70000002u;
+        h.AddContained(itemId);
+        h.Objects.AddOrUpdate(new ClientObject
+        {
+            ObjectId = chest,
+            Type = ItemType.Container,
+            ItemsCapacity = 24,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Openable,
+        });
+        h.GroundObject = chest;
+        var payload = new ItemDragPayload(
+            itemId,
+            source,
+            SourceSlot: 0,
+            SourceCell: new UiItemSlot());
+
+        Assert.False(h.Controller.DropToWorld(payload));
+        Assert.False(h.Controller.PlaceIn3D(payload, chest));
+
+        Assert.Empty(h.Drops);
+        Assert.Empty(h.Puts);
+        Assert.Equal(Pack, h.Objects.Get(itemId)!.ContainerId);
+    }
+
     [Fact]
     public void ActivateItem_appliesRetailUseThrottle()
     {

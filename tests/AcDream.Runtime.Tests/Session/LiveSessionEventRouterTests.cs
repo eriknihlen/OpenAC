@@ -42,7 +42,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             new LiveEntitySessionSink(
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
-                _ => { }, _ => { }),
+                _ => { }, _ => { }, _ => false),
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
@@ -133,7 +133,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             new LiveEntitySessionSink(
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
                 _ => { }, _ => { }, _ => { }, _ => { }, _ => { }, _ => { },
-                _ => { }, _ => { }),
+                _ => { }, _ => { }, _ => false),
             new LiveEnvironmentSessionSink(_ => { }, _ => { }),
             NewInventoryBindings(),
             NewCharacterBindings(),
@@ -811,7 +811,7 @@ public sealed class LiveSessionEventRouterTests : IDisposable
             LayerId: 1u,
             Duration: 60d,
             CasterGuid: playerGuid,
-            StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Attribute,
+            StatModType: (uint)(EnchantmentMath.EnchantmentTypeFlag.Attribute | EnchantmentMath.EnchantmentTypeFlag.Multiplicative),
             StatModKey: 1u,
             StatModValue: 1.2f,
             Bucket: 1u));
@@ -1021,6 +1021,50 @@ public sealed class LiveSessionEventRouterTests : IDisposable
         router.Dispose();
     }
 
+    // The host's entity knowledge decides how the object table takes a
+    // re-sent description: an object held in the world is created again and
+    // takes the first place in its container; one not held stays where it is.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DescriptionRefresh_OfAHeldItem_PutsItFirstInItsPack(bool held)
+    {
+        const uint pack = 0x500000C9u;
+        uint[] items = [0x70000021u, 0x70000022u, 0x70000023u];
+        using var session = NewSession();
+        var objects = new ClientObjectTable();
+        for (int slot = 0; slot < items.Length; slot++)
+        {
+            objects.AddOrUpdate(new ClientObject { ObjectId = items[slot] });
+            Assert.True(objects.ApplyServerMove(items[slot], pack, 0u, slot));
+        }
+        var router = new LiveSessionEventRouter(
+            session,
+            NoOpEntitySink() with { IsHeld = guid => held && guid == items[2] },
+            new LiveEnvironmentSessionSink(_ => { }, _ => { }),
+            NewInventoryBindings() with { Objects = objects },
+            NewCharacterBindings(),
+            NewSocialBindings(),
+            NewActions());
+        router.Attach();
+
+        EventDelegate<Action<WorldSession.EntitySpawn>>(
+            session, nameof(session.EntityDescriptionRefreshed))(
+            new WorldSession.EntitySpawn(
+                items[2], null, 0x02000001u,
+                Array.Empty<CreateObject.AnimPartChange>(),
+                Array.Empty<CreateObject.TextureChange>(),
+                Array.Empty<CreateObject.SubPaletteSwap>(),
+                null, null, "Aetheria", null, null, null,
+                ContainerId: pack));
+
+        Assert.Equal("Aetheria", objects.Get(items[2])!.Name);
+        Assert.Equal(
+            held ? [items[2], items[0], items[1]] : items,
+            objects.GetContents(pack));
+        router.Dispose();
+    }
+
     private static LiveEntitySessionSink NoOpEntitySink() => new(
         Spawned: _ => { },
         Deleted: _ => { },
@@ -1035,7 +1079,8 @@ public sealed class LiveSessionEventRouterTests : IDisposable
         DescriptionRefreshed: _ => { },
         PlayPhysicsScript: _ => { },
         PlayPhysicsScriptType: _ => { },
-        SoundEvent: _ => { });
+        SoundEvent: _ => { },
+        IsHeld: _ => false);
 
     [Fact]
     public void HouseRentNotices_RouteIntoTheSharedRuntimeOwner()
@@ -1198,7 +1243,8 @@ public sealed class LiveSessionEventRouterTests : IDisposable
                 DescriptionRefreshed: _ => { },
                 PlayPhysicsScript: _ => { },
                 PlayPhysicsScriptType: _ => { },
-                SoundEvent: _ => { }),
+                SoundEvent: _ => { },
+                IsHeld: _ => false),
             new LiveEnvironmentSessionSink(
                 EnvironChanged: _ => { },
                 ServerTimeUpdated: _ =>

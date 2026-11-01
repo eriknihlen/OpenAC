@@ -44,7 +44,8 @@ internal sealed class LiveEntitySessionController
         OnDescriptionRefreshed,
         OnPlayPhysicsScript,
         OnPlayPhysicsScriptType,
-        OnSoundEvent);
+        OnSoundEvent,
+        IsHeld: _hydration.IsHeld);
 
     private void OnSpawned(WorldSession.EntitySpawn value) =>
         _inbound.Run(_hydration, value,

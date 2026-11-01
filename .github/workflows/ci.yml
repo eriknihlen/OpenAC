@@ -106,9 +106,9 @@ jobs:
           done
 
   macos-portable:
-    # GitHub documents macos-14 as an Apple-silicon hosted image. Keep this
+    # GitHub documents macos-15 as an Apple-silicon hosted image. Keep this
     # hosted for pushes as well as PRs: the repository has no self-hosted Mac.
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           brew install molten-vk vulkan-loader
           test "$(brew info --json=v2 molten-vk | jq -r '.formulae[0].installed[] | select(.version == "1.4.2") | .version')" = 1.4.2
-          test "$(brew info --json=v2 vulkan-loader | jq -r '.formulae[0].installed[] | select(.version == "1.4.357.0") | .version')" = 1.4.357.0
+          test "$(brew info --json=v2 vulkan-loader | jq -r '.formulae[0].installed[] | select(.version == "1.4.363.0") | .version')" = 1.4.363.0
 
       - name: Build the macOS native test and launcher closures
         shell: pwsh

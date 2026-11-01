@@ -224,6 +224,13 @@ public sealed class ClientObject
     public bool AppraisalAnswered { get; internal set; }
 
     /// <summary>
+    /// True once the server has answered an appraisal of this object with its
+    /// properties. A later unsuccessful answer does not take it back: what
+    /// that successful answer delivered stays.
+    /// </summary>
+    public bool AppraisalSucceeded { get; internal set; }
+
+    /// <summary>
     /// True when the latest thing the server said about this object was an
     /// appraisal answer saying it could not appraise it. A successful answer
     /// clears it, and so does anything else the server sends about the

@@ -166,19 +166,68 @@ public class InputDispatcherIsActionHeldTests
     }
 
     [Fact]
-    public void IsActionHeld_gated_off_while_keyboard_captured()
+    public void IsActionHeld_KeyHeldBeforeAFieldTakesTheKeyboard_StaysHeldUntilReleased()
     {
+        // The chat entry clicked while running: a held action ends only when
+        // its key comes up, whatever has the keyboard then.
         var (dispatcher, kb, mouse, bindings) = Build();
         bindings.Add(new Binding(new KeyChord(Key.W, ModifierMask.None), InputAction.MovementForward));
         kb.EmitKeyDown(Key.W, ModifierMask.None);
-
         Assert.True(dispatcher.IsActionHeld(InputAction.MovementForward));
 
         mouse.WantCaptureKeyboard = true;
+        Assert.True(dispatcher.IsActionHeld(InputAction.MovementForward));
+        mouse.WantCaptureMouse = true;
+        Assert.True(dispatcher.IsActionHeld(InputAction.MovementForward));
+
+        kb.EmitKeyUp(Key.W, ModifierMask.None);
+        Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
+    }
+
+    [Fact]
+    public void IsActionHeld_KeyPressedWhileAFieldHasTheKeyboard_HoldsNothing()
+    {
+        // A key typed into the field moves nothing, then or after the field
+        // lets the keyboard go; a fresh press holds again.
+        var (dispatcher, kb, mouse, bindings) = Build();
+        bindings.Add(new Binding(new KeyChord(Key.W, ModifierMask.None), InputAction.MovementForward));
+        mouse.WantCaptureKeyboard = true;
+        kb.EmitKeyDown(Key.W, ModifierMask.None);
         Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
 
         mouse.WantCaptureKeyboard = false;
-        mouse.WantCaptureMouse = true;
+        Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
+
+        kb.EmitKeyUp(Key.W, ModifierMask.None);
+        kb.EmitKeyDown(Key.W, ModifierMask.None);
         Assert.True(dispatcher.IsActionHeld(InputAction.MovementForward));
+    }
+
+    [Fact]
+    public void IsActionHeld_KeyTakenByARebindCapture_HoldsNothing()
+    {
+        var (dispatcher, kb, _, bindings) = Build();
+        bindings.Add(new Binding(new KeyChord(Key.W, ModifierMask.None), InputAction.MovementForward));
+        KeyChord? captured = null;
+        dispatcher.BeginCapture(chord => captured = chord);
+
+        kb.EmitKeyDown(Key.W, ModifierMask.None);
+
+        Assert.Equal(new KeyChord(Key.W, ModifierMask.None), captured);
+        Assert.False(dispatcher.IsActionHeld(InputAction.MovementForward));
+    }
+
+    [Fact]
+    public void IsActionHeld_ButtonPressedOverTheInterface_HoldsNothing()
+    {
+        var (dispatcher, _, mouse, bindings) = Build();
+        var rmb = new KeyChord(InputDispatcher.MouseButtonToKey(MouseButton.Right), ModifierMask.None, Device: 1);
+        bindings.Add(new Binding(rmb, InputAction.AcdreamRmbOrbitHold, ActivationType.Hold));
+        mouse.WantCaptureMouse = true;
+
+        mouse.EmitMouseDown(MouseButton.Right, ModifierMask.None);
+        mouse.WantCaptureMouse = false;
+
+        Assert.False(dispatcher.IsActionHeld(InputAction.AcdreamRmbOrbitHold));
     }
 }

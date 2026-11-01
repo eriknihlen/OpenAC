@@ -33,7 +33,7 @@ public sealed class EnchantmentRegistryProjectionTests
     }
 
     [Fact]
-    public void GetEnchantmentsInEffect_PowerComparisonUsesRetailSignedInt()
+    public void GetEnchantmentsInEffect_PowerComparisonUsesSignedInt()
     {
         IReadOnlyList<ActiveEnchantmentRecord> result =
             EnchantmentRegistryProjection.GetEnchantmentsInEffect(
@@ -46,7 +46,7 @@ public sealed class EnchantmentRegistryProjectionTests
     }
 
     [Fact]
-    public void GetEnchantmentsInEffect_EqualPower_PrefersLaterStartAndKeepsExactTie()
+    public void GetEnchantmentsInEffect_EqualPower_PrefersLaterStartAndGivesAnExactTieToTheChallenger()
     {
         IReadOnlyList<ActiveEnchantmentRecord> result =
             EnchantmentRegistryProjection.GetEnchantmentsInEffect(
@@ -56,11 +56,37 @@ public sealed class EnchantmentRegistryProjectionTests
                 Enchantment(3u, 2u, category: 12u, power: 7u, start: 20d),
             ]);
 
+        Assert.Equal(3u, Assert.Single(result).SpellId);
+    }
+
+    [Fact]
+    public void GetEnchantmentsInEffect_ABeatenRecordOfIdentityZeroStays()
+    {
+        IReadOnlyList<ActiveEnchantmentRecord> result =
+            EnchantmentRegistryProjection.GetEnchantmentsInEffect(
+            [
+                Enchantment(0u, 1u, category: 3u, power: 1u),
+                Enchantment(7u, 1u, category: 3u, power: 2u),
+            ]);
+
+        Assert.Equal([0u, 7u], result.Select(record => record.SpellId));
+    }
+
+    [Fact]
+    public void GetEnchantmentsInEffect_EqualPower_AnEarlierStartLoses()
+    {
+        IReadOnlyList<ActiveEnchantmentRecord> result =
+            EnchantmentRegistryProjection.GetEnchantmentsInEffect(
+            [
+                Enchantment(2u, 1u, category: 12u, power: 7u, start: 20d),
+                Enchantment(1u, 1u, category: 12u, power: 7u, start: 10d),
+            ]);
+
         Assert.Equal(2u, Assert.Single(result).SpellId);
     }
 
     [Fact]
-    public void GetEnchantmentsInEffect_ReplacingWinner_AppendsInRetailOrder()
+    public void GetEnchantmentsInEffect_ReplacingWinner_AppendsAtTheEnd()
     {
         IReadOnlyList<ActiveEnchantmentRecord> result =
             EnchantmentRegistryProjection.GetEnchantmentsInEffect(

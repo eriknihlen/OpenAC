@@ -157,6 +157,10 @@ public sealed class UiText : UiElement, IUiDatStateful
     /// <summary>The scroll model — also read by the linked UiScrollbar.</summary>
     public UiScrollable Scroll { get; } = new();
 
+    /// <summary>
+    /// Keep the view at the end as lines arrive (lines set by code, such as a
+    /// log). The element's own authored string always starts at its first line.
+    /// </summary>
     public bool PreserveEndOnLayout { get; set; } = true;
 
     public bool WheelScrollEnabled { get; set; }
@@ -281,15 +285,7 @@ public sealed class UiText : UiElement, IUiDatStateful
 
         if (_authoredStateStrings is { } stateStrings
             && stateStrings.TryGetValue(stateId, out string? authoredLine))
-        {
-            // One cached line, rebuilt only when the authored text or the
-            // element's colour changes. A closure here would hand the draw a
-            // freshly allocated array on every frame, for every authored
-            // label in the interface.
-            _authoredStateLineText = authoredLine;
-            _authoredStateLine = null;
-            LinesProvider = _authoredStateLineProvider ??= AuthoredStateLines;
-        }
+            SetAuthoredText(authoredLine);
 
         if (propagate && state?.PassToChildren == true)
         {
@@ -301,21 +297,70 @@ public sealed class UiText : UiElement, IUiDatStateful
         return true;
     }
 
-    private Line[]? _authoredStateLine;
-    private string _authoredStateLineText = string.Empty;
-    private Vector4 _authoredStateLineColor;
-    private Func<IReadOnlyList<Line>>? _authoredStateLineProvider;
+    private string _authoredText = string.Empty;
+    private Line[]? _authoredLines;
+    private Vector4 _authoredLinesColor;
+    private float _authoredLinesRoom = float.NaN;
+    private UiDatFont? _authoredLinesFont;
+    private bool _authoredLinesOneLine;
+    private Func<IReadOnlyList<Line>>? _authoredLinesProvider;
 
     private readonly List<(string Text, float X, float Y, Vector4 Color)> _datLineScratch = [];
 
-    private IReadOnlyList<Line> AuthoredStateLines()
+    /// <summary>
+    /// Show the element's own string the way the element lays it out:
+    /// word-wrapped to its width between the margins, where a line break in
+    /// the string also starts a new line, unless it is one line, which never
+    /// breaks.
+    /// </summary>
+    internal void SetAuthoredText(string text)
     {
-        if (_authoredStateLine is null || _authoredStateLineColor != DefaultColor)
+        _authoredText = text;
+        _authoredLines = null;
+        LinesProvider = _authoredLinesProvider ??= AuthoredLines;
+    }
+
+    /// <summary>The lines shown are the element's own string, not lines set by code.</summary>
+    private bool ShowsAuthoredText
+        => _authoredLinesProvider is not null
+            && ReferenceEquals(LinesProvider, _authoredLinesProvider);
+
+    // Cached and rebuilt only when the string, the room between the margins,
+    // the font, the colour or the one-line flag changes: a fresh array per call
+    // would be an allocation per frame for every authored label in the interface.
+    private IReadOnlyList<Line> AuthoredLines()
+    {
+        bool wrap = !OneLine;
+        float room = Math.Max(
+            1f,
+            Width - (Padding + MarginLeft) - (Padding + MarginRight));
+        if (_authoredLines is null
+            || _authoredLinesColor != DefaultColor
+            || _authoredLinesOneLine != OneLine
+            || (wrap && (_authoredLinesRoom != room
+                         || !ReferenceEquals(_authoredLinesFont, DatFont))))
         {
-            _authoredStateLineColor = DefaultColor;
-            _authoredStateLine = [new Line(_authoredStateLineText, _authoredStateLineColor)];
+            _authoredLinesColor = DefaultColor;
+            _authoredLinesOneLine = OneLine;
+            _authoredLinesRoom = room;
+            _authoredLinesFont = DatFont;
+            if (!wrap)
+            {
+                _authoredLines = [new Line(_authoredText, DefaultColor)];
+            }
+            else
+            {
+                Func<string, float> measure = DatFont is { } font
+                    ? font.MeasureWidth
+                    : static value => value.Length * 8f;
+                IReadOnlyList<string> wrapped = WrapWords(_authoredText, measure, room);
+                var lines = new Line[wrapped.Count];
+                for (int i = 0; i < lines.Length; i++)
+                    lines[i] = new Line(wrapped[i], DefaultColor);
+                _authoredLines = lines;
+            }
         }
-        return _authoredStateLine;
+        return _authoredLines;
     }
 
     private static bool TryColor(UiPropertyValue property, out Vector4 color)
@@ -467,7 +512,10 @@ public sealed class UiText : UiElement, IUiDatStateful
         Scroll.SetExtents(
             (int)MathF.Ceiling(contentH),
             (int)MathF.Floor(innerH),
-            preserveEnd: PreserveEndOnLayout);
+            // An authored string keeps the offset (zero at first), so one too
+            // tall for its box shows its start; only lines set by code follow
+            // the end.
+            preserveEnd: PreserveEndOnLayout && !ShowsAuthoredText);
 
         float baseY = ContentBaseY(
             top,

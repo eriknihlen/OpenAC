@@ -197,6 +197,46 @@ public sealed class SalvageUiControllerTests
         Assert.False(h.Button.Enabled);
     }
 
+    // A staged cell's drag says it came from the salvage window, so the
+    // world and the item windows refuse it: lifting it only unstages it.
+    [Fact]
+    public void A_staged_cell_drags_as_a_salvage_window_alias()
+    {
+        using var h = new Harness();
+        h.Item(1);
+        Assert.True(h.Controller.AddItem(1));
+
+        UiItemSlot cell = h.List.GetItem(0)!;
+        Assert.Equal(ItemDragSource.Salvage, cell.SourceKind);
+        var payload = Assert.IsType<ItemDragPayload>(cell.GetDragPayload());
+        Assert.Equal(ItemDragSource.Salvage, payload.SourceKind);
+        Assert.True(payload.SourceKind.IsAlias());
+    }
+
+    // The salvage window refuses an alias too: a staged item lifted out and
+    // let go over the row again stays unstaged.
+    [Fact]
+    public void A_staged_item_dropped_back_on_the_row_stays_unstaged()
+    {
+        using var h = new Harness();
+        var item = h.Item(1);
+        h.Item(2);
+        h.Controller.AddItem(1);
+        h.Controller.AddItem(2);
+        UiItemSlot lifted = h.List.GetItem(0)!;
+        var payload = Assert.IsType<ItemDragPayload>(lifted.GetDragPayload());
+
+        h.Controller.OnDragLift(h.List, lifted, payload);
+        Assert.Equal(1, h.Controller.ItemCount);
+        UiItemSlot target = h.List.GetItem(0)!;
+        Assert.Equal(ItemDragAcceptance.Reject, h.Controller.OnDragOver(h.List, target, payload));
+        h.Controller.HandleDropRelease(h.List, target, payload);
+
+        Assert.Equal(1, h.Controller.ItemCount);
+        Assert.Equal(2u, h.List.GetItem(0)!.ItemId);
+        Assert.Equal(0, item.TradeState);
+    }
+
     // #251: right-click on a staged item examines it, as on any other item
     // cell, and leaves it staged.
     [Fact]

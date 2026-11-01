@@ -76,6 +76,39 @@ public static class ShortcutDropPlanner
         return mutations.ToArray();
     }
 
+    /// <summary>
+    /// The changes a drop of <paramref name="droppedObjectId"/> on
+    /// <paramref name="targetSlot"/> makes when that object gets no shortcut:
+    /// nothing is added, but the target's shortcut still makes way, to the
+    /// first empty slot to the right of it (wrapping round, the target itself
+    /// last), unless it was the dropped object's own.
+    /// </summary>
+    public static ShortcutMutation[] PlanRefusedDrop(
+        IReadOnlyList<ShortcutEntry?> slots,
+        int targetSlot,
+        uint droppedObjectId)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        if (slots.Count != ShortcutStore.SlotCount
+            || (uint)targetSlot >= ShortcutStore.SlotCount)
+            return Array.Empty<ShortcutMutation>();
+
+        var state = new ShortcutEntry?[ShortcutStore.SlotCount];
+        for (int i = 0; i < state.Length; i++)
+            state[i] = slots[i];
+
+        var mutations = new List<ShortcutMutation>(2);
+        ShortcutEntry? displaced = VisibleEntry(state[targetSlot]);
+        RemoveVisibleAt(state, targetSlot, mutations);
+        if (displaced is { } entry && entry.ObjectId != droppedObjectId)
+        {
+            int empty = FirstEmptyToRight(state, targetSlot);
+            if (empty >= 0)
+                Add(state, entry.WithIndex(empty), mutations);
+        }
+        return mutations.ToArray();
+    }
+
     public static ShortcutMutation[] PlanFullStackMerge(
         IReadOnlyList<ShortcutEntry?> slots,
         uint oldObjectId,

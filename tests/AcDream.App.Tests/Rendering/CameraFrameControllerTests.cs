@@ -255,6 +255,115 @@ public sealed class CameraFrameControllerTests
     }
 
     [Fact]
+    public void ModernView_OrbitsWithTheViewYaw_AndHandsBackWithoutAJump()
+    {
+        PlayerMovementController controller = CreatePlayer();
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        var chase = new ChaseCameraInputState
+        {
+            Legacy = legacy,
+            Retail = retail,
+            ModernMouseTurning = true,
+            RmbOrbitHeld = true,
+            ModernViewActive = true,
+            ModernViewYaw = 1f,
+        };
+        var input = new InputSource
+        {
+            Chase = new ChaseCameraAdjustmentInput(false, false, false, false, RotateLeft: false, RotateRight: true),
+        };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), input, runtime,
+            chase, localFrame, new Reconciler([]), new CombatTargetSource());
+        var timing = new UpdateFrameTiming(1.0 / 60.0, 1f / 60f, 1.0);
+
+        // The character's facing does not drag the view, and the keypad
+        // rotate does not fight the mouse for it.
+        controller.Yaw = 0.3f;
+        frame.Tick(timing);
+        Assert.Equal(0.7f, legacy.YawOffset, 5);
+        Assert.Equal(0.7f, retail.YawOffset, 5);
+        Vector3 eyeHeld = retail.Position;
+
+        // The drag is over: the ordinary camera keeps the orbit it was handed,
+        // so the view does not snap behind the character.
+        chase.RmbOrbitHeld = false;
+        chase.ModernViewActive = false;
+        input.Chase = default;
+        frame.Tick(timing);
+        Assert.Equal(0.7f, legacy.YawOffset, 5);
+        Assert.Equal(0.7f, retail.YawOffset, 5);
+        Assert.True(Vector3.Distance(eyeHeld, retail.Position) < 0.01f);
+    }
+
+    // With the option on and no drag under way, the camera is the ordinary
+    // one: it smooths the facing's 30 Hz turn steps, keeps the keypad orbit
+    // and target tracking, exactly as with the option off.
+    [Fact]
+    public void ModernOption_WithoutADrag_TheCameraIsTheOrdinaryOne()
+    {
+        bool savedRetail = CameraDiagnostics.UseRetailChaseCamera;
+        try
+        {
+            CameraDiagnostics.UseRetailChaseCamera = true;
+            (Vector3[] off, float offsetOff) = ChaseEyesWhileTurning(modern: false);
+            (Vector3[] on, float offsetOn) = ChaseEyesWhileTurning(modern: true);
+
+            Assert.Equal(offsetOff, offsetOn);
+            for (int i = 0; i < off.Length; i++)
+                Assert.True(
+                    Vector3.Distance(off[i], on[i]) < 1e-5f,
+                    $"frame {i}: option off {off[i]}, option on {on[i]}");
+        }
+        finally
+        {
+            CameraDiagnostics.UseRetailChaseCamera = savedRetail;
+        }
+    }
+
+    // The character turns in keyframe steps on every fifth frame (a 30 Hz
+    // physics step at 144 frames a second) while the keypad orbits the camera.
+    private static (Vector3[] Eyes, float YawOffset) ChaseEyesWhileTurning(bool modern)
+    {
+        PlayerMovementController controller = CreatePlayer();
+        var runtime = new PlayerRuntime(controller, []);
+        var localFrame = new RetailLocalPlayerFrameController(runtime, new StillMovementInput());
+        CameraController camera = CreateCamera();
+        var legacy = new ChaseCamera();
+        var retail = new RetailChaseCamera();
+        camera.EnterChaseMode(legacy, retail);
+        var chase = new ChaseCameraInputState
+        {
+            Legacy = legacy,
+            Retail = retail,
+            ModernMouseTurning = modern,
+        };
+        var input = new InputSource
+        {
+            Chase = new ChaseCameraAdjustmentInput(false, false, false, false, RotateLeft: false, RotateRight: true),
+        };
+        var frame = new CameraFrameController(
+            camera, new CaptureSource(), input, runtime,
+            chase, localFrame, new Reconciler([]), new CombatTargetSource());
+        var timing = new UpdateFrameTiming(1.0 / 144.0, 1f / 144f, 1.0);
+
+        var eyes = new Vector3[60];
+        for (int i = 0; i < eyes.Length; i++)
+        {
+            if (i % 5 == 0)
+                controller.Yaw += 0.05f;
+            frame.Tick(timing);
+            eyes[i] = retail.Position;
+        }
+        return (eyes, retail.YawOffset);
+    }
+
+    [Fact]
     public void PreNetworkAdvancedPlayer_DoesNotRunTheInboundCreationReconcile()
     {
         PlayerMovementController controller = CreatePlayer();

@@ -67,7 +67,7 @@ public sealed class GameWindow :
         return defaults with
         {
             Size = size,
-            Title = "acdream — Vulkan",
+            Title = RenderFrameDiagnosticsController.Product,
             VSync = useVSync,
             WindowBorder = border,
             IsVisible = !exactAutomationFramebuffer,
@@ -535,7 +535,8 @@ public sealed class GameWindow :
             _retainedInputCapture);
         _movementInput = new AcDream.App.Input.DispatcherMovementInputSource(
             _playerControllerSlot,
-            _inputCapture);
+            _inputCapture,
+            _chaseCameraInput);
         _framebufferResize = new FramebufferResizeController(_viewportAspect);
         _datDir = options.DatDir;
         _worldGameState = host.WorldGameState;
@@ -1546,7 +1547,8 @@ public sealed class GameWindow :
             frameRoots => new SessionStartCompositionPhase(
                 new SessionStartDependencies(
                     Console.WriteLine,
-                    JoinPlayingSession))
+                    JoinPlayingSession,
+                    () => WindowFocusRequest.BringToFront(_window!, Console.WriteLine)))
                 .Start(frameRoots));
 
         ApplyPluginAutomationBindings();

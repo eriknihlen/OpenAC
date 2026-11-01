@@ -35,6 +35,35 @@ public sealed class DispatcherMovementInputSourceTests
     }
 
     [Fact]
+    public void BothButtonForward_RunsAndKeyboardBackwardCancelsIt()
+    {
+        var (dispatcher, _, _) = CreateDispatcher();
+        using var movement = new RuntimeLocalPlayerMovementState();
+        var chase = new ChaseCameraInputState
+        {
+            ModernMouseTurning = true,
+            BothMouseButtonsRunForward = true,
+            ModernMouseForward = true,
+        };
+        var source = new DispatcherMovementInputSource(movement, chase: chase);
+        source.Bind(dispatcher);
+
+        MovementInput mouseOnly = source.Capture();
+        Assert.True(mouseOnly.Forward);
+        Assert.True(mouseOnly.Run);
+
+        dispatcher.TrySetAutomationActionHeld(InputAction.MovementBackup, held: true);
+        MovementInput opposed = source.Capture();
+        Assert.False(opposed.Forward);
+        Assert.False(opposed.Backward);
+
+        chase.ModernMouseForward = false;
+        MovementInput keyboardOnly = source.Capture();
+        Assert.True(keyboardOnly.Backward);
+        Assert.False(keyboardOnly.Forward);
+    }
+
+    [Fact]
     public void CommandInputIsMarkedPersistentWithoutChangingStoredSnapshot()
     {
         using var movement = new RuntimeLocalPlayerMovementState();
@@ -50,7 +79,7 @@ public sealed class DispatcherMovementInputSourceTests
     }
 
     [Fact]
-    public void RetainedKeyboardCaptureSilencesHeldKeysButDoesNotCancelAutorun()
+    public void RetainedKeyboardCaptureKeepsAHoldBegunBeforeItAndDoesNotCancelAutorun()
     {
         var (dispatcher, _, mouse) = CreateDispatcher();
         var source = CreateSource();
@@ -64,9 +93,11 @@ public sealed class DispatcherMovementInputSourceTests
         Assert.True(captured.Forward);
         Assert.True(source.AutoRunActive);
 
+        // With autorun off the hold still moves the character until let go.
         source.HandlePressedAction(InputAction.MovementRunLock);
-        captured = source.Capture();
-        Assert.False(captured.Forward);
+        Assert.True(source.Capture().Forward);
+        dispatcher.TrySetAutomationActionHeld(InputAction.MovementForward, held: false);
+        Assert.False(source.Capture().Forward);
     }
 
     [Fact]

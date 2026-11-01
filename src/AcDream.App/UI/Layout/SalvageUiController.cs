@@ -221,7 +221,7 @@ public sealed class SalvageUiController : IRetainedPanelController, IItemListDra
                     SlotIndex = _list.GetNumUIItems(),
                     SpriteResolve = _list.SpriteResolve,
                     AllowDragSource = true,
-                    SourceKind = ItemDragSource.Inventory,
+                    SourceKind = ItemDragSource.Salvage,
                     ShowTradeOverlay = true,
                     TradeOverlaySprite = TradeOverlaySprite,
                     TooltipTextResolve = id => ItemTooltipCaption.Resolve(

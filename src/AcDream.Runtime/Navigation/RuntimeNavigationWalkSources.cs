@@ -700,10 +700,10 @@ internal sealed class RuntimeNavigationDoors : INavigationDoors
             ? (float)item.Properties.GetFloat((uint)PropertyFloat.UseRadius, DefaultUseReach)
             : DefaultUseReach;
 
-    /// <summary>What the client's last appraisal of a door said of its lock, or null before one arrives.</summary>
+    /// <summary>Whether a door is locked, read as the plugin view of it reads it; null while the client does not know.</summary>
     public bool? IsLocked(uint doorId) =>
-        _runtime.InventoryOwner.Objects.Get(doorId) is { LastAppraisalTimeMs: not 0 } item
-            ? item.Properties.Bools.TryGetValue((uint)PropertyBool.Locked, out bool locked) && locked
+        _runtime.InventoryOwner.Objects.Get(doorId) is { } item
+            ? RuntimeNavigationProjection.KnownLock(item)
             : null;
 
     public bool Appraise(uint doorId) => _appraise?.Invoke(doorId) == true;

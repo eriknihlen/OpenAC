@@ -103,7 +103,8 @@ public sealed class RuntimeLiveEntitySessionController
         // these packets and discards them, exactly as it does F754/F755.
         _ => { },
         _ => { },
-        _ => { });
+        _ => { },
+        IsHeld: guid => Entities.IsKnown(guid));
 
     private RuntimeEntityObjectLifetime Entities =>
         _runtime.EntityObjects;

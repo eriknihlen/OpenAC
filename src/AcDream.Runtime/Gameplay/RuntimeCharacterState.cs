@@ -202,7 +202,7 @@ public sealed class RuntimeCharacterState : IDisposable
         int activeCount = System.Linq.Enumerable.Count(Spellbook.ActiveEnchantments);
         System.Console.WriteLine(
             System.FormattableString.Invariant(
-                $"[stat-chain] base run={_runSkillBase} jump={_jumpSkillBase} runMod={runMod.Multiplier:F4}x+{runMod.Additive:F1} -> eff run={run} jump={jump} (activeEnchantments={activeCount})"));
+                $"[stat-chain] base run={_runSkillBase} jump={_jumpSkillBase} runMod=[{runMod}] -> eff run={run} jump={jump} (activeEnchantments={activeCount})"));
         MovementSkills.Update(run, jump);
     }
 

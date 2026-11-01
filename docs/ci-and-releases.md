@@ -6,8 +6,8 @@ Workflow: [`.github/workflows/ci.yml`](https://github.com/eriknihlen/OpenAC/blob
 
 | Event | `windows-gate` | `linux-portable` | `macos-portable` | `vulkan-hardware` | `release` |
 |---|---|---|---|---|---|
-| Pull request | GitHub-hosted `windows-latest` | GitHub-hosted `ubuntu-latest` | GitHub-hosted Apple-silicon `macos-14` | not run | not run |
-| Push to `main` | self-hosted `openac-windows` | self-hosted `openac-linux` | GitHub-hosted Apple-silicon `macos-14` | self-hosted `openac-windows` (NVIDIA GPU) | not run |
+| Pull request | GitHub-hosted `windows-latest` | GitHub-hosted `ubuntu-latest` | GitHub-hosted Apple-silicon `macos-15` | not run | not run |
+| Push to `main` | self-hosted `openac-windows` | self-hosted `openac-linux` | GitHub-hosted Apple-silicon `macos-15` | self-hosted `openac-windows` (NVIDIA GPU) | not run |
 | Push of a `v*` tag | self-hosted | self-hosted | GitHub-hosted Apple-silicon | self-hosted | self-hosted, after all four are green |
 
 `macos-intel` is a separate job, not part of `macos-portable`, that builds and
@@ -37,7 +37,7 @@ runs the presentation-free closure with the Linux lane enabled; the network
 test assembly runs single-threaded there because its socket tests contend on a
 small container. `macos-portable` enables the macOS lane, publishes the native
 Apple-silicon payloads, and checks the Finder-launchable app bundle. GitHub
-documents `macos-14` as an Apple-silicon hosted runner. `vulkan-hardware` runs
+documents `macos-15` as an Apple-silicon hosted runner. `vulkan-hardware` runs
 `Lane=Vulkan` on the NVIDIA runner. A test in
 `GitHubWorkflowFilterContractTests` pins every workflow filter to the script's
 default so the platform lanes cannot drift.

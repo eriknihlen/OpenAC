@@ -38,7 +38,7 @@ public sealed class CharacterRecordParityTests
                     LayerId: 1u,
                     Duration: -1d,
                     CasterGuid: 0u,
-                    StatModType: 0u,
+                    StatModType: (uint)EnchantmentMath.EnchantmentTypeFlag.Multiplicative,
                     StatModKey: 0u,
                     StatModValue: 0.95f,
                     Bucket: 4u));

@@ -323,15 +323,59 @@ public sealed class HousePurchaseUiControllerTests
         Assert.Equal(["You can only trade items you are carrying"], h.Reports);
     }
 
-    [Fact]
-    public void Drop_AShortcut_IsIgnored()
+    [Theory]
+    [InlineData(ItemDragSource.ShortcutBar)]
+    [InlineData(ItemDragSource.Vendor)]
+    [InlineData(ItemDragSource.Salvage)]
+    public void Drop_AnAlias_IsIgnored(ItemDragSource source)
     {
         using var h = new Harness();
-        h.Objects.AddOrUpdate(new ClientObject { ObjectId = 2, WeenieClassId = 273u, StackSize = 10 });
+        h.Item(2, 273u, stack: 10);
         h.Open();
 
-        h.Drop(h.BuyList, 2, ItemDragSource.ShortcutBar);
+        h.Drop(h.BuyList, 2, source);
 
+        Assert.Empty(h.Reports);
+        Assert.Equal(0, Harness.Staged(h.BuyList));
+    }
+
+    // A staged cell's drag stands for the item, so the world and the item
+    // windows refuse it: lifting it only unstages it.
+    [Fact]
+    public void AStagedCell_DragsAsAnAlias()
+    {
+        using var h = new Harness();
+        h.Item(1, 273u, stack: 10);
+        h.Open();
+        h.Drop(h.BuyList, 1);
+
+        var payload = Assert.IsType<ItemDragPayload>(h.BuyList.GetItem(0)!.GetDragPayload());
+        Assert.Equal(ItemDragSource.Vendor, payload.SourceKind);
+        Assert.True(payload.SourceKind.IsAlias());
+    }
+
+    // The window refuses an alias too: a staged item lifted out and let go
+    // over the strip again stays unstaged.
+    [Fact]
+    public void AStagedItem_DroppedBackOnTheStrip_StaysUnstaged()
+    {
+        using var h = new Harness();
+        h.Item(1, 273u, stack: 10);
+        h.Open();
+        h.Drop(h.BuyList, 1);
+        UiItemSlot lifted = h.BuyList.GetItem(0)!;
+        var payload = Assert.IsType<ItemDragPayload>(lifted.GetDragPayload());
+
+        h.Controller.OnDragLift(h.BuyList, lifted, payload);
+        h.Controller.Tick();
+        Assert.Equal(0, Harness.Staged(h.BuyList));
+        UiItemSlot target = h.BuyList.GetItem(0)!;
+        Assert.NotEqual(ItemDragAcceptance.Accept,
+            h.Controller.OnDragOver(h.BuyList, target, payload));
+        h.Controller.HandleDropRelease(h.BuyList, target, payload);
+        h.Controller.Tick();
+
+        Assert.Equal(0, Harness.Staged(h.BuyList));
         Assert.Empty(h.Reports);
     }
 

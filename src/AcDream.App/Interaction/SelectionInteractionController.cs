@@ -350,6 +350,10 @@ internal sealed class SelectionInteractionController
     public void PlaceDraggedItem(ItemDragPayload payload, float mouseX, float mouseY)
     {
         ArgumentNullException.ThrowIfNull(payload);
+        // An alias (a shortcut, or a vendor, house or salvage list cell)
+        // carries no item, so nothing is looked for under the pointer.
+        if (payload.SourceKind.IsAlias())
+            return;
         uint target = _query.PickAt(mouseX, mouseY, includeSelf: true) ?? 0u;
         if (target != 0u)
             _query.BeginLightingPulse(target);

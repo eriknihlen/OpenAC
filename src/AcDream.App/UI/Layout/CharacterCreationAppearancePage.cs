@@ -52,6 +52,12 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
     internal const uint ShadeScrollId = 0x10000321u;
     internal const uint ViewportId = 0x100003BBu;
 
+    /// <summary>The skin spin's top, below the mouth spin.</summary>
+    internal const float SkinSpinTop = 180f;
+    /// <summary>The skin spin's top in the nose spin's place, for a heritage
+    /// without nose and mouth, so no gap opens above it.</summary>
+    internal const float SkinSpinTopWithoutNose = 90f;
+
     internal const uint HelpTextId = 0x100003ABu;
 
     private const uint HelpScrollRelativeId = 0x100002E7u;
@@ -228,12 +234,18 @@ internal sealed class CharacterCreationAppearancePage : IDisposable
             noseSpin.Visible = !clothesHidden;
         if (_spins.TryGetValue(Part.Mouth, out UiButton? mouthSpin))
             mouthSpin.Visible = !clothesHidden;
-        SetArrowsEnabled(Part.Eyes, !clothesHidden);
-        if (clothesHidden)
+        // Without nose and mouth the skin spin moves up into the nose spin's
+        // place, and back below the mouth for every other heritage.
+        if (_spins.TryGetValue(Part.Skin, out UiButton? skinSpin))
         {
-            _currentChoice = Choice.Face;
-            _currentPart = Part.Hair;
+            skinSpin.Left = 0f;
+            skinSpin.Top = clothesHidden ? SkinSpinTopWithoutNose : SkinSpinTop;
+            skinSpin.ResetAnchorCapture();
         }
+        SetArrowsEnabled(Part.Eyes, !clothesHidden);
+        // The choice and part stay as picked: only the full page update puts
+        // a heritage without clothes back on the face, so the eyes and skin
+        // spins stay picked while their colour and shade change.
         ApplyChoiceVisibility();
 
         // GF-6: heritage-flavored, index-independent — no gender needed.

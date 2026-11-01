@@ -1,3 +1,4 @@
+using AcDream.App.Input;
 using AcDream.App.Rendering.Vfx;
 using AcDream.App.Rendering.Wb;
 using AcDream.App.Streaming;
@@ -6,6 +7,7 @@ using AcDream.Content;
 using AcDream.Core.Physics;
 using AcDream.Core.Vfx;
 using AcDream.Core.World;
+using AcDream.Runtime;
 using Silk.NET.Windowing;
 
 namespace AcDream.App.Rendering;
@@ -15,22 +17,35 @@ internal sealed class RuntimeRenderFrameTitleFactsSource : IRenderFrameTitleFact
     private readonly GpuWorldState _world;
     private readonly LiveEntityAnimationRuntimeView<LiveEntityAnimationState> _animations;
     private readonly WorldTimeService _time;
+    private readonly GameRuntime _runtime;
+    private readonly ILocalPlayerIdentitySource _player;
 
     public RuntimeRenderFrameTitleFactsSource(
         GpuWorldState world,
         LiveEntityAnimationRuntimeView<LiveEntityAnimationState> animations,
-        WorldTimeService time)
+        WorldTimeService time,
+        GameRuntime runtime,
+        ILocalPlayerIdentitySource player)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _animations = animations ?? throw new ArgumentNullException(nameof(animations));
         _time = time ?? throw new ArgumentNullException(nameof(time));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _player = player ?? throw new ArgumentNullException(nameof(player));
     }
 
-    public RenderFrameTitleFacts Capture() => new(
-        _world.Entities.Count,
-        _animations.Count,
-        _time.CurrentCalendar,
-        _time.DayFraction);
+    public RenderFrameTitleFacts Capture()
+    {
+        RenderFrameTitleSubject subject = RenderFrameTitleSubject.Of(
+            _runtime.CharacterSelection,
+            _player.ServerGuid);
+        return new RenderFrameTitleFacts(
+            subject.InWorld,
+            subject.CharacterName,
+            _world.Entities.Count,
+            _animations.Count,
+            _time.CurrentCalendar);
+    }
 }
 
 internal sealed class SilkRenderFrameTitleSink : IRenderFrameTitleSink

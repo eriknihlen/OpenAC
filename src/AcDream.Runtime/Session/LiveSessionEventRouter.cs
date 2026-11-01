@@ -26,7 +26,8 @@ public sealed record LiveEntitySessionSink(
     Action<WorldSession.EntitySpawn> DescriptionRefreshed,
     Action<PlayPhysicsScript> PlayPhysicsScript,
     Action<PlayPhysicsScriptType> PlayPhysicsScriptType,
-    Action<SoundEvent> SoundEvent);
+    Action<SoundEvent> SoundEvent,
+    Func<uint, bool> IsHeld);
 
 public sealed record LiveEnvironmentSessionSink(
     Action<uint> EnvironChanged,
@@ -167,7 +168,8 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
                 inventory.Objects,
                 inventory.PlayerGuid,
                 character.Character.LocalPlayer,
-                IsAccepting));
+                IsAccepting,
+                entities.IsHeld));
             ConstructionCheckpoint();
             _subscriptions.Add(CombatStateWiring.Wire(
                 session,
@@ -783,6 +785,7 @@ public sealed class LiveSessionEventRouter : ILiveSessionEventRouting
         ArgumentNullException.ThrowIfNull(entities.PlayPhysicsScript);
         ArgumentNullException.ThrowIfNull(entities.PlayPhysicsScriptType);
         ArgumentNullException.ThrowIfNull(entities.SoundEvent);
+        ArgumentNullException.ThrowIfNull(entities.IsHeld);
         ArgumentNullException.ThrowIfNull(environment.EnvironChanged);
         ArgumentNullException.ThrowIfNull(environment.ServerTimeUpdated);
         ArgumentNullException.ThrowIfNull(inventory.Objects);

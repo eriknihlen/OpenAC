@@ -282,7 +282,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     /// drag can read as accepted and still be turned away on release.</summary>
     private void HandleDollDragOver(object? payload, int x, int y)
         => DollDragAcceptance = payload is not ItemDragPayload drag
-            || drag.SourceKind == ItemDragSource.ShortcutBar
+            || drag.SourceKind.IsAlias()
                 ? ItemDragAcceptance.None
                 : _objects.Get(drag.ObjId) is { } item && ItemEquipRules.IsAutoWearItem(item)
                     ? ItemDragAcceptance.Accept
@@ -294,7 +294,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
     private void HandleDollDrop(object? payload, int x, int y)
     {
         ClearDollDragAcceptance();
-        if (payload is not ItemDragPayload drag || drag.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload is not ItemDragPayload drag || drag.SourceKind.IsAlias())
             return;
         if (_objects.Get(drag.ObjId) is not { } item || !ItemEquipRules.IsAutoWearItem(item))
             return;
@@ -409,7 +409,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
 
     public ItemDragAcceptance OnDragOver(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
-        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.SourceKind.IsAlias())
             return ItemDragAcceptance.None;
         var item = _objects.Get(payload.ObjId);
         if (item is null)
@@ -422,7 +422,7 @@ public sealed class PaperdollController : IItemListDragHandler, IRetainedPanelCo
 
     public void HandleDropRelease(UiItemList targetList, UiItemSlot targetCell, ItemDragPayload payload)
     {
-        if (payload.SourceKind == ItemDragSource.ShortcutBar)
+        if (payload.SourceKind.IsAlias())
             return;
         var item = _objects.Get(payload.ObjId);
         if (item is null) return;

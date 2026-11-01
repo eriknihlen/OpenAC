@@ -1,5 +1,6 @@
 using System.Linq;
 using AcDream.Core.Items;
+using AcDream.Core.Properties;
 using Xunit;
 
 namespace AcDream.Core.Tests.Items;
@@ -518,6 +519,94 @@ public sealed class ClientObjectTableTests
     }
 
     [Fact]
+    public void MonarchInstanceIdUpdate_SetsAndClearsMonarchId()
+    {
+        // Swearing or breaking allegiance announces the new monarch with an
+        // instance-id update; the radar's allegiance box and the house entry
+        // gate read MonarchId. 0 means no allegiance.
+        const uint personGuid = 0x50000005u;
+        const uint monarchGuid = 0x50000777u;
+        var table = new ClientObjectTable();
+        ClientObject person = table.Ingest(FullWeenie(personGuid));
+        Assert.Null(person.MonarchId);
+
+        Assert.True(table.UpdateInstanceIdProperty(
+            personGuid, (uint)PropertyInstanceId.Monarch, monarchGuid));
+        Assert.Equal(monarchGuid, person.MonarchId);
+        Assert.Equal(monarchGuid, person.Properties.InstanceIds[(uint)PropertyInstanceId.Monarch]);
+
+        Assert.True(table.UpdateInstanceIdProperty(
+            personGuid, (uint)PropertyInstanceId.Monarch, value: 0u));
+        Assert.Null(person.MonarchId);
+    }
+
+    // Each of these bools is also a bit of the public description, and the
+    // update moves that bit with it, leaving every other bit alone. Locked is
+    // the inverse of openable.
+    [Theory]
+    [InlineData(PropertyBool.Stuck, PublicWeenieFlags.Stuck, false)]
+    [InlineData(PropertyBool.Locked, PublicWeenieFlags.Openable, true)]
+    [InlineData(PropertyBool.Inscribable, PublicWeenieFlags.Inscribable, false)]
+    [InlineData(PropertyBool.UiHidden, PublicWeenieFlags.UiHidden, false)]
+    [InlineData(PropertyBool.IgnoreHouseBarriers, PublicWeenieFlags.ImmuneCellRestrictions, false)]
+    [InlineData(PropertyBool.HiddenAdmin, PublicWeenieFlags.HiddenAdmin, false)]
+    public void DescriptionBoolUpdate_MovesItsDescriptionBit(
+        PropertyBool property,
+        PublicWeenieFlags bit,
+        bool inverted)
+    {
+        const uint guid = 0x7E166010u;
+        const uint other = (uint)(PublicWeenieFlags.Attackable | PublicWeenieFlags.Bindstone);
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = guid, PublicWeenieBitfield = other });
+        int updates = 0;
+        table.ObjectUpdated += _ => updates++;
+
+        Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: !inverted));
+        Assert.Equal(other | (uint)bit, table.Get(guid)!.PublicWeenieBitfield);
+        Assert.Equal(!inverted, table.Get(guid)!.Properties.Bools[(uint)property]);
+        Assert.Equal(1, updates);
+
+        Assert.True(table.UpdateBoolProperty(guid, (uint)property, value: inverted));
+        Assert.Equal(other, table.Get(guid)!.PublicWeenieBitfield);
+        Assert.Equal(inverted, table.Get(guid)!.Properties.Bools[(uint)property]);
+        Assert.Equal(2, updates);
+    }
+
+    [Fact]
+    public void UiHiddenBoolUpdate_OnAnObjectWithNoBitsYet_StartsFromNone()
+    {
+        const uint trap = 0x7E166002u;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject { ObjectId = trap });
+
+        Assert.True(table.UpdateBoolProperty(
+            trap, (uint)PropertyBool.UiHidden, value: true));
+
+        Assert.Equal((uint)PublicWeenieFlags.UiHidden, table.Get(trap)!.PublicWeenieBitfield);
+    }
+
+    [Fact]
+    public void OtherBoolUpdate_StoresTheValueAndLeavesTheDescriptionBits()
+    {
+        const uint door = 0x7E166003u;
+        var table = new ClientObjectTable();
+        table.AddOrUpdate(new ClientObject
+        {
+            ObjectId = door,
+            PublicWeenieBitfield = (uint)PublicWeenieFlags.Stuck,
+        });
+
+        Assert.True(table.UpdateBoolProperty(
+            door, (uint)PropertyBool.Open, value: true));
+
+        Assert.True(table.Get(door)!.Properties.Bools[(uint)PropertyBool.Open]);
+        Assert.Equal((uint)PublicWeenieFlags.Stuck, table.Get(door)!.PublicWeenieBitfield);
+        Assert.False(table.UpdateBoolProperty(
+            0x7E1660FFu, (uint)PropertyBool.UiHidden, value: true));
+    }
+
+    [Fact]
     public void WeenieData_Construct()
     {
         var d = new WeenieData(Guid: 1, Name: "x", Type: ItemType.Misc, WeenieClassId: 2,
@@ -568,6 +657,46 @@ public sealed class ClientObjectTableTests
         Assert.NotNull(added);
         Assert.Equal(0x06001234u, table.Get(0x500000B0u)!.IconId);
         Assert.Equal(0xABCDu, obj.WeenieClassId);
+    }
+
+    [Fact]
+    public void Ingest_FullDescriptionWithoutAMonarch_ClearsIt_APartialOneKeepsIt()
+    {
+        // A description off the wire (one that carries its header) replaces
+        // the whole description, and the server leaves the monarch out when
+        // there is none. Partial data with no header leaves it alone.
+        const uint guid = 0x500000B5u;
+        const uint monarch = 0x50000777u;
+        var fromWire = new ClientObjectHeader(
+            0u, null, 0u, 0u, 0u, null, null, null, null, null, null);
+        var table = new ClientObjectTable();
+        table.Ingest(FullWeenie(guid) with { MonarchId = monarch, Header = fromWire });
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
+
+        table.Ingest(FullWeenie(guid));
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
+
+        table.Ingest(FullWeenie(guid) with { Header = fromWire });
+        Assert.Null(table.Get(guid)!.MonarchId);
+    }
+
+    [Fact]
+    public void Ingest_DescriptionThatSaysItHasAMonarchButWasCutShort_KeepsTheMonarch()
+    {
+        // The description's header says a monarch follows (0x40), but the
+        // value never arrived: that is no word that the monarch is gone.
+        const uint guid = 0x500000B6u;
+        const uint monarch = 0x50000777u;
+        var table = new ClientObjectTable();
+        table.Ingest(FullWeenie(guid) with { MonarchId = monarch });
+
+        table.Ingest(FullWeenie(guid) with
+        {
+            Header = new ClientObjectHeader(
+                0x40u, null, 0u, 0u, 0u, null, null, null, null, null, null),
+        });
+
+        Assert.Equal(monarch, table.Get(guid)!.MonarchId);
     }
 
     [Fact]

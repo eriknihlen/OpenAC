@@ -368,6 +368,9 @@ public sealed class PlayerMovementController
     private bool _hasInputSnapshot;
 
     private bool _mouseLookActive;
+    private bool _modernMouseLook;
+    // Modern mouse turning: the compass heading (degrees) the view points at.
+    private float? _mouseLookFacingTarget;
     private bool _mouseTurnSamplePending;
     private float _mouseTurnAdjustment;
     private uint? _activeInputTurnCommand;
@@ -741,13 +744,15 @@ public sealed class PlayerMovementController
         _body.TransientState &= ~TransientStateFlags.Active;
     }
 
-    public bool BeginMouseLook(MovementInput input)
+    public bool BeginMouseLook(MovementInput input, bool modern = false)
     {
         EnsurePublishedForRuntimeOperation();
         if (_mouseLookActive || State != PlayerState.InWorld)
             return false;
 
         _mouseLookActive = true;
+        _modernMouseLook = modern;
+        _mouseLookFacingTarget = null;
         TakeControlFromServer(input);
         _mouseTurnSamplePending = false;
         _mouseTurnAdjustment = 0f;
@@ -755,12 +760,39 @@ public sealed class PlayerMovementController
         return true;
     }
 
+    /// <summary>
+    /// Modern mouse turning: the yaw (radians) the view points along. While a
+    /// modern mouse look is active and no turn key is held, the character turns
+    /// toward it with the ordinary turn motion at the full turn rate, and stops
+    /// on it. The view never waits on the character, and nothing else sets the
+    /// character's heading.
+    /// </summary>
+    public void SetMouseLookFacingTarget(float yaw)
+    {
+        EnsurePublishedForRuntimeOperation();
+        if (!_mouseLookActive || !_modernMouseLook || !float.IsFinite(yaw))
+            return;
+        _mouseLookFacingTarget = AcDream.Core.Physics.Motion.MoveToMath.HeadingFromYaw(yaw);
+    }
+
+    /// <summary>
+    /// True when no modern facing turn is under way: the character faces the
+    /// view target, or there is no modern mouse look (it ended, or a teleport
+    /// or reset cleared it).
+    /// </summary>
+    public bool MouseLookFacingSettled =>
+        !_mouseLookActive
+        || !_modernMouseLook
+        || _mouseLookFacingTarget is not { } target
+        || (!FacingTurnActive
+            && MathF.Abs(FacingError(target)) <= AcDream.Core.Physics.Motion.MoveToMath.Epsilon);
+
     public void SubmitMouseTurnAdjustment(
         float signedAdjustment,
         MovementInput input)
     {
         EnsurePublishedForRuntimeOperation();
-        if (!_mouseLookActive || !float.IsFinite(signedAdjustment))
+        if (!_mouseLookActive || _modernMouseLook || !float.IsFinite(signedAdjustment))
             return;
 
         TakeControlFromServer(input);
@@ -797,6 +829,8 @@ public sealed class PlayerMovementController
             return false;
 
         _mouseLookActive = false;
+        _modernMouseLook = false;
+        _mouseLookFacingTarget = null;
         TakeControlFromServer(input);
         _mouseTurnSamplePending = false;
         _mouseTurnAdjustment = 0f;
@@ -807,10 +841,10 @@ public sealed class PlayerMovementController
 
     private void ApplyMouseLookToggleMovement(MovementInput input, bool entering)
     {
-        (uint? sidestep, bool useRunHold) = DesiredInputSidestep(input, entering);
+        (uint? sidestep, bool useRunHold) = DesiredInputSidestep(input, entering && !_modernMouseLook);
         ApplyInputSidestep(sidestep, useRunHold, reapply: !entering);
 
-        uint? turn = entering
+        uint? turn = entering && !_modernMouseLook
             ? null
             : input.TurnRight
                 ? MotionCommand.TurnRight
@@ -936,6 +970,87 @@ public sealed class PlayerMovementController
         _activeInputTurnSpeed = desired.HasValue ? speed : 0f;
         _activeInputTurnFromMouse = desired.HasValue && fromMouse;
         return apply;
+    }
+
+    // A modern facing turn is under way: the view target, not a key, owns the turn.
+    private bool FacingTurnActive =>
+        _mouseLookActive
+        && _modernMouseLook
+        && _activeInputTurnFromMouse
+        && _activeInputTurnCommand.HasValue;
+
+    // Compass degrees from the facing to the target, in (-180, 180]; positive
+    // is a right turn (a right turn raises the compass heading).
+    private float FacingError(float targetHeading)
+    {
+        float error = (targetHeading
+            - AcDream.Core.Physics.Motion.MoveToMath.GetHeading(_body.Orientation)) % 360f;
+        if (error > 180f)
+            error -= 360f;
+        else if (error <= -180f)
+            error += 360f;
+        return error;
+    }
+
+    // How far the target still lies ahead along the given turn, in degrees.
+    private static float FacingAhead(uint turn, float error) =>
+        turn == MotionCommand.TurnRight ? error : -error;
+
+    // The turn a modern mouse look wants this frame. A turn under way keeps
+    // going while the target is on or ahead of the facing: it is stopped at
+    // the next physics step boundary that finds the target not ahead, so a
+    // drag that pauses for a frame or two does not stop and restart it.
+    // A view swung back past the facing turns the other way. One full-rate
+    // turn at a time, no speed changes: the turn motion is never re-issued.
+    private uint? DesiredFacingTurn(MovementInput input)
+    {
+        if (_mouseLookFacingTarget is not { } target)
+            return null;
+
+        float error = FacingError(target);
+        if (FacingTurnActive
+            && _activeInputTurnCommand is { } active
+            && FacingAhead(active, error) >= -AcDream.Core.Physics.Motion.MoveToMath.Epsilon)
+            return active;
+
+        if (MathF.Abs(error) <= AcDream.Core.Physics.Motion.MoveToMath.Epsilon)
+            return null;
+
+        if (_controlledByServer)
+            TakeControlFromServer(input);
+        return error > 0f ? MotionCommand.TurnRight : MotionCommand.TurnLeft;
+    }
+
+    // At a physics step boundary: a facing turn whose target is no longer
+    // ahead stops before the step runs.
+    private bool StopFacingTurnIfOnTarget()
+    {
+        if (!FacingTurnActive
+            || _mouseLookFacingTarget is not { } target
+            || _activeInputTurnCommand is not { } active
+            || FacingAhead(active, FacingError(target))
+                > AcDream.Core.Physics.Motion.MoveToMath.Epsilon)
+            return false;
+
+        ApplyInputTurn(null, 1f, fromMouse: true);
+        return true;
+    }
+
+    // After a physics step turned the body: a facing turn that passed its
+    // target lands on it, the way the game's own turn-to-heading finishes,
+    // so the character never turns past where the view points.
+    private void LandFacingTurnOnTarget()
+    {
+        if (!FacingTurnActive
+            || _mouseLookFacingTarget is not { } target
+            || _activeInputTurnCommand is not { } active)
+            return;
+
+        float error = FacingError(target);
+        if (FacingAhead(active, error) < 0f && MathF.Abs(error) < 90f)
+            _body.Orientation = AcDream.Core.Physics.Motion.MoveToMath.SetHeading(
+                _body.Orientation,
+                target);
     }
 
     private static AcDream.Core.Physics.Motion.MovementParameters MouseAxisParameters(
@@ -1410,6 +1525,8 @@ public sealed class PlayerMovementController
         _activeInputSidestepCommand = null;
         _activeInputSidestepUsesRunHold = false;
         _mouseLookActive = false;
+        _modernMouseLook = false;
+        _mouseLookFacingTarget = null;
         _mouseTurnSamplePending = false;
         _mouseTurnAdjustment = 0f;
         _mouseMovementEventCandidate = false;
@@ -1464,6 +1581,8 @@ public sealed class PlayerMovementController
         _activeInputSidestepCommand = null;
         _activeInputSidestepUsesRunHold = false;
         _mouseLookActive = false;
+        _modernMouseLook = false;
+        _mouseLookFacingTarget = null;
         _mouseTurnSamplePending = false;
         _mouseTurnAdjustment = 0f;
         _mouseMovementEventCandidate = false;
@@ -1754,7 +1873,7 @@ public sealed class PlayerMovementController
             }
 
             (uint? desiredSidestep, bool sidestepUsesRunHold) =
-                DesiredInputSidestep(input, _mouseLookActive);
+                DesiredInputSidestep(input, _mouseLookActive && !_modernMouseLook);
             if (ApplyInputSidestep(desiredSidestep, sidestepUsesRunHold))
                 motionEdgeFired = true;
 
@@ -1765,7 +1884,9 @@ public sealed class PlayerMovementController
             if (keyboardTurnEdge)
                 movementEventRequested = true;
 
-            uint? desiredTurnCommand = _mouseLookActive
+            bool legacyMouseLook = _mouseLookActive && !_modernMouseLook;
+            bool keyboardOwnsTurn = input.TurnLeft != input.TurnRight;
+            uint? desiredTurnCommand = legacyMouseLook
                 ? null
                 : input.TurnRight
                     ? MotionCommand.TurnRight
@@ -1774,8 +1895,17 @@ public sealed class PlayerMovementController
                         : null;
             float desiredTurnSpeed = 1f;
             bool desiredTurnFromMouse = false;
+            bool facingTurn = false;
 
-            if (_mouseLookActive && _mouseTurnSamplePending)
+            if (_mouseLookActive && _modernMouseLook && !keyboardOwnsTurn)
+            {
+                // Modern mouse turning: the turn keys are up, so the view
+                // target owns the turn, as a steady full-rate mouse turn.
+                desiredTurnCommand = DesiredFacingTurn(input);
+                desiredTurnFromMouse = desiredTurnCommand.HasValue;
+                facingTurn = true;
+            }
+            else if (legacyMouseLook && _mouseTurnSamplePending)
             {
                 float adjustment = _mouseTurnAdjustment;
                 _mouseTurnSamplePending = false;
@@ -1792,7 +1922,7 @@ public sealed class PlayerMovementController
                     desiredTurnFromMouse = true;
                 }
             }
-            else if (_mouseLookActive && _activeInputTurnFromMouse)
+            else if (legacyMouseLook && _activeInputTurnFromMouse)
             {
                 desiredTurnCommand = _activeInputTurnCommand;
                 desiredTurnSpeed = _activeInputTurnSpeed;
@@ -1803,7 +1933,13 @@ public sealed class PlayerMovementController
                     desiredTurnCommand,
                     desiredTurnSpeed,
                     desiredTurnFromMouse))
+            {
                 motionEdgeFired = true;
+                // A modern facing turn starts and stops the way a turn key
+                // does, so the server hears each edge at once.
+                if (facingTurn)
+                    movementEventRequested = true;
+            }
 
             if (motionEdgeFired)
             {
@@ -1908,6 +2044,12 @@ public sealed class PlayerMovementController
                 ? PlayerPhysicsQuantumCapture.Snapshot(_body)
                 : default;
 
+            if (StopFacingTurnIfOnTarget())
+            {
+                motionEdgeFired = true;
+                movementEventRequested = true;
+            }
+
             var pmDelta = _positionManagerDeltaScratch;
             pmDelta.Reset();
             if (_advanceAnimationRootMotion is { } advanceRootMotion)
@@ -1957,6 +2099,7 @@ public sealed class PlayerMovementController
                     _body.Orientation,
                     _body.Orientation * pmDelta.Orientation);
             }
+            LandFacingTurnOnTarget();
 
             _body.calc_acceleration();
             PlayerPhysicsBodyTraceSnapshot capturePreIntegration = captureQuantum
