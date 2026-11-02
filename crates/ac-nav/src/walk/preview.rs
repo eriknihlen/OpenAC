@@ -68,6 +68,22 @@ pub(super) struct PreviewGround {
     pub(super) reused: bool,
     pub(super) landblock_ids: Vec<u32>,
     pub(super) object_ids: Arc<HashSet<u32>>,
+    /// The square the grid covers, which may be larger than the one asked
+    /// for when a kept grid is searched: `(origin_x, origin_y, size)`.
+    pub(super) square: (f32, f32, f32),
+}
+
+impl PreviewGround {
+    /// The middle of the grid and the radius that takes in all of it, for
+    /// finding the portals and objects a route over it must keep out of.
+    pub(super) fn around(&self) -> (Vec3, f32) {
+        let (origin_x, origin_y, size) = self.square;
+        let half = size * 0.5;
+        (
+            Vec3::new(origin_x + half, origin_y + half, 0.0),
+            half * std::f32::consts::SQRT_2,
+        )
+    }
 }
 
 /// How a preview ended (OpenAC `PluginNavigationPlanStatus`).
@@ -249,20 +265,22 @@ impl WalkController {
                 "no collision is loaded around the character",
             ));
         };
+        // The portals and objects are looked for over the whole grid the
+        // route is searched on, which a kept grid may make larger than the
+        // region asked for.
+        let (centre, reach) = ground.around();
         let PreviewGround {
             source,
             reused,
             landblock_ids,
             object_ids,
+            ..
         } = ground;
         let cells = self.cells_of(cx, &landblock_ids);
         let crowd = self.crowd(cx, &sample, object_id);
         let body = sample.body;
         let start = sample.position;
         let leaps = sample.leaps;
-        let half = size * 0.5;
-        let centre = Vec3::new(origin_x + half, origin_y + half, 0.0);
-        let reach = half * std::f32::consts::SQRT_2;
         let widen = |spot: NavAvoidance| NavAvoidance::new(spot.centre, spot.radius + body.radius);
         let portals: Vec<NavAvoidance> = cx
             .goals
@@ -359,6 +377,7 @@ impl WalkController {
             return Some(PreviewGround {
                 landblock_ids: grid.landblock_ids().to_vec(),
                 object_ids: Arc::new(grid.object_ids().clone()),
+                square: (grid.origin_x(), grid.origin_y(), grid.size()),
                 source: GridSource::Built(grid),
                 reused: true,
             });
@@ -374,6 +393,7 @@ impl WalkController {
                 reused: true,
                 landblock_ids: building.landblock_ids.clone(),
                 object_ids: Arc::clone(&building.object_ids),
+                square: (building.origin_x, building.origin_y, building.size),
             });
         }
         let stands_on = |id: u32| cx.goals.stands_still(id);
@@ -391,6 +411,10 @@ impl WalkController {
         }?;
         let landblock_ids = captured.landblock_ids.clone();
         let object_ids = Arc::new(captured.object_ids.clone());
+        let square = (captured.origin_x, captured.origin_y, captured.size);
+        // A walk asked for meanwhile waits for this build rather than starting
+        // its own: over a sealed dungeon it covers every cell, as the walk's
+        // would.
         let source = if grid_dungeon != 0 && self.building.is_none() {
             self.grid_idle_since = f64::NAN;
             GridSource::Building(self.share_build(
@@ -408,18 +432,33 @@ impl WalkController {
             reused: false,
             landblock_ids,
             object_ids,
+            square,
         })
     }
 
-    /// The cell surfaces of the landblocks a grid covers, copied once per
-    /// grid: they do not change while their landblock stays loaded.
+    /// The cell surfaces of the landblocks a grid covers, copied once while
+    /// those landblocks stay where they are loaded. The surfaces are in the
+    /// world frame, so a landblock loaded again at another offset is copied
+    /// again.
     pub(super) fn cells_of(
         &mut self,
         cx: &WalkWorld<'_>,
         landblock_ids: &[u32],
     ) -> Arc<[CellSurface]> {
-        if let Some((ids, cells)) = &self.grid_cells
-            && ids.as_slice() == landblock_ids
+        let placed: Vec<super::PlacedLandblock> = landblock_ids
+            .iter()
+            .filter_map(|&id| {
+                cx.physics.landblock(id).map(|landblock| {
+                    (
+                        id,
+                        landblock.world_offset_x.to_bits(),
+                        landblock.world_offset_y.to_bits(),
+                    )
+                })
+            })
+            .collect();
+        if let Some((kept, cells)) = &self.grid_cells
+            && *kept == placed
         {
             return Arc::clone(cells);
         }
@@ -428,7 +467,7 @@ impl WalkController {
             .filter_map(|&id| cx.physics.landblock(id))
             .flat_map(|landblock| landblock.cells.iter().cloned())
             .collect();
-        self.grid_cells = Some((landblock_ids.to_vec(), Arc::clone(&cells)));
+        self.grid_cells = Some((placed, Arc::clone(&cells)));
         cells
     }
 }

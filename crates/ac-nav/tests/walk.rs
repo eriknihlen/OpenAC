@@ -307,6 +307,8 @@ struct Goals {
     /// When set, places in a cell stand on its floor as the client's goal
     /// source stands them.
     floors: Option<PhysicsEngine>,
+    /// Where and how far each look for portals reached.
+    portal_looks: RefCell<Vec<(Vec3, f32)>>,
 }
 
 impl NavGoalSource for Goals {
@@ -354,11 +356,12 @@ impl NavGoalSource for Goals {
 
     fn find_portals(
         &self,
-        _around: Vec3,
-        _radius: f32,
+        around: Vec3,
+        radius: f32,
         _goal_object_id: u32,
         goal: Vec3,
     ) -> Vec<NavAvoidance> {
+        self.portal_looks.borrow_mut().push((around, radius));
         let footprints: Vec<NavAvoidance> =
             self.portals.iter().copied().map(portal_footprint).collect();
         except_the_one_the_walk_ends(&footprints, goal)
@@ -2978,6 +2981,32 @@ fn a_preview_does_not_replace_a_walk_under_way() {
     assert!(h.walk.is_busy());
     assert_eq!(h.report().sequence, sequence);
     assert_eq!(h.report().object_id, TARGET);
+}
+
+/// A preview searching the grid a walk keeps looks for portals over all of
+/// that grid, as the walk does, not only over the region it would have
+/// built for itself: a route over the kept grid may go anywhere on it.
+#[test]
+fn a_preview_on_a_kept_grid_looks_for_portals_over_all_of_it() {
+    let mut h = harness(&[(TARGET, v(60.0, 75.0, 0.0)), (OTHER, v(75.0, 75.0, 0.0))]);
+    h.walk.walk_to(TARGET, DEFAULT_ARRIVAL_METERS);
+    h.run_until_settled(60.0);
+    let walk_look = *h
+        .goals
+        .portal_looks
+        .borrow()
+        .last()
+        .expect("the walk looked");
+    let start = h.body.borrow().position;
+    let (x, y, size) = walk::try_choose_region(start, v(75.0, 75.0, 0.0)).unwrap();
+    let own = Vec3::new(x + size * 0.5, y + size * 0.5, 0.0);
+    assert_ne!(
+        own, walk_look.0,
+        "the preview's own region differs from the grid"
+    );
+    let plan = h.preview(walk::PreviewTarget::Object(OTHER), 2.5);
+    assert!(plan.grid_reused, "{}", plan.reason);
+    assert_eq!(*h.goals.portal_looks.borrow().last().unwrap(), walk_look);
 }
 
 #[test]

@@ -398,6 +398,9 @@ impl SharedBuild {
     }
 }
 
+/// A loaded landblock and where: its id and the bits of its world offset.
+type PlacedLandblock = (u32, u32, u32);
+
 /// The grid build under way, and what it is being built over.
 struct GridBuilding {
     build: SharedBuild,
@@ -752,8 +755,9 @@ pub struct WalkController {
     building: Option<GridBuilding>,
     grid_dungeon: u32,
     /// The cell surfaces of the landblocks a grid was built over, kept for
-    /// naming the cell of each point a preview reports.
-    grid_cells: Option<(Vec<u32>, Arc<[ac_physics::CellSurface]>)>,
+    /// naming the cell of each point a preview reports, with where each
+    /// landblock was loaded when they were copied.
+    grid_cells: Option<(Vec<PlacedLandblock>, Arc<[ac_physics::CellSurface]>)>,
     objects_last_seen: u64,
     classified_cell_id: u32,
     classified_sealed: bool,
@@ -3384,13 +3388,6 @@ impl WalkController {
             }
         };
         self.grid_dungeon = building.dungeon;
-        if self
-            .grid_cells
-            .as_ref()
-            .is_some_and(|(ids, _)| ids.as_slice() != grid.landblock_ids())
-        {
-            self.grid_cells = None;
-        }
         let report = grid.report();
         self.say(&format!(
             "Navmesh: {} standing points ({} clear) over {} m from {} landblocks in {} ms, built because {}",

@@ -142,17 +142,16 @@ impl WalkController {
                 "no collision is loaded around the character",
             )));
         };
+        let (centre, reach) = ground.around();
         let PreviewGround {
             source,
             reused,
             landblock_ids,
             object_ids,
+            ..
         } = ground;
         let cells = self.cells_of(cx, &landblock_ids);
         let body = sample.body;
-        let half = size * 0.5;
-        let centre = Vec3::new(origin_x + half, origin_y + half, 0.0);
-        let reach = half * std::f32::consts::SQRT_2;
         let widen = |spot: NavAvoidance| NavAvoidance::new(spot.centre, spot.radius + body.radius);
         let mut avoid: Vec<NavAvoidance> = cx
             .goals
