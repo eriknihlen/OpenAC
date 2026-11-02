@@ -69,6 +69,9 @@ struct VertexOut {
     @location(7) @interpolate(flat) base_layer: f32,
     @location(8) world: vec3<f32>,
     @location(9) @interpolate(flat) full_detail: u32,
+    // The landscape detail's strength at this vertex, 0..1, from its
+    // distance in front of the camera; interpolated across the triangle.
+    @location(10) detail_fade: f32,
 };
 
 // (u, v, texture layer, alpha layer); a layer of -1 means absent.
@@ -82,6 +85,19 @@ fn unpack_overlay(tex_idx: u32, alpha_idx: u32, rot: u32, uv: vec2<f32>) -> vec4
     else if (rot == 2u) { r = vec2<f32>(1.0 - uv.x, 1.0 - uv.y); }
     else if (rot == 3u) { r = vec2<f32>(uv.y, 1.0 - uv.x); }
     return vec4<f32>(r.x, r.y, t, a);
+}
+
+// The landscape detail's strength at `depth` metres in front of the
+// camera: full nearer than 10 m, fading linearly to nothing at 50 m in
+// byte steps (truncated), nothing beyond.
+fn landscape_detail_fade(depth: f32) -> f32 {
+    if (depth < 10.0) {
+        return 1.0;
+    }
+    if (depth <= 50.0) {
+        return trunc((1.0 - (depth - 10.0) * (1.0 / 40.0)) * 255.0) / 255.0;
+    }
+    return 0.0;
 }
 
 @vertex
@@ -128,6 +144,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let world = in.position + in.block_offset;
     out.world = world;
     out.clip = globals.view_proj * vec4<f32>(world.x, world.y, world.z - 0.01, 1.0);
+    // The clip w of a perspective projection is the view-space depth.
+    out.detail_fade = landscape_detail_fade(out.clip.w);
     return out;
 }
 
@@ -205,14 +223,16 @@ fn apply_fog(lit: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
 }
 
 // The lit terrain with the landscape detail blended over it: toward the
-// detail colour by the detail's alpha, as the mesh shader blends the
-// building detail over an opaque surface. The detail repeats `z` times
+// detail colour by the detail's alpha times the distance fade, as the mesh
+// shader blends the building detail by its alpha times the surface's
+// opacity. The detail repeats `z` times
 // per cell and draws only on full-detail landblocks with the option on
 // (z != 0); otherwise `lit` comes back unchanged. Sampled in uniform
 // control flow for its implicit derivatives.
-fn landscape_detailed(lit: vec3<f32>, cell_uv: vec2<f32>, full_detail: u32) -> vec3<f32> {
+fn landscape_detailed(lit: vec3<f32>, cell_uv: vec2<f32>, full_detail: u32, fade: f32) -> vec3<f32> {
     let d = textureSample(landscape_detail, detail_sampler, cell_uv * detail_tiling.z);
-    let detailed = d.rgb * d.a + lit * (1.0 - d.a);
+    let weight = d.a * fade;
+    let detailed = d.rgb * weight + lit * (1.0 - weight);
     return select(lit, detailed, detail_tiling.z != 0.0 && full_detail != 0u);
 }
 
@@ -233,7 +253,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let rgb = clamp(base_masked + ovl_masked + road_masked, vec3<f32>(0.0), vec3<f32>(1.0));
     var lit = rgb * min(in.lighting, vec3<f32>(1.0));
     lit = lit + scene.fog_params.z * vec3<f32>(0.6, 0.6, 0.75);
-    lit = landscape_detailed(lit, in.base_uv, in.full_detail);
+    lit = landscape_detailed(lit, in.base_uv, in.full_detail, in.detail_fade);
     lit = apply_fog(lit, in.world);
     // Drawn whole through a portal view, as OpenAC's terrain; depth sorts it.
     return vec4<f32>(lit, 1.0);

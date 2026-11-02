@@ -4,8 +4,9 @@
 //! lit surface by the mesh shader; they draw only with the "building detail
 //! textures" option on and a non-zero tiling. The landscape image repeats
 //! over the outdoor terrain near the player and is blended in by the
-//! terrain shader the same way; it draws only with the "landscape detail
-//! textures" option on and a non-zero tiling.
+//! terrain shader the same way, fading out between 10 m and 50 m from the
+//! camera; it draws only with the "landscape detail textures" option on
+//! and a non-zero tiling.
 
 use super::pipelines::write_layer;
 use crate::assets::DetailTexture;
@@ -31,6 +32,28 @@ pub fn detail_tiling(options: DetailOptions, tilings: [Option<f32>; 3]) -> [f32;
         on(options.landscape, tilings[2]),
         0.0,
     ]
+}
+
+/// How strongly the landscape detail draws at a terrain vertex
+/// `depth_metres` in front of the camera (its view-space depth), 0..=255:
+/// full strength nearer than 10 m, fading linearly to nothing at 50 m
+/// (truncated to a byte), nothing beyond. The terrain shaders compute the
+/// same value per vertex (`landscape_detail_fade` in `terrain.wgsl` and
+/// `terrain_atmospheric.wgsl`, as a fraction of 255) and let it
+/// interpolate across the triangle; this is the reference they follow.
+#[cfg(test)]
+#[must_use]
+pub fn landscape_detail_fade(depth_metres: f32) -> u8 {
+    const NEAR: f32 = 10.0;
+    const FAR: f32 = 50.0;
+    if depth_metres < NEAR {
+        255
+    } else if depth_metres <= FAR {
+        // Truncated, not rounded.
+        ((1.0 - (depth_metres - NEAR) * (1.0 / (FAR - NEAR))) * 255.0) as u8
+    } else {
+        0
+    }
 }
 
 /// The detail textures on the GPU and their bind group.
@@ -241,6 +264,18 @@ mod tests {
             [0.0; 4]
         );
         assert_eq!(detail_tiling(BOTH, [None, Some(0.0), None]), [0.0; 4]);
+    }
+
+    // The fade the landscape detail takes with distance from the camera
+    // (the research note on landscape detail textures): 255 nearer than
+    // 10 m, (1 - (z - 10) / 40) * 255 truncated up to 50 m, 0 beyond.
+    #[test]
+    fn the_landscape_detail_fades_from_ten_to_fifty_metres() {
+        let curve: Vec<u8> = [0.0, 10.0, 30.0, 50.0, 60.0]
+            .into_iter()
+            .map(landscape_detail_fade)
+            .collect();
+        assert_eq!(curve, [255, 255, 127, 0, 0]);
     }
 
     #[test]
