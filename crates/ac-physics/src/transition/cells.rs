@@ -419,6 +419,11 @@ impl Transition {
     /// back up (refused when it is only checking for ground, or when a step
     /// down would overshoot). A body that is not standing records the
     /// collision.
+    ///
+    /// The camera's eye is not pushed up: a sphere sunk into the ground is
+    /// moved back along its own step to where it first touches the plane,
+    /// and the collision is recorded, so a clipped sweep stops there. The
+    /// water depth plays no part for it.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn validate_walkable(
         &mut self,
@@ -430,6 +435,11 @@ impl Transition {
         cell_id: u32,
         walkable_vertices: Option<[Vec3; 3]>,
     ) -> TransitionState {
+        if self.object_info.is_viewer() {
+            self.validate_walkable_viewer(sphere_center, sphere_radius, contact_plane);
+            return TransitionState::Ok;
+        }
+
         let low_point = sphere_center - Vec3::new(0.0, 0.0, sphere_radius);
         let dist = low_point.dot(contact_plane.normal) + contact_plane.d + water_depth;
 
@@ -487,6 +497,35 @@ impl Transition {
         }
 
         result
+    }
+
+    /// The camera's arm of [`Transition::validate_walkable`]. The gap is
+    /// measured from the sphere's surface along the plane's normal (not
+    /// from its lowest point). Sunk in by more than the tolerance, the
+    /// sphere goes back the fraction `t` of its step from the current
+    /// centre that puts its surface on the plane. A sweep that began
+    /// outdoors always goes back; one that began indoors only when the
+    /// touch lies within this step (`0 < t <= 1`).
+    fn validate_walkable_viewer(
+        &mut self,
+        sphere_center: Vec3,
+        sphere_radius: f32,
+        contact_plane: Plane,
+    ) {
+        let dist = sphere_center.dot(contact_plane.normal) + contact_plane.d - sphere_radius;
+        if dist > -EPSILON {
+            return;
+        }
+        let offset = sphere_center - self.sphere_path.global_curr_center[0].center;
+        let t = dist / offset.dot(contact_plane.normal);
+        let within_step = t > 0.0 && t <= 1.0;
+        let began_outdoors = self.sphere_path.begin_cell_id & 0xFFFF < 0x0100;
+        if within_step || began_outdoors {
+            self.sphere_path.add_offset_to_check_pos(offset * -t);
+            self.collision_info
+                .set_collision_normal(contact_plane.normal);
+            self.collision_info.collided_with_environment = true;
+        }
     }
 
     fn cache_walkable_context(
