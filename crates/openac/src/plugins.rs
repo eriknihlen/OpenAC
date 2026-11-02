@@ -93,7 +93,7 @@ pub fn slow_log(env: impl Fn(&str) -> Option<String>) -> Option<std::time::Durat
 }
 
 /// Whether a plugin event also goes to the client log (standard error, the
-/// launcher's `client.err.log`) whatever the console shows: a plugin that
+/// launcher's `client.log`) whatever the console shows: a plugin that
 /// failed or stopped with a fault, and the slow log.
 #[must_use]
 pub fn for_client_log(event: &PluginEvent) -> bool {
@@ -149,10 +149,11 @@ pub fn engine(paths: Option<&ac_host::PathSet>) -> std::sync::Arc<ac_plugin::Plu
 /// profiles (OpenAC's `ACDREAM_VTANK_PROFILE_DIR`).
 pub const VTANK_PROFILE_DIR_VARIABLE: &str = "OPENAC_VTANK_PROFILE_DIR";
 
-/// Where plugin storage lives: each plugin's data in `files` inside its own
-/// folder under the plugins folder, the shared VTank profiles beside it
-/// (`ac_host::PathSet`), or in the folder [`VTANK_PROFILE_DIR_VARIABLE`]
-/// names (unset or empty: the default); none without a path set.
+/// Where plugin storage lives: each plugin's data in `data` inside its own
+/// folder under the plugins folder, the shared VTank profiles in `vtank`
+/// inside MossTank's (`ac_host::PathSet`), or in the folder
+/// [`VTANK_PROFILE_DIR_VARIABLE`] names (unset or empty: the default); none
+/// without a path set.
 #[must_use]
 pub fn storage_roots(
     paths: Option<&ac_host::PathSet>,

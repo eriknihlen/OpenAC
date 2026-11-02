@@ -447,11 +447,12 @@ fn walk(directory: &Path, manifest: &PluginManifest) -> Result<Option<String>, W
             if is_ignored(&name) {
                 continue;
             }
-            // The plugin's own saved files are the player's, not part of
-            // what was installed, and grow without any install limit.
+            // The plugin's own saved files and the shared VTank folder are
+            // the player's, not part of what was installed, and grow without
+            // any install limit.
             if relative_directory.is_empty()
                 && entry.file_type().is_ok_and(|kind| kind.is_dir())
-                && name.eq_ignore_ascii_case(ac_host::paths::PLUGIN_FILES_FOLDER_NAME)
+                && ac_host::paths::is_player_folder(&name)
             {
                 continue;
             }

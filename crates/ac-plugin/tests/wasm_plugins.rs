@@ -276,7 +276,7 @@ fn a_plugin_stores_text_in_its_own_folder() {
     let folder = data
         .0
         .join("openac.hello")
-        .join("files")
+        .join(ac_host::paths::PLUGIN_FILES_FOLDER_NAME)
         .join("character")
         .join("+Horan");
     assert_eq!(
@@ -2481,7 +2481,7 @@ fn writing_the_players_files_neither_marks_nor_holds_back_a_reload() {
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
 
-    let files = folder.join("files");
+    let files = folder.join(ac_host::paths::PLUGIN_FILES_FOLDER_NAME);
     std::fs::create_dir_all(&files).unwrap();
     std::fs::write(files.join("plugin.json"), "{}").unwrap();
     std::fs::write(files.join("hello.wasm"), "not the plugin").unwrap();

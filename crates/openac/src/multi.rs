@@ -25,10 +25,21 @@ use ac_runtime::session::{
 use crate::console::{self, ConsoleInput};
 use crate::window_state::{WindowNote, WindowTracker};
 
-/// Takes the install's session lock shared for the caller to hold for its
-/// whole run; the reason to refuse the start while an update or a move
-/// holds it exclusively.
+/// How long a starting client waits for another process (the launcher, or
+/// a client started at the same moment) to finish moving the install into
+/// the current folder layout.
+const LAYOUT_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Moves the install into the current folder layout if it is not there yet
+/// (before anything reads its folders), then takes the install's session
+/// lock shared for the caller to hold for its whole run; the reason to
+/// refuse the start when the files could not be moved, or while an update
+/// or a move holds the lock exclusively.
 pub fn hold_install(paths: &ac_host::PathSet) -> Result<ac_host::InstallSessionLease, String> {
+    let migration = ac_host::layout::migrate_waiting(paths, LAYOUT_PATIENCE)?;
+    for note in &migration.notes {
+        errln!("layout: {note}");
+    }
     match ac_host::InstallSessionLease::try_acquire_shared(paths) {
         Ok(Some(lease)) => Ok(lease),
         Ok(None) => Err(ac_host::InstallSessionLease::busy_message(paths)),
@@ -71,6 +82,10 @@ pub fn run(
             return exit(HostExit::Configuration);
         }
     };
+    // A launcher session's folder (none for a document written by hand),
+    // held for the whole run so the launcher's cleanup leaves it alone.
+    let _session_folder =
+        ac_host::layout::LauncherSessionFolder::claim(&plan.paths, &plan.config_path);
 
     let logins = {
         let stdin = std::io::stdin();
@@ -399,9 +414,9 @@ impl ChatPrinter {
     }
 
     /// Whether a line for the client log (standard error, which the
-    /// launcher keeps as `client.err.log`) must be written there too: not
-    /// when this printer already writes to it, nor when a person reads the
-    /// console on the terminal standard error also shows.
+    /// launcher keeps in `client.log` with standard output) must be written
+    /// there too: not when this printer already writes to it, nor when a
+    /// person reads the console on the terminal standard error also shows.
     fn client_log_unseen(&self) -> bool {
         match self.stream {
             Some(ConsoleStream::Stderr) => false,

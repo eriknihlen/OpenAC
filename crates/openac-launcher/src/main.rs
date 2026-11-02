@@ -17,6 +17,7 @@ mod mirror;
 mod png;
 mod script;
 mod shell;
+mod startup;
 mod surface_watch;
 mod theme;
 mod ui;
@@ -27,34 +28,20 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use ac_host::{PathOverrides, PathSet, RootSource, SystemPlatform};
-use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::control;
-use ac_launcher_core::installation::{InstallRootMover, RetailContentStore};
+use ac_launcher_core::launcher_log::LauncherLog;
+use ac_launcher_core::layout_gate::{self, LayoutGate, LayoutGateState};
 use ac_launcher_core::net::HttpTransport;
-use ac_launcher_core::orchestration::{
-    LauncherExecutableSet, LauncherOrchestrator, OrchestratorParts,
-};
-use ac_launcher_core::profiles::LauncherProfileStore;
-use ac_launcher_core::status::{KnownServerCatalog, ServerHealthService};
 use ac_launcher_core::updates::{
-    ClientVersionResolution, ClientVersionState, ClientVersionStore, LauncherInstallationLayout,
-    LauncherSelfUpdateManager, LauncherUpdater, LauncherVersion, ReleaseManifestClient, detect_rid,
-    self_update_bootstrap, suffix_for_current_os,
+    ClientVersionStore, LauncherInstallationLayout, LauncherSelfUpdateManager, detect_rid,
+    self_update_bootstrap,
 };
-use ac_launcher_core::window::classic_migration::ClassicMigrationDialog;
-use ac_launcher_core::window::install_folder::InstallFolderParts;
-use ac_launcher_core::window::plugins::PluginComposition;
+use ac_launcher_core::window::Orchestration;
 use ac_launcher_core::window::startup::{LauncherStartupMode, LauncherStartupOptions};
-use ac_launcher_core::window::{
-    ApplyLauncherUpdate, LauncherWindow, LauncherWindowParts, Orchestration, ThreadSpawner,
-};
-use ac_launcher_net::{OsHttpTransport, UdpReachabilityProbe};
+use ac_launcher_net::OsHttpTransport;
 
 /// The exit code of a startup that failed (OpenAC's 74, `EX_IOERR`).
 const STARTUP_FAILED: u8 = 74;
-
-/// What the window says if it has no updater (it always gets one here).
-const NO_UPDATER: &str = "The update check is unavailable.";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -114,150 +101,34 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
         return Err("The self-update bootstrap changed validated launcher arguments.".into());
     }
 
-    // A move of the install folder can leave the install record naming the
-    // old folder's content; the install check that follows would reject it.
-    match ac_launcher_core::installation::repair_content_records(&paths) {
-        Ok(repaired) => {
-            for record in repaired {
-                println!(
-                    "install folder: {} now names this folder's content",
-                    record.display()
-                );
-            }
-        }
-        // The install check that follows reports the record as it is.
-        Err(error) => {
-            eprintln!("install folder: the install record could not be updated: {error}");
-        }
-    }
-
-    let script = script::Script::from_environment().transpose()?;
-    let launcher_version = LauncherVersion::try_parse(env!("CARGO_PKG_VERSION"))
-        .ok_or("The launcher's version is not SemVer 2.0.")?;
-
-    let versions = Arc::new(ClientVersionStore::new(&paths));
-    let executables = LauncherExecutableSet::from_current_version_store_or_directory(
-        Arc::clone(&versions),
-        &launcher_directory,
-    );
-    let orchestrator = Arc::new(LauncherOrchestrator::with_parts(
-        LauncherProfileStore::for_paths(&paths),
-        paths.clone(),
-        executables,
-        None,
-        OrchestratorParts {
-            installation_status: Some("Checking installed game content…".into()),
-            update_session_barrier: Some(versions.barrier().clone()),
-            ..OrchestratorParts::default()
-        },
+    // The install moves into the current folder layout before anything reads
+    // its folders; while clients of the install run, the window waits for
+    // them, and a move that fails starts nothing.
+    let log = LauncherLog::open(&paths);
+    log.line(&format!(
+        "launcher {} started; install folder {}",
+        env!("CARGO_PKG_VERSION"),
+        paths.root_directory().display()
     ));
-
-    // The update check reads the production release feed unless the command line names
-    // another (`--update-manifest-uri`), as OpenAC's launcher does. The launcher's own
-    // update rides on the same feed.
-    let apply_launcher_update: Option<ApplyLauncherUpdate> = {
-        let manager = Arc::clone(&self_updates);
-        let installed_root = layout.installed_root.clone();
-        let executable = executable.clone();
-        let public_arguments = options.public_arguments.clone();
-        Some(Arc::new(move |_: &CancelToken| {
-            self_update_bootstrap::try_apply_staged_update_now(
-                &manager,
-                &installed_root,
-                &executable,
-                &public_arguments,
-            )
-            .map_err(|error| error.to_string())
-        }) as ApplyLauncherUpdate)
+    let gate = LayoutGate::begin(&paths, &log, Arc::new(layout_gate::running_clients));
+    let context = startup::StartContext {
+        paths,
+        options,
+        rid,
+        transport,
+        executable,
+        launcher_directory,
+        self_updates,
+        layout,
+        log: log.clone(),
     };
-    let manifest =
-        ReleaseManifestClient::for_feed(Arc::clone(&transport), &options.update_manifest_uri)
-            .map_err(|error| error.to_string())?;
-    let sessions = Arc::clone(&orchestrator);
-    let updater = Some(Arc::new(
-        LauncherUpdater::new(
-            Arc::new(manifest),
-            Arc::clone(&transport),
-            Arc::clone(&versions),
-            launcher_version.clone(),
-            &rid,
-            move || {
-                sessions.snapshot().is_ok_and(|snapshot| {
-                    snapshot.sessions.iter().any(|session| session.is_active())
-                })
-            },
-        )
-        .map_err(|error| error.to_string())?
-        .with_self_updates(Arc::clone(&self_updates), layout.clone())
-        // A release build carries the fingerprint of what the launcher is built from
-        // (OPENAC_LAUNCHER_FINGERPRINT at compile time); a developer build has none
-        // and updates by version.
-        .with_launcher_fingerprint(option_env!("OPENAC_LAUNCHER_FINGERPRINT")),
-    ));
-
-    let client_version = {
-        let versions = Arc::clone(&versions);
-        let beside = launcher_directory.join(format!("openac{}", suffix_for_current_os()));
-        let directory = launcher_directory.clone();
-        let version = launcher_version.clone();
-        Arc::new(move || {
-            let resolution = versions.cached_resolution();
-            if resolution.is_verified() || !beside.is_file() {
-                return Some(resolution);
-            }
-            // The client built with this launcher has the launcher's version.
-            Some(ClientVersionResolution {
-                state: ClientVersionState::Verified,
-                status: "The client beside the launcher.".into(),
-                version: Some(version.clone()),
-                directory: Some(directory.clone()),
-                previous_version: None,
-                record: None,
-            })
-        })
+    // Ready at once (the usual start): a part that cannot be made is a
+    // startup failure, before any window opens.
+    let prepared = if gate.state() == LayoutGateState::Ready {
+        Some(startup::prepare(&context)?)
+    } else {
+        None
     };
-    let plugins = Arc::new(PluginComposition::new(
-        &paths,
-        options.plugin_list_uri.clone(),
-        Arc::clone(&transport),
-    ));
-    let health = Arc::new(ServerHealthService::new(
-        Arc::clone(&transport),
-        Arc::new(UdpReachabilityProbe::new()),
-    ));
-    let known_servers = Arc::new(KnownServerCatalog::new(
-        Arc::clone(&transport),
-        &paths.cache_directory,
-    ));
-    let shared: Arc<dyn Orchestration> = orchestrator;
-    // `--control-pipe`: the optional same-user endpoint test runs drive this
-    // launcher through; it lives until the window closes.
-    let _control = match &options.control_pipe {
-        Some(name) => Some(start_control(name, &shared, &versions, &rid)?),
-        None => None,
-    };
-    let install_folder = PathSet::default_root(&SystemPlatform)
-        .ok()
-        .map(|default_root| {
-            let restart_arguments = options.public_arguments.clone();
-            let restart_executable = executable.clone();
-            InstallFolderParts {
-                paths: paths.clone(),
-                mover: Arc::new(InstallRootMover::new(&paths, &default_root, None)),
-                // Every store this launcher opened names the old folder, so a
-                // fresh launcher takes over once the install moved.
-                restart_launcher: Arc::new(move || {
-                    if let Err(error) = std::process::Command::new(&restart_executable)
-                        .args(&restart_arguments)
-                        .spawn()
-                    {
-                        eprintln!(
-                            "install folder: the launcher could not be started again: {error}"
-                        );
-                    }
-                }),
-            }
-        });
 
     shell::run(
         shell::ShellOptions {
@@ -265,33 +136,9 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
             size: (1120.0, 740.0),
             min_size: (760.0, 460.0),
             icon: window_icon(),
+            log: Some(log),
         },
-        move |_ctx, waker| {
-            let mut window = LauncherWindow::new(LauncherWindowParts {
-                orchestrator: Arc::clone(&shared),
-                spawner: Arc::new(ThreadSpawner),
-                wake: Arc::new(move || waker()),
-                content: Some(Arc::new(RetailContentStore::new(&paths))),
-                updater,
-                updater_unavailable_reason: NO_UPDATER.into(),
-                plugins: Some(plugins),
-                server_health: Some(health),
-                launcher_version: Some(launcher_version.value().to_owned()),
-                client_version,
-                apply_launcher_update,
-                install_folder,
-                checked_accounts: Some(
-                    ac_launcher_core::profiles::LauncherCheckedAccountStore::for_paths(&paths),
-                ),
-                relaunch_clock: None,
-                known_servers: Some(known_servers),
-                classic_migration: Some(ClassicMigrationDialog::new(
-                    paths.vtank_profiles_directory(),
-                )),
-            });
-            window.initialize();
-            app::LauncherApp::new(window, shared, script)
-        },
+        move |_ctx, waker| startup::StartupApp::new(gate, context, prepared, waker),
     )
     .map_err(|error| error.to_string())?;
     Ok(ExitCode::SUCCESS)
@@ -318,12 +165,14 @@ fn window_icon() -> Option<shell::WindowIcon> {
 /// what failed (an unreadable pointer file, say).
 /// Opens the control endpoint `name` over the launcher's orchestrator; a
 /// name another process holds is a startup failure, as OpenAC's.
-fn start_control(
+pub(crate) fn start_control(
     name: &str,
     launcher: &Arc<dyn Orchestration>,
     versions: &Arc<ClientVersionStore>,
     rid: &str,
+    log: &LauncherLog,
 ) -> Result<control::ControlServer, String> {
+    let log = log.clone();
     let handler = Arc::new(control::LauncherControlHandler::new(
         Arc::clone(launcher),
         Some(control::reload_client(Arc::clone(versions), rid.to_owned())),
@@ -332,7 +181,7 @@ fn start_control(
     control::ControlServer::start(
         name,
         Arc::new(move |request, cancel| handler.handle(request, cancel)),
-        Arc::new(|message| eprintln!("{message}")),
+        Arc::new(move |message| log.say(message)),
         control::DEFAULT_REQUEST_TIMEOUT,
     )
     .map_err(|error| format!("The control pipe '{name}' could not be opened: {error}"))

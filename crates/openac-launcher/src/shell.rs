@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use ac_launcher_core::launcher_log::LauncherLog;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
@@ -81,6 +82,9 @@ pub struct ShellOptions {
     pub min_size: (f64, f64),
     /// The title bar and task bar image, if any.
     pub icon: Option<WindowIcon>,
+    /// The launcher's log, which keeps what the window reports about
+    /// itself.
+    pub log: Option<LauncherLog>,
 }
 
 /// A window icon: 8-bit RGBA, top row first.
@@ -184,6 +188,15 @@ struct OpenWindow {
     watch: SurfaceWatch,
     /// No rebuild is tried before this.
     rebuild_after: Option<Instant>,
+    log: Option<LauncherLog>,
+}
+
+/// Says a line about the window on standard error and in the log.
+fn say(log: Option<&LauncherLog>, line: &str) {
+    match log {
+        Some(log) => log.say(line),
+        None => eprintln!("{line}"),
+    }
 }
 
 /// What draws into the window: its surface and the device behind it.
@@ -219,11 +232,11 @@ impl OpenWindow {
                 // refuses leaves the window without one: an icon is never
                 // worth failing the launcher.
                 winit::window::Icon::from_rgba(icon.rgba.clone(), icon.width, icon.height)
-                    .map_err(|error| eprintln!("window icon: {error}"))
+                    .map_err(|error| say(options.log.as_ref(), &format!("window icon: {error}")))
                     .ok()
             }));
         let window = Arc::new(event_loop.create_window(attributes)?);
-        let gpu = Gpu::new(instance, &window)?;
+        let gpu = Gpu::new(instance, &window, options.log.clone())?;
         let state = egui_winit::State::new(
             ctx.clone(),
             egui::ViewportId::ROOT,
@@ -239,6 +252,7 @@ impl OpenWindow {
             active: true,
             watch: SurfaceWatch::default(),
             rebuild_after: None,
+            log: options.log.clone(),
         })
     }
 
@@ -274,7 +288,7 @@ impl OpenWindow {
     fn observe(&mut self, state: SurfaceState) -> NextAttempt {
         let (next, line) = self.watch.observe(state);
         if let Some(line) = line {
-            eprintln!("{line}");
+            say(self.log.as_ref(), &line);
         }
         next
     }
@@ -299,18 +313,21 @@ impl OpenWindow {
         // The old surface and device go first: nothing more may reach them.
         self.gpu = None;
         *instance = new_instance(event_loop.owned_display_handle());
-        match Gpu::new(instance, &self.window) {
+        match Gpu::new(instance, &self.window, self.log.clone()) {
             Ok(mut gpu) => {
                 for (id, delta) in textures.full_images() {
                     gpu.renderer
                         .update_texture(&gpu.device, &gpu.queue, id, &delta);
                 }
                 self.gpu = Some(gpu);
-                eprintln!("launcher window: GPU rebuilt");
+                say(self.log.as_ref(), "launcher window: GPU rebuilt");
                 NextAttempt::Now
             }
             Err(error) => {
-                eprintln!("launcher window: rebuilding the GPU failed: {error}");
+                say(
+                    self.log.as_ref(),
+                    &format!("launcher window: rebuilding the GPU failed: {error}"),
+                );
                 self.observe(SurfaceState::RebuildFailed)
             }
         }
@@ -318,7 +335,11 @@ impl OpenWindow {
 }
 
 impl Gpu {
-    fn new(instance: &wgpu::Instance, window: &Arc<Window>) -> Result<Self, ShellError> {
+    fn new(
+        instance: &wgpu::Instance,
+        window: &Arc<Window>,
+        log: Option<LauncherLog>,
+    ) -> Result<Self, ShellError> {
         let surface = instance.create_surface(Arc::clone(window))?;
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
@@ -337,7 +358,10 @@ impl Gpu {
             // Dropping the device here (a rebuild, the window closing) is
             // not a loss.
             if reason != wgpu::DeviceLostReason::Destroyed {
-                eprintln!("launcher window: GPU device lost: {message}");
+                say(
+                    log.as_ref(),
+                    &format!("launcher window: GPU device lost: {message}"),
+                );
                 flag.store(true, Ordering::Release);
             }
         });

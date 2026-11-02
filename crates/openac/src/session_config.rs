@@ -136,6 +136,10 @@ pub fn run(
             return exit(HostExit::Configuration);
         }
     };
+    // A launcher session's folder (none for a document written by hand),
+    // held for the whole run so the launcher's cleanup leaves it alone.
+    let _session_folder =
+        ac_host::layout::LauncherSessionFolder::claim(&paths, std::path::Path::new(path));
     // The window reader guarantees exactly one session, never a probe.
     let Some(descriptor) = config.sessions.first().cloned() else {
         errln!("Configuration invalid: the document names no session.");

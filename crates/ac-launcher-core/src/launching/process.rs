@@ -28,8 +28,8 @@ pub struct LauncherProcessSpec {
     pub environment: Vec<(String, String)>,
     /// Whether a console stop (Ctrl+Break / SIGINT) asks it to exit.
     pub supports_console_graceful_stop: bool,
-    /// Where its error output is captured, capped.
-    pub stderr_log_path: Option<PathBuf>,
+    /// Where its standard output and error are captured together, capped.
+    pub output_log_path: Option<PathBuf>,
     /// Keep standard input open after the password (a console session
     /// reads typed lines from it for as long as it runs).
     pub keep_standard_input_open: bool,
@@ -140,15 +140,12 @@ impl SystemChildProcess {
 
     fn command(&self) -> Command {
         let mut command = Command::new(&self.spec.executable_path);
-        command
-            .args(&self.spec.arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
-            .stderr(if self.spec.stderr_log_path.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::inherit()
-            });
+        command.args(&self.spec.arguments).stdin(Stdio::piped());
+        if self.spec.output_log_path.is_some() {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
         for (name, value) in &self.spec.environment {
             command.env(name, value);
         }
@@ -194,6 +191,41 @@ pub fn request_console_stop(pid: u32) -> bool {
     send_console_stop(pid)
 }
 
+/// The most a line may grow before it is written without its end, so a
+/// stream that never ends a line cannot hold memory without bound.
+const LONGEST_HELD_LINE: usize = 64 * 1024;
+
+/// Copies `stream` into `capture` on a thread of its own, a whole line at a
+/// time (a line longer than [`LONGEST_HELD_LINE`] in pieces), until the
+/// stream ends.
+fn spawn_line_pump(
+    name: &str,
+    mut stream: impl Read + Send + 'static,
+    capture: Arc<BoundedProcessOutputCapture>,
+) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let mut buffer = [0u8; 4096];
+            let mut pending: Vec<u8> = Vec::new();
+            while let Ok(read) = stream.read(&mut buffer) {
+                if read == 0 {
+                    break;
+                }
+                pending.extend_from_slice(&buffer[..read]);
+                if let Some(last_break) = pending.iter().rposition(|&byte| byte == b'\n') {
+                    capture.append(&pending[..=last_break]);
+                    pending.drain(..=last_break);
+                } else if pending.len() > LONGEST_HELD_LINE {
+                    capture.append(&pending);
+                    pending.clear();
+                }
+            }
+            capture.append(&pending);
+        })?;
+    Ok(())
+}
+
 impl ChildProcess for SystemChildProcess {
     fn start(&self, on_exit: ExitCallback) -> io::Result<()> {
         let mut slot = lock(&self.child);
@@ -203,26 +235,24 @@ impl ChildProcess for SystemChildProcess {
         let mut child = self.spawn()?;
         *lock(&self.pid) = Some(child.id());
         *lock(&self.stdin) = child.stdin.take();
+        let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         // Kept before any further setup, so a kill still reaches a child
         // whose setup fails.
         *slot = Some(child);
         drop(slot);
-        if let (Some(path), Some(mut stderr)) = (&self.spec.stderr_log_path, stderr)
+        if let Some(path) = &self.spec.output_log_path
             && let Ok(capture) = BoundedProcessOutputCapture::with_default_cap(path)
         {
-            std::thread::Builder::new()
-                .name("launcher-stderr-pump".into())
-                .spawn(move || {
-                    let mut buffer = [0u8; 4096];
-                    while let Ok(read) = stderr.read(&mut buffer) {
-                        if read == 0 {
-                            break;
-                        }
-                        capture.append(&buffer[..read]);
-                    }
-                    capture.close();
-                })?;
+            // Both streams go to the one log, whole lines at a time, so a
+            // line of one never lands inside a line of the other.
+            let capture = Arc::new(capture);
+            if let Some(stdout) = stdout {
+                spawn_line_pump("launcher-stdout-pump", stdout, Arc::clone(&capture))?;
+            }
+            if let Some(stderr) = stderr {
+                spawn_line_pump("launcher-stderr-pump", stderr, capture)?;
+            }
         }
 
         // The exit watcher: polls so `kill` can still reach the child.

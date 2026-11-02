@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use ac_host::PathSet;
+use ac_host::paths::is_player_folder;
 
 use super::catalog::PluginCatalog;
 use super::inventory::{
@@ -66,13 +67,29 @@ pub const PERMISSION_VOCABULARY_REFUSAL: &str = "This plugin needs a newer launc
 pub const PERMISSIONS_CHANGED_REFUSAL: &str =
     "This plugin changed since you reviewed it. Check it again before installing.";
 
-/// The refusal when a package ships its own top-level `files` folder.
-pub const PACKAGED_FILES_REFUSAL: &str = "This plugin's package contains a top-level 'files' \
-     folder. That name is kept for the plugin's own saved files, so the launcher will not \
-     install it.";
+/// The refusal when a package ships its own top-level `data` or `vtank`
+/// folder.
+pub const PACKAGED_FILES_REFUSAL: &str = "This plugin's package contains a top-level 'data' or \
+     'vtank' folder. Those names are kept for the player's own saved files, so the launcher \
+     will not install it.";
 
 /// The folder inside a plugin's folder that holds the player's files for it.
 const FILES_FOLDER_NAME: &str = ac_host::paths::PLUGIN_FILES_FOLDER_NAME;
+
+/// The player's folders (see [`ac_host::paths::is_player_folder`]) directly
+/// in `directory`, by name.
+fn player_folders(directory: &Path) -> Vec<std::ffi::OsString> {
+    std::fs::read_dir(directory)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .map(|entry| entry.file_name())
+                .filter(|name| is_player_folder(&name.to_string_lossy()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// What runs right after an update set the old version's files aside and
 /// before the new ones go in.
@@ -509,7 +526,7 @@ impl PluginInstaller {
 
     /// Installs a reviewed local ZIP as a direct install, or updates the
     /// direct install of the same id. Never turns a launcher-managed or
-    /// bundled plugin into a direct install, and never touches `files`.
+    /// bundled plugin into a direct install, and never touches the player's folders.
     #[allow(clippy::too_many_arguments)]
     pub fn install_local_zip(
         &self,
@@ -640,7 +657,7 @@ impl PluginInstaller {
     }
 
     /// Unpacks a local archive into `staging` and checks it as a release
-    /// package: its `plugin.json`, its content, no packaged `files` folder,
+    /// package: its `plugin.json`, its content, no packaged `data` or `vtank` folder,
     /// its icon.
     fn extract_local_manifest(
         &self,
@@ -742,7 +759,7 @@ impl PluginInstaller {
     }
 
     /// Removes a managed plugin's code. Its private files in
-    /// `plugins/<id>/files` stay unless `delete_storage` asks for them too;
+    /// `plugins/<id>/data` stay unless `delete_storage` asks for them too;
     /// never the shared root and never the VTank profile folder.
     pub fn remove(&self, id: &str, delete_storage: bool) -> Result<(), UpdateError> {
         if self.records().find(id).is_none() {
@@ -764,10 +781,11 @@ impl PluginInstaller {
         Ok(())
     }
 
-    /// Moves a plugin folder to the trash in one rename, hands its private
-    /// files back to a fresh folder of the same name unless asked to delete
-    /// them, then deletes the trash. A crash between the two renames leaves
-    /// the files in the trash, where recovery finds and returns them.
+    /// Moves a plugin folder to the trash in one rename, hands the player's
+    /// folders back to a fresh folder of the same name (its private files
+    /// only unless asked to delete them; the shared VTank folder always),
+    /// then deletes the trash. A crash between the renames leaves them in
+    /// the trash, where recovery finds and returns them.
     fn remove_code_keeping_files(
         &self,
         trash_name: &str,
@@ -776,11 +794,16 @@ impl PluginInstaller {
     ) -> Result<(), UpdateError> {
         let trash = self.create_trash_path(trash_name)?;
         std::fs::rename(plugin_directory, &trash).map_err(io)?;
-        let trashed_files = trash.join(FILES_FOLDER_NAME);
-        if !delete_files && trashed_files.is_dir() {
+        for name in player_folders(&trash) {
+            if delete_files
+                && name
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(FILES_FOLDER_NAME)
+            {
+                continue;
+            }
             std::fs::create_dir_all(plugin_directory).map_err(io)?;
-            std::fs::rename(&trashed_files, plugin_directory.join(FILES_FOLDER_NAME))
-                .map_err(io)?;
+            std::fs::rename(trash.join(&name), plugin_directory.join(&name)).map_err(io)?;
         }
         fsutil::try_delete_tree(&trash);
         Ok(())
@@ -943,15 +966,14 @@ impl PluginInstaller {
             // Record-less trash is a direct removal, never a managed one;
             // resurrecting it would undo a removal that already succeeded.
             if self.records().find(id).is_some() && !has_plugin_code(&original) {
-                let original_files = original.join(FILES_FOLDER_NAME);
-                let trash_files = trash.join(FILES_FOLDER_NAME);
-                if original_files.is_dir() {
-                    if trash_files.is_dir() {
-                        // Two copies cannot arise from one swap; leave both
-                        // for the player rather than pick one.
-                        continue;
-                    }
-                    std::fs::rename(&original_files, &trash_files).map_err(io)?;
+                let kept = player_folders(&original);
+                if kept.iter().any(|name| trash.join(name).exists()) {
+                    // Two copies cannot arise from one swap; leave both
+                    // for the player rather than pick one.
+                    continue;
+                }
+                for name in kept {
+                    std::fs::rename(original.join(&name), trash.join(&name)).map_err(io)?;
                 }
                 if original.is_dir() {
                     std::fs::remove_dir(&original).map_err(io)?;
@@ -966,7 +988,7 @@ impl PluginInstaller {
     }
 
     /// Writes a new version into the plugin's own folder while clients may
-    /// be running it. The player's `files` folder is never moved. The old
+    /// be running it. The player's folders are never moved. The old
     /// version's files are set aside first and the new ones moved in, with
     /// `plugin.json` last, so a folder holding the new `plugin.json` holds
     /// all of the new version. A journal beside the staging folder names the
@@ -1090,7 +1112,7 @@ impl PluginInstaller {
     /// back, and every file the old version did not have leaves the
     /// plugin's folder. It can run again after being interrupted itself,
     /// because it only ever moves what is still set aside. The player's
-    /// `files` folder is never touched.
+    /// folders are never touched.
     fn put_back(&self, journal: &Path) -> std::io::Result<()> {
         let text = std::fs::read_to_string(journal)?;
         let mut lines = text.lines();
@@ -1181,7 +1203,7 @@ fn refuse_unmanaged_folder(
     id: &str,
     target_directory: &Path,
 ) -> Result<(), UpdateError> {
-    // A folder holding nothing but files/ is what removing a plugin's code
+    // A folder holding nothing but the player's folders is what removing a plugin's code
     // leaves behind; installing the plugin again picks its files up.
     if existing.is_some() || !has_plugin_code(target_directory) {
         return Ok(());
@@ -1235,7 +1257,7 @@ fn staging_of(journal: &Path) -> PathBuf {
 
 /// Every file of a plugin's code, relative to its folder with `/`
 /// separators and in ordinal order: everything but the player's top-level
-/// `files` folder.
+/// `data` and `vtank` folders.
 fn code_files(directory: &Path) -> Vec<String> {
     let mut files = Vec::new();
     let mut pending = vec![directory.to_path_buf()];
@@ -1256,7 +1278,7 @@ fn code_files(directory: &Path) -> Vec<String> {
                     .map(|component| component.as_os_str().to_string_lossy().into_owned())
                     .collect::<Vec<_>>()
                     .join("/");
-                if !is_in_files_folder(&relative) {
+                if !is_in_player_folder(&relative) {
                     files.push(relative);
                 }
             }
@@ -1266,10 +1288,12 @@ fn code_files(directory: &Path) -> Vec<String> {
     files
 }
 
-fn is_in_files_folder(relative: &str) -> bool {
+/// Whether a `/`-separated path relative to a plugin's folder lies inside
+/// one of the player's folders.
+fn is_in_player_folder(relative: &str) -> bool {
     relative
-        .get(..FILES_FOLDER_NAME.len() + 1)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&format!("{FILES_FOLDER_NAME}/")))
+        .split_once('/')
+        .is_some_and(|(first, _)| is_player_folder(first))
 }
 
 /// The new version's files go in with its entry module next to last and
@@ -1294,7 +1318,7 @@ fn move_file(source: &Path, destination: &Path) -> std::io::Result<()> {
 }
 
 /// Removes folders the old version had and the new one left empty; the
-/// player's `files` folder and what is inside it stay.
+/// player's folders and what is inside them stay.
 fn remove_empty_code_folders(plugin_directory: &Path) -> std::io::Result<()> {
     if !plugin_directory.is_dir() {
         return Ok(());
@@ -1324,7 +1348,7 @@ fn remove_empty_code_folders(plugin_directory: &Path) -> std::io::Result<()> {
                     .join("/")
             })
             .unwrap_or_default();
-        if relative.eq_ignore_ascii_case(FILES_FOLDER_NAME) || is_in_files_folder(&relative) {
+        if is_player_folder(&relative) || is_in_player_folder(&relative) {
             continue;
         }
         if std::fs::read_dir(&folder)?.next().is_none() {
@@ -1342,38 +1366,31 @@ fn id_from_trash_name(name: &str) -> &str {
     }
 }
 
-/// Refuses a package that ships its own top-level `files` folder: that
-/// name inside a plugin's folder belongs to the player's saved files, and
-/// an update carries the old one into the new version.
+/// Refuses a package that ships its own top-level `data` or `vtank`
+/// folder: those names inside a plugin's folder belong to the player's
+/// files, and an update carries the old ones into the new version.
 fn refuse_packaged_files_folder(staging_directory: &Path) -> Result<(), UpdateError> {
     let entries = std::fs::read_dir(staging_directory).map_err(io)?;
     for entry in entries {
         let entry = entry.map_err(io)?;
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(FILES_FOLDER_NAME)
-        {
+        if is_player_folder(&entry.file_name().to_string_lossy()) {
             return Err(UpdateError::failed(PACKAGED_FILES_REFUSAL));
         }
     }
     Ok(())
 }
 
-/// Whether a plugin folder holds anything besides the player's files.
+/// Whether a plugin folder holds anything besides the player's folders.
 fn has_plugin_code(plugin_directory: &Path) -> bool {
     std::fs::read_dir(plugin_directory).is_ok_and(|entries| {
-        entries.flatten().any(|entry| {
-            !entry
-                .file_name()
-                .to_string_lossy()
-                .eq_ignore_ascii_case(FILES_FOLDER_NAME)
-        })
+        entries
+            .flatten()
+            .any(|entry| !is_player_folder(&entry.file_name().to_string_lossy()))
     })
 }
 
-/// The file beside a staging folder that says its files/ holds the
-/// player's files rather than anything the package brought. It sits
+/// The file beside a staging folder that says its player's folders hold
+/// the player's files rather than anything the package brought. It sits
 /// outside the staging folder, so no package can ship it.
 fn player_files_marker(staging_directory: &Path) -> PathBuf {
     let mut marker = staging_directory.as_os_str().to_owned();
@@ -1381,22 +1398,23 @@ fn player_files_marker(staging_directory: &Path) -> PathBuf {
     PathBuf::from(marker)
 }
 
-/// Returns files a swap staged beside new code to their plugin folder.
-/// True when nothing of the player's is left in `staging_directory`.
+/// Returns the player's folders a swap staged beside new code to their
+/// plugin folder. True when nothing of the player's is left in
+/// `staging_directory`.
 fn return_staged_files(staging_directory: &Path, plugin_directory: &Path) -> bool {
-    let staged = staging_directory.join(FILES_FOLDER_NAME);
-    if !staged.is_dir() {
-        return true;
+    let mut all_returned = true;
+    for name in player_folders(staging_directory) {
+        let target = plugin_directory.join(&name);
+        // Left where it is on failure; the next recovery tries again.
+        let returned = !target.exists()
+            && std::fs::create_dir_all(plugin_directory).is_ok()
+            && std::fs::rename(staging_directory.join(&name), &target).is_ok();
+        all_returned &= returned;
     }
-    let target = plugin_directory.join(FILES_FOLDER_NAME);
-    if target.is_dir() {
-        return false;
-    }
-    // Left where it is on failure; the next recovery tries again.
-    std::fs::create_dir_all(plugin_directory).is_ok() && std::fs::rename(&staged, &target).is_ok()
+    all_returned
 }
 
-/// Hands a staging folder's files/ back only when the marker says they are
+/// Hands a staging folder's player folders back only when the marker says they are
 /// the player's, then deletes the staging folder and its marker. Leaves
 /// both when the files could not be handed back.
 fn reclaim_staging(staging_directory: &Path, plugin_directory: &Path) {

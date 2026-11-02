@@ -248,7 +248,8 @@ mod tests {
         std::fs::write(vtank.join("Hunt.met"), "classic").unwrap();
         std::fs::write(vtank.join("Route.nav"), "nav").unwrap();
         let root = scratch.0.join("openac");
-        let metas = root.join("vtank").join("mosstank").join("metas");
+        let profiles = root.join("plugins").join("acdream.mosstank").join("vtank");
+        let metas = profiles.join("mosstank").join("metas");
         std::fs::create_dir_all(&metas).unwrap();
         std::fs::write(metas.join("Hunt.met"), "edited").unwrap();
         let args = [
@@ -270,6 +271,6 @@ mod tests {
             std::fs::read_to_string(metas.join("Hunt.met")).unwrap(),
             "edited"
         );
-        assert!(root.join("vtank/mosstank/navs/Route.nav").is_file());
+        assert!(profiles.join("mosstank/navs/Route.nav").is_file());
     }
 }

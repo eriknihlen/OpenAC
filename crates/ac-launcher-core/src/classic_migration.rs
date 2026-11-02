@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The plugin the imported profiles are for.
-pub const MOSSTANK_PLUGIN_ID: &str = "acdream.mosstank";
+pub const MOSSTANK_PLUGIN_ID: &str = ac_host::paths::VTANK_PLUGIN_ID;
 
 /// The folder MossTank keeps everything a person edits in.
 pub const MOSSTANK_FOLDER: &str = "mosstank";

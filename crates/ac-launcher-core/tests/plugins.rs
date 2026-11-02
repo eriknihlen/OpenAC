@@ -1016,8 +1016,8 @@ fn direct_install_passes_and_ignores_metadata_files() {
 fn the_direct_install_check_ignores_the_plugins_own_files() {
     let root = TempDir::new("direct-files");
     let directory = write_valid_plugin(&root, "valid");
-    std::fs::create_dir_all(directory.join("files")).unwrap();
-    std::fs::write(directory.join("files").join("stray.exe"), [0x4D, 0x5A]).unwrap();
+    std::fs::create_dir_all(directory.join("data")).unwrap();
+    std::fs::write(directory.join("data").join("stray.exe"), [0x4D, 0x5A]).unwrap();
     assert_eq!(direct_install_refusal(&directory, &valid_direct()), None);
 }
 
@@ -2972,26 +2972,149 @@ fn a_reinstall_after_remove_finds_the_kept_files() {
 // OpenAC PluginInstallerTests.APackageThatShipsAFilesFolderIsRefused.
 #[test]
 fn a_package_that_ships_a_files_folder_is_refused() {
+    // The player's folders are `data` and `vtank`; neither may come in a
+    // package.
+    for folder in ["data", "vtank", "Data"] {
+        let fixture = InstallerFixture::new();
+        let manifest = installer_manifest(HELLO, "0.1.0", None, None).into_bytes();
+        let release = fixture.release_from(
+            "0.1.0",
+            manifest.clone(),
+            vec![
+                ("plugin.json".to_owned(), manifest),
+                (format!("{HELLO}.wasm"), b"binary".to_vec()),
+                (format!("{folder}/defaults.json"), b"{}".to_vec()),
+            ],
+        );
+        fixture.register(HELLO_REPO, &release, None, None);
+
+        let error = fixture.install(HELLO_REPO, &release).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            ac_launcher_core::plugins::PACKAGED_FILES_REFUSAL,
+            "{folder}"
+        );
+        assert!(!fixture.plugin_dir().join(HELLO).exists());
+    }
+}
+
+/// The shared VTank folder inside a plugin's folder, as MossTank's holds it.
+fn vtank_folder(fixture: &InstallerFixture) -> PathBuf {
+    fixture
+        .plugin_dir()
+        .join(HELLO)
+        .join(ac_host::paths::VTANK_FOLDER_NAME)
+}
+
+#[test]
+fn an_update_and_a_reinstall_keep_the_data_and_vtank_folders() {
     let fixture = InstallerFixture::new();
-    let manifest = installer_manifest(HELLO, "0.1.0", None, None).into_bytes();
-    let release = fixture.release_from(
-        "0.1.0",
-        manifest.clone(),
-        vec![
-            ("plugin.json".to_owned(), manifest),
-            (format!("{HELLO}.wasm"), b"binary".to_vec()),
-            ("files/defaults.json".to_owned(), b"{}".to_vec()),
-        ],
-    );
-    fixture.register(HELLO_REPO, &release, None, None);
+    let first = fixture.release("0.1.0");
+    fixture.register(HELLO_REPO, &first, None, None);
+    fixture.install(HELLO_REPO, &first).unwrap();
+    let data = fixture.paths.plugin_files_directory(HELLO);
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("settings.json"), "mine").unwrap();
+    let vtank = vtank_folder(&fixture);
+    std::fs::create_dir_all(vtank.join("mosstank").join("metas")).unwrap();
+    std::fs::write(vtank.join("mosstank").join("metas").join("a.met"), "meta").unwrap();
 
-    let error = fixture.install(HELLO_REPO, &release).unwrap_err();
-
+    let second = fixture.release("0.2.0");
+    fixture.register(HELLO_REPO, &second, None, None);
+    fixture.install(HELLO_REPO, &second).unwrap();
     assert_eq!(
-        error.to_string(),
-        ac_launcher_core::plugins::PACKAGED_FILES_REFUSAL
+        fixture.find(HELLO).unwrap().version.as_deref(),
+        Some("0.2.0")
     );
-    assert!(!fixture.plugin_dir().join(HELLO).exists());
+    assert_eq!(
+        std::fs::read_to_string(data.join("settings.json")).unwrap(),
+        "mine"
+    );
+    assert_eq!(
+        std::fs::read_to_string(vtank.join("mosstank").join("metas").join("a.met")).unwrap(),
+        "meta"
+    );
+
+    // Removed (its data kept), then installed again.
+    fixture.installer.remove(HELLO, false).unwrap();
+    assert!(
+        !fixture
+            .plugin_dir()
+            .join(HELLO)
+            .join("plugin.json")
+            .exists()
+    );
+    assert!(data.join("settings.json").is_file());
+    assert!(vtank.join("mosstank").join("metas").join("a.met").is_file());
+    fixture.install(HELLO_REPO, &second).unwrap();
+    assert!(
+        fixture
+            .plugin_dir()
+            .join(HELLO)
+            .join("plugin.json")
+            .is_file()
+    );
+    assert!(data.join("settings.json").is_file());
+    assert!(vtank.join("mosstank").join("metas").join("a.met").is_file());
+}
+
+#[test]
+fn removing_with_its_storage_never_deletes_the_shared_vtank_folder() {
+    let fixture = InstallerFixture::new();
+    let release = fixture.release("0.1.0");
+    fixture.register(HELLO_REPO, &release, None, None);
+    fixture.install(HELLO_REPO, &release).unwrap();
+    let data = fixture.paths.plugin_files_directory(HELLO);
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("settings.json"), "mine").unwrap();
+    let vtank = vtank_folder(&fixture);
+    std::fs::create_dir_all(&vtank).unwrap();
+    std::fs::write(vtank.join("loot.utl"), "shared").unwrap();
+
+    fixture.installer.remove(HELLO, true).unwrap();
+
+    assert!(!data.exists());
+    assert_eq!(
+        std::fs::read_to_string(vtank.join("loot.utl")).unwrap(),
+        "shared"
+    );
+    assert!(fixture.find(HELLO).is_none());
+    // A folder holding only the shared VTank folder is not an install: the
+    // plugin installs into it again.
+    fixture.install(HELLO_REPO, &release).unwrap();
+    assert!(
+        fixture
+            .plugin_dir()
+            .join(HELLO)
+            .join("plugin.json")
+            .is_file()
+    );
+    assert!(vtank.join("loot.utl").is_file());
+}
+
+#[test]
+fn a_vtank_folder_without_its_plugin_is_not_an_unmanaged_install() {
+    // Another plugin writes the shared VTank folder while MossTank is not
+    // installed; installing MossTank afterwards adopts the folder.
+    let fixture = InstallerFixture::new();
+    let vtank = vtank_folder(&fixture);
+    std::fs::create_dir_all(&vtank).unwrap();
+    std::fs::write(vtank.join("a.met"), "meta").unwrap();
+    let release = fixture.release("0.1.0");
+    fixture.register(HELLO_REPO, &release, None, None);
+    fixture.install(HELLO_REPO, &release).unwrap();
+    assert!(
+        fixture
+            .plugin_dir()
+            .join(HELLO)
+            .join("plugin.json")
+            .is_file()
+    );
+    assert_eq!(
+        std::fs::read_to_string(vtank.join("a.met")).unwrap(),
+        "meta"
+    );
 }
 
 // OpenAC PluginInstallerTests.RecoveryReturnsFilesAnInterruptedUpdateStaged.
@@ -3000,7 +3123,7 @@ fn recovery_returns_files_an_interrupted_update_staged() {
     let fixture = InstallerFixture::new();
     write_manifest(&fixture.plugin_dir().join(HELLO), HELLO, "0.1.0");
     let staging = fixture.plugin_dir().join(".staging");
-    let staged = staging.join(format!("{HELLO}-abc123")).join("files");
+    let staged = staging.join(format!("{HELLO}-abc123")).join("data");
     std::fs::create_dir_all(&staged).unwrap();
     std::fs::write(staged.join("state.json"), "{}").unwrap();
     std::fs::write(staging.join(format!("{HELLO}-abc123.player-files")), HELLO).unwrap();
@@ -3108,8 +3231,8 @@ fn interrupted_update(fixture: &InstallerFixture, old_files: &[&str]) -> PathBuf
 fn recovery_puts_back_an_in_place_update_a_crash_interrupted() {
     let fixture = InstallerFixture::new();
     let plugin = fixture.plugin_dir().join(HELLO);
-    std::fs::create_dir_all(plugin.join("files")).unwrap();
-    std::fs::write(plugin.join("files").join("state.json"), "mine").unwrap();
+    std::fs::create_dir_all(plugin.join("data")).unwrap();
+    std::fs::write(plugin.join("data").join("state.json"), "mine").unwrap();
     let staging = interrupted_update(&fixture, &[&format!("{HELLO}.wasm"), "plugin.json"]);
     let set_aside = set_aside_of(&staging);
     // Set aside: the old manifest; still in place: the old module; already
@@ -3132,7 +3255,7 @@ fn recovery_puts_back_an_in_place_update_a_crash_interrupted() {
     );
     assert!(!plugin.join("new.xml").exists());
     assert_eq!(
-        std::fs::read_to_string(plugin.join("files").join("state.json")).unwrap(),
+        std::fs::read_to_string(plugin.join("data").join("state.json")).unwrap(),
         "mine"
     );
     assert!(!fixture.plugin_dir().join(".staging").exists());
@@ -3176,7 +3299,7 @@ fn recovery_never_adopts_a_packages_own_files_folder() {
         .plugin_dir()
         .join(".staging")
         .join(format!("{HELLO}-abc123"))
-        .join("files");
+        .join("data");
     std::fs::create_dir_all(&staged).unwrap();
     std::fs::write(staged.join("defaults.json"), "{}").unwrap();
 
@@ -3195,8 +3318,8 @@ fn recovery_returns_files_from_record_less_trash() {
         .join(".trash")
         .join(format!("{HELLO}-abc123"));
     write_manifest(&trash, HELLO, "0.1.0");
-    std::fs::create_dir_all(trash.join("files")).unwrap();
-    std::fs::write(trash.join("files").join("state.json"), "{}").unwrap();
+    std::fs::create_dir_all(trash.join("data")).unwrap();
+    std::fs::write(trash.join("data").join("state.json"), "{}").unwrap();
 
     fixture.installer.recover().unwrap();
 

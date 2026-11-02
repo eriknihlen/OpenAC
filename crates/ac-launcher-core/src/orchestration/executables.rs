@@ -181,7 +181,7 @@ impl LauncherExecutableSet {
         &self,
         mode: LaunchMode,
         config_file_path: &Path,
-        stderr_log_path: Option<&Path>,
+        output_log_path: Option<&Path>,
     ) -> Result<LauncherProcessSpec, OrchestratorError> {
         require_path(config_file_path)?;
         let paths = self.require_available(mode)?;
@@ -194,7 +194,7 @@ impl LauncherExecutableSet {
                 // Window support stays on, so the row can open a window on it.
                 environment: Vec::new(),
                 supports_console_graceful_stop: true,
-                stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+                output_log_path: output_log_path.map(Path::to_path_buf),
                 keep_standard_input_open: true,
             }
         } else {
@@ -207,7 +207,7 @@ impl LauncherExecutableSet {
                 // The client logs off and exits on the console stop with or
                 // without a window (a deliberate divergence from OpenAC).
                 supports_console_graceful_stop: true,
-                stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+                output_log_path: output_log_path.map(Path::to_path_buf),
                 keep_standard_input_open: true,
             }
         };
@@ -218,7 +218,7 @@ impl LauncherExecutableSet {
     pub fn create_probe_spec(
         &self,
         config_file_path: &Path,
-        stderr_log_path: Option<&Path>,
+        output_log_path: Option<&Path>,
     ) -> Result<LauncherProcessSpec, OrchestratorError> {
         require_path(config_file_path)?;
         let paths = self.require_available(LaunchMode::Headless)?;
@@ -232,7 +232,7 @@ impl LauncherExecutableSet {
             working_directory: paths.working_directory,
             environment: vec![(HEADLESS_ENVIRONMENT_VARIABLE.into(), "1".into())],
             supports_console_graceful_stop: true,
-            stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+            output_log_path: output_log_path.map(Path::to_path_buf),
             keep_standard_input_open: false,
         })
     }

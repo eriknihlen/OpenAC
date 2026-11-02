@@ -2,13 +2,13 @@
 //! relative keys (OpenAC `FilePluginStorage` behind `ScopedPluginHost`'s
 //! per-plugin scoping, and the shared `VtankProfiles` storage).
 //!
-//! - `plugin-data` is `<plugin storage directory>/<plugin id>/files`, the
+//! - `plugin-data` is `<plugin storage directory>/<plugin id>/data`, the
 //!   same folder on every host; with the storage directory at the plugins
 //!   folder it is inside the plugin's own folder, where installs, updates
 //!   and code removal leave it alone;
 //! - `plugin-files` is the plugin's own installed folder, read only;
-//! - `profiles` is the shared VTank folder, for plugins with the
-//!   `profiles` permission.
+//! - `profiles` is the shared VTank folder (`vtank` in MossTank's plugin
+//!   folder), for plugins with the `profiles` permission.
 //!
 //! A scope is a sub-folder (`character/<name>`, `world/<name>`). Keys are
 //! `/`-separated, never absolute, never `..`, never `\`. Writes are atomic
@@ -864,11 +864,19 @@ mod tests {
         .expect("a manifest");
         fs::create_dir_all(package.join("maps")).unwrap();
         fs::create_dir_all(package.join("routes")).unwrap();
-        fs::create_dir_all(data.join("openac.routes").join("files").join("routes")).unwrap();
+        fs::create_dir_all(
+            data.join("openac.routes")
+                .join(ac_host::paths::PLUGIN_FILES_FOLDER_NAME)
+                .join("routes"),
+        )
+        .unwrap();
         fs::write(package.join("maps").join("dereth.dat"), "map").unwrap();
         fs::write(package.join("routes").join("default.json"), "default").unwrap();
         fs::write(package.join("routes").join("Shared.json"), "package").unwrap();
-        let user = data.join("openac.routes").join("files").join("routes");
+        let user = data
+            .join("openac.routes")
+            .join(ac_host::paths::PLUGIN_FILES_FOLDER_NAME)
+            .join("routes");
         fs::write(user.join("custom.json"), "custom").unwrap();
         fs::write(user.join("shared.json"), "user").unwrap();
         let roots = StorageRoots {

@@ -725,7 +725,7 @@ fn asset_version_crash_produces_actionable_error_without_exposing_stderr() {
     );
     launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
     let supervisor = supervisors.single();
-    let path = supervisor.spec().stderr_log_path.unwrap();
+    let path = supervisor.spec().output_log_path.unwrap();
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(
         &path,

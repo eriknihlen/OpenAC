@@ -233,7 +233,7 @@ struct Activity {
     exit_code: Option<i32>,
     error: Option<String>,
     plugin_notice: Option<String>,
-    stderr_log_path: Option<PathBuf>,
+    output_log_path: Option<PathBuf>,
     host_terminal_status: Option<String>,
     /// The client's own exit reason; set only when it reported its exit.
     exit_reason: Option<String>,
@@ -399,11 +399,13 @@ fn safe_error(prefix: &str, detail: &str, secret: Option<&str>) -> String {
 /// prepared content is from another version, otherwise why it ended in
 /// plain words (see [`describe_client_exit`]).
 fn read_exit_failure(activity: &Activity) -> String {
-    if let Some(path) = &activity.stderr_log_path
+    if let Some(path) = &activity.output_log_path
         && let Ok(file) = std::fs::File::open(path)
     {
-        let mut buffer = Vec::with_capacity(4096);
-        if file.take(4096).read_to_end(&mut buffer).is_ok() {
+        // The log holds standard output too, so the start of the error
+        // stream may sit a little way in.
+        let mut buffer = Vec::with_capacity(64 * 1024);
+        if file.take(64 * 1024).read_to_end(&mut buffer).is_ok() {
             let text = String::from_utf8_lossy(&buffer);
             if text.contains("bake tool") && text.contains("does not match") {
                 return "The installed client and prepared game files are different versions. \
@@ -1374,13 +1376,13 @@ impl LauncherOrchestrator {
         }
     }
 
-    /// The file a session's error output is captured in.
+    /// The file a session's output (standard output and error) is captured in.
     pub fn session_log_path(&self, session_id: &str) -> Option<PathBuf> {
         lock(&self.inner.gate)
             .activities
             .iter()
             .find(|activity| activity.session_id == session_id)
-            .and_then(|activity| activity.stderr_log_path.clone())
+            .and_then(|activity| activity.output_log_path.clone())
     }
 
     /// Stops a session: cancels a start still running and stops the
@@ -1703,7 +1705,7 @@ impl Inner {
             exit_code: None,
             error: None,
             plugin_notice: None,
-            stderr_log_path: None,
+            output_log_path: None,
             host_terminal_status: None,
             server_message: None,
             account_in_use: false,
@@ -1952,7 +1954,7 @@ impl Inner {
             .with_activity(request.serial, |activity| {
                 activity.supervisor = Some(Arc::clone(&supervisor));
                 activity.status_source = Some(status_source);
-                activity.stderr_log_path = Some(composed.stderr_log_path.clone());
+                activity.output_log_path = Some(composed.client_log_path.clone());
                 activity.plugin_notice = plugin_notice;
                 activity.status = "Starting host process…".into();
             })
@@ -1963,11 +1965,11 @@ impl Inner {
         let mut spec = match request.launch_mode {
             None => inner
                 .executables
-                .create_probe_spec(&composed.config_file_path, Some(&composed.stderr_log_path)),
+                .create_probe_spec(&composed.config_file_path, Some(&composed.client_log_path)),
             Some(mode) => inner.executables.create_play_spec(
                 mode,
                 &composed.config_file_path,
-                Some(&composed.stderr_log_path),
+                Some(&composed.client_log_path),
             ),
         }
         .map_err(|error| StartFailure::Error(error.to_string()))?;

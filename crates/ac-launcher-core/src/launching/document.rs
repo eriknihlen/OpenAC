@@ -1,7 +1,10 @@
 //! Composing the session-config document a launched client reads: one
 //! session, the password through standard input only, an explicit plugin
 //! allow-list (blank loads nothing; refused, duplicated and blocked plugins
-//! removed), written under `<cache>/launcher/sessions/<id>/`.
+//! removed), written in the session's own folder,
+//! `logs/<server>/<character>/<local start time>/` (the account's name
+//! for a session started without a character), beside its status file and
+//! the client's log.
 //!
 //! The document is `ac-host`'s own `HostConfig`, so whatever the launcher
 //! writes is exactly what the host's reader accepts.
@@ -28,12 +31,15 @@ pub const STANDARD_INPUT_REFERENCE: &str = "session";
 pub struct ComposedSessionConfig {
     /// The session id.
     pub session_id: String,
-    /// `<cache>/launcher/sessions/<id>/session.json`.
+    /// The session's folder (see [`ac_host::layout::create_session_folder`]).
+    pub session_directory: PathBuf,
+    /// `<session folder>/session.json`.
     pub config_file_path: PathBuf,
-    /// `<cache>/launcher/sessions/<id>/status.jsonl`.
+    /// `<session folder>/status.jsonl`.
     pub status_file_path: PathBuf,
-    /// `<cache>/launcher/sessions/<id>/client.err.log`.
-    pub stderr_log_path: PathBuf,
+    /// `<session folder>/client.log`: the client's standard output and
+    /// error.
+    pub client_log_path: PathBuf,
     /// The document.
     pub document: HostConfig,
     /// One line per configured plugin left out (refused, duplicated,
@@ -131,13 +137,50 @@ impl SessionConfigService for LauncherSessionConfigService {
     }
 }
 
-fn session_paths(paths: &PathSet, session_id: &str) -> (PathBuf, PathBuf, PathBuf) {
-    let directory = paths.launcher_sessions_directory().join(session_id);
+/// The files of the session folder `directory`: the document, the status
+/// file and the client log.
+fn session_paths(directory: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    use ac_host::paths::{
+        SESSION_CLIENT_LOG_FILE_NAME, SESSION_CONFIG_FILE_NAME, SESSION_STATUS_FILE_NAME,
+    };
     (
-        directory.join("session.json"),
-        directory.join("status.jsonl"),
-        directory.join("client.err.log"),
+        directory.join(SESSION_CONFIG_FILE_NAME),
+        directory.join(SESSION_STATUS_FILE_NAME),
+        directory.join(SESSION_CLIENT_LOG_FILE_NAME),
     )
+}
+
+/// The folder a session starting now is given, before [`write`] makes it
+/// (a later number when one of the same second is already there):
+/// `logs/<server>/<character>/<local start time>`.
+fn session_directory(paths: &PathSet, server: &ServerProfile, filed_under: &str) -> PathBuf {
+    let now = std::time::SystemTime::now();
+    let now_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        });
+    let offset = ac_host::local_time::LocalZone::system().utc_offset_seconds(now_ms);
+    paths
+        .session_logs_directory(&server.name, filed_under)
+        .join(ac_host::layout::session_folder_name(
+            now_ms + i64::from(offset) * 1000,
+        ))
+}
+
+/// The name a session's folder is filed under: the character's, or the
+/// account's when the player picks the character in the client (or the
+/// character has no name to file it under).
+fn filed_under(account: &AccountProfile, character: Option<&CharacterProfile>) -> String {
+    match character {
+        Some(character)
+            if character.launch_mode != LaunchMode::GuiSelect
+                && !character.name.trim().is_empty() =>
+        {
+            character.name.clone()
+        }
+        _ => account.account.clone(),
+    }
 }
 
 fn content(install: &LauncherInstallRecord) -> ContentDescriptor {
@@ -201,7 +244,9 @@ pub fn compose(
     if install.requires_client_compatibility_confirmation {
         return Err(ComposeError::ClientCompatibilityUnconfirmed);
     }
-    let (config_file_path, status_file_path, stderr_log_path) = session_paths(paths, session_id);
+    let session_directory =
+        session_directory(paths, server, &filed_under(account, Some(character)));
+    let (config_file_path, status_file_path, client_log_path) = session_paths(&session_directory);
     let selector = match character.launch_mode {
         LaunchMode::GuiSelect => None,
         _ => Some(selector(character)?),
@@ -233,9 +278,10 @@ pub fn compose(
     };
     Ok(ComposedSessionConfig {
         session_id: session_id.to_owned(),
+        session_directory,
         config_file_path,
         status_file_path,
-        stderr_log_path,
+        client_log_path,
         document: HostConfig {
             process: ProcessSettings {
                 paths: ac_host::PathOverrides::default(),
@@ -262,7 +308,8 @@ pub fn compose_probe(
     if install.requires_client_compatibility_confirmation {
         return Err(ComposeError::ClientCompatibilityUnconfirmed);
     }
-    let (config_file_path, status_file_path, stderr_log_path) = session_paths(paths, session_id);
+    let session_directory = session_directory(paths, server, &filed_under(account, None));
+    let (config_file_path, status_file_path, client_log_path) = session_paths(&session_directory);
     let session = SessionDescriptor {
         id: session_id.to_owned(),
         endpoint: endpoint(server)?,
@@ -279,9 +326,10 @@ pub fn compose_probe(
     };
     Ok(ComposedSessionConfig {
         session_id: session_id.to_owned(),
+        session_directory,
         config_file_path,
         status_file_path,
-        stderr_log_path,
+        client_log_path,
         document: HostConfig {
             process: ProcessSettings {
                 paths: ac_host::PathOverrides::default(),
@@ -293,10 +341,23 @@ pub fn compose_probe(
     })
 }
 
-/// Writes the document to its config file (creating the session folder).
-pub fn write(composed: ComposedSessionConfig) -> Result<ComposedSessionConfig, ComposeError> {
-    if let Some(directory) = composed.config_file_path.parent() {
-        std::fs::create_dir_all(directory)?;
+/// Makes the session folder and writes the document into it. A folder of
+/// that name already there (a session of the same character started in
+/// the same second) is never reused: the session gets the next free name
+/// (` (2)`, ` (3)`, ...), and the document's paths follow it.
+pub fn write(mut composed: ComposedSessionConfig) -> Result<ComposedSessionConfig, ComposeError> {
+    let claimed = ac_host::layout::claim_session_folder(&composed.session_directory)?;
+    if claimed != composed.session_directory {
+        let (config_file_path, status_file_path, client_log_path) = session_paths(&claimed);
+        for session in &mut composed.document.sessions {
+            if session.status_file.as_deref() == Some(composed.status_file_path.as_path()) {
+                session.status_file = Some(status_file_path.clone());
+            }
+        }
+        composed.session_directory = claimed;
+        composed.config_file_path = config_file_path;
+        composed.status_file_path = status_file_path;
+        composed.client_log_path = client_log_path;
     }
     std::fs::write(&composed.config_file_path, serialize(&composed.document))?;
     Ok(composed)
