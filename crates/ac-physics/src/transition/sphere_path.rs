@@ -40,6 +40,8 @@ pub struct SpherePath {
 
     /// Start of the move.
     pub begin_pos: Vec3,
+    /// The cell the move started in (0: none).
+    pub begin_cell_id: u32,
     /// End of the move.
     pub end_pos: Vec3,
     /// Where the body is now.
@@ -141,6 +143,7 @@ impl Default for SpherePath {
             global_sphere: [Sphere::default(); 2],
             global_curr_center: [Sphere::default(); 2],
             begin_pos: Vec3::ZERO,
+            begin_cell_id: 0,
             end_pos: Vec3::ZERO,
             cur_pos: Vec3::ZERO,
             check_pos: Vec3::ZERO,
@@ -446,6 +449,7 @@ impl SpherePath {
         end_orientation: Option<Quat>,
     ) {
         self.begin_pos = begin;
+        self.begin_cell_id = cell_id;
         self.end_pos = end;
         self.cur_pos = begin;
         self.cur_cell_id = cell_id;

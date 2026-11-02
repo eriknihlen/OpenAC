@@ -282,8 +282,21 @@ fn player_cannot_walk_onto_the_open_sea() {
 #[test]
 fn camera_and_missiles_cross_the_open_sea() {
     let engine = sea_engine([WATER_VERTEX; 81]);
-    let viewer = sea_step(
+    // The camera sweeps as the chase camera does: one sphere, off the
+    // ground, no stepping (a camera has no step down to keep it on the
+    // ground; set up as a walking body, its step down would be moved back
+    // along its step).
+    let lift = Vec3::new(0.0, 0.0, 0.5);
+    let viewer = resolve(
         &engine,
+        SEA_START + lift,
+        SEA_START + Vec3::X + lift,
+        SEA_CELL,
+        0.48,
+        0.0,
+        0.0,
+        0.0,
+        false,
         flags(ObjectInfoState::IS_VIEWER | ObjectInfoState::PATH_CLIPPED),
         None,
     );
@@ -671,6 +684,35 @@ fn sweep_viewer(engine: &PhysicsEngine) -> ResolveResult {
         camera_flags(),
         None,
     )
+}
+
+// The camera's eye swept down into flat ground (z = 0) stops on its own
+// line where its sphere first touches the ground: it is moved back along
+// the step, never lifted straight up over the ground. Golden value worked
+// by hand: the centre falls 0.2 m per meter of y from z = 1 at y = 10, so
+// the 0.3 m sphere touches at y = 13.5, z = 0.3.
+#[test]
+fn a_camera_swept_into_the_ground_stops_on_its_line_where_it_touches() {
+    let engine = world_engine(LANDBLOCK, zero_terrain());
+    let lift = Vec3::new(0.0, 0.0, VIEWER_RADIUS);
+    let r = resolve(
+        &engine,
+        Vec3::new(12.0, 10.0, 1.0) - lift,
+        Vec3::new(12.0, 20.0, -1.0) - lift,
+        CELL,
+        VIEWER_RADIUS,
+        0.0,
+        0.0,
+        0.0,
+        false,
+        camera_flags(),
+        None,
+    );
+    let eye = r.position + lift;
+    assert!(r.ok, "{r:?}");
+    assert!((eye.z - VIEWER_RADIUS).abs() < 1e-3, "eye {eye}");
+    assert!((eye.y - 13.5).abs() < 1e-3, "eye {eye} is off its line");
+    assert!((eye.x - 12.0).abs() < 1e-4, "eye {eye}");
 }
 
 fn prop_engine(

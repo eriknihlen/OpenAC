@@ -257,3 +257,127 @@ fn across_the_town_network_hub_the_swept_eye_is_in_its_viewer_cell() {
         &misses[..misses.len().min(5)]
     );
 }
+
+/// Near Wai Jhou (landblock 0x3E33): a player reported standing at
+/// (161.35, 123.22) in cell 0x0036, on flat ground with a steep slope
+/// rising 6 to 8 m behind them, facing away from it.
+const WAI_JHOU: LandblockCoord = LandblockCoord { x: 0x3E, y: 0x33 };
+const WAI_JHOU_CELL: u32 = 0x3E33_0036;
+
+/// The reported facing (w, x, y, z = -0.506433, 0, 0, -0.862279).
+fn wai_jhou_yaw() -> f32 {
+    ac_render::camera::yaw_of(glam::Quat::from_xyzw(0.0, 0.0, -0.862_279, -0.506_433))
+}
+
+/// Zoom out with the zoom key held for `zoom_frames` frames at 60 frames a
+/// second, then hold still until `frames`; the eye's distance from the
+/// pivot over the last 100 frames, and the camera.
+fn zoom_out_against_the_slope(
+    engine: &PhysicsEngine,
+    feet: Vec3,
+    zoom_frames: usize,
+    frames: usize,
+) -> (Vec<f32>, ChaseCamera) {
+    use ac_render::camera::ChaseAdjustment;
+    let probe = PhysicsCameraProbe::new(engine, Vec3::ZERO);
+    let subject = ChaseSubject::standing(feet, wai_jhou_yaw());
+    let mut cam = ChaseCamera::default();
+    let pivot = feet + Vec3::new(0.0, 0.0, cam.pivot_height);
+    let mut distances = Vec::new();
+    for frame in 0..frames {
+        if frame < zoom_frames {
+            let zoom_out = ChaseAdjustment {
+                zoom_out: true,
+                ..ChaseAdjustment::default()
+            };
+            cam.adjust_held(zoom_out, 1.0 / 60.0);
+        }
+        cam.update(
+            &subject,
+            1.0 / 60.0,
+            Some(ChaseCollision {
+                probe: &probe,
+                cell_id: WAI_JHOU_CELL,
+                self_id: 0x5000_0001,
+            }),
+        );
+        if frame + 100 >= frames {
+            distances.push(cam.eye().distance(pivot));
+        }
+    }
+    (distances, cam)
+}
+
+/// Issue #70: zoomed out with the slope behind, the eye is stopped by the
+/// slope where the boom first meets it, on the boom's own line, and stays
+/// there. It used to be lifted up out of the ground at each frame's sweep,
+/// climbing the slope 13 m from the pivot on a 10 m boom and bouncing
+/// 0.27 m back and forth every frame.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn zoomed_out_with_a_slope_behind_the_eye_stops_at_the_slope() {
+    let engine = neighbourhood(WAI_JHOU);
+    let feet = Vec3::new(161.347_4, 123.218_14, -0.094);
+    let (distances, cam) = zoom_out_against_the_slope(&engine, feet, 400, 900);
+    let pivot = feet + Vec3::new(0.0, 0.0, cam.pivot_height);
+
+    let (min, max) = distances
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), d| (lo.min(*d), hi.max(*d)));
+    assert!(max - min < 0.001, "the eye moves between {min} and {max} m");
+    assert!(
+        max < cam.distance - 1.0,
+        "the eye is {max} m out on a {} m boom: not stopped by the slope",
+        cam.distance
+    );
+
+    // On the boom's line: no lift off it.
+    let heading = Vec3::new(wai_jhou_yaw().cos(), wai_jhou_yaw().sin(), 0.0);
+    let (wanted, _) = desired_pose(pivot, heading, cam.distance, cam.pitch, cam.yaw_offset);
+    let along = (wanted - pivot).normalize();
+    let to_eye = cam.eye() - pivot;
+    let off_line = (to_eye - along * to_eye.dot(along)).length();
+    assert!(off_line < 0.01, "the eye is {off_line} m off the boom line");
+
+    // Touching the slope: a little further along the boom is in the ground.
+    let probe = PhysicsCameraProbe::new(&engine, Vec3::ZERO);
+    let further = cam.eye() + along * 0.05;
+    let swept = probe.sweep_eye(pivot, further, WAI_JHOU_CELL, 0x5000_0001, feet);
+    assert!(
+        swept.eye.distance(cam.eye()) < 0.01,
+        "nothing stops the eye: {swept:?}"
+    );
+    assert_eq!(cam.player_translucency(), 0.0);
+}
+
+/// Backed up against the slope, the slope pushes the eye in along the boom
+/// toward the back of the player's head; at the foot of the slope the eye
+/// is at the pivot and the player is drawn fully see-through.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn backed_against_the_slope_the_eye_comes_in_to_the_player() {
+    let engine = neighbourhood(WAI_JHOU);
+    let back = -Vec3::new(wai_jhou_yaw().cos(), wai_jhou_yaw().sin(), 0.0);
+    let start = Vec3::new(161.347_4, 123.218_14, 0.0);
+    let mut last = f32::MAX;
+    for meters_back in [3.0_f32, 5.0, 6.0, 7.0, 7.5] {
+        let mut feet = start + back * meters_back;
+        feet.z = engine.sample_terrain_z(feet.x, feet.y).unwrap();
+        let (distances, cam) = zoom_out_against_the_slope(&engine, feet, 300, 600);
+        let d = *distances.last().unwrap();
+        let spread = distances.iter().fold(0.0_f32, |s, x| s.max((x - d).abs()));
+        assert!(
+            spread < 0.001,
+            "{meters_back} m back: the eye moves {spread} m"
+        );
+        assert!(
+            d < last,
+            "{meters_back} m back: the eye is {d} m out, was {last}"
+        );
+        last = d;
+        if meters_back == 7.5 {
+            assert!(d < 0.2, "at the foot of the slope the eye is {d} m out");
+            assert_eq!(cam.player_translucency(), 1.0);
+        }
+    }
+}
