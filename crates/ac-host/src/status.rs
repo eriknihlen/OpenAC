@@ -28,6 +28,17 @@ pub const STATUS_VOCABULARY_VERSION: u32 = 1;
 /// How often a session that makes progress writes `heartbeat`.
 pub const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// The environment variable a launcher sets to `1` to ask for `heartbeat`
+/// lines. Without it none are written: a launcher that does not know the
+/// event would report every one as unknown.
+pub const HEARTBEAT_VARIABLE: &str = "OPENAC_STATUS_HEARTBEAT";
+
+/// Whether the launcher asked for `heartbeat` lines (`read` looks up an
+/// environment variable).
+pub fn heartbeat_requested(read: impl Fn(&str) -> Option<String>) -> bool {
+    read(HEARTBEAT_VARIABLE).is_some_and(|value| value.trim() == "1")
+}
+
 /// The server's refusal an `exited` line names: its words, and whether it
 /// only says the account is still logged on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -670,6 +681,16 @@ impl<S: StatusSink> StatusWriter<S> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    // Not an OpenAC test: heartbeats are written only when a launcher asks.
+    #[test]
+    fn heartbeats_are_written_only_when_asked() {
+        assert!(heartbeat_requested(
+            |name| (name == HEARTBEAT_VARIABLE).then(|| "1".into())
+        ));
+        assert!(!heartbeat_requested(|_| None));
+        assert!(!heartbeat_requested(|_| Some("0".into())));
+    }
 
     #[test]
     fn timestamps_use_seven_fraction_digits_and_utc_offset() {

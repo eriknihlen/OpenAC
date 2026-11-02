@@ -29,7 +29,9 @@ pub use supervisor::{
 /// The variables every client and windowless host the launcher starts gets,
 /// so a child resolves exactly the folders the launcher itself uses rather
 /// than guessing from a pointer file or whatever the shell exported: the
-/// root, and each member spelled out so none can drift.
+/// root, and each member spelled out so none can drift. It also asks the client
+/// for `heartbeat` status lines, which this launcher reads to tell a client
+/// that stopped responding.
 pub fn child_environment(paths: &ac_host::PathSet) -> Vec<(String, String)> {
     use ac_host::paths::{CACHE_DIR_VAR, CONFIG_DIR_VAR, DATA_DIR_VAR, ROOT_DIR_VAR};
     let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
@@ -38,5 +40,6 @@ pub fn child_environment(paths: &ac_host::PathSet) -> Vec<(String, String)> {
         (CONFIG_DIR_VAR.to_owned(), text(&paths.config_directory)),
         (DATA_DIR_VAR.to_owned(), text(&paths.data_directory)),
         (CACHE_DIR_VAR.to_owned(), text(&paths.cache_directory)),
+        (ac_host::HEARTBEAT_VARIABLE.to_owned(), "1".to_owned()),
     ]
 }

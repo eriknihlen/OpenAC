@@ -1067,7 +1067,17 @@ fn run(
                     state: LifecycleState::Faulted,
                     ..Lifecycle::stopped(generation)
                 });
-                summary.server_refusal = ended_by.as_ref().and_then(ServerRefusal::from_error);
+                // Only a refusal before the session got in says the login is
+                // still held; the same code in the world is a boot (another
+                // log in on the account), an ordinary end.
+                summary.server_refusal =
+                    ended_by
+                        .as_ref()
+                        .and_then(ServerRefusal::from_error)
+                        .map(|refusal| ServerRefusal {
+                            still_logged_on: refusal.still_logged_on && !logged_in,
+                            ..refusal
+                        });
                 break Err(error);
             }
         }

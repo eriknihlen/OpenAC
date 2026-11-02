@@ -83,6 +83,7 @@ document and resolves the folders without connecting, then prints
 | `OPENAC_HEADLESS_CONSOLE` | `openac run` | on when standard input is a terminal | `0` turns the console off, anything else on; `--console` always turns it on. |
 | `OPENAC_HEADLESS_CONSOLE_STREAM` | `openac run` | `stderr` | `stdout` or `stderr` (any case); anything else is a configuration error (exit 3). `--console-stream` wins. |
 | `OPENAC_HEADLESS` | `openac run` | unset | `1` runs the document's sessions without window support. The launcher sets it only for a character refresh; its headless play sessions keep window support so their row can open a window. Without it, while no window is open the process holds only the window host's event loop (memory as with `1`); the GPU device, window and world renderer are made by the first `/window`, and about 290 MB of them stays after that window closes. |
+| `OPENAC_STATUS_HEARTBEAT` | `openac` (both forms) | unset | `1` makes each session write a `heartbeat` line to its status file every 10 s in which its loop made progress and, while the game window shows it, the window's event loop answered too (a minimized window still answers; a hung one does not). The launcher sets it for every client it starts and shows a client in the world that stays silent for 30 s as "Not responding". Unset, nothing is written, so a launcher that does not know the event never sees it. |
 
 Exit codes: 0 success, 2 usage, 3 configuration, 4 credential, 5 connection,
 6 runtime.
@@ -144,12 +145,13 @@ comments and trailing commas are refused:
   `requested`, `closedByUser`, `renderFailed`, `shutdown`) and
   `windowFailed` (`error`; a `/window` the client could not carry out, such
   as one without window support). Also added: `heartbeat` (the envelope
-  only), written every 10 s in which the session's loop made progress, so a
-  launcher can tell a client that stopped responding; and on `exited`, when
+  only), written every 10 s while the session and its window make progress,
+  only when `OPENAC_STATUS_HEARTBEAT` is `1` (the launcher sets it); and on `exited`, when
   a refusal from the server ended the session, `serverMessage` (the game's
-  words for it) and `accountInUse: true` when it only says the account or
-  one of its characters is still logged on (an earlier session the server
-  has not let go of yet).
+  words for it) and `accountInUse: true` when it refused the login, before
+  the session got in, saying the account or one of its characters is still
+  logged on (an earlier session the server has not let go of yet; the same
+  code in the world is a boot and does not count).
 - A server silent for more than 140 s is gone (not configurable). A session
   with no window attached at that moment writes `disconnected` with reason
   `connection-lost` and logs in again every 30 s, entering its configured

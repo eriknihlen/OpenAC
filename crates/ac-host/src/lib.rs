@@ -46,8 +46,8 @@ pub use exit::ExitCode;
 pub use install_lease::InstallSessionLease;
 pub use paths::{KnownFolder, Os, PathOverrides, PathSet, Platform, RootSource, SystemPlatform};
 pub use status::{
-    FileSink, HEARTBEAT_INTERVAL, RosterEntry, RosterReport, ServerRefusalNote, StatusSink,
-    StatusWriter, WriterSink,
+    FileSink, HEARTBEAT_INTERVAL, HEARTBEAT_VARIABLE, RosterEntry, RosterReport, ServerRefusalNote,
+    StatusSink, StatusWriter, WriterSink, heartbeat_requested,
 };
 
 use std::path::Path;

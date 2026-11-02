@@ -240,11 +240,12 @@ pub fn run(
             session: several.then(|| id.clone()),
         };
         let notes = window_notes.remove(&id);
+        let liveness = Liveness::requested(host_handle.clone());
         monitors.push(
             std::thread::Builder::new()
                 .name(format!("monitor-{id}"))
                 .spawn(move || {
-                    let code = monitor(&id, handle, status, &printer, policy, notes);
+                    let code = monitor(&id, handle, status, &printer, policy, notes, liveness);
                     if let Ok(mut codes) = codes.lock() {
                         codes.push(code);
                     }
@@ -443,6 +444,7 @@ pub(crate) fn monitor(
     printer: &ChatPrinter,
     mut policy: Option<Box<dyn session::policy::Policy>>,
     window: Option<std::sync::mpsc::Receiver<WindowNote>>,
+    liveness: Option<Liveness>,
 ) -> HostExit {
     status.started(id);
     // A notice names its session only when several share the console, as
@@ -455,11 +457,12 @@ pub(crate) fn monitor(
     let mut policy_done = false;
     let mut policy_failure: Option<String> = None;
     let started = std::time::Instant::now();
-    // A heartbeat goes out every interval in which the session thread made
-    // progress: a stuck session loop stops it, and its launcher shows the
-    // client as not responding.
-    let mut last_heartbeat = std::time::Instant::now();
-    let mut beat_progress = handle.progress();
+    // When the launcher asked for them, a heartbeat goes out every interval
+    // in which the session made progress (and, while the window shows it,
+    // the window's event loop too): a stuck loop stops them, and the
+    // launcher shows the client as not responding.
+    let mut heartbeat = HeartbeatGate::new(std::time::Instant::now(), handle.progress());
+    let mut window_open = false;
     // A policy acts on its clock between events too; it is stepped at least
     // every 50 ms (OpenAC ticks it once per host frame).
     let poll = if policy.is_some() {
@@ -469,16 +472,26 @@ pub(crate) fn monitor(
     };
     let summary = loop {
         let event = handle.next_event(poll);
-        if last_heartbeat.elapsed() >= ac_host::HEARTBEAT_INTERVAL {
-            last_heartbeat = std::time::Instant::now();
-            let progress = handle.progress();
-            if progress != beat_progress {
-                beat_progress = progress;
-                status.heartbeat(id);
-            }
-        }
         for note in crate::window_state::drain(window.as_ref()) {
+            window_open = match note {
+                WindowNote::Opened => true,
+                WindowNote::Closed(_) | WindowNote::Failed(_) => false,
+            };
             note.report(id, &mut status);
+        }
+        if let Some(liveness) = &liveness {
+            let probe = liveness.window.as_ref().filter(|_| window_open);
+            let answered = probe.map(ac_render::HostHandle::answered_pings);
+            if let Some(beat) =
+                heartbeat.check(std::time::Instant::now(), handle.progress(), answered)
+            {
+                if let Some(host) = probe {
+                    let _ = host.ping();
+                }
+                if beat {
+                    status.heartbeat(id);
+                }
+            }
         }
         if let Some(policy) = policy.as_mut().filter(|_| !policy_done) {
             if let Some(event) = event.as_ref() {
@@ -710,6 +723,75 @@ pub(crate) fn monitor(
     code
 }
 
+/// What a session's heartbeat watches, when the launcher asked for
+/// heartbeats: the session loop, and the process's window host while its
+/// window shows the session.
+#[derive(Debug, Clone)]
+pub(crate) struct Liveness {
+    /// The window host, when the process has one.
+    pub(crate) window: Option<ac_render::HostHandle>,
+}
+
+impl Liveness {
+    /// Liveness when the launcher asked for heartbeats (its environment
+    /// variable), otherwise `None`.
+    pub(crate) fn requested(window: Option<ac_render::HostHandle>) -> Option<Self> {
+        ac_host::heartbeat_requested(|name| std::env::var(name).ok()).then_some(Self { window })
+    }
+}
+
+/// Decides when a heartbeat is written: once per interval, when the session
+/// loop moved since the last check and, while a window shows the session,
+/// its event loop answered the ping sent at the last check. A window that
+/// is minimized still answers (a ping wakes its loop); a hung one does not.
+#[derive(Debug)]
+pub(crate) struct HeartbeatGate {
+    last: std::time::Instant,
+    progress: u64,
+    /// The answered count when the last ping went out.
+    ping_sent: Option<u64>,
+}
+
+impl HeartbeatGate {
+    pub(crate) fn new(now: std::time::Instant, progress: u64) -> Self {
+        Self {
+            last: now,
+            progress,
+            ping_sent: None,
+        }
+    }
+
+    /// At `now`, with the session loop's `progress` and, while a window
+    /// shows the session, how many pings its event loop has `answered`:
+    /// `None` until an interval has passed, then whether to write a
+    /// heartbeat (and a new ping is due when `answered` was given).
+    pub(crate) fn check(
+        &mut self,
+        now: std::time::Instant,
+        progress: u64,
+        answered: Option<u64>,
+    ) -> Option<bool> {
+        if now.saturating_duration_since(self.last) < ac_host::HEARTBEAT_INTERVAL {
+            return None;
+        }
+        self.last = now;
+        let moved = progress != self.progress;
+        self.progress = progress;
+        let turning = match answered {
+            Some(answered) => {
+                let turning = self.ping_sent.is_none_or(|sent| answered > sent);
+                self.ping_sent = Some(answered);
+                turning
+            }
+            None => {
+                self.ping_sent = None;
+                true
+            }
+        };
+        Some(moved && turning)
+    }
+}
+
 /// Console: `/sessions`, `/session <id>` (where unaddressed lines go),
 /// `@<id> <line>` (one line to one session), `/window [id]` (opens or moves
 /// the window to that session, else to the current one), `/close`,
@@ -916,6 +998,28 @@ fn end_code(error: Option<&str>) -> HostExit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Not an OpenAC test: a heartbeat needs the session loop to have moved
+    // and, while a window shows the session, its event loop to have
+    // answered the last ping; a closed window is not asked.
+    #[test]
+    fn a_heartbeat_needs_the_session_and_its_window_to_make_progress() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let mut gate = HeartbeatGate::new(start, 0);
+        assert_eq!(gate.check(at(5), 10, None), None, "not yet due");
+        assert_eq!(gate.check(at(10), 10, None), Some(true));
+        assert_eq!(gate.check(at(20), 10, None), Some(false), "session stuck");
+        assert_eq!(gate.check(at(30), 11, None), Some(true));
+        // A window opens: its first check sends the first ping.
+        assert_eq!(gate.check(at(40), 12, Some(0)), Some(true));
+        assert_eq!(gate.check(at(50), 13, Some(1)), Some(true), "answered");
+        assert_eq!(gate.check(at(60), 14, Some(1)), Some(false), "window hung");
+        assert_eq!(gate.check(at(70), 15, Some(1)), Some(false), "still hung");
+        assert_eq!(gate.check(at(80), 16, Some(2)), Some(true), "turning again");
+        // The window closed: only the session counts.
+        assert_eq!(gate.check(at(90), 17, None), Some(true));
+    }
 
     // OpenAC HeadlessSessionHost.ResolveTerminalStatus: a start that does
     // not reach the world (no character included) exits 5.

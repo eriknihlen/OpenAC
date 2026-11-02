@@ -310,7 +310,8 @@ pub fn run(
                     session: None,
                 };
                 // A window ignores the document's bot policy.
-                let result = multi::monitor(&id, handle, status, &printer, None, notes);
+                let liveness = multi::Liveness::requested(Some(window.clone()));
+                let result = multi::monitor(&id, handle, status, &printer, None, notes, liveness);
                 if let Ok(mut code) = code.lock() {
                     *code = result;
                 }

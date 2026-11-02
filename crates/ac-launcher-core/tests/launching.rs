@@ -48,6 +48,8 @@ fn every_child_is_told_the_root_and_each_member() {
     assert_eq!(value("OPENAC_CONFIG_DIR"), Some(root.join("elsewhere")));
     assert_eq!(value("OPENAC_DATA_DIR"), Some(root.clone()));
     assert_eq!(value("OPENAC_CACHE_DIR"), Some(root.join("cache")));
+    // An addition: the client writes heartbeats only when asked.
+    assert_eq!(value("OPENAC_STATUS_HEARTBEAT"), Some(PathBuf::from("1")));
 }
 
 // --- SessionConfigComposerTests -------------------------------------------------
