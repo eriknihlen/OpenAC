@@ -548,7 +548,7 @@ impl WindowUi {
         self.follow_plugin_dock_setting();
         // The theme the player saved: opted-in windows take it from their
         // first draw, and plugins are told it (OpenAC `FollowTheme`).
-        let saved = ThemeKind::from_saved(&self.settings.plugin_ui.theme);
+        let saved = ThemeKind::from_saved(&self.settings().plugin_ui.theme);
         // The session starts in the classic theme, so telling it that
         // changes nothing (as OpenAC's publish of an unchanged theme
         // raises nothing); only another theme is sent.
@@ -707,19 +707,16 @@ impl WindowUi {
         if kind == self.plugins.theme_kind {
             return;
         }
-        kind.saved_name()
-            .clone_into(&mut self.settings.plugin_ui.theme);
-        let section = ac_ui::panels::options::Section::PluginUi;
-        if !self.settings_changes.iter().any(|(s, _)| *s == section) {
-            self.settings_changes.push((section, true));
-        }
+        self.edit_settings(ac_ui::panels::options::Section::PluginUi, true, |s| {
+            kind.saved_name().clone_into(&mut s.plugin_ui.theme);
+        });
         self.apply_plugin_theme(kind, true);
     }
 
     /// The settings changed in another window: a different saved theme is
     /// applied here too.
     pub(super) fn follow_plugin_theme_setting(&mut self) {
-        let saved = ThemeKind::from_saved(&self.settings.plugin_ui.theme);
+        let saved = ThemeKind::from_saved(&self.settings().plugin_ui.theme);
         if saved != self.plugins.theme_kind {
             self.apply_plugin_theme(saved, true);
         }
@@ -734,12 +731,9 @@ impl WindowUi {
 
     /// The dock's mode is saved with the client settings.
     fn save_plugin_dock(&mut self, mode: DockMode) {
-        mode.saved_name()
-            .clone_into(&mut self.settings.plugin_ui.dock);
-        let section = ac_ui::panels::options::Section::PluginUi;
-        if !self.settings_changes.iter().any(|(s, _)| *s == section) {
-            self.settings_changes.push((section, true));
-        }
+        self.edit_settings(ac_ui::panels::options::Section::PluginUi, true, |s| {
+            mode.saved_name().clone_into(&mut s.plugin_ui.dock);
+        });
     }
 
     /// The player picked a place for the dock in the Appearance window: it is
@@ -756,12 +750,9 @@ impl WindowUi {
     /// The player picked a size for the dock in the Appearance window: it is
     /// saved with the client settings and applied.
     fn pick_plugin_dock_size(&mut self, size: DockSize) {
-        size.saved_name()
-            .clone_into(&mut self.settings.plugin_ui.dock_size);
-        let section = ac_ui::panels::options::Section::PluginUi;
-        if !self.settings_changes.iter().any(|(s, _)| *s == section) {
-            self.settings_changes.push((section, true));
-        }
+        self.edit_settings(ac_ui::panels::options::Section::PluginUi, true, |s| {
+            size.saved_name().clone_into(&mut s.plugin_ui.dock_size);
+        });
         self.host
             .with_controller::<PluginDock, _>(dock::WINDOW, |c, ui| c.set_size(ui, size));
     }
@@ -769,13 +760,9 @@ impl WindowUi {
     /// The player picked how the dock opens in the Appearance window: it is
     /// saved with the client settings and applied.
     fn pick_plugin_dock_opens(&mut self, opens: DockOpens) {
-        opens
-            .saved_name()
-            .clone_into(&mut self.settings.plugin_ui.dock_opens);
-        let section = ac_ui::panels::options::Section::PluginUi;
-        if !self.settings_changes.iter().any(|(s, _)| *s == section) {
-            self.settings_changes.push((section, true));
-        }
+        self.edit_settings(ac_ui::panels::options::Section::PluginUi, true, |s| {
+            opens.saved_name().clone_into(&mut s.plugin_ui.dock_opens);
+        });
         self.host
             .with_controller::<PluginDock, _>(dock::WINDOW, |c, ui| c.set_opens(ui, opens));
     }
@@ -783,9 +770,9 @@ impl WindowUi {
     /// The saved place, size and opening of the dock are applied, when they
     /// differ.
     pub(super) fn follow_plugin_dock_setting(&mut self) {
-        let saved = DockMode::from_saved(&self.settings.plugin_ui.dock);
-        let size = DockSize::from_saved(&self.settings.plugin_ui.dock_size);
-        let opens = DockOpens::from_saved(&self.settings.plugin_ui.dock_opens);
+        let saved = DockMode::from_saved(&self.settings().plugin_ui.dock);
+        let size = DockSize::from_saved(&self.settings().plugin_ui.dock_size);
+        let opens = DockOpens::from_saved(&self.settings().plugin_ui.dock_opens);
         self.host
             .with_controller::<PluginDock, _>(dock::WINDOW, |c, ui| {
                 c.set_mode(ui, saved);

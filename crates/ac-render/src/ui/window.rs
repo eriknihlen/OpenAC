@@ -527,10 +527,14 @@ pub struct WindowUi {
     pub(super) social_in_world: Option<bool>,
     /// The selection the social panel was last fed.
     pub(super) fed_social_selection: Option<Option<u32>>,
-    /// The client settings the options window edits (the window's copy).
-    pub(super) settings: PlayerSettings,
-    /// Sections the options window changed, not yet taken by the window.
-    pub(super) settings_changes: Vec<(ac_ui::panels::options::Section, bool)>,
+    /// The client settings in force in this window: the one copy every
+    /// editor here changes, only through [`WindowUi::edit_settings`] (or
+    /// [`WindowUi::replace_settings`] for a change made outside the
+    /// window), so the options window's copy always follows it.
+    settings: PlayerSettings,
+    /// Sections changed, not yet taken by the window, each with whether to
+    /// save it now.
+    settings_changes: Vec<(ac_ui::panels::options::Section, bool)>,
     /// The pre-game screens (`super::pregame`).
     pub(super) pregame: Option<ac_ui::pregame::PreGameScreens>,
     /// The chat entry, set aside while a pre-game screen shows.
@@ -670,6 +674,62 @@ impl WindowUi {
             return Err(ui.notices.join("; "));
         }
         Ok(ui)
+    }
+
+    /// The client settings in force in this window.
+    #[must_use]
+    pub fn settings(&self) -> &PlayerSettings {
+        &self.settings
+    }
+
+    /// The sections changed since the last call, each with whether to save
+    /// it now. The window applies them; its host saves them.
+    pub fn take_settings_changes(&mut self) -> Vec<(ac_ui::panels::options::Section, bool)> {
+        std::mem::take(&mut self.settings_changes)
+    }
+
+    /// Change the client settings: `edit` changes only the fields its
+    /// editor owns, on the settings as they stand now, and `section` is
+    /// recorded for the window to apply (and to save when `persist`).
+    ///
+    /// The options window keeps a copy of the settings to show and edit; it
+    /// takes every change at once, so its own next change starts from the
+    /// settings in force and cannot put another editor's older values
+    /// back (the dock's place, the theme, a console's display change).
+    pub(super) fn edit_settings(
+        &mut self,
+        section: ac_ui::panels::options::Section,
+        persist: bool,
+        edit: impl FnOnce(&mut PlayerSettings),
+    ) {
+        edit(&mut self.settings);
+        self.show_settings_in_options();
+        if !self.settings_changes.contains(&(section, persist)) {
+            self.settings_changes.push((section, persist));
+        }
+    }
+
+    /// The settings as changed outside this window (a console command, the
+    /// mixer): they replace this window's, and the options window's copy
+    /// follows. Nothing is recorded: the change's owner applied and saved
+    /// it.
+    pub(super) fn replace_settings(&mut self, settings: &PlayerSettings) {
+        self.settings.clone_from(settings);
+        self.show_settings_in_options();
+    }
+
+    /// The options window's copy of the settings follows this window's.
+    fn show_settings_in_options(&mut self) {
+        let settings = self.settings.clone();
+        self.host
+            .with_controller::<ac_ui::panels::options::OptionsWindowController, _>(
+                super::options::OPTIONS_WINDOW,
+                |c, _| {
+                    let mut live = c.live().clone();
+                    live.settings = settings;
+                    c.set_live(live);
+                },
+            );
     }
 
     pub(super) fn import(&mut self, layout_id: u32) -> Result<ImportedLayout, String> {
