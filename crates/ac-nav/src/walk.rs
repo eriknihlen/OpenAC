@@ -336,6 +336,91 @@ impl<T: Send + 'static> Job<T> {
     }
 }
 
+/// What a grid build ends with: the grid, or why there is none.
+type BuiltGrid = Result<Arc<NavGrid>, String>;
+
+/// A grid build that more than one search can wait on: a walk takes it up
+/// on the session thread once it has finished, while a preview or a reach
+/// search waits for it on its own worker.
+#[derive(Clone)]
+struct SharedBuild(Arc<(Mutex<Option<BuiltGrid>>, std::sync::Condvar)>);
+
+impl SharedBuild {
+    fn start(
+        mode: PlanMode,
+        work: impl FnOnce() -> Result<NavGrid, String> + Send + 'static,
+    ) -> Self {
+        let build = Self(Arc::new((Mutex::new(None), std::sync::Condvar::new())));
+        let done = build.clone();
+        let run = move || {
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+                .unwrap_or_else(|_| Err("the work panicked".to_owned()))
+                .map(Arc::new);
+            let (slot, ready) = &*done.0;
+            *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(built);
+            ready.notify_all();
+        };
+        match mode {
+            PlanMode::Threads => {
+                std::thread::spawn(run);
+            }
+            PlanMode::Inline => run(),
+        }
+        build
+    }
+
+    fn is_finished(&self) -> bool {
+        self.0
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// The grid, waiting for the build when it is still running.
+    fn wait(&self) -> BuiltGrid {
+        let (slot, ready) = &*self.0;
+        let mut built = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(built) = built.as_ref() {
+                return built.clone();
+            }
+            built = ready
+                .wait(built)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+/// The grid build under way, and what it is being built over.
+struct GridBuilding {
+    build: SharedBuild,
+    dungeon: u32,
+    why: String,
+    body: NavBody,
+    origin_x: f32,
+    origin_y: f32,
+    size: f32,
+    landblock_ids: Vec<u32>,
+    object_ids: Arc<HashSet<u32>>,
+    /// Whether a walk asked for it, so that a failed build ends the walk.
+    for_walk: bool,
+}
+
+impl GridBuilding {
+    /// Whether the grid will cover `point` as [`NavGrid::contains`] says.
+    fn covers(&self, point: Vec3, margin: f32) -> bool {
+        point.x >= self.origin_x + margin
+            && point.y >= self.origin_y + margin
+            && point.x <= self.origin_x + self.size - margin
+            && point.y <= self.origin_y + self.size - margin
+    }
+}
+
 /// The arrival distance a walk ends within by default, metres.
 pub const DEFAULT_ARRIVAL_METERS: f32 = 2.5;
 /// How often a walk plans again before it gives up blocked.
@@ -662,10 +747,11 @@ pub struct WalkController {
     report: WalkReport,
     grid: Option<Arc<NavGrid>>,
     search_notes: Arc<Mutex<Vec<String>>>,
-    building: Option<Job<Result<NavGrid, String>>>,
+    building: Option<GridBuilding>,
     grid_dungeon: u32,
-    building_dungeon: u32,
-    building_why: String,
+    /// The cell surfaces of the landblocks a grid was built over, kept for
+    /// naming the cell of each point a preview reports.
+    grid_cells: Option<(Vec<u32>, Arc<[ac_physics::CellSurface]>)>,
     objects_last_seen: u64,
     classified_cell_id: u32,
     classified_sealed: bool,
@@ -1133,8 +1219,7 @@ impl WalkController {
             search_notes: Arc::new(Mutex::new(Vec::new())),
             building: None,
             grid_dungeon: 0,
-            building_dungeon: 0,
-            building_why: "a walk needs one over its route".to_owned(),
+            grid_cells: None,
             objects_last_seen: 0,
             classified_cell_id: 0,
             classified_sealed: false,
@@ -1200,7 +1285,9 @@ impl WalkController {
     /// next tick takes it up.
     #[must_use]
     pub fn search_finished(&self) -> bool {
-        self.building.as_ref().is_some_and(Job::is_finished)
+        self.building
+            .as_ref()
+            .is_some_and(|b| b.build.is_finished())
             || self.routing.as_ref().is_some_and(Job::is_finished)
     }
 
@@ -2778,7 +2865,16 @@ impl WalkController {
             .rebuild_why
             .clone()
             .unwrap_or_else(|| "a walk needs one over its route".to_owned());
-        if !self.start_build(cx, origin_x, origin_y, size, sample.body, dungeon, why) {
+        if !self.start_build(
+            cx,
+            origin_x,
+            origin_y,
+            size,
+            sample.body,
+            dungeon,
+            why,
+            true,
+        ) {
             self.end(
                 cx,
                 active,
@@ -2999,6 +3095,7 @@ impl WalkController {
     fn release_grid(&mut self) {
         self.grid = None;
         self.grid_dungeon = 0;
+        self.grid_cells = None;
         self.grid_idle_since = f64::NAN;
         *self.aim_finder.borrow_mut() = None;
         if let Some(released) = &self.grid_released {
@@ -3080,6 +3177,7 @@ impl WalkController {
         body: NavBody,
         dungeon: u32,
         why: String,
+        for_walk: bool,
     ) -> bool {
         let stands_on = |id: u32| cx.goals.stands_still(id);
         let captured: Option<NavGeometry> = if dungeon == 0 {
@@ -3097,12 +3195,41 @@ impl WalkController {
         let Some(captured) = captured else {
             return false;
         };
-        self.building_dungeon = dungeon;
-        self.building_why = why;
-        self.building = Some(Job::start(self.mode, move || {
-            NavGrid::build(&captured, body, DEFAULT_CELL_SIZE).map_err(|e| format!("{e:?}"))
-        }));
+        self.share_build(captured, body, dungeon, why, for_walk);
         true
+    }
+
+    /// Starts building a grid from geometry already captured, as the
+    /// controller's own, which every walk, preview and reach search over the
+    /// same ground can then wait on.
+    fn share_build(
+        &mut self,
+        captured: NavGeometry,
+        body: NavBody,
+        dungeon: u32,
+        why: String,
+        for_walk: bool,
+    ) -> SharedBuild {
+        let (origin_x, origin_y, size) = (captured.origin_x, captured.origin_y, captured.size);
+        let landblock_ids = captured.landblock_ids.clone();
+        let object_ids = Arc::new(captured.object_ids.clone());
+        let building = GridBuilding {
+            build: SharedBuild::start(self.mode, move || {
+                NavGrid::build(&captured, body, DEFAULT_CELL_SIZE).map_err(|e| format!("{e:?}"))
+            }),
+            dungeon,
+            why,
+            body,
+            origin_x,
+            origin_y,
+            size,
+            landblock_ids,
+            object_ids,
+            for_walk,
+        };
+        let build = building.build.clone();
+        self.building = Some(building);
+        build
     }
 
     /// Whether the objects a body meets in a grid's region have changed
@@ -3189,7 +3316,7 @@ impl WalkController {
             let at = flat(sample.position);
             let built = try_choose_square(minimum.min(at), maximum.max(at), MAXIMUM_DUNGEON_REGION)
                 .is_some_and(|(x, y, size)| {
-                    self.start_build(cx, x, y, size, sample.body, dungeon, why.to_owned())
+                    self.start_build(cx, x, y, size, sample.body, dungeon, why.to_owned(), false)
                 });
             if !built {
                 self.view_retry_tick = self.tick + VIEW_RETRY_TICKS;
@@ -3222,20 +3349,28 @@ impl WalkController {
             sample.body,
             0,
             why.to_owned(),
+            false,
         ) {
             self.view_retry_tick = self.tick + VIEW_RETRY_TICKS;
         }
     }
 
     fn collect_build(&mut self, cx: &mut WalkWorld<'_>) {
-        if !self.building.as_ref().is_some_and(Job::is_finished) {
+        if !self
+            .building
+            .as_ref()
+            .is_some_and(|b| b.build.is_finished())
+        {
             return;
         }
         let building = self.building.take().expect("finished");
-        let grid = match building.take() {
-            Ok(Ok(grid)) => grid,
-            Ok(Err(message)) | Err(message) => {
+        let grid = match building.build.wait() {
+            Ok(grid) => grid,
+            Err(message) => {
                 self.say(&format!("Navmesh: the build failed: {message}"));
+                if !building.for_walk {
+                    return;
+                }
                 if let Some(mut active) = self.active.take() {
                     let why = format!("the grid build failed: {message}");
                     self.end(cx, &mut active, WalkState::NoRoute, &why);
@@ -3246,8 +3381,14 @@ impl WalkController {
                 return;
             }
         };
-        let grid = Arc::new(grid);
-        self.grid_dungeon = self.building_dungeon;
+        self.grid_dungeon = building.dungeon;
+        if self
+            .grid_cells
+            .as_ref()
+            .is_some_and(|(ids, _)| ids.as_slice() != grid.landblock_ids())
+        {
+            self.grid_cells = None;
+        }
         let report = grid.report();
         self.say(&format!(
             "Navmesh: {} standing points ({} clear) over {} m from {} landblocks in {} ms, built because {}",
@@ -3256,7 +3397,7 @@ impl WalkController {
             fixed(grid.size(), 0),
             grid.landblock_ids().len(),
             fixed(report.milliseconds as f32, 0),
-            self.building_why
+            building.why
         ));
         self.grid = Some(grid);
     }

@@ -744,6 +744,12 @@ impl Harness {
         }
     }
 
+    /// Grids are built and routes searched on workers, as the client does.
+    fn threaded(mut self) -> Self {
+        self.walk = WalkController::new(PlanMode::Threads, Some(collecting(&self.said)));
+        self
+    }
+
     /// The walk's uses are recorded.
     fn recording_uses(mut self) -> Self {
         self.recorder = Some(UseRecorder::default());
@@ -3931,6 +3937,146 @@ mod dungeon_place_floor {
 
     fn placed(world: &PhysicsEngine, cell_id: u32, point: Vec3) -> Vec3 {
         on_the_cell_floor(world, cell_id, point, None)
+    }
+
+    fn to_the_tall_room() -> walk::PreviewTarget {
+        walk::PreviewTarget::Place {
+            cell_id: TALL_ROOM,
+            local: TALL_MIDDLE,
+        }
+    }
+
+    fn builds(h: &Harness) -> usize {
+        h.said()
+            .iter()
+            .filter(|line| line.starts_with("Navmesh:") && line.contains("built because"))
+            .count()
+    }
+
+    /// A box the server placed in the tall room, which a body stands on.
+    fn place_a_crate(h: &mut Harness, id: u32) {
+        let (shadows, world) = h.physics.shadows_and_world();
+        shadows
+            .register(
+                world,
+                id,
+                &ac_physics::SingleShape {
+                    gfx_obj_id: 0,
+                    radius: 0.5,
+                    collision_type: ac_physics::ShadowCollisionType::Cylinder,
+                    cyl_height: 0.5,
+                    scale: 1.0,
+                },
+                ac_physics::RegistrationSite {
+                    world_pos: v(36.0, 16.0, FLOOR),
+                    rotation: glam::Quat::IDENTITY,
+                    world_offset_x: 0.0,
+                    world_offset_y: 0.0,
+                    landblock_id: 0xA9B4_FFFF,
+                    seed_cell_id: TALL_ROOM,
+                },
+                0,
+                Default::default(),
+                false,
+                None,
+            )
+            .expect("the crate registers");
+        h.goals.standing.insert(id);
+    }
+
+    /// The grid a preview builds over a sealed dungeon is kept, so the next
+    /// preview there searches it and builds none.
+    #[test]
+    fn a_second_preview_in_a_dungeon_searches_the_grid_the_first_built() {
+        let mut h = harness_in_the_low_room(floors());
+        let first = h.preview(to_the_tall_room(), 2.5);
+        assert_eq!(first.status, walk::PlanStatus::Routed, "{}", first.reason);
+        assert!(!first.grid_reused);
+        h.tick();
+        let second = h.preview(
+            walk::PreviewTarget::Place {
+                cell_id: STACKED_UPPER,
+                local: UPPER_MIDDLE,
+            },
+            2.5,
+        );
+        assert_eq!(second.status, walk::PlanStatus::Routed, "{}", second.reason);
+        assert!(second.grid_reused);
+        assert_eq!(builds(&h), 1, "{:?}", h.said());
+        assert!(first.took_ms >= 0.0 && second.took_ms >= 0.0);
+    }
+
+    /// A preview asked while a grid over the dungeon is being built waits
+    /// for that build instead of starting its own.
+    #[test]
+    fn a_preview_asked_during_a_build_waits_for_it() {
+        let mut h = harness_in_the_low_room(floors());
+        let first = h.preview(to_the_tall_room(), 2.5);
+        let second = h.preview(to_the_tall_room(), 2.5);
+        assert!(!first.grid_reused);
+        assert!(
+            second.grid_reused,
+            "the first preview's build was under way"
+        );
+        assert_eq!(second.path, first.path);
+        h.tick();
+        assert_eq!(builds(&h), 1, "{:?}", h.said());
+    }
+
+    /// On workers, a second preview asked while the first's build runs
+    /// waits for that build on its own worker, and both answer.
+    #[test]
+    fn previews_on_workers_share_one_build() {
+        let mut h = harness_in_the_low_room(floors()).threaded();
+        let mut handle = BodyHandle(Rc::clone(&h.body));
+        let world = WalkWorld {
+            physics: &h.physics,
+            body: &mut handle,
+            goals: &h.goals,
+            doors: None,
+            paused_by: None,
+            is_sealed_dungeon: Some(&|_| true),
+        };
+        let first = h.walk.preview_path(&world, to_the_tall_room(), 2.5);
+        let second = h.walk.preview_path(&world, to_the_tall_room(), 2.5);
+        let (first, second) = (first.take(), second.take());
+        assert_eq!(first.status, walk::PlanStatus::Routed, "{}", first.reason);
+        assert_eq!(second.status, walk::PlanStatus::Routed, "{}", second.reason);
+        assert!(!first.grid_reused);
+        assert!(second.grid_reused);
+        h.tick();
+        assert_eq!(builds(&h), 1, "{:?}", h.said());
+    }
+
+    /// A walk after a preview walks over the grid the preview built.
+    #[test]
+    fn a_walk_after_a_preview_builds_no_grid_of_its_own() {
+        let mut h = harness_in_the_low_room(floors());
+        let plan = h.preview(to_the_tall_room(), 2.5);
+        assert_eq!(plan.status, walk::PlanStatus::Routed, "{}", plan.reason);
+        h.tick();
+        h.walk
+            .walk_to_place(TALL_ROOM, TALL_MIDDLE, DEFAULT_ARRIVAL_METERS);
+        let report = h.run_until_settled(60.0);
+        assert_eq!(report.state, WalkState::Arrived, "{}", report.reason);
+        assert_eq!(builds(&h), 1, "{:?}", h.said());
+    }
+
+    /// An object a body stands on placed after the grid was built is not in
+    /// it, so the next preview builds the grid again.
+    #[test]
+    fn a_preview_builds_again_once_an_object_to_stand_on_is_placed() {
+        let mut h = harness_in_the_low_room(floors());
+        let _ = h.preview(to_the_tall_room(), 2.5);
+        h.tick();
+        place_a_crate(&mut h, 0x7A9B_4002);
+        let after = h.preview(to_the_tall_room(), 2.5);
+        assert_eq!(after.status, walk::PlanStatus::Routed, "{}", after.reason);
+        assert!(!after.grid_reused);
+        h.tick();
+        assert_eq!(builds(&h), 2, "{:?}", h.said());
+        let again = h.preview(to_the_tall_room(), 2.5);
+        assert!(again.grid_reused);
     }
 
     /// Why the fix is needed: a goal left in mid-air, higher over the floor

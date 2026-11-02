@@ -371,6 +371,7 @@ fn a_plan_point_reads_as_map_coordinates() {
             ],
             reason: "routed".into(),
             length_meters: 12.5,
+            ..NavPlan::default()
         },
     );
     assert_eq!(plan.handle, 7);
