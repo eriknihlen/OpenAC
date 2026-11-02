@@ -80,6 +80,22 @@ pub fn chat_filters(settings: &PlayerSettings) -> ChatWindowState {
     state
 }
 
+/// Section `section` of `from` copied into `into`, the rest of `into` kept:
+/// an options window change applied to the settings in force (each of its
+/// rows writes the fields of the one section it reports).
+fn take_section(into: &mut PlayerSettings, from: &PlayerSettings, section: Section) {
+    match section {
+        Section::Display => into.display.clone_from(&from.display),
+        Section::Audio => into.audio.clone_from(&from.audio),
+        Section::Mixer => into.mixer.clone_from(&from.mixer),
+        Section::Camera => into.camera.clone_from(&from.camera),
+        Section::Chat => into.chat.clone_from(&from.chat),
+        Section::PluginUi => into.plugin_ui.clone_from(&from.plugin_ui),
+        // The character's options are the session's, not the settings.
+        Section::Character(_) => {}
+    }
+}
+
 impl WindowUi {
     /// OpenAC `RetailUiRuntime.MountOptionsPanel`.
     pub(super) fn mount_options(&mut self, resolution_choices: Vec<String>) -> Result<(), String> {
@@ -128,7 +144,7 @@ impl WindowUi {
             opacity_captions: captions.unwrap_or_default(),
         };
         let live = LiveValues {
-            settings: self.settings.clone(),
+            settings: self.settings().clone(),
             options1: self
                 .player_view
                 .map_or(ac_runtime::character::DEFAULT_OPTIONS1, |v| v.options1),
@@ -206,32 +222,13 @@ impl WindowUi {
         true
     }
 
-    /// The client settings the window applies (its options window's copy).
-    #[must_use]
-    pub fn settings(&self) -> &PlayerSettings {
-        &self.settings
-    }
-
-    /// The sections the options window changed since the last call, each
-    /// with whether to save it now. The window applies them; its host saves
-    /// them.
-    pub fn take_settings_changes(&mut self) -> Vec<(Section, bool)> {
-        std::mem::take(&mut self.settings_changes)
-    }
-
     /// The settings changed outside the window (a console command): the
-    /// options window reads them from now on.
+    /// window and its options window read them from now on, and the plugin
+    /// dock and theme follow them.
     pub fn settings_changed_elsewhere(&mut self, settings: &PlayerSettings) {
-        self.settings = settings.clone();
+        self.replace_settings(settings);
         self.follow_plugin_theme_setting();
         self.follow_plugin_dock_setting();
-        let settings = settings.clone();
-        self.host
-            .with_controller::<OptionsWindowController, _>(OPTIONS_WINDOW, |c, _| {
-                let mut live = c.live().clone();
-                live.settings = settings;
-                c.set_live(live);
-            });
     }
 
     /// The player's view changed: the options window's character words, and
@@ -263,28 +260,22 @@ impl WindowUi {
             ac_runtime::character::option(id)
                 .is_some_and(|e| !e.in_options1 && options2 & e.mask != 0)
         };
-        let mut chat = self.settings.chat;
+        let mut chat = self.settings().chat;
         chat.hear_general_chat = hear(option_id::LISTEN_TO_GENERAL_CHAT);
         chat.hear_trade_chat = hear(option_id::LISTEN_TO_TRADE_CHAT);
         chat.hear_lfg_chat = hear(option_id::LISTEN_TO_LFG_CHAT);
         chat.hear_roleplay_chat = hear(option_id::LISTEN_TO_ROLEPLAY_CHAT);
         chat.hear_society_chat = hear(option_id::LISTEN_TO_SOCIETY_CHAT);
-        if chat == self.settings.chat {
+        if chat == self.settings().chat {
             return;
         }
-        self.settings.chat = chat;
-        let settings = self.settings.clone();
-        self.settings_changed_elsewhere(&settings);
-        self.settings_changes.push((Section::Chat, true));
+        self.edit_settings(Section::Chat, true, |s| s.chat = chat);
     }
 
     /// Change the display settings as the options window would (applied
     /// and saved by the window): automation's Potato Mode and UI Only.
     pub fn change_display(&mut self, change: impl FnOnce(&mut ac_host::settings::DisplaySettings)) {
-        change(&mut self.settings.display);
-        let settings = self.settings.clone();
-        self.settings_changed_elsewhere(&settings);
-        self.settings_changes.push((Section::Display, true));
+        self.edit_settings(Section::Display, true, |s| change(&mut s.display));
     }
 
     /// A client-local system line (the window's own messages, such as
@@ -310,14 +301,14 @@ impl WindowUi {
 
     /// The chat font and filters of the settings, on the chat window.
     pub(super) fn apply_chat_settings(&mut self) {
-        let chat = self.settings.chat;
+        let chat = self.settings().chat;
         let font = chat_font_id(
             self.content.dats(),
             chat.chat_font_face,
             chat.chat_font_size_index,
         )
         .and_then(|id| self.content.font(id));
-        let filters = chat_filters(&self.settings);
+        let filters = chat_filters(self.settings());
         self.host
             .with_controller::<ChatWindowController, _>(CHAT_WINDOW, |c, ui| {
                 if let Some(font) = &font {
@@ -351,11 +342,14 @@ impl WindowUi {
                     }
                     return;
                 }
-                self.settings = live.settings;
+                // Only the section the window changed is taken from its
+                // copy, onto the settings in force.
+                self.edit_settings(section, persist, |s| {
+                    take_section(s, &live.settings, section);
+                });
                 if section == Section::Chat {
                     self.apply_chat_settings();
                 }
-                self.settings_changes.push((section, persist));
             }
             OptionsOutput::Applied => commands.push(SessionCommand::SaveCharacterOptions),
             OptionsOutput::ExitToCharacterSelection => {
@@ -394,11 +388,9 @@ impl WindowUi {
             ac_runtime::character::option(option_id::USE_MOUSE_TURNING)
                 .is_some_and(|e| v.options2 & e.mask != 0)
         });
-        let result = mouse_turning_macro(&self.settings.camera, use_mouse_turning);
-        self.settings.camera = result.updated;
-        let settings = self.settings.clone();
-        self.settings_changed_elsewhere(&settings);
-        self.settings_changes.push((Section::Camera, true));
+        let result = mouse_turning_macro(&self.settings().camera, use_mouse_turning);
+        let camera = result.updated;
+        self.edit_settings(Section::Camera, true, |s| s.camera = camera);
         if result.use_mouse_turning_changed {
             commands.push(SessionCommand::SetCharacterOption {
                 option: option_id::USE_MOUSE_TURNING,

@@ -365,6 +365,173 @@ fn the_dock_takes_its_saved_place_and_a_drag_is_saved_when_it_ends() {
     );
 }
 
+/// The options window's Configuration page opened, its vsync row unchecked
+/// as a click does.
+fn uncheck_vsync_in_the_options_window(ui: &mut WindowUi) {
+    use ac_render::ui::options::OPTIONS_WINDOW;
+    use ac_ui::widgets::Button;
+    assert!(ui.open_options_page(ac_ui::panels::options::OptionsPage::Configuration));
+    // The page shows (and applies) before the click.
+    ui.drain();
+    ui.host_mut().pump();
+    ui.drain();
+    let content = ac_ui::content::DatContent::new(dats()).unwrap();
+    let caption = content.strings().resolve(
+        0x2300_0003,
+        ac_ui::strings::compute_hash("ID_Rendering_SyncToDisplayRefresh"),
+        0,
+    );
+    assert!(caption.is_some(), "the vsync caption resolves");
+    let root = &ui.host().root;
+    let mut stack = vec![root.window(OPTIONS_WINDOW).unwrap().frame];
+    let mut row = None;
+    while let Some(id) = stack.pop() {
+        if root
+            .widget::<Button>(id)
+            .is_some_and(|b| b.label.is_some() && b.label == caption)
+        {
+            row = Some(id);
+        }
+        stack.extend(root.children(id));
+    }
+    let row = row.expect("the vsync row");
+    let root = &mut ui.host_mut().root;
+    root.with::<Button, _>(row, |b, ui| b.set_selected(ui, row, false));
+    root.send_message(row, ac_ui::root::ElementMessage::Clicked { x: 1, y: 1 });
+    ui.host_mut().pump();
+    ui.drain();
+}
+
+/// The options window edits only what it changed: the dock's place, saved
+/// by a drag after the options window was built, survives the options
+/// window's next change (vsync), so the next save writes the new place.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_docks_dragged_place_survives_an_options_window_change() {
+    use ac_host::settings::PlayerSettings;
+    use ac_ui::event::MouseButton;
+    use ac_ui::panels::options::Section;
+    use ac_ui::plugin::dock::{DockMode, PluginDock, WINDOW};
+    let size = (1280, 720);
+    let (state, _) = session();
+    let mut saved = PlayerSettings::default();
+    saved.plugin_ui.dock = "top".to_owned();
+    let mut ui =
+        WindowUi::build_with(dats(), size, &saved, vec!["1280x720".into()]).expect("the UI builds");
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    let mode = |ui: &mut WindowUi| {
+        ui.host_mut()
+            .with_controller::<PluginDock, _>(WINDOW, |c, _| c.mode())
+            .unwrap()
+    };
+    assert_eq!(mode(&mut ui), DockMode::Top);
+
+    // Drag the dock down off the top edge: its new place is saved.
+    let frame = ui.host().root.window(WINDOW).unwrap().frame;
+    let left = ui.host().root.element(frame).unwrap().left;
+    let (x, y) = (left as i32 + 5, 10);
+    let host = ui.host_mut();
+    host.mouse_move(x, y);
+    host.mouse_down(MouseButton::Left, x, y, 0);
+    host.mouse_move(x, y + 100);
+    ui.frame(Instant::now(), size);
+    ui.feed(&mut scene);
+    ui.host_mut().mouse_up(MouseButton::Left, x, y + 100, 0);
+    ui.frame(Instant::now(), size);
+    ui.feed(&mut scene);
+    assert_eq!(ui.settings().plugin_ui.dock, "floating-horizontal");
+    ui.take_settings_changes();
+
+    uncheck_vsync_in_the_options_window(&mut ui);
+    assert!(!ui.settings().display.vsync, "the options change applies");
+    assert_eq!(
+        ui.settings().plugin_ui.dock,
+        "floating-horizontal",
+        "the options window put the dock's old place back"
+    );
+    assert_eq!(mode(&mut ui), DockMode::FloatingHorizontal);
+    assert_eq!(ui.take_settings_changes(), [(Section::Display, true)]);
+}
+
+/// The same for the theme picked in the Appearance window: it survives the
+/// options window's next change.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_picked_plugin_theme_survives_an_options_window_change() {
+    use ac_plugin_ui::ThemeKind;
+    use ac_ui::plugin::dock::{PluginDock, WINDOW};
+    use ac_ui::widgets::Menu;
+    const APPEARANCE: &str = "plugin:openac:appearance";
+    let size = (1280, 720);
+    let (state, _) = session();
+    let mut ui = WindowUi::build(dats(), size).expect("the UI builds");
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+
+    // The dock's gear opens the Appearance window.
+    let gear = ui
+        .host_mut()
+        .with_controller::<PluginDock, _>(WINDOW, |c, _| c.layout().gear)
+        .unwrap();
+    let frame = ui.host().root.window(WINDOW).unwrap().frame;
+    let e = ui.host().root.element(frame).unwrap();
+    ui.script(&UiScript::Click {
+        x: (e.left + gear.x + 4.0) as i32,
+        y: (e.top + gear.y + 4.0) as i32,
+        button: 0,
+        double: false,
+    });
+    for _ in 0..2 {
+        ui.feed(&mut scene);
+        ui.frame(Instant::now(), size);
+    }
+    assert!(ui.host().root.is_window_visible(APPEARANCE));
+
+    // Its theme menu picks Moss.
+    let moss = ThemeKind::Moss.display_name();
+    let root = &ui.host().root;
+    let mut stack = vec![root.window(APPEARANCE).unwrap().frame];
+    let mut pick = None;
+    while let Some(id) = stack.pop() {
+        if let Some(item) = root
+            .widget::<Menu>(id)
+            .and_then(|m| m.items.iter().find(|i| i.label == moss))
+        {
+            pick = Some((id, item.payload));
+        }
+        stack.extend(root.children(id));
+    }
+    let (menu, payload) = pick.expect("the theme menu offers Moss");
+    ui.host_mut()
+        .root
+        .send_message(menu, ac_ui::root::ElementMessage::MenuSelected(payload));
+    ui.host_mut().pump();
+    for _ in 0..2 {
+        ui.feed(&mut scene);
+        ui.frame(Instant::now(), size);
+    }
+    let theme = ThemeKind::Moss.saved_name();
+    assert_eq!(ui.settings().plugin_ui.theme, theme);
+    ui.take_settings_changes();
+
+    uncheck_vsync_in_the_options_window(&mut ui);
+    assert!(!ui.settings().display.vsync, "the options change applies");
+    assert_eq!(
+        ui.settings().plugin_ui.theme,
+        theme,
+        "the options window put the old theme back"
+    );
+}
+
 /// The limit on the dock's slots: a saved one applies, and a drag of its handle
 /// is saved only as it ends.
 #[test]

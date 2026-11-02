@@ -232,7 +232,7 @@ impl WindowUi {
     /// The tooltip settings (OpenAC applies `MiscSettings` to the
     /// presenter and the root's hover delay).
     pub(super) fn apply_tooltip_settings(&mut self) {
-        let misc = self.settings.misc;
+        let misc = self.settings().misc;
         if let Some(t) = self.host.tooltips_mut() {
             t.enabled = misc.tooltip_enable;
         }
@@ -345,7 +345,7 @@ impl WindowUi {
             self.handle_input_action(InputAction::ToggleGameplayOptionsPage);
             return;
         }
-        let display = &mut self.settings.display;
+        let mut display = self.settings().display.clone();
         let changed = match *request {
             // OpenAC `RuntimeSettingsController.ToggleFrameRate`: the
             // display option flips and is saved.
@@ -366,13 +366,9 @@ impl WindowUi {
             _ => false,
         };
         if changed {
-            // The options window keeps its own copy of the settings and
-            // hands it back whole on its next change; it must see this one,
-            // or that change would put the old display values back.
-            let settings = self.settings.clone();
-            self.settings_changed_elsewhere(&settings);
-            self.settings_changes
-                .push((ac_ui::panels::options::Section::Display, true));
+            self.edit_settings(ac_ui::panels::options::Section::Display, true, |s| {
+                s.display = display;
+            });
             return;
         }
         let Some(layouts) = self.status.layouts.as_mut() else {
@@ -402,19 +398,20 @@ impl WindowUi {
             .status
             .level_of_detail
             .unwrap_or((self.status.frame_rate.fps(), 0.0));
+        let show_fps = self.settings().display.show_fps;
         if let Some(fps) = self.status.fps {
             fps.update(
                 &mut self.host.root,
                 f64::from(frames_per_second),
                 f64::from(degrade_multiplier),
-                self.settings.display.show_fps,
+                show_fps,
             );
         }
         self.tick_overlays();
         self.apply_tooltip_settings();
         // OpenAC `RetailWindowOpacityController` and
         // `RetailWindowLockPresentationController`, from the chat settings.
-        let chat = self.settings.chat;
+        let chat = self.settings().chat;
         let opacity = self.status.opacity.get_or_insert_with(|| {
             ac_ui::window_chrome::WindowOpacity::new(chat.default_opacity, chat.active_opacity)
         });
