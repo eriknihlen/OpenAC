@@ -246,6 +246,9 @@ impl Orchestration for OwnerSpy {
     fn session_log_path(&self, _session_id: &str) -> Option<PathBuf> {
         unexpected("session_log_path")
     }
+    fn close_to_new_sessions(&self) -> Result<(), OrchestratorError> {
+        unexpected("close_to_new_sessions")
+    }
     fn dispose(&self) {
         unexpected("dispose")
     }

@@ -15,6 +15,7 @@ use super::accounts::{
 };
 use super::add_server::AddServerDialog;
 use super::classic_migration::ClassicMigrationDialog;
+use super::closing::LauncherClosing;
 use super::console::SessionConsole;
 use super::first_run::FirstRunSetup;
 use super::icon::{PluginIcon, decode_icon};
@@ -178,6 +179,11 @@ enum Message {
         result: Box<Result<LauncherSessionSnapshot, OrchestratorError>>,
     },
     StopFinished(Result<(), OrchestratorError>),
+    /// A stop the closing started has returned.
+    CloseStopFinished {
+        session_id: String,
+        result: Result<(), OrchestratorError>,
+    },
     ContentVerified {
         verification: Box<InstallRecordVerification>,
         startup: bool,
@@ -320,6 +326,8 @@ pub struct LauncherWindow {
     /// The confirmation shown when the window is closed while clients run.
     pub close_prompt: Option<ClosePrompt>,
     close_confirmed: bool,
+    /// The launcher is closing over running clients.
+    closing: Option<LauncherClosing>,
 
     is_checking_server_health: bool,
     next_health_check: Option<Instant>,
@@ -579,6 +587,7 @@ impl LauncherWindow {
             window_switches: Vec::new(),
             close_prompt: None,
             close_confirmed: false,
+            closing: None,
             is_checking_server_health: false,
             next_health_check: None,
             health_cancellation: CancelToken::new(),
@@ -747,6 +756,10 @@ impl LauncherWindow {
             self.apply(message);
         }
         self.refresh_row_states();
+        if self.closing.is_some() {
+            self.follow_closing();
+            return;
+        }
         if !self.relaunch_attempt_running {
             self.run_automatic_relaunch();
         }
@@ -800,6 +813,14 @@ impl LauncherWindow {
                 if !self.disposed {
                     self.refresh_from_core();
                 }
+            }
+            Message::CloseStopFinished { session_id, result } => {
+                if let Err(error) = result
+                    && let Some(closing) = self.closing.as_mut()
+                {
+                    closing.stop_failed(&session_id, error_text(&error));
+                }
+                self.follow_closing();
             }
             Message::ContentVerified {
                 verification,
@@ -1594,7 +1615,7 @@ impl LauncherWindow {
 
     /// Commands that change things may run.
     pub fn can_interact(&self) -> bool {
-        !self.is_busy && !self.is_modal_open()
+        !self.is_busy && !self.is_modal_open() && self.closing.is_none()
     }
 
     /// Rows may start: another account's start or a stop does not prevent
@@ -1617,7 +1638,10 @@ impl LauncherWindow {
     /// Stop may run for `session_id`: only that session's own pending stop
     /// prevents it.
     pub fn can_stop_session(&self, session_id: &str) -> bool {
-        !self.is_busy && !self.is_modal_open() && !self.stop_gate.is_stopping(session_id)
+        !self.is_busy
+            && !self.is_modal_open()
+            && self.closing.is_none()
+            && !self.stop_gate.is_stopping(session_id)
     }
 
     /// The row's Stop may run.
@@ -1979,6 +2003,10 @@ impl LauncherWindow {
     /// at once) and returns false; a session that
     /// has ended does not count.
     pub fn request_close(&mut self) -> bool {
+        if self.closing.is_some() {
+            // The closing view is up; it closes the window when done.
+            return false;
+        }
         if self.close_confirmed {
             return true;
         }
@@ -1999,12 +2027,96 @@ impl LauncherWindow {
         false
     }
 
-    /// The confirmation's Close: the window closes, stopping every client
-    /// as closing always does.
+    /// The confirmation's Close: every client is logged out at once while
+    /// the window shows the closing; it closes when all have ended.
     pub fn confirm_close(&mut self) {
         if self.close_prompt.take().is_some() {
             self.close_confirmed = true;
+            self.begin_closing();
         }
+    }
+
+    /// The closing in progress, when the launcher is closing over clients.
+    pub fn closing(&self) -> Option<&LauncherClosing> {
+        self.closing.as_ref()
+    }
+
+    /// Whether the window should close now: the player confirmed closing,
+    /// or a staged launcher update or install move asked for a restart,
+    /// and every client has ended. The first call starts the closing.
+    pub fn should_exit(&mut self) -> bool {
+        if !self.close_confirmed && !self.shutdown_requested {
+            return false;
+        }
+        self.begin_closing();
+        self.closing
+            .as_ref()
+            .is_some_and(LauncherClosing::is_finished)
+    }
+
+    /// Starts closing the launcher: nothing new may start (no Play, no
+    /// automatic relaunch, no control-endpoint start) and every running
+    /// client is stopped at once, each on its own worker with Stop's
+    /// graceful wait before a kill. Runs once.
+    fn begin_closing(&mut self) {
+        if self.closing.is_some() {
+            return;
+        }
+        self.closing = Some(LauncherClosing::new());
+        self.close_prompt = None;
+        if let Err(error) = self.orchestrator.close_to_new_sessions() {
+            self.last_error = Some(error_text(&error));
+        }
+        self.automatic_relaunch.dispose();
+        for (_, cancel) in &self.row_launches {
+            cancel.cancel();
+        }
+        self.operation_status = "Closing…".into();
+        self.follow_closing();
+    }
+
+    /// Reads the newest state into the closing and starts the stops it
+    /// asks for: a graceful one for each client that joined, a forced one
+    /// for each after "Close now".
+    fn follow_closing(&mut self) {
+        let Some(closing) = self.closing.as_mut() else {
+            return;
+        };
+        let snapshot = match self.orchestrator.snapshot() {
+            Ok(snapshot) => snapshot,
+            // The orchestrator is gone: every process it had was stopped.
+            Err(_) => return,
+        };
+        let joined = closing.observe(&snapshot);
+        let timeout = if closing.is_force_requested() {
+            Duration::ZERO
+        } else {
+            GRACEFUL_STOP_TIMEOUT
+        };
+        for session_id in joined {
+            self.start_closing_stop(session_id, timeout);
+        }
+    }
+
+    /// "Close now": kills every client still logging out.
+    pub fn close_now(&mut self) {
+        let Some(closing) = self.closing.as_mut() else {
+            return;
+        };
+        for session_id in closing.request_force() {
+            self.start_closing_stop(session_id, Duration::ZERO);
+        }
+        self.follow_closing();
+    }
+
+    fn start_closing_stop(&self, session_id: String, timeout: Duration) {
+        let orchestrator = Arc::clone(&self.orchestrator);
+        self.run(move |sender, wake| {
+            // Not cancellable: a closing stop ends in a kill.
+            let result = orchestrator.stop_session(&session_id, timeout, &CancelToken::new());
+            let _ = sender.send(Message::CloseStopFinished { session_id, result });
+            wake();
+        });
     }
 
     /// The confirmation's Cancel: nothing closes and every client runs on.

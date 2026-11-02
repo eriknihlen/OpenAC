@@ -74,6 +74,10 @@ struct Fake {
     sessions_override: Mutex<Option<Vec<LauncherSessionSnapshot>>>,
     stop_handler: Mutex<Option<StopHandler>>,
     stopped: Mutex<Vec<String>>,
+    /// Each stop's graceful timeout, in order.
+    stop_timeouts: Mutex<Vec<Duration>>,
+    /// The launcher is closing.
+    closed_to_new_sessions: Mutex<bool>,
     snapshot_reads: std::sync::atomic::AtomicUsize,
     capability_reads: std::sync::atomic::AtomicUsize,
     /// Window switches asked for: session, open.
@@ -405,10 +409,11 @@ impl Orchestration for Fake {
     fn stop_session(
         &self,
         id: &str,
-        _timeout: Duration,
+        timeout: Duration,
         cancel: &CancelToken,
     ) -> Result<(), OrchestratorError> {
         self.stopped.lock().unwrap().push(id.to_owned());
+        self.stop_timeouts.lock().unwrap().push(timeout);
         match self.stop_handler.lock().unwrap().as_ref() {
             Some(handler) => handler(cancel),
             None => Ok(()),
@@ -435,6 +440,10 @@ impl Orchestration for Fake {
     }
     fn session_log_path(&self, _id: &str) -> Option<PathBuf> {
         None
+    }
+    fn close_to_new_sessions(&self) -> Result<(), OrchestratorError> {
+        *self.closed_to_new_sessions.lock().unwrap() = true;
+        Ok(())
     }
     fn dispose(&self) {}
 }
@@ -3395,6 +3404,9 @@ fn a_launcher_update_stages_then_restarts_without_touching_the_client() {
     assert_eq!(*applied.lock().unwrap(), 1);
     assert!(window.is_shutdown_requested());
     assert_eq!(feed.installed_client(), None);
+    // No client runs: the window closes at once (with clients it would
+    // close them first, as a confirmed close does).
+    assert!(window.should_exit());
 }
 
 // OpenAC LauncherUpdateViewModelTests.ALauncherUpdateThatCannotRestartTellsTheUserToReopen.
@@ -4453,8 +4465,99 @@ fn closing_the_launcher_while_clients_run_asks_first() {
     window.confirm_close();
     assert!(window.close_prompt.is_none());
     assert!(window.is_close_confirmed());
-    // The window's exit stops them (as closing always did), not the prompt.
+    // The window stays open on the closing while the client logs out.
+    assert_eq!(*fake.stopped.lock().unwrap(), ["session-1"]);
+    assert!(window.closing().is_some());
+    assert!(!window.should_exit());
+}
+
+// Not an OpenAC test: closing over running clients stops them all at once
+// on workers, shows one line per client and the overall progress, lets
+// nothing start meanwhile, and closes the window once every client ended.
+#[test]
+fn closing_stops_every_client_at_once_and_shows_its_progress() {
+    let fake = batch();
+    let mut alice = live_session("session-1", "One", "Alice");
+    alice.character_name = Some("Alicia".into());
+    alice.state = LauncherActivityState::InWorld;
+    let mut bob = live_session("session-2", "One", "Bob");
+    bob.character_name = None;
+    *fake.sessions_override.lock().unwrap() = Some(vec![alice.clone(), bob.clone()]);
+    let spawner = Arc::new(QueueSpawner::default());
+    let mut window = LauncherWindow::new(parts(fake.clone(), spawner.clone()));
+    window.initialize();
+
+    assert!(!window.request_close());
+    window.confirm_close();
+    assert!(*fake.closed_to_new_sessions.lock().unwrap());
+    assert!(!window.can_interact());
+    assert!(!window.can_start_rows());
+    assert!(
+        !window.request_close(),
+        "a second close waits for the closing"
+    );
+    let closing = window.closing().unwrap();
+    assert_eq!(closing.summary(), "Closing 2 of 2 clients…");
+    let lines: Vec<(String, String)> = closing
+        .clients()
+        .iter()
+        .map(|client| (client.title(), client.state.text()))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            ("Alice / Alicia".to_owned(), "Logging out…".to_owned()),
+            ("Bob / One".to_owned(), "Logging out…".to_owned()),
+        ]
+    );
+    // Both stops run on workers, not on the window's thread.
     assert!(fake.stopped.lock().unwrap().is_empty());
+    spawner.run_all();
+    assert_eq!(*fake.stopped.lock().unwrap(), ["session-1", "session-2"]);
+    assert_eq!(
+        *fake.stop_timeouts.lock().unwrap(),
+        [Duration::from_secs(30), Duration::from_secs(30)]
+    );
+
+    // Alice logs out; Bob did not respond and was killed.
+    let mut alice_ended = alice;
+    alice_ended.state = LauncherActivityState::Exited;
+    alice_ended.has_live_process = Some(false);
+    *fake.sessions_override.lock().unwrap() = Some(vec![alice_ended.clone(), bob.clone()]);
+    window.poll();
+    assert_eq!(
+        window.closing().unwrap().summary(),
+        "Closing 1 of 2 clients…"
+    );
+    assert!(!window.should_exit());
+    let mut bob_ended = bob;
+    bob_ended.state = LauncherActivityState::Exited;
+    bob_ended.has_live_process = Some(false);
+    bob_ended.stop = Some(ac_launcher_core::orchestration::LauncherSessionStop::Forced);
+    *fake.sessions_override.lock().unwrap() = Some(vec![alice_ended, bob_ended]);
+    window.poll();
+    let closing = window.closing().unwrap();
+    assert_eq!(closing.clients()[0].state.text(), "Closed");
+    assert_eq!(
+        closing.clients()[1].state.text(),
+        "Did not respond, closed by force"
+    );
+    assert_eq!(closing.summary(), "All clients have closed.");
+    assert!(window.should_exit());
+}
+
+// Not an OpenAC test: "Close now" kills every client still logging out.
+#[test]
+fn close_now_forces_the_clients_still_logging_out() {
+    let (fake, mut window) = running_graphical();
+    assert!(!window.request_close());
+    window.confirm_close();
+    window.close_now();
+    assert_eq!(
+        *fake.stop_timeouts.lock().unwrap(),
+        [Duration::from_secs(30), Duration::ZERO]
+    );
+    assert!(window.closing().unwrap().is_force_requested());
 }
 
 #[test]

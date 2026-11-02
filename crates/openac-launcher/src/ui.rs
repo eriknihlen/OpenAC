@@ -7,6 +7,7 @@ use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke
 use ac_launcher_core::plugins::PluginReleaseChannel;
 use ac_launcher_core::profiles::LauncherTextEditorKind;
 use ac_launcher_core::window::accounts::{AccountGroup, AccountServerRow, RowLaunchMode};
+use ac_launcher_core::window::closing::ClosingClientState;
 use ac_launcher_core::window::install_dialog::PluginEnableChoice;
 use ac_launcher_core::window::install_folder::InstallFolderRow;
 use ac_launcher_core::window::plugins_panel::{
@@ -21,6 +22,10 @@ use crate::theme::{self, hex};
 /// Draws one frame.
 pub fn draw(app: &mut LauncherApp, root: &mut Ui) {
     let ctx = root.ctx().clone();
+    if app.window.closing().is_some() {
+        closing_view(app, root);
+        return;
+    }
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         app.window.close_active_modal();
     }
@@ -41,6 +46,53 @@ pub fn draw(app: &mut LauncherApp, root: &mut Ui) {
         });
     dialogs(app, &ctx);
     consoles(app, &ctx);
+}
+
+/// The window's last view while it closes over running clients: one line per client with
+/// its state, the overall progress, and Close now.
+fn closing_view(app: &mut LauncherApp, root: &mut Ui) {
+    let mut close_now = false;
+    egui::CentralPanel::default()
+        .frame(
+            Frame::new()
+                .fill(theme::BACKGROUND)
+                .inner_margin(Margin::same(24)),
+        )
+        .show(root, |ui| {
+            let Some(closing) = app.window.closing() else {
+                return;
+            };
+            dialog_title(ui, "Closing the launcher");
+            ui.label(RichText::new(closing.summary()).color(theme::TEXT));
+            ui.add_space(10.0);
+            egui::ScrollArea::vertical()
+                .max_height((ui.available_height() - 48.0).max(80.0))
+                .show(ui, |ui| {
+                    for client in closing.clients() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(client.title()).strong());
+                            let color = match client.state {
+                                ClosingClientState::LoggingOut => theme::MUTED,
+                                ClosingClientState::Closed => theme::SECONDARY,
+                                _ => theme::ERROR,
+                            };
+                            ui.label(RichText::new(client.state.text()).color(color));
+                        });
+                    }
+                });
+            ui.add_space(12.0);
+            let can_force = !closing.is_finished() && !closing.is_force_requested();
+            if ui
+                .add_enabled(can_force, egui::Button::new("Close now"))
+                .on_hover_text("Close every client still logging out at once")
+                .clicked()
+            {
+                close_now = true;
+            }
+        });
+    if close_now {
+        app.window.close_now();
+    }
 }
 
 // --- Small widgets -----------------------------------------------------------------------

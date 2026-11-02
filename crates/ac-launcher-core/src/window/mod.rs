@@ -16,6 +16,7 @@
 //!   client update prompt, a windowless session's console.
 //! - [`icon`]: decoding plugin icons.
 //! - [`install_folder`]: the install folder section of the settings.
+//! - [`closing`]: closing the launcher over running clients.
 //! - [`classic_migration`]: the classic VirindiTank and UtilityBelt import.
 //!
 //! Every slow step (a launch, a stop, an HTTP request, hashing) runs on a
@@ -26,6 +27,7 @@
 pub mod accounts;
 pub mod add_server;
 pub mod classic_migration;
+pub mod closing;
 pub mod console;
 pub mod first_run;
 pub mod icon;
@@ -199,6 +201,8 @@ pub trait Orchestration: Send + Sync {
     /// headless without restarting it.
     fn set_session_window(&self, session_id: &str, open: bool) -> Result<(), OrchestratorError>;
     fn session_log_path(&self, session_id: &str) -> Option<PathBuf>;
+    /// Refuses every new session from now on: the launcher is closing.
+    fn close_to_new_sessions(&self) -> Result<(), OrchestratorError>;
     fn dispose(&self);
 }
 
@@ -356,6 +360,9 @@ impl Orchestration for LauncherOrchestrator {
     }
     fn session_log_path(&self, session_id: &str) -> Option<PathBuf> {
         LauncherOrchestrator::session_log_path(self, session_id)
+    }
+    fn close_to_new_sessions(&self) -> Result<(), OrchestratorError> {
+        LauncherOrchestrator::close_to_new_sessions(self)
     }
     fn dispose(&self) {
         LauncherOrchestrator::dispose(self);

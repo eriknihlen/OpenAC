@@ -54,6 +54,8 @@ pub const FIRST_RUN_REQUIRED: &str =
 
 const INSTALL_VERIFIED: &str = "Client content SHA-256, size, and bake-tool version verified.";
 const INSTALL_CONFIGURED: &str = "Client content paths are configured.";
+/// Why nothing starts while the launcher closes.
+pub const LAUNCHER_CLOSING: &str = "The launcher is closing.";
 const ALREADY_RUNNING: &str = "A session or character refresh is already running for this account.";
 /// How long a client in the world may go without reporting progress (it
 /// writes a heartbeat every 10 s) before it shows as not responding.
@@ -178,6 +180,8 @@ struct State {
     install_record: Option<LauncherInstallRecord>,
     installation_status: String,
     plugin_catalog: Option<Arc<PluginCatalog>>,
+    /// The launcher is closing: nothing new may start.
+    closing: bool,
     disposed: bool,
 }
 
@@ -597,6 +601,7 @@ impl LauncherOrchestrator {
                 install_record,
                 installation_status,
                 plugin_catalog: None,
+                closing: false,
                 disposed: false,
             }),
             paths,
@@ -678,7 +683,9 @@ impl LauncherOrchestrator {
             return Ok(executable);
         }
         let state = self.inner.state()?;
-        Ok(if state.install_record.is_none() {
+        Ok(if state.closing {
+            LauncherCapability::unavailable(LAUNCHER_CLOSING)
+        } else if state.install_record.is_none() {
             LauncherCapability::unavailable(FIRST_RUN_REQUIRED)
         } else {
             LauncherCapability::AVAILABLE
@@ -765,6 +772,9 @@ impl LauncherOrchestrator {
         find_account(&state.store, server_name, account_name)?;
         if state.install_record.is_none() {
             return Ok(LauncherCapability::unavailable(FIRST_RUN_REQUIRED));
+        }
+        if state.closing {
+            return Ok(LauncherCapability::unavailable(LAUNCHER_CLOSING));
         }
         Ok(
             match find_active(&state.activities, server_name, account_name) {
@@ -1118,6 +1128,9 @@ impl LauncherOrchestrator {
         let request = {
             let mut guard = self.inner.state()?;
             let state = &mut *guard;
+            if state.closing {
+                return Err(OrchestratorError::Operation(LAUNCHER_CLOSING.into()));
+            }
             if find_active(&state.activities, server_name, account_name).is_some() {
                 return Err(OrchestratorError::Operation(ALREADY_RUNNING.into()));
             }
@@ -1208,6 +1221,9 @@ impl LauncherOrchestrator {
         let request = {
             let mut guard = self.inner.state()?;
             let state = &mut *guard;
+            if state.closing {
+                return Err(OrchestratorError::Operation(LAUNCHER_CLOSING.into()));
+            }
             if find_active(&state.activities, server_name, account_name).is_some() {
                 return Err(OrchestratorError::Operation(ALREADY_RUNNING.into()));
             }
@@ -1485,9 +1501,19 @@ impl LauncherOrchestrator {
         Ok(())
     }
 
-    /// Stops every session (each up to five seconds before a kill) and
-    /// refuses further use. Blocks until every process is seen to end.
-    /// Dropping the orchestrator does this too.
+    /// Refuses every new session or refresh from now on (the launcher is
+    /// closing): the window's, automatic relaunch's and the control
+    /// endpoint's. Running sessions are left to their stops.
+    pub fn close_to_new_sessions(&self) -> Result<(), OrchestratorError> {
+        self.inner.state()?.closing = true;
+        self.inner.raise_state_changed();
+        Ok(())
+    }
+
+    /// Stops every session (each up to five seconds before a kill, all at
+    /// once) and refuses further use. Blocks until every process is seen to
+    /// end. Dropping the orchestrator does this too, so no client outlives
+    /// the launcher even when the window's closing is skipped.
     pub fn dispose(&self) {
         let activities = {
             let mut state = lock(&self.inner.gate);
@@ -1497,9 +1523,24 @@ impl LauncherOrchestrator {
             state.disposed = true;
             std::mem::take(&mut state.activities)
         };
-        for activity in activities {
-            dispose_activity(activity);
-        }
+        std::thread::scope(|scope| {
+            for activity in activities {
+                // One thread per session, so they stop at once; when no
+                // thread can be had, this one stops it.
+                let slot = Arc::new(Mutex::new(Some(activity)));
+                let worker_slot = Arc::clone(&slot);
+                let spawned = std::thread::Builder::new()
+                    .name("launcher-dispose".into())
+                    .spawn_scoped(scope, move || {
+                        let activity = lock(&worker_slot).take();
+                        activity.into_iter().for_each(dispose_activity);
+                    });
+                if spawned.is_err() {
+                    let activity = lock(&slot).take();
+                    activity.into_iter().for_each(dispose_activity);
+                }
+            }
+        });
     }
 }
 

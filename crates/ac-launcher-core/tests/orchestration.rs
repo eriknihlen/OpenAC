@@ -793,6 +793,79 @@ fn dispose_keeps_update_lease_until_live_child_is_observed_terminal() {
     supervisors.allow_every_stop();
 }
 
+// Not an OpenAC test: disposing stops every session at once (each stop on
+// its own thread), not one after another.
+#[test]
+fn dispose_stops_every_session_at_once() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(BlockingStopSupervisorFactory::default());
+    let orchestrator = Arc::new(create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    ));
+    orchestrator
+        .add_account("Local ACE", "otheraccount", PASSWORD)
+        .unwrap();
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    orchestrator
+        .launch(
+            "Local ACE",
+            "otheraccount",
+            None,
+            LaunchMode::GuiSelect,
+            &none(),
+        )
+        .unwrap();
+    let created: Vec<Arc<BlockingStopSupervisor>> = lock(&supervisors.created).clone();
+    assert_eq!(created.len(), 2);
+
+    let disposing = Arc::clone(&orchestrator);
+    let disposal = std::thread::spawn(move || disposing.dispose());
+    // Both stops are entered while neither may finish.
+    for supervisor in &created {
+        assert!(supervisor.stop_entered.wait(Some(Duration::from_secs(5))));
+    }
+    assert!(!disposal.is_finished());
+    supervisors.allow_every_stop();
+    disposal.join().unwrap();
+    for supervisor in &created {
+        assert!(*lock(&supervisor.disposed));
+    }
+}
+
+// Not an OpenAC test: once the launcher closes, nothing new starts.
+#[test]
+fn a_closing_launcher_starts_nothing_new() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    orchestrator.close_to_new_sessions().unwrap();
+    let refused = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap_err();
+    assert_eq!(refused.to_string(), "The launcher is closing.");
+    assert!(
+        orchestrator
+            .probe("Local ACE", "testaccount", &none())
+            .is_err()
+    );
+    let capability = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap();
+    assert_eq!(
+        capability.reason.as_deref(),
+        Some("The launcher is closing.")
+    );
+    assert!(supervisors.created().is_empty());
+}
+
 #[test]
 fn snapshot_projects_the_full_hierarchy_without_the_credential() {
     let root = TempDir::new("orchestrator");
