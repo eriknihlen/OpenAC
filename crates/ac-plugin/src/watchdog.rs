@@ -232,6 +232,7 @@ impl Entry {
             Event::ExperienceChanged(_) => "experience changed",
             Event::ThemeChanged(_) => "theme changed",
             Event::NavigationPlan(_) => "navigation plan",
+            Event::NavigationReach(_) => "navigation reach",
             Event::StatusTextReceived(_) => "status text",
             Event::Ui(UiEvent::Action(_)) => "ui action",
             Event::Ui(UiEvent::Pointer(_)) => "ui pointer",

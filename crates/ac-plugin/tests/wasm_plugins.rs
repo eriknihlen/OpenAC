@@ -901,6 +901,45 @@ fn a_navigation_plan_reaches_each_plugin_in_its_api_versions_encoding() {
     }
 }
 
+/// A reach search's answer reaches a plugin built for API 1.5, through a
+/// real module, byte for byte as this API encodes it; the same plugin as an
+/// API 1.4 SDK built it is never sent it, since that SDK would stop the
+/// plugin on an event kind it cannot read.
+#[test]
+fn a_reach_answer_reaches_only_plugins_built_for_api_1_5() {
+    use ac_plugin::abi::navigation::{CellReach, NavigationPlanStatus, NavigationReach};
+    let event = Event::NavigationReach(NavigationReach {
+        handle: 3,
+        status: NavigationPlanStatus::Routed,
+        cells: vec![CellReach {
+            cell_id: 0x0032_0100,
+            route_meters: 4.5,
+            by_drop: true,
+            ..CellReach::default()
+        }],
+        reason: "1 cells reached".into(),
+        grid_reused: true,
+        took_ms: 9.0,
+    });
+    for version in [ApiVersion::new(1, 4), API_CURRENT] {
+        let root = Root::new(&format!("raw-reach-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        if version == API_CURRENT {
+            assert_eq!(handed, [event.to_bytes()]);
+        } else {
+            assert!(handed.is_empty(), "{version}: {handed:?}");
+        }
+    }
+}
+
 /// Installs the test plugin `name` into `root` as an SDK for API `version`
 /// built it: its manifest, version section and layout section that
 /// version's ([`section_at`]). This SDK's own version installs it as built.

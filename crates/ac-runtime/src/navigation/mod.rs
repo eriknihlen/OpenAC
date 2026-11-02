@@ -34,8 +34,8 @@ use ac_nav::automation::{
 use ac_nav::commands::NAME_SEARCH_METERS;
 use ac_nav::motor::{MoveChannel, MoveRequest, ScriptedMoveSnapshot, ScriptedMovement};
 use ac_nav::walk::{
-    DEFAULT_ARRIVAL_METERS, NavPlan, PathPreview, PlanMode, PlanStatus, PreviewTarget,
-    WalkController, WalkWorld,
+    DEFAULT_ARRIVAL_METERS, NavPlan, NavReach, PathPreview, PlanMode, PlanStatus, PreviewTarget,
+    ReachSearch, WalkController, WalkWorld,
 };
 use glam::Vec3;
 
@@ -99,22 +99,55 @@ pub struct Navigation {
     /// The grid is shown (`/nav grid`, or a route asked for alone).
     grid_shown: bool,
     view: NavigationView,
-    /// Path previews plugins asked for.
+    /// Path previews and reach searches plugins asked for.
     previews: Previews,
 }
 
-/// Path previews plugins asked for, by owner and handle, oldest first.
+/// A search a plugin asked for, under way.
+#[derive(Debug)]
+enum Pending {
+    Plan(PathPreview),
+    Reach(ReachSearch),
+}
+
+impl Pending {
+    fn is_finished(&self) -> bool {
+        match self {
+            Self::Plan(preview) => preview.is_finished(),
+            Self::Reach(search) => search.is_finished(),
+        }
+    }
+
+    fn take(self) -> Answered {
+        match self {
+            Self::Plan(preview) => Answered::Plan(preview.take()),
+            Self::Reach(search) => Answered::Reach(search.take()),
+        }
+    }
+}
+
+/// What a search a plugin asked for found.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Answered {
+    /// A path preview's plan.
+    Plan(NavPlan),
+    /// A reach search's cells.
+    Reach(NavReach),
+}
+
+/// Path previews and reach searches plugins asked for, by owner and
+/// handle, oldest first. Handles count up across both and are never 0.
 #[derive(Debug, Default)]
 pub(crate) struct Previews {
-    items: Vec<(String, u32, PathPreview)>,
+    items: Vec<(String, u32, Pending)>,
     next: u32,
 }
 
 impl Previews {
-    /// Keep a preview for `owner` until it ends; its handle (never 0).
-    fn add(&mut self, owner: &str, preview: PathPreview) -> u32 {
+    /// Keep a search for `owner` until it ends; its handle (never 0).
+    fn add(&mut self, owner: &str, pending: Pending) -> u32 {
         self.next = self.next.wrapping_add(1).max(1);
-        self.items.push((owner.to_owned(), self.next, preview));
+        self.items.push((owner.to_owned(), self.next, pending));
         self.next
     }
 }
@@ -199,13 +232,15 @@ impl Navigation {
         status: PlanStatus,
         reason: &str,
     ) -> u32 {
-        self.previews
-            .add(owner, PathPreview::ready(NavPlan::failed(status, reason)))
+        self.previews.add(
+            owner,
+            Pending::Plan(PathPreview::ready(NavPlan::failed(status, reason))),
+        )
     }
 
-    /// The previews that ended, with their owners and handles, oldest
-    /// first.
-    pub(crate) fn take_finished_previews(&mut self) -> Vec<(String, u32, NavPlan)> {
+    /// The previews and reach searches that ended, with their owners and
+    /// handles, oldest first.
+    pub(crate) fn take_finished_previews(&mut self) -> Vec<(String, u32, Answered)> {
         let (done, pending): (Vec<_>, Vec<_>) = std::mem::take(&mut self.previews.items)
             .into_iter()
             .partition(|(_, _, preview)| preview.is_finished());
@@ -529,7 +564,19 @@ impl RuntimeSurface<'_, '_> {
                 "navigation is unavailable",
             ))
         };
-        self.previews.add(self.owner, preview)
+        self.previews.add(self.owner, Pending::Plan(preview))
+    }
+
+    /// Start a reach search for the surface's owner: every cell of the
+    /// sealed dungeon the character stands in that it can walk to within
+    /// `max_meters`, the search on the walk's planner. The handle the
+    /// answer will carry, or 0 when nothing can be searched from: out of
+    /// the world, in portal space or the air, or not in a sealed dungeon.
+    pub(crate) fn reachable_cells(&mut self, max_meters: f32) -> u32 {
+        match self.with_walk_world(|walk, world| walk.reachable_cells(world, max_meters)) {
+            Some(Some(search)) => self.previews.add(self.owner, Pending::Reach(search)),
+            _ => 0,
+        }
     }
 
     fn capture_preview(
@@ -537,6 +584,16 @@ impl RuntimeSurface<'_, '_> {
         target: PreviewTarget,
         arrival_meters: f32,
     ) -> Option<PathPreview> {
+        self.with_walk_world(|walk, world| walk.preview_path(world, target, arrival_meters))
+    }
+
+    /// Runs `ask` against the walk with the world as it stands, for a search
+    /// that moves nothing (no doors, no pause); `None` while walks are not
+    /// possible.
+    fn with_walk_world<R>(
+        &mut self,
+        ask: impl FnOnce(&mut WalkController, &WalkWorld<'_>) -> R,
+    ) -> Option<R> {
         if !self.can_walk() {
             return None;
         }
@@ -565,7 +622,7 @@ impl RuntimeSurface<'_, '_> {
             paused_by: None,
             is_sealed_dungeon: Some(&dungeon),
         };
-        Some(self.walk.preview_path(&world, target, arrival_meters))
+        Some(ask(self.walk, &world))
     }
 
     /// Where the character stands, in metres from the corner of the first

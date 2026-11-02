@@ -14,21 +14,22 @@ use ac_nav::automation::{
     MapPosition, NavCommandStatus, PauseId, validate_arrival, validate_place,
 };
 use ac_nav::motor::{self, ScriptedMoveSnapshot, ScriptedMoveState};
-use ac_nav::walk::{NavPlan, PlanStatus, PreviewTarget, WalkReport, WalkState};
+use ac_nav::walk::{NavPlan, NavReach, PlanStatus, PreviewTarget, WalkReport, WalkState};
 use ac_physics::movement::MovementInput;
 use ac_physics::placement_room::PlacementRoom;
 use ac_plugin::abi::Event;
 use ac_plugin::abi::navigation::{
-    FindObject, GoToPlace, GoToReport, GoToState, MoveChannel, MoveDirection, MovePace,
+    CellReach, FindObject, GoToPlace, GoToReport, GoToState, MoveChannel, MoveDirection, MovePace,
     MoveProgress, MoveReport, MoveRequest, MoveState, MoveUnit, MovementIntent, NavigationObject,
-    NavigationPlan, NavigationPlanStatus, NavigationSnapshot, NavigationStatus, PathPreviewRequest,
-    PauseChange, RoomAhead, RoomAheadStatus,
+    NavigationPlan, NavigationPlanStatus, NavigationReach, NavigationSnapshot, NavigationStatus,
+    PathPreviewRequest, PauseChange, ReachRequest, RoomAhead, RoomAheadStatus,
 };
 use ac_plugin::abi::world::Position;
+use glam::Vec3;
 
 use super::PluginBinding;
 use super::world::position_of;
-use crate::navigation::NavigationSurface;
+use crate::navigation::{Answered, NavigationSurface};
 use crate::session::SessionState;
 use crate::world::World;
 
@@ -144,15 +145,69 @@ pub fn follow(state: &mut SessionState, in_world: bool) -> Vec<Event> {
     out
 }
 
-/// The path previews that ended this pass, each for the plugin that asked
-/// (OpenAC: the plugin's `PreviewPathAsync` task completes).
+/// The path previews and reach searches that ended this pass, each for the
+/// plugin that asked (OpenAC: the plugin's `PreviewPathAsync` task
+/// completes).
 pub fn follow_previews(state: &mut SessionState) -> Vec<(String, Event)> {
     state
         .navigation
         .take_finished_previews()
         .into_iter()
-        .map(|(owner, handle, plan)| (owner, Event::NavigationPlan(project_plan(handle, plan))))
+        .map(|(owner, handle, answered)| {
+            let event = match answered {
+                Answered::Plan(plan) => Event::NavigationPlan(project_plan(handle, plan)),
+                Answered::Reach(reach) => Event::NavigationReach(project_reach(handle, reach)),
+            };
+            (owner, event)
+        })
         .collect()
+}
+
+/// A point as plugins read it: map coordinates and elevation from metres
+/// measured from the corner of the first landblock, with its cell and no
+/// heading.
+fn map_position(cell_id: u32, global: Vec3) -> Position {
+    Position {
+        cell_id,
+        east_west: (f64::from(global.x) - 24_468.0) / 240.0,
+        north_south: (f64::from(global.y) - 24_468.0) / 240.0,
+        elevation: f64::from(global.z) / 240.0,
+        heading_degrees: 0.0,
+        is_outdoor: (1..=0x40).contains(&(cell_id & 0xFFFF)),
+    }
+}
+
+fn plan_status(status: PlanStatus) -> NavigationPlanStatus {
+    match status {
+        PlanStatus::Routed => NavigationPlanStatus::Routed,
+        PlanStatus::NoRoute => NavigationPlanStatus::NoRoute,
+        PlanStatus::Unavailable => NavigationPlanStatus::Unavailable,
+        PlanStatus::InvalidTarget => NavigationPlanStatus::InvalidTarget,
+        PlanStatus::Failed => NavigationPlanStatus::Failed,
+    }
+}
+
+/// A reach search's answer as plugins read it: each cell's place as map
+/// coordinates.
+#[must_use]
+pub fn project_reach(handle: u32, reach: NavReach) -> NavigationReach {
+    NavigationReach {
+        handle,
+        status: plan_status(reach.status),
+        cells: reach
+            .cells
+            .iter()
+            .map(|cell| CellReach {
+                cell_id: cell.cell_id,
+                route_meters: cell.route_meters,
+                place: map_position(cell.cell_id, cell.place),
+                by_drop: cell.by_drop,
+            })
+            .collect(),
+        reason: reach.reason,
+        grid_reused: reach.grid_reused,
+        took_ms: reach.took_ms,
+    }
 }
 
 /// A plan as plugins read it: each point as map coordinates with its cell
@@ -161,27 +216,11 @@ pub fn follow_previews(state: &mut SessionState) -> Vec<(String, Event)> {
 pub fn project_plan(handle: u32, plan: NavPlan) -> NavigationPlan {
     NavigationPlan {
         handle,
-        status: match plan.status {
-            PlanStatus::Routed => NavigationPlanStatus::Routed,
-            PlanStatus::NoRoute => NavigationPlanStatus::NoRoute,
-            PlanStatus::Unavailable => NavigationPlanStatus::Unavailable,
-            PlanStatus::InvalidTarget => NavigationPlanStatus::InvalidTarget,
-            PlanStatus::Failed => NavigationPlanStatus::Failed,
-        },
+        status: plan_status(plan.status),
         path: plan
             .path
             .iter()
-            .map(|point| {
-                let g = point.global;
-                Position {
-                    cell_id: point.cell_id,
-                    east_west: (f64::from(g.x) - 24_468.0) / 240.0,
-                    north_south: (f64::from(g.y) - 24_468.0) / 240.0,
-                    elevation: f64::from(g.z) / 240.0,
-                    heading_degrees: 0.0,
-                    is_outdoor: (1..=0x40).contains(&(point.cell_id & 0xFFFF)),
-                }
-            })
+            .map(|point| map_position(point.cell_id, point.global))
             .collect(),
         reason: plan.reason,
         length_meters: plan.length_meters,
@@ -669,6 +708,29 @@ impl PluginBinding<'_> {
         self.state
             .navigate(owner, link.outbox, link.active, link.clocks, |s| {
                 s.preview_path(target, arrival, valid)
+            })
+    }
+
+    /// A reach search: the handle the answer will carry, or 0 when nothing
+    /// can be searched from (no session, out of the world, in portal space
+    /// or the air, or not in a sealed dungeon) or the distance is not above
+    /// 0. The answer reaches only this plugin.
+    pub(super) fn navigation_reachable_cells(
+        &mut self,
+        owner: &str,
+        request: &ReachRequest,
+    ) -> u32 {
+        let above_zero = request.max_meters > 0.0;
+        if !above_zero || !self.facts.in_world {
+            return 0;
+        }
+        let Some(link) = self.link.as_mut() else {
+            return 0;
+        };
+        let max_meters = request.max_meters;
+        self.state
+            .navigate(owner, link.outbox, link.active, link.clocks, |s| {
+                s.reachable_cells(max_meters)
             })
     }
 

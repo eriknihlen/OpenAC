@@ -71,6 +71,19 @@ impl Session {
     /// A character standing on open ground in Holtburg (landblock-local
     /// metres).
     pub fn at(x: f32, y: f32) -> Self {
+        Self::in_cell(
+            outdoor_cell(x, y),
+            Vector3 {
+                x,
+                y,
+                z: ground_z(x, y),
+            },
+        )
+    }
+
+    /// A character standing in a cell, at a point in its landblock-local
+    /// metres.
+    pub fn in_cell(cell_id: u32, origin: Vector3) -> Self {
         let mut state = SessionState::new(CommunicationPaths::default());
         state.install_content(content());
         state.world.set_player(PLAYER);
@@ -81,12 +94,8 @@ impl Session {
                 ..PhysicsTimestamps::default()
             },
             Some(Position {
-                cell_id: outdoor_cell(x, y),
-                origin: Vector3 {
-                    x,
-                    y,
-                    z: ground_z(x, y),
-                },
+                cell_id,
+                origin,
                 orientation: Quaternion::IDENTITY,
             }),
         );

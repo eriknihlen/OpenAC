@@ -90,7 +90,9 @@ the theme's real name and colours. API 1.5 added, at the end of a path
 preview's `NavigationPlan`, whether it reused a grid and how long the client's
 worker took, at the end of `IndoorCell` its doorways and the cells seen
 from it, and at the end of the floorplan's `DungeonCell` its bounds and floor
-height. Everything the client offers
+height. It also added `Host::reachable_cells` and its answer,
+`Event::NavigationReach`, which a plugin built for an older version never
+hears. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -226,6 +228,37 @@ preview is kept for the walks and previews after it, until it goes unused for
 grid was there already (API 1.5), and `took_ms` how long the worker spent:
 the first preview in a dungeon builds the grid, and the ones after it are
 quicker.
+
+Inside a sealed dungeon, `Host::reachable_cells(max_meters)` (API 1.5) asks
+for every cell the character can walk to from where it stands, each with the
+length of its route, from one search. Use `f32::INFINITY` as the distance for
+the whole dungeon. It returns a handle, or 0 when nothing can be searched
+from: out of the world, in portal space or the air, or not in a sealed
+dungeon. The answer arrives as `Event::NavigationReach` with that handle, to
+this plugin only. It runs on a worker over the same grid as walks and
+previews, and in a dungeon of a few hundred cells it takes about 10 to 15 ms
+once the grid is built. Each `CellReach` gives:
+
+- `route_meters`: the search's cost by the shortest way over the grid's
+  steps, before the route is straightened. That is metres walked, plus the
+  height climbed or dropped, plus a few metres for each jump. In the
+  installed dungeons it comes within about 15% of a preview's
+  `length_meters` to the same place, usually a little under, since a walk
+  keeps off walls.
+- `place`: the point on the cell's floor the length is measured to, ready
+  for `go_to_place` or a preview.
+- `by_drop`: the way there steps or leaps down farther than the character
+  steps up, so it could not walk back up the way it came. A jump, or
+  another way round, might still take it back.
+
+The cells come nearest first, the character's own among them. A cell left
+out cannot be walked to from where the character stands now, within the
+distance. It may lie behind a portal or an object in the way, in a part of
+the dungeon joined only by a portal, or up a drop it cannot climb. It is
+still part of the dungeon. A cell with no floor of its own (`floor_z` is
+`None`) is never listed; the cell under it is. Doors are not in the grid, so
+a shut or locked door stops neither a reach search nor a preview. A walk
+opens a shut door when it reaches it and goes round a locked one.
 
 **Dungeon data.** `Host::dungeon_floorplan` and `Host::indoor_cells` read a
 landblock's cells from the game files once and keep them, so only the first

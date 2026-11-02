@@ -659,3 +659,140 @@ fn a_dungeons_floorplan_cells_carry_their_bounds_and_floor() {
         assert!(read.cells.iter().all(|c| c.floor_z.is_none()));
     });
 }
+
+// A reach search asks for nothing while there is nothing to search from,
+// or for a distance that is not above 0: the handle is 0 and no answer
+// follows.
+#[test]
+fn a_reach_search_with_nothing_to_search_from_has_no_handle() {
+    use super::navigation::follow_previews;
+    use ac_plugin::abi::navigation::ReachRequest;
+    let mut state = in_world();
+    let mut outbox = Outbox::new();
+    let handles = with_binding(&mut state, &mut outbox, |b| {
+        [50.0, f32::INFINITY, 0.0, -1.0, f32::NAN].map(|max_meters| {
+            call_as::<calls::NavigationReachableCells>(b, "test.a", &ReachRequest { max_meters })
+        })
+    });
+    assert_eq!(handles, [0; 5], "no dats, so no walks");
+    assert!(follow_previews(&mut state).is_empty());
+}
+
+// A reach answer as plugins read it: each cell's place as map coordinates
+// with its cell, as a preview's points are.
+#[test]
+fn a_reach_answer_reads_as_map_coordinates() {
+    use super::navigation::project_reach;
+    use ac_nav::walk::{CellReach, NavReach, PlanStatus};
+    use ac_plugin::abi::navigation::NavigationPlanStatus;
+    use glam::Vec3;
+    let reach = project_reach(
+        9,
+        NavReach {
+            status: PlanStatus::Routed,
+            cells: vec![CellReach {
+                cell_id: 0xA9B4_0100,
+                route_meters: 12.5,
+                place: Vec3::new(24_468.0 + 240.0, 24_468.0 - 480.0, -30.0),
+                by_drop: true,
+            }],
+            reason: "1 cells reached".into(),
+            grid_reused: true,
+            took_ms: 4.0,
+        },
+    );
+    assert_eq!(reach.handle, 9);
+    assert_eq!(reach.status, NavigationPlanStatus::Routed);
+    assert!(reach.grid_reused);
+    assert_eq!(reach.took_ms, 4.0);
+    let cell = &reach.cells[0];
+    assert_eq!(
+        (cell.cell_id, cell.route_meters, cell.by_drop),
+        (0xA9B4_0100, 12.5, true)
+    );
+    assert!((cell.place.east_west - 1.0).abs() < 1e-9);
+    assert!((cell.place.north_south + 2.0).abs() < 1e-9);
+    assert!((cell.place.elevation + 0.125).abs() < 1e-9);
+    assert!(!cell.place.is_outdoor);
+}
+
+/// A reach search in an installed dungeon through the plugin call: the
+/// plugin that asked hears every cell it can walk to, each placed on that
+/// cell's floor, its own cell first; another plugin hears nothing.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_reach_search_in_a_dungeon_answers_the_plugin_that_asked() {
+    use super::navigation::follow_previews;
+    use ac_plugin::abi::navigation::{NavigationPlanStatus, ReachRequest};
+    const CELL: u32 = 0x0032_0000;
+    // Stood on the floor of a cell with one, in the middle of its box.
+    let content = crate::navigation::walk_tests::content();
+    let plan = ac_nav::floorplan::DungeonFloorplanBuilder::new()
+        .try_build(content.dats(), CELL)
+        .unwrap()
+        .unwrap();
+    let (cell, floor) = plan
+        .cells
+        .iter()
+        .find_map(|c| c.floor_z.map(|z| (c, z)))
+        .expect("a cell with a floor");
+    let middle = (cell.bounds.min + cell.bounds.max) * 0.5;
+    let mut session = Session::in_cell(
+        cell.cell_id,
+        ac_proto::Vector3 {
+            x: middle.x,
+            y: middle.y,
+            z: floor + 0.05,
+        },
+    );
+    for _ in 0..300 {
+        if session.state.movement.controller().is_some() {
+            break;
+        }
+        session.frames(1);
+    }
+    session.frames(60);
+    let handle = {
+        let Session { state, outbox, .. } = &mut session;
+        with_binding(state, outbox, |b| {
+            call_as::<calls::NavigationReachableCells>(
+                b,
+                "test.a",
+                &ReachRequest {
+                    max_meters: f32::INFINITY,
+                },
+            )
+        })
+    };
+    assert_ne!(handle, 0, "in a sealed dungeon");
+    // The search runs on a worker, much slower in a debug build.
+    let mut answers = Vec::new();
+    let asked = std::time::Instant::now();
+    while answers.is_empty() && asked.elapsed() < std::time::Duration::from_secs(120) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        session.frames(1);
+        answers.extend(follow_previews(&mut session.state));
+    }
+    let [(owner, Event::NavigationReach(reach))] = answers.as_slice() else {
+        panic!("one reach answer, got {answers:?}");
+    };
+    assert_eq!(owner, "test.a");
+    assert_eq!(reach.handle, handle);
+    assert_eq!(
+        reach.status,
+        NavigationPlanStatus::Routed,
+        "{}",
+        reach.reason
+    );
+    assert!(reach.cells.len() > 200, "{}", reach.reason);
+    assert!(reach.cells[0].route_meters < 1.0, "{:?}", reach.cells[0]);
+    assert!(
+        reach
+            .cells
+            .windows(2)
+            .all(|w| w[0].route_meters <= w[1].route_meters)
+    );
+    assert!(reach.cells.iter().all(|c| c.place.cell_id == c.cell_id
+        && c.cell_id >> 16 == CELL >> 16
+        && !c.place.is_outdoor));
+}

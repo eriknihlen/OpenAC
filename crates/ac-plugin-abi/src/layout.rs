@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0x0a4a_7b5e_5aa4_49f8;
+    const PUBLISHED: u64 = 0xd295_5983_861d_a7be;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {
@@ -364,7 +364,9 @@ mod tests {
         ];
         let section = PluginLayout::parse(&section_at(v1_2)).unwrap();
         for import in Import::ALL {
-            let absent = new_imports.contains(import) || API_1_4_FONTS.contains(import);
+            let absent = new_imports.contains(import)
+                || API_1_4_FONTS.contains(import)
+                || !import.since().is_at_most(v1_2);
             let expected = (!absent).then(|| import.shape_at(v1_2));
             assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
         }

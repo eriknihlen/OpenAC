@@ -4,7 +4,7 @@ use ac_plugin_abi::calls;
 use ac_plugin_abi::navigation::{
     FindObject, GoToPlace, GoToReport, MoveChannel, MoveDirection, MovePace, MoveReport,
     MoveRequest, MoveUnit, MovementIntent, NavigationObject, NavigationSnapshot, NavigationStatus,
-    PathPreviewRequest, PauseChange, RoomAhead,
+    PathPreviewRequest, PauseChange, ReachRequest, RoomAhead,
 };
 use ac_plugin_abi::world::Position;
 
@@ -180,6 +180,19 @@ impl Host<'_> {
             place: Some(place),
             arrival_meters,
         })
+    }
+
+    /// Every cell of the sealed dungeon the character stands in that it can
+    /// walk to along routes of at most `max_meters` (`f32::INFINITY` for
+    /// all of them), each with its route's length, from one search (API
+    /// 1.5). Returns the search's handle, or 0 when nothing can be searched
+    /// from: out of the world, in portal space or the air, or not in a
+    /// sealed dungeon. The answer arrives as `Event::NavigationReach` with
+    /// that handle on a later event pass, nearest by route first; a cell it
+    /// leaves out cannot be walked to from here now. The search runs on the
+    /// client's worker over the grid walks and previews use.
+    pub fn reachable_cells(&mut self, max_meters: f32) -> u32 {
+        self.call::<calls::NavigationReachableCells>(&ReachRequest { max_meters })
     }
 
     /// Have walks wait while this plugin needs the character: `reason`

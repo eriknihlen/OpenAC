@@ -777,6 +777,17 @@ macro_rules! import_table {
             NavigationPreviewPath = navigation_preview_path($crate::navigation::PathPreviewRequest)
                 -> u32,
                 permission: None, window: false, since: (1, 0);
+            /// Every cell of the sealed dungeon the character stands in that
+            /// it can walk to within `max_meters`, each with the length of
+            /// its route, from one search (API 1.5): a handle (never 0), or
+            /// 0 when nothing can be searched from (out of the world, in
+            /// portal space or in the air, or not in a sealed dungeon). The
+            /// answer arrives as `Event::NavigationReach` to this plugin, at
+            /// the earliest after the call returns. The search runs on a
+            /// worker over the grid walks and previews use.
+            NavigationReachableCells = navigation_reachable_cells($crate::navigation::ReachRequest)
+                -> u32,
+                permission: None, window: false, since: (1, 5);
             /// Have walks wait while the plugin needs the character: a
             /// handle whose reason (initially this one) the plugin updates;
             /// 0 when refused.
