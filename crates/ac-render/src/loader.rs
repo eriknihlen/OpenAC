@@ -1078,13 +1078,12 @@ impl Worker<'_> {
         for id in gfx_objs {
             self.gfx_objs.remove(id);
         }
-        let (handles, plain): (Vec<u32>, Vec<u32>) = surfaces
-            .iter()
-            .partition(|&&id| id >= crate::appearance_residency::FIRST_SURFACE_HANDLE);
-        for id in plain {
-            self.surfaces.remove(id);
+        for &id in surfaces {
+            if id < crate::appearance_residency::FIRST_SURFACE_HANDLE {
+                self.surfaces.remove(id);
+            }
         }
-        self.looks.forget(appearances, variants, &handles);
+        self.looks.forget(appearances, variants, surfaces);
     }
 
     /// Send a model drawn with an appearance, preceded by its GfxObjs, the

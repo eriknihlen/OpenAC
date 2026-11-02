@@ -2926,47 +2926,60 @@ impl WorldRenderer {
             }
         }
         models.extend(self.viewports.models());
+        let used = looks_in_use(scene, &mut self.viewports);
         let mut gfx: HashSet<u32> = HashSet::new();
-        for id in &models {
-            if let Some(Some(parts)) = self.models.get(id) {
-                gfx.extend(parts.iter().map(|p| p.gfx_obj_id));
-            }
-        }
-        // Looks nothing draws any more go, with the variants only they
-        // named; their recoloured surfaces become unowned below.
-        let mut used = scene_appearance_keys(scene);
-        used.extend(self.viewports.appearance_keys().cloned());
-        let released = self.looks.release_unused(|key| used.contains(key));
-        gfx.extend(self.looks.all_parts().map(|p| p.gfx_obj_id));
-        // Particle models and textures live emitters draw with.
-        let mut particle_surfaces = HashSet::new();
-        if let Some(effects) = self.effects.as_ref() {
-            gfx.extend(effects.ledger().gfx_objs());
-            particle_surfaces.extend(effects.ledger().surfaces());
-        }
-        for r in self.residents.values() {
-            for b in r.near.iter().flat_map(|n| &n.buildings) {
-                gfx.insert(b.part0.0);
-                gfx.extend(b.levels.iter().map(|l| l.gfx_obj_id));
-            }
-        }
-        let levels: Vec<u32> = gfx
-            .iter()
-            .filter_map(|id| self.meshes.get(&u64::from(*id)))
-            .flat_map(|m| m.degrades.iter().map(|l| l.gfx_obj_id))
-            .collect();
-        gfx.extend(levels);
-        let mut surfaces: HashSet<u32> = HashSet::new();
-        for (key, mesh) in &self.meshes {
-            if *key >> 32 != 0 || gfx.contains(&(*key as u32)) {
-                surfaces.extend(mesh.sub_meshes.iter().map(|s| s.surface_id));
-            }
-        }
-        surfaces.extend(self.looks.owned_surfaces());
-        surfaces.extend(particle_surfaces);
+        // Meshes and textures nothing draws stay within their unowned
+        // budgets (OpenAC's residency budgets); the oldest beyond go. Looks
+        // nothing draws any more go, with the variants only they named, and
+        // a recoloured surface no kept look draws with is held in the
+        // texture budget like any other (OpenAC releases a composite
+        // texture's last owner into its unowned budget).
+        // UI Only keeps nothing unowned (OpenAC
+        // `SetUnownedContentRetained(false)`).
+        let retain = !self.ui_only;
+        let swept = crate::appearance_residency::sweep_looks(
+            &mut self.looks,
+            &mut self.unowned_surfaces,
+            |key| used.contains(key),
+            |looks| {
+                for id in &models {
+                    if let Some(Some(parts)) = self.models.get(id) {
+                        gfx.extend(parts.iter().map(|p| p.gfx_obj_id));
+                    }
+                }
+                gfx.extend(looks.all_parts().map(|p| p.gfx_obj_id));
+                // Particle models and textures live emitters draw with.
+                let mut surfaces = HashSet::new();
+                if let Some(effects) = self.effects.as_ref() {
+                    gfx.extend(effects.ledger().gfx_objs());
+                    surfaces.extend(effects.ledger().surfaces());
+                }
+                for r in self.residents.values() {
+                    for b in r.near.iter().flat_map(|n| &n.buildings) {
+                        gfx.insert(b.part0.0);
+                        gfx.extend(b.levels.iter().map(|l| l.gfx_obj_id));
+                    }
+                }
+                let levels: Vec<u32> = gfx
+                    .iter()
+                    .filter_map(|id| self.meshes.get(&u64::from(*id)))
+                    .flat_map(|m| m.degrades.iter().map(|l| l.gfx_obj_id))
+                    .collect();
+                gfx.extend(levels);
+                for (key, mesh) in &self.meshes {
+                    if *key >> 32 != 0 || gfx.contains(&(*key as u32)) {
+                        surfaces.extend(mesh.sub_meshes.iter().map(|s| s.surface_id));
+                    }
+                }
+                surfaces
+            },
+            self.surfaces.iter().map(|(id, s)| (*id, s.bytes)),
+            retain,
+        );
         // Surfaces a kept mesh needs that are not here (released while the
         // mesh was being sent): ask again.
-        let lost: Vec<u32> = surfaces
+        let lost: Vec<u32> = swept
+            .owned
             .iter()
             .copied()
             .filter(|id| *id < FIRST_SURFACE_HANDLE && !self.surfaces.contains_key(id))
@@ -2982,14 +2995,6 @@ impl WorldRenderer {
             .copied()
             .filter(|id| !models.contains(id))
             .collect();
-        // Meshes and textures nothing draws stay within their unowned
-        // budgets (OpenAC's residency budgets); the oldest beyond go. A
-        // recoloured surface no kept look draws with is held in the
-        // texture budget like any other (OpenAC releases a composite
-        // texture's last owner into its unowned budget).
-        // UI Only keeps nothing unowned (OpenAC
-        // `SetUnownedContentRetained(false)`).
-        let retain = !self.ui_only;
         let gone_gfx = self.unowned_meshes.settle(
             self.meshes
                 .iter()
@@ -3001,19 +3006,23 @@ impl WorldRenderer {
             |id| gfx.contains(id),
             retain,
         );
-        let gone_surfaces = self.unowned_surfaces.settle(
-            self.surfaces
-                .iter()
-                .map(|(id, surface)| (*id, surface.bytes)),
-            |id| surfaces.contains(id),
-            retain,
-        );
-        let nothing_gone = gone_models.is_empty()
-            && gone_gfx.is_empty()
-            && gone_surfaces.is_empty()
-            && released.is_empty();
-        if !nothing_gone {
-            self.release(gone_models, gone_gfx, gone_surfaces, released);
+        for id in &gone_models {
+            self.models.remove(id);
+            self.model_info.remove(id);
+            self.requested_models.release(*id);
+        }
+        for id in &gone_gfx {
+            self.meshes.remove(&u64::from(*id));
+            self.requested_gfx.remove(id);
+        }
+        for id in &swept.gone_surfaces {
+            self.surfaces.remove(id);
+            self.requested_surfaces.remove(id);
+        }
+        // Everything released is forgotten in one request, so the loader
+        // sends each again when next wanted.
+        if let Some(forget) = swept.into_forget(gone_models, gone_gfx) {
+            self.loader.request(forget);
         }
         let (count, bytes) = self
             .surfaces
@@ -3024,37 +3033,6 @@ impl WorldRenderer {
         self.stats.recoloured_surface_bytes = bytes;
         self.stats.appearances = self.looks.appearance_count();
         self.stats.variants = self.looks.variant_count();
-    }
-
-    /// Release what a sweep found unused and tell the loader to forget it,
-    /// in one request (so it sends each again when next wanted).
-    fn release(
-        &mut self,
-        gone_models: Vec<u32>,
-        gone_gfx: Vec<u32>,
-        gone_surfaces: Vec<u32>,
-        looks: crate::appearance_residency::ReleasedLooks,
-    ) {
-        for id in &gone_models {
-            self.models.remove(id);
-            self.model_info.remove(id);
-            self.requested_models.release(*id);
-        }
-        for id in &gone_gfx {
-            self.meshes.remove(&u64::from(*id));
-            self.requested_gfx.remove(id);
-        }
-        for id in &gone_surfaces {
-            self.surfaces.remove(id);
-            self.requested_surfaces.remove(id);
-        }
-        self.loader.request(LoadRequest::Forget {
-            models: gone_models,
-            gfx_objs: gone_gfx,
-            surfaces: gone_surfaces,
-            appearances: looks.appearances,
-            variants: looks.variants,
-        });
     }
 
     /// Whether the player's interior cell `cell` can see outside (as last
@@ -3370,11 +3348,8 @@ impl WorldRenderer {
                 Loaded::Icon(icon) => self.icon = Some(icon),
                 Loaded::Surface(surface) => {
                     self.requested_surfaces.remove(&surface.id);
-                    // A recoloured surface sent again at a new texture
-                    // detail is not new.
-                    if !self.surfaces.contains_key(&surface.id) {
-                        self.looks.surface_arrived(surface.id);
-                    }
+                    let held = self.surfaces.contains_key(&surface.id);
+                    self.looks.surface_arrived(surface.id, held);
                     self.upload_surface(device, queue, &surface);
                 }
                 Loaded::GfxObj(gfx) => {
@@ -3390,20 +3365,14 @@ impl WorldRenderer {
                 Loaded::Variant { id, surfaces } => self.looks.variant_arrived(id, surfaces),
                 Loaded::Appearance { key, parts, bounds } => {
                     let surfaces = &self.surfaces;
-                    if let Some(refused) = self
+                    // One that crossed a forget in flight is refused: the
+                    // loader forgets it and what it named that is gone, and
+                    // the next frame asks for it again.
+                    if let Some(forget) = self
                         .looks
                         .appearance_arrived(*key, parts, bounds, |h| surfaces.contains_key(&h))
                     {
-                        // It crossed a forget in flight: the loader forgets
-                        // it and what it named that is gone, and the next
-                        // frame asks for it again.
-                        self.loader.request(LoadRequest::Forget {
-                            models: Vec::new(),
-                            gfx_objs: Vec::new(),
-                            surfaces: refused.handles,
-                            appearances: refused.appearances,
-                            variants: refused.variants,
-                        });
+                        self.loader.request(forget);
                     }
                 }
                 Loaded::Region {
@@ -4466,8 +4435,22 @@ fn drawn_objects(
         })
 }
 
-/// The looks of the server objects drawn (held objects included): what the
-/// sweep keeps.
+/// The looks the sweep keeps: those of the server objects drawn (held
+/// objects included) and of the creation previews. Creation is over once a
+/// character is in the world: its previews' looks are let go then.
+fn looks_in_use(
+    scene: Option<&Scene>,
+    viewports: &mut viewport::Viewports,
+) -> HashSet<AppearanceKey> {
+    if scene.is_some_and(Scene::in_world) {
+        viewports.end_creation();
+    }
+    let mut used = scene_appearance_keys(scene);
+    used.extend(viewports.appearance_keys().cloned());
+    used
+}
+
+/// The looks of the server objects drawn (held objects included).
 fn scene_appearance_keys(scene: Option<&Scene>) -> HashSet<AppearanceKey> {
     drawn_objects(scene)
         .map(|(object, setup_id)| AppearanceKey::in_world(setup_id, &object.model))

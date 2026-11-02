@@ -71,6 +71,24 @@ impl Viewports {
         self.models.iter().copied()
     }
 
+    /// Character creation is over: its previews let their looks go and
+    /// start afresh next time (their figures name the looks' variants).
+    pub(crate) fn end_creation(&mut self) {
+        if self
+            .shown_looks
+            .iter()
+            .chain(&self.wanted_looks)
+            .any(Option::is_some)
+        {
+            self.shown_looks = [None, None];
+            self.wanted_looks = [None, None];
+            self.chargen = [
+                ChargenPreviewState::new(false),
+                ChargenPreviewState::new(true),
+            ];
+        }
+    }
+
     /// The looks the viewports draw that no world object may hold (the
     /// creation previews'); the paperdoll and the examine portrait draw
     /// world objects, whose looks the world keeps.
@@ -488,6 +506,34 @@ mod tests {
 
     fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
         crate::test_gpu::device()
+    }
+
+    /// The creation previews' looks are kept while a character is being
+    /// made and let go once one is in the world.
+    #[test]
+    fn creation_looks_are_let_go_once_a_character_is_in_the_world() {
+        let mut viewports = Viewports::new(wgpu::TextureFormat::Rgba8Unorm);
+        let look = AppearanceKey {
+            setup_id: HUMAN_MALE_SETUP,
+            texture_changes: vec![(0, 0x0500_0001, 0x0500_0002)],
+            ..AppearanceKey::default()
+        };
+        viewports.shown_looks[0] = Some(look.clone());
+        viewports.wanted_looks[1] = Some(look.clone());
+        let snapshot = |player_guid| {
+            ac_runtime::session::PresentationEvent::Snapshot(ac_runtime::world::WorldSnapshot {
+                player_guid,
+                objects: Vec::new(),
+            })
+        };
+        let mut scene = Scene::default();
+        scene.apply(snapshot(None));
+        let used = super::super::looks_in_use(Some(&scene), &mut viewports);
+        assert!(used.contains(&look), "kept while making a character");
+        scene.apply(snapshot(Some(0x5000_000A)));
+        let used = super::super::looks_in_use(Some(&scene), &mut viewports);
+        assert!(!used.contains(&look), "let go in the world");
+        assert_eq!(viewports.appearance_keys().count(), 0);
     }
 
     #[test]

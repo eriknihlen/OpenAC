@@ -14,11 +14,16 @@
 //!
 //! The two sides stay in lockstep: everything the window drops it tells the
 //! loader to forget in one `Forget` request, so the loader sends it again
-//! when it is next wanted. Requests and results each keep their order, so
-//! a request made after a forget is answered after it; what crosses a
-//! forget in flight is caught on arrival (an appearance naming a variant or
-//! a recoloured surface the window no longer has is refused, forgotten
-//! and asked for again).
+//! when it is next wanted. The loader reads requests in the order they
+//! were made and applies a forget as it reads it, while appearance work
+//! waits in its own queue (newest first) and is done later: so a request
+//! made after a forget is answered after it, and work still queued when a
+//! forget is read is answered after it too. Only what the loader sent
+//! before reading a forget can cross it, and that is caught on arrival: an
+//! appearance naming a variant or a recoloured surface the window no
+//! longer has is refused, forgotten and asked for again; a recoloured
+//! surface sent again for a texture-detail change after its release is
+//! held unowned and released again.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -27,7 +32,9 @@ use ac_dat::objects::Palette;
 use glam::Vec3;
 
 use crate::appearance::{AppearanceKey, PaletteSpec};
+use crate::loader::LoadRequest;
 use crate::meshing::MeshRef;
+use crate::unowned_cache::BoundedUnownedResourceCache;
 
 /// Handles of recoloured surfaces start here, above every surface id
 /// (`0x08xxxxxx`), so a handle never names a stored surface.
@@ -57,6 +64,74 @@ pub(crate) struct ReleasedLooks {
 impl ReleasedLooks {
     pub(crate) fn is_empty(&self) -> bool {
         self.appearances.is_empty() && self.variants.is_empty() && self.handles.is_empty()
+    }
+
+    /// The one `Forget` request for these and the models, GfxObjs and
+    /// surfaces released with them (the recoloured handles go with the
+    /// surfaces); `None` when nothing was released.
+    pub(crate) fn into_forget(
+        self,
+        models: Vec<u32>,
+        gfx_objs: Vec<u32>,
+        mut surfaces: Vec<u32>,
+    ) -> Option<LoadRequest> {
+        if self.is_empty() && models.is_empty() && gfx_objs.is_empty() && surfaces.is_empty() {
+            return None;
+        }
+        surfaces.extend(self.handles);
+        Some(LoadRequest::Forget {
+            models,
+            gfx_objs,
+            surfaces,
+            appearances: self.appearances,
+            variants: self.variants,
+        })
+    }
+}
+
+/// What a sweep of the looks and the surfaces decided.
+#[derive(Debug, Default)]
+pub(crate) struct LooksSweep {
+    /// Every surface in use: the kept looks' and the others owned.
+    pub owned: HashSet<u32>,
+    /// Surfaces, plain and recoloured, beyond the unowned budget (all
+    /// unowned ones when nothing unowned is kept): to release.
+    pub gone_surfaces: Vec<u32>,
+    /// The looks and variants released.
+    pub released: ReleasedLooks,
+}
+
+impl LooksSweep {
+    /// The one `Forget` request for this sweep, with the models and
+    /// GfxObjs it released too.
+    pub(crate) fn into_forget(self, models: Vec<u32>, gfx_objs: Vec<u32>) -> Option<LoadRequest> {
+        self.released
+            .into_forget(models, gfx_objs, self.gone_surfaces)
+    }
+}
+
+/// One sweep of the looks and the surfaces the window holds: the looks
+/// `used` does not name are dropped with the variants only they named;
+/// `owned_elsewhere` (called after, with the looks kept) gives the other
+/// surfaces in use; then every `resident` surface (with its bytes) nothing
+/// owns is held unowned, recoloured ones like plain ones, and the oldest
+/// beyond the budget (all of them when `retain` is off) are to go.
+pub(crate) fn sweep_looks(
+    looks: &mut HeldLooks,
+    unowned: &mut BoundedUnownedResourceCache<u32>,
+    used: impl Fn(&AppearanceKey) -> bool,
+    owned_elsewhere: impl FnOnce(&HeldLooks) -> HashSet<u32>,
+    resident: impl IntoIterator<Item = (u32, u64)>,
+    retain: bool,
+) -> LooksSweep {
+    let released = looks.release_unused(used);
+    let mut owned = owned_elsewhere(looks);
+    owned.extend(looks.owned_surfaces());
+    let gone_surfaces = unowned.settle(resident, |id| owned.contains(id), retain);
+    LooksSweep {
+        owned,
+        gone_surfaces,
+        released,
     }
 }
 
@@ -209,15 +284,21 @@ impl SentLooks {
         all
     }
 
-    /// The window released these: send them again when next wanted. A
-    /// variant naming a forgotten recoloured surface is forgotten with it,
-    /// and a palette no remaining look uses goes too.
+    /// The window released these (`surfaces`: any surface ids; the
+    /// recoloured handles among them are this side's): send them again
+    /// when next wanted. A variant naming a forgotten recoloured surface is
+    /// forgotten with it, and a palette no remaining look uses goes too.
     pub(crate) fn forget(
         &mut self,
         appearances: &[AppearanceKey],
         variants: &[u32],
-        handles: &[u32],
+        surfaces: &[u32],
     ) {
+        let handles: Vec<u32> = surfaces
+            .iter()
+            .copied()
+            .filter(|&id| id >= FIRST_SURFACE_HANDLE)
+            .collect();
         if appearances.is_empty() && variants.is_empty() && handles.is_empty() {
             return;
         }
@@ -334,10 +415,12 @@ impl HeldLooks {
             .map(|i| map[i].1)
     }
 
-    /// A recoloured surface arrived.
-    pub(crate) fn surface_arrived(&mut self, handle: u32) {
-        if handle >= FIRST_SURFACE_HANDLE {
-            self.arriving_handles.insert(handle);
+    /// A surface arrived (`held`: the window holds it already). A new
+    /// recoloured surface is kept for the appearance it precedes; one sent
+    /// again at a new texture detail is not new.
+    pub(crate) fn surface_arrived(&mut self, id: u32, held: bool) {
+        if id >= FIRST_SURFACE_HANDLE && !held {
+            self.arriving_handles.insert(id);
         }
     }
 
@@ -350,7 +433,7 @@ impl HeldLooks {
     /// An appearance arrived. `has_surface`: whether the window holds a
     /// surface. An appearance naming a variant the window lacks, or one
     /// whose recoloured surface it lacks, crossed a forget in flight: it is
-    /// refused (`Some`: what the loader must forget before it is asked for
+    /// refused (`Some`: the `Forget` the loader must read before it is asked for
     /// again; it is no longer marked as asked).
     pub(crate) fn appearance_arrived(
         &mut self,
@@ -358,7 +441,7 @@ impl HeldLooks {
         parts: Option<Vec<MeshRef>>,
         bounds: Bounds,
         has_surface: impl Fn(u32) -> bool,
-    ) -> Option<ReleasedLooks> {
+    ) -> Option<LoadRequest> {
         self.arriving_variants.clear();
         self.arriving_handles.clear();
         self.requested.remove(&key);
@@ -391,17 +474,24 @@ impl HeldLooks {
             self.variants.remove(id);
         }
         refused.appearances.push(key);
-        Some(refused)
+        refused.into_forget(Vec::new(), Vec::new(), Vec::new())
     }
 
     /// Drop the appearances `used` does not hold and the variants no kept
     /// appearance names; returns them (no handles: the recoloured surfaces
-    /// go to the unowned budget, see [`HeldLooks::owned_surfaces`]).
+    /// go to the unowned budget, see [`HeldLooks::owned_surfaces`]). What
+    /// arrived ahead of an appearance is kept only while one is still asked
+    /// for: with none outstanding it was sent for nothing (a resend of a
+    /// surface released since) and is owned no longer.
     pub(crate) fn release_unused(
         &mut self,
         used: impl Fn(&AppearanceKey) -> bool,
     ) -> ReleasedLooks {
         self.requested.retain(|key| used(key));
+        if self.requested.is_empty() {
+            self.arriving_variants.clear();
+            self.arriving_handles.clear();
+        }
         let gone: Vec<AppearanceKey> = self
             .appearances
             .keys()

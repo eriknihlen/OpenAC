@@ -33,25 +33,26 @@ enum Msg {
     Appearance(AppearanceKey, Vec<MeshRef>),
 }
 
-/// What the window asks.
-#[derive(Debug)]
-enum Req {
-    Appearance(AppearanceKey),
-    Forget(ReleasedLooks),
-}
-
 /// The loader's side: two parts, each texture change recolouring its part
 /// (as `Worker::ensure_appearance` builds the changes).
 #[derive(Default)]
 struct Loader {
     sent: SentLooks,
+    /// Recoloured surfaces a texture-detail change sends again, waiting.
+    resizes: Vec<(SurfaceVariantKey, u32)>,
 }
 
 impl Loader {
-    fn answer(&mut self, request: Req, out: &mut VecDeque<Msg>) {
+    fn answer(&mut self, request: LoadRequest, out: &mut VecDeque<Msg>) {
         match request {
-            Req::Forget(f) => self.sent.forget(&f.appearances, &f.variants, &f.handles),
-            Req::Appearance(key) => {
+            LoadRequest::Forget {
+                surfaces,
+                appearances,
+                variants,
+                ..
+            } => self.sent.forget(&appearances, &variants, &surfaces),
+            LoadRequest::Appearance(key) => {
+                let key = *key;
                 if self.sent.was_sent(&key) {
                     return;
                 }
@@ -79,6 +80,22 @@ impl Loader {
                 self.sent.sent(key.clone());
                 out.push_back(Msg::Appearance(key, parts));
             }
+            other => panic!("not asked in these tests: {other:?}"),
+        }
+    }
+
+    /// A texture-detail change: every recoloured surface sent is to go
+    /// again (`Worker::change_detail`).
+    fn change_detail(&mut self) {
+        self.resizes = self.sent.surface_variants();
+    }
+
+    /// Send them, unless the window released one since (`Work::ResizeVariant`).
+    fn resize(&mut self, out: &mut VecDeque<Msg>) {
+        for (key, handle) in std::mem::take(&mut self.resizes) {
+            if self.sent.holds_handle(&key, handle) {
+                out.push_back(Msg::Surface(handle, key));
+            }
         }
     }
 }
@@ -91,16 +108,17 @@ enum Drawn {
     Missing(u32),
 }
 
-/// The window's side, swept as `WorldRenderer::sweep` sweeps: looks
-/// nothing draws go, recoloured surfaces nothing owns join the unowned
-/// budget, and everything released is forgotten in one request.
+/// The window's side, adopting and sweeping through the same calls as
+/// `WorldRenderer` (`adopt_loaded`, `sweep`): looks nothing draws go,
+/// recoloured surfaces nothing owns join the unowned budget, and
+/// everything released is forgotten in one request.
 struct Window {
     looks: HeldLooks,
     /// Recoloured surfaces held, with what each shows.
     surfaces: HashMap<u32, SurfaceVariantKey>,
     unowned: BoundedUnownedResourceCache<u32>,
     retain: bool,
-    requests: VecDeque<Req>,
+    requests: VecDeque<LoadRequest>,
     results: VecDeque<Msg>,
     loader: Loader,
 }
@@ -123,7 +141,8 @@ impl Window {
     fn ask(&mut self, scene: &[AppearanceKey]) {
         for key in scene {
             if !self.looks.contains(key) && self.looks.ask(key) {
-                self.requests.push_back(Req::Appearance(key.clone()));
+                self.requests
+                    .push_back(LoadRequest::Appearance(Box::new(key.clone())));
             }
         }
     }
@@ -139,17 +158,18 @@ impl Window {
     fn adopt(&mut self, msg: Msg) {
         match msg {
             Msg::Surface(handle, key) => {
-                self.looks.surface_arrived(handle);
+                let held = self.surfaces.contains_key(&handle);
+                self.looks.surface_arrived(handle, held);
                 self.surfaces.insert(handle, key);
             }
             Msg::Variant(id, surfaces) => self.looks.variant_arrived(id, surfaces),
             Msg::Appearance(key, parts) => {
                 let held = &self.surfaces;
-                if let Some(refused) = self
+                if let Some(forget) = self
                     .looks
                     .appearance_arrived(key, Some(parts), None, |h| held.contains_key(&h))
                 {
-                    self.requests.push_back(Req::Forget(refused));
+                    self.requests.push_back(forget);
                 }
             }
         }
@@ -176,19 +196,19 @@ impl Window {
     }
 
     fn sweep(&mut self, scene: &[AppearanceKey]) {
-        let mut released = self.looks.release_unused(|key| scene.contains(key));
-        let owned: HashSet<u32> = self.looks.owned_surfaces().collect();
-        let gone = self.unowned.settle(
+        let swept = sweep_looks(
+            &mut self.looks,
+            &mut self.unowned,
+            |key| scene.contains(key),
+            |_| HashSet::new(),
             self.surfaces.keys().map(|&h| (h, MIB)),
-            |h| owned.contains(h),
             self.retain,
         );
-        for handle in &gone {
+        for handle in &swept.gone_surfaces {
             self.surfaces.remove(handle);
         }
-        released.handles = gone;
-        if !released.is_empty() {
-            self.requests.push_back(Req::Forget(released));
+        if let Some(forget) = swept.into_forget(Vec::new(), Vec::new()) {
+            self.requests.push_back(forget);
         }
     }
 
@@ -419,4 +439,68 @@ fn a_look_arriving_across_a_sweep_keeps_its_variants_and_surfaces() {
     w.adopt(appearance);
     assert!(w.requests.is_empty(), "the look arrived whole");
     assert_eq!(w.drawn(&a), expected(0x0500_00A0));
+}
+
+/// A texture-detail change the loader acts on before it reads a release
+/// sends a recoloured surface the window has just let go: it comes back
+/// unowned and is released again, and the look is rebuilt whole when its
+/// object returns.
+#[test]
+fn a_late_detail_resend_of_a_released_surface_is_released_again() {
+    let mut w = Window::new(0);
+    let a = look(0x0200_0001, 0x0500_00A0);
+    w.show(std::slice::from_ref(&a));
+    w.loader.change_detail();
+    w.sweep(&[]);
+    assert!(w.surfaces.is_empty(), "nothing fits a zero budget");
+    // The loader sends it again before it reads the release.
+    w.loader.resize(&mut w.results);
+    w.adopt_all();
+    assert_eq!(w.surfaces.len(), 1, "the resend came back");
+    w.loader_works();
+    w.sweep(&[]);
+    assert!(
+        w.surfaces.is_empty(),
+        "no look owns the resend: released again"
+    );
+    w.loader_works();
+    assert_eq!(w.loader.sent.counts(), (0, 0, 0, 0));
+    w.show(std::slice::from_ref(&a));
+    assert_eq!(w.drawn(&a), expected(0x0500_00A0));
+}
+
+/// A resend the loader comes to after it read the release is not sent.
+#[test]
+fn a_detail_resend_read_after_the_release_is_skipped() {
+    let mut w = Window::new(0);
+    let a = look(0x0200_0001, 0x0500_00A0);
+    w.show(std::slice::from_ref(&a));
+    w.loader.change_detail();
+    w.sweep(&[]);
+    w.loader_works();
+    w.loader.resize(&mut w.results);
+    assert!(w.results.is_empty());
+}
+
+/// A recoloured surface the window holds, sent again at a new detail, is
+/// not mistaken for one arriving ahead of an appearance: unowned it stays
+/// unowned while other looks are on their way.
+#[test]
+fn a_detail_resend_of_a_held_surface_stays_unowned() {
+    let mut w = Window::new(64);
+    let (a, b) = (
+        look(0x0200_0001, 0x0500_00A0),
+        look(0x0200_0002, 0x0500_00B0),
+    );
+    w.show(std::slice::from_ref(&a));
+    w.sweep(&[]);
+    assert_eq!(w.unowned.count(), 1);
+    w.loader_works();
+    w.loader.change_detail();
+    w.loader.resize(&mut w.results);
+    w.adopt_all();
+    // b is asked for and not here yet.
+    w.ask(std::slice::from_ref(&b));
+    w.sweep(std::slice::from_ref(&b));
+    assert_eq!(w.unowned.count(), 1, "a's surface is still unowned");
 }
