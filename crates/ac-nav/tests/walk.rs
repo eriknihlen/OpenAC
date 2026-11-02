@@ -66,6 +66,8 @@ struct SimBody {
     moves_begun: i32,
     jumps: i32,
     still_frames: i32,
+    /// What it can leap, when known.
+    leaps: Option<ac_nav::NavLeapAbility>,
 }
 
 const STALL_SECONDS: f32 = 1.5;
@@ -100,6 +102,7 @@ impl SimBody {
             moves_begun: 0,
             jumps: 0,
             still_frames: 0,
+            leaps: None,
         }
     }
 
@@ -230,7 +233,7 @@ impl WalkBody for BodyHandle {
             },
             in_portal_space: body.in_portal_space,
             cell_id: body.cell_id,
-            leaps: None,
+            leaps: body.leaps,
             airborne: body.airborne,
             turning: body.turning,
             walk_stop_meters: 0.0,
@@ -825,6 +828,28 @@ impl Harness {
             is_sealed_dungeon: sealed.map(|f| f as &dyn Fn(u32) -> bool),
         };
         self.walk.preview_path(&world, target, arrival).take()
+    }
+
+    /// A reach search over the world as it stands (searched inline), or
+    /// `None` when there is nothing to search from.
+    fn try_reach(&mut self, max_meters: f32) -> Option<walk::NavReach> {
+        let mut handle = BodyHandle(Rc::clone(&self.body));
+        let sealed = self.sealed.as_deref();
+        let world = WalkWorld {
+            physics: &self.physics,
+            body: &mut handle,
+            goals: &self.goals,
+            doors: None,
+            paused_by: None,
+            is_sealed_dungeon: sealed.map(|f| f as &dyn Fn(u32) -> bool),
+        };
+        self.walk
+            .reachable_cells(&world, max_meters)
+            .map(walk::ReachSearch::take)
+    }
+
+    fn reach(&mut self, max_meters: f32) -> walk::NavReach {
+        self.try_reach(max_meters).expect("a reach search")
     }
 
     fn integrate(&self, seconds: f32) {
@@ -4200,5 +4225,262 @@ mod dungeon_place_floor {
             placed(&world, TALL_ROOM, under_the_ceiling),
             under_the_ceiling.with_z(FLOOR)
         );
+    }
+}
+
+/// Reach searches over a small dungeon: a room, a corridor east of it to a
+/// floor 3 m lower (dropped to, never climbed back from), and a narrow
+/// passage north to a far room, with a portal standing in the passage.
+mod reach {
+    use super::*;
+
+    const START: u32 = 0xA9B4_0100;
+    const CORRIDOR: u32 = 0xA9B4_0101;
+    const BELOW: u32 = 0xA9B4_0102;
+    const PASSAGE: u32 = 0xA9B4_0103;
+    const FAR_ROOM: u32 = 0xA9B4_0104;
+    const FLOOR: f32 = -30.0;
+    /// Deeper than the body steps down, so reached by a drop, and too high
+    /// to jump back up.
+    const LOWER: f32 = FLOOR - 3.0;
+    /// A body that jumps half a metre and may drop 5 m.
+    const DROPS: ac_nav::NavLeapAbility = ac_nav::NavLeapAbility {
+        walk_speed: 3.12,
+        run_speed: 7.3,
+        full_jump_height: 0.5,
+        maximum_drop: 5.0,
+        physics: ac_nav::NavLeapPhysics {
+            step_seconds: 0.0,
+            elasticity: 0.0,
+            friction: 0.0,
+        },
+    };
+
+    fn floor(cell_id: u32, x0: f32, y0: f32, x1: f32, y1: f32, z: f32) -> CellSurface {
+        let vertices: HashMap<u16, Vec3> = HashMap::from([
+            (0, v(x0, y0, z)),
+            (1, v(x1, y0, z)),
+            (2, v(x1, y1, z)),
+            (3, v(x0, y1, z)),
+        ]);
+        CellSurface::new(cell_id, &vertices, &[vec![0, 1, 2, 3]])
+    }
+
+    fn dungeon() -> PhysicsEngine {
+        let mut physics = PhysicsEngine::new();
+        physics.add_landblock(
+            0xA9B4_FFFF,
+            TerrainSurface::new(&[0; 81], &[0.0; 256], 0, 0, None),
+            vec![
+                floor(START, 10.0, 10.0, 30.0, 30.0, FLOOR),
+                floor(CORRIDOR, 30.0, 16.0, 60.0, 24.0, FLOOR),
+                floor(BELOW, 60.0, 10.0, 80.0, 30.0, LOWER),
+                floor(PASSAGE, 18.5, 30.0, 21.5, 50.0, FLOOR),
+                floor(FAR_ROOM, 10.0, 50.0, 30.0, 70.0, FLOOR),
+            ],
+            Vec::new(),
+            0.0,
+            0.0,
+        );
+        physics
+    }
+
+    fn in_the_room(portal: bool) -> Harness {
+        let mut body = SimBody::at(v(20.0, 20.0, FLOOR));
+        body.cell_id = START;
+        body.leaps = Some(DROPS);
+        let goals = Goals {
+            portals: if portal {
+                vec![NavAvoidance::new(v(20.0, 40.0, FLOOR), 1.5)]
+            } else {
+                Vec::new()
+            },
+            ..Goals::default()
+        };
+        Harness::new(dungeon(), body, goals).sealed(|cell| cell >> 16 == 0xA9B4)
+    }
+
+    fn found(reach: &walk::NavReach, cell_id: u32) -> Option<walk::CellReach> {
+        reach.cells.iter().find(|c| c.cell_id == cell_id).copied()
+    }
+
+    #[test]
+    fn every_cell_a_walk_reaches_comes_back_with_its_routes_length() {
+        let mut h = in_the_room(true);
+        let reach = h.reach(500.0);
+        assert_eq!(reach.status, walk::PlanStatus::Routed, "{}", reach.reason);
+        let start = found(&reach, START).expect("the character's own cell");
+        assert!(start.route_meters < 0.5, "{start:?}");
+        assert_eq!(reach.cells[0].cell_id, START, "cheapest first");
+        let corridor = found(&reach, CORRIDOR).expect("the corridor");
+        let below = found(&reach, BELOW).expect("the floor below");
+        // About 10 m across the room to the corridor, then 30 m along it
+        // a leap a few metres out and 3 m down, with its penalty.
+        assert!(
+            (10.0..12.0).contains(&corridor.route_meters),
+            "{corridor:?}"
+        );
+        assert!((43.0..60.0).contains(&below.route_meters), "{below:?}");
+        in_range(below.place.z, LOWER - 0.1, LOWER + 0.1);
+        // The passage's near half is reached; the portal shuts the far room off.
+        assert!(found(&reach, PASSAGE).is_some());
+        assert_eq!(found(&reach, FAR_ROOM), None, "{:?}", reach.cells);
+        assert_eq!(h.report().sequence, 0, "no walk was started");
+    }
+
+    /// A reached cell's place lies on its floor, also where the floor
+    /// slopes and a grid node stands a little off it.
+    #[test]
+    fn a_reached_place_is_on_the_cells_floor_where_it_slopes() {
+        // Rising 1 m every 2 m eastward from (10, 10).
+        let rise = |x: f32| FLOOR + (x - 10.0) * 0.5;
+        let vertices: HashMap<u16, Vec3> = HashMap::from([
+            (0, v(10.0, 10.0, rise(10.0))),
+            (1, v(16.0, 10.0, rise(16.0))),
+            (2, v(16.0, 30.0, rise(16.0))),
+            (3, v(10.0, 30.0, rise(10.0))),
+        ]);
+        let mut physics = PhysicsEngine::new();
+        physics.add_landblock(
+            0xA9B4_FFFF,
+            TerrainSurface::new(&[0; 81], &[0.0; 256], 0, 0, None),
+            vec![CellSurface::new(START, &vertices, &[vec![0, 1, 2, 3]])],
+            Vec::new(),
+            0.0,
+            0.0,
+        );
+        let mut body = SimBody::at(v(11.0, 20.0, rise(11.0)));
+        body.cell_id = START;
+        let mut h =
+            Harness::new(physics, body, Goals::default()).sealed(|cell| cell >> 16 == 0xA9B4);
+        let reach = h.reach(500.0);
+        let cell = found(&reach, START).expect("the ramp");
+        let place = cell.place;
+        assert!(
+            (place.z - rise(place.x)).abs() < 1e-3,
+            "{place} is not on the floor at {}",
+            rise(place.x)
+        );
+    }
+
+    #[test]
+    fn a_cell_reached_only_by_stepping_down_is_marked_by_drop() {
+        let mut h = in_the_room(false);
+        let reach = h.reach(500.0);
+        assert!(found(&reach, BELOW).unwrap().by_drop);
+        for cell in [START, CORRIDOR, PASSAGE, FAR_ROOM] {
+            assert!(!found(&reach, cell).unwrap().by_drop, "0x{cell:08X}");
+        }
+    }
+
+    #[test]
+    fn a_reach_goes_no_farther_than_asked() {
+        let mut h = in_the_room(false);
+        let reach = h.reach(25.0);
+        assert!(found(&reach, CORRIDOR).is_some());
+        assert_eq!(found(&reach, BELOW), None);
+        assert!(reach.cells.iter().all(|c| c.route_meters <= 25.0));
+    }
+
+    /// A reach length is the search's cost over the grid's steps, before
+    /// the route is straightened: close to a preview's length to the same
+    /// place where no leap is taken. A leap costs a few metres more than its
+    /// length.
+    #[test]
+    fn a_reach_length_is_close_to_a_previews_length_to_the_same_place() {
+        let mut h = in_the_room(false);
+        let reach = h.reach(500.0);
+        let below = found(&reach, BELOW).unwrap();
+        let plan = h.preview(
+            walk::PreviewTarget::Place {
+                cell_id: BELOW,
+                local: below.place,
+            },
+            0.5,
+        );
+        assert_eq!(plan.status, walk::PlanStatus::Routed, "{}", plan.reason);
+        assert!(
+            below.route_meters >= plan.length_meters,
+            "{below:?} {plan:?}"
+        );
+        for cell in [CORRIDOR, FAR_ROOM] {
+            let reached = found(&reach, cell).unwrap();
+            let plan = h.preview(
+                walk::PreviewTarget::Place {
+                    cell_id: cell,
+                    local: reached.place,
+                },
+                0.5,
+            );
+            assert_eq!(plan.status, walk::PlanStatus::Routed, "{}", plan.reason);
+            let ratio = reached.route_meters / plan.length_meters;
+            assert!((0.95..1.15).contains(&ratio), "0x{cell:08X}: {ratio}");
+        }
+    }
+
+    #[test]
+    fn a_reach_keeps_its_grid_for_the_previews_and_reaches_after_it() {
+        let mut h = in_the_room(false);
+        let first = h.reach(500.0);
+        assert!(!first.grid_reused);
+        h.tick();
+        let plan = h.preview(
+            walk::PreviewTarget::Place {
+                cell_id: BELOW,
+                local: v(70.0, 20.0, LOWER),
+            },
+            2.5,
+        );
+        assert!(plan.grid_reused, "the reach's grid was kept");
+        let again = h.reach(500.0);
+        assert!(again.grid_reused);
+        assert_eq!(again.cells, first.cells);
+    }
+
+    #[test]
+    fn outside_a_sealed_dungeon_or_off_the_ground_there_is_no_reach_search() {
+        let mut h = in_the_room(false).sealed(|_| false);
+        assert!(h.try_reach(500.0).is_none());
+        let mut h = in_the_room(false);
+        h.body.borrow_mut().airborne = true;
+        assert!(h.try_reach(500.0).is_none());
+        h.body.borrow_mut().airborne = false;
+        h.body.borrow_mut().in_portal_space = true;
+        assert!(h.try_reach(500.0).is_none());
+    }
+
+    /// On workers, a reach search and a preview asked together both answer,
+    /// over one grid build.
+    #[test]
+    fn a_reach_and_a_preview_out_at_once_both_answer() {
+        let mut h = in_the_room(false).threaded();
+        let mut handle = BodyHandle(Rc::clone(&h.body));
+        let sealed = |cell: u32| cell >> 16 == 0xA9B4;
+        let world = WalkWorld {
+            physics: &h.physics,
+            body: &mut handle,
+            goals: &h.goals,
+            doors: None,
+            paused_by: None,
+            is_sealed_dungeon: Some(&sealed),
+        };
+        let reach = h
+            .walk
+            .reachable_cells(&world, 500.0)
+            .expect("a reach search");
+        let preview = h.walk.preview_path(
+            &world,
+            walk::PreviewTarget::Place {
+                cell_id: FAR_ROOM,
+                local: v(20.0, 60.0, FLOOR),
+            },
+            2.5,
+        );
+        let (reach, plan) = (reach.take(), preview.take());
+        assert_eq!(reach.status, walk::PlanStatus::Routed, "{}", reach.reason);
+        assert_eq!(plan.status, walk::PlanStatus::Routed, "{}", plan.reason);
+        assert!(!reach.grid_reused);
+        assert!(plan.grid_reused, "it waited for the reach's build");
+        assert_eq!(reach.cells.len(), 5);
     }
 }

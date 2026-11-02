@@ -62,12 +62,12 @@ pub enum PreviewTarget {
 }
 
 /// The ground a preview searches, and what it was built over.
-struct PreviewGround {
-    source: GridSource,
+pub(super) struct PreviewGround {
+    pub(super) source: GridSource,
     /// Whether the grid was there or under way before the preview asked.
-    reused: bool,
-    landblock_ids: Vec<u32>,
-    object_ids: Arc<HashSet<u32>>,
+    pub(super) reused: bool,
+    pub(super) landblock_ids: Vec<u32>,
+    pub(super) object_ids: Arc<HashSet<u32>>,
 }
 
 /// How a preview ended (OpenAC `PluginNavigationPlanStatus`).
@@ -339,7 +339,7 @@ impl WalkController {
     /// both ends, else one built from what is captured now. Inside a sealed
     /// dungeon a grid built for a preview is kept, as a walk's is, when
     /// nothing else is being built. `None` when no collision is loaded.
-    fn preview_ground(
+    pub(super) fn preview_ground(
         &mut self,
         cx: &WalkWorld<'_>,
         sample: &WalkBodySample,
@@ -413,7 +413,11 @@ impl WalkController {
 
     /// The cell surfaces of the landblocks a grid covers, copied once per
     /// grid: they do not change while their landblock stays loaded.
-    fn cells_of(&mut self, cx: &WalkWorld<'_>, landblock_ids: &[u32]) -> Arc<[CellSurface]> {
+    pub(super) fn cells_of(
+        &mut self,
+        cx: &WalkWorld<'_>,
+        landblock_ids: &[u32],
+    ) -> Arc<[CellSurface]> {
         if let Some((ids, cells)) = &self.grid_cells
             && ids.as_slice() == landblock_ids
         {

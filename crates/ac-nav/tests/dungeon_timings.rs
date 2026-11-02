@@ -254,3 +254,155 @@ fn dungeon_reads_are_timed() {
         );
     }
 }
+
+/// A reach search over every cell of a few installed dungeons, timed on
+/// the asking thread and the worker, then a preview to each cell it
+/// reached: how a reach length compares with the preview's straightened
+/// length to the same place, and which cells with a floor it missed.
+#[test]
+#[ignore = "needs the retail dat files and OPENAC_DIAGNOSTIC_TESTS=1"]
+fn reach_searches_in_installed_dungeons_are_timed() {
+    if std::env::var("OPENAC_DIAGNOSTIC_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set OPENAC_DIAGNOSTIC_TESTS=1 to run diagnostic tests");
+        return;
+    }
+    let dats = support::dats();
+    let sealed = |cell: u32| ac_nav::dungeon::is_sealed_dungeon(&dats, cell);
+    for dungeon in [0x0032_FFFFu32, 0x5B48_FFFF] {
+        let cell_ids: Vec<u32> = (0x100..0x500)
+            .map(|low| (dungeon & 0xFFFF_0000) | low)
+            .collect();
+        let world = support::load(&dats, &[dungeon], &cell_ids);
+        let middles = cell_middles(&world.engine, dungeon);
+        let (start_cell, start_middle) = middles[0];
+        let start = on_the_cell_floor(&world.engine, start_cell, start_middle, None);
+        let goals = Floors(&world.engine);
+        let mut body = Standing {
+            position: start,
+            cell_id: start_cell,
+            body: world.body,
+        };
+        let mut controller = WalkController::new(PlanMode::Threads, None);
+        let mut times = Vec::new();
+        let mut reach = None;
+        for _ in 0..3 {
+            let mut view = WalkWorld {
+                physics: &world.engine,
+                body: &mut body,
+                goals: &goals,
+                doors: None,
+                paused_by: None,
+                is_sealed_dungeon: Some(&sealed),
+            };
+            let asked = Instant::now();
+            let search = controller
+                .reachable_cells(&view, f32::INFINITY)
+                .expect("a reach search");
+            let asking = milliseconds(asked);
+            let found = search.take();
+            times.push((asking, found.took_ms, found.grid_reused));
+            controller.tick(&mut view, 0.05);
+            reach = Some(found);
+        }
+        let reach = reach.unwrap();
+        println!(
+            "0x{:04X}: {} of {} cells reached ({}); asking {:.2} ms, worker {:.1} ms building the grid, then {:.1} and {:.1} ms on it",
+            dungeon >> 16,
+            reach.cells.len(),
+            middles.len(),
+            reach.reason,
+            times[0].0,
+            times[0].1,
+            times[1].1,
+            times[2].1,
+        );
+        assert!(!times[0].2 && times[1].2 && times[2].2);
+
+        let mut ratios = Vec::new();
+        let mut unrouted = 0;
+        for cell in &reach.cells {
+            let view = WalkWorld {
+                physics: &world.engine,
+                body: &mut body,
+                goals: &goals,
+                doors: None,
+                paused_by: None,
+                is_sealed_dungeon: Some(&sealed),
+            };
+            let plan = controller
+                .preview_path(
+                    &view,
+                    PreviewTarget::Place {
+                        cell_id: cell.cell_id,
+                        local: cell.place,
+                    },
+                    0.5,
+                )
+                .take();
+            if plan.status == PlanStatus::Routed && plan.length_meters > 1.0 {
+                ratios.push(f64::from(cell.route_meters / plan.length_meters));
+            } else if plan.status != PlanStatus::Routed {
+                unrouted += 1;
+            }
+        }
+        ratios.sort_by(f64::total_cmp);
+        let at = |share: f64| ratios[((ratios.len() - 1) as f64 * share) as usize];
+        println!(
+            "  reach length / preview length over {} cells: min {:.3}, median {:.3}, 90th {:.3}, max {:.3}; {unrouted} reached cells a preview did not route",
+            ratios.len(),
+            at(0.0),
+            at(0.5),
+            at(0.9),
+            at(1.0),
+        );
+        let drops = reach.cells.iter().filter(|c| c.by_drop).count();
+        let plan = ac_nav::floorplan::DungeonFloorplanBuilder::new()
+            .try_build(&dats, dungeon)
+            .unwrap()
+            .unwrap();
+        let reached: std::collections::HashSet<u32> =
+            reach.cells.iter().map(|c| c.cell_id).collect();
+        let missed: Vec<u32> = plan
+            .cells
+            .iter()
+            .filter(|c| c.floor_z.is_some() && !reached.contains(&c.cell_id))
+            .map(|c| c.cell_id)
+            .collect();
+        let floorless = plan.cells.iter().filter(|c| c.floor_z.is_none()).count();
+        // A preview to the middle of each cell with a floor the reach
+        // missed: one that routes is a cell whose floor the reach could
+        // not find a node on.
+        let mut routed_anyway = Vec::new();
+        for &cell_id in missed.iter().take(40) {
+            let Some(&(_, middle)) = middles.iter().find(|(id, _)| *id == cell_id) else {
+                continue;
+            };
+            let view = WalkWorld {
+                physics: &world.engine,
+                body: &mut body,
+                goals: &goals,
+                doors: None,
+                paused_by: None,
+                is_sealed_dungeon: Some(&sealed),
+            };
+            let plan = controller
+                .preview_path(
+                    &view,
+                    PreviewTarget::Place {
+                        cell_id,
+                        local: middle,
+                    },
+                    2.5,
+                )
+                .take();
+            if plan.status == PlanStatus::Routed {
+                let end = plan.path.last().map(|p| p.cell_id).unwrap_or(0);
+                routed_anyway.push(format!("0x{cell_id:08X} (ends in 0x{end:08X})"));
+            }
+        }
+        println!(
+            "  {drops} reached by a drop; {floorless} with no floor of their own; {} with a floor not reached, of which a preview to the middle routes: {routed_anyway:?}",
+            missed.len()
+        );
+    }
+}

@@ -41,7 +41,9 @@ use crate::route::{
 };
 
 mod preview;
+mod reach;
 pub use preview::{NavPlan, PathPreview, PlanPoint, PlanStatus, PreviewTarget};
+pub use reach::{CellReach, NavReach, ReachSearch, cells_reached};
 
 /// Where a walk or route request stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
