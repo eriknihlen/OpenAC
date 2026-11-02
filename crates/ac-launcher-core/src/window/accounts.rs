@@ -181,6 +181,10 @@ pub struct AccountServerRow {
     pub latency_milliseconds: Option<f64>,
     /// Why Play is refused, empty when it may run (refreshed by the window).
     pub disabled_reason: String,
+    /// Play waits only for the server to let go of the account after an
+    /// unclean exit: the countdown the row shows in place of its status
+    /// (refreshed by the window every frame).
+    pub hold_text: Option<String>,
     /// False while the profile filter hides this row.
     pub is_visible: bool,
     /// The account's profile tags on this server.
@@ -209,6 +213,7 @@ impl AccountServerRow {
             server_status_text: "Not checked".into(),
             latency_milliseconds: None,
             disabled_reason: String::new(),
+            hold_text: None,
             is_visible: true,
             profiles: Vec::new(),
             active_session_id: None,

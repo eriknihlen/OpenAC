@@ -1641,7 +1641,7 @@ fn batch_availability_preserves_active_and_reconnect_refusals() {
     check("Stop the running");
     supervisors.single().exit(23);
     assert!(!single_session(&orchestrator).is_process_or_start_active());
-    check("Try again");
+    check("Ready in");
 }
 
 // OpenAC LauncherOrchestratorTests.StopDuringStartupRemainsOwnedUntilCancelledOrFailedStartFinishes.
@@ -1770,9 +1770,10 @@ fn failed_startup_with_live_child_retains_account_and_update_ownership() {
 }
 
 // Not an OpenAC test: the reconnect hold OpenAC's orchestrator applies after
-// an unclean exit, checked with a controlled clock.
+// an unclean exit (here 30 s: one login attempt makes the server drop a
+// stale login), checked with a controlled clock; a launch obeys it too.
 #[test]
-fn an_unclean_exit_holds_the_account_for_three_minutes() {
+fn an_unclean_exit_holds_the_account_for_thirty_seconds() {
     let root = TempDir::new("orchestrator");
     let supervisors = Arc::new(FakeSupervisorFactory::default());
     let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
@@ -1793,7 +1794,17 @@ fn an_unclean_exit_holds_the_account_for_three_minutes() {
         .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
         .unwrap();
     assert!(!held.is_available);
-    assert!(held.reason.unwrap().ends_with("Try again in 180 s."));
+    assert_eq!(held.held_for, Some(Duration::from_secs(30)));
+    assert_eq!(
+        held.reason.as_deref(),
+        Some("The server may still hold this character. Ready in 30 s.")
+    );
+    let refused = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "The server may still hold this character. Ready in 30 s."
+    );
+    assert_eq!(supervisors.created().len(), 1, "nothing started");
 
     *lock(&now) = start + Duration::from_millis(500);
     let reason = orchestrator
@@ -1801,15 +1812,24 @@ fn an_unclean_exit_holds_the_account_for_three_minutes() {
         .unwrap()
         .reason
         .unwrap();
-    assert!(reason.ends_with("Try again in 180 s."), "{reason}");
+    assert!(reason.ends_with("Ready in 30 s."), "{reason}");
+    *lock(&now) = start + Duration::from_secs(5);
+    let reason = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap()
+        .reason
+        .unwrap();
+    assert!(reason.ends_with("Ready in 25 s."), "{reason}");
 
     *lock(&now) = start + SERVER_SESSION_HOLD;
+    assert_eq!(SERVER_SESSION_HOLD, Duration::from_secs(30));
     assert!(
         orchestrator
             .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
             .unwrap()
             .is_available
     );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
 }
 
 // ---- profile text while sessions run ----------------------------------------
@@ -2405,6 +2425,66 @@ mod relaunch {
         clock.advance(2);
         host.poll(&mut scheduler, true);
         assert_eq!(host.launches.len(), 1);
+    }
+
+    // Not an OpenAC test: a relaunch the server refuses because the account
+    // is still logged on is tried again once the server's hold ends (the
+    // capability), not after the full delay, and gives up after six refused
+    // logins in a row with the server's words.
+    #[test]
+    fn a_refused_relaunch_retries_after_the_hold_and_gives_up_after_six() {
+        let mut host = Host::new();
+        let clock = Clock::default();
+        let mut scheduler = clock.controller();
+        scheduler.set_delay_seconds(60).unwrap();
+        host.sessions = vec![session(1, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        // A crash: the first relaunch waits the full delay.
+        host.sessions = vec![session(1, false)];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(59);
+        host.poll(&mut scheduler, true);
+        assert!(host.launches.is_empty());
+        clock.advance(1);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 1);
+        for attempt in 1..=6u64 {
+            // The relaunched client is refused: the account is still held.
+            let mut refused = session(100 + attempt, false);
+            refused.account_in_use = true;
+            refused.server_message =
+                Some("Another account is already logged on from this client.".into());
+            host.sessions = vec![refused];
+            host.observe(&mut scheduler, &[choice()]);
+            // The hold is the only wait.
+            host.capability = LauncherCapability::held(Duration::from_secs(30));
+            host.poll(&mut scheduler, true);
+            assert_eq!(host.launches.len() as u64, attempt, "held");
+            host.capability = LauncherCapability::AVAILABLE;
+            clock.advance(30);
+            host.poll(&mut scheduler, true);
+            if attempt < 6 {
+                assert_eq!(host.launches.len() as u64, attempt + 1, "retried");
+            }
+        }
+        assert_eq!(host.launches.len(), 6, "at most six attempts");
+        let notices = scheduler.take_notices();
+        assert_eq!(notices.len(), 1);
+        assert!(
+            notices[0].contains("Another account is already logged on from this client."),
+            "{notices:?}"
+        );
+        clock.advance(3600);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 6, "given up");
+        // A session started by hand starts the count over.
+        host.sessions = vec![session(200, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        host.sessions = vec![session(200, false)];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(60);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 7);
     }
 
     #[test]

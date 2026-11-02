@@ -835,8 +835,15 @@ fn account_row(
         // OpenAC sets the session text 2 px lower (`Margin="0,2,0,0"`) to sit level
         // with the combo boxes' larger text.
         let session = columns.cell(4, y).translate(Vec2::new(0.0, 2.0));
-        cells[4] = grid_cell(ui, session, centered, |ui| {
-            cut(ui, muted(&row.status)).on_hover_text(&row.status);
+        cells[4] = grid_cell(ui, session, centered, |ui| match row.hold_text.as_deref() {
+            // The server's hold counts down in place of the status (the window
+            // redraws at least every 250 ms).
+            Some(hold) => {
+                cut(ui, RichText::new(hold).color(theme::GOLD).size(12.0)).on_hover_text(hold);
+            }
+            None => {
+                cut(ui, muted(&row.status)).on_hover_text(&row.status);
+            }
         });
         cells[5] = grid_cell(ui, columns.cell(5, y), centered, |ui| {
             let size = Vec2::new(ui.available_width(), CONTROL_HEIGHT);

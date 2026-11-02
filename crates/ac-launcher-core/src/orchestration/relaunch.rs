@@ -6,6 +6,12 @@
 //! hands out at most one due attempt, the caller runs the ordinary launch,
 //! and [`finish`] records how it went.
 //!
+//! A relaunched client the server refuses because the account is still
+//! logged on is tried again as soon as the server's hold ends, at most
+//! [`MAXIMUM_REFUSED_RELAUNCHES`] times in a row; then relaunching that
+//! account stops, with the server's words, until a session of it is started
+//! some other way.
+//!
 //! [`poll`]: LauncherRelaunchController::poll
 //! [`finish`]: LauncherRelaunchController::finish
 
@@ -15,7 +21,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::capabilities::LauncherCapability;
 use super::orchestrator::OrchestratorError;
-use super::snapshot::{LauncherActivityKind, LauncherSessionSnapshot, LauncherStateSnapshot};
+use super::snapshot::{
+    LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot, LauncherStateSnapshot,
+};
 use crate::cancel::CancelToken;
 use crate::profiles::{LaunchMode, same_account};
 
@@ -25,6 +33,12 @@ pub const DEFAULT_RELAUNCH_DELAY_SECONDS: u32 = 180;
 pub const MINIMUM_RELAUNCH_DELAY_SECONDS: u32 = 5;
 /// The longest delay allowed, in seconds.
 pub const MAXIMUM_RELAUNCH_DELAY_SECONDS: u32 = 3600;
+
+/// How many relaunches in a row the server may refuse because the account
+/// is still logged on before automatic relaunch gives up. Each waits only
+/// for the server's 30 s hold, so this bounds the retrying to about three
+/// minutes.
+pub const MAXIMUM_REFUSED_RELAUNCHES: u32 = 6;
 
 /// A monotonic clock: the time since some fixed start.
 pub type MonotonicClock = Arc<dyn Fn() -> Duration + Send + Sync>;
@@ -87,6 +101,15 @@ struct Entry {
     tracked_session: Option<String>,
     terminal_since: Option<Duration>,
     cancellation: Option<CancelToken>,
+    /// Sessions in a row the server refused because the account was still
+    /// logged on.
+    refused: u32,
+    /// The tracked session was refused that way: the next attempt waits
+    /// only for the server's hold, not the full delay.
+    retry_after_hold: bool,
+    /// Too many refusals: nothing is relaunched until a new session of the
+    /// account is seen.
+    given_up: bool,
 }
 
 /// Schedules ordinary launches for the play sessions of checked accounts.
@@ -98,6 +121,8 @@ pub struct LauncherRelaunchController {
     disposed: bool,
     launching: bool,
     delay_seconds: u32,
+    /// Why relaunching gave up, for the window to show; taken once.
+    notices: Vec<String>,
 }
 
 impl std::fmt::Debug for LauncherRelaunchController {
@@ -128,6 +153,7 @@ impl LauncherRelaunchController {
             disposed: false,
             launching: false,
             delay_seconds: DEFAULT_RELAUNCH_DELAY_SECONDS,
+            notices: Vec::new(),
         }
     }
 
@@ -238,6 +264,11 @@ impl LauncherRelaunchController {
                         entry.seen_created_at = Some(latest.created_at);
                         entry.tracked_session = Some(latest.session_id.clone());
                         entry.terminal_since = None;
+                        // A session someone else started: the count starts
+                        // over.
+                        entry.refused = 0;
+                        entry.retry_after_hold = false;
+                        entry.given_up = false;
                     }
                     index
                 }
@@ -256,6 +287,9 @@ impl LauncherRelaunchController {
                                 .map(|session| session.session_id.clone()),
                             terminal_since: None,
                             cancellation: None,
+                            refused: 0,
+                            retry_after_hold: false,
+                            given_up: false,
                         },
                     ));
                     self.entries.len() - 1
@@ -265,13 +299,37 @@ impl LauncherRelaunchController {
             let Some(tracked) = &entry.tracked_session else {
                 continue;
             };
-            if sessions
-                .get(tracked.as_str())
-                .is_some_and(|session| session.is_process_or_start_active())
-            {
-                entry.terminal_since = None;
-            } else if entry.terminal_since.is_none() {
-                entry.terminal_since = Some(now);
+            let session = sessions.get(tracked.as_str()).copied();
+            match session {
+                Some(session) if session.is_process_or_start_active() => {
+                    entry.terminal_since = None;
+                    if session.state == LauncherActivityState::InWorld {
+                        entry.refused = 0;
+                    }
+                }
+                _ if entry.terminal_since.is_some() => {}
+                ended => {
+                    entry.terminal_since = Some(now);
+                    if ended.is_some_and(|session| session.account_in_use) {
+                        // The server still held the account: try again once
+                        // its hold ends, a bounded number of times.
+                        entry.refused += 1;
+                        entry.retry_after_hold = true;
+                        if entry.refused >= MAXIMUM_REFUSED_RELAUNCHES && !entry.given_up {
+                            entry.given_up = true;
+                            let said = ended
+                                .and_then(|session| session.server_message.as_deref())
+                                .unwrap_or("the account is still logged on");
+                            self.notices.push(format!(
+                                "Automatic relaunch of {} on {} stopped: the server refused \n                                 {} logins in a row ({said}).",
+                                entry.selection.account, entry.selection.server, entry.refused
+                            ));
+                        }
+                    } else {
+                        entry.refused = 0;
+                        entry.retry_after_hold = false;
+                    }
+                }
             }
         }
     }
@@ -295,7 +353,9 @@ impl LauncherRelaunchController {
             let Some(since) = entry.terminal_since else {
                 continue;
             };
-            if now.saturating_sub(since) < delay {
+            // After a refusal the server's hold, checked through `capability`,
+            // is the only wait.
+            if entry.given_up || (!entry.retry_after_hold && now.saturating_sub(since) < delay) {
                 continue;
             }
             let choice = &entry.selection;
@@ -340,6 +400,10 @@ impl LauncherRelaunchController {
                 if !self.disposed {
                     failure = Some(error);
                 }
+                // A launch that failed outright waits the full delay.
+                if let Some(entry) = self.live_entry(attempt) {
+                    entry.retry_after_hold = false;
+                }
             }
         }
         if let Some(entry) = self.live_entry(attempt)
@@ -356,6 +420,12 @@ impl LauncherRelaunchController {
         }
         self.launching = false;
         failure
+    }
+
+    /// Why relaunching gave up for an account since the last call (too
+    /// many refused logins), for the window to show.
+    pub fn take_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notices)
     }
 
     /// Cancels every pending relaunch and stops scheduling.

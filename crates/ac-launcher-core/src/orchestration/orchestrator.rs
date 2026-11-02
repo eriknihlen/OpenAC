@@ -42,8 +42,11 @@ use crate::status::{
 use crate::updates::{SessionLease, UpdateSessionBarrier};
 
 /// How long the server may keep holding an account after a session ended
-/// without logging out cleanly.
-pub const SERVER_SESSION_HOLD: Duration = Duration::from_secs(3 * 60);
+/// without logging out cleanly. A login during it is usually refused, but
+/// the attempt itself makes the server drop the stale login, so the next
+/// one gets in: the launcher waits this long, and a refusal starts the
+/// wait again.
+pub const SERVER_SESSION_HOLD: Duration = Duration::from_secs(30);
 
 /// Why nothing may launch before first-run setup.
 pub const FIRST_RUN_REQUIRED: &str =
@@ -1098,6 +1101,17 @@ impl LauncherOrchestrator {
             if find_active(&state.activities, server_name, account_name).is_some() {
                 return Err(OrchestratorError::Operation(ALREADY_RUNNING.into()));
             }
+            // Every start obeys the hold: the window's, automatic relaunch's
+            // and the control endpoint's.
+            let hold = self
+                .inner
+                .reconnect_hold(&state.activities, server_name, account_name);
+            if !hold.is_available {
+                return Err(OrchestratorError::Operation(
+                    hold.reason
+                        .unwrap_or_else(|| "Launch is unavailable.".into()),
+                ));
+            }
             let server = find_server(&state.store, server_name)?;
             let account = find_account(&state.store, server_name, account_name)?;
             let character = match character_name {
@@ -1640,11 +1654,7 @@ impl Inner {
         if remaining.is_zero() {
             return LauncherCapability::AVAILABLE;
         }
-        let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0);
-        LauncherCapability::unavailable(format!(
-            "The last session for this account did not log out cleanly, so the server may still \
-             be holding it. Try again in {seconds} s."
-        ))
+        LauncherCapability::held(remaining)
     }
 
     fn with_activity<T>(&self, serial: u64, action: impl FnOnce(&mut Activity) -> T) -> Option<T> {

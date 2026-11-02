@@ -31,6 +31,8 @@ struct OwnerSpy {
     accounts: Mutex<Option<Vec<LauncherAccountSnapshot>>>,
     session: Mutex<LauncherSessionSnapshot>,
     launches: Mutex<Vec<Launch>>,
+    /// What the account may launch now.
+    capability: Mutex<LauncherCapability>,
     console_lines: Mutex<Vec<(String, String)>>,
 }
 
@@ -71,6 +73,7 @@ fn spy() -> Arc<OwnerSpy> {
             window: Default::default(),
         }),
         launches: Mutex::new(Vec::new()),
+        capability: Mutex::new(LauncherCapability::AVAILABLE),
         console_lines: Mutex::new(Vec::new()),
     })
 }
@@ -118,7 +121,7 @@ impl Orchestration for OwnerSpy {
         _account_name: &str,
         _mode: LaunchMode,
     ) -> Result<LauncherCapability, OrchestratorError> {
-        unexpected("account_launch_capability")
+        Ok(self.capability.lock().unwrap().clone())
     }
     fn set_install_record(
         &self,
@@ -297,6 +300,28 @@ fn starts_the_saved_selection_and_rejects_a_duplicate_or_graphical_launch() {
         &request("start", Some("other"), Some("account"), None)
     ));
     assert_eq!(owner.launches.lock().unwrap().len(), 1);
+}
+
+// Not an OpenAC test: a start while the server may still hold the account
+// is refused with the seconds left, and nothing is launched.
+#[test]
+fn start_obeys_the_reconnect_hold() {
+    let owner = spy();
+    let handler = handler(&owner);
+    *owner.capability.lock().unwrap() =
+        LauncherCapability::held(std::time::Duration::from_millis(24_200));
+    let reply = handler
+        .handle(
+            &request("start", Some("world"), Some("account"), None),
+            &CancelToken::new(),
+        )
+        .unwrap();
+    assert!(!reply.ok);
+    assert_eq!(
+        reply.error.as_deref(),
+        Some("The server may still hold this character. Ready in 25 s.")
+    );
+    assert!(owner.launches.lock().unwrap().is_empty());
 }
 
 // OpenAC StartFindsTheSavedAccountWhateverTheCaseOfItsName.

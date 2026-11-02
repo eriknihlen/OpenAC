@@ -1157,6 +1157,10 @@ impl LauncherWindow {
             Vec::new()
         };
         self.automatic_relaunch.observe(snapshot, &checked, enabled);
+        if let Some(notice) = self.automatic_relaunch.take_notices().pop() {
+            self.last_error = Some(notice);
+            self.operation_status = "Automatic relaunch stopped.".into();
+        }
     }
 
     /// [`Self::observe_session_controls`] against the orchestrator's newest
@@ -1489,6 +1493,16 @@ impl LauncherWindow {
                 )
                 .unwrap_or_default()
             };
+            // Only the server's hold blocks Play: the row shows its
+            // countdown, not just a tooltip.
+            let mode = row.mode();
+            row.hold_text = availability
+                .iter()
+                .find(|(known, _)| *known == mode)
+                .and_then(|(_, map)| map.get(&key))
+                .filter(|capability| capability.held_for.is_some())
+                .and_then(|capability| capability.reason.clone())
+                .filter(|reason| *reason == row.disabled_reason);
         }
         self.starting_rows = starting;
         self.snapshot = snapshot;

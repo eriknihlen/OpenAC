@@ -530,6 +530,42 @@ fn poll_refreshes_play_when_reconnect_delay_expires_without_an_event() {
     assert!(window.row(&account, &server).unwrap().can_play());
 }
 
+// Not an OpenAC test: the server's hold is shown on the row as a countdown,
+// not only as the Play button's tooltip; another refusal is not.
+#[test]
+fn the_servers_hold_counts_down_on_the_row() {
+    let fake = batch();
+    let mut window = create_started(&fake);
+    let (account, server) = row_keys(&window)[0].clone();
+    *fake.account_launch_capability.lock().unwrap() =
+        Some(LauncherCapability::held(Duration::from_secs(25)));
+    window.poll();
+    let row = window.row(&account, &server).unwrap();
+    assert!(!row.can_play());
+    assert_eq!(
+        row.hold_text.as_deref(),
+        Some("The server may still hold this character. Ready in 25 s.")
+    );
+    *fake.account_launch_capability.lock().unwrap() =
+        Some(LauncherCapability::held(Duration::from_millis(1_500)));
+    window.poll();
+    assert!(
+        window
+            .row(&account, &server)
+            .unwrap()
+            .hold_text
+            .as_deref()
+            .is_some_and(|text| text.ends_with("Ready in 2 s."))
+    );
+    *fake.account_launch_capability.lock().unwrap() =
+        Some(LauncherCapability::unavailable("Something else."));
+    window.poll();
+    assert_eq!(window.row(&account, &server).unwrap().hold_text, None);
+    *fake.account_launch_capability.lock().unwrap() = Some(LauncherCapability::AVAILABLE);
+    window.poll();
+    assert_eq!(window.row(&account, &server).unwrap().hold_text, None);
+}
+
 // OpenAC LauncherWindowViewModelTests.FailedStartupIsShownInItsRowAndNotCountedAsStarted.
 #[test]
 fn failed_startup_is_shown_in_its_row_and_not_counted_as_started() {
