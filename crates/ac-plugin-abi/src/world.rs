@@ -609,8 +609,21 @@ wire_record! {
         /// tall room it is well above the floor; a walk or preview to it
         /// stands it on the floor under it.
         pub center: (f32, f32, f32),
-        /// The layer it belongs to.
+        /// The layer it belongs to: the 6 m band of its floor's height (or,
+        /// for a cell with no floor, of the floor it opens onto below). A
+        /// band is coarse: two cells on one floor can sit in different
+        /// bands, so compare `floor_z` to tell floors apart.
         pub layer_z: f32,
+        /// The lower corner of the box around every polygon of the cell,
+        /// landblock-local metres (API 1.5).
+        since (1, 5) pub bounds_min: (f32, f32, f32),
+        /// The upper corner of that box (API 1.5).
+        since (1, 5) pub bounds_max: (f32, f32, f32),
+        /// The height of the cell's lowest floor, landblock-local metres:
+        /// the lowest level polygon of the cell that faces up, at its
+        /// corners' mean height (API 1.5). `None` for a cell with no floor
+        /// of its own, such as a shaft or the upper half of a tall room.
+        since (1, 5) pub floor_z: Option<f32>,
     }
 }
 

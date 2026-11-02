@@ -616,6 +616,9 @@ impl PluginBinding<'_> {
                     cell_id: c.cell_id,
                     center: v3(c.center),
                     layer_z: c.layer_z,
+                    bounds_min: v3(c.bounds.min),
+                    bounds_max: v3(c.bounds.max),
+                    floor_z: c.floor_z,
                 })
                 .collect(),
             bounds_min: v3(plan.bounds.min),

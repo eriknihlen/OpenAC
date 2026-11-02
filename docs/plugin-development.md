@@ -88,8 +88,9 @@ for anything that is not a hook). API 1.4 added five plugin themes: a plugin
 built for an older version is told `ThemeKind::Moss` under any of them, with
 the theme's real name and colours. API 1.5 added, at the end of a path
 preview's `NavigationPlan`, whether it reused a grid and how long the client's
-worker took, and at the end of `IndoorCell` its doorways and the cells seen
-from it. Everything the client offers
+worker took, at the end of `IndoorCell` its doorways and the cells seen
+from it, and at the end of the floorplan's `DungeonCell` its bounds and floor
+height. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -237,6 +238,13 @@ cell, worked out ahead of time from the doorways, so it is coarser than a
 line of sight: it can take in a cell round a corner or behind a closed door.
 A doorway is where the dungeon is open, not whether a door stands in it; a
 door is a world object, and walks open it or go round it when it is locked.
+Each floorplan `DungeonCell` has `bounds_min` and `bounds_max`, the box
+around its polygons, and `floor_z`, the height of its lowest floor (API 1.5).
+Use `floor_z`, not `layer_z`, to tell floors apart: `layer_z` is a 6 m band,
+and a tall room's cell can sit a band above a low corridor on the same floor.
+`floor_z` is `None` for a cell with no floor of its own. Tall rooms are built
+as one cell on top of another, so the upper cell has none; nor does a shaft.
+A plugin that needs a floor for such a cell can follow its doorways down.
 
 ## Testing natively
 

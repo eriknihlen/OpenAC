@@ -165,7 +165,9 @@ impl Host<'_> {
         self.call::<calls::DungeonIsSealed>(&cell_id)
     }
 
-    /// A landblock's dungeon floorplan.
+    /// A landblock's dungeon floorplan: each band's floors and walls, and
+    /// each cell's middle and band, and from API 1.5 its bounds and floor
+    /// height. Read from the game files once per landblock and kept.
     pub fn dungeon_floorplan(&mut self, landblock_id: u32) -> Option<Floorplan> {
         self.call::<calls::DungeonFloorplan>(&landblock_id)
     }

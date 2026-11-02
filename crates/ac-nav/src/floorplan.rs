@@ -131,6 +131,13 @@ pub struct DungeonFloorplanCell {
     pub center: Vec3,
     /// The key of the band the cell is drawn in.
     pub layer_z: f32,
+    /// The box around every polygon of the cell, landblock metres.
+    pub bounds: FloorplanBounds,
+    /// The height of the cell's lowest floor (a level polygon facing up,
+    /// at its corners' mean height), landblock metres; `None` for a cell
+    /// with no floor of its own, such as a shaft or the upper half of a
+    /// tall room.
+    pub floor_z: Option<f32>,
 }
 
 /// The box around a plan, landblock metres.
@@ -344,6 +351,8 @@ struct FlattenedCell {
     floor_band: Option<f32>,
     /// The band the cell's origin is in.
     origin_band: f32,
+    bounds: FloorplanBounds,
+    floor_z: Option<f32>,
     walls: Vec<WallSpan>,
 }
 
@@ -467,6 +476,7 @@ fn build(landblock: u32, placed: &[PlacedCell]) -> Option<DungeonFloorplan> {
         let mut walls = Vec::new();
         let mut floor_height = 0.0_f32;
         let mut floor_vertices = 0_usize;
+        let mut lowest_floor: Option<f32> = None;
         for polygon in &cell.geometry.polygons {
             counts.polygons += 1;
             let world: Vec<Vec3> = polygon
@@ -503,6 +513,7 @@ fn build(landblock: u32, placed: &[PlacedCell]) -> Option<DungeonFloorplan> {
                         .push(world.iter().map(|v| Vec2::new(v.x, v.y)).collect());
                     floor_height += height * world.len() as f32;
                     floor_vertices += world.len();
+                    lowest_floor = Some(lowest_floor.map_or(height, |low| low.min(height)));
                 } else {
                     counts.ceilings += 1;
                 }
@@ -526,6 +537,8 @@ fn build(landblock: u32, placed: &[PlacedCell]) -> Option<DungeonFloorplan> {
             floor_band: (floor_vertices != 0)
                 .then(|| layer_key(floor_height / floor_vertices as f32)),
             origin_band: layer_key(cell.origin.z),
+            bounds: cell_bounds,
+            floor_z: lowest_floor,
             walls,
         });
     }
@@ -584,6 +597,8 @@ fn build(landblock: u32, placed: &[PlacedCell]) -> Option<DungeonFloorplan> {
             cell_id: cell.cell_id,
             center: cell.center,
             layer_z: band,
+            bounds: cell.bounds,
+            floor_z: cell.floor_z,
         });
     }
 

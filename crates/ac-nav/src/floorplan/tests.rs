@@ -485,6 +485,47 @@ fn a_tall_rooms_upper_cell_folds_into_the_band_of_the_cell_below() {
     assert_eq!(plan.counts.walls_after_merge, 8);
 }
 
+/// Each cell keeps the box around its polygons and the height of its own
+/// floor. The lower half of the tall room is drawn with its floor at 2.5
+/// while its middle is at 5.5; its upper half and the lonely cell have no
+/// floor of their own.
+#[test]
+fn each_cell_keeps_its_bounds_and_the_height_of_its_floor() {
+    let dats = stacked_rooms();
+    let plan = DungeonFloorplanBuilder::new()
+        .try_build(&dats, STACKED)
+        .unwrap()
+        .unwrap();
+    let [lower, upper, lonely] = plan.cells.as_slice() else {
+        panic!("three cells: {:?}", plan.cells);
+    };
+    assert_vec3(Vec3::new(20.0, 30.0, 2.5), lower.bounds.min);
+    assert_vec3(Vec3::new(30.0, 38.0, 8.5), lower.bounds.max);
+    assert_eq!(lower.floor_z, Some(2.5));
+    assert_vec3(Vec3::new(25.0, 34.0, 5.5), lower.center);
+    assert_vec3(Vec3::new(20.0, 30.0, 8.5), upper.bounds.min);
+    assert_vec3(Vec3::new(30.0, 38.0, 14.5), upper.bounds.max);
+    assert_eq!(
+        upper.floor_z, None,
+        "its floor is the opening onto the cell below"
+    );
+    assert_eq!(lonely.floor_z, None);
+    assert_vec3(Vec3::new(60.0, 30.0, 15.0), lonely.bounds.min);
+
+    // A quarter turn about (20, 30): the 10 by 8 box runs 8 m west and 10 m
+    // north of it.
+    let dats = two_rooms();
+    let plan = DungeonFloorplanBuilder::new()
+        .try_build(&dats, TWO_ROOMS)
+        .unwrap()
+        .unwrap();
+    let turned = &plan.cells[0];
+    assert_vec3(Vec3::new(12.0, 30.0, 0.5), turned.bounds.min);
+    assert_vec3(Vec3::new(20.0, 40.0, 3.5), turned.bounds.max);
+    assert_eq!(turned.floor_z, Some(0.5));
+    assert_eq!(plan.cells[1].floor_z, Some(7.2));
+}
+
 const SHAFT: u32 = 0x0345_0000;
 
 /// One shaft three cells tall: a bottom cell with a floor, a middle cell

@@ -583,3 +583,79 @@ fn a_dungeons_indoor_cells_carry_their_doorways_and_older_plugins_get_the_record
         assert_eq!(read[0].cell_id, cells[0].cell_id);
     });
 }
+
+/// A dungeon's floorplan from the installed game files: each cell's box
+/// holds its middle and its floor, and a plugin built for API 1.4 is sent
+/// the plan as it was, byte for byte. Prints how often the band a cell is
+/// drawn in and the band of its own floor differ, and which cells one list
+/// has and the other has not.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_dungeons_floorplan_cells_carry_their_bounds_and_floor() {
+    use ac_plugin::abi::world::Floorplan;
+    use ac_plugin::abi::{API_CURRENT, ApiVersion, Import};
+    const DUNGEON: u32 = 0x0032_0000;
+    let mut session = Session::at(60.0, 150.0);
+    let Session { state, outbox, .. } = &mut session;
+    with_binding(state, outbox, |b| {
+        let plan = call_as::<calls::DungeonFloorplan>(b, "a", &DUNGEON).expect("a plan");
+        let indoor = call_as::<calls::DungeonIndoorCells>(b, "a", &DUNGEON);
+        let mut floorless = 0;
+        let mut off_band = 0;
+        for cell in &plan.cells {
+            let (low, high) = (cell.bounds_min, cell.bounds_max);
+            let inside = |(x, y, z): (f32, f32, f32)| {
+                x >= low.0 - 1e-3
+                    && y >= low.1 - 1e-3
+                    && z >= low.2 - 1e-3
+                    && x <= high.0 + 1e-3
+                    && y <= high.1 + 1e-3
+                    && z <= high.2 + 1e-3
+            };
+            assert!(inside(cell.center), "0x{:08X}", cell.cell_id);
+            match cell.floor_z {
+                Some(floor) => {
+                    assert!(
+                        floor >= low.2 - 1e-3 && floor <= high.2 + 1e-3,
+                        "0x{:08X}",
+                        cell.cell_id
+                    );
+                    if ac_nav::floorplan::layer_key(floor) != cell.layer_z {
+                        off_band += 1;
+                    }
+                }
+                None => floorless += 1,
+            }
+        }
+        let planned: std::collections::HashSet<u32> =
+            plan.cells.iter().map(|c| c.cell_id).collect();
+        let listed: std::collections::HashSet<u32> = indoor.iter().map(|c| c.cell_id).collect();
+        println!(
+            "0x{:04X}: {} cells on the plan, {} listed; {floorless} without a floor, {off_band} drawn off their floor's band; listed only: {:X?}; planned only: {:X?}",
+            DUNGEON >> 16,
+            planned.len(),
+            listed.len(),
+            listed.difference(&planned).collect::<Vec<_>>(),
+            planned.difference(&listed).collect::<Vec<_>>(),
+        );
+        assert!(planned.is_subset(&listed));
+
+        let v1_4 = ApiVersion::new(1, 4);
+        let ask = |b: &mut PluginBinding<'_>, version| {
+            let caller = Caller {
+                plugin_id: "a",
+                api_version: version,
+            };
+            b.call(caller, Import::DungeonFloorplan, &DUNGEON.to_bytes())
+                .unwrap()
+        };
+        let older = ask(b, v1_4);
+        let plan = Some(plan);
+        assert_eq!(older, plan.to_bytes_at(v1_4));
+        assert_eq!(ask(b, API_CURRENT), plan.to_bytes());
+        let read = Option::<Floorplan>::from_bytes_at(&older, v1_4)
+            .unwrap()
+            .unwrap();
+        assert!(read.cells.iter().all(|c| c.floor_z.is_none()));
+    });
+}

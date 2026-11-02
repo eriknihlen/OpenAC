@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0xaa91_d1fb_20b2_bd41;
+    const PUBLISHED: u64 = 0x0a4a_7b5e_5aa4_49f8;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {
@@ -313,9 +313,12 @@ mod tests {
     const API_1_4_CORE: u64 = 0xc98c_762b_1ce4_4a3c;
 
     /// The calls API 1.5 changed, with the shape each had before: the
-    /// indoor cells gained their doorways and the cells seen from them.
-    const API_1_4_CHANGED: [(Import, u64); 1] =
-        [(Import::DungeonIndoorCells, 0xca99_6144_2871_7333)];
+    /// indoor cells gained their doorways and the cells seen from them, and
+    /// the floorplan's cells their bounds and floor height.
+    const API_1_4_CHANGED: [(Import, u64); 2] = [
+        (Import::DungeonIndoorCells, 0xca99_6144_2871_7333),
+        (Import::DungeonFloorplan, 0xa845_70db_d1b5_681c),
+    ];
 
     /// API 1.5 added fields at the end of a path preview's plan, which
     /// changes the core shape, and to the records of the calls in
