@@ -217,6 +217,34 @@ impl<K: Eq + Hash + Clone> BoundedUnownedResourceCache<K> {
         self.order.clear();
         self.resident_bytes = 0;
     }
+
+    /// One sweep over the `resident` resources (with their bytes): those
+    /// `owned` names leave the budget, the others not held yet are held,
+    /// newest; then the oldest beyond the budget (all of them when
+    /// `retain` is off) are taken out and returned, to be released.
+    pub fn settle(
+        &mut self,
+        resident: impl IntoIterator<Item = (K, u64)>,
+        owned: impl Fn(&K) -> bool,
+        retain: bool,
+    ) -> Vec<K> {
+        for (key, bytes) in resident {
+            if owned(&key) {
+                self.mark_owned(&key);
+            } else if !self.contains(&key) {
+                // A zero-sized resource is never held (nothing to free).
+                let _ = self.mark_unowned(key, bytes);
+            }
+        }
+        std::iter::from_fn(|| {
+            if retain {
+                self.try_take_oldest_over_budget()
+            } else {
+                self.try_take_oldest()
+            }
+        })
+        .collect()
+    }
 }
 
 #[cfg(test)]

@@ -53,6 +53,7 @@ use crate::animation::pose::rest_poses;
 use crate::animation::source::{AnimationSource, ContentAnimationSource};
 use crate::animation::{AnimationPresenter, FiredHook, HookOwner, StaticKey};
 use crate::appearance::AppearanceKey;
+use crate::appearance_residency::FIRST_SURFACE_HANDLE;
 use crate::assets::{
     GfxObjData, LandblockData, NearData, StaticInstance, SubMeshRange, SurfaceData,
 };
@@ -138,10 +139,6 @@ type Bounds = Option<(Vec3, Vec3)>;
 /// chase camera's sweep sphere).
 const VIEWER_SPHERE_RADIUS: f32 = crate::camera_collision::VIEWER_SPHERE_RADIUS;
 
-/// Handles of substituted surfaces start here (see the loader); they are
-/// never released.
-const FIRST_SURFACE_HANDLE: u32 = 0x1000_0000;
-
 /// Settings of the world renderer.
 #[derive(Debug, Clone)]
 pub struct WorldSettings {
@@ -180,6 +177,14 @@ pub struct WorldStats {
     pub meshes: usize,
     /// Surface textures on the GPU.
     pub surfaces: usize,
+    /// Server objects' looks held (appearances), as of the last sweep.
+    pub appearances: usize,
+    /// Their part variants, as of the last sweep.
+    pub variants: usize,
+    /// Recoloured surface textures on the GPU, as of the last sweep.
+    pub recoloured_surfaces: usize,
+    /// Their bytes.
+    pub recoloured_surface_bytes: u64,
     /// CPU time of the last frame's preparation (loader uploads, the walk,
     /// instance lists), microseconds.
     pub prepare_micros: u64,
@@ -516,8 +521,6 @@ pub(crate) struct WorldRenderer {
     lights: WindowLights,
     /// Bounds and lights of each model.
     model_info: crate::IdMap<u32, ModelInfo>,
-    /// Bounds of each appearance's parts.
-    appearance_bounds: HashMap<AppearanceKey, Option<(Vec3, Vec3)>>,
     /// The player's cell and whether it is sealed (no view outside).
     player_cell_sealed: Option<(u32, bool)>,
     /// The frame's clear colour (the fog colour once the sky is known).
@@ -584,11 +587,9 @@ pub(crate) struct WorldRenderer {
 
     models: crate::IdMap<u32, Option<Vec<MeshRef>>>,
     requested_models: crate::model_requests::ModelRequests,
-    /// Server objects' models drawn with their appearance.
-    appearances: HashMap<AppearanceKey, Option<Vec<MeshRef>>>,
-    requested_appearances: HashSet<AppearanceKey>,
-    /// Part surface substitutions: variant id to (surface id, handle).
-    variants: HashMap<u32, Vec<(u32, u32)>>,
+    /// Server objects' models drawn with their appearance, their part
+    /// variants and which recoloured surfaces they own.
+    looks: crate::appearance_residency::HeldLooks,
     meshes: crate::IdMap<MeshKey, GfxGpu>,
     /// GfxObjs and surfaces asked for again after a release.
     requested_gfx: HashSet<u32>,
@@ -895,7 +896,6 @@ impl WorldRenderer {
             ambient_region: None,
             lights: WindowLights::new(),
             model_info: crate::IdMap::default(),
-            appearance_bounds: HashMap::new(),
             player_cell_sealed: None,
             clear: None,
             camera: None,
@@ -947,9 +947,7 @@ impl WorldRenderer {
             icon_probes: icon_probes::IconProbes::default(),
             models: crate::IdMap::default(),
             requested_models: crate::model_requests::ModelRequests::default(),
-            appearances: HashMap::new(),
-            requested_appearances: HashSet::new(),
-            variants: HashMap::new(),
+            looks: crate::appearance_residency::HeldLooks::default(),
             meshes: crate::IdMap::default(),
             requested_gfx: HashSet::new(),
             requested_surfaces: HashSet::new(),
@@ -2494,13 +2492,7 @@ impl WorldRenderer {
     /// and land cell), asking for models not yet here.
     fn request_missing_models(&mut self, scene: Option<&Scene>) {
         self.server_models_missing.clear();
-        for object in scene.into_iter().flat_map(Scene::objects) {
-            let Some(setup_id) = object.setup_id else {
-                continue;
-            };
-            if object.position.is_none() && object.parent.is_none() {
-                continue;
-            }
+        for (object, setup_id) in drawn_objects(scene) {
             // Held objects do not hold back the login reveal.
             let gates_reveal = object.parent.is_none();
             let key = AppearanceKey::in_world(setup_id, &object.model);
@@ -2513,11 +2505,11 @@ impl WorldRenderer {
                 if self.requested_models.ask(setup_id) {
                     self.loader.request(LoadRequest::Model(setup_id));
                 }
-            } else if self.drawn_by_appearance(&key) && !self.appearances.contains_key(&key) {
+            } else if self.drawn_by_appearance(&key) && !self.looks.contains(&key) {
                 if gates_reveal {
                     self.server_models_missing.push((object.guid, setup_id));
                 }
-                if self.requested_appearances.insert(key.clone()) {
+                if self.looks.ask(&key) {
                     self.loader.request(LoadRequest::Appearance(Box::new(key)));
                 }
             }
@@ -2551,8 +2543,7 @@ impl WorldRenderer {
             let parts = self.models.get(&setup_id).and_then(Option::as_deref)?;
             Some((parts, self.model_info.get(&setup_id).and_then(|i| i.bounds)))
         } else {
-            let parts = self.appearances.get(&key).and_then(Option::as_deref)?;
-            Some((parts, self.appearance_bounds.get(&key).copied().flatten()))
+            self.looks.parts(&key)
         }
     }
 
@@ -2941,9 +2932,12 @@ impl WorldRenderer {
                 gfx.extend(parts.iter().map(|p| p.gfx_obj_id));
             }
         }
-        for parts in self.appearances.values().flatten() {
-            gfx.extend(parts.iter().map(|p| p.gfx_obj_id));
-        }
+        // Looks nothing draws any more go, with the variants only they
+        // named; their recoloured surfaces become unowned below.
+        let mut used = scene_appearance_keys(scene);
+        used.extend(self.viewports.appearance_keys().cloned());
+        let released = self.looks.release_unused(|key| used.contains(key));
+        gfx.extend(self.looks.all_parts().map(|p| p.gfx_obj_id));
         // Particle models and textures live emitters draw with.
         let mut particle_surfaces = HashSet::new();
         if let Some(effects) = self.effects.as_ref() {
@@ -2968,9 +2962,7 @@ impl WorldRenderer {
                 surfaces.extend(mesh.sub_meshes.iter().map(|s| s.surface_id));
             }
         }
-        for map in self.variants.values() {
-            surfaces.extend(map.iter().flat_map(|&(s, h)| [s, h]));
-        }
+        surfaces.extend(self.looks.owned_surfaces());
         surfaces.extend(particle_surfaces);
         // Surfaces a kept mesh needs that are not here (released while the
         // mesh was being sent): ask again.
@@ -2991,51 +2983,58 @@ impl WorldRenderer {
             .filter(|id| !models.contains(id))
             .collect();
         // Meshes and textures nothing draws stay within their unowned
-        // budgets (OpenAC's residency budgets); the oldest beyond go.
-        for (key, mesh) in &self.meshes {
-            if *key >> 32 != 0 {
-                continue;
-            }
-            let id = *key as u32;
-            if gfx.contains(&id) {
-                self.unowned_meshes.mark_owned(&id);
-            } else if !self.unowned_meshes.contains(&id) {
-                let bytes = (mesh.vertices.size() + mesh.indices.size()).max(1);
-                let _ = self.unowned_meshes.mark_unowned(id, bytes);
-            }
-        }
-        for (id, surface) in &self.surfaces {
-            if *id >= FIRST_SURFACE_HANDLE {
-                continue;
-            }
-            if surfaces.contains(id) {
-                self.unowned_surfaces.mark_owned(id);
-            } else if !self.unowned_surfaces.contains(id) {
-                let _ = self.unowned_surfaces.mark_unowned(*id, surface.bytes);
-            }
-        }
+        // budgets (OpenAC's residency budgets); the oldest beyond go. A
+        // recoloured surface no kept look draws with is held in the
+        // texture budget like any other (OpenAC releases a composite
+        // texture's last owner into its unowned budget).
         // UI Only keeps nothing unowned (OpenAC
         // `SetUnownedContentRetained(false)`).
         let retain = !self.ui_only;
-        let gone_gfx: Vec<u32> = std::iter::from_fn(|| {
-            if retain {
-                self.unowned_meshes.try_take_oldest_over_budget()
-            } else {
-                self.unowned_meshes.try_take_oldest()
-            }
-        })
-        .collect();
-        let gone_surfaces: Vec<u32> = std::iter::from_fn(|| {
-            if retain {
-                self.unowned_surfaces.try_take_oldest_over_budget()
-            } else {
-                self.unowned_surfaces.try_take_oldest()
-            }
-        })
-        .collect();
-        if gone_models.is_empty() && gone_gfx.is_empty() && gone_surfaces.is_empty() {
-            return;
+        let gone_gfx = self.unowned_meshes.settle(
+            self.meshes
+                .iter()
+                .filter(|(key, _)| *key >> 32 == 0)
+                .map(|(key, mesh)| {
+                    let bytes = (mesh.vertices.size() + mesh.indices.size()).max(1);
+                    (*key as u32, bytes)
+                }),
+            |id| gfx.contains(id),
+            retain,
+        );
+        let gone_surfaces = self.unowned_surfaces.settle(
+            self.surfaces
+                .iter()
+                .map(|(id, surface)| (*id, surface.bytes)),
+            |id| surfaces.contains(id),
+            retain,
+        );
+        let nothing_gone = gone_models.is_empty()
+            && gone_gfx.is_empty()
+            && gone_surfaces.is_empty()
+            && released.is_empty();
+        if !nothing_gone {
+            self.release(gone_models, gone_gfx, gone_surfaces, released);
         }
+        let (count, bytes) = self
+            .surfaces
+            .iter()
+            .filter(|(id, _)| **id >= FIRST_SURFACE_HANDLE)
+            .fold((0, 0), |(n, b), (_, s)| (n + 1, b + s.bytes));
+        self.stats.recoloured_surfaces = count;
+        self.stats.recoloured_surface_bytes = bytes;
+        self.stats.appearances = self.looks.appearance_count();
+        self.stats.variants = self.looks.variant_count();
+    }
+
+    /// Release what a sweep found unused and tell the loader to forget it,
+    /// in one request (so it sends each again when next wanted).
+    fn release(
+        &mut self,
+        gone_models: Vec<u32>,
+        gone_gfx: Vec<u32>,
+        gone_surfaces: Vec<u32>,
+        looks: crate::appearance_residency::ReleasedLooks,
+    ) {
         for id in &gone_models {
             self.models.remove(id);
             self.model_info.remove(id);
@@ -3053,6 +3052,8 @@ impl WorldRenderer {
             models: gone_models,
             gfx_objs: gone_gfx,
             surfaces: gone_surfaces,
+            appearances: looks.appearances,
+            variants: looks.variants,
         });
     }
 
@@ -3369,6 +3370,11 @@ impl WorldRenderer {
                 Loaded::Icon(icon) => self.icon = Some(icon),
                 Loaded::Surface(surface) => {
                     self.requested_surfaces.remove(&surface.id);
+                    // A recoloured surface sent again at a new texture
+                    // detail is not new.
+                    if !self.surfaces.contains_key(&surface.id) {
+                        self.looks.surface_arrived(surface.id);
+                    }
                     self.upload_surface(device, queue, &surface);
                 }
                 Loaded::GfxObj(gfx) => {
@@ -3381,12 +3387,24 @@ impl WorldRenderer {
                     self.models.insert(id, parts);
                     self.model_info.insert(id, info);
                 }
-                Loaded::Variant { id, surfaces } => {
-                    self.variants.insert(id, surfaces);
-                }
+                Loaded::Variant { id, surfaces } => self.looks.variant_arrived(id, surfaces),
                 Loaded::Appearance { key, parts, bounds } => {
-                    self.appearance_bounds.insert((*key).clone(), bounds);
-                    self.appearances.insert(*key, parts);
+                    let surfaces = &self.surfaces;
+                    if let Some(refused) = self
+                        .looks
+                        .appearance_arrived(*key, parts, bounds, |h| surfaces.contains_key(&h))
+                    {
+                        // It crossed a forget in flight: the loader forgets
+                        // it and what it named that is gone, and the next
+                        // frame asks for it again.
+                        self.loader.request(LoadRequest::Forget {
+                            models: Vec::new(),
+                            gfx_objs: Vec::new(),
+                            surfaces: refused.handles,
+                            appearances: refused.appearances,
+                            variants: refused.variants,
+                        });
+                    }
                 }
                 Loaded::Region {
                     sky,
@@ -3697,14 +3715,7 @@ impl WorldRenderer {
         let handle = if variant == 0 {
             surface_id
         } else {
-            self.variants
-                .get(&variant)
-                .and_then(|map| {
-                    map.binary_search_by_key(&surface_id, |&(s, _)| s)
-                        .ok()
-                        .map(|i| map[i].1)
-                })
-                .unwrap_or(surface_id)
+            self.looks.handle(variant, surface_id).unwrap_or(surface_id)
         };
         self.surfaces.get(&handle)
     }
@@ -4441,6 +4452,28 @@ impl RevealFacts for RevealState<'_> {
     }
 }
 
+/// The server objects drawn (standing in the world or held by one) and
+/// their models.
+fn drawn_objects(
+    scene: Option<&Scene>,
+) -> impl Iterator<Item = (&ac_runtime::world::ObjectView, u32)> {
+    scene
+        .into_iter()
+        .flat_map(Scene::objects)
+        .filter_map(|object| {
+            let setup_id = object.setup_id?;
+            (object.position.is_some() || object.parent.is_some()).then_some((object, setup_id))
+        })
+}
+
+/// The looks of the server objects drawn (held objects included): what the
+/// sweep keeps.
+fn scene_appearance_keys(scene: Option<&Scene>) -> HashSet<AppearanceKey> {
+    drawn_objects(scene)
+        .map(|(object, setup_id)| AppearanceKey::in_world(setup_id, &object.model))
+        .collect()
+}
+
 #[cfg(test)]
 mod atlas_upload_tests;
 #[cfg(test)]
@@ -4730,5 +4763,98 @@ mod tests {
         for cell in cells {
             assert_eq!(filed[&cell], vec![(HOME, 0), (HOME, 1), (HOME, 2)]);
         }
+    }
+
+    /// A server object recoloured by `texture`, standing in the world
+    /// (`Some(false)`), held by another with no place of its own
+    /// (`Some(true)`), or in a pack (`None`).
+    fn recoloured_object(
+        local_id: u32,
+        texture: u32,
+        held: Option<bool>,
+    ) -> ac_runtime::world::ObjectView {
+        use ac_runtime::world::{EffectFacts, ObjectKey, ObjectView, RadarFacts};
+        ObjectView {
+            key: ObjectKey {
+                local_id,
+                incarnation: 1,
+            },
+            guid: 0x8000_0000 | local_id,
+            name: None,
+            setup_id: Some(0x0200_0001),
+            position: (held == Some(false)).then_some(ac_proto::Position {
+                cell_id: 0xA9B4_0019,
+                origin: ac_proto::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                orientation: ac_proto::Quaternion::IDENTITY,
+            }),
+            parent: (held == Some(true)).then_some(ac_proto::PhysicsAttachment {
+                guid: 0x5000_0001,
+                location_id: 1,
+            }),
+            placement: None,
+            rest_placement: 0,
+            scale: None,
+            translucency: None,
+            state: 0,
+            velocity: None,
+            model: ac_proto::ModelData {
+                texture_changes: vec![ac_proto::TextureChange {
+                    part_index: 0,
+                    old_texture: 0x0500_0001,
+                    new_texture: texture,
+                }],
+                ..ac_proto::ModelData::default()
+            },
+            motion_table_id: None,
+            sound_table_id: None,
+            radar: RadarFacts::default(),
+            motion: None,
+            effects: EffectFacts::default(),
+            step_blend: None,
+        }
+    }
+
+    /// The sweep keeps the looks of the objects standing in the world and
+    /// of those they hold (a wielded sword has no place of its own), not
+    /// of what sits in a pack.
+    #[test]
+    fn held_items_keep_their_looks() {
+        let standing = recoloured_object(1, 0x0500_00A0, Some(false));
+        let held = recoloured_object(2, 0x0500_00B0, Some(true));
+        let packed = recoloured_object(3, 0x0500_00C0, None);
+        let mut scene = Scene::default();
+        scene.apply(ac_runtime::session::PresentationEvent::Snapshot(
+            ac_runtime::world::WorldSnapshot {
+                player_guid: None,
+                objects: vec![standing.clone(), held.clone(), packed.clone()],
+            },
+        ));
+        let key =
+            |o: &ac_runtime::world::ObjectView| AppearanceKey::in_world(0x0200_0001, &o.model);
+        let used = scene_appearance_keys(Some(&scene));
+        assert!(used.contains(&key(&standing)));
+        assert!(used.contains(&key(&held)), "a held item keeps its look");
+        assert!(!used.contains(&key(&packed)));
+
+        let mut looks = crate::appearance_residency::HeldLooks::default();
+        for (variant, o) in (1u32..).zip([&standing, &held, &packed]) {
+            looks.variant_arrived(variant, vec![(0x0800_0100, FIRST_SURFACE_HANDLE + variant)]);
+            let part = MeshRef {
+                gfx_obj_id: 0x0100_0001,
+                transform: Mat4::IDENTITY,
+                variant,
+            };
+            let refused = looks.appearance_arrived(key(o), Some(vec![part]), None, |_| true);
+            assert!(refused.is_none());
+        }
+        let released = looks.release_unused(|k| used.contains(k));
+        assert_eq!(released.appearances, vec![key(&packed)]);
+        assert_eq!(released.variants, vec![3]);
+        assert!(looks.contains(&key(&held)));
+        assert_eq!(looks.handle(2, 0x0800_0100), Some(FIRST_SURFACE_HANDLE + 2));
     }
 }

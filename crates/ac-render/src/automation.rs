@@ -264,13 +264,17 @@ pub fn checkpoint_json(
         Some(s) => {
             let _ = write!(
                 out,
-                "{{\"loadedLandblocks\":{},\"visibleLandblocks\":{},\"objectsDrawn\":{},\"cellsDrawn\":{},\"meshes\":{},\"surfaces\":{},\"animatedObjects\":{},\"animatedStatics\":{},\"particleEmitters\":{},\"particles\":{},\"viewerCell\":{}}}",
+                "{{\"loadedLandblocks\":{},\"visibleLandblocks\":{},\"objectsDrawn\":{},\"cellsDrawn\":{},\"meshes\":{},\"surfaces\":{},\"appearances\":{},\"variants\":{},\"recolouredSurfaces\":{},\"recolouredSurfaceBytes\":{},\"animatedObjects\":{},\"animatedStatics\":{},\"particleEmitters\":{},\"particles\":{},\"viewerCell\":{}}}",
                 s.landblocks,
                 s.landblocks_drawn,
                 s.objects_drawn,
                 s.cells_drawn,
                 s.meshes,
                 s.surfaces,
+                s.appearances,
+                s.variants,
+                s.recoloured_surfaces,
+                s.recoloured_surface_bytes,
                 s.animated_objects,
                 s.animated_statics,
                 s.emitters,
@@ -503,6 +507,7 @@ mod tests {
         assert!(one.contains("\"normalWorldDrawn\":true"), "{one}");
         assert!(one.contains("\"isReady\":true"), "{one}");
         assert!(one.contains("\"loadedLandblocks\":9"), "{one}");
+        assert!(one.contains("\"recolouredSurfaceBytes\":0"), "{one}");
         let timeline =
             std::fs::read_to_string(dir.join("world-lifecycle.checkpoints.jsonl")).unwrap();
         assert_eq!(timeline.lines().count(), 2);

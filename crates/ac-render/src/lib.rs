@@ -10,6 +10,7 @@
 
 pub mod animation;
 pub mod appearance;
+mod appearance_residency;
 pub mod assets;
 pub mod atmosphere;
 pub mod attach;

@@ -40,6 +40,10 @@ pub(crate) struct Viewports {
     /// Models the previews draw that no world object holds (the scenery
     /// behind them), kept from the sweep.
     models: HashSet<u32>,
+    /// The looks each creation preview shows and last asked for, kept
+    /// from the sweep.
+    shown_looks: [Option<AppearanceKey>; 2],
+    wanted_looks: [Option<AppearanceKey>; 2],
     epoch: Instant,
     generation: u64,
 }
@@ -55,6 +59,8 @@ impl Viewports {
             ],
             poses: HashMap::new(),
             models: HashSet::new(),
+            shown_looks: [None, None],
+            wanted_looks: [None, None],
             epoch: Instant::now(),
             generation: 0,
         }
@@ -63,6 +69,13 @@ impl Viewports {
     /// The models the viewports draw that must not be released.
     pub(crate) fn models(&self) -> impl Iterator<Item = u32> + '_ {
         self.models.iter().copied()
+    }
+
+    /// The looks the viewports draw that no world object may hold (the
+    /// creation previews'); the paperdoll and the examine portrait draw
+    /// world objects, whose looks the world keeps.
+    pub(crate) fn appearance_keys(&self) -> impl Iterator<Item = &AppearanceKey> + '_ {
+        self.shown_looks.iter().chain(&self.wanted_looks).flatten()
     }
 }
 
@@ -338,9 +351,16 @@ impl WorldRenderer {
         now: f64,
     ) -> Option<SceneDraw> {
         let index = usize::from(slot == ViewportSlot::ChargenSummary);
-        if self.viewports.chargen[index].needs_rebuild(look.heritage, look.gender, &look.selection)
-            && let Some(figure) = self.chargen_figure(look)
-        {
+        let rebuild = self.viewports.chargen[index].needs_rebuild(
+            look.heritage,
+            look.gender,
+            &look.selection,
+        );
+        if rebuild {
+            self.viewports.wanted_looks[index] = Some(look.key.clone());
+        }
+        if rebuild && let Some(figure) = self.chargen_figure(look) {
+            self.viewports.shown_looks[index] = Some(look.key.clone());
             if look.backdrop_setup != 0 {
                 self.viewports.models.insert(look.backdrop_setup);
             }
@@ -393,10 +413,10 @@ impl WorldRenderer {
             self.viewports.models.insert(key.setup_id);
             return self.wanted_model(key.setup_id);
         }
-        match self.appearances.get(key) {
+        match self.looks.get(key) {
             Some(parts) => parts.clone(),
             None => {
-                if self.requested_appearances.insert(key.clone()) {
+                if self.looks.ask(key) {
                     self.loader
                         .request(LoadRequest::Appearance(Box::new(key.clone())));
                 }

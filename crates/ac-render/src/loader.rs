@@ -21,12 +21,13 @@ use std::thread::{self, JoinHandle};
 use ac_audio::ambient::AmbientRegion;
 use ac_core::lighting::LightInfoSource;
 use ac_core::sky::LoadedSkyDesc;
-use ac_dat::objects::{Palette, Region};
+use ac_dat::objects::Region;
 use ac_dat::texture::DecodedTexture;
 use ac_physics::PhysicsEngine;
 use glam::Vec3;
 
-use crate::appearance::{AppearanceKey, PaletteSpec};
+use crate::appearance::AppearanceKey;
+use crate::appearance_residency::{SentLooks, SurfaceVariantKey};
 use crate::assets::{
     self, GfxObjData, LandblockData, NearData, REGION_ID, SurfaceData, TerrainAtlasData,
 };
@@ -74,8 +75,12 @@ pub enum LoadRequest {
         models: Vec<u32>,
         /// GfxObj ids.
         gfx_objs: Vec<u32>,
-        /// Surface ids.
+        /// Surface ids and recoloured surface handles.
         surfaces: Vec<u32>,
+        /// Appearances.
+        appearances: Vec<AppearanceKey>,
+        /// Variant ids.
+        variants: Vec<u32>,
     },
 }
 
@@ -376,14 +381,8 @@ struct Worker<'a> {
     /// Each GfxObj's box, model-local.
     gfx_bounds: HashMap<u32, (Vec3, Vec3)>,
     surfaces: SentSurfaces,
-    appearances: HashSet<AppearanceKey>,
-    /// Modified palettes built so far (`None`: the swap cannot be built).
-    palettes: HashMap<PaletteSpec, Option<Arc<Palette>>>,
-    /// Substituted surfaces: (surface, texture, palette) to handle.
-    surface_variants: HashMap<SurfaceVariantKey, u32>,
-    next_surface_handle: u32,
-    /// Part surface maps to variant ids.
-    variants: HashMap<Vec<(u32, u32)>, u32>,
+    /// Appearances, their variants and recoloured surfaces sent.
+    looks: SentLooks,
     /// The world's texture detail.
     detail: WorldTextureDetail,
     /// Block-compressed textures may stay compressed (the GPU samples them).
@@ -393,10 +392,6 @@ struct Worker<'a> {
     /// The sky's models, whose textures keep their full detail.
     full_detail_models: HashSet<u32>,
 }
-
-/// Handles of substituted surfaces start here, above every surface id
-/// (`0x08xxxxxx`), so a handle never names a stored surface.
-const FIRST_SURFACE_HANDLE: u32 = 0x1000_0000;
 
 /// Work the loader queues between requests.
 /// One landblock job.
@@ -921,9 +916,6 @@ enum Work {
     ResizeVariant(SurfaceVariantKey, u32),
 }
 
-/// A substituted surface: (surface, texture, palette).
-type SurfaceVariantKey = (u32, Option<u32>, Option<PaletteSpec>);
-
 impl Worker<'_> {
     fn send(&self, item: Loaded) -> bool {
         !self.stop.load(Ordering::Relaxed) && self.out.send(item).is_ok()
@@ -1012,12 +1004,7 @@ impl Worker<'_> {
     fn change_detail(&mut self, detail: WorldTextureDetail) -> Vec<Work> {
         self.detail = detail;
         self.prepared.set_detail(detail);
-        let mut variants: Vec<(SurfaceVariantKey, u32)> = self
-            .surface_variants
-            .iter()
-            .map(|(key, &handle)| (key.clone(), handle))
-            .collect();
-        variants.sort_unstable_by_key(|&(_, handle)| handle);
+        let variants = self.looks.surface_variants();
         self.surfaces
             .to_resize()
             .into_iter()
@@ -1046,7 +1033,7 @@ impl Worker<'_> {
         // A palette that cannot be built repaints nothing.
         let repaint = spec
             .as_ref()
-            .and_then(|spec| self.palettes.get(spec).cloned().flatten());
+            .and_then(|spec| self.looks.built_palette(spec));
         sized(
             assets::build_surface_with(
                 &self.content,
@@ -1074,35 +1061,50 @@ impl Worker<'_> {
         self.send(Loaded::Near(coord, Box::new(data)))
     }
 
-    fn forget(&mut self, models: &[u32], gfx_objs: &[u32], surfaces: &[u32]) {
+    /// The window released these: they are sent again when next wanted.
+    /// Recoloured surfaces (handles) are forgotten with the variants that
+    /// name them.
+    fn forget(
+        &mut self,
+        models: &[u32],
+        gfx_objs: &[u32],
+        surfaces: &[u32],
+        appearances: &[AppearanceKey],
+        variants: &[u32],
+    ) {
         for id in models {
             self.models.remove(id);
         }
         for id in gfx_objs {
             self.gfx_objs.remove(id);
         }
-        for id in surfaces {
-            self.surfaces.remove(*id);
+        let (handles, plain): (Vec<u32>, Vec<u32>) = surfaces
+            .iter()
+            .partition(|&&id| id >= crate::appearance_residency::FIRST_SURFACE_HANDLE);
+        for id in plain {
+            self.surfaces.remove(id);
         }
+        self.looks.forget(appearances, variants, &handles);
     }
 
     /// Send a model drawn with an appearance, preceded by its GfxObjs, the
     /// substituted surfaces and the variants that are new. False once the
     /// window is gone.
     fn ensure_appearance(&mut self, key: AppearanceKey) -> bool {
-        if self.appearances.contains(&key) {
+        if self.looks.was_sent(&key) {
             return true;
         }
         let palette = match &key.palette {
-            Some(spec) => self
-                .palettes
-                .entry(spec.clone())
-                .or_insert_with(|| assets::modified_palette(&self.content, spec).map(Arc::new))
-                .clone(),
+            Some(spec) => {
+                let content = &self.content;
+                self.looks.palette(spec, || {
+                    assets::modified_palette(content, spec).map(Arc::new)
+                })
+            }
             None => None,
         };
         let Some(parts) = assets::appearance_parts(&self.content, &key) else {
-            self.appearances.insert(key.clone());
+            self.looks.sent(key.clone());
             return self.send(Loaded::Appearance {
                 key: Box::new(key),
                 parts: None,
@@ -1114,52 +1116,36 @@ impl Worker<'_> {
             if !self.ensure_gfx_obj(part.part.gfx_obj_id, false) {
                 return false;
             }
-            let mut surfaces = Vec::new();
-            for change in &part.changes {
+            let changes = part.changes.iter().filter_map(|change| {
                 // A palette that cannot be built repaints nothing.
                 let repaint = change.repaint.then_some(()).and(palette.as_ref());
                 if change.texture.is_none() && repaint.is_none() {
-                    continue;
+                    return None;
                 }
                 let spec = repaint.and(key.palette.clone());
-                let variant_key = (change.surface_id, change.texture, spec);
-                let handle = match self.surface_variants.get(&variant_key) {
-                    Some(&handle) => handle,
-                    None => {
-                        let handle = self.next_surface_handle;
-                        self.next_surface_handle += 1;
-                        let data = self.variant_surface(&variant_key, handle);
-                        self.surface_variants.insert(variant_key, handle);
-                        if !self.send(Loaded::Surface(Box::new(data))) {
-                            return false;
-                        }
-                        handle
-                    }
-                };
-                surfaces.push((change.surface_id, handle));
-            }
-            let variant = if surfaces.is_empty() {
-                0
-            } else {
-                surfaces.sort_unstable();
-                match self.variants.get(&surfaces) {
-                    Some(&id) => id,
-                    None => {
-                        let id = self.variants.len() as u32 + 1;
-                        self.variants.insert(surfaces.clone(), id);
-                        if !self.send(Loaded::Variant { id, surfaces }) {
-                            return false;
-                        }
-                        id
-                    }
+                Some((change.surface_id, change.texture, spec))
+            });
+            let variant = self.looks.part_variant(changes);
+            for (variant_key, handle) in &variant.new_surfaces {
+                let data = self.variant_surface(variant_key, *handle);
+                if !self.send(Loaded::Surface(Box::new(data))) {
+                    return false;
                 }
-            };
+            }
+            if let Some(surfaces) = variant.new_variant
+                && !self.send(Loaded::Variant {
+                    id: variant.id,
+                    surfaces,
+                })
+            {
+                return false;
+            }
             meshes.push(MeshRef {
-                variant,
+                variant: variant.id,
                 ..part.part
             });
         }
-        self.appearances.insert(key.clone());
+        self.looks.sent(key.clone());
         let bounds = assets::parts_bounds(&meshes, |g| self.gfx_bounds.get(&g).copied());
         self.send(Loaded::Appearance {
             key: Box::new(key),
@@ -1241,11 +1227,7 @@ fn run(
         gfx_objs: HashSet::new(),
         gfx_bounds: HashMap::new(),
         surfaces: SentSurfaces::default(),
-        appearances: HashSet::new(),
-        palettes: HashMap::new(),
-        surface_variants: HashMap::new(),
-        next_surface_handle: FIRST_SURFACE_HANDLE,
-        variants: HashMap::new(),
+        looks: SentLooks::default(),
         detail,
         block_compression,
         prepared: Arc::new(PreparedSurfaces::new(detail)),
@@ -1294,7 +1276,9 @@ fn run(
                     models: m,
                     gfx_objs,
                     surfaces,
-                } => worker.forget(&m, &gfx_objs, &surfaces),
+                    appearances,
+                    variants,
+                } => worker.forget(&m, &gfx_objs, &surfaces, &appearances, &variants),
                 LoadRequest::TextureDetail(detail) => {
                     let old = worker.detail;
                     // The terrain goes first: the window writes the new
@@ -1382,11 +1366,12 @@ fn run(
             Some(Work::GfxObj(id, full)) => worker.ensure_gfx_obj(id, full),
             Some(Work::Surface(id, full)) => worker.ensure_surface(id, full),
             Some(Work::Resize(id)) => worker.resize_surface(id),
-            Some(Work::ResizeVariant(key, handle)) => {
+            // Unless the window released it since.
+            Some(Work::ResizeVariant(key, handle)) if worker.looks.holds_handle(&key, handle) => {
                 let data = worker.variant_surface(&key, handle);
                 worker.send(Loaded::Surface(Box::new(data)))
             }
-            None => true,
+            Some(Work::ResizeVariant(..)) | None => true,
         };
         if !done {
             return;

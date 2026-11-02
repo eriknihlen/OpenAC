@@ -240,6 +240,8 @@ mod tests {
             models: vec![shared],
             gfx_objs: Vec::new(),
             surfaces: Vec::new(),
+            appearances: Vec::new(),
+            variants: Vec::new(),
         });
         // It takes the landblock and asks for what may have been passed over.
         let have = window.have.clone();
