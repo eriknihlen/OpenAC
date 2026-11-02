@@ -413,6 +413,14 @@ wire_record! {
         pub reason: String,
         /// The route's length, metres.
         pub length_meters: f32,
+        /// Whether the search ran over a grid already built (or being
+        /// built) for a walk or an earlier preview, rather than one built
+        /// for this preview alone.
+        since (1, 5) pub grid_reused: bool,
+        /// How long the client's worker spent on it, milliseconds: waiting
+        /// for a grid under way, building one, and searching it. The time
+        /// to answer the call itself is not in it.
+        since (1, 5) pub took_ms: f32,
     }
 }
 

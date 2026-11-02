@@ -185,6 +185,8 @@ pub fn project_plan(handle: u32, plan: NavPlan) -> NavigationPlan {
             .collect(),
         reason: plan.reason,
         length_meters: plan.length_meters,
+        grid_reused: plan.grid_reused,
+        took_ms: plan.took_ms,
     }
 }
 

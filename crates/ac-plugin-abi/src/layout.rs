@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0x2645_bda7_c935_0d54;
+    const PUBLISHED: u64 = 0xe6e9_4c4d_4522_8e79;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {
@@ -302,6 +302,28 @@ mod tests {
         Import::UiFontRelease,
         Import::UiFontCount,
     ];
+
+    /// The core shape every plugin built for API 1.4 carries (a path
+    /// preview's plan without the grid it reused or the worker's time).
+    const API_1_4_CORE: u64 = 0xc98c_762b_1ce4_4a3c;
+
+    /// API 1.5 added fields at the end of a path preview's plan, which
+    /// changes the core shape: an API 1.4 plugin keeps its own, and every
+    /// import it has is as it was.
+    #[test]
+    fn api_1_4_plugins_keep_their_core_and_import_shapes() {
+        let v1_4 = ApiVersion::new(1, 4);
+        assert_eq!(core_shape(v1_4), API_1_4_CORE);
+        assert_ne!(CORE_SHAPE, API_1_4_CORE);
+        let section = PluginLayout::parse(&section_at(v1_4)).unwrap();
+        for import in Import::ALL {
+            let expected = import
+                .since()
+                .is_at_most(v1_4)
+                .then(|| import.shape_at(v1_4));
+            assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
+        }
+    }
 
     /// API 1.3 added only imports (the world triangles and markers): an API
     /// 1.2 plugin's section leaves those out, and its other shapes are an API

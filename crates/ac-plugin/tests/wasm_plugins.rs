@@ -416,7 +416,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.4 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.5 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -625,13 +625,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.4""#, r#""apiVersion": "1.5""#);
+    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.6""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.5, but this build supports 1.0..1.4"
+        "plugin 'openac.probe' declares apiVersion 1.6, but this build supports 1.0..1.5"
     );
 }
 
@@ -680,7 +680,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.4""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -794,7 +794,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.4""#,
+        r#""apiVersion": "1.5""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -846,6 +846,59 @@ fn a_plugin_built_for_api_1_3_still_loads() {
     let v1_3 = ApiVersion::new(1, 3);
     let (loaded, error) = load_probe_built_for("probe-1-3", "1.3", &section_at(v1_3));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.5 gave a path preview's plan two fields at its end: `probe` as an
+/// API 1.4 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_4_still_loads() {
+    let v1_4 = ApiVersion::new(1, 4);
+    let (loaded, error) = load_probe_built_for("probe-1-4", "1.4", &section_at(v1_4));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// A path preview's plan reaches a plugin exactly as its API version
+/// encodes it, through a real module: `rawbytes` built for API 1.4 is
+/// handed the plan without the grid it reused or the worker's time (byte
+/// for byte the 1.4 encoding); built for this API it gets both.
+#[test]
+fn a_navigation_plan_reaches_each_plugin_in_its_api_versions_encoding() {
+    use ac_plugin::abi::navigation::{NavigationPlan, NavigationPlanStatus};
+    let event = Event::NavigationPlan(NavigationPlan {
+        handle: 7,
+        status: NavigationPlanStatus::Routed,
+        reason: "routed".into(),
+        length_meters: 12.5,
+        grid_reused: true,
+        took_ms: 3.25,
+        ..NavigationPlan::default()
+    });
+    for version in [ApiVersion::new(1, 4), API_CURRENT] {
+        let root = Root::new(&format!("raw-plan-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        assert_eq!(handed, [event.to_bytes_at(version)], "{version}");
+        let Ok(Event::NavigationPlan(read)) = Event::from_bytes_at(&handed[0], version) else {
+            panic!("{version}: a plan");
+        };
+        assert_eq!(read.length_meters, 12.5, "{version}");
+        if version == API_CURRENT {
+            assert_eq!(handed[0], event.to_bytes());
+            assert!(read.grid_reused);
+            assert_eq!(read.took_ms, 3.25);
+        } else {
+            assert_eq!(handed[0].len() + 5, event.to_bytes().len(), "{version}");
+            assert!(!read.grid_reused);
+            assert_eq!(read.took_ms, 0.0);
+        }
+    }
 }
 
 /// Installs the test plugin `name` into `root` as an SDK for API `version`
@@ -1216,7 +1269,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.4 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.5 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2368,7 +2421,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.4""#,
+            r#""apiVersion": "1.5""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),

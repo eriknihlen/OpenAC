@@ -86,7 +86,9 @@ record without it (API 1.2 added `hook_item_types` to the inventory and
 world-object records: the item-type bits saying what a house hook takes, 0
 for anything that is not a hook). API 1.4 added five plugin themes: a plugin
 built for an older version is told `ThemeKind::Moss` under any of them, with
-the theme's real name and colours. Everything the client offers
+the theme's real name and colours. API 1.5 added, at the end of a path
+preview's `NavigationPlan`, whether it reused a grid and how long the client's
+worker took. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -206,6 +208,23 @@ bridge, a dungeon) it lies flat at the anchor's height. The client draws shapes
 centred within 250 m of the camera and in view, nearest first when a frame holds
 more than it has room for.
 
+**Navigation.** `Host::go_to` and `Host::go_to_place` walk the character,
+and `Host::go_to_report` says how the latest walk stands. The client plans
+over a grid of 0.25 m columns built from the collision loaded now; inside a
+sealed dungeon one grid covers every cell. `Host::preview_path` and
+`Host::preview_path_to_place` plan a route without moving the character: each
+returns a handle (0 never), and the plan arrives later as
+`Event::NavigationPlan` with that handle, to this plugin only. Only asking
+happens on the session thread. The grid build and the search run on a worker,
+so a plan can take tens of milliseconds and several can be out at once. A
+preview searches the grid a walk or an earlier preview built when it still
+stands for the world there. Inside a sealed dungeon a grid built for a
+preview is kept for the walks and previews after it, until it goes unused for
+30 seconds or the dungeon unloads. The plan's `grid_reused` says whether its
+grid was there already (API 1.5), and `took_ms` how long the worker spent:
+the first preview in a dungeon builds the grid, and the ones after it are
+quicker.
+
 ## Testing natively
 
 On a native target the SDK has `testing::FakeHost`, which answers every
@@ -235,7 +254,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.4",
+  "apiVersion": "1.5",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -251,7 +270,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.4"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.5"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |
