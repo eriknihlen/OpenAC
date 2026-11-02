@@ -173,6 +173,7 @@ fn session(state: LauncherActivityState) -> LauncherSessionSnapshot {
         exited_gracefully: false,
         server_message: None,
         account_in_use: false,
+        stop: None,
         plugin_notice: None,
         has_live_process: None,
         startup_in_flight: false,

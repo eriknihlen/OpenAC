@@ -22,6 +22,15 @@ pub enum LauncherSessionState {
     Exited,
 }
 
+/// How a stop ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopOutcome {
+    /// The process ended by itself within the timeout, or was not running.
+    Exited,
+    /// It did not end within the timeout and was killed.
+    Killed,
+}
+
 /// Why a supervisor operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum SupervisorError {
@@ -70,8 +79,9 @@ pub trait ProcessSupervisor: Send + Sync {
         spec: &LauncherProcessSpec,
         password: Option<&str>,
     ) -> Result<(), SupervisorError>;
-    /// Stops it, waiting up to `timeout` before killing.
-    fn stop(&self, timeout: Duration) -> Result<(), SupervisorError>;
+    /// Stops it, waiting up to `timeout` before killing; says whether it
+    /// had to kill.
+    fn stop(&self, timeout: Duration) -> Result<StopOutcome, SupervisorError>;
     /// Sends one line to a console session's input; false when it takes none.
     fn try_send_line(&self, line: &str) -> bool;
     /// Stops the process (if running) and lets it go.
@@ -226,16 +236,17 @@ impl LauncherProcessSupervisor {
     fn stop_process(
         process: &Arc<dyn ChildProcess>,
         timeout: Duration,
-    ) -> Result<(), SupervisorError> {
+    ) -> Result<StopOutcome, SupervisorError> {
         process.try_request_graceful_stop();
         process.close_main_window();
-        if !process.wait_for_exit(Some(timeout)) && !process.has_exited() {
-            process.kill()?;
-            if !process.wait_for_exit(None) && !process.has_exited() {
-                return Err(SupervisorError::NotTerminal);
-            }
+        if process.wait_for_exit(Some(timeout)) || process.has_exited() {
+            return Ok(StopOutcome::Exited);
         }
-        Ok(())
+        process.kill()?;
+        if !process.wait_for_exit(None) && !process.has_exited() {
+            return Err(SupervisorError::NotTerminal);
+        }
+        Ok(StopOutcome::Killed)
     }
 }
 
@@ -327,13 +338,13 @@ impl ProcessSupervisor for LauncherProcessSupervisor {
         Ok(())
     }
 
-    fn stop(&self, timeout: Duration) -> Result<(), SupervisorError> {
+    fn stop(&self, timeout: Duration) -> Result<StopOutcome, SupervisorError> {
         let process = self.lock().process.clone();
         match process {
             Some(process) if !process.has_exited() => {
                 LauncherProcessSupervisor::stop_process(&process, timeout)
             }
-            _ => Ok(()),
+            _ => Ok(StopOutcome::Exited),
         }
     }
 

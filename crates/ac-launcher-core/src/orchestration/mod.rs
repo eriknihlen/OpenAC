@@ -31,6 +31,6 @@ pub use relaunch::{
 pub use snapshot::{
     LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
     LauncherCharacterSnapshot, LauncherServerSnapshot, LauncherSessionSnapshot,
-    LauncherSessionWindow, LauncherStateSnapshot,
+    LauncherSessionStop, LauncherSessionWindow, LauncherStateSnapshot,
 };
 pub use stop_gate::LauncherStopGate;

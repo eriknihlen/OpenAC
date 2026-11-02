@@ -18,13 +18,13 @@ use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{
     ComposeError, ComposedSessionConfig, LauncherProcessSpec, LauncherSessionState,
-    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StateListener,
+    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StateListener, StopOutcome,
     SupervisorError, compose, compose_probe, serialize,
 };
 use ac_launcher_core::orchestration::{
     Clock, LauncherActivityKind, LauncherActivityState, LauncherExecutableSet,
-    LauncherOrchestrator, LauncherPlatformCapabilities, OrchestratorError, OrchestratorParts,
-    SERVER_SESSION_HOLD, UNSUPPORTED_PLATFORM_GRAPHICAL_LAUNCH_DISABLED_REASON,
+    LauncherOrchestrator, LauncherPlatformCapabilities, LauncherSessionStop, OrchestratorError,
+    OrchestratorParts, SERVER_SESSION_HOLD, UNSUPPORTED_PLATFORM_GRAPHICAL_LAUNCH_DISABLED_REASON,
     WINDOW_SWITCH_TIMEOUT,
 };
 use ac_launcher_core::plugins::PluginCatalog;
@@ -197,6 +197,8 @@ struct FakeSupervisorState {
     lines: Vec<String>,
     /// The child takes no console input.
     refuses_lines: bool,
+    /// The child does not log out when asked: a stop kills it.
+    ignores_stop: bool,
 }
 
 /// Records the spec and password; `exit` ends it. With
@@ -219,6 +221,7 @@ impl FakeSupervisor {
                 stop_calls: 0,
                 lines: Vec::new(),
                 refuses_lines: false,
+                ignores_stop: false,
             }),
             listeners: Mutex::new(Vec::new()),
             start_error,
@@ -261,6 +264,10 @@ impl FakeSupervisor {
     fn refuse_lines(&self) {
         lock(&self.state).refuses_lines = true;
     }
+
+    fn ignore_stop(&self) {
+        lock(&self.state).ignores_stop = true;
+    }
 }
 
 impl ProcessSupervisor for FakeSupervisor {
@@ -299,15 +306,21 @@ impl ProcessSupervisor for FakeSupervisor {
         Ok(())
     }
 
-    fn stop(&self, _timeout: Duration) -> Result<(), SupervisorError> {
-        {
+    fn stop(&self, _timeout: Duration) -> Result<StopOutcome, SupervisorError> {
+        let killed = {
             let mut state = lock(&self.state);
             state.stop_calls += 1;
             state.state = LauncherSessionState::Exited;
-            state.exit_code = Some(0);
-        }
+            // A killed child ends with the code a kill gives it.
+            state.exit_code = Some(if state.ignores_stop { 1 } else { 0 });
+            state.ignores_stop
+        };
         self.publish(LauncherSessionState::Exited);
-        Ok(())
+        Ok(if killed {
+            StopOutcome::Killed
+        } else {
+            StopOutcome::Exited
+        })
     }
 
     fn try_send_line(&self, line: &str) -> bool {
@@ -398,11 +411,11 @@ impl ProcessSupervisor for BlockingStopSupervisor {
         Ok(())
     }
 
-    fn stop(&self, _timeout: Duration) -> Result<(), SupervisorError> {
+    fn stop(&self, _timeout: Duration) -> Result<StopOutcome, SupervisorError> {
         self.stop_entered.set();
         self.allow_terminal.wait(None);
         self.publish(LauncherSessionState::Exited);
-        Ok(())
+        Ok(StopOutcome::Exited)
     }
 
     fn try_send_line(&self, _line: &str) -> bool {
@@ -1545,6 +1558,40 @@ fn stop_runs_through_the_supervisor_and_makes_the_account_probeable_again() {
     );
 }
 
+// Not an OpenAC test: a Stop that has to kill the client is a stop, not a
+// crash (no crash error), but the server may still hold the login, so the
+// hold applies.
+#[test]
+fn a_stop_that_has_to_kill_is_a_stop_not_a_crash() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    let launched = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    supervisors.single().ignore_stop();
+    orchestrator
+        .stop_session(&launched.session_id, Duration::from_millis(10), &none())
+        .unwrap();
+
+    let session = single_session(&orchestrator);
+    assert_eq!(session.state, LauncherActivityState::Exited);
+    assert_eq!(session.stop, Some(LauncherSessionStop::Forced));
+    assert_eq!(session.error, None);
+    assert_eq!(
+        session.status,
+        "Stopped (did not respond, closed by force)."
+    );
+    let hold = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap();
+    assert!(hold.held_for.is_some(), "{hold:?}");
+}
+
 // OpenAC LauncherOrchestratorTests.BatchAvailabilityChecksHostFilesOnceForManyAccountsAndSeesChanges.
 #[test]
 fn batch_availability_checks_host_files_once_for_many_accounts_and_sees_changes() {
@@ -2112,8 +2159,8 @@ mod relaunch {
     use ac_launcher_core::orchestration::{
         LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState, LauncherCapability,
         LauncherPlatformCapabilities, LauncherRelaunchController, LauncherRelaunchSelection,
-        LauncherServerSnapshot, LauncherSessionSnapshot, LauncherStateSnapshot, LauncherStopGate,
-        OrchestratorError,
+        LauncherServerSnapshot, LauncherSessionSnapshot, LauncherSessionStop,
+        LauncherStateSnapshot, LauncherStopGate, OrchestratorError,
     };
     use ac_launcher_core::profiles::LaunchMode;
 
@@ -2146,6 +2193,7 @@ mod relaunch {
             exited_gracefully: false,
             server_message: None,
             account_in_use: false,
+            stop: None,
             plugin_notice: None,
             has_live_process: Some(live),
             startup_in_flight: false,
@@ -2485,6 +2533,29 @@ mod relaunch {
         clock.advance(60);
         host.poll(&mut scheduler, true);
         assert_eq!(host.launches.len(), 7);
+    }
+
+    // Not an OpenAC test: a Stop that had to kill the client is the player's
+    // stop, so it is not relaunched (a graceful Stop still is, as above).
+    #[test]
+    fn a_forced_stop_is_not_relaunched() {
+        let mut host = Host::new();
+        let clock = Clock::default();
+        let mut scheduler = clock.controller();
+        scheduler.set_delay_seconds(5).unwrap();
+        host.sessions = vec![session(1, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        // The process is seen to end before the stop records the kill.
+        let mut stopping = session(1, false);
+        stopping.stop = Some(LauncherSessionStop::Requested);
+        host.sessions = vec![stopping.clone()];
+        host.observe(&mut scheduler, &[choice()]);
+        stopping.stop = Some(LauncherSessionStop::Forced);
+        host.sessions = vec![stopping];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(600);
+        host.poll(&mut scheduler, true);
+        assert!(host.launches.is_empty());
     }
 
     #[test]

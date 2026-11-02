@@ -21,13 +21,13 @@ use super::exit_reason::{ClientExit, describe_client_exit};
 use super::snapshot::{
     LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
     LauncherCharacterSnapshot, LauncherServerSnapshot, LauncherSessionSnapshot,
-    LauncherSessionWindow, LauncherStateSnapshot,
+    LauncherSessionStop, LauncherSessionWindow, LauncherStateSnapshot,
 };
 use crate::cancel::{CancelToken, Cancelled, LinkedToken};
 use crate::installation::LauncherInstallRecord;
 use crate::launching::{
     LauncherProcessSupervisorFactory, LauncherSessionConfigService, LauncherSessionState,
-    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService,
+    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StopOutcome,
 };
 use crate::plugins::PluginCatalog;
 use crate::profiles::{
@@ -55,6 +55,8 @@ pub const FIRST_RUN_REQUIRED: &str =
 const INSTALL_VERIFIED: &str = "Client content SHA-256, size, and bake-tool version verified.";
 const INSTALL_CONFIGURED: &str = "Client content paths are configured.";
 const ALREADY_RUNNING: &str = "A session or character refresh is already running for this account.";
+/// A Stop that had to kill: a stop, not a crash.
+const FORCED_STOP: &str = "Stopped (did not respond, closed by force).";
 const STOP_TIMEOUT_ON_DISPOSE: Duration = Duration::from_secs(5);
 
 /// How long a running session's client has to report a switched window
@@ -227,6 +229,8 @@ struct Activity {
     server_message: Option<String>,
     /// That refusal only said the account was still logged on.
     account_in_use: bool,
+    /// The player stopped it, and how that went.
+    stop: Option<LauncherSessionStop>,
     /// `error` is the exit's reason, worded from what was known then; a
     /// later exit report words it again.
     error_is_exit_reason: bool,
@@ -296,6 +300,7 @@ impl Activity {
             exited_gracefully: self.exited_gracefully(),
             server_message: self.server_message.clone(),
             account_in_use: self.account_in_use,
+            stop: self.stop,
             plugin_notice: self.plugin_notice.clone(),
             has_live_process: Some(self.has_live_process()),
             startup_in_flight: self.startup_in_flight,
@@ -401,7 +406,10 @@ fn read_exit_failure(activity: &Activity) -> String {
 /// failed exit gets its reason unless an error of another kind is already
 /// shown; a graceful one keeps its error as it is.
 fn word_exit_failure(activity: &mut Activity) {
-    let failed = activity.exit_code.is_some_and(|code| code != 0);
+    // A process the player's Stop ended without its own report (killed
+    // after the timeout) did not fail.
+    let stopped = activity.stop.is_some() && !activity.host_reported_exit;
+    let failed = activity.exit_code.is_some_and(|code| code != 0) && !stopped;
     if failed && (activity.error.is_none() || activity.error_is_exit_reason) {
         activity.error = Some(read_exit_failure(activity));
         activity.error_is_exit_reason = true;
@@ -1357,6 +1365,7 @@ impl LauncherOrchestrator {
             }
             activity.set_state(LauncherActivityState::Stopping, now);
             activity.status = "Stopping session…".into();
+            activity.stop.get_or_insert(LauncherSessionStop::Requested);
             (
                 activity.supervisor.clone(),
                 activity.start_cancellation.clone(),
@@ -1370,7 +1379,28 @@ impl LauncherOrchestrator {
         let Some(supervisor) = supervisor else {
             return Ok(());
         };
-        if let Err(error) = supervisor.stop(timeout) {
+        let outcome = supervisor.stop(timeout);
+        if let Ok(StopOutcome::Killed) = outcome {
+            {
+                let mut state = lock(&self.inner.gate);
+                if let Some(activity) = state
+                    .activities
+                    .iter_mut()
+                    .find(|activity| activity.session_id == session_id)
+                {
+                    activity.stop = Some(LauncherSessionStop::Forced);
+                    if activity.error_is_exit_reason {
+                        activity.error = None;
+                        activity.error_is_exit_reason = false;
+                    }
+                    if activity.is_terminal() {
+                        activity.status = FORCED_STOP.into();
+                    }
+                }
+            }
+            self.inner.raise_state_changed();
+        }
+        if let Err(error) = outcome {
             let message = safe_error("Could not stop the session", &error.to_string(), None);
             {
                 let mut state = lock(&self.inner.gate);
@@ -1591,6 +1621,7 @@ impl Inner {
             server_message: None,
             account_in_use: false,
             error_is_exit_reason: false,
+            stop: None,
             exit_reason: None,
             host_reported_exit: false,
             process_exited: false,
@@ -1884,6 +1915,10 @@ impl Inner {
                     activity.set_state(LauncherActivityState::Exited, now);
                     activity.status = activity.host_terminal_status.clone().unwrap_or_else(|| {
                         match activity.exit_code {
+                            _ if activity.stop == Some(LauncherSessionStop::Forced) => {
+                                FORCED_STOP.to_owned()
+                            }
+                            _ if activity.stop.is_some() => "Stopped.".to_owned(),
                             Some(code) => format!("Host process exited with code {code}."),
                             None => "Host process exited.".to_owned(),
                         }

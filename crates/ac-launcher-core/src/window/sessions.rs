@@ -1,7 +1,9 @@
 //! A session as the session log shows it: who is playing, and are they in
 //! yet, not which launch mode started the process.
 
-use crate::orchestration::{LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot};
+use crate::orchestration::{
+    LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot, LauncherSessionStop,
+};
 
 /// One line of the session log.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +71,10 @@ pub fn describe_status(snapshot: &LauncherSessionSnapshot) -> String {
     // Not graceful: the host never reported its own exit, or reported a failure. The server may
     // still be holding the account, and saying so here is what stops the next login failure
     // being a mystery. A refusal from the server is told in its own words.
+    if snapshot.stop == Some(LauncherSessionStop::Forced) {
+        return "Stopped (did not respond, closed by force) — the server may hold this account \n                for a short while."
+            .into();
+    }
     if let Some(message) = snapshot
         .server_message
         .as_deref()

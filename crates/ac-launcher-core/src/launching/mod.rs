@@ -23,7 +23,7 @@ pub use process::{
 };
 pub use supervisor::{
     LauncherProcessSupervisor, LauncherProcessSupervisorFactory, LauncherSessionState,
-    ProcessSupervisor, ProcessSupervisorFactory, StateListener, SupervisorError,
+    ProcessSupervisor, ProcessSupervisorFactory, StateListener, StopOutcome, SupervisorError,
 };
 
 /// The variables every client and windowless host the launcher starts gets,

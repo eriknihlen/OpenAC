@@ -19,8 +19,8 @@ use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{
     BoundedProcessOutputCapture, ChildProcess, ChildProcessFactory, ComposeError,
     ComposedSessionConfig, DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, ExitCallback, LauncherProcessSpec,
-    LauncherProcessSupervisor, LauncherSessionState, ProcessSupervisor, SystemChildProcessFactory,
-    compose, compose_probe, serialize, write,
+    LauncherProcessSupervisor, LauncherSessionState, ProcessSupervisor, StopOutcome,
+    SystemChildProcessFactory, compose, compose_probe, serialize, write,
 };
 use ac_launcher_core::plugins::{
     InstalledPluginRecord, InstalledPluginRecordStore, PluginCatalog, PluginInstallSource,
@@ -1064,7 +1064,10 @@ fn stop_closes_gracefully_or_kills_after_the_timeout() {
     let factory = FakeFactory::new(true);
     let supervisor = LauncherProcessSupervisor::new(factory.clone());
     supervisor.start(&spec(), Some("pw")).unwrap();
-    supervisor.stop(Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        supervisor.stop(Duration::from_millis(50)).unwrap(),
+        StopOutcome::Exited
+    );
     let fake = factory.last();
     assert_eq!(fake.state().calls, ["gracefulStop", "closeMainWindow"]);
     assert_eq!(fake.state().kills, 0);
@@ -1080,7 +1083,12 @@ fn stop_closes_gracefully_or_kills_after_the_timeout() {
     let factory = FakeFactory::new(false);
     let supervisor = LauncherProcessSupervisor::new(factory.clone());
     supervisor.start(&spec(), Some("pw")).unwrap();
-    supervisor.stop(Duration::from_millis(50)).unwrap();
+    // A stop that had to kill says so (the launcher counts it as a stop,
+    // not a crash).
+    assert_eq!(
+        supervisor.stop(Duration::from_millis(50)).unwrap(),
+        StopOutcome::Killed
+    );
     assert_eq!(factory.last().state().kills, 1);
     assert_eq!(
         ProcessSupervisor::state(&*supervisor),

@@ -22,7 +22,8 @@ use std::time::{Duration, Instant, SystemTime};
 use super::capabilities::LauncherCapability;
 use super::orchestrator::OrchestratorError;
 use super::snapshot::{
-    LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot, LauncherStateSnapshot,
+    LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot, LauncherSessionStop,
+    LauncherStateSnapshot,
 };
 use crate::cancel::CancelToken;
 use crate::profiles::{LaunchMode, same_account};
@@ -306,6 +307,13 @@ impl LauncherRelaunchController {
                     if session.state == LauncherActivityState::InWorld {
                         entry.refused = 0;
                     }
+                }
+                Some(session) if session.stop == Some(LauncherSessionStop::Forced) => {
+                    // A Stop that had to kill the client is still the
+                    // player's stop, not a crash: it is not relaunched.
+                    entry.tracked_session = None;
+                    entry.terminal_since = None;
+                    entry.retry_after_hold = false;
                 }
                 _ if entry.terminal_since.is_some() => {}
                 ended => {
