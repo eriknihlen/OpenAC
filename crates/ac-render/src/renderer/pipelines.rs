@@ -224,7 +224,7 @@ pub fn terrain_pipeline(
         4 => Uint8x4,
         5 => Uint8x4,
     ];
-    let offset_attributes = wgpu::vertex_attr_array![6 => Float32x3];
+    let offset_attributes = wgpu::vertex_attr_array![6 => Float32x3, 7 => Uint32];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain"),
         layout: Some(&layout),

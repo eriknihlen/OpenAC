@@ -76,7 +76,19 @@ pub struct TerrainAtlasData {
     /// interior cells (index 1): the region's second and third terrain
     /// descriptions' detail textures, when they have one.
     pub details: [Option<DetailTexture>; 2],
+    /// The detail texture laid over the outdoor terrain: the region's
+    /// first terrain description's detail texture, when it has one.
+    pub landscape_detail: Option<DetailTexture>,
 }
+
+/// Which of the region's terrain descriptions carries each detail
+/// texture: the first the landscape's, the second the building shells',
+/// the third the interior cells'.
+pub const LANDSCAPE_DETAIL_DESCRIPTION: usize = 0;
+/// See [`LANDSCAPE_DETAIL_DESCRIPTION`].
+pub const BUILDING_DETAIL_DESCRIPTION: usize = 1;
+/// See [`LANDSCAPE_DETAIL_DESCRIPTION`].
+pub const ENVIRONMENT_DETAIL_DESCRIPTION: usize = 2;
 
 /// A detail texture and how often it repeats per texture unit.
 #[derive(Debug, Clone, PartialEq)]
@@ -215,12 +227,19 @@ pub fn build_terrain_atlas(
 
     let (alpha_layers, alpha_width, alpha_height) =
         decode_alpha_maps(content, tex_merge, &mut blending);
-    let mut details = parallel_map(&[1, 2], |&i| {
-        tex_merge
-            .terrain_desc
-            .get(i)
-            .and_then(|d| detail_texture(content, d))
-    })
+    let mut details = parallel_map(
+        &[
+            BUILDING_DETAIL_DESCRIPTION,
+            ENVIRONMENT_DETAIL_DESCRIPTION,
+            LANDSCAPE_DETAIL_DESCRIPTION,
+        ],
+        |&i| {
+            tex_merge
+                .terrain_desc
+                .get(i)
+                .and_then(|d| detail_texture(content, d))
+        },
+    )
     .into_iter();
 
     TerrainAtlasData {
@@ -231,6 +250,7 @@ pub fn build_terrain_atlas(
         tiling,
         blending,
         details: [details.next().flatten(), details.next().flatten()],
+        landscape_detail: details.next().flatten(),
     }
 }
 

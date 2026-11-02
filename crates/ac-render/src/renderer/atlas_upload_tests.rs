@@ -66,6 +66,7 @@ fn region_sized_atlas() -> TerrainAtlasData {
         tiling: [1.0; TERRAIN_LAYER_CAPACITY],
         blending: ac_core::terrain::TerrainBlendingContext::empty(),
         details: [None, None],
+        landscape_detail: None,
     }
 }
 

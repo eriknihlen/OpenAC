@@ -238,7 +238,7 @@ fn terrain_receiver_pipeline(
         immediate_size: 0,
     });
     let vertex_attributes = terrain_vertex_attributes();
-    let offset_attributes = wgpu::vertex_attr_array![6 => Float32x3];
+    let offset_attributes = wgpu::vertex_attr_array![6 => Float32x3, 7 => Uint32];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain atmospheric"),
         layout: Some(&layout),

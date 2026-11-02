@@ -125,6 +125,9 @@ pub struct DisplaySettings {
     pub landscape_draw_distance: i32,
     /// Building detail textures.
     pub building_detail_textures: bool,
+    /// Landscape detail textures: a fine pattern repeated over the outdoor
+    /// terrain near the player. Off by default (the game shipped it off).
+    pub landscape_detail_textures: bool,
     /// Multi-pass alpha.
     pub multi_pass_alpha: bool,
     /// Keep distant buildings.
@@ -163,6 +166,7 @@ impl Default for DisplaySettings {
             texture_filtering: 1,
             landscape_draw_distance: 8,
             building_detail_textures: true,
+            landscape_detail_textures: false,
             multi_pass_alpha: false,
             keep_distant_buildings: true,
             potato_mode: false,
@@ -578,6 +582,11 @@ fn read_display(d: &[Member], version: i32) -> Result<DisplaySettings, Unreadabl
             "buildingDetailTextures",
             def.building_detail_textures,
         ),
+        landscape_detail_textures: read_bool(
+            d,
+            "landscapeDetailTextures",
+            def.landscape_detail_textures,
+        ),
         multi_pass_alpha: read_bool(d, "multiPassAlpha", def.multi_pass_alpha),
         keep_distant_buildings: read_bool(d, "keepDistantBuildings", def.keep_distant_buildings),
         potato_mode: read_bool(d, "potatoMode", def.potato_mode),
@@ -646,7 +655,7 @@ fn display_object(d: &DisplaySettings) -> String {
             out
         },
     );
-    let fields: [(&str, String); 24] = [
+    let fields: [(&str, String); 25] = [
         ("automaticDegrades", boolean(d.automatic_degrades)),
         (
             "buildingDetailTextures",
@@ -662,6 +671,10 @@ fn display_object(d: &DisplaySettings) -> String {
         ("gamma", float(d.gamma)),
         ("graphicsPerformance", float(d.graphics_performance)),
         ("keepDistantBuildings", boolean(d.keep_distant_buildings)),
+        (
+            "landscapeDetailTextures",
+            boolean(d.landscape_detail_textures),
+        ),
         (
             "landscapeDrawDistance",
             d.landscape_draw_distance.to_string(),
@@ -778,6 +791,7 @@ mod tests {
             texture_filtering: 2,
             landscape_draw_distance: 5,
             building_detail_textures: false,
+            landscape_detail_textures: true,
             multi_pass_alpha: true,
             keep_distant_buildings: false,
             potato_mode: true,
@@ -790,6 +804,23 @@ mod tests {
         let (loaded, warning) = t.store().load_display();
         assert_eq!(warning, None);
         assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn landscape_detail_textures_default_off_and_round_trip() {
+        let t = Temp::new("landscapedetail");
+        assert!(!DisplaySettings::default().landscape_detail_textures);
+        // A file from before the option reads it as off.
+        t.write(r#"{ "version": 4, "display": { "buildingDetailTextures": true } }"#);
+        assert!(!t.store().load_display().0.landscape_detail_textures);
+        let on = DisplaySettings {
+            landscape_detail_textures: true,
+            ..DisplaySettings::default()
+        };
+        t.store().save_display(&on).unwrap();
+        let text = std::fs::read_to_string(&t.0).unwrap();
+        assert!(text.contains("\"landscapeDetailTextures\": true"), "{text}");
+        assert!(t.store().load_display().0.landscape_detail_textures);
     }
 
     #[test]

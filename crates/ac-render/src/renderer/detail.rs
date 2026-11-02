@@ -1,18 +1,36 @@
-//! The retail detail textures: the region's building and environment
-//! detail images, repeated over building shells and interior cell walls
-//! and blended into the lit surface by the mesh shader. They draw only with
-//! the "building detail textures" option on and a non-zero tiling.
+//! The retail detail textures: the region's building, environment and
+//! landscape detail images. The building and environment images repeat
+//! over building shells and interior cell walls and are blended into the
+//! lit surface by the mesh shader; they draw only with the "building detail
+//! textures" option on and a non-zero tiling. The landscape image repeats
+//! over the outdoor terrain near the player and is blended in by the
+//! terrain shader the same way; it draws only with the "landscape detail
+//! textures" option on and a non-zero tiling.
 
 use super::pipelines::write_layer;
 use crate::assets::DetailTexture;
 
-/// The tilings the shader reads: x building shells, y interior cells; 0
-/// where the detail is off (the option, a missing texture or a zero
-/// tiling).
+/// Which detail options are on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DetailOptions {
+    /// Building shells and interior cells.
+    pub building: bool,
+    /// The outdoor terrain.
+    pub landscape: bool,
+}
+
+/// The tilings the shaders read: x building shells, y interior cells, z
+/// the landscape; 0 where the detail is off (its option, a missing texture
+/// or a zero tiling). `tilings` is building, environment, landscape.
 #[must_use]
-pub fn detail_tiling(enabled: bool, tilings: [Option<f32>; 2]) -> [f32; 4] {
-    let on = |t: Option<f32>| t.filter(|t| enabled && *t != 0.0).unwrap_or(0.0);
-    [on(tilings[0]), on(tilings[1]), 0.0, 0.0]
+pub fn detail_tiling(options: DetailOptions, tilings: [Option<f32>; 3]) -> [f32; 4] {
+    let on = |enabled: bool, t: Option<f32>| t.filter(|t| enabled && *t != 0.0).unwrap_or(0.0);
+    [
+        on(options.building, tilings[0]),
+        on(options.building, tilings[1]),
+        on(options.landscape, tilings[2]),
+        0.0,
+    ]
 }
 
 /// The detail textures on the GPU and their bind group.
@@ -21,9 +39,10 @@ pub(super) struct DetailGpu {
     sampler: wgpu::Sampler,
     params: wgpu::Buffer,
     pub group: wgpu::BindGroup,
-    /// Building (0) and environment (1): the image and its tiling.
-    textures: [Option<(wgpu::TextureView, f32)>; 2],
-    enabled: bool,
+    /// Building (0), environment (1) and landscape (2): the image and its
+    /// tiling.
+    textures: [Option<(wgpu::TextureView, f32)>; 3],
+    options: DetailOptions,
 }
 
 impl DetailGpu {
@@ -31,7 +50,7 @@ impl DetailGpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        enabled: bool,
+        options: DetailOptions,
     ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("detail none"),
@@ -71,8 +90,8 @@ impl DetailGpu {
             sampler,
             params,
             group,
-            textures: [None, None],
-            enabled,
+            textures: [None, None, None],
+            options,
         };
         this.write_params(queue);
         this
@@ -112,25 +131,30 @@ impl DetailGpu {
 
     fn write_params(&self, queue: &wgpu::Queue) {
         let tiling = detail_tiling(
-            self.enabled,
+            self.options,
             [
                 self.textures[0].as_ref().map(|t| t.1),
                 self.textures[1].as_ref().map(|t| t.1),
+                self.textures[2].as_ref().map(|t| t.1),
             ],
         );
         queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&tiling));
     }
 
     /// The region's detail textures arrived: upload them with their mips.
+    /// The terrain's bind group holds the landscape image, so it is built
+    /// again after this.
     pub fn set_textures(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         details: &[Option<DetailTexture>; 2],
+        landscape: Option<&DetailTexture>,
     ) {
-        for (slot, detail) in self.textures.iter_mut().zip(details) {
-            *slot = detail.as_ref().map(|d| {
+        let sources = [details[0].as_ref(), details[1].as_ref(), landscape];
+        for (slot, detail) in self.textures.iter_mut().zip(sources) {
+            *slot = detail.map(|d| {
                 let image = &d.image;
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("detail"),
@@ -169,29 +193,82 @@ impl DetailGpu {
         self.write_params(queue);
     }
 
-    /// The "building detail textures" option changed.
-    pub fn set_enabled(&mut self, queue: &wgpu::Queue, enabled: bool) {
-        if self.enabled != enabled {
-            self.enabled = enabled;
+    /// The detail options changed.
+    pub fn set_options(&mut self, queue: &wgpu::Queue, options: DetailOptions) {
+        if self.options != options {
+            self.options = options;
             self.write_params(queue);
         }
+    }
+
+    /// The landscape detail image (a white texel without one).
+    pub fn landscape_view(&self) -> &wgpu::TextureView {
+        self.textures[2].as_ref().map_or(&self.white, |t| &t.0)
+    }
+
+    /// The detail images' sampler: repeating, linear with linear mips.
+    pub fn sampler(&self) -> &wgpu::Sampler {
+        &self.sampler
+    }
+
+    /// The tilings the shaders read ([`detail_tiling`]).
+    pub fn params(&self) -> &wgpu::Buffer {
+        &self.params
     }
 }
 
 #[cfg(test)]
 mod tests {
     //! OpenAC `RetailDetailTextureContract.ShouldRender` (the option and an
-    //! available texture) and the dispatchers' `Tiling != 0` gate.
+    //! available texture) and the dispatchers' `Tiling != 0` gate; the
+    //! landscape detail behind its own option.
 
     use super::*;
+
+    const BOTH: DetailOptions = DetailOptions {
+        building: true,
+        landscape: true,
+    };
 
     #[test]
     fn detail_draws_only_with_the_option_a_texture_and_a_tiling() {
         assert_eq!(
-            detail_tiling(true, [Some(10.0), Some(4.0)]),
+            detail_tiling(BOTH, [Some(10.0), Some(4.0), None]),
             [10.0, 4.0, 0.0, 0.0]
         );
-        assert_eq!(detail_tiling(false, [Some(10.0), Some(4.0)]), [0.0; 4]);
-        assert_eq!(detail_tiling(true, [None, Some(0.0)]), [0.0; 4]);
+        assert_eq!(
+            detail_tiling(DetailOptions::default(), [Some(10.0), Some(4.0), None]),
+            [0.0; 4]
+        );
+        assert_eq!(detail_tiling(BOTH, [None, Some(0.0), None]), [0.0; 4]);
+    }
+
+    #[test]
+    fn the_landscape_detail_draws_only_with_its_own_option_a_texture_and_a_tiling() {
+        assert_eq!(
+            detail_tiling(BOTH, [None, None, Some(4.0)]),
+            [0.0, 0.0, 4.0, 0.0]
+        );
+        // Off by its own option, whatever the building option says.
+        let building_only = DetailOptions {
+            building: true,
+            landscape: false,
+        };
+        assert_eq!(
+            detail_tiling(building_only, [Some(10.0), Some(4.0), Some(4.0)]),
+            [10.0, 4.0, 0.0, 0.0]
+        );
+        // On by its own option alone; the building details stay off.
+        let landscape_only = DetailOptions {
+            building: false,
+            landscape: true,
+        };
+        assert_eq!(
+            detail_tiling(landscape_only, [Some(10.0), Some(4.0), Some(4.0)]),
+            [0.0, 0.0, 4.0, 0.0]
+        );
+        // No texture, or a zero tiling: off.
+        assert_eq!(detail_tiling(BOTH, [None, None, None]), [0.0; 4]);
+        assert_eq!(detail_tiling(BOTH, [None, None, Some(0.0)]), [0.0; 4]);
     }
 }

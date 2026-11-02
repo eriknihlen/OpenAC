@@ -35,6 +35,13 @@ struct SceneLighting {
 // Repeats per cell by texture layer, four per vec4 (std140 arrays pad each
 // element to 16 bytes).
 @group(1) @binding(4) var<uniform> tiling: array<vec4<f32>, 9>;
+// The landscape detail texture: a fine pattern repeated many times per cell
+// and blended over the lit terrain near the player.
+@group(1) @binding(5) var landscape_detail: texture_2d<f32>;
+@group(1) @binding(6) var detail_sampler: sampler;
+// Detail repeats per cell: x building shells, y interior cells, z the
+// landscape (the one read here); 0 turns that detail off.
+@group(1) @binding(7) var<uniform> detail_tiling: vec4<f32>;
 
 @group(2) @binding(0) var<uniform> shadow: ShadowBlock;
 @group(2) @binding(1) var shadow_map: texture_depth_2d_array;
@@ -50,6 +57,8 @@ struct VertexIn {
     @location(5) packed3: vec4<u32>,
     // The landblock's corner in the drawing frame.
     @location(6) block_offset: vec3<f32>,
+    // 1 when the landblock is drawn at full detail (near the player).
+    @location(7) full_detail: u32,
 };
 
 struct VertexOut {
@@ -63,6 +72,7 @@ struct VertexOut {
     @location(6) road1: vec4<f32>,
     @location(7) @interpolate(flat) base_layer: f32,
     @location(8) world: vec3<f32>,
+    @location(9) @interpolate(flat) full_detail: u32,
     // The sun, which shadows take away (`lighting` holds the ambient).
     @location(10) sun: vec3<f32>,
     @location(11) normal: vec3<f32>,
@@ -107,6 +117,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
     var out: VertexOut;
     out.base_uv = uv;
+    out.full_detail = in.full_detail;
     let n = normalize(in.normal);
     let sun = scene.lights[0];
     let l = max(dot(n, -sun.dir_and_range.xyz), 0.0);
@@ -202,6 +213,14 @@ fn apply_fog(lit: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     return mix(lit, scene.fog_color.xyz, fog);
 }
 
+// The lit terrain with the landscape detail blended over it, as
+// terrain.wgsl does.
+fn landscape_detailed(lit: vec3<f32>, cell_uv: vec2<f32>, full_detail: u32) -> vec3<f32> {
+    let d = textureSample(landscape_detail, detail_sampler, cell_uv * detail_tiling.z);
+    let detailed = d.rgb * d.a + lit * (1.0 - d.a);
+    return select(lit, detailed, detail_tiling.z != 0.0 && full_detail != 0u);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let base_sample = sample_terrain(in.base_uv, max(in.base_layer, 0.0));
@@ -227,6 +246,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lighting = in.lighting + in.sun * visibility;
     var lit = rgb * min(lighting, vec3<f32>(1.0));
     lit = lit + scene.fog_params.z * vec3<f32>(0.6, 0.6, 0.75);
+    lit = landscape_detailed(lit, in.base_uv, in.full_detail);
     lit = apply_fog(lit, in.world);
     // Drawn whole through a portal view, as OpenAC's terrain; depth sorts it.
     return vec4<f32>(lit, 1.0);

@@ -67,6 +67,7 @@ pub enum DisplayField {
     TextureFiltering,
     LandscapeDrawDistance,
     BuildingDetailTextures,
+    LandscapeDetailTextures,
     MultiPassAlpha,
 }
 
@@ -265,6 +266,7 @@ impl LiveValues {
                     DisplayField::TextureFiltering => Int(d.texture_filtering),
                     DisplayField::LandscapeDrawDistance => Int(d.landscape_draw_distance),
                     DisplayField::BuildingDetailTextures => Bool(d.building_detail_textures),
+                    DisplayField::LandscapeDetailTextures => Bool(d.landscape_detail_textures),
                     DisplayField::MultiPassAlpha => Bool(d.multi_pass_alpha),
                 }
             }
@@ -377,6 +379,9 @@ impl LiveValues {
                     }
                     (DisplayField::BuildingDetailTextures, Bool(x)) => {
                         d.building_detail_textures = *x;
+                    }
+                    (DisplayField::LandscapeDetailTextures, Bool(x)) => {
+                        d.landscape_detail_textures = *x;
                     }
                     (DisplayField::MultiPassAlpha, Bool(x)) => d.multi_pass_alpha = *x,
                     _ => return None,

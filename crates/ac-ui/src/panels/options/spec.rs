@@ -768,6 +768,14 @@ pub fn config_rows() -> Vec<ConfigRow> {
             display(DisplayField::BuildingDetailTextures),
             false,
         ),
+        // The game's strings keep this row's caption and help, though the
+        // game itself never offered it.
+        toggle(
+            "ID_Graphics_LandscapeDetailTextures",
+            def.landscape_detail_textures,
+            display(DisplayField::LandscapeDetailTextures),
+            false,
+        ),
         toggle(
             "ID_Graphics_MultiPassAlpha",
             false,
@@ -1165,8 +1173,10 @@ mod tests {
             .position(|r| matches!(r, ConfigRow::ExplicitHeader(_)))
             .expect("the enhancements section");
         let rows = &all[..enhancements];
-        // The 39, the UI scale row, and OpenAC's two modern mouse turning
-        // rows, last of the explicit toggles (they sit in the input section).
+        // The 39, the UI scale row, the landscape detail textures row (the
+        // game has its caption but never offered it), and OpenAC's two
+        // modern mouse turning rows, last of the explicit toggles (they sit
+        // in the input section).
         let modern: Vec<&str> = rows
             .iter()
             .filter_map(|r| match r {
@@ -1181,8 +1191,8 @@ mod tests {
                 BOTH_MOUSE_BUTTONS_RUN_FORWARD_LABEL
             ]
         );
-        assert_eq!(option_rows(rows), 39 + 1 + 2);
-        assert_eq!(rows.len(), 48 + 1 + 2);
+        assert_eq!(option_rows(rows), 39 + 1 + 1 + 2);
+        assert_eq!(rows.len(), 48 + 1 + 1 + 2);
         let headers = rows
             .iter()
             .filter(|r| matches!(r, ConfigRow::Header(_)))

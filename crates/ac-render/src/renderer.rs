@@ -747,6 +747,11 @@ impl WorldRenderer {
                 texture_entry(2, wgpu::TextureViewDimension::D2Array),
                 sampler_entry(3),
                 uniform_entry(4, wgpu::ShaderStages::FRAGMENT),
+                // The landscape detail texture, its sampler and the detail
+                // tilings.
+                texture_entry(5, wgpu::TextureViewDimension::D2),
+                sampler_entry(6),
+                uniform_entry(7, wgpu::ShaderStages::FRAGMENT),
             ],
         });
         let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -770,7 +775,10 @@ impl WorldRenderer {
             device,
             queue,
             &detail_layout,
-            display.building_detail_textures,
+            detail::DetailOptions {
+                building: display.building_detail_textures,
+                landscape: display.landscape_detail_textures,
+            },
         );
         let quality = crate::quality::resolve(display, &settings.quality_overrides);
         let samples = usable_sample_count(quality.msaa_samples, msaa_supported);
@@ -1140,8 +1148,13 @@ impl WorldRenderer {
         }
         self.particle_range = crate::quality::particle_range_multiplier(display.particle_range);
         self.degrade.degrade_distance = display.degrade_distance;
-        self.detail
-            .set_enabled(queue, display.building_detail_textures);
+        self.detail.set_options(
+            queue,
+            detail::DetailOptions {
+                building: display.building_detail_textures,
+                landscape: display.landscape_detail_textures,
+            },
+        );
         self.degrade.keep_distant_buildings = display.keep_distant_buildings;
         self.automatic_degrades = display.automatic_degrades;
         self.graphics_performance = display.graphics_performance;
@@ -2373,7 +2386,21 @@ impl WorldRenderer {
                 |p| (p.visible_cells, p.missing_surfaces, p.missing_gfx),
             );
         let land_cells = std::mem::take(&mut sink.land_cells);
-        let (frame, scratch) = sink.out.finish_keeping();
+        let (mut frame, scratch) = sink.out.finish_keeping();
+        // The landscape is centred on the player's landblock: it and its
+        // neighbours are at full detail, where the landscape detail draws.
+        let full_detail_center = self.region.as_ref().map(|r| {
+            let (x, y) = r.center();
+            LandblockCoord {
+                x: x as u8,
+                y: y as u8,
+            }
+        });
+        crate::draws::mark_full_detail(
+            &mut frame.terrain,
+            &frame.terrain_draws,
+            full_detail_center,
+        );
         // The shadow casters stand in the land cells the walk reached.
         let caster_started = Instant::now();
         let casters = if self.atmosphere.as_ref().is_some_and(|a| a.shadows_on()) {
@@ -3438,6 +3465,18 @@ impl WorldRenderer {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: tiling.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(self.detail.landscape_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(self.detail.sampler()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: self.detail.params().as_entire_binding(),
                 },
             ],
         }));

@@ -116,6 +116,45 @@ impl InstanceGpu {
 pub struct TerrainInstanceGpu {
     /// The landblock's south-west corner, drawing frame.
     pub offset: [f32; 3],
+    /// 1 when the landblock is drawn at full detail (the landscape detail
+    /// texture may draw on it), else 0.
+    pub full_detail: u32,
+}
+
+impl TerrainInstanceGpu {
+    /// The landblock whose corner is at `offset`, not at full detail.
+    #[must_use]
+    pub fn at(offset: [f32; 3]) -> Self {
+        Self {
+            offset,
+            full_detail: 0,
+        }
+    }
+}
+
+/// Whether `block` is drawn at full detail with the landscape centred on
+/// `center` (the player's landblock): the centre landblock and its eight
+/// neighbours are, every landblock further out is drawn coarser. The
+/// landscape detail texture draws only on full-detail landblocks.
+#[must_use]
+pub fn full_detail_landblock(block: LandblockCoord, center: LandblockCoord) -> bool {
+    let dx = (i32::from(block.x) - i32::from(center.x)).abs();
+    let dy = (i32::from(block.y) - i32::from(center.y)).abs();
+    dx.max(dy) <= 1
+}
+
+/// Mark each of a frame's terrain instances (`terrain`, one per entry of
+/// `draws`) full detail or not, with the landscape centred on `center`
+/// (none: no landblock is at full detail).
+pub fn mark_full_detail(
+    terrain: &mut [TerrainInstanceGpu],
+    draws: &[TerrainDraw],
+    center: Option<LandblockCoord>,
+) {
+    for (instance, draw) in terrain.iter_mut().zip(draws) {
+        instance.full_detail =
+            u32::from(center.is_some_and(|c| full_detail_landblock(draw.block, c)));
+    }
 }
 
 /// Every land cell of a landblock, as a [`TerrainDraw::cells`] mask.
@@ -694,9 +733,9 @@ impl StreamBuilder {
             let first = self.draws.terrain.len();
             self.segment.terrain_index.clear();
             for (block, offset, cells) in self.segment.terrain.drain(..) {
-                self.draws.terrain.push(TerrainInstanceGpu {
-                    offset: offset.to_array(),
-                });
+                self.draws
+                    .terrain
+                    .push(TerrainInstanceGpu::at(offset.to_array()));
                 self.draws.terrain_draws.push(TerrainDraw { block, cells });
             }
             let last = self.draws.terrain.len();
@@ -930,6 +969,43 @@ pub fn instance(model: Mat4, lights: LightSet, indoor: bool) -> InstanceGpu {
 mod tests {
     use super::*;
     use crate::lights::NO_LIGHTS;
+
+    // The landscape is drawn at full detail on the player's landblock and
+    // the eight around it (one landblock either way, diagonals too);
+    // landblocks two or more away are drawn coarser.
+    #[test]
+    fn full_detail_is_the_players_landblock_and_its_eight_neighbours() {
+        let center = LandblockCoord { x: 0xA9, y: 0xB4 };
+        let at = |dx: i32, dy: i32| LandblockCoord {
+            x: (0xA9 + dx) as u8,
+            y: (0xB4 + dy) as u8,
+        };
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                assert!(full_detail_landblock(at(dx, dy), center), "{dx} {dy}");
+            }
+        }
+        for (dx, dy) in [(2, 0), (0, -2), (2, 2), (-2, 1), (5, 0)] {
+            assert!(!full_detail_landblock(at(dx, dy), center), "{dx} {dy}");
+        }
+        // Each instance is marked from its draw's landblock; with no centre
+        // (no outdoor landscape) none is.
+        let draws = [
+            TerrainDraw {
+                block: at(1, 1),
+                cells: ALL_LAND_CELLS,
+            },
+            TerrainDraw {
+                block: at(2, 0),
+                cells: ALL_LAND_CELLS,
+            },
+        ];
+        let mut terrain = [TerrainInstanceGpu::at([0.0; 3]); 2];
+        mark_full_detail(&mut terrain, &draws, Some(center));
+        assert_eq!(terrain.map(|t| t.full_detail), [1, 0]);
+        mark_full_detail(&mut terrain, &draws, None);
+        assert_eq!(terrain.map(|t| t.full_detail), [0, 0]);
+    }
 
     /// OpenAC `PortalDepthMaskRetailStateTests.SealAndPunchUseOneRetailAlwaysWritePipelineAndOneDrawEach`:
     /// a punch and a seal are one depth-only fan each through the one

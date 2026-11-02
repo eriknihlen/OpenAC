@@ -171,6 +171,7 @@ pub fn effective_display(display: &DisplaySettings) -> DisplaySettings {
         texture_filtering: 0,
         landscape_draw_distance: 3,
         building_detail_textures: false,
+        landscape_detail_textures: false,
         multi_pass_alpha: false,
         render_pack: None,
         ..display.clone()
@@ -361,6 +362,7 @@ mod tests {
         assert_eq!(effective.quality, QualityPreset::Potato);
         assert_eq!(effective.particle_range, ParticleRange::Retail);
         assert!(!effective.building_detail_textures);
+        assert!(!effective.landscape_detail_textures);
         assert_eq!(stored.quality, QualityPreset::Ultra, "stored untouched");
         let off = DisplaySettings {
             potato_mode: false,

@@ -522,9 +522,7 @@ impl WorldRenderer {
             .map(|coord| {
                 (
                     coord,
-                    TerrainInstanceGpu {
-                        offset: landblock_offset(&self.origin, coord).to_array(),
-                    },
+                    TerrainInstanceGpu::at(landblock_offset(&self.origin, coord).to_array()),
                 )
             })
             .collect();

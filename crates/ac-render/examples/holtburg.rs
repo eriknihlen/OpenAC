@@ -65,6 +65,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .display
             .set_render_pack_selection(&selection);
     }
+    // `OPENAC_EXAMPLE_LANDSCAPE_DETAIL=1|0`: the landscape detail textures
+    // on or off, as the options window sets them.
+    if let Ok(v) = std::env::var("OPENAC_EXAMPLE_LANDSCAPE_DETAIL") {
+        options.settings.display.landscape_detail_textures = v == "1";
+    }
     let (host, handle, events) = WindowHost::new(options)?;
     let driver = thread::spawn(move || -> Result<(), String> {
         let (tx, rx) = mpsc::channel();

@@ -53,6 +53,7 @@ pub(crate) fn step_cost(atlas: &TerrainAtlasData, step: AtlasStep) -> StreamingW
         AtlasStep::Finish => atlas
             .details
             .iter()
+            .chain(std::iter::once(&atlas.landscape_detail))
             .flatten()
             .flat_map(|d| &d.image.levels)
             .map(|l| len(l.len()))
@@ -204,9 +205,16 @@ impl WorldRenderer {
             })
         };
         self.terrain_atlas = Some((array_view(terrain), array_view(alpha), tiling));
+        // The terrain's group binds the landscape detail image: upload the
+        // detail images first.
+        self.detail.set_textures(
+            device,
+            queue,
+            &self.detail_layout,
+            &atlas.details,
+            atlas.landscape_detail.as_ref(),
+        );
         self.rebuild_terrain_group(device);
-        self.detail
-            .set_textures(device, queue, &self.detail_layout, &atlas.details);
     }
 }
 
@@ -240,6 +248,10 @@ mod tests {
                 }),
                 None,
             ],
+            landscape_detail: detail.then(|| DetailTexture {
+                image: chain(4, 3),
+                tiling: 4.0,
+            }),
         }
     }
 
@@ -274,6 +286,7 @@ mod tests {
             .map_while(|i| step_at(&a, i))
             .map(|s| step_cost(&a, s).gpu_upload_bytes)
             .collect();
-        assert_eq!(costs, [layer, layer, layer, 16, 16, detail + tiling]);
+        // The finish uploads the building and the landscape detail images.
+        assert_eq!(costs, [layer, layer, layer, 16, 16, 2 * detail + tiling]);
     }
 }

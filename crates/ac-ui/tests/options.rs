@@ -268,14 +268,15 @@ fn binding_builds_every_page_and_shows_gameplay() {
     assert!(b.c.page(OptionsPage::Gameplay).is_empty());
     assert_eq!(b.c.page(OptionsPage::Character).len(), 50);
     assert_eq!(b.c.page(OptionsPage::Chat).len(), 7);
-    // The game's 39, the UI Scale row, the Graphics Enhancements section's
-    // 21 and the two modern mouse turning rows in the input section.
-    assert_eq!(b.c.page(OptionsPage::Configuration).len(), 63);
-    // 6 headers, 50 toggles, 6 separators; 6 + 39 + 6 (the game's 36, the
-    // UI Scale row and the two modern mouse turning rows) and 1 + 21 + 1;
-    // 1 + 2 + 1 + 5 x 3.
+    // The game's 39, the UI Scale row, the landscape detail textures row,
+    // the Graphics Enhancements section's 21 and the two modern mouse
+    // turning rows in the input section.
+    assert_eq!(b.c.page(OptionsPage::Configuration).len(), 64);
+    // 6 headers, 50 toggles, 6 separators; 6 + 40 + 6 (the game's 36, the
+    // UI Scale row, the landscape detail textures row and the two modern
+    // mouse turning rows) and 1 + 21 + 1; 1 + 2 + 1 + 5 x 3.
     assert_eq!(list_rows(&b, options::CHARACTER_LIST_ID).len(), 62);
-    assert_eq!(list_rows(&b, options::CONFIG_LIST_ID).len(), 74);
+    assert_eq!(list_rows(&b, options::CONFIG_LIST_ID).len(), 75);
     assert_eq!(list_rows(&b, options::CHAT_LIST_ID).len(), 19);
     let notices = b.c.take_notices();
     assert!(notices.is_empty(), "{notices:?}");

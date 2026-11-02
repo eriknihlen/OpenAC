@@ -17,6 +17,37 @@ fn dats() -> Content {
     Content::open(&dir).expect("open the retail dats")
 }
 
+/// The landscape detail texture is the region's first terrain
+/// description's (the building shells' is the second's, the interior
+/// cells' the third's).
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_landscape_detail_is_the_first_terrain_descriptions() {
+    let d = dats();
+    let region = d.dats.get::<Region>(REGION_ID).unwrap().unwrap();
+    let descs = &region.terrain_info.land_surfaces.tex_merge.terrain_desc;
+    for (i, desc) in descs.iter().take(3).enumerate() {
+        println!(
+            "description {i}: detail {:#010x} x {}",
+            desc.terrain_tex.detail_texture_id, desc.terrain_tex.detail_tex_tiling
+        );
+    }
+    let atlas = assets::build_terrain_atlas(&d, &region, WorldTextureDetail::FULL);
+    let landscape = atlas.landscape_detail.expect("a landscape detail texture");
+    let first = &descs[assets::LANDSCAPE_DETAIL_DESCRIPTION].terrain_tex;
+    assert_eq!(assets::LANDSCAPE_DETAIL_DESCRIPTION, 0);
+    assert_ne!(first.detail_texture_id, 0);
+    assert_eq!(landscape.tiling, first.detail_tex_tiling as f32);
+    assert!(landscape.tiling > 0.0);
+    assert!(landscape.image.width > 0 && !landscape.image.levels.is_empty());
+    // The dats give the landscape its own image (description 0 names
+    // 0x05001786, descriptions 1 and 2 both 0x05001787), so the loaded one
+    // is not the building shells' or the interior cells'.
+    assert_eq!(first.detail_texture_id, 0x0500_1786);
+    assert_ne!(Some(&landscape), atlas.details[0].as_ref());
+    assert_ne!(Some(&landscape), atlas.details[1].as_ref());
+}
+
 #[test]
 #[ignore = "needs the retail dat files"]
 fn terrain_atlas_has_every_layer_and_graded_alpha_maps() {
