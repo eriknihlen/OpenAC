@@ -1304,6 +1304,12 @@ impl CharacterCreation {
         let a = &self.appearance;
         let b = &self.attributes;
         let attribute = |v: i32| u32::try_from(v).unwrap_or(0);
+        // The server indexes the CharGen option lists by these values, so a
+        // slot the player never chose becomes the first option and an
+        // unchosen shade the first palette of its set. `headgear_style`
+        // keeps UNSET: the server reads `uint.MaxValue` as "no headgear".
+        let index = |v: u32| if v == UNSET { 0 } else { v };
+        let shade = |v: f64| if v == UNSET_SHADE { 0.0 } else { v };
         let mut classes = [0u32; SKILL_ADVANCEMENT_CLASS_COUNT];
         for (slot, value) in classes.iter_mut().zip(self.skills.to_wire_classes()) {
             *slot = value;
@@ -1313,26 +1319,26 @@ impl CharacterCreation {
                 heritage: self.heritage_id,
                 gender: self.gender_key,
                 appearance: CharacterAppearance {
-                    eyes_strip: a.eyes_strip,
-                    nose_strip: a.nose_strip,
-                    mouth_strip: a.mouth_strip,
-                    hair_color: a.hair_color,
-                    eye_color: a.eye_color,
-                    hair_style: a.hair_style,
+                    eyes_strip: index(a.eyes_strip),
+                    nose_strip: index(a.nose_strip),
+                    mouth_strip: index(a.mouth_strip),
+                    hair_color: index(a.hair_color),
+                    eye_color: index(a.eye_color),
+                    hair_style: index(a.hair_style),
                     headgear_style: a.headgear_style,
-                    headgear_color: a.headgear_color,
-                    shirt_style: a.shirt_style,
-                    shirt_color: a.shirt_color,
-                    trousers_style: a.trousers_style,
-                    trousers_color: a.trousers_color,
-                    footwear_style: a.footwear_style,
-                    footwear_color: a.footwear_color,
-                    skin_shade: a.skin_shade,
-                    hair_shade: a.hair_shade,
-                    headgear_shade: a.headgear_shade,
-                    shirt_shade: a.shirt_shade,
-                    trousers_shade: a.trousers_shade,
-                    footwear_shade: a.footwear_shade,
+                    headgear_color: index(a.headgear_color),
+                    shirt_style: index(a.shirt_style),
+                    shirt_color: index(a.shirt_color),
+                    trousers_style: index(a.trousers_style),
+                    trousers_color: index(a.trousers_color),
+                    footwear_style: index(a.footwear_style),
+                    footwear_color: index(a.footwear_color),
+                    skin_shade: shade(a.skin_shade),
+                    hair_shade: shade(a.hair_shade),
+                    headgear_shade: shade(a.headgear_shade),
+                    shirt_shade: shade(a.shirt_shade),
+                    trousers_shade: shade(a.trousers_shade),
+                    footwear_shade: shade(a.footwear_shade),
                 },
                 template: self.template,
                 attributes: CharacterAttributes {

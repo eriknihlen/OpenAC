@@ -518,6 +518,46 @@ fn an_accepted_finish_trims_the_name_and_sends_55_skill_slots() {
     assert_eq!(classes[SKILL_PRESET_PRIMARY as usize], 3);
 }
 
+#[test]
+fn an_unchosen_appearance_defaults_to_the_first_options_on_the_wire() {
+    // The console/headless flow never touches the appearance; the server
+    // indexes the CharGen lists by every one of these, so UNSET (the
+    // console default) must become the first option, not `0xFFFFFFFF`.
+    let mut state = ready_to_finish();
+    assert_eq!(state.snapshot().appearance.hair_style, UNSET);
+    let finish = state.try_begin_finish(0, 11, false).unwrap();
+    let a = &finish.request.appearance;
+    for value in [
+        a.eyes_strip,
+        a.nose_strip,
+        a.mouth_strip,
+        a.hair_style,
+        a.hair_color,
+        a.eye_color,
+        a.headgear_color,
+        a.shirt_style,
+        a.shirt_color,
+        a.trousers_style,
+        a.trousers_color,
+        a.footwear_style,
+        a.footwear_color,
+    ] {
+        assert_eq!(value, 0);
+    }
+    // `uint.MaxValue` means "no headgear" to the server.
+    assert_eq!(a.headgear_style, UNSET);
+    for shade in [
+        a.skin_shade,
+        a.hair_shade,
+        a.headgear_shade,
+        a.shirt_shade,
+        a.trousers_shade,
+        a.footwear_shade,
+    ] {
+        assert_eq!(shade, 0.0);
+    }
+}
+
 fn pending() -> CharacterCreation {
     let mut state = ready_to_finish();
     state.try_begin_finish(0, 11, false).unwrap();
