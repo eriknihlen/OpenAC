@@ -1119,6 +1119,49 @@ fn a_client_older_than_the_folder_layout_is_not_started() {
 }
 
 #[test]
+fn an_old_store_client_gives_way_to_the_client_beside_the_launcher() {
+    use ac_launcher_core::orchestration::LauncherExecutableSet;
+    use ac_launcher_core::profiles::LaunchMode;
+
+    let fixture = StoreFixture::new();
+    let store = Arc::new(fixture.store());
+    fixture.promote(&store, "0.1.9", "old").unwrap();
+    // A launcher built with its client beside it (the same build).
+    let beside = fixture.root.join("launcher");
+    std::fs::create_dir_all(&beside).unwrap();
+    let program = format!(
+        "openac{}",
+        ac_launcher_core::updates::suffix_for_rid(&fixture.rid)
+    );
+    std::fs::write(beside.join(&program), "client").unwrap();
+    let executables =
+        LauncherExecutableSet::from_current_version_store_or_directory(Arc::clone(&store), &beside)
+            .with_unix_execute_permission(Arc::new(|_| true));
+    let capability = executables.availability(LaunchMode::Gui);
+    assert!(capability.is_available, "{:?}", capability.reason);
+    assert_eq!(
+        executables.paths().unwrap().graphical_host_path,
+        beside.join(&program)
+    );
+}
+
+#[test]
+fn the_old_client_message_reads_as_one_line() {
+    let version = LauncherVersion::try_parse("0.1.9").unwrap();
+    assert!(ac_launcher_core::updates::predates_the_folder_layout(
+        &version
+    ));
+    assert!(!ac_launcher_core::updates::predates_the_folder_layout(
+        &LauncherVersion::try_parse("0.1.10-beta.1").unwrap()
+    ));
+    assert_eq!(
+        ac_launcher_core::updates::predates_the_folder_layout_message(&version),
+        "Client 0.1.9 was made for the old folder layout and cannot run on this install. \
+         Update the client."
+    );
+}
+
+#[test]
 fn a_client_older_than_the_folder_layout_is_never_rolled_back_to() {
     let fixture = StoreFixture::new();
     let store = fixture.store();

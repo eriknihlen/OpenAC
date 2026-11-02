@@ -42,7 +42,8 @@ pub fn predates_the_folder_layout(version: &LauncherVersion) -> bool {
 /// What the player is told about a client older than the folder layout.
 pub fn predates_the_folder_layout_message(version: &LauncherVersion) -> String {
     format!(
-        "Client {version} was made for the old folder layout and cannot run on this \n         install. Update the client."
+        "Client {version} was made for the old folder layout and cannot run on this install. \
+         Update the client."
     )
 }
 

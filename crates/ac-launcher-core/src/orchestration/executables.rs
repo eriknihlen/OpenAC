@@ -136,10 +136,14 @@ impl LauncherExecutableSet {
         let beside = paths_in(side_by_side);
         Self::from_resolver(Arc::new(move || {
             let resolution = store.cached_resolution();
-            refuse_old_client(&resolution)?;
-            match (&resolution.directory, resolution.is_verified()) {
-                (Some(directory), true) => Ok(paths_in(directory)),
+            // The client beside the launcher is the launcher's own build, so
+            // it also stands in for an installed one too old for the
+            // install's folder layout.
+            let usable = refuse_old_client(&resolution);
+            match (&resolution.directory, resolution.is_verified(), usable) {
+                (Some(directory), true, Ok(())) => Ok(paths_in(directory)),
                 _ if beside.graphical_host_path.is_file() => Ok(beside.clone()),
+                (_, _, Err(old)) => Err(old),
                 _ => Err(resolution.status),
             }
         }))

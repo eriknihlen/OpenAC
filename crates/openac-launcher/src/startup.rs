@@ -146,7 +146,8 @@ impl RescueUpdate {
 
     /// Checks the feed for a newer launcher and, when there is one, stages
     /// it and hands it to its helper, on a thread of its own.
-    fn start(self: &Arc<Self>, context: &StartContext, waker: Waker) {
+    fn start(self: &Arc<Self>, context: &StartContext, gate: &LayoutGate, waker: Waker) {
+        let gate = gate.clone();
         if self.busy.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -181,6 +182,12 @@ impl RescueUpdate {
                             &cancel,
                         )
                         .map_err(|e| e.to_string())?;
+                    // The helper replaces this launcher as soon as it starts:
+                    // no move may be running then, nor start after.
+                    gate.stop();
+                    while gate.is_running() {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
                     let applied = self_update_bootstrap::try_apply_staged_update_now(
                         &manager,
                         &installed_root,
@@ -443,6 +450,9 @@ pub struct StartupApp {
     stage: Stage,
     waker: Waker,
     exit: bool,
+    /// The player closed the window while a move ran: it closes once the
+    /// move is done.
+    closing: bool,
 }
 
 impl StartupApp {
@@ -467,6 +477,7 @@ impl StartupApp {
             stage,
             waker,
             exit: false,
+            closing: false,
         }
     }
 
@@ -479,6 +490,10 @@ impl StartupApp {
 
     /// Moves on to the launcher once the layout is ready.
     fn advance(&mut self) {
+        // A launcher closing after its move does not start up first.
+        if self.closing {
+            return;
+        }
         let Stage::Gate {
             gate,
             context,
@@ -504,6 +519,23 @@ impl StartupApp {
     }
 }
 
+impl StartupApp {
+    /// Closes the waiting window, unless a move is running: then it closes
+    /// once the move is done, so the files are never left half moved.
+    /// True when it may close now.
+    fn close_gate(&mut self) -> bool {
+        let Stage::Gate { gate, .. } = &self.stage else {
+            return true;
+        };
+        if gate.stop() {
+            self.closing = true;
+            false
+        } else {
+            true
+        }
+    }
+}
+
 impl LauncherUi for StartupApp {
     fn update(&mut self, root: &mut egui::Ui, window_active: bool) {
         self.advance();
@@ -523,13 +555,25 @@ impl LauncherUi for StartupApp {
         let ctx = root.ctx().clone();
         crate::theme::apply(&ctx);
         let state = gate.state();
-        let message = failure
-            .clone()
-            .or_else(|| state.message())
-            .unwrap_or_default();
+        let moving = gate.is_running() || state == LayoutGateState::Moving;
+        if self.closing && !gate.is_running() {
+            self.exit = true;
+        }
+        let message = if self.closing {
+            "Finishing the move…".to_owned()
+        } else {
+            failure
+                .clone()
+                .or_else(|| state.message())
+                .unwrap_or_default()
+        };
         let move_failed = matches!(state, LayoutGateState::Failed(_));
-        let stopped = failure.is_some() || move_failed;
-        let mut close = rescue.handed_over.load(Ordering::Acquire);
+        let stopped = !self.closing && (failure.is_some() || move_failed);
+        let rescue_busy = rescue.busy.load(Ordering::Acquire);
+        // The update's helper starts only once no move runs (see
+        // `RescueUpdate::start`), so the launcher can close for it.
+        let handed_over = rescue.handed_over.load(Ordering::Acquire);
+        let mut close = false;
         root.vertical_centered(|ui| {
             ui.add_space(ui.available_height() / 3.0);
             ui.label(RichText::new("OpenAC").heading().strong());
@@ -546,30 +590,37 @@ impl LauncherUi for StartupApp {
             }
             ui.add_space(16.0);
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                if move_failed && failure.is_none() {
-                    if ui.button("Try again").clicked() {
+                if move_failed && failure.is_none() && !self.closing {
+                    let try_again = egui::Button::new("Try again");
+                    if ui.add_enabled(!moving && !rescue_busy, try_again).clicked() {
                         gate.retry();
                     }
-                    let busy = rescue.busy.load(Ordering::Acquire);
-                    if ui
-                        .add_enabled(!busy, egui::Button::new("Check for a launcher update"))
-                        .clicked()
-                    {
-                        rescue.start(context, Arc::clone(&self.waker));
+                    let check = egui::Button::new("Check for a launcher update");
+                    if ui.add_enabled(!moving && !rescue_busy, check).clicked() {
+                        rescue.start(context, gate, Arc::clone(&self.waker));
                     }
                 }
-                if ui.button("Close").clicked() {
+                if ui
+                    .add_enabled(!self.closing, egui::Button::new("Close"))
+                    .clicked()
+                {
                     close = true;
                 }
             });
         });
-        self.exit |= close;
+        if close && self.close_gate() {
+            self.exit = true;
+        }
+        self.exit |= handed_over;
         // The gate's thread tries again every second; look again soon.
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 
     fn close_requested(&mut self) -> bool {
-        self.running().is_none_or(LauncherApp::close_requested)
+        match self.running() {
+            Some(app) => app.close_requested(),
+            None => self.close_gate(),
+        }
     }
 
     fn on_exit(&mut self) {

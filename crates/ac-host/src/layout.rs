@@ -229,8 +229,10 @@ fn migrate_with(
     let mut mover = Mover {
         notes: Vec::new(),
         rename,
+        merging: Vec::new(),
     };
     let result = (|| {
+        remove_leftover_copies(paths)?;
         mover.game_folder(paths)?;
         mover.plugin_files_folders(paths)?;
         mover.vtank_folder(paths)?;
@@ -290,11 +292,18 @@ fn rename_or_copy(source: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
+/// The end of the name a file is copied to before it takes its own name.
+const COPYING_SUFFIX: &str = ".copying";
+
 /// Copies `source` to `destination` (a file, or a folder and everything in
-/// it), checks every file reads back the same, then deletes `source`. A
-/// failure part-way leaves `source` whole; the partial copy is removed.
+/// it), checks every file reads back the same, then deletes `source`. Each
+/// file is written under a temporary name beside its destination and takes
+/// its own name only once it reads back the same, so a copy cut short
+/// never leaves a partial file under a real name. A failure part-way
+/// leaves `source` whole; the partial copy is removed.
 fn copy_then_delete(source: &Path, destination: &Path) -> io::Result<()> {
-    let copied = copy_checked(source, destination);
+    let mut visited = std::collections::HashSet::new();
+    let copied = copy_checked(source, destination, &mut visited);
     if let Err(error) = copied {
         let _ = remove_no_follow(destination);
         return Err(error);
@@ -302,18 +311,40 @@ fn copy_then_delete(source: &Path, destination: &Path) -> io::Result<()> {
     remove_no_follow(source)
 }
 
-fn copy_checked(source: &Path, destination: &Path) -> io::Result<()> {
+/// `<path>.copying`.
+fn copying_name(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(COPYING_SUFFIX);
+    PathBuf::from(name)
+}
+
+fn copy_checked(
+    source: &Path,
+    destination: &Path,
+    visited: &mut std::collections::HashSet<PathBuf>,
+) -> io::Result<()> {
     let metadata = std::fs::metadata(source)?;
     if metadata.is_dir() {
+        // A link back to a folder this copy is already inside would be
+        // copied without end; it is left out.
+        if !visited.insert(std::fs::canonicalize(source)?) {
+            return Ok(());
+        }
         std::fs::create_dir(destination)?;
         for entry in std::fs::read_dir(source)? {
             let entry = entry?;
-            copy_checked(&entry.path(), &destination.join(entry.file_name()))?;
+            copy_checked(&entry.path(), &destination.join(entry.file_name()), visited)?;
         }
         return Ok(());
     }
-    std::fs::copy(source, destination)?;
-    if !same_contents(source, destination)? {
+    let temporary = copying_name(destination);
+    match std::fs::remove_file(&temporary) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    std::fs::copy(source, &temporary)?;
+    if !same_contents(source, &temporary)? {
+        let _ = std::fs::remove_file(&temporary);
         return Err(io::Error::other(format!(
             "the copy of {} does not read back the same",
             source.display()
@@ -322,8 +353,49 @@ fn copy_checked(source: &Path, destination: &Path) -> io::Result<()> {
     if let Ok(written) = metadata.modified() {
         let _ = File::options()
             .write(true)
-            .open(destination)
+            .open(&temporary)
             .and_then(|file| file.set_modified(written));
+    }
+    std::fs::rename(&temporary, destination)
+}
+
+/// Deletes what an earlier run's copies cut short left (`*.copying`) in
+/// the folders the move writes into, before anything else runs: their
+/// originals are still in place and are copied again.
+fn remove_leftover_copies(paths: &PathSet) -> StepResult {
+    let mut visited = std::collections::HashSet::new();
+    for folder in [
+        paths.game_data_directory(),
+        paths.plugins_directory(),
+        paths.logs_directory(),
+    ] {
+        remove_copies_in(&folder, &mut visited)?;
+    }
+    Ok(())
+}
+
+fn remove_copies_in(folder: &Path, visited: &mut std::collections::HashSet<PathBuf>) -> StepResult {
+    let Ok(canonical) = std::fs::canonicalize(folder) else {
+        return Ok(());
+    };
+    if !visited.insert(canonical) {
+        return Ok(());
+    }
+    let entries = match std::fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(failed(folder, error)),
+    };
+    for entry in entries {
+        let path = entry.map_err(|error| failed(folder, error))?.path();
+        if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+            remove_copies_in(&path, visited)?;
+        } else if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().ends_with(COPYING_SUFFIX))
+        {
+            std::fs::remove_file(&path).map_err(|error| failed(&path, error))?;
+        }
     }
     Ok(())
 }
@@ -396,6 +468,9 @@ fn failed(path: &Path, error: io::Error) -> (PathBuf, io::Error) {
 struct Mover {
     notes: Vec<String>,
     rename: Rename,
+    /// The folders (as their real paths) being merged now, outermost
+    /// first: a link back to one of them is a cycle, not more to merge.
+    merging: Vec<PathBuf>,
 }
 
 impl Mover {
@@ -530,17 +605,46 @@ impl Mover {
         let existing = std::fs::metadata(destination)
             .or_else(|_| std::fs::symlink_metadata(destination))
             .map_err(|error| failed(destination, error))?;
+        let real_source = std::fs::canonicalize(source).ok();
+        // A link can make the two the same place: nothing to move.
+        if real_source.is_some() && real_source == std::fs::canonicalize(destination).ok() {
+            return Ok(());
+        }
         if incoming.is_dir() && existing.is_dir() {
-            for child in std::fs::read_dir(source).map_err(|error| failed(source, error))? {
-                let child = child.map_err(|error| failed(source, error))?;
-                self.move_item(&child.path(), &destination.join(child.file_name()))?;
+            let real_source = real_source.unwrap_or_else(|| source.to_path_buf());
+            if self.merging.contains(&real_source) {
+                // A link back to a folder being merged: following it would
+                // never end, and what it points at is moved already.
+                remove_no_follow(source).map_err(|error| failed(source, error))?;
+                self.notes.push(format!(
+                    "{} led back into a folder being moved; the link was removed.",
+                    source.display()
+                ));
+                return Ok(());
             }
+            self.merging.push(real_source);
+            let merged = (|| {
+                for child in std::fs::read_dir(source).map_err(|error| failed(source, error))? {
+                    let child = child.map_err(|error| failed(source, error))?;
+                    self.move_item(&child.path(), &destination.join(child.file_name()))?;
+                }
+                Ok(())
+            })();
+            self.merging.pop();
+            merged?;
             let emptied = if is_link(source) {
                 remove_no_follow(source)
             } else {
                 std::fs::remove_dir(source)
             };
             return emptied.map_err(|error| failed(source, error));
+        }
+        // The same file already there: the one moving is not needed.
+        if !incoming.is_dir()
+            && !existing.is_dir()
+            && same_contents(source, destination).map_err(|error| failed(source, error))?
+        {
+            return remove_no_follow(source).map_err(|error| failed(source, error));
         }
         // A folder keeps the name over a file (it holds what the name is
         // for); otherwise the newer one keeps it.
@@ -1127,6 +1231,86 @@ mod tests {
         assert_eq!(std::fs::read(new.join("big.met")).unwrap(), big);
         assert!(!root.join("vtank").exists());
         assert!(is_current(&paths));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn temporary_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "openac-layout-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ))
+    }
+
+    /// A link to a folder, or `false` where the platform makes none.
+    fn link_folder(link: &Path, target: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+                return true;
+            }
+            std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            false
+        }
+    }
+
+    #[test]
+    fn a_copy_to_another_volume_does_not_follow_a_link_back_into_itself() {
+        let root = temporary_root("copy-cycle");
+        let paths = PathSet::for_root(&root, crate::paths::RootSource::Explicit);
+        let old = root.join("vtank");
+        std::fs::create_dir_all(old.join("metas")).unwrap();
+        std::fs::write(old.join("metas").join("a.met"), "meta").unwrap();
+        if !link_folder(&old.join("metas").join("loop"), &old) {
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        migrate_with(
+            &paths,
+            SystemTime::now(),
+            &LocalZone::fixed(0),
+            across_volumes,
+        )
+        .unwrap();
+
+        let new = paths.vtank_profiles_directory().join("metas");
+        assert_eq!(std::fs::read_to_string(new.join("a.met")).unwrap(), "meta");
+        assert!(!old.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_copy_to_another_volume_goes_through_a_temporary_name() {
+        let root = temporary_root("copy-temporary");
+        let source = root.join("source.met");
+        let destination = root.join("destination.met");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&source, "meta").unwrap();
+        // What a copy stopped part-way left.
+        std::fs::write(root.join("destination.met.copying"), "me").unwrap();
+
+        copy_then_delete(&source, &destination).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "meta");
+        assert!(!source.exists());
+        assert!(!root.join("destination.met.copying").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

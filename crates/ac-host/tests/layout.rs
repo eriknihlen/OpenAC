@@ -798,3 +798,94 @@ fn the_cleanup_never_deletes_through_a_link() {
     // Nothing behind the linked server folder was touched.
     assert_eq!(read(&kept.join("client.log")), "keep");
 }
+
+#[test]
+fn a_leftover_partial_copy_is_cleared_and_the_original_moved() {
+    let (_dir, paths) = root("layout-partial-copy");
+    let root = paths.root_directory().to_path_buf();
+    // A run copying to another volume stopped half way through a.met: the
+    // part it wrote sits beside the destination, newer than the original.
+    let original = root.join("vtank").join("a.met");
+    write(&original, "the good original");
+    touch(&original, 1_000_000_000);
+    let partial = paths.vtank_profiles_directory().join("a.met.copying");
+    write(&partial, "the go");
+    touch(&partial, 2_000_000_000);
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    let vtank = paths.vtank_profiles_directory();
+    assert_eq!(read(&vtank.join("a.met")), "the good original");
+    assert!(!partial.exists());
+    assert!(!vtank.join("a.old.met").exists());
+    assert!(!vtank.join("a.met.old.copying").exists());
+}
+
+#[test]
+fn an_identical_file_already_there_is_not_kept_twice() {
+    let (_dir, paths) = root("layout-identical");
+    let root = paths.root_directory().to_path_buf();
+    write(&root.join("vtank").join("a.met"), "same");
+    touch(&root.join("vtank").join("a.met"), 2_000_000_000);
+    write(&paths.vtank_profiles_directory().join("a.met"), "same");
+    touch(
+        &paths.vtank_profiles_directory().join("a.met"),
+        1_000_000_000,
+    );
+
+    let migration = migrate(&paths, now(), &utc()).unwrap();
+
+    let vtank = paths.vtank_profiles_directory();
+    assert_eq!(read(&vtank.join("a.met")), "same");
+    assert!(!vtank.join("a.old.met").exists());
+    assert!(!root.join("vtank").exists());
+    assert!(
+        !migration
+            .notes
+            .iter()
+            .any(|note| note.contains("were both there")),
+        "{:?}",
+        migration.notes
+    );
+}
+
+#[test]
+fn a_link_to_the_destination_itself_is_not_moved_onto_itself() {
+    let (_dir, paths) = root("layout-same-folder");
+    let vtank = paths.vtank_profiles_directory();
+    write(&vtank.join("a.met"), "meta");
+    // The old place is a link to the new one.
+    if !link_folder(&paths.root_directory().join("vtank"), &vtank) {
+        eprintln!("skipped: this platform would not make a folder link");
+        return;
+    }
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    assert_eq!(read(&vtank.join("a.met")), "meta");
+    assert!(!vtank.join("a.old.met").exists());
+    assert!(layout::is_current(&paths));
+}
+
+#[test]
+fn a_link_back_into_the_folder_being_merged_is_not_followed_forever() {
+    let (_dir, paths) = root("layout-merge-cycle");
+    let root = paths.root_directory().to_path_buf();
+    let old = root.join("vtank");
+    write(&old.join("sub").join("a.met"), "meta");
+    if !link_folder(&old.join("sub").join("loop"), &old) {
+        eprintln!("skipped: this platform would not make a folder link");
+        return;
+    }
+    // The destination already has the same folders, so the move merges
+    // into them, link included.
+    std::fs::create_dir_all(paths.vtank_profiles_directory().join("sub").join("loop")).unwrap();
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    assert_eq!(
+        read(&paths.vtank_profiles_directory().join("sub").join("a.met")),
+        "meta"
+    );
+    assert!(layout::is_current(&paths));
+}
