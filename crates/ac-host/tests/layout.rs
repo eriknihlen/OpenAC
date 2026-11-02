@@ -289,51 +289,6 @@ fn a_running_client_holds_the_migration_off() {
 }
 
 #[test]
-fn a_half_done_migration_finishes_on_the_next_run() {
-    let (_dir, paths) = root("layout-resume");
-    let root = old_root(&paths);
-    // A run that stopped after moving part of data/ and before rewriting
-    // the record: game/ holds the record, data/ still the package.
-    std::fs::create_dir_all(paths.game_data_directory()).unwrap();
-    std::fs::rename(
-        root.join("data").join("install.json"),
-        paths.game_data_directory().join("install.json"),
-    )
-    .unwrap();
-    // And the plugin's data/ already started.
-    write(
-        &paths
-            .plugin_files_directory("acdream.mosstank")
-            .join("moved-earlier.txt"),
-        "earlier",
-    );
-    // And part of the VTank folder already moved.
-    write(
-        &paths
-            .vtank_profiles_directory()
-            .join("mosstank")
-            .join("navs")
-            .join("b.nav"),
-        "nav",
-    );
-
-    migrate(&paths, now(), &utc()).unwrap();
-    assert!(!root.join("data").exists());
-    assert_eq!(
-        read(&paths.game_data_directory().join("pak").join("acdream.pak")),
-        "pak"
-    );
-    assert!(read(&paths.game_data_directory().join("install.json")).contains("game"));
-    let data = paths.plugin_files_directory("acdream.mosstank");
-    assert_eq!(read(&data.join("moved-earlier.txt")), "earlier");
-    assert_eq!(read(&data.join("settings.json")), "mine");
-    let vtank = paths.vtank_profiles_directory().join("mosstank");
-    assert_eq!(read(&vtank.join("navs").join("b.nav")), "nav");
-    assert_eq!(read(&vtank.join("metas").join("a.met")), "meta");
-    assert!(!root.join("vtank").exists());
-}
-
-#[test]
 fn a_collision_keeps_the_newer_in_place_and_the_other_beside_it() {
     let (_dir, paths) = root("layout-collide");
     let root = paths.root_directory().to_path_buf();
@@ -568,4 +523,278 @@ fn only_a_launcher_session_document_has_a_session_folder() {
     let renamed = folder.join("other.json");
     write(&renamed, "{}");
     assert!(LauncherSessionFolder::claim(&paths, &renamed).is_none());
+}
+
+/// Makes `link` a link to the folder `target`: a directory symbolic link,
+/// or on Windows a junction when symbolic links are not allowed. `false`
+/// when the platform allows neither (the test then has nothing to check).
+fn link_folder(link: &Path, target: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+            return true;
+        }
+        std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
+#[test]
+fn a_crash_between_the_two_renames_of_a_collision_finishes_on_the_next_run() {
+    let (_dir, paths) = root("layout-resume-collision");
+    let root = paths.root_directory().to_path_buf();
+    // The first run found both a.met files, set the older (already in
+    // place) aside as a.old.met, and stopped before moving the newer in.
+    write(&root.join("vtank").join("a.met"), "newer");
+    write(&paths.vtank_profiles_directory().join("a.old.met"), "older");
+    assert!(!layout::is_current(&paths));
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    let vtank = paths.vtank_profiles_directory();
+    assert_eq!(read(&vtank.join("a.met")), "newer");
+    assert_eq!(read(&vtank.join("a.old.met")), "older");
+    assert!(!root.join("vtank").exists());
+    assert!(layout::is_current(&paths));
+}
+
+#[test]
+fn a_crash_after_the_plugin_step_finishes_on_the_next_run() {
+    let (_dir, paths) = root("layout-resume-steps");
+    let root = old_root(&paths);
+    // Steps 1 and 2 ran their renames (data/ is game/, files/ is data/) and
+    // the run stopped before rewriting the record and before step 3, so the
+    // record, vtank/, the macro logs and the marker are as they were.
+    std::fs::rename(root.join("data"), paths.game_data_directory()).unwrap();
+    for plugin in ["acdream.mosstank", "acdream.mosswartmassacre"] {
+        let folder = root.join("plugins").join(plugin);
+        std::fs::rename(folder.join("files"), folder.join("data")).unwrap();
+    }
+    assert!(!layout::is_current(&paths));
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    assert!(layout::is_current(&paths));
+    assert_eq!(
+        read(&paths.game_data_directory().join("pak").join("acdream.pak")),
+        "pak"
+    );
+    assert!(read(&paths.game_data_directory().join("install.json")).contains("game"));
+    let data = paths.plugin_files_directory("acdream.mosstank");
+    assert_eq!(read(&data.join("settings.json")), "mine");
+    assert!(!data.join("debug").exists());
+    assert_eq!(
+        read(
+            &paths
+                .old_plugin_logs_directory()
+                .join("macro-20261101-abc.log")
+        ),
+        "macro"
+    );
+    assert_eq!(
+        read(
+            &paths
+                .vtank_profiles_directory()
+                .join("mosstank")
+                .join("metas")
+                .join("a.met")
+        ),
+        "meta"
+    );
+    assert!(!root.join("vtank").exists());
+}
+
+#[test]
+fn a_folder_wins_its_name_over_a_file_of_that_name() {
+    let (_dir, paths) = root("layout-file-named-data");
+    let plugin = paths.plugins_directory().join("acdream.mosstank");
+    write(&plugin.join("files").join("settings.json"), "mine");
+    // A file named `data`, written after the folder.
+    write(&plugin.join("data"), "a stray file");
+    touch(&plugin.join("files").join("settings.json"), 1_000_000_000);
+    touch(&plugin.join("data"), 2_000_000_000);
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    assert_eq!(read(&plugin.join("data").join("settings.json")), "mine");
+    assert_eq!(read(&plugin.join("data.old")), "a stray file");
+    assert!(!plugin.join("files").exists());
+}
+
+#[test]
+fn a_client_that_cannot_move_the_files_says_it_needs_the_new_launcher_at_once() {
+    let (_dir, paths) = root("layout-client-busy");
+    old_root(&paths);
+    // An older launcher's session holds the install.
+    let older = InstallSessionLease::try_acquire_shared(&paths)
+        .unwrap()
+        .unwrap();
+    let started = std::time::Instant::now();
+    let error = layout::migrate_waiting(&paths, Duration::from_secs(10)).unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the client waited {:?}",
+        started.elapsed()
+    );
+    assert!(
+        error.starts_with(
+            "This client needs the new launcher. Restart the launcher to finish the update."
+        ),
+        "{error}"
+    );
+    assert!(error.contains("in use"), "{error}");
+    drop(older);
+}
+
+#[test]
+fn a_client_waits_while_another_program_moves_the_files() {
+    let (_dir, paths) = root("layout-client-waits");
+    old_root(&paths);
+    // Another program is moving the files: it holds the layout lock.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths.layout_lock_file())
+        .unwrap();
+    lock.lock().unwrap();
+    assert!(matches!(
+        migrate(&paths, now(), &utc()),
+        Err(MigrationError::Moving)
+    ));
+    let finisher = {
+        let paths = paths.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            write(&paths.layout_marker_file(), "{ \"version\": 2 }");
+            drop(lock);
+        })
+    };
+    let migration = layout::migrate_waiting(&paths, Duration::from_secs(10)).unwrap();
+    assert!(!migration.moved);
+    finisher.join().unwrap();
+}
+
+#[test]
+fn a_failed_step_says_what_went_wrong() {
+    let (_dir, paths) = root("layout-messages");
+    let path = paths.root_directory().join("data");
+    let failed = |error: std::io::Error| MigrationError::Failed {
+        path: path.clone(),
+        error,
+        notes: Vec::new(),
+    };
+    let denied = failed(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "access denied by policy",
+    ))
+    .message(&paths);
+    assert!(denied.contains("access denied by policy"), "{denied}");
+    assert!(denied.contains(&path.display().to_string()), "{denied}");
+    assert!(!denied.contains("is in use"), "{denied}");
+    let busy = failed(std::io::Error::from(std::io::ErrorKind::ResourceBusy)).message(&paths);
+    assert!(
+        busy.contains("is in use. Close all OpenAC clients"),
+        "{busy}"
+    );
+    #[cfg(windows)]
+    {
+        // A file another program holds open.
+        let sharing = failed(std::io::Error::from_raw_os_error(32)).message(&paths);
+        assert!(sharing.contains("is in use"), "{sharing}");
+    }
+    assert!(
+        MigrationError::Busy
+            .message(&paths)
+            .contains("is in use. Close all OpenAC clients")
+    );
+}
+
+#[test]
+fn linked_plugin_and_session_folders_are_moved_through_the_link() {
+    let (_dir, paths) = root("layout-links");
+    let elsewhere = TempDir::new("layout-links-target");
+    let target = elsewhere.path.join("mosstank-folder");
+    write(&target.join("files").join("settings.json"), "mine");
+    std::fs::create_dir_all(paths.plugins_directory()).unwrap();
+    let plugin = paths.plugins_directory().join("acdream.mosstank");
+    if !link_folder(&plugin, &target) {
+        eprintln!("skipped: this platform would not make a folder link");
+        return;
+    }
+    let session_target = elsewhere.path.join("old-session");
+    write(
+        &session_target.join("session.json"),
+        &old_session_document("10.0.0.5", 9000, "player"),
+    );
+    std::fs::create_dir_all(paths.launcher_log_directory()).unwrap();
+    let old_session = paths
+        .launcher_log_directory()
+        .join(old_session_name(NOW_MS - 60_000, 'a'));
+    assert!(link_folder(&old_session, &session_target));
+
+    migrate(&paths, now(), &utc()).unwrap();
+
+    // The plugin's files were renamed inside the linked folder.
+    assert_eq!(read(&target.join("data").join("settings.json")), "mine");
+    assert!(!target.join("files").exists());
+    // The linked session folder was filed like any other.
+    assert!(std::fs::symlink_metadata(&old_session).is_err());
+    assert!(
+        paths
+            .session_logs_directory("10.0.0.5", "player")
+            .join("2026-11-02 11-59-00")
+            .join("session.json")
+            .is_file()
+    );
+}
+
+#[test]
+fn the_cleanup_never_deletes_through_a_link() {
+    let (_dir, paths) = root("layout-cleanup-links");
+    let elsewhere = TempDir::new("layout-cleanup-links-target");
+    let zone = utc();
+    let day = 86_400_000;
+    let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+    // An old session folder that is a link to a folder elsewhere.
+    let session_target = elsewhere.path.join("kept-session");
+    write(&session_target.join("client.log"), "keep");
+    let character = paths.session_logs_directory("S", "C");
+    std::fs::create_dir_all(&character).unwrap();
+    let old_name = session_folder_name(i64::try_from(NOW_MS - 9 * day).unwrap());
+    if !link_folder(&character.join(&old_name), &session_target) {
+        eprintln!("skipped: this platform would not make a folder link");
+        return;
+    }
+    // A server folder that is a link to a folder holding an old session.
+    let other = PathSet::for_root(&elsewhere.path.join("other-root"), RootSource::Explicit);
+    let kept = create_session_folder(&other, "x", "y", at(NOW_MS - 9 * day), &zone).unwrap();
+    write(&kept.join("client.log"), "keep");
+    assert!(link_folder(
+        &paths.logs_directory().join("Linked"),
+        &other.logs_directory().join("x")
+    ));
+
+    let failures = clean_old_logs(&paths, now(), &zone);
+    assert!(failures.is_empty(), "{failures:?}");
+
+    // The old linked session went, as a link: what it pointed at stays.
+    assert!(std::fs::symlink_metadata(character.join(&old_name)).is_err());
+    assert_eq!(read(&session_target.join("client.log")), "keep");
+    // Nothing behind the linked server folder was touched.
+    assert_eq!(read(&kept.join("client.log")), "keep");
 }

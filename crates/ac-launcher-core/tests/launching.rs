@@ -1527,6 +1527,18 @@ fn the_client_log_holds_standard_output_and_error_in_whole_lines() {
     }
 }
 
+#[test]
+fn a_child_whose_log_cannot_be_written_still_has_its_output_read() {
+    // A log path that cannot be a file: the capture is never made, and the
+    // child must still be able to write everything it has to say.
+    let mut spec = fixture_spec(&["write-both", "5000"]);
+    spec.output_log_path = Some(PathBuf::from("   "));
+    let supervisor = LauncherProcessSupervisor::system();
+    supervisor.start(&spec, None).unwrap();
+    assert!(wait_for_exited(&supervisor, Duration::from_secs(30)));
+    assert_eq!(supervisor.exit_code(), Some(0));
+}
+
 /// A child process that counts kills, around a real one.
 struct RecordingChild {
     inner: Arc<dyn ChildProcess>,

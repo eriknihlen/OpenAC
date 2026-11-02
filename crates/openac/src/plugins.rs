@@ -120,14 +120,22 @@ pub fn only_in_plugin_log(event: &PluginEvent, has_plugin_logs: bool) -> bool {
         )
 }
 
+/// The size at which a plugin's log starts over: the file becomes
+/// `<plugin id>.old.log` (replacing the one before), so one plugin keeps at
+/// most twice this.
+pub const PLUGIN_LOG_ROLL_AT_BYTES: u64 = 16 * 1024 * 1024;
+
 /// A launcher session's plugin logs: everything a plugin writes through the
 /// host's log call, appended to `<plugin id>.log` in the session folder's
-/// `plugins` folder, one line each with the local time and the level.
+/// `plugins` folder, one line each with the local time and the level; past
+/// [`PLUGIN_LOG_ROLL_AT_BYTES`] it rolls over to `<plugin id>.old.log`.
 #[derive(Debug)]
 pub struct PluginLogFiles {
     directory: PathBuf,
     zone: ac_host::local_time::LocalZone,
-    open: BTreeMap<String, std::fs::File>,
+    roll_at: u64,
+    /// Each open log and how long it is.
+    open: BTreeMap<String, (std::fs::File, u64)>,
     reported: std::collections::BTreeSet<String>,
 }
 
@@ -141,9 +149,20 @@ impl PluginLogFiles {
     /// Logs whose times are in `zone`.
     #[must_use]
     pub fn with_zone(directory: PathBuf, zone: ac_host::local_time::LocalZone) -> Self {
+        Self::with_limit(directory, zone, PLUGIN_LOG_ROLL_AT_BYTES)
+    }
+
+    /// Logs that start over past `roll_at` bytes.
+    #[must_use]
+    pub fn with_limit(
+        directory: PathBuf,
+        zone: ac_host::local_time::LocalZone,
+        roll_at: u64,
+    ) -> Self {
         Self {
             directory,
             zone,
+            roll_at,
             open: BTreeMap::new(),
             reported: std::collections::BTreeSet::new(),
         }
@@ -156,25 +175,25 @@ impl PluginLogFiles {
             .join(format!("{}.log", ac_host::paths::file_name_safe(plugin)))
     }
 
+    /// The file one plugin's log rolls over to.
+    #[must_use]
+    pub fn old_path_for(&self, plugin: &str) -> PathBuf {
+        self.directory.join(format!(
+            "{}.old.log",
+            ac_host::paths::file_name_safe(plugin)
+        ))
+    }
+
     /// Appends one line. A line that cannot be written is said once per
     /// plugin on standard error (the client log) and the session goes on.
     pub fn append(&mut self, plugin: &str, level: LogLevel, message: &str) {
-        use std::io::Write as _;
         let line = format!(
             "{} {} {message}\n",
             local_time_text(std::time::SystemTime::now(), &self.zone),
             level.name()
         );
         let key = plugin.to_ascii_lowercase();
-        let result = match self.open.get_mut(&key) {
-            Some(file) => file.write_all(line.as_bytes()),
-            None => ac_host::layout::open_append(&self.path_for(plugin)).and_then(|mut file| {
-                file.write_all(line.as_bytes())?;
-                self.open.insert(key.clone(), file);
-                Ok(())
-            }),
-        };
-        if let Err(error) = result {
+        if let Err(error) = self.write(&key, plugin, line.as_bytes()) {
             // Opened again with the next line, in case the trouble passed.
             self.open.remove(&key);
             if self.reported.insert(key) {
@@ -184,6 +203,27 @@ impl PluginLogFiles {
                 );
             }
         }
+    }
+
+    fn write(&mut self, key: &str, plugin: &str, line: &[u8]) -> std::io::Result<()> {
+        use std::io::Write as _;
+        if !self.open.contains_key(key) {
+            let file = ac_host::layout::open_append(&self.path_for(plugin))?;
+            let length = file.metadata()?.len();
+            self.open.insert(key.to_owned(), (file, length));
+        }
+        let length = self.open.get(key).map_or(0, |(_, length)| *length);
+        if length > 0 && length + line.len() as u64 > self.roll_at {
+            self.open.remove(key);
+            std::fs::rename(self.path_for(plugin), self.old_path_for(plugin))?;
+            let file = ac_host::layout::open_append(&self.path_for(plugin))?;
+            self.open.insert(key.to_owned(), (file, 0));
+        }
+        if let Some((file, length)) = self.open.get_mut(key) {
+            file.write_all(line)?;
+            *length += line.len() as u64;
+        }
+        Ok(())
     }
 }
 
@@ -431,6 +471,40 @@ mod tests {
         assert!(lines[1].ends_with(" info started"), "{}", lines[1]);
         let other = std::fs::read_to_string(directory.join("Other_Plugin.log")).unwrap();
         assert!(other.ends_with(" warn careful\n"), "{other}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_plugin_log_rolls_over_to_its_old_log_and_stays_bounded() {
+        let folder = std::env::temp_dir().join(format!(
+            "openac-plugin-log-roll-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let directory = folder.join("plugins");
+        let mut logs = PluginLogFiles::with_limit(
+            directory.clone(),
+            ac_host::local_time::LocalZone::fixed(0),
+            300,
+        );
+        for index in 0..40 {
+            logs.append(
+                "acdream.mosstank",
+                LogLevel::Debug,
+                &format!("line {index:02}"),
+            );
+        }
+        let current = directory.join("acdream.mosstank.log");
+        let old = directory.join("acdream.mosstank.old.log");
+        assert!(std::fs::metadata(&current).unwrap().len() <= 300);
+        assert!(std::fs::metadata(&old).unwrap().len() <= 300);
+        assert!(
+            std::fs::read_to_string(&current)
+                .unwrap()
+                .contains("line 39")
+        );
         let _ = std::fs::remove_dir_all(&folder);
     }
 

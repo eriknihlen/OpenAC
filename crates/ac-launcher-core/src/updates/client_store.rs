@@ -25,6 +25,27 @@ use crate::ids;
 use crate::integrity;
 use crate::json::{self, ObjectBuilder, Out};
 
+/// The first client release that uses the install's current folder layout
+/// (`ac_host::layout`): the lowest version of the release after 0.1.9, a
+/// pre-release of it included. An older client reads and writes the folders
+/// the layout moved, so the launcher never starts one and never rolls back
+/// to one.
+pub const FIRST_CLIENT_OF_THE_FOLDER_LAYOUT: &str = "0.1.10-0";
+
+/// Whether a client version predates the install's folder layout (see
+/// [`FIRST_CLIENT_OF_THE_FOLDER_LAYOUT`]).
+pub fn predates_the_folder_layout(version: &LauncherVersion) -> bool {
+    LauncherVersion::try_parse(FIRST_CLIENT_OF_THE_FOLDER_LAYOUT)
+        .is_some_and(|first| *version < first)
+}
+
+/// What the player is told about a client older than the folder layout.
+pub fn predates_the_folder_layout_message(version: &LauncherVersion) -> String {
+    format!(
+        "Client {version} was made for the old folder layout and cannot run on this \n         install. Update the client."
+    )
+}
+
 /// One installed file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledFileRecord {
@@ -680,6 +701,18 @@ impl ClientVersionStore {
         let previous = Self::read_pointer(&self.previous_pointer_path);
         if let Some(pointer) = &previous.pointer {
             let mut recovered = self.resolve_pointer(pointer, rid, cancel)?;
+            if let Some(version) = recovered
+                .version
+                .as_ref()
+                .filter(|version| predates_the_folder_layout(version))
+            {
+                // Only the previous client is left, and it would run on the
+                // old folders: nothing is restored.
+                let refused =
+                    ClientVersionResolution::invalid(predates_the_folder_layout_message(version));
+                self.set_cached(&refused);
+                return Ok(refused);
+            }
             if recovered.is_verified() {
                 let installed = installed_version(&self.client_directory())
                     .and_then(|text| LauncherVersion::try_parse(&text));
@@ -861,6 +894,11 @@ impl ClientVersionStore {
             })?;
         let previous = LauncherVersion::try_parse(&previous)
             .ok_or_else(|| UpdateError::failed("Client pointer previousVersion is invalid."))?;
+        if predates_the_folder_layout(&previous) {
+            return Err(UpdateError::failed(predates_the_folder_layout_message(
+                &previous,
+            )));
+        }
         let verified = self.verify_version_directory(
             &self.version_directory(&previous),
             &previous,

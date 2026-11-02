@@ -395,24 +395,49 @@ fn safe_error(prefix: &str, detail: &str, secret: Option<&str>) -> String {
     }
 }
 
+/// Whether any line of a client log (the file and the older files it rotated
+/// to, each at most [`crate::launching::DEFAULT_MAX_BYTES`] long) matches.
+/// The log holds the client's standard output with its error stream, so
+/// a line can sit anywhere in it.
+fn log_has_line(path: &std::path::Path, matches: impl Fn(&str) -> bool) -> bool {
+    use std::io::BufRead as _;
+    let generations = (0..crate::launching::DEFAULT_MAX_FILES).map(|generation| {
+        if generation == 0 {
+            path.to_path_buf()
+        } else {
+            let mut name = path.as_os_str().to_owned();
+            name.push(format!(".{generation}"));
+            PathBuf::from(name)
+        }
+    });
+    generations.into_iter().any(|file| {
+        let Ok(file) = std::fs::File::open(&file) else {
+            return false;
+        };
+        // Bounded by the capture's own limit, and a little over for the
+        // line that ends past it.
+        let reader =
+            std::io::BufReader::new(file.take(crate::launching::DEFAULT_MAX_BYTES + 64 * 1024));
+        reader
+            .split(b'\n')
+            .map_while(Result::ok)
+            .any(|line| matches(&String::from_utf8_lossy(&line)))
+    })
+}
+
 /// The error a failed client shows: a specific one when the client said its
 /// prepared content is from another version, otherwise why it ended in
 /// plain words (see [`describe_client_exit`]).
 fn read_exit_failure(activity: &Activity) -> String {
-    if let Some(path) = &activity.output_log_path
-        && let Ok(file) = std::fs::File::open(path)
-    {
-        // The log holds standard output too, so the start of the error
-        // stream may sit a little way in.
-        let mut buffer = Vec::with_capacity(64 * 1024);
-        if file.take(64 * 1024).read_to_end(&mut buffer).is_ok() {
-            let text = String::from_utf8_lossy(&buffer);
-            if text.contains("bake tool") && text.contains("does not match") {
-                return "The installed client and prepared game files are different versions. \
-                        Update the client to match your game files before trying again."
-                    .to_owned();
-            }
-        }
+    let mismatch = activity.output_log_path.as_deref().is_some_and(|path| {
+        log_has_line(path, |line| {
+            line.contains("bake tool") && line.contains("does not match")
+        })
+    });
+    if mismatch {
+        return "The installed client and prepared game files are different versions. \
+                Update the client to match your game files before trying again."
+            .to_owned();
     }
     describe_client_exit(ClientExit {
         code: activity.exit_code,

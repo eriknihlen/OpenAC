@@ -345,6 +345,12 @@ impl PathSet {
         self.data_directory.join("layout.json")
     }
 
+    /// The lock a process holds while it moves the root into the current
+    /// layout.
+    pub fn layout_lock_file(&self) -> PathBuf {
+        self.data_directory.join("layout.lock")
+    }
+
     /// The launcher's profile document, which names the servers.
     pub fn launcher_profiles_file(&self) -> PathBuf {
         self.config_directory.join(LAUNCHER_PROFILES_FILE_NAME)

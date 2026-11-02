@@ -5,9 +5,10 @@
 //! The current layout (version 2) is described in [`crate::paths`]. A root
 //! records its layout in `layout.json` (`{ "version": 2 }`). [`migrate`]
 //! moves an older root into it before anything reads these folders: both
-//! the launcher and every client run it at startup. It takes the install's
-//! session lock alone, so it never runs while any client of this install
-//! runs, nor twice at once. Each step can be run again after an
+//! the launcher and every client run it at startup. It holds `layout.lock`
+//! (so a second mover waits for the first) and takes the install's
+//! session lock alone (so it never runs while any client of this install
+//! runs). Each step can be run again after an
 //! interruption; the marker is written last. Nothing reads the old places
 //! afterwards.
 //!
@@ -71,6 +72,9 @@ pub enum MigrationError {
     /// or another process migrating), so nothing was moved.
     #[error("the install is in use")]
     Busy,
+    /// Another process is moving the files now.
+    #[error("another process is moving the files")]
+    Moving,
     /// A step could not complete; nothing more was moved, and the next
     /// start goes on from here.
     #[error("{}: {error}", path.display())]
@@ -85,18 +89,60 @@ pub enum MigrationError {
 }
 
 impl MigrationError {
-    /// The player-facing text.
+    /// The player-facing text: what is in use when something holds a file
+    /// or the install, otherwise the error itself and its path.
     pub fn message(&self, paths: &PathSet) -> String {
-        let path = match self {
-            Self::Busy => paths.root_directory().to_path_buf(),
-            Self::Failed { path, .. } => path.clone(),
-        };
-        format!(
-            "Could not move your files to the new layout: {} is in use. Close all OpenAC \
-             clients and start the launcher again.",
-            path.display()
-        )
+        match self {
+            Self::Busy => in_use_message(paths.root_directory()),
+            Self::Moving => format!(
+                "Could not move your files to the new layout: another OpenAC program is \
+                 moving the files in {} now. Start again when it has finished.",
+                paths.root_directory().display()
+            ),
+            Self::Failed { path, error, .. } if is_in_use(error) => in_use_message(path),
+            Self::Failed { path, error, .. } => format!(
+                "Could not move your files to the new layout: {} ({:?}: {error}). Start the \
+                 launcher again once that is fixed.",
+                path.display(),
+                error.kind()
+            ),
+        }
     }
+
+    /// The text a client shows when it cannot move the files: a client
+    /// that finds the install held by others was started beside an older
+    /// launcher or older clients, which only the new launcher clears up.
+    pub fn client_message(&self, paths: &PathSet) -> String {
+        match self {
+            Self::Busy => format!(
+                "This client needs the new launcher. Restart the launcher to finish the \
+                 update. (The install folder {} is in use by another OpenAC program, so its \
+                 files could not be moved to the new layout.)",
+                paths.root_directory().display()
+            ),
+            other => other.message(paths),
+        }
+    }
+}
+
+fn in_use_message(path: &Path) -> String {
+    format!(
+        "Could not move your files to the new layout: {} is in use. Close all OpenAC \
+         clients and start the launcher again.",
+        path.display()
+    )
+}
+
+/// Whether an error says another program holds the file.
+fn is_in_use(error: &io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::ResourceBusy | io::ErrorKind::ExecutableFileBusy
+    ) {
+        return true;
+    }
+    // ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION.
+    cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33))
 }
 
 /// Whether the root's marker says it is in the current layout.
@@ -116,15 +162,54 @@ pub fn is_current(paths: &PathSet) -> bool {
 /// already there. `now` and `zone` date the old session folders.
 ///
 /// # Errors
-/// [`MigrationError::Busy`] while anything of this install runs;
+/// [`MigrationError::Moving`] while another process moves the files;
+/// [`MigrationError::Busy`] while anything else of this install runs;
 /// [`MigrationError::Failed`] when a step could not complete.
 pub fn migrate(
     paths: &PathSet,
     now: SystemTime,
     zone: &LocalZone,
 ) -> Result<Migration, MigrationError> {
+    migrate_with(paths, now, zone, rename_or_copy)
+}
+
+/// [`migrate`] with the way one item is moved replaced (tests).
+fn migrate_with(
+    paths: &PathSet,
+    now: SystemTime,
+    zone: &LocalZone,
+    rename: Rename,
+) -> Result<Migration, MigrationError> {
     if is_current(paths) {
         return Ok(Migration::default());
+    }
+    // The mover's own lock first: it tells a second mover (who waits for
+    // the marker) from a client or update that holds the install (who
+    // keeps the files from being moved at all).
+    let lock_path = paths.layout_lock_file();
+    let layout_lock = (|| {
+        std::fs::create_dir_all(paths.root_directory())?;
+        OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+    })()
+    .map_err(|error| MigrationError::Failed {
+        path: lock_path.clone(),
+        error,
+        notes: Vec::new(),
+    })?;
+    match layout_lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return Err(MigrationError::Moving),
+        Err(TryLockError::Error(error)) => {
+            return Err(MigrationError::Failed {
+                path: lock_path,
+                error,
+                notes: Vec::new(),
+            });
+        }
     }
     let lease = match InstallSessionLease::try_acquire_exclusive(paths) {
         Ok(Some(lease)) => lease,
@@ -141,7 +226,10 @@ pub fn migrate(
     if is_current(paths) {
         return Ok(Migration::default());
     }
-    let mut mover = Mover::default();
+    let mut mover = Mover {
+        notes: Vec::new(),
+        rename,
+    };
     let result = (|| {
         mover.game_folder(paths)?;
         mover.plugin_files_folders(paths)?;
@@ -151,6 +239,7 @@ pub fn migrate(
         write_marker(paths).map_err(|error| failed(&paths.layout_marker_file(), error))
     })();
     drop(lease);
+    drop(layout_lock);
     match result {
         Ok(()) => Ok(Migration {
             moved: true,
@@ -164,23 +253,122 @@ pub fn migrate(
     }
 }
 
-/// [`migrate`] for a client: when another process holds the install, it
-/// waits up to `patience` for that process to finish the migration (the
-/// marker appears) before giving up.
+/// [`migrate`] for a client: while another process moves the files, it
+/// waits up to `patience` for that to finish (the marker appears). When
+/// the install is held by others instead (an older launcher's session, an
+/// older client), it does not wait: only the new launcher can finish the
+/// update, and the client says so at once.
 ///
 /// # Errors
-/// The player-facing message (see [`MigrationError::message`]).
+/// The player-facing message (see [`MigrationError::client_message`]).
 pub fn migrate_waiting(paths: &PathSet, patience: Duration) -> Result<Migration, String> {
     let zone = LocalZone::system();
     let deadline = std::time::Instant::now() + patience;
     loop {
         match migrate(paths, SystemTime::now(), &zone) {
             Ok(migration) => return Ok(migration),
-            Err(MigrationError::Busy) if std::time::Instant::now() < deadline => {
+            Err(MigrationError::Moving) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(250));
             }
-            Err(error) => return Err(error.message(paths)),
+            Err(error) => return Err(error.client_message(paths)),
         }
+    }
+}
+
+/// How one file or folder is moved to a path that is free.
+type Rename = fn(&Path, &Path) -> io::Result<()>;
+
+/// A rename, or, where the two places are on different volumes (a plugins
+/// folder linked to another drive), a copy that is checked before the
+/// original goes.
+fn rename_or_copy(source: &Path, destination: &Path) -> io::Result<()> {
+    match std::fs::rename(source, destination) {
+        Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+            copy_then_delete(source, destination)
+        }
+        other => other,
+    }
+}
+
+/// Copies `source` to `destination` (a file, or a folder and everything in
+/// it), checks every file reads back the same, then deletes `source`. A
+/// failure part-way leaves `source` whole; the partial copy is removed.
+fn copy_then_delete(source: &Path, destination: &Path) -> io::Result<()> {
+    let copied = copy_checked(source, destination);
+    if let Err(error) = copied {
+        let _ = remove_no_follow(destination);
+        return Err(error);
+    }
+    remove_no_follow(source)
+}
+
+fn copy_checked(source: &Path, destination: &Path) -> io::Result<()> {
+    let metadata = std::fs::metadata(source)?;
+    if metadata.is_dir() {
+        std::fs::create_dir(destination)?;
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            copy_checked(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    std::fs::copy(source, destination)?;
+    if !same_contents(source, destination)? {
+        return Err(io::Error::other(format!(
+            "the copy of {} does not read back the same",
+            source.display()
+        )));
+    }
+    if let Ok(written) = metadata.modified() {
+        let _ = File::options()
+            .write(true)
+            .open(destination)
+            .and_then(|file| file.set_modified(written));
+    }
+    Ok(())
+}
+
+fn same_contents(left: &Path, right: &Path) -> io::Result<bool> {
+    use std::io::Read as _;
+    let (mut left, mut right) = (File::open(left)?, File::open(right)?);
+    if left.metadata()?.len() != right.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut a, mut b) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    loop {
+        let read = left.read(&mut a)?;
+        if read == 0 {
+            return Ok(true);
+        }
+        right.read_exact(&mut b[..read])?;
+        if a[..read] != b[..read] {
+            return Ok(false);
+        }
+    }
+}
+
+/// Whether `path` is a link (a symbolic link or a junction).
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+}
+
+/// Removes `path`: a link itself (never what it points at), a file, or a
+/// folder with everything in it.
+fn remove_no_follow(path: &Path) -> io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        // A link to a folder is removed as a folder on Windows (a
+        // junction or a directory symbolic link), as a file elsewhere.
+        return if cfg!(windows) && std::fs::metadata(path).is_ok_and(|m| m.is_dir()) {
+            std::fs::remove_dir(path)
+        } else {
+            std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))
+        };
+    }
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
     }
 }
 
@@ -205,9 +393,9 @@ fn failed(path: &Path, error: io::Error) -> (PathBuf, io::Error) {
 }
 
 /// Runs the steps and keeps their notes.
-#[derive(Debug, Default)]
 struct Mover {
     notes: Vec<String>,
+    rename: Rename,
 }
 
 impl Mover {
@@ -301,7 +489,7 @@ impl Mover {
             };
             let age = unix_ms(now).saturating_sub(started_ms);
             if age > i64::try_from(KEEP_LOGS.as_millis()).unwrap_or(i64::MAX) {
-                std::fs::remove_dir_all(&folder).map_err(|error| failed(&folder, error))?;
+                remove_no_follow(&folder).map_err(|error| failed(&folder, error))?;
                 self.notes
                     .push(format!("Deleted the old session folder {name}."));
                 continue;
@@ -319,7 +507,7 @@ impl Mover {
             std::fs::create_dir_all(&parent).map_err(|error| failed(&parent, error))?;
             let local_ms = started_ms + i64::from(zone.utc_offset_seconds(started_ms)) * 1000;
             let destination = unused_child(&parent, &session_folder_name(local_ms));
-            std::fs::rename(&folder, &destination).map_err(|error| failed(&folder, error))?;
+            (self.rename)(&folder, &destination).map_err(|error| failed(&folder, error))?;
         }
         Ok(())
     }
@@ -328,33 +516,52 @@ impl Mover {
     /// merges, child by child; anything onto something already there keeps
     /// the newer in place and the other beside it (`<name>.old<ext>`).
     fn move_item(&mut self, source: &Path, destination: &Path) -> StepResult {
-        let Ok(existing) = std::fs::symlink_metadata(destination) else {
+        let rename = self.rename;
+        if std::fs::symlink_metadata(destination).is_err() {
             if let Some(parent) = destination.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| failed(parent, error))?;
             }
-            return std::fs::rename(source, destination).map_err(|error| failed(source, error));
-        };
-        let incoming = std::fs::symlink_metadata(source).map_err(|error| failed(source, error))?;
+            return rename(source, destination).map_err(|error| failed(source, error));
+        }
+        // Judged through links: a linked folder is a folder.
+        let incoming = std::fs::metadata(source)
+            .or_else(|_| std::fs::symlink_metadata(source))
+            .map_err(|error| failed(source, error))?;
+        let existing = std::fs::metadata(destination)
+            .or_else(|_| std::fs::symlink_metadata(destination))
+            .map_err(|error| failed(destination, error))?;
         if incoming.is_dir() && existing.is_dir() {
             for child in std::fs::read_dir(source).map_err(|error| failed(source, error))? {
                 let child = child.map_err(|error| failed(source, error))?;
                 self.move_item(&child.path(), &destination.join(child.file_name()))?;
             }
-            return std::fs::remove_dir(source).map_err(|error| failed(source, error));
+            let emptied = if is_link(source) {
+                remove_no_follow(source)
+            } else {
+                std::fs::remove_dir(source)
+            };
+            return emptied.map_err(|error| failed(source, error));
         }
-        let incoming_is_newer = match (incoming.modified(), existing.modified()) {
-            (Ok(incoming), Ok(existing)) => incoming > existing,
-            _ => false,
+        // A folder keeps the name over a file (it holds what the name is
+        // for); otherwise the newer one keeps it.
+        let incoming_wins = if incoming.is_dir() != existing.is_dir() {
+            incoming.is_dir()
+        } else {
+            match (incoming.modified(), existing.modified()) {
+                (Ok(incoming), Ok(existing)) => incoming > existing,
+                _ => false,
+            }
         };
         let beside = beside_name(destination);
-        if incoming_is_newer {
-            std::fs::rename(destination, &beside).map_err(|error| failed(destination, error))?;
-            std::fs::rename(source, destination).map_err(|error| failed(source, error))?;
+        if incoming_wins {
+            rename(destination, &beside).map_err(|error| failed(destination, error))?;
+            rename(source, destination).map_err(|error| failed(source, error))?;
         } else {
-            std::fs::rename(source, &beside).map_err(|error| failed(source, error))?;
+            rename(source, &beside).map_err(|error| failed(source, error))?;
         }
         self.notes.push(format!(
-            "{} and {} were both there; the newer is {} and the other is {}.",
+            "{} and {} were both there; {} keeps the name (a folder over a file, else the \
+             newer) and the other is {}.",
             source.display(),
             destination.display(),
             destination.display(),
@@ -388,7 +595,8 @@ fn beside_name(path: &Path) -> PathBuf {
         .unwrap_or_else(|| path.to_path_buf())
 }
 
-/// The folders directly in `folder`; none when it does not exist.
+/// The folders directly in `folder`; none when it does not exist. A link to
+/// a folder (a symbolic link or a junction) counts as a folder.
 fn subfolders(folder: &Path) -> io::Result<Vec<PathBuf>> {
     let entries = match std::fs::read_dir(folder) {
         Ok(entries) => entries,
@@ -398,7 +606,7 @@ fn subfolders(folder: &Path) -> io::Result<Vec<PathBuf>> {
     let mut folders = Vec::new();
     for entry in entries {
         let entry = entry?;
-        if entry.file_type()?.is_dir() {
+        if std::fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir()) {
             folders.push(entry.path());
         }
     }
@@ -798,10 +1006,15 @@ pub fn clean_old_logs(paths: &PathSet, now: SystemTime, zone: &LocalZone) -> Vec
                 .iter()
                 .any(|reserved| reserved.eq_ignore_ascii_case(&name))
         });
-        if reserved {
+        // Nothing is deleted through a linked server or character folder:
+        // what it points at is not this install's to clear out.
+        if reserved || is_link(&server) {
             continue;
         }
         for character in subfolders(&server).unwrap_or_default() {
+            if is_link(&character) {
+                continue;
+            }
             for session in subfolders(&character).unwrap_or_default() {
                 let Some(started) = session
                     .file_name()
@@ -812,7 +1025,8 @@ pub fn clean_old_logs(paths: &PathSet, now: SystemTime, zone: &LocalZone) -> Vec
                 if local_now_ms.saturating_sub(started) <= keep_ms || is_held(&session) {
                     continue;
                 }
-                if let Err(error) = std::fs::remove_dir_all(&session) {
+                // A linked session folder goes as a link; what it points at stays.
+                if let Err(error) = remove_no_follow(&session) {
                     failures.push(format!(
                         "Could not delete the old session folder {}: {error}",
                         session.display()
@@ -858,4 +1072,61 @@ pub fn open_append(path: &Path) -> io::Result<File> {
         std::fs::create_dir_all(parent)?;
     }
     OpenOptions::new().create(true).append(true).open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A rename that always finds the two places on different volumes,
+    /// as one into a plugins folder linked to another drive does.
+    fn other_volume(_: &Path, _: &Path) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::CrossesDevices))
+    }
+
+    /// [`rename_or_copy`] with [`other_volume`] as the rename.
+    fn across_volumes(source: &Path, destination: &Path) -> io::Result<()> {
+        match other_volume(source, destination) {
+            Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+                copy_then_delete(source, destination)
+            }
+            other => other,
+        }
+    }
+
+    #[test]
+    fn a_move_to_another_volume_copies_checks_and_then_deletes() {
+        let root = std::env::temp_dir().join(format!(
+            "openac-layout-volumes-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let paths = PathSet::for_root(&root, crate::paths::RootSource::Explicit);
+        let old = root.join("vtank").join("mosstank").join("metas");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("a.met"), "meta").unwrap();
+        let big: Vec<u8> = (0..200_000u32).map(|n| (n % 251) as u8).collect();
+        std::fs::write(old.join("big.met"), &big).unwrap();
+
+        let migration = migrate_with(
+            &paths,
+            SystemTime::now(),
+            &LocalZone::fixed(0),
+            across_volumes,
+        )
+        .unwrap();
+
+        assert!(migration.moved);
+        let new = paths
+            .vtank_profiles_directory()
+            .join("mosstank")
+            .join("metas");
+        assert_eq!(std::fs::read_to_string(new.join("a.met")).unwrap(), "meta");
+        assert_eq!(std::fs::read(new.join("big.met")).unwrap(), big);
+        assert!(!root.join("vtank").exists());
+        assert!(is_current(&paths));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

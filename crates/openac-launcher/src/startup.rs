@@ -4,7 +4,8 @@
 //! shows only why it waits, and nothing reads the install's folders.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ac_host::PathSet;
 use ac_launcher_core::cancel::CancelToken;
@@ -78,6 +79,139 @@ pub struct Prepared {
     control: Option<control::ControlServer>,
 }
 
+/// The updater over the release feed: the client and the launcher's own
+/// update. `has_running_sessions` is asked before every change.
+fn build_updater(
+    context: &StartContext,
+    versions: &Arc<ClientVersionStore>,
+    launcher_version: &LauncherVersion,
+    has_running_sessions: impl Fn() -> bool + Send + Sync + 'static,
+) -> Result<LauncherUpdater, String> {
+    // The update check reads the production release feed unless the command
+    // line names another (`--update-manifest-uri`), as OpenAC's launcher
+    // does. The launcher's own update rides on the same feed.
+    let manifest = ReleaseManifestClient::for_feed(
+        Arc::clone(&context.transport),
+        &context.options.update_manifest_uri,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(LauncherUpdater::new(
+        Arc::new(manifest),
+        Arc::clone(&context.transport),
+        Arc::clone(versions),
+        launcher_version.clone(),
+        &context.rid,
+        has_running_sessions,
+    )
+    .map_err(|error| error.to_string())?
+    .with_self_updates(Arc::clone(&context.self_updates), context.layout.clone())
+    // A release build carries the fingerprint of what the launcher is built
+    // from (OPENAC_LAUNCHER_FINGERPRINT at compile time); a developer build
+    // has none and updates by version.
+    .with_launcher_fingerprint(option_env!("OPENAC_LAUNCHER_FINGERPRINT")))
+}
+
+/// The launcher's own update, offered while the move of the files has
+/// failed: a later release that fixes what stopped the move can be
+/// installed without the rest of the launcher, which the move holds back.
+struct RescueUpdate {
+    status: Mutex<String>,
+    busy: AtomicBool,
+    /// The staged update's helper was started; this launcher closes for it.
+    handed_over: AtomicBool,
+}
+
+impl RescueUpdate {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            status: Mutex::new(String::new()),
+            busy: AtomicBool::new(false),
+            handed_over: AtomicBool::new(false),
+        })
+    }
+
+    fn status(&self) -> String {
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_status(&self, text: impl Into<String>) {
+        *self
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = text.into();
+    }
+
+    /// Checks the feed for a newer launcher and, when there is one, stages
+    /// it and hands it to its helper, on a thread of its own.
+    fn start(self: &Arc<Self>, context: &StartContext, waker: Waker) {
+        if self.busy.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.set_status("Checking for a launcher update…");
+        let rescue = Arc::clone(self);
+        let updater = LauncherVersion::try_parse(env!("CARGO_PKG_VERSION"))
+            .ok_or_else(|| "The launcher's version is not SemVer 2.0.".to_owned())
+            .and_then(|version| {
+                let versions = Arc::new(ClientVersionStore::new(&context.paths));
+                build_updater(context, &versions, &version, || false)
+            });
+        let manager = Arc::clone(&context.self_updates);
+        let installed_root = context.layout.installed_root.clone();
+        let executable = context.executable.clone();
+        let arguments = context.options.public_arguments.clone();
+        let log = context.log.clone();
+        let spawned = std::thread::Builder::new()
+            .name("launcher-rescue-update".into())
+            .spawn(move || {
+                let outcome = (|| -> Result<String, String> {
+                    let updater = updater?;
+                    let cancel = CancelToken::new();
+                    let check = updater.check(&cancel).map_err(|e| e.to_string())?;
+                    if !check.is_launcher_update_available {
+                        return Ok("No newer launcher is available yet.".to_owned());
+                    }
+                    let progress_rescue = Arc::clone(&rescue);
+                    updater
+                        .stage_launcher(
+                            &check,
+                            &mut |progress| progress_rescue.set_status(progress.status),
+                            &cancel,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let applied = self_update_bootstrap::try_apply_staged_update_now(
+                        &manager,
+                        &installed_root,
+                        &executable,
+                        &arguments,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    if applied {
+                        rescue.handed_over.store(true, Ordering::Release);
+                        Ok("Installing the launcher update…".to_owned())
+                    } else {
+                        Ok("The launcher update is ready; start the launcher again to \
+                            install it."
+                            .to_owned())
+                    }
+                })();
+                let text = outcome.unwrap_or_else(|error| {
+                    format!("The launcher update could not be installed: {error}")
+                });
+                log.line(&format!("layout: {text}"));
+                rescue.set_status(text);
+                rescue.busy.store(false, Ordering::Release);
+                waker();
+            });
+        if let Err(error) = spawned {
+            self.set_status(format!("The update check could not start: {error}"));
+            self.busy.store(false, Ordering::Release);
+        }
+    }
+}
+
 /// Builds the launcher's parts. Reads the install's folders, so it runs
 /// only once the install is in the current layout.
 ///
@@ -146,32 +280,17 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
             .map_err(|error| error.to_string())
         }) as ApplyLauncherUpdate)
     };
-    let manifest = ReleaseManifestClient::for_feed(
-        Arc::clone(&context.transport),
-        &context.options.update_manifest_uri,
-    )
-    .map_err(|error| error.to_string())?;
     let sessions = Arc::clone(&orchestrator);
-    let updater = Some(Arc::new(
-        LauncherUpdater::new(
-            Arc::new(manifest),
-            Arc::clone(&context.transport),
-            Arc::clone(&versions),
-            launcher_version.clone(),
-            &context.rid,
-            move || {
-                sessions.snapshot().is_ok_and(|snapshot| {
-                    snapshot.sessions.iter().any(|session| session.is_active())
-                })
-            },
-        )
-        .map_err(|error| error.to_string())?
-        .with_self_updates(Arc::clone(&context.self_updates), context.layout.clone())
-        // A release build carries the fingerprint of what the launcher is built from
-        // (OPENAC_LAUNCHER_FINGERPRINT at compile time); a developer build has none
-        // and updates by version.
-        .with_launcher_fingerprint(option_env!("OPENAC_LAUNCHER_FINGERPRINT")),
-    ));
+    let updater = Some(Arc::new(build_updater(
+        context,
+        &versions,
+        &launcher_version,
+        move || {
+            sessions
+                .snapshot()
+                .is_ok_and(|snapshot| snapshot.sessions.iter().any(|session| session.is_active()))
+        },
+    )?));
 
     let client_version = {
         let versions = Arc::clone(&versions);
@@ -311,6 +430,8 @@ enum Stage {
         context: Box<StartContext>,
         /// The parts could not be made once the layout was ready.
         failure: Option<String>,
+        /// The launcher's own update, offered while the move has failed.
+        rescue: Arc<RescueUpdate>,
     },
     /// The launcher runs.
     Running(Box<Running>),
@@ -339,6 +460,7 @@ impl StartupApp {
                 gate,
                 context: Box::new(context),
                 failure: None,
+                rescue: RescueUpdate::new(),
             },
         };
         Self {
@@ -361,6 +483,7 @@ impl StartupApp {
             gate,
             context,
             failure,
+            ..
         } = &mut self.stage
         else {
             return;
@@ -388,7 +511,13 @@ impl LauncherUi for StartupApp {
             app.update(root, window_active);
             return;
         }
-        let Stage::Gate { gate, failure, .. } = &self.stage else {
+        let Stage::Gate {
+            gate,
+            context,
+            failure,
+            rescue,
+        } = &self.stage
+        else {
             return;
         };
         let ctx = root.ctx().clone();
@@ -398,7 +527,9 @@ impl LauncherUi for StartupApp {
             .clone()
             .or_else(|| state.message())
             .unwrap_or_default();
-        let stopped = failure.is_some() || matches!(state, LayoutGateState::Failed(_));
+        let move_failed = matches!(state, LayoutGateState::Failed(_));
+        let stopped = failure.is_some() || move_failed;
+        let mut close = rescue.handed_over.load(Ordering::Acquire);
         root.vertical_centered(|ui| {
             ui.add_space(ui.available_height() / 3.0);
             ui.label(RichText::new("OpenAC").heading().strong());
@@ -408,13 +539,31 @@ impl LauncherUi for StartupApp {
                 ui.add_space(8.0);
                 ui.spinner();
             }
+            let rescue_status = rescue.status();
+            if !rescue_status.is_empty() {
+                ui.add_space(8.0);
+                ui.label(&rescue_status);
+            }
             ui.add_space(16.0);
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                if move_failed && failure.is_none() {
+                    if ui.button("Try again").clicked() {
+                        gate.retry();
+                    }
+                    let busy = rescue.busy.load(Ordering::Acquire);
+                    if ui
+                        .add_enabled(!busy, egui::Button::new("Check for a launcher update"))
+                        .clicked()
+                    {
+                        rescue.start(context, Arc::clone(&self.waker));
+                    }
+                }
                 if ui.button("Close").clicked() {
-                    self.exit = true;
+                    close = true;
                 }
             });
         });
+        self.exit |= close;
         // The gate's thread tries again every second; look again soon.
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }

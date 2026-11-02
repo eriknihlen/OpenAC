@@ -713,6 +713,34 @@ fn set_show_beta_plugins_persists_to_disk_for_a_fresh_orchestrator_instance() {
 }
 
 #[test]
+fn the_exit_diagnosis_finds_its_line_after_a_lot_of_standard_output() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
+    let supervisor = supervisors.single();
+    let path = supervisor.spec().output_log_path.unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut log = "window: a line the client printed on standard output
+"
+    .repeat(4000);
+    log.push_str(
+        "prepared asset package does not match: bake tool 10 != 6
+",
+    );
+    std::fs::write(&path, log).unwrap();
+    supervisor.exit(1);
+    let error = single_session(&orchestrator).error.unwrap();
+    assert!(error.contains("Update the client"), "{error}");
+}
+
+#[test]
 fn asset_version_crash_produces_actionable_error_without_exposing_stderr() {
     let root = TempDir::new("orchestrator");
     let supervisors = Arc::new(FakeSupervisorFactory::default());

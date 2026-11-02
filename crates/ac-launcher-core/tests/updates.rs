@@ -1084,6 +1084,66 @@ fn dynamic_executable_resolver_tracks_only_verified_current_version() {
     );
 }
 
+// A client released before the install's current folder layout (0.1.9 was
+// the last) would read and write the old folders, so it is never started
+// and never restored.
+#[test]
+fn a_client_older_than_the_folder_layout_is_not_started() {
+    use ac_launcher_core::orchestration::LauncherExecutableSet;
+    use ac_launcher_core::profiles::LaunchMode;
+
+    let fixture = StoreFixture::new();
+    let store = Arc::new(fixture.store());
+    fixture.promote(&store, "0.1.9", "old").unwrap();
+    for executables in [
+        LauncherExecutableSet::from_current_version_store(Arc::clone(&store)),
+        LauncherExecutableSet::from_current_version_store_or_directory(
+            Arc::clone(&store),
+            fixture.root.path.as_path(),
+        ),
+    ] {
+        let capability = executables.availability(LaunchMode::Gui);
+        assert!(!capability.is_available);
+        assert!(
+            capability
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("Update the client")),
+            "{:?}",
+            capability.reason
+        );
+    }
+    fixture.promote(&store, "0.1.10", "new").unwrap();
+    let executables = LauncherExecutableSet::from_current_version_store(Arc::clone(&store));
+    assert!(executables.availability(LaunchMode::Gui).is_available);
+}
+
+#[test]
+fn a_client_older_than_the_folder_layout_is_never_rolled_back_to() {
+    let fixture = StoreFixture::new();
+    let store = fixture.store();
+    fixture.promote(&store, "0.1.9", "old").unwrap();
+    fixture.promote(&store, "0.1.10", "new").unwrap();
+
+    let error = store.rollback(&fixture.rid, &none()).unwrap_err();
+    assert!(error.to_string().contains("Update the client"), "{error}");
+    assert_eq!(store.cached_resolution().version.unwrap().value(), "0.1.10");
+
+    // Nor restored when the active pointer is lost and only the previous
+    // one is left.
+    std::fs::remove_file(store.current_pointer_path()).unwrap();
+    let recovered = fixture
+        .store()
+        .load_and_recover(&fixture.rid, &none())
+        .unwrap();
+    assert!(!recovered.is_verified(), "{}", recovered.status);
+    assert!(
+        recovered.status.contains("Update the client"),
+        "{}",
+        recovered.status
+    );
+}
+
 #[test]
 fn updates_reuse_one_client_path_and_retain_only_one_rollback_copy() {
     let fixture = StoreFixture::new();

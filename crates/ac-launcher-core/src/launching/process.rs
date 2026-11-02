@@ -197,12 +197,17 @@ const LONGEST_HELD_LINE: usize = 64 * 1024;
 
 /// Copies `stream` into `capture` on a thread of its own, a whole line at a
 /// time (a line longer than [`LONGEST_HELD_LINE`] in pieces), until the
-/// stream ends.
+/// stream ends; without a capture the stream is read and dropped.
 fn spawn_line_pump(
     name: &str,
     mut stream: impl Read + Send + 'static,
-    capture: Arc<BoundedProcessOutputCapture>,
+    capture: Option<Arc<BoundedProcessOutputCapture>>,
 ) -> io::Result<()> {
+    let append = move |bytes: &[u8]| {
+        if let Some(capture) = &capture {
+            capture.append(bytes);
+        }
+    };
     std::thread::Builder::new()
         .name(name.into())
         .spawn(move || {
@@ -214,14 +219,14 @@ fn spawn_line_pump(
                 }
                 pending.extend_from_slice(&buffer[..read]);
                 if let Some(last_break) = pending.iter().rposition(|&byte| byte == b'\n') {
-                    capture.append(&pending[..=last_break]);
+                    append(&pending[..=last_break]);
                     pending.drain(..=last_break);
                 } else if pending.len() > LONGEST_HELD_LINE {
-                    capture.append(&pending);
+                    append(&pending);
                     pending.clear();
                 }
             }
-            capture.append(&pending);
+            append(&pending);
         })?;
     Ok(())
 }
@@ -241,18 +246,21 @@ impl ChildProcess for SystemChildProcess {
         // whose setup fails.
         *slot = Some(child);
         drop(slot);
-        if let Some(path) = &self.spec.output_log_path
-            && let Ok(capture) = BoundedProcessOutputCapture::with_default_cap(path)
-        {
-            // Both streams go to the one log, whole lines at a time, so a
-            // line of one never lands inside a line of the other.
-            let capture = Arc::new(capture);
-            if let Some(stdout) = stdout {
-                spawn_line_pump("launcher-stdout-pump", stdout, Arc::clone(&capture))?;
-            }
-            if let Some(stderr) = stderr {
-                spawn_line_pump("launcher-stderr-pump", stderr, capture)?;
-            }
+        // Both streams go to the one log, whole lines at a time, so a line of
+        // one never lands inside a line of the other. They are read to their
+        // end even when the log cannot be made: a pipe nobody reads would
+        // stall the child, or break its writes once closed.
+        let capture = self
+            .spec
+            .output_log_path
+            .as_deref()
+            .and_then(|path| BoundedProcessOutputCapture::with_default_cap(path).ok())
+            .map(Arc::new);
+        if let Some(stdout) = stdout {
+            spawn_line_pump("launcher-stdout-pump", stdout, capture.clone())?;
+        }
+        if let Some(stderr) = stderr {
+            spawn_line_pump("launcher-stderr-pump", stderr, capture)?;
         }
 
         // The exit watcher: polls so `kill` can still reach the child.

@@ -18,8 +18,9 @@ pub mod zip;
 pub use barrier::{ExclusiveLease, SessionLease, UPDATE_LOCK_FILE_NAME, UpdateSessionBarrier};
 pub use client_store::{
     ClientActivationPointer, ClientVersionRecord, ClientVersionResolution, ClientVersionState,
-    ClientVersionStore, InstalledFileRecord, is_normalized_relative, resolve_contained,
-    validate_required_executables,
+    ClientVersionStore, FIRST_CLIENT_OF_THE_FOLDER_LAYOUT, InstalledFileRecord,
+    is_normalized_relative, predates_the_folder_layout, predates_the_folder_layout_message,
+    resolve_contained, validate_required_executables,
 };
 pub use downloader::{
     ArtifactDownloadProgress, VerifiedArtifactDownload, VerifiedArtifactDownloader,

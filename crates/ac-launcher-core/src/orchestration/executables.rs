@@ -18,7 +18,8 @@ use crate::fsutil;
 use crate::launching::LauncherProcessSpec;
 use crate::profiles::LaunchMode;
 use crate::updates::{
-    ClientVersionStore, detect_rid, graphical_host_for_rid, headless_host_for_rid,
+    ClientVersionResolution, ClientVersionStore, detect_rid, graphical_host_for_rid,
+    headless_host_for_rid, predates_the_folder_layout, predates_the_folder_layout_message,
     suffix_for_current_os,
 };
 
@@ -29,6 +30,17 @@ pub const HEADLESS_ENVIRONMENT_VARIABLE: &str = "OPENAC_HEADLESS";
 pub type PathPredicate = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
 
 type Resolver = Arc<dyn Fn() -> Result<ExecutablePaths, String> + Send + Sync>;
+
+/// An installed client older than the install's folder layout is never
+/// started: it would read and write the folders the layout moved.
+fn refuse_old_client(resolution: &ClientVersionResolution) -> Result<(), String> {
+    match resolution.version.as_ref() {
+        Some(version) if resolution.is_verified() && predates_the_folder_layout(version) => {
+            Err(predates_the_folder_layout_message(version))
+        }
+        _ => Ok(()),
+    }
+}
 
 /// The executables and the directory they run in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +116,7 @@ impl LauncherExecutableSet {
     pub fn from_current_version_store(store: Arc<ClientVersionStore>) -> Self {
         Self::from_resolver(Arc::new(move || {
             let resolution = store.cached_resolution();
+            refuse_old_client(&resolution)?;
             match (&resolution.directory, resolution.is_verified()) {
                 (Some(directory), true) => Ok(paths_in(directory)),
                 _ => Err(resolution.status),
@@ -123,6 +136,7 @@ impl LauncherExecutableSet {
         let beside = paths_in(side_by_side);
         Self::from_resolver(Arc::new(move || {
             let resolution = store.cached_resolution();
+            refuse_old_client(&resolution)?;
             match (&resolution.directory, resolution.is_verified()) {
                 (Some(directory), true) => Ok(paths_in(directory)),
                 _ if beside.graphical_host_path.is_file() => Ok(beside.clone()),
