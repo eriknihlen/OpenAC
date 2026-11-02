@@ -70,9 +70,12 @@ pub fn describe_status(snapshot: &LauncherSessionSnapshot) -> String {
     }
     // Not graceful: the host never reported its own exit, or reported a failure. The server may
     // still be holding the account, and saying so here is what stops the next login failure
-    // being a mystery. A refusal from the server is told in its own words.
+    // being a mystery. A refusal from the server is told in its own words,
+    // and says the server may hold the account only when that is what it
+    // refused for (not, say, a full server or an unknown account).
     if snapshot.stop == Some(LauncherSessionStop::Forced) {
-        return "Stopped (did not respond, closed by force) — the server may hold this account \n                for a short while."
+        return "Stopped (did not respond, closed by force) — the server may hold this account \
+                for a short while."
             .into();
     }
     if let Some(message) = snapshot
@@ -81,7 +84,11 @@ pub fn describe_status(snapshot: &LauncherSessionSnapshot) -> String {
         .map(|message| message.trim().trim_end_matches('.'))
         .filter(|message| !message.is_empty())
     {
-        return format!("{message} — the server may hold this account for a short while.");
+        return if snapshot.account_in_use {
+            format!("{message} — the server may hold this account for a short while.")
+        } else {
+            format!("{message}.")
+        };
     }
     let detail = match snapshot.exit_reason.as_deref() {
         Some("connection-error") => "Could not reach the server",

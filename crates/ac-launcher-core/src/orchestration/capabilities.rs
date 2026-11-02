@@ -41,7 +41,7 @@ impl LauncherCapability {
         Self {
             is_available: false,
             reason: Some(format!(
-                "The server may still hold this character. Ready in {seconds} s."
+                "The server may still hold this account. Ready in {seconds} s."
             )),
             held_for: Some(remaining),
         }

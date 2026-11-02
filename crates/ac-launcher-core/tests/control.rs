@@ -324,7 +324,7 @@ fn start_obeys_the_reconnect_hold() {
     assert!(!reply.ok);
     assert_eq!(
         reply.error.as_deref(),
-        Some("The server may still hold this character. Ready in 25 s.")
+        Some("The server may still hold this account. Ready in 25 s.")
     );
     assert!(owner.launches.lock().unwrap().is_empty());
 }

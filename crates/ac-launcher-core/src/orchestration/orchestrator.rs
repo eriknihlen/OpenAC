@@ -182,6 +182,10 @@ struct State {
     plugin_catalog: Option<Arc<PluginCatalog>>,
     /// The launcher is closing: nothing new may start.
     closing: bool,
+    /// When sessions cleared from the list ended uncleanly, by server and
+    /// account: the server may hold the account whether or not the session
+    /// is still listed.
+    cleared_holds: Vec<(String, String, SystemTime)>,
     disposed: bool,
 }
 
@@ -602,6 +606,7 @@ impl LauncherOrchestrator {
                 installation_status,
                 plugin_catalog: None,
                 closing: false,
+                cleared_holds: Vec::new(),
                 disposed: false,
             }),
             paths,
@@ -715,9 +720,12 @@ impl LauncherOrchestrator {
                 active.kind.lower_name()
             )));
         }
-        Ok(self
-            .inner
-            .reconnect_hold(&state.activities, server_name, account_name))
+        Ok(self.inner.reconnect_hold(
+            &state.activities,
+            &state.cleared_holds,
+            server_name,
+            account_name,
+        ))
     }
 
     /// [`account_launch_capability`](Self::account_launch_capability) for
@@ -743,8 +751,12 @@ impl LauncherOrchestrator {
                         active.kind.lower_name()
                     ))
                 } else {
-                    self.inner
-                        .reconnect_hold(&state.activities, &server.name, &account.account)
+                    self.inner.reconnect_hold(
+                        &state.activities,
+                        &state.cleared_holds,
+                        &server.name,
+                        &account.account,
+                    )
                 };
                 result.insert((server.name.clone(), account.account.clone()), capability);
             }
@@ -1136,9 +1148,12 @@ impl LauncherOrchestrator {
             }
             // Every start obeys the hold: the window's, automatic relaunch's
             // and the control endpoint's.
-            let hold = self
-                .inner
-                .reconnect_hold(&state.activities, server_name, account_name);
+            let hold = self.inner.reconnect_hold(
+                &state.activities,
+                &state.cleared_holds,
+                server_name,
+                account_name,
+            );
             if !hold.is_available {
                 return Err(OrchestratorError::Operation(
                     hold.reason
@@ -1489,6 +1504,24 @@ impl LauncherOrchestrator {
                     .into_iter()
                     .partition(|activity| !activity.is_active());
             state.activities = kept;
+            // Clearing the list does not end the server's hold: an unclean
+            // end is remembered for its account (only the newest matters).
+            let now = (self.inner.clock)();
+            state.cleared_holds.retain(|(_, _, ended_at)| {
+                now.duration_since(*ended_at).unwrap_or_default() < SERVER_SESSION_HOLD
+            });
+            for activity in finished
+                .iter()
+                .filter(|activity| !activity.exited_gracefully())
+            {
+                if let Some(ended_at) = activity.terminal_at {
+                    state.cleared_holds.push((
+                        activity.server_name.clone(),
+                        activity.account_name.clone(),
+                        ended_at,
+                    ));
+                }
+            }
             finished
         };
         let any = !removed.is_empty();
@@ -1718,11 +1751,12 @@ impl Inner {
     fn reconnect_hold(
         &self,
         activities: &[Activity],
+        cleared: &[(String, String, SystemTime)],
         server_name: &str,
         account_name: &str,
     ) -> LauncherCapability {
         let now = (self.clock)();
-        let Some(terminal_at) = activities
+        let listed = activities
             .iter()
             .filter(|activity| {
                 activity.is_terminal()
@@ -1730,9 +1764,14 @@ impl Inner {
                     && activity.server_name == server_name
                     && same_account(&activity.account_name, account_name)
             })
-            .filter_map(|activity| activity.terminal_at)
-            .max()
-        else {
+            .filter_map(|activity| activity.terminal_at);
+        let cleared = cleared
+            .iter()
+            .filter(|(server, account, _)| {
+                server == server_name && same_account(account, account_name)
+            })
+            .map(|(_, _, ended_at)| *ended_at);
+        let Some(terminal_at) = listed.chain(cleared).max() else {
             return LauncherCapability::AVAILABLE;
         };
         let elapsed = now.duration_since(terminal_at).unwrap_or(Duration::ZERO);

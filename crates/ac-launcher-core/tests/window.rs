@@ -555,7 +555,7 @@ fn the_servers_hold_counts_down_on_the_row() {
     assert!(!row.can_play());
     assert_eq!(
         row.hold_text.as_deref(),
-        Some("The server may still hold this character. Ready in 25 s.")
+        Some("The server may still hold this account. Ready in 25 s.")
     );
     *fake.account_launch_capability.lock().unwrap() =
         Some(LauncherCapability::held(Duration::from_millis(1_500)));
@@ -4560,6 +4560,44 @@ fn close_now_forces_the_clients_still_logging_out() {
     assert!(window.closing().unwrap().is_force_requested());
 }
 
+// Not an OpenAC test: a client the timeout already killed keeps "Did not
+// respond" after Close now; only those still logging out then read
+// "Closed by force".
+#[test]
+fn close_now_keeps_what_the_timeout_did() {
+    use ac_launcher_core::orchestration::LauncherSessionStop;
+    let fake = batch();
+    let alice = live_session("session-1", "One", "Alice");
+    let mut bob = live_session("session-2", "One", "Bob");
+    bob.character_name = None;
+    *fake.sessions_override.lock().unwrap() = Some(vec![alice.clone(), bob.clone()]);
+    let mut window = create_initialized(&fake);
+    assert!(!window.request_close());
+    window.confirm_close();
+    let ended = |mut session: LauncherSessionSnapshot| {
+        session.state = LauncherActivityState::Exited;
+        session.has_live_process = Some(false);
+        session.stop = Some(LauncherSessionStop::Forced);
+        session
+    };
+    *fake.sessions_override.lock().unwrap() = Some(vec![alice.clone(), ended(bob.clone())]);
+    window.poll();
+    window.close_now();
+    *fake.sessions_override.lock().unwrap() = Some(vec![ended(alice), ended(bob)]);
+    window.poll();
+    let states: Vec<String> = window
+        .closing()
+        .unwrap()
+        .clients()
+        .iter()
+        .map(|client| client.state.text())
+        .collect();
+    assert_eq!(
+        states,
+        ["Closed by force", "Did not respond, closed by force"]
+    );
+}
+
 #[test]
 fn closing_the_launcher_with_no_client_running_closes_at_once() {
     let fake = batch();
@@ -4593,4 +4631,37 @@ fn cancelling_the_close_keeps_everything_running() {
     window.close_active_modal();
     assert!(window.close_prompt.is_none());
     assert!(!window.is_close_confirmed());
+}
+
+// Not an OpenAC test: the session log tells a forced stop and a refusal
+// in plain words, and says the server may hold the account only after a
+// forced stop or a refusal because the account is still logged on.
+#[test]
+fn the_session_log_says_the_server_may_hold_the_account_only_when_it_may() {
+    use ac_launcher_core::orchestration::LauncherSessionStop;
+    use ac_launcher_core::window::sessions::describe_status;
+    let mut ended = session(LauncherActivityState::Exited);
+    ended.exit_code = Some(1);
+    ended.stop = Some(LauncherSessionStop::Forced);
+    assert_eq!(
+        describe_status(&ended),
+        "Stopped (did not respond, closed by force) — the server may hold this account for a \
+         short while."
+    );
+    ended.stop = None;
+    ended.exit_code = Some(6);
+    ended.exit_reason = Some("the server ended the session".into());
+    ended.server_message = Some("Another account is already logged on from this client.".into());
+    ended.account_in_use = true;
+    assert_eq!(
+        describe_status(&ended),
+        "Another account is already logged on from this client — the server may hold this \
+         account for a short while."
+    );
+    ended.server_message = Some("The server is currently full. Please try again later.".into());
+    ended.account_in_use = false;
+    assert_eq!(
+        describe_status(&ended),
+        "The server is currently full. Please try again later."
+    );
 }

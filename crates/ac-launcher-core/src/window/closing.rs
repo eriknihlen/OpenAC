@@ -54,6 +54,9 @@ pub struct ClosingClient {
     pub character_name: Option<String>,
     /// Where it is.
     pub state: ClosingClientState,
+    /// "Close now" was pressed while it still logged out: its kill is the
+    /// player's, not the timeout's.
+    closed_now: bool,
 }
 
 impl ClosingClient {
@@ -110,10 +113,11 @@ impl LauncherClosing {
                 server_name: session.server_name.clone(),
                 character_name: session.character_name.clone(),
                 state: ClosingClientState::LoggingOut,
+                // After "Close now" its stop is a forced one at once.
+                closed_now: self.force_requested,
             });
             started.push(session.session_id.clone());
         }
-        let force_requested = self.force_requested;
         for client in &mut self.clients {
             if matches!(client.state, ClosingClientState::Failed(_)) {
                 continue;
@@ -125,7 +129,7 @@ impl LauncherClosing {
             if let Some(name) = session.and_then(|session| session.character_name.clone()) {
                 client.character_name = Some(name);
             }
-            client.state = ended_state(session, force_requested);
+            client.state = ended_state(session, client.closed_now);
         }
         started
     }
@@ -144,11 +148,14 @@ impl LauncherClosing {
     /// "Close now": the clients still logging out, to be killed at once.
     pub fn request_force(&mut self) -> Vec<String> {
         self.force_requested = true;
-        self.clients
-            .iter()
-            .filter(|client| client.state.is_pending())
-            .map(|client| client.session_id.clone())
-            .collect()
+        let mut forced = Vec::new();
+        for client in &mut self.clients {
+            if client.state.is_pending() {
+                client.closed_now = true;
+                forced.push(client.session_id.clone());
+            }
+        }
+        forced
     }
 
     /// "Close now" was pressed.
@@ -184,15 +191,13 @@ impl LauncherClosing {
 
 /// A followed session's state from its snapshot: still logging out while
 /// its process or start runs; otherwise closed, by force when its stop had
-/// to kill it. A session no longer listed has ended.
-fn ended_state(
-    session: Option<&LauncherSessionSnapshot>,
-    force_requested: bool,
-) -> ClosingClientState {
+/// to kill it ("Close now" when it was still logging out then, else the
+/// timeout). A session no longer listed has ended.
+fn ended_state(session: Option<&LauncherSessionSnapshot>, closed_now: bool) -> ClosingClientState {
     match session {
         Some(session) if session.is_process_or_start_active() => ClosingClientState::LoggingOut,
         Some(session) if session.stop == Some(LauncherSessionStop::Forced) => {
-            if force_requested {
+            if closed_now {
                 ClosingClientState::ClosedNow
             } else {
                 ClosingClientState::DidNotRespond

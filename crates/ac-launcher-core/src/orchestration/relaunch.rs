@@ -41,6 +41,16 @@ pub const MAXIMUM_RELAUNCH_DELAY_SECONDS: u32 = 3600;
 /// minutes.
 pub const MAXIMUM_REFUSED_RELAUNCHES: u32 = 6;
 
+/// Why automatic relaunch stopped for an account after `refused` refused
+/// logins in a row, the last with the server's words `said`.
+pub fn refused_notice(account: &str, server: &str, refused: u32, said: &str) -> String {
+    let said = said.trim().trim_end_matches('.');
+    format!(
+        "Automatic relaunch of {account} on {server} stopped: the server refused {refused} \
+         logins in a row ({said})."
+    )
+}
+
 /// A monotonic clock: the time since some fixed start.
 pub type MonotonicClock = Arc<dyn Fn() -> Duration + Send + Sync>;
 
@@ -102,9 +112,12 @@ struct Entry {
     tracked_session: Option<String>,
     terminal_since: Option<Duration>,
     cancellation: Option<CancelToken>,
-    /// Sessions in a row the server refused because the account was still
-    /// logged on.
+    /// Sessions the server refused because the account was still logged on,
+    /// since one last reached the world or one was started by hand.
     refused: u32,
+    /// The session whose refusal was last counted: each counts once, and
+    /// its exit report may be read after the end itself was seen.
+    refusal_counted: Option<String>,
     /// The tracked session was refused that way: the next attempt waits
     /// only for the server's hold, not the full delay.
     retry_after_hold: bool,
@@ -266,10 +279,14 @@ impl LauncherRelaunchController {
                         entry.tracked_session = Some(latest.session_id.clone());
                         entry.terminal_since = None;
                         // A session someone else started: the count starts
-                        // over.
-                        entry.refused = 0;
-                        entry.retry_after_hold = false;
-                        entry.given_up = false;
+                        // over. One that appears while an attempt runs is
+                        // the attempt's own (its launch reports the state
+                        // change before the attempt is finished).
+                        if entry.cancellation.is_none() {
+                            entry.refused = 0;
+                            entry.retry_after_hold = false;
+                            entry.given_up = false;
+                        }
                     }
                     index
                 }
@@ -289,6 +306,7 @@ impl LauncherRelaunchController {
                             terminal_since: None,
                             cancellation: None,
                             refused: 0,
+                            refusal_counted: None,
                             retry_after_hold: false,
                             given_up: false,
                         },
@@ -315,27 +333,38 @@ impl LauncherRelaunchController {
                     entry.terminal_since = None;
                     entry.retry_after_hold = false;
                 }
-                _ if entry.terminal_since.is_some() => {}
                 ended => {
-                    entry.terminal_since = Some(now);
-                    if ended.is_some_and(|session| session.account_in_use) {
-                        // The server still held the account: try again once
-                        // its hold ends, a bounded number of times.
+                    if entry.terminal_since.is_none() {
+                        entry.terminal_since = Some(now);
+                        // An end waits the full delay unless it shows a
+                        // refusal.
+                        entry.retry_after_hold = false;
+                    }
+                    // The client's exit report, which says the server still
+                    // held the account, is often read after the end itself
+                    // was seen: each refused session counts once, whenever
+                    // it shows.
+                    if let Some(refused) = ended.filter(|session| session.account_in_use)
+                        && entry.refusal_counted.as_deref() != Some(refused.session_id.as_str())
+                    {
+                        entry.refusal_counted = Some(refused.session_id.clone());
+                        // Try again once its hold ends, a bounded number of
+                        // times.
                         entry.refused += 1;
                         entry.retry_after_hold = true;
                         if entry.refused >= MAXIMUM_REFUSED_RELAUNCHES && !entry.given_up {
                             entry.given_up = true;
-                            let said = ended
-                                .and_then(|session| session.server_message.as_deref())
+                            let said = refused
+                                .server_message
+                                .as_deref()
                                 .unwrap_or("the account is still logged on");
-                            self.notices.push(format!(
-                                "Automatic relaunch of {} on {} stopped: the server refused \n                                 {} logins in a row ({said}).",
-                                entry.selection.account, entry.selection.server, entry.refused
+                            self.notices.push(refused_notice(
+                                &entry.selection.account,
+                                &entry.selection.server,
+                                entry.refused,
+                                said,
                             ));
                         }
-                    } else {
-                        entry.refused = 0;
-                        entry.retry_after_hold = false;
                     }
                 }
             }

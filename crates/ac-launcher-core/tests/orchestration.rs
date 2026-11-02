@@ -1490,11 +1490,15 @@ fn a_failed_client_says_why_in_plain_words() {
     let root = TempDir::new("orchestrator");
     let supervisors = Arc::new(FakeSupervisorFactory::default());
     let statuses = Arc::new(QueueStatusSourceFactory::default());
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let now = Arc::new(Mutex::new(start));
+    let clock_now = Arc::clone(&now);
     let orchestrator = create_orchestrator(
         &root,
         Setup {
             supervisors: supervisors.clone(),
             statuses: statuses.clone(),
+            clock: Some(Arc::new(move || *lock(&clock_now))),
             ..Setup::default()
         },
     );
@@ -1505,6 +1509,14 @@ fn a_failed_client_says_why_in_plain_words() {
         Some("The client closed unexpectedly. (exit code -1)")
     );
     orchestrator.clear_finished_sessions().unwrap();
+    // Clearing the list does not lift the server's hold.
+    assert!(
+        launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless)
+            .unwrap_err()
+            .to_string()
+            .starts_with("The server may still hold this account.")
+    );
+    *lock(&now) = start + SERVER_SESSION_HOLD;
 
     launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
     let refused_supervisor = Arc::clone(&supervisors.created()[1]);
@@ -1973,12 +1985,12 @@ fn an_unclean_exit_holds_the_account_for_thirty_seconds() {
     assert_eq!(held.held_for, Some(Duration::from_secs(30)));
     assert_eq!(
         held.reason.as_deref(),
-        Some("The server may still hold this character. Ready in 30 s.")
+        Some("The server may still hold this account. Ready in 30 s.")
     );
     let refused = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap_err();
     assert_eq!(
         refused.to_string(),
-        "The server may still hold this character. Ready in 30 s."
+        "The server may still hold this account. Ready in 30 s."
     );
     assert_eq!(supervisors.created().len(), 1, "nothing started");
 
@@ -2649,7 +2661,7 @@ mod relaunch {
         let notices = scheduler.take_notices();
         assert_eq!(notices.len(), 1);
         assert!(
-            notices[0].contains("Another account is already logged on from this client."),
+            notices[0].contains("(Another account is already logged on from this client)."),
             "{notices:?}"
         );
         clock.advance(3600);
@@ -2663,6 +2675,66 @@ mod relaunch {
         clock.advance(60);
         host.poll(&mut scheduler, true);
         assert_eq!(host.launches.len(), 7);
+    }
+
+    // Not an OpenAC test: the window hears of a relaunched session (the
+    // launch's state change) before the attempt is finished, and often
+    // sees a session end before its exit report says the server refused
+    // it. Neither order may reset or double the count: six refused logins
+    // still stop relaunching.
+    #[test]
+    fn refusals_count_whatever_order_the_window_sees_them_in() {
+        for (observe_before_finish, report_after_end) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let case = format!("early {observe_before_finish}, late {report_after_end}");
+            let mut host = Host::new();
+            let clock = Clock::default();
+            let mut scheduler = clock.controller();
+            scheduler.set_delay_seconds(60).unwrap();
+            host.sessions = vec![session(1, true)];
+            host.observe(&mut scheduler, &[choice()]);
+            host.sessions = vec![session(1, false)];
+            host.observe(&mut scheduler, &[choice()]);
+            clock.advance(60);
+            let mut launches = 0u64;
+            while let Some(attempt) = scheduler
+                .poll(true, &mut |_| Ok(LauncherCapability::AVAILABLE))
+                .unwrap()
+            {
+                launches += 1;
+                assert!(launches <= 6, "{case}: never gave up");
+                // Starting: a refused login never reaches the world.
+                let mut launched = session(100 + launches, true);
+                launched.state = LauncherActivityState::Starting;
+                if observe_before_finish {
+                    host.sessions = vec![launched.clone()];
+                    host.observe(&mut scheduler, &[choice()]);
+                }
+                assert!(scheduler.finish(&attempt, Ok(launched)).is_none());
+                let mut ended = session(100 + launches, false);
+                if report_after_end {
+                    host.sessions = vec![ended.clone()];
+                    host.observe(&mut scheduler, &[choice()]);
+                }
+                ended.account_in_use = true;
+                ended.server_message =
+                    Some("Another account is already logged on from this client.".into());
+                host.sessions = vec![ended];
+                host.observe(&mut scheduler, &[choice()]);
+                host.observe(&mut scheduler, &[choice()]);
+                clock.advance(30);
+            }
+            assert_eq!(launches, 6, "{case}");
+            assert_eq!(
+                scheduler.take_notices(),
+                [
+                    "Automatic relaunch of Account on World stopped: the server refused 6 logins \
+                     in a row (Another account is already logged on from this client)."
+                ],
+                "{case}"
+            );
+        }
     }
 
     // Not an OpenAC test: a Stop that had to kill the client is the player's
