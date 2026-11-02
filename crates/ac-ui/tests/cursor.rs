@@ -149,6 +149,54 @@ fn each_resize_edge_chooses_its_retail_cursor() {
     }
 }
 
+/// A piece of a window that resizes it by its own means.
+#[derive(Debug)]
+struct OwnResize;
+
+impl ac_ui::tree::Widget for OwnResize {
+    fn resize_cursor_edges(&self) -> Option<ResizeEdges> {
+        Some(ResizeEdges::BOTTOM)
+    }
+
+    // A press on it does not move the window either.
+    fn handles_click(&self, _element: &Element) -> bool {
+        true
+    }
+}
+
+#[test]
+fn an_element_can_show_a_resize_cursor_and_the_window_stays_as_it_is() {
+    let mut ui = root(800.0, 600.0);
+    let w = window(&mut ui, false);
+    ui.add(w, at(0.0, 0.0, 150.0, 20.0), OwnResize);
+    let vertical = control(0x0600_5E66);
+
+    ui.on_mouse_move(60, 50);
+    let f = update(&mut ui);
+    assert_eq!(
+        (f.kind, f.cursor),
+        (CursorFeedbackKind::ResizeVertical, vertical)
+    );
+    assert_eq!(ui.hover_resize_edges(), ResizeEdges::NONE);
+
+    // It keeps showing while the button is down, wherever the pointer goes.
+    ui.on_mouse_down(MouseButton::Left, 60, 50, 0);
+    ui.on_mouse_move(300, 300);
+    let f = update(&mut ui);
+    assert_eq!(
+        (f.kind, f.cursor),
+        (CursorFeedbackKind::ResizeVertical, vertical)
+    );
+    assert_eq!(ui.active_resize_edges(), ResizeEdges::NONE);
+    assert_eq!(
+        ui.element(w).map(|e| (e.left, e.top, e.width, e.height)),
+        Some((50.0, 40.0, 150.0, 100.0))
+    );
+
+    ui.on_mouse_up(MouseButton::Left, 300, 300, 0);
+    assert_eq!(update(&mut ui).kind, CursorFeedbackKind::Default);
+}
+
 #[test]
 fn move_and_text_hover_have_their_own_cursors() {
     let mv = resolve(CursorSnapshot {

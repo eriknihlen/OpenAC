@@ -365,6 +365,105 @@ fn the_dock_takes_its_saved_place_and_a_drag_is_saved_when_it_ends() {
     );
 }
 
+/// The limit on the dock's slots: a saved one applies, and a drag of its handle
+/// is saved only as it ends.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_dock_takes_its_saved_limit_and_a_drag_of_its_handle_is_saved_when_it_ends() {
+    use ac_host::settings::PlayerSettings;
+    use ac_ui::event::MouseButton;
+    use ac_ui::plugin::dock::{PluginDock, WINDOW};
+    let size = (1280, 720);
+    let (mut state, _) = session();
+    for i in 0..8 {
+        state
+            .register_panel(
+                &UiOwner::new(format!("test.{i}"), format!("Plugin {i}")),
+                PanelDescriptor::new("main", format!("Plugin {i}")),
+                "<panel/>",
+                BindingSchema::new("Binding"),
+            )
+            .unwrap();
+    }
+    let mut ui = WindowUi::build(dats(), size).expect("the UI builds");
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    let limit = |ui: &mut WindowUi| {
+        ui.host_mut()
+            .with_controller::<PluginDock, _>(WINDOW, |c, _| c.slot_limit())
+            .unwrap()
+    };
+    assert_eq!(limit(&mut ui), None);
+
+    let mut saved = PlayerSettings::default();
+    saved.plugin_ui.dock_slots = 3;
+    ui.settings_changed_elsewhere(&saved);
+    ui.frame(Instant::now(), size);
+    assert_eq!(limit(&mut ui), Some(3));
+    saved.plugin_ui.dock_slots = -1;
+    ui.settings_changed_elsewhere(&saved);
+    ui.frame(Instant::now(), size);
+    assert_eq!(limit(&mut ui), None);
+    saved.plugin_ui.dock_slots = 5;
+    ui.settings_changed_elsewhere(&saved);
+    ui.frame(Instant::now(), size);
+    assert_eq!(limit(&mut ui), Some(5));
+
+    let on_handle = |ui: &mut WindowUi| {
+        let handle = ui
+            .host_mut()
+            .with_controller::<PluginDock, _>(WINDOW, |c, _| c.layout().length_handle)
+            .unwrap()
+            .unwrap();
+        let frame = ui.host().root.window(WINDOW).unwrap().frame;
+        let e = ui.host().root.element(frame).unwrap();
+        (
+            (e.left + handle.x + handle.w / 2.0) as i32,
+            (e.top + handle.y + handle.h / 2.0) as i32,
+        )
+    };
+
+    // Two slots back from its far end.
+    ui.host_mut().root.set_ui_locked(false);
+    ui.frame(Instant::now(), size);
+    let (x, y) = on_handle(&mut ui);
+    let host = ui.host_mut();
+    host.mouse_move(x, y);
+    host.mouse_down(MouseButton::Left, x, y, 0);
+    host.mouse_move(x, y - 90);
+    ui.frame(Instant::now(), size);
+    ui.feed(&mut scene);
+    assert_eq!(limit(&mut ui), Some(3));
+    assert_eq!(
+        ui.settings().plugin_ui.dock_slots,
+        5,
+        "not until the drag ends"
+    );
+    ui.host_mut().mouse_up(MouseButton::Left, x, y - 90, 0);
+    ui.frame(Instant::now(), size);
+    ui.feed(&mut scene);
+    assert_eq!(ui.settings().plugin_ui.dock_slots, 3);
+    assert!(
+        ui.take_settings_changes()
+            .iter()
+            .any(|(s, _)| *s == ac_ui::panels::options::Section::PluginUi)
+    );
+
+    // A press in place saves nothing.
+    let (x, y) = on_handle(&mut ui);
+    let host = ui.host_mut();
+    host.mouse_move(x, y);
+    host.mouse_down(MouseButton::Left, x, y, 0);
+    host.mouse_up(MouseButton::Left, x, y, 0);
+    ui.frame(Instant::now(), size);
+    ui.feed(&mut scene);
+    assert!(ui.take_settings_changes().is_empty());
+}
+
 /// A reader that hands out a 4 x 4 image for every path (OpenAC PR #271's
 /// file icons; the real reader is `ac-plugin-ui`'s).
 #[derive(Debug)]

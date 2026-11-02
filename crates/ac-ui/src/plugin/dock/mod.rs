@@ -9,6 +9,9 @@
 //!
 //! With more windows than fit, the slots scroll with the wheel or the arrows at
 //! each end of the list, and a bar beside them says how far through it they are.
+//! While windows are unlocked a handle at its far end limits how many slots it
+//! shows, by a whole slot at a time, and the rest scroll the same way. Dragged out
+//! until they all show, or as long as the screen lets it be, it has no limit.
 //!
 //! Closed, the dock is only the tile, with a count of the plugin windows open,
 //! and those windows stay as they are. The state is saved per character with
@@ -31,7 +34,7 @@ use std::sync::Arc;
 use ac_plugin_ui::markup::normalize_icon;
 use ac_plugin_ui::{PanelView, PluginIcon, UiInput};
 
-use self::layout::{ARROW_LENGTH, DockLayout, Metrics, ScrollBar};
+use self::layout::{ARROW_LENGTH, DockLayout, LENGTH_HANDLE, Metrics, ScrollBar};
 pub use self::layout::{DockMode, DockOpens, DockSize};
 use self::style::DockSide;
 use super::style::{PointerState, with_alpha};
@@ -41,7 +44,7 @@ use crate::bundled_font::ModernFonts;
 use crate::draw::{Color, DEFAULT_OUTLINE_COLOR, RenderContext};
 use crate::event::{UiEvent, kind};
 use crate::font::UiFont;
-use crate::geometry::{AnchorEdges, Rect};
+use crate::geometry::{AnchorEdges, Rect, ResizeEdges};
 use crate::host::PanelController;
 use crate::layout_persistence::WindowState;
 use crate::root::{ElementMessage, UiRoot};
@@ -177,6 +180,7 @@ pub struct PluginDock {
     gear: ElementId,
     back: ElementId,
     forward: ElementId,
+    length_handle: ElementId,
     entries: Vec<Entry>,
     mode: DockMode,
     size: DockSize,
@@ -203,6 +207,9 @@ pub struct PluginDock {
     /// Whether the slots' icons were last picked for a light theme.
     icons_light: bool,
     first: usize,
+    /// How many slots it shows at most; none for as many as the screen has room
+    /// for.
+    slot_limit: Option<usize>,
     layout: DockLayout,
     screen: (f32, f32),
     /// The dock is being dragged, with the closest the pointer has been to its
@@ -223,6 +230,14 @@ pub struct PluginDock {
     mode_before_drag: DockMode,
     /// A drag ended in another mode since the window last asked.
     mode_dragged: bool,
+    /// The length handle is being dragged, with the limit it had when it was
+    /// taken hold of.
+    stretching: Option<Option<usize>>,
+    /// The pointer has moved since the length handle was taken hold of.
+    moved_in_stretch: bool,
+    /// A drag of the length handle ended on another limit since the window last
+    /// asked.
+    limit_stretched: bool,
     /// The player right-clicked the dock or pressed the gear since the window
     /// last asked.
     appearance_requested: bool,
@@ -278,6 +293,9 @@ impl PluginDock {
         };
         let back = arrow("PluginDockBack", false);
         let forward = arrow("PluginDockForward", true);
+        let mut h = Element::at(0.0, 0.0, 0.0, 0.0).with_anchors(AnchorEdges::NONE);
+        h.name = Some("PluginDockLengthHandle".to_owned());
+        let length_handle = ui.add(root, h, DockLengthHandle::default());
         let mut dock = Self {
             root,
             grip,
@@ -285,6 +303,7 @@ impl PluginDock {
             gear,
             back,
             forward,
+            length_handle,
             entries: Vec::new(),
             mode,
             size: DockSize::default(),
@@ -302,6 +321,7 @@ impl PluginDock {
             theme: PluginTheme::Classic,
             icons_light: false,
             first: 0,
+            slot_limit: None,
             layout,
             screen: ui.size(),
             dragging: None,
@@ -312,6 +332,9 @@ impl PluginDock {
             reveal: None,
             mode_before_drag: mode,
             mode_dragged: false,
+            stretching: None,
+            moved_in_stretch: false,
+            limit_stretched: false,
             appearance_requested: false,
         };
         dock.reflow(ui);
@@ -334,6 +357,21 @@ impl PluginDock {
     pub fn set_size(&mut self, ui: &mut UiRoot, size: DockSize) {
         if self.size != size {
             self.size = size;
+            self.reflow(ui);
+        }
+    }
+
+    /// How many slots it shows at most, if it is limited.
+    #[must_use]
+    pub fn slot_limit(&self) -> Option<usize> {
+        self.slot_limit
+    }
+
+    /// Shows at most `limit` slots, and scrolls the rest; none for as many as the
+    /// screen has room for.
+    pub fn set_slot_limit(&mut self, ui: &mut UiRoot, limit: Option<usize>) {
+        if self.slot_limit != limit {
+            self.slot_limit = limit;
             self.reflow(ui);
         }
     }
@@ -446,6 +484,13 @@ impl PluginDock {
         if !mode.is_rail() {
             ui.move_window(WINDOW, left, top);
         }
+    }
+
+    /// The limit a drag of the length handle left the dock with, once, when the
+    /// drag has ended (the window saves it). A drag in progress does not change
+    /// what is saved.
+    pub fn take_stretched_limit(&mut self) -> Option<Option<usize>> {
+        std::mem::take(&mut self.limit_stretched).then_some(self.slot_limit)
     }
 
     /// The mode a drag left the dock in, once, when the drag has ended (the
@@ -573,9 +618,11 @@ impl PluginDock {
         }
         self.screen = ui.size();
         let owners: Vec<&str> = self.entries.iter().map(|e| e.owner.as_str()).collect();
-        let longest = layout::max_length(self.mode, self.screen.0, self.screen.1);
         let closed = self.laid_out_closed();
         let grip = !ui.ui_locked();
+        let longest = layout::max_length(self.mode, self.screen.0, self.screen.1).min(
+            layout::length_for_slots(self.mode, self.size, grip, &owners, self.slot_limit),
+        );
         let l = layout::compute(
             self.mode, self.size, closed, grip, &owners, longest, self.first,
         );
@@ -630,8 +677,9 @@ impl PluginDock {
         // A dock on the screen's right or bottom edge keeps that edge when its
         // size changes without opening, closing or changing mode (the grip
         // coming or going, a new size), as one on the left or top edge keeps
-        // that one. Opening and closing place it themselves.
-        let same = self.laid_out_as == (closed, self.mode);
+        // that one. Opening and closing place it themselves, and the length
+        // handle is the end that moves.
+        let same = self.laid_out_as == (closed, self.mode) && !self.length_handle_held(ui);
         self.laid_out_as = (closed, self.mode);
         let (sw, sh) = self.screen;
         if let Some(e) = ui.element_mut(self.root) {
@@ -647,6 +695,18 @@ impl PluginDock {
             }
         }
         let open_count = self.entries.iter().filter(|e| e.open).count();
+        if let Some(r) = l.length_handle {
+            place(ui, self.length_handle, r);
+        }
+        ui.set_visible(self.length_handle, l.length_handle.is_some());
+        if let Some(w) = ui.widget_mut::<DockLengthHandle>(self.length_handle) {
+            w.palette = palette;
+            w.mode = self.mode;
+            w.metrics = metrics;
+            if l.length_handle.is_none() {
+                w.pointer = PointerState::default();
+            }
+        }
         if let Some(w) = ui.widget_mut::<DockGrip>(self.grip) {
             w.palette = palette;
             w.mode = self.mode;
@@ -819,7 +879,8 @@ impl PluginDock {
             return;
         };
         reveal.elapsed += dt.max(0.0);
-        if reveal.elapsed >= self.reveal_seconds || !self.is_shown() || ui.is_window_move_active() {
+        let done = reveal.elapsed >= self.reveal_seconds || !self.is_shown();
+        if done || ui.is_window_move_active() || self.length_handle_held(ui) {
             self.end_reveal(ui);
         } else {
             self.place_reveal(ui);
@@ -875,9 +936,10 @@ impl PluginDock {
         if !over {
             self.peek_held_off = false;
         }
-        let held = ui
-            .widget::<DockGrip>(self.grip)
-            .is_some_and(|g| g.held.is_some());
+        let held = self.length_handle_held(ui)
+            || ui
+                .widget::<DockGrip>(self.grip)
+                .is_some_and(|g| g.held.is_some());
         let busy = held || ui.is_window_move_active() || ui.modal.is_some() || self.covered;
         let want = if busy {
             self.peeking
@@ -953,6 +1015,60 @@ impl PluginDock {
         if !moving {
             self.mode_dragged = self.mode != self.mode_before_drag;
             self.release_grip(ui);
+        }
+    }
+
+    /// Whether the length handle has the pointer.
+    fn length_handle_held(&self, ui: &UiRoot) -> bool {
+        ui.widget::<DockLengthHandle>(self.length_handle)
+            .is_some_and(|h| h.grabbed.is_some())
+    }
+
+    /// While the length handle is held the dock takes the limit that brings its
+    /// far end nearest the pointer, along its main axis and never off the screen.
+    /// A press in place changes nothing. The drag's last move is followed in the
+    /// frame after it ends, like the grip's.
+    fn follow_length_handle(&mut self, ui: &mut UiRoot) {
+        let Some((grabbed, press, released)) = ui
+            .widget::<DockLengthHandle>(self.length_handle)
+            .and_then(|h| h.grabbed.map(|g| (g.along, g.press, h.released)))
+        else {
+            return;
+        };
+        let before = *self.stretching.get_or_insert(self.slot_limit);
+        let gone = self.layout.length_handle.is_none() || !self.is_shown() || self.covered;
+        self.moved_in_stretch = self.moved_in_stretch || ui.mouse() != press;
+        if self.moved_in_stretch
+            && !gone
+            && let Some((left, top)) = ui.element(self.root).map(|e| (e.left, e.top))
+        {
+            let (mx, my) = ui.mouse();
+            let (sw, sh) = self.screen;
+            let (start, pointer, screen) = if self.mode.is_horizontal() {
+                (left, mx as f32, sw)
+            } else {
+                (top, my as f32, sh)
+            };
+            let owners: Vec<&str> = self.entries.iter().map(|e| e.owner.as_str()).collect();
+            let limit = layout::slots_for_length(
+                self.mode,
+                self.size,
+                self.layout.grip.is_some(),
+                &owners,
+                layout::max_length(self.mode, sw, sh),
+                screen - start,
+                pointer - start + LENGTH_HANDLE - grabbed,
+            );
+            self.set_slot_limit(ui, limit);
+        }
+        if released || gone {
+            if let Some(h) = ui.widget_mut::<DockLengthHandle>(self.length_handle) {
+                h.grabbed = None;
+                h.released = false;
+            }
+            self.stretching = None;
+            self.moved_in_stretch = false;
+            self.limit_stretched = self.slot_limit != before;
         }
     }
 
@@ -1248,6 +1364,7 @@ impl PanelController for PluginDock {
     fn tick(&mut self, ui: &mut UiRoot, dt: f64) {
         self.ease_reveal(ui, dt as f32);
         self.follow_drag(ui);
+        self.follow_length_handle(ui);
         let size = ui.element(self.root).map(|e| (e.width, e.height));
         if self.screen != ui.size()
             || (self.reveal.is_none() && size != Some((self.layout.width, self.layout.height)))
@@ -1509,6 +1626,99 @@ impl Widget for DockGrip {
             horizontal,
             radius,
             look,
+        );
+    }
+}
+
+/// Where the length handle was taken hold of.
+#[derive(Debug, Clone, Copy)]
+struct LengthGrab {
+    /// How far along the handle.
+    along: f32,
+    /// Where the pointer was.
+    press: (i32, i32),
+}
+
+/// The handle at the dock's far end, which limits how many slots it shows, there
+/// only while windows are unlocked. The dock does the work: it makes its own
+/// length by whole slots, and a saved layout's size never applies to it.
+#[derive(Debug, Clone)]
+struct DockLengthHandle {
+    palette: Palette,
+    pointer: PointerState,
+    mode: DockMode,
+    metrics: Metrics,
+    /// Until the dock sees the drag end.
+    grabbed: Option<LengthGrab>,
+    /// The button came up, or the pointer was taken away.
+    released: bool,
+}
+
+impl Default for DockLengthHandle {
+    fn default() -> Self {
+        Self {
+            palette: Palette::CLASSIC_DOCK,
+            pointer: PointerState::default(),
+            mode: DockMode::default(),
+            metrics: DockSize::default().metrics(),
+            grabbed: None,
+            released: false,
+        }
+    }
+}
+
+impl Widget for DockLengthHandle {
+    fn on_event(&mut self, ui: &mut UiRoot, me: ElementId, e: &UiEvent) -> bool {
+        if e.target != Some(me) {
+            return false;
+        }
+        self.pointer.observe(e);
+        match e.kind {
+            kind::MOUSE_DOWN => {
+                let along = if self.mode.is_horizontal() {
+                    e.data1
+                } else {
+                    e.data2
+                };
+                self.grabbed = Some(LengthGrab {
+                    along: along as f32,
+                    press: ui.mouse(),
+                });
+                self.released = false;
+            }
+            kind::MOUSE_UP | kind::CAPTURE_CHANGED if self.grabbed.is_some() => {
+                self.released = true;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn handles_click(&self, _element: &Element) -> bool {
+        true
+    }
+
+    fn hover_outlasts_tooltip(&self) -> bool {
+        true
+    }
+
+    fn resize_cursor_edges(&self) -> Option<ResizeEdges> {
+        Some(if self.mode.is_horizontal() {
+            ResizeEdges::RIGHT
+        } else {
+            ResizeEdges::BOTTOM
+        })
+    }
+
+    fn draw(&mut self, ui: &mut UiRoot, me: ElementId, rc: &mut RenderContext<'_>) {
+        let (w, h) = element_size(ui, me);
+        style::length_handle(
+            rc,
+            &self.palette,
+            Rect::new(0.0, 0.0, w, h),
+            self.mode.is_horizontal(),
+            self.metrics.well_radius.min(4.0),
+            self.pointer.look(true),
         );
     }
 }

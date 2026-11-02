@@ -554,6 +554,7 @@ fn the_plugin_dock_defaults_to_floating_and_persists_beside_the_theme() {
         dock: "right".into(),
         dock_size: "bigger".into(),
         dock_opens: "hover".into(),
+        dock_slots: 7,
     };
     store.save_plugin_ui(&moss).unwrap();
     assert_eq!(store.load_plugin_ui().0, moss);
@@ -566,6 +567,7 @@ fn the_plugin_dock_defaults_to_floating_and_persists_beside_the_theme() {
     assert_eq!(store.load_plugin_ui().0.dock, "right");
     assert_eq!(store.load_plugin_ui().0.dock_size, "bigger");
     assert_eq!(store.load_plugin_ui().0.dock_opens, "hover");
+    assert_eq!(store.load_plugin_ui().0.dock_slots, 7);
 }
 
 #[test]
@@ -577,6 +579,7 @@ fn a_settings_file_from_before_the_dock_loads_as_floating_and_keeps_its_theme() 
     assert_eq!(loaded.dock, "floating");
     assert_eq!(loaded.dock_size, "default");
     assert_eq!(loaded.dock_opens, "click");
+    assert_eq!(loaded.dock_slots, 0);
 }
 
 #[test]

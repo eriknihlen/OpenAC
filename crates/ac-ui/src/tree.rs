@@ -578,6 +578,13 @@ pub trait Widget: AsAny + fmt::Debug {
         None
     }
 
+    /// For an element that changes its window's size itself: the edges whose
+    /// resize cursor shows over it and while it holds the pointer. The window
+    /// is left alone: a press on it does not start a resize.
+    fn resize_cursor_edges(&self) -> Option<ResizeEdges> {
+        None
+    }
+
     /// The vertical scroll model this widget owns (a text's transcript, a
     /// list's rows), which a linked scrollbar reads and drives.
     fn scroll_model(&mut self) -> Option<&mut Scrollable> {

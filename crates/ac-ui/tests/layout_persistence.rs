@@ -765,6 +765,34 @@ fn a_saved_rail_restores_to_its_edge_with_its_place_along_it() {
     assert_eq!((left, top), (1280.0 - 46.0, 222.0));
 }
 
+#[test]
+fn a_limit_on_the_docks_slots_leaves_its_saved_place_and_size_alone() {
+    use ac_ui::plugin::dock::{PluginDock, WINDOW};
+    let dir = Dir::new();
+    {
+        let mut host = dock_host();
+        host.with_controller::<PluginDock, _>(WINDOW, |c, ui| c.set_slot_limit(ui, Some(2)));
+        let mut p = persist(&mut host, Some(dir.store()), "Alice", (1280, 720));
+        p.set_gameplay_active(&mut host, true);
+        p.restore_all(&mut host);
+        host.root.move_window(WINDOW, 300.0, 222.0);
+        p.follow(&mut host);
+    }
+    // The limit is a client setting, so it comes first in a new run, then the
+    // place, and the saved height of the dock is never taken for one.
+    let mut host = dock_host();
+    let mut p = persist(&mut host, Some(dir.store()), "Alice", (1280, 720));
+    p.set_gameplay_active(&mut host, true);
+    p.restore_all(&mut host);
+    host.tick(0.016, 16, None);
+    let limit = host
+        .with_controller::<PluginDock, _>(WINDOW, |c, _| c.slot_limit())
+        .unwrap();
+    assert_eq!(limit, None);
+    let (left, top, _, _) = geometry(&host, WINDOW);
+    assert_eq!((left, top), (300.0, 222.0));
+}
+
 // ── .SidePanels ─────────────────────────────────────────────────────────
 
 fn side_panel_size_survives_a_map_switch_and_a_fresh_login(chosen: f32) {
