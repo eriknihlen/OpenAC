@@ -2619,10 +2619,10 @@ mod relaunch {
 
     // Not an OpenAC test: a relaunch the server refuses because the account
     // is still logged on is tried again once the server's hold ends (the
-    // capability), not after the full delay, and gives up after six refused
-    // logins in a row with the server's words.
+    // capability), not after the full delay, for as long as the server keeps
+    // answering.
     #[test]
-    fn a_refused_relaunch_retries_after_the_hold_and_gives_up_after_six() {
+    fn a_refused_relaunch_retries_after_the_hold_while_the_server_answers() {
         let mut host = Host::new();
         let clock = Clock::default();
         let mut scheduler = clock.controller();
@@ -2638,7 +2638,7 @@ mod relaunch {
         clock.advance(1);
         host.poll(&mut scheduler, true);
         assert_eq!(host.launches.len(), 1);
-        for attempt in 1..=6u64 {
+        for attempt in 1..=20u64 {
             // The relaunched client is refused: the account is still held.
             let mut refused = session(100 + attempt, false);
             refused.account_in_use = true;
@@ -2653,37 +2653,26 @@ mod relaunch {
             host.capability = LauncherCapability::AVAILABLE;
             clock.advance(30);
             host.poll(&mut scheduler, true);
-            if attempt < 6 {
-                assert_eq!(host.launches.len() as u64, attempt + 1, "retried");
-            }
+            assert_eq!(host.launches.len() as u64, attempt + 1, "retried");
         }
-        assert_eq!(host.launches.len(), 6, "at most six attempts");
-        let notices = scheduler.take_notices();
-        assert_eq!(notices.len(), 1);
-        assert!(
-            notices[0].contains("(Another account is already logged on from this client)."),
-            "{notices:?}"
-        );
-        clock.advance(3600);
-        host.poll(&mut scheduler, true);
-        assert_eq!(host.launches.len(), 6, "given up");
-        // A session started by hand starts the count over.
-        host.sessions = vec![session(200, true)];
+        // A client that could not reach the server ends like any other: the
+        // next try waits the full delay.
+        host.sessions = vec![session(300, false)];
         host.observe(&mut scheduler, &[choice()]);
-        host.sessions = vec![session(200, false)];
-        host.observe(&mut scheduler, &[choice()]);
-        clock.advance(60);
+        clock.advance(30);
         host.poll(&mut scheduler, true);
-        assert_eq!(host.launches.len(), 7);
+        assert_eq!(host.launches.len(), 21, "a plain end waits the delay");
+        clock.advance(30);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 22);
     }
 
     // Not an OpenAC test: the window hears of a relaunched session (the
     // launch's state change) before the attempt is finished, and often
     // sees a session end before its exit report says the server refused
-    // it. Neither order may reset or double the count: six refused logins
-    // still stop relaunching.
+    // it. In every order a refusal is retried after the hold alone.
     #[test]
-    fn refusals_count_whatever_order_the_window_sees_them_in() {
+    fn refusals_retry_after_the_hold_whatever_order_the_window_sees_them_in() {
         for (observe_before_finish, report_after_end) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
@@ -2703,7 +2692,9 @@ mod relaunch {
                 .unwrap()
             {
                 launches += 1;
-                assert!(launches <= 6, "{case}: never gave up");
+                if launches == 10 {
+                    break;
+                }
                 // Starting: a refused login never reaches the world.
                 let mut launched = session(100 + launches, true);
                 launched.state = LauncherActivityState::Starting;
@@ -2723,17 +2714,10 @@ mod relaunch {
                 host.sessions = vec![ended];
                 host.observe(&mut scheduler, &[choice()]);
                 host.observe(&mut scheduler, &[choice()]);
+                // Less than the delay: only the hold is waited out.
                 clock.advance(30);
             }
-            assert_eq!(launches, 6, "{case}");
-            assert_eq!(
-                scheduler.take_notices(),
-                [
-                    "Automatic relaunch of Account on World stopped: the server refused 6 logins \
-                     in a row (Another account is already logged on from this client)."
-                ],
-                "{case}"
-            );
+            assert_eq!(launches, 10, "{case}");
         }
     }
 

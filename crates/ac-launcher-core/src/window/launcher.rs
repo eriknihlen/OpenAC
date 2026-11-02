@@ -1178,12 +1178,6 @@ impl LauncherWindow {
             Vec::new()
         };
         self.automatic_relaunch.observe(snapshot, &checked, enabled);
-        let notices = self.automatic_relaunch.take_notices();
-        if !notices.is_empty() {
-            // One line per account that stopped.
-            self.last_error = Some(notices.join("\n"));
-            self.operation_status = "Automatic relaunch stopped.".into();
-        }
     }
 
     /// [`Self::observe_session_controls`] against the orchestrator's newest
