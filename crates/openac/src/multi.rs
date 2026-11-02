@@ -84,7 +84,7 @@ pub fn run(
     };
     // A launcher session's folder (none for a document written by hand),
     // held for the whole run so the launcher's cleanup leaves it alone.
-    let _session_folder =
+    let session_folder =
         ac_host::layout::LauncherSessionFolder::claim(&plan.paths, &plan.config_path);
 
     let logins = {
@@ -253,6 +253,9 @@ pub fn run(
         let printer = ChatPrinter {
             stream: chat_stream,
             session: several.then(|| id.clone()),
+            plugin_logs: session_folder
+                .as_ref()
+                .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory),
         };
         let notes = window_notes.remove(&id);
         let liveness = Liveness::requested(host_handle.clone());
@@ -393,6 +396,10 @@ pub(crate) struct ChatPrinter {
     pub(crate) stream: Option<ConsoleStream>,
     /// The session id put in front of each line when several run.
     pub(crate) session: Option<String>,
+    /// The launcher session folder's plugin log folder: every line a plugin
+    /// logs is appended to `<plugin id>.log` there, and its debug lines go
+    /// only there. `None` for a client started by hand.
+    pub(crate) plugin_logs: Option<std::path::PathBuf>,
 }
 
 impl ChatPrinter {
@@ -472,6 +479,10 @@ pub(crate) fn monitor(
     let mut policy_done = false;
     let mut policy_failure: Option<String> = None;
     let started = std::time::Instant::now();
+    let mut plugin_logs = printer
+        .plugin_logs
+        .clone()
+        .map(crate::plugins::PluginLogFiles::new);
     // When the launcher asked for them, a heartbeat goes out every interval
     // in which the session made progress (and, while the window shows it,
     // the window's event loop too): a stuck loop stops them, and the
@@ -627,10 +638,23 @@ pub(crate) fn monitor(
                     PluginEvent::Report(PluginReport::SlowCall { .. })
                     | PluginEvent::Log { .. } => {}
                 }
-                printer.print(&console::notice(
-                    &crate::plugins::event_line(&event),
-                    printer.session.as_deref(),
-                ));
+                if let (
+                    Some(logs),
+                    PluginEvent::Log {
+                        plugin,
+                        level,
+                        message,
+                    },
+                ) = (plugin_logs.as_mut(), &event)
+                {
+                    logs.append(plugin, *level, message);
+                }
+                if !crate::plugins::only_in_plugin_log(&event, plugin_logs.is_some()) {
+                    printer.print(&console::notice(
+                        &crate::plugins::event_line(&event),
+                        printer.session.as_deref(),
+                    ));
+                }
                 if crate::plugins::for_client_log(&event) && printer.client_log_unseen() {
                     errln!(
                         "{}",

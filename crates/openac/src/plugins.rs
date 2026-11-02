@@ -103,6 +103,108 @@ pub fn for_client_log(event: &PluginEvent) -> bool {
     )
 }
 
+/// Whether a plugin event goes only to the plugin's own log file and not
+/// to the console: a debug line, when the session has plugin logs (a
+/// launcher session). A plugin's detail for whoever debugs it, such as a
+/// bot's macro trace, would drown the console and the client log; without
+/// a session folder there is nowhere else for it, so it prints.
+#[must_use]
+pub fn only_in_plugin_log(event: &PluginEvent, has_plugin_logs: bool) -> bool {
+    has_plugin_logs
+        && matches!(
+            event,
+            PluginEvent::Log {
+                level: LogLevel::Debug,
+                ..
+            }
+        )
+}
+
+/// A launcher session's plugin logs: everything a plugin writes through the
+/// host's log call, appended to `<plugin id>.log` in the session folder's
+/// `plugins` folder, one line each with the local time and the level.
+#[derive(Debug)]
+pub struct PluginLogFiles {
+    directory: PathBuf,
+    zone: ac_host::local_time::LocalZone,
+    open: BTreeMap<String, std::fs::File>,
+    reported: std::collections::BTreeSet<String>,
+}
+
+impl PluginLogFiles {
+    /// Logs in `directory` (made with the first line).
+    #[must_use]
+    pub fn new(directory: PathBuf) -> Self {
+        Self::with_zone(directory, ac_host::local_time::LocalZone::system())
+    }
+
+    /// Logs whose times are in `zone`.
+    #[must_use]
+    pub fn with_zone(directory: PathBuf, zone: ac_host::local_time::LocalZone) -> Self {
+        Self {
+            directory,
+            zone,
+            open: BTreeMap::new(),
+            reported: std::collections::BTreeSet::new(),
+        }
+    }
+
+    /// The file of one plugin's log.
+    #[must_use]
+    pub fn path_for(&self, plugin: &str) -> PathBuf {
+        self.directory
+            .join(format!("{}.log", ac_host::paths::file_name_safe(plugin)))
+    }
+
+    /// Appends one line. A line that cannot be written is said once per
+    /// plugin on standard error (the client log) and the session goes on.
+    pub fn append(&mut self, plugin: &str, level: LogLevel, message: &str) {
+        use std::io::Write as _;
+        let line = format!(
+            "{} {} {message}\n",
+            local_time_text(std::time::SystemTime::now(), &self.zone),
+            level.name()
+        );
+        let key = plugin.to_ascii_lowercase();
+        let result = match self.open.get_mut(&key) {
+            Some(file) => file.write_all(line.as_bytes()),
+            None => ac_host::layout::open_append(&self.path_for(plugin)).and_then(|mut file| {
+                file.write_all(line.as_bytes())?;
+                self.open.insert(key.clone(), file);
+                Ok(())
+            }),
+        };
+        if let Err(error) = result {
+            // Opened again with the next line, in case the trouble passed.
+            self.open.remove(&key);
+            if self.reported.insert(key) {
+                crate::stdio::errln!(
+                    "plugin {plugin}: its log {} could not be written: {error}",
+                    self.path_for(plugin).display()
+                );
+            }
+        }
+    }
+}
+
+/// `yyyy-MM-dd HH:mm:ss.fff` on the local clock.
+fn local_time_text(at: std::time::SystemTime, zone: &ac_host::local_time::LocalZone) -> String {
+    let utc_ms = at.duration_since(std::time::UNIX_EPOCH).map_or(0, |since| {
+        i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+    });
+    let local_ms = utc_ms + i64::from(zone.utc_offset_seconds(utc_ms)) * 1000;
+    let seconds = local_ms.div_euclid(1000);
+    let (year, month, day) = ac_host::status::civil_from_days(seconds.div_euclid(86_400));
+    let second_of_day = seconds.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}.{:03}",
+        second_of_day / 3600,
+        second_of_day / 60 % 60,
+        second_of_day % 60,
+        local_ms.rem_euclid(1000)
+    )
+}
+
 /// The environment variable naming the labels this client answers to among
 /// the clients on this computer when a session document declares none
 /// (OpenAC's `ACDREAM_PLUGIN_TAGS`): comma separated.
@@ -298,6 +400,54 @@ mod tests {
         );
         assert!(for_client_log(&slow));
         assert!(!for_client_log(&log(LogLevel::Error)));
+    }
+
+    #[test]
+    fn a_launcher_session_keeps_every_plugin_log_line_in_the_plugins_own_file() {
+        let folder = std::env::temp_dir().join(format!(
+            "openac-plugin-logs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let directory = folder.join("plugins");
+        let mut logs =
+            PluginLogFiles::with_zone(directory.clone(), ac_host::local_time::LocalZone::fixed(0));
+        logs.append("acdream.mosstank", LogLevel::Debug, "macro: state Combat");
+        logs.append("acdream.mosstank", LogLevel::Info, "started");
+        logs.append("Other/Plugin", LogLevel::Warn, "careful");
+        let text = std::fs::read_to_string(directory.join("acdream.mosstank.log")).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        // `yyyy-MM-dd HH:mm:ss.fff level text`
+        assert_eq!(&lines[0][10..11], " ");
+        assert_eq!(&lines[0][19..20], ".");
+        assert!(
+            lines[0].ends_with(" debug macro: state Combat"),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[1].ends_with(" info started"), "{}", lines[1]);
+        let other = std::fs::read_to_string(directory.join("Other_Plugin.log")).unwrap();
+        assert!(other.ends_with(" warn careful\n"), "{other}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn debug_lines_stay_off_the_console_only_when_there_is_a_plugin_log() {
+        let log = |level| PluginEvent::Log {
+            plugin: "acdream.mosstank".into(),
+            level,
+            message: "detail".into(),
+        };
+        assert!(only_in_plugin_log(&log(LogLevel::Debug), true));
+        assert!(!only_in_plugin_log(&log(LogLevel::Debug), false));
+        assert!(!only_in_plugin_log(&log(LogLevel::Info), true));
+        assert!(!only_in_plugin_log(&log(LogLevel::Warn), true));
+        assert!(!only_in_plugin_log(&log(LogLevel::Error), true));
+        let loaded = PluginEvent::Report(PluginReport::Loaded { id: "x.y".into() });
+        assert!(!only_in_plugin_log(&loaded, true));
     }
 
     #[test]
