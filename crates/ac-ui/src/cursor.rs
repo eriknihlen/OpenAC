@@ -265,13 +265,20 @@ impl CursorFeedbackController {
         let hover_target_compatible = (facts.target_mode == CursorTargetMode::UseTarget
             && hover_target != 0)
             .then(|| (facts.target_compatible)(hover_target));
+        let own_edges = |ui: &UiRoot, id: Option<ElementId>| {
+            id.and_then(|id| ui.widget_dyn(id))
+                .and_then(|w| w.resize_cursor_edges())
+                .unwrap_or(ResizeEdges::NONE)
+        };
+        let active_resize_edges = ui.active_resize_edges() | own_edges(ui, ui.captured());
+        let hover_resize_edges = ui.hover_resize_edges() | own_edges(ui, hover);
         let snapshot = CursorSnapshot {
             dragging: ui.drag_payload().is_some(),
             drag_accept: slot
                 .and_then(|s| ui.widget::<ItemSlot>(s))
                 .map_or(DragAcceptance::None, ItemSlot::drag_acceptance),
-            active_resize_edges: ui.active_resize_edges(),
-            hover_resize_edges: ui.hover_resize_edges(),
+            active_resize_edges,
+            hover_resize_edges,
             window_move_active: ui.is_window_move_active(),
             hover_window_move: ui.hover_window_move(),
             hover_ui: hover.is_some(),

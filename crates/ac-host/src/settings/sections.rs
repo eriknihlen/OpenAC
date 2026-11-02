@@ -345,6 +345,9 @@ pub struct PluginUiSettings {
     /// How the plugin dock opens, as saved (`click`, `hover`); the reader of the
     /// name decides what an unknown one means.
     pub dock_opens: String,
+    /// How many windows the plugin dock shows at most before the rest scroll;
+    /// 0 or less for as many as the screen has room for.
+    pub dock_slots: i32,
 }
 
 impl Default for PluginUiSettings {
@@ -354,6 +357,7 @@ impl Default for PluginUiSettings {
             dock: "floating".to_owned(),
             dock_size: "default".to_owned(),
             dock_opens: "click".to_owned(),
+            dock_slots: 0,
         }
     }
 }
@@ -364,6 +368,7 @@ fn read_plugin_ui(m: &[Member]) -> Result<PluginUiSettings, Unreadable> {
         dock: crate::settings::read_string(m, "dock", "floating"),
         dock_size: crate::settings::read_string(m, "dockSize", "default"),
         dock_opens: crate::settings::read_string(m, "dockOpens", "click"),
+        dock_slots: crate::settings::read_int(m, "dockSlots", 0)?,
     })
 }
 
@@ -642,6 +647,7 @@ impl SettingsStore {
                 ("dock", dock),
                 ("dockSize", dock_size),
                 ("dockOpens", dock_opens),
+                ("dockSlots", p.dock_slots.to_string()),
             ]),
         )
     }

@@ -924,6 +924,450 @@ fn hovering_the_tile_labels_it_and_the_grip_has_no_label() {
     assert!(rig.label().is_none());
 }
 
+// ── The limit on its length ─────────────────────────────────────────────
+
+impl Rig {
+    /// `count` plugins with a window each, in `mode`, locked.
+    fn limited(mode: DockMode, count: usize, limit: Option<usize>) -> Self {
+        let mut rig = Self::new(SCREEN.1, PluginTheme::Moss);
+        rig.add_plugins(count);
+        rig.sync_plain();
+        rig.with(|c, ui| {
+            c.set_mode(ui, mode);
+            c.set_slot_limit(ui, limit);
+        });
+        rig.tick();
+        rig
+    }
+
+    fn shown_slots(&mut self) -> usize {
+        self.layout().slots.iter().flatten().count()
+    }
+}
+
+#[test]
+fn a_limit_shows_that_many_slots_and_scrolls_the_rest_at_every_size() {
+    for size in DockSize::ALL {
+        let mut rig = Rig::limited(DockMode::Floating, 8, Some(3));
+        rig.with(|c, ui| c.set_size(ui, size));
+        rig.tick();
+        assert_eq!(rig.shown_slots(), 3, "{size:?}");
+        assert!(rig.layout().forward.is_some(), "{size:?}");
+        assert_eq!(rig.layout().max_first, 5, "{size:?}");
+    }
+}
+
+#[test]
+fn a_limit_the_list_fits_in_lays_it_out_as_with_none() {
+    let mut rig = Rig::limited(DockMode::Floating, 4, None);
+    let plain = rig.layout();
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(4)));
+    assert_eq!(rig.layout(), plain);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(9)));
+    assert_eq!(rig.layout(), plain);
+}
+
+#[test]
+fn a_limit_keeps_its_slots_through_the_lock_and_gives_way_to_a_small_screen() {
+    let mut rig = Rig::limited(DockMode::Left, 12, Some(5));
+    assert_eq!(rig.shown_slots(), 5);
+    rig.host.root.set_ui_locked(false);
+    rig.tick();
+    assert_eq!(rig.shown_slots(), 5);
+    rig.host.root.set_size(SCREEN.0, 250.0);
+    rig.tick();
+    assert!(rig.shown_slots() < 5);
+    assert!(rig.size().1 <= 250.0);
+    rig.host.root.set_size(SCREEN.0, SCREEN.1);
+    rig.tick();
+    assert_eq!(rig.shown_slots(), 5);
+}
+
+#[test]
+fn a_limit_keeps_the_place_in_the_list_when_it_can_and_the_closed_dock_is_still_the_tile() {
+    let mut rig = Rig::limited(DockMode::Floating, 12, Some(4));
+    rig.with(|c, ui| c.scroll_to(ui, 3));
+    assert_eq!(rig.layout().first, 3);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(6)));
+    assert_eq!(rig.layout().first, 3);
+    rig.with(|c, ui| c.set_slot_limit(ui, None));
+    let unlimited = rig.layout().first;
+    assert!(unlimited <= 3);
+
+    let closed = rig.layout().tile;
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(2)));
+    rig.click(closed);
+    rig.tick();
+    assert!(rig.closed());
+    assert_eq!(rig.size().1, rig.size().0);
+}
+
+// ── The length handle ───────────────────────────────────────────────────
+
+impl Rig {
+    /// `count` plugins with a window each, in `mode`, unlocked and placed.
+    fn stretchy(mode: DockMode, count: usize) -> Self {
+        let mut rig = Self::limited(mode, count, None);
+        rig.host.root.set_ui_locked(false);
+        rig.tick();
+        rig
+    }
+
+    /// The pointer on the middle of the length handle, on the screen.
+    fn on_length_handle(&mut self) -> (i32, i32) {
+        let handle = self.layout().length_handle.unwrap();
+        let (left, top) = self.at();
+        (
+            (left + handle.x + handle.w / 2.0) as i32,
+            (top + handle.y + handle.h / 2.0) as i32,
+        )
+    }
+
+    fn grab_length_handle(&mut self) -> (i32, i32) {
+        let (x, y) = self.on_length_handle();
+        self.host.mouse_move(x, y);
+        self.host.mouse_down(MouseButton::Left, x, y, 0);
+        (x, y)
+    }
+
+    /// A press on the length handle, one move and a release.
+    fn stretch(&mut self, by: (i32, i32)) {
+        let (x, y) = self.grab_length_handle();
+        self.move_to(x + by.0, y + by.1);
+        self.release(x + by.0, y + by.1);
+    }
+
+    fn limit(&mut self) -> Option<usize> {
+        self.with(|c, _| c.slot_limit())
+    }
+
+    fn stretched(&mut self) -> Option<Option<usize>> {
+        self.with(|c, _| c.take_stretched_limit())
+    }
+}
+
+#[test]
+fn dragging_the_handle_up_shows_fewer_slots_a_whole_slot_at_a_time() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 12);
+    rig.host.root.move_window(WINDOW, 300.0, 30.0);
+    rig.tick();
+    let (_, tall) = rig.size();
+    assert_eq!(rig.at(), (300.0, 30.0));
+    let (x, y) = rig.grab_length_handle();
+    let mut lengths = vec![tall];
+    for up in (5..=300).step_by(5) {
+        rig.move_to(x, y - up);
+        lengths.push(rig.size().1);
+        // Only the far end moves.
+        assert_eq!(rig.at(), (300.0, 30.0), "{up}");
+    }
+    rig.release(x, y - 300);
+    assert!(rig.limit().is_some());
+    let mut steps: Vec<f32> = lengths.windows(2).map(|w| w[0] - w[1]).collect();
+    steps.retain(|s| *s != 0.0);
+    assert!(!steps.is_empty());
+    assert!(steps[1..].iter().all(|s| *s == 45.0), "{steps:?}");
+    // It went by whole slots, and nothing is cut in half.
+    assert!(rig.shown_slots() >= 1);
+}
+
+#[test]
+fn the_handle_follows_the_pointer_to_within_half_a_slot_and_goes_by_the_main_axis_only() {
+    for (mode, along_x) in [
+        (DockMode::Floating, false),
+        (DockMode::Left, false),
+        (DockMode::Right, false),
+        (DockMode::FloatingHorizontal, true),
+        (DockMode::Top, true),
+        (DockMode::Bottom, true),
+    ] {
+        let mut rig = Rig::stretchy(mode, 14);
+        let before = rig.at();
+        let across_before = if along_x { rig.size().1 } else { rig.size().0 };
+        let (x, y) = rig.on_length_handle();
+        let length_before = if along_x { rig.size().0 } else { rig.size().1 };
+        // The screen may have kept the dock from being as long as it wants, so
+        // this goes a good way back.
+        let by = 200;
+        let delta = if along_x { (-by, 0) } else { (0, -by) };
+        let wander = if along_x { (0, 37) } else { (37, 0) };
+        rig.grab_length_handle();
+        rig.move_to(x + delta.0 + wander.0, y + delta.1 + wander.1);
+        rig.release(x + delta.0 + wander.0, y + delta.1 + wander.1);
+        let length_after = if along_x { rig.size().0 } else { rig.size().1 };
+        let wanted = length_before - by as f32;
+        assert!(
+            (length_after - wanted).abs() <= 45.0 / 2.0 + 1.0,
+            "{mode:?} {length_after} {wanted}"
+        );
+        let across_after = if along_x { rig.size().1 } else { rig.size().0 };
+        assert_eq!(across_after, across_before, "{mode:?}");
+        // Its near end and its edge stay where they were.
+        assert_eq!(rig.at(), before, "{mode:?}");
+        assert_eq!(rig.mode(), mode, "{mode:?}");
+    }
+}
+
+#[test]
+fn a_dock_touching_the_far_edge_of_the_screen_gives_way_from_that_end_and_grows_back() {
+    // Too long for the screen, a floating dock is pushed up until it is flush
+    // with the bottom. Shrinking it must not keep it there by moving its top.
+    let mut rig = Rig::stretchy(DockMode::Floating, 40);
+    let (left, top) = rig.at();
+    let (_, tall) = rig.size();
+    assert_eq!(top + tall, SCREEN.1);
+    let (x, y) = rig.grab_length_handle();
+    rig.move_to(x, y - 200);
+    assert_eq!(rig.at(), (left, top));
+    assert!(rig.size().1 < tall);
+    let shrunk = rig.size().1;
+    assert!(top + shrunk < SCREEN.1);
+    // It grows back in the same drag, and the limit goes when it gets there.
+    rig.move_to(x, y);
+    assert_eq!(rig.at(), (left, top));
+    assert_eq!(rig.size().1, tall);
+    rig.release(x, y);
+    assert_eq!(rig.limit(), None);
+    assert_eq!(rig.stretched(), None);
+}
+
+#[test]
+fn a_rail_as_long_as_the_screen_shrinks_from_its_far_end_too() {
+    let mut rig = Rig::stretchy(DockMode::Right, 40);
+    let at = rig.at();
+    let (_, tall) = rig.size();
+    assert_eq!(at.1 + tall, SCREEN.1);
+    rig.stretch((0, -300));
+    assert_eq!(rig.at(), at);
+    assert!(rig.size().1 < tall - 250.0);
+    assert!(rig.limit().is_some());
+}
+
+#[test]
+fn a_bottom_rail_keeps_its_edge_as_its_far_end_moves_along_it() {
+    let mut rig = Rig::stretchy(DockMode::Bottom, 40);
+    let bottom = |rig: &mut Rig| rig.at().1 + rig.size().1;
+    assert_eq!(bottom(&mut rig), SCREEN.1);
+    let (left, _) = rig.at();
+    rig.stretch((-400, 0));
+    assert_eq!(bottom(&mut rig), SCREEN.1);
+    assert_eq!(rig.at().0, left);
+    assert!(rig.limit().is_some());
+}
+
+#[test]
+fn dragged_out_until_every_slot_shows_it_has_no_limit_and_a_new_window_grows_it() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 6);
+    rig.host.root.move_window(WINDOW, 300.0, 10.0);
+    rig.tick();
+    let (_, tall) = rig.size();
+    rig.stretch((0, -150));
+    assert!(rig.limit().is_some());
+    assert!(rig.size().1 < tall);
+    assert!(rig.stretched().is_some());
+    rig.stretch((0, 400));
+    assert_eq!(rig.limit(), None);
+    assert_eq!(rig.stretched(), Some(None));
+    assert_eq!(rig.size().1, tall);
+    rig.add("new", "New", PanelDescriptor::new("main", "New"));
+    rig.sync_plain();
+    assert_eq!(rig.size().1, tall + 45.0);
+    assert!(rig.layout().forward.is_none());
+}
+
+#[test]
+fn it_cannot_be_dragged_past_the_screen_and_a_low_dock_stays_where_it_is() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 12);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(2)));
+    rig.host.root.move_window(WINDOW, 300.0, 200.0);
+    rig.tick();
+    let (x, _) = rig.grab_length_handle();
+    rig.move_to(x, SCREEN.1 as i32 - 1);
+    rig.release(x, SCREEN.1 as i32 - 1);
+    assert_eq!(rig.at().1, 200.0);
+    assert!(200.0 + rig.size().1 <= SCREEN.1);
+    // 14 + 6 + 36 + 9 + 16 + five slots (216 with dividers) + 16 + 9 + 36 + 12 = 370.
+    assert_eq!(rig.limit(), Some(5));
+    assert_eq!(rig.size().1, 370.0);
+}
+
+#[test]
+fn a_press_in_place_changes_nothing_and_the_limit_is_told_once_when_the_drag_ends() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 12);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(5)));
+    rig.tick();
+    let (x, y) = rig.grab_length_handle();
+    rig.tick();
+    rig.release(x, y);
+    assert_eq!(rig.limit(), Some(5));
+    assert_eq!(rig.stretched(), None);
+
+    let (x, y) = rig.grab_length_handle();
+    rig.move_to(x, y - 90);
+    assert_eq!(rig.limit(), Some(3));
+    assert_eq!(rig.stretched(), None);
+    rig.release(x, y - 90);
+    assert_eq!(rig.stretched(), Some(Some(3)));
+    assert_eq!(rig.stretched(), None);
+}
+
+#[test]
+fn a_whole_drag_between_two_frames_still_counts() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 12);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(5)));
+    rig.tick();
+    let (x, y) = rig.grab_length_handle();
+    rig.host.mouse_move(x, y - 90);
+    rig.host.mouse_up(MouseButton::Left, x, y - 90, 0);
+    rig.tick();
+    assert_eq!(rig.limit(), Some(3));
+    assert_eq!(rig.stretched(), Some(Some(3)));
+}
+
+#[test]
+fn the_handle_is_not_there_locked_closed_or_with_one_slot_and_a_press_there_does_nothing() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 6);
+    assert!(rig.layout().length_handle.is_some());
+    rig.host.root.set_ui_locked(true);
+    rig.tick();
+    assert_eq!(rig.layout().length_handle, None);
+    rig.host.root.set_ui_locked(false);
+    rig.tick();
+    let tile = rig.layout().tile;
+    rig.click(tile);
+    rig.tick();
+    assert!(rig.closed());
+    assert_eq!(rig.layout().length_handle, None);
+
+    let mut rig = Rig::stretchy(DockMode::Floating, 1);
+    assert_eq!(rig.layout().length_handle, None);
+}
+
+#[test]
+fn the_handle_shows_the_resize_cursor_that_runs_along_the_dock_and_moves_nothing_else() {
+    use crate::cursor::{
+        CursorFacts, CursorFeedbackController, CursorFeedbackKind, CursorTargetMode,
+    };
+    use ac_core::combat::CombatMode;
+    for (mode, kind) in [
+        (DockMode::Floating, CursorFeedbackKind::ResizeVertical),
+        (DockMode::Right, CursorFeedbackKind::ResizeVertical),
+        (DockMode::Top, CursorFeedbackKind::ResizeHorizontal),
+    ] {
+        let mut rig = Rig::stretchy(mode, 6);
+        let (x, y) = rig.on_length_handle();
+        rig.host.mouse_move(x, y);
+        rig.tick();
+        let never = |_: u32| false;
+        let facts = CursorFacts {
+            target_mode: CursorTargetMode::None,
+            busy_count: 0,
+            combat_mode: CombatMode::NON_COMBAT,
+            world_target: 0,
+            target_compatible: &never,
+        };
+        let mut cursor = CursorFeedbackController::new();
+        assert_eq!(
+            cursor.update(&mut rig.host.root, &facts).kind,
+            kind,
+            "{mode:?}"
+        );
+        assert!(!rig.host.root.hover_window_move());
+        // Off it, the cursor goes back: the rest of the dock is not resizable.
+        let gear = rig.layout().gear;
+        rig.hover(gear);
+        assert_ne!(
+            cursor.update(&mut rig.host.root, &facts).kind,
+            kind,
+            "{mode:?}"
+        );
+    }
+}
+
+#[test]
+fn the_handle_draws_a_bar_and_a_well_only_under_the_pointer() {
+    let p = PluginTheme::Moss.palette().unwrap();
+    let r = Rect::new(0.0, 0.0, 48.0, layout::LENGTH_HANDLE);
+    let rest = drawn(|rc| style::length_handle(rc, &p, r, false, 4.0, ButtonLook::Normal));
+    let over = drawn(|rc| style::length_handle(rc, &p, r, false, 4.0, ButtonLook::Hovered));
+    assert!(has_color(&rest, p.muted));
+    assert!(!has_color(&rest, hover(&p, p.field)));
+    assert!(has_color(&over, p.text));
+    assert!(has_color(&over, hover(&p, p.field)));
+}
+
+#[test]
+fn a_peeking_dock_stays_open_while_its_handle_is_held_and_the_pointer_wanders() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 8);
+    rig.host.root.move_window(WINDOW, 300.0, 100.0);
+    rig.tick();
+    rig.press_tile();
+    rig.with(|c, ui| c.set_opens(ui, DockOpens::Hover));
+    rig.host.mouse_move(700, 500);
+    rig.pass(1.0);
+    assert!(rig.closed_view());
+    let tile = rig.layout().tile;
+    rig.hover(tile);
+    rig.pass(0.3);
+    assert!(!rig.closed_view());
+    let (x, y) = rig.grab_length_handle();
+    rig.move_to(x + 300, y - 60);
+    rig.pass(2.0);
+    assert!(!rig.closed_view());
+    rig.release(x + 300, y - 60);
+    assert!(rig.stretched().flatten().is_some());
+    rig.pass(1.0);
+    assert!(rig.closed_view());
+}
+
+#[test]
+fn hiding_the_dock_while_its_handle_is_held_ends_the_drag() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 12);
+    rig.with(|c, ui| c.set_slot_limit(ui, Some(5)));
+    rig.tick();
+    let (x, y) = rig.grab_length_handle();
+    rig.move_to(x, y - 90);
+    assert_eq!(rig.limit(), Some(3));
+    rig.with(|c, ui| c.set_hidden(ui, true));
+    rig.tick();
+    assert_eq!(rig.stretched(), Some(Some(3)));
+    rig.move_to(x, y - 200);
+    rig.release(x, y - 200);
+    assert_eq!(rig.limit(), Some(3));
+    rig.with(|c, ui| c.set_hidden(ui, false));
+    rig.tick();
+    assert_eq!(rig.limit(), Some(3));
+    assert!(!rig.with(|c, ui| c.length_handle_held(ui)));
+}
+
+#[test]
+fn taking_hold_of_the_handle_on_a_dock_opening_finishes_the_opening() {
+    let mut rig = Rig::stretchy(DockMode::Floating, 8);
+    rig.host.root.move_window(WINDOW, 300.0, 100.0);
+    rig.tick();
+    let tile = rig.layout().tile;
+    rig.click(tile);
+    rig.tick();
+    assert!(rig.closed());
+    rig.with(|c, _| c.reveal_seconds = 10.0);
+    let tile = rig.layout().tile;
+    rig.click(tile);
+    rig.tick();
+    assert!(rig.with(|c, _| c.reveal.is_some()));
+    let handle = rig.layout().length_handle.unwrap();
+    rig.with(|c, ui| {
+        if let Some(h) = ui.widget_mut::<DockLengthHandle>(c.length_handle) {
+            h.grabbed = Some(LengthGrab {
+                along: handle.h / 2.0,
+                press: (0, 0),
+            });
+        }
+    });
+    rig.tick();
+    assert!(rig.with(|c, _| c.reveal.is_none()));
+    assert_eq!(rig.size().1, rig.with(|c, _| c.layout().height),);
+}
+
 // ── The grip ────────────────────────────────────────────────────────────
 
 impl Rig {
@@ -955,7 +1399,9 @@ fn the_grip_shows_only_while_windows_are_unlocked_and_the_dock_changes_to_fit() 
     rig.tick();
     assert!(!rig.grip_shows());
     assert_eq!(rig.layout().grip, None);
-    assert_eq!(rig.size(), (w, h - layout::GRIP_LENGTH));
+    // The grip goes, and the handle gives way to the padding it stood for.
+    let locked = h - layout::GRIP_LENGTH - (layout::LENGTH_HANDLE - layout::PADDING);
+    assert_eq!(rig.size(), (w, locked));
     assert_eq!(rig.layout().tile.y, tile.y - layout::GRIP_LENGTH);
     // The dock stays where it was, whichever way the lock goes.
     assert_eq!(rig.at(), (300.0, 100.0));
@@ -1057,7 +1503,8 @@ fn a_horizontal_docks_grip_stands_across_it() {
     );
     rig.host.root.set_ui_locked(true);
     rig.tick();
-    assert_eq!(rig.size(), (w - layout::GRIP_LENGTH, h));
+    let locked = w - layout::GRIP_LENGTH - (layout::LENGTH_HANDLE - layout::PADDING);
+    assert_eq!(rig.size(), (locked, h));
 }
 
 // ── Peeking open ────────────────────────────────────────────────────────

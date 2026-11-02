@@ -767,17 +767,29 @@ impl WindowUi {
             .with_controller::<PluginDock, _>(dock::WINDOW, |c, ui| c.set_opens(ui, opens));
     }
 
-    /// The saved place, size and opening of the dock are applied, when they
-    /// differ.
+    /// The limit on the dock's slots, as a drag of its handle left it, is saved
+    /// with the client settings.
+    fn save_plugin_dock_limit(&mut self, limit: Option<usize>) {
+        self.edit_settings(ac_ui::panels::options::Section::PluginUi, true, |s| {
+            s.plugin_ui.dock_slots = limit.and_then(|l| i32::try_from(l).ok()).unwrap_or(0);
+        });
+    }
+
+    /// The saved place, size, opening and limit of the dock are applied, when
+    /// they differ.
     pub(super) fn follow_plugin_dock_setting(&mut self) {
         let saved = DockMode::from_saved(&self.settings().plugin_ui.dock);
         let size = DockSize::from_saved(&self.settings().plugin_ui.dock_size);
         let opens = DockOpens::from_saved(&self.settings().plugin_ui.dock_opens);
+        let limit = usize::try_from(self.settings().plugin_ui.dock_slots)
+            .ok()
+            .filter(|l| *l > 0);
         self.host
             .with_controller::<PluginDock, _>(dock::WINDOW, |c, ui| {
                 c.set_mode(ui, saved);
                 c.set_size(ui, size);
                 c.set_opens(ui, opens);
+                c.set_slot_limit(ui, limit);
             });
     }
 
@@ -1037,6 +1049,13 @@ impl WindowUi {
         if let Some(mode) = dragged {
             self.save_plugin_dock(mode);
             self.sync_appearance();
+        }
+        let stretched = self
+            .host
+            .with_controller::<PluginDock, _>(dock::WINDOW, |c, _| c.take_stretched_limit())
+            .flatten();
+        if let Some(limit) = stretched {
+            self.save_plugin_dock_limit(limit);
         }
         self.follow_appearance();
     }

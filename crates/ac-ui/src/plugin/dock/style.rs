@@ -59,6 +59,10 @@ pub const GRIP_DOT_ROWS: f32 = 4.0;
 pub const GRIP_WELL_SIDES: f32 = 9.0;
 /// How far the grip's well sits in along the dock.
 pub const GRIP_WELL_ENDS: f32 = 2.0;
+/// The bar on the length handle: how long it runs across the dock.
+pub const LENGTH_BAR_ACROSS: f32 = 16.0;
+/// The bar on the length handle: how thick it is.
+pub const LENGTH_BAR_THICKNESS: f32 = 2.0;
 /// Colour art's alpha while its window is closed.
 pub const CLOSED_ART_ALPHA: f32 = 0.85;
 /// How wide an arrow's chevron is across the dock.
@@ -191,6 +195,52 @@ pub fn slot_well(rc: &mut RenderContext<'_>, p: &Palette, r: Rect, radius: f32, 
     rc.fill_rounded_rect(r.x, r.y, r.w, r.h, CornerRadii::all(radius), face);
 }
 
+/// The well of the grip or the length handle in `r`.
+fn grip_well(r: Rect, horizontal: bool) -> Rect {
+    let (inset_x, inset_y) = if horizontal {
+        (GRIP_WELL_ENDS, GRIP_WELL_SIDES)
+    } else {
+        (GRIP_WELL_SIDES, GRIP_WELL_ENDS)
+    };
+    Rect::new(
+        r.x + inset_x,
+        r.y + inset_y,
+        r.w - 2.0 * inset_x,
+        r.h - 2.0 * inset_y,
+    )
+}
+
+/// The length handle's bar, running across the dock and centred in `r`, unlike the
+/// grip's dots, with a well behind it under the pointer or held.
+pub fn length_handle(
+    rc: &mut RenderContext<'_>,
+    p: &Palette,
+    r: Rect,
+    horizontal: bool,
+    radius: f32,
+    look: ButtonLook,
+) {
+    slot_well(rc, p, grip_well(r, horizontal), radius, look);
+    let color = if look == ButtonLook::Normal {
+        p.muted
+    } else {
+        p.text
+    };
+    let (w, h) = if horizontal {
+        (LENGTH_BAR_THICKNESS, LENGTH_BAR_ACROSS)
+    } else {
+        (LENGTH_BAR_ACROSS, LENGTH_BAR_THICKNESS)
+    };
+    rc.fill_rounded_rect(
+        r.x + (r.w - w) / 2.0,
+        r.y + (r.h - h) / 2.0,
+        w,
+        h,
+        CornerRadii::all(LENGTH_BAR_THICKNESS / 2.0),
+        color,
+    );
+}
+
 /// The grip's dots, two rows of four running across the dock, centred in `r`
 /// with a well behind them under the pointer or held.
 pub fn grip(
@@ -201,18 +251,7 @@ pub fn grip(
     radius: f32,
     look: ButtonLook,
 ) {
-    let (inset_x, inset_y) = if horizontal {
-        (GRIP_WELL_ENDS, GRIP_WELL_SIDES)
-    } else {
-        (GRIP_WELL_SIDES, GRIP_WELL_ENDS)
-    };
-    let well = Rect::new(
-        r.x + inset_x,
-        r.y + inset_y,
-        r.w - 2.0 * inset_x,
-        r.h - 2.0 * inset_y,
-    );
-    slot_well(rc, p, well, radius, look);
+    slot_well(rc, p, grip_well(r, horizontal), radius, look);
     let color = if look == ButtonLook::Normal {
         p.muted
     } else {
