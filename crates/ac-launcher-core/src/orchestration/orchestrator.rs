@@ -55,6 +55,10 @@ pub const FIRST_RUN_REQUIRED: &str =
 const INSTALL_VERIFIED: &str = "Client content SHA-256, size, and bake-tool version verified.";
 const INSTALL_CONFIGURED: &str = "Client content paths are configured.";
 const ALREADY_RUNNING: &str = "A session or character refresh is already running for this account.";
+/// How long a client in the world may go without reporting progress (it
+/// writes a heartbeat every 10 s) before it shows as not responding.
+pub const NOT_RESPONDING_AFTER: Duration = Duration::from_secs(30);
+const NOT_RESPONDING: &str = "Not responding.";
 /// A Stop that had to kill: a stop, not a crash.
 const FORCED_STOP: &str = "Stopped (did not respond, closed by force).";
 const STOP_TIMEOUT_ON_DISPOSE: Duration = Duration::from_secs(5);
@@ -231,6 +235,13 @@ struct Activity {
     account_in_use: bool,
     /// The player stopped it, and how that went.
     stop: Option<LauncherSessionStop>,
+    /// When its last status line was read (launcher clock).
+    last_progress_at: Option<SystemTime>,
+    /// Its client writes heartbeats; only such a client is judged
+    /// unresponsive by its silence.
+    heartbeats_seen: bool,
+    /// In the world and silent for [`NOT_RESPONDING_AFTER`].
+    not_responding: bool,
     /// `error` is the exit's reason, worded from what was known then; a
     /// later exit report words it again.
     error_is_exit_reason: bool,
@@ -301,6 +312,7 @@ impl Activity {
             server_message: self.server_message.clone(),
             account_in_use: self.account_in_use,
             stop: self.stop,
+            not_responding: self.not_responding && self.state == LauncherActivityState::InWorld,
             plugin_notice: self.plugin_notice.clone(),
             has_live_process: Some(self.has_live_process()),
             startup_in_flight: self.startup_in_flight,
@@ -1445,6 +1457,7 @@ impl LauncherOrchestrator {
             }
         }
         changed |= self.inner.expire_window_switches();
+        changed |= self.inner.judge_responsiveness();
         if changed {
             self.inner.raise_state_changed();
         }
@@ -1622,6 +1635,9 @@ impl Inner {
             account_in_use: false,
             error_is_exit_reason: false,
             stop: None,
+            last_progress_at: None,
+            heartbeats_seen: false,
+            not_responding: false,
             exit_reason: None,
             host_reported_exit: false,
             process_exited: false,
@@ -1938,6 +1954,30 @@ impl Inner {
         self.raise_state_changed();
     }
 
+    /// Marks the clients in the world that have gone silent for
+    /// [`NOT_RESPONDING_AFTER`] as not responding (detection only: nothing
+    /// is stopped); true when one changed.
+    fn judge_responsiveness(&self) -> bool {
+        let now = (self.clock)();
+        let mut state = lock(&self.gate);
+        let mut changed = false;
+        for activity in &mut state.activities {
+            let silent = activity.last_progress_at.is_some_and(|at| {
+                now.duration_since(at).unwrap_or_default() >= NOT_RESPONDING_AFTER
+            });
+            if silent
+                && activity.heartbeats_seen
+                && !activity.not_responding
+                && activity.state == LauncherActivityState::InWorld
+            {
+                activity.not_responding = true;
+                activity.status = NOT_RESPONDING.into();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// Gives up the window switches their clients did not answer in time;
     /// true when one was given up.
     fn expire_window_switches(&self) -> bool {
@@ -1976,6 +2016,17 @@ impl Inner {
         if event.session_id() != activity.session_id {
             activity.error = Some("Ignored a status event for a different session id.".into());
             return;
+        }
+        // Any line is progress; a heartbeat also says the client keeps them
+        // coming while it is well.
+        activity.last_progress_at = Some(now);
+        if event.kind == StatusEventKind::Heartbeat {
+            activity.heartbeats_seen = true;
+        }
+        if std::mem::take(&mut activity.not_responding)
+            && activity.state == LauncherActivityState::InWorld
+        {
+            activity.status = "In world.".into();
         }
 
         if activity.is_terminal() {

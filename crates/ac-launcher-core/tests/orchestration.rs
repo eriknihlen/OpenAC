@@ -1558,6 +1558,62 @@ fn stop_runs_through_the_supervisor_and_makes_the_account_probeable_again() {
     );
 }
 
+// Not an OpenAC test: a client in the world that writes heartbeats and then
+// falls silent for 30 s shows as not responding until its next line; a
+// client that never wrote one (an older build) is not judged.
+#[test]
+fn a_silent_client_in_the_world_shows_as_not_responding() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let statuses = Arc::new(QueueStatusSourceFactory::default());
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let now = Arc::new(Mutex::new(start));
+    let clock_now = Arc::clone(&now);
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            statuses: statuses.clone(),
+            clock: Some(Arc::new(move || *lock(&clock_now))),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    let queue = statuses.single();
+    enqueue(&queue, connected("s1"));
+    enqueue(&queue, entered_world("s1", "+Acdream"));
+    orchestrator.poll_status().unwrap();
+    // No heartbeat yet: silence is not judged.
+    *lock(&now) = start + Duration::from_secs(60);
+    orchestrator.poll_status().unwrap();
+    assert!(!single_session(&orchestrator).not_responding);
+
+    let heartbeat = |queue: &EventQueue| {
+        enqueue(queue, event("s1", "heartbeat", StatusEventKind::Heartbeat));
+    };
+    heartbeat(&queue);
+    orchestrator.poll_status().unwrap();
+    *lock(&now) = start + Duration::from_secs(60 + 29);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(!session.not_responding);
+    assert_eq!(session.status, "In world.");
+
+    *lock(&now) = start + Duration::from_secs(60 + 30);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(session.not_responding);
+    assert_eq!(session.state, LauncherActivityState::InWorld);
+    assert_eq!(session.status, "Not responding.");
+    assert_eq!(supervisors.single().stop_calls(), 0, "detection only");
+
+    heartbeat(&queue);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(!session.not_responding);
+    assert_eq!(session.status, "In world.");
+}
+
 // Not an OpenAC test: a Stop that has to kill the client is a stop, not a
 // crash (no crash error), but the server may still hold the login, so the
 // hold applies.
@@ -2194,6 +2250,7 @@ mod relaunch {
             server_message: None,
             account_in_use: false,
             stop: None,
+            not_responding: false,
             plugin_notice: None,
             has_live_process: Some(live),
             startup_in_flight: false,

@@ -174,6 +174,7 @@ fn session(state: LauncherActivityState) -> LauncherSessionSnapshot {
         server_message: None,
         account_in_use: false,
         stop: None,
+        not_responding: false,
         plugin_notice: None,
         has_live_process: None,
         startup_in_flight: false,
@@ -847,6 +848,30 @@ fn the_character_box_shows_who_is_in_world_and_returns_to_the_saved_choice_after
         window.row(&account, &server).unwrap().displayed_character(),
         CHARACTER_SELECT
     );
+}
+
+// Not an OpenAC test: a client that stopped responding says so on its row
+// and in the session log, before an older error.
+#[test]
+fn a_client_that_stopped_responding_says_so() {
+    let fake = batch();
+    let mut window = create_initialized(&fake);
+    let (account, server) = row_keys(&window)[0].clone();
+    fake.set_session(|session| {
+        session.server_name = server.clone();
+        session.account_name = account.clone();
+        session.state = LauncherActivityState::InWorld;
+        session.exit_code = None;
+        session.error = Some("Plugin failed: x: y".into());
+        session.not_responding = true;
+    });
+    fake.raise_state_changed();
+    window.poll();
+    assert_eq!(
+        window.row(&account, &server).unwrap().status,
+        "Not responding"
+    );
+    assert_eq!(window.sessions[0].state, "Not responding");
 }
 
 // OpenAC LauncherWindowViewModelTests.CheckedRowsLaunchAllSelectedAccountsWithRequestedModesAndContinueAfterFailure.

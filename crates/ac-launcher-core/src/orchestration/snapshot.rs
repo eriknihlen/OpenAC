@@ -188,6 +188,9 @@ pub struct LauncherSessionSnapshot {
     pub account_in_use: bool,
     /// The player stopped it, and how that went.
     pub stop: Option<LauncherSessionStop>,
+    /// In the world, its client has stopped reporting progress (it may
+    /// be frozen); detection only.
+    pub not_responding: bool,
     /// Plugins left out at launch (blocked ids), kept apart from the status
     /// so later updates do not hide it.
     pub plugin_notice: Option<String>,

@@ -117,6 +117,7 @@ pub fn describe_state(snapshot: &LauncherSessionSnapshot) -> &'static str {
                 "Character select"
             }
         }
+        LauncherActivityState::InWorld if snapshot.not_responding => "Not responding",
         LauncherActivityState::InWorld => "In game",
         LauncherActivityState::Disconnected | LauncherActivityState::Stopping => "Stopping",
         LauncherActivityState::Failed => "Failed",

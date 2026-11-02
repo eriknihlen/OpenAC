@@ -442,8 +442,11 @@ impl AccountServerRow {
             })
             .map(|session| session.window.clone());
         self.active_character_name = active.and_then(|session| session.character_name.clone());
-        self.status = session
-            .and_then(|session| session.error.clone())
+        // A client that stopped responding says so before an older error.
+        self.status = active
+            .filter(|session| session.not_responding)
+            .map(|_| "Not responding".to_owned())
+            .or_else(|| session.and_then(|session| session.error.clone()))
             .or_else(|| session.map(|session| session.status.clone()))
             .unwrap_or_else(|| account.activity_status.clone());
         self.launch_error = session.and_then(|session| session.error.clone());

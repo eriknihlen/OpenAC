@@ -68,6 +68,7 @@ fn spy() -> Arc<OwnerSpy> {
             server_message: None,
             account_in_use: false,
             stop: None,
+            not_responding: false,
             plugin_notice: None,
             has_live_process: None,
             startup_in_flight: false,

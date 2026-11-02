@@ -19,9 +19,9 @@ pub use executables::{
 };
 pub use exit_reason::{ClientExit, describe_client_exit};
 pub use orchestrator::{
-    AccountCapabilities, Clock, FIRST_RUN_REQUIRED, LauncherOrchestrator, OrchestratorError,
-    OrchestratorParts, SERVER_SESSION_HOLD, SessionIdFactory, StateChangedListener,
-    WINDOW_SWITCH_TIMEOUT, create_session_id,
+    AccountCapabilities, Clock, FIRST_RUN_REQUIRED, LauncherOrchestrator, NOT_RESPONDING_AFTER,
+    OrchestratorError, OrchestratorParts, SERVER_SESSION_HOLD, SessionIdFactory,
+    StateChangedListener, WINDOW_SWITCH_TIMEOUT, create_session_id,
 };
 pub use relaunch::{
     DEFAULT_RELAUNCH_DELAY_SECONDS, LauncherRelaunchController, LauncherRelaunchSelection,
