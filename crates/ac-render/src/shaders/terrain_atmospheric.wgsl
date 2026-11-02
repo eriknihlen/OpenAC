@@ -234,10 +234,13 @@ fn apply_fog(lit: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
 // The lit terrain with the landscape detail blended over it, as
 // terrain.wgsl does.
 fn landscape_detailed(lit: vec3<f32>, cell_uv: vec2<f32>, full_detail: u32, fade: f32) -> vec3<f32> {
+    if (detail_tiling.z == 0.0) {
+        return lit;
+    }
     let d = textureSample(landscape_detail, detail_sampler, cell_uv * detail_tiling.z);
     let weight = d.a * fade;
     let detailed = d.rgb * weight + lit * (1.0 - weight);
-    return select(lit, detailed, detail_tiling.z != 0.0 && full_detail != 0u);
+    return select(lit, detailed, full_detail != 0u);
 }
 
 @fragment

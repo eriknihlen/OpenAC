@@ -278,6 +278,123 @@ mod tests {
         assert_eq!(curve, [255, 255, 127, 0, 0]);
     }
 
+    /// The text of the shader function `landscape_detail_fade` in `source`:
+    /// from its `fn` line to the closing brace at the line's start.
+    fn wgsl_fade_function(source: &str) -> &str {
+        let start = source
+            .find("fn landscape_detail_fade(")
+            .expect("the shader has landscape_detail_fade");
+        let end = source[start..].find("\n}").expect("the function ends") + start + 2;
+        &source[start..end]
+    }
+
+    /// `function` (a WGSL `landscape_detail_fade`) run on the GPU at each
+    /// of `depths`, as bytes (the fraction of 255 it returns, rounded).
+    fn run_on_gpu(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        function: &str,
+        depths: &[f32],
+    ) -> Vec<u8> {
+        let source = format!(
+            "@group(0) @binding(0) var<storage, read> depths: array<f32>;\n\
+             @group(0) @binding(1) var<storage, read_write> fades: array<f32>;\n\
+             {function}\n\
+             @compute @workgroup_size(1)\n\
+             fn main(@builtin(global_invocation_id) id: vec3<u32>) {{\n\
+                 fades[id.x] = landscape_detail_fade(depths[id.x]);\n\
+             }}\n"
+        );
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("landscape detail fade test"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("landscape detail fade test"),
+            layout: None,
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let size = std::mem::size_of_val(depths) as u64;
+        let input = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("depths"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&input, 0, bytemuck::cast_slice(depths));
+        let output = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fades"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fades readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("landscape detail fade test"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(depths.len() as u32, 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, size);
+        queue.submit([encoder.finish()]);
+        readback.map_async(wgpu::MapMode::Read, .., |_| {});
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("the GPU finishes");
+        let mapped = readback.slice(..).get_mapped_range().expect("mapped");
+        let fades: &[f32] = bytemuck::cast_slice(&mapped);
+        fades.iter().map(|f| (f * 255.0).round() as u8).collect()
+    }
+
+    // Both terrain shaders' fade, run on the GPU, gives the reference's
+    // bytes either side of each edge; and the two copies are the same text.
+    #[test]
+    fn the_terrain_shaders_fade_as_the_reference_does() {
+        let shaders = [
+            ("terrain.wgsl", include_str!("../shaders/terrain.wgsl")),
+            (
+                "terrain_atmospheric.wgsl",
+                include_str!("../shaders/terrain_atmospheric.wgsl"),
+            ),
+        ];
+        let depths = [0.0, 9.99, 10.0, 30.0, 49.99, 50.0, 60.0];
+        let expected: Vec<u8> = depths.into_iter().map(landscape_detail_fade).collect();
+        if let Some((device, queue)) = crate::test_gpu::device() {
+            for (name, source) in shaders {
+                let on_gpu = run_on_gpu(&device, &queue, wgsl_fade_function(source), &depths);
+                assert_eq!(on_gpu, expected, "{name} at {depths:?}");
+            }
+        }
+        assert_eq!(
+            wgsl_fade_function(shaders[0].1),
+            wgsl_fade_function(shaders[1].1),
+            "the two terrain shaders' fades differ"
+        );
+    }
+
     #[test]
     fn the_landscape_detail_draws_only_with_its_own_option_a_texture_and_a_tiling() {
         assert_eq!(
