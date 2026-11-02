@@ -68,16 +68,24 @@ pub fn describe_status(snapshot: &LauncherSessionSnapshot) -> String {
     }
     // Not graceful: the host never reported its own exit, or reported a failure. The server may
     // still be holding the account, and saying so here is what stops the next login failure
-    // being a mystery.
+    // being a mystery. A refusal from the server is told in its own words.
+    if let Some(message) = snapshot
+        .server_message
+        .as_deref()
+        .map(|message| message.trim().trim_end_matches('.'))
+        .filter(|message| !message.is_empty())
+    {
+        return format!("{message} — the server may hold this account for a short while.");
+    }
     let detail = match snapshot.exit_reason.as_deref() {
         Some("connection-error") => "Could not reach the server",
         Some("credential-error") => "The account or password was rejected",
         Some("configuration-error") => "The session configuration was rejected",
         Some("usage-error") => "The client rejected how it was started",
-        None | Some("") => "Crashed",
+        None | Some("") => "Closed unexpectedly",
         Some(_) => "Stopped unexpectedly",
     };
-    format!("{detail} — the server may hold this account for a few minutes.")
+    format!("{detail} — the server may hold this account for a short while.")
 }
 
 /// `Character refresh` for a refresh, the character once known, else

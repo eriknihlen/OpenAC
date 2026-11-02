@@ -17,6 +17,7 @@ use ac_host::PathSet;
 
 use super::capabilities::{LauncherCapability, LauncherPlatformCapabilities};
 use super::executables::LauncherExecutableSet;
+use super::exit_reason::{ClientExit, describe_client_exit};
 use super::snapshot::{
     LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
     LauncherCharacterSnapshot, LauncherServerSnapshot, LauncherSessionSnapshot,
@@ -219,6 +220,13 @@ struct Activity {
     host_terminal_status: Option<String>,
     /// The client's own exit reason; set only when it reported its exit.
     exit_reason: Option<String>,
+    /// The server's own words, when a refusal from it ended the session.
+    server_message: Option<String>,
+    /// That refusal only said the account was still logged on.
+    account_in_use: bool,
+    /// `error` is the exit's reason, worded from what was known then; a
+    /// later exit report words it again.
+    error_is_exit_reason: bool,
     /// The client reported its own exit, rather than the launcher only
     /// seeing the process end.
     host_reported_exit: bool,
@@ -283,6 +291,8 @@ impl Activity {
             created_at: self.created_at,
             exit_reason: self.exit_reason.clone(),
             exited_gracefully: self.exited_gracefully(),
+            server_message: self.server_message.clone(),
+            account_in_use: self.account_in_use,
             plugin_notice: self.plugin_notice.clone(),
             has_live_process: Some(self.has_live_process()),
             startup_in_flight: self.startup_in_flight,
@@ -357,9 +367,10 @@ fn safe_error(prefix: &str, detail: &str, secret: Option<&str>) -> String {
     }
 }
 
-/// The error a failed start shows: a specific one when the client said its
-/// prepared content is from another version, otherwise the exit code.
-fn read_startup_failure(activity: &Activity) -> String {
+/// The error a failed client shows: a specific one when the client said its
+/// prepared content is from another version, otherwise why it ended in
+/// plain words (see [`describe_client_exit`]).
+fn read_exit_failure(activity: &Activity) -> String {
     if let Some(path) = &activity.stderr_log_path
         && let Ok(file) = std::fs::File::open(path)
     {
@@ -373,9 +384,24 @@ fn read_startup_failure(activity: &Activity) -> String {
             }
         }
     }
-    match activity.exit_code {
-        Some(code) => format!("Client exited with code {code}. See the session log for details."),
-        None => "Client exited with code . See the session log for details.".to_owned(),
+    describe_client_exit(ClientExit {
+        code: activity.exit_code,
+        reported_reason: activity
+            .exit_reason
+            .as_deref()
+            .filter(|_| activity.host_reported_exit),
+        server_message: activity.server_message.as_deref(),
+    })
+}
+
+/// Words the activity's exit failure again from what is known now: a
+/// failed exit gets its reason unless an error of another kind is already
+/// shown; a graceful one keeps its error as it is.
+fn word_exit_failure(activity: &mut Activity) {
+    let failed = activity.exit_code.is_some_and(|code| code != 0);
+    if failed && (activity.error.is_none() || activity.error_is_exit_reason) {
+        activity.error = Some(read_exit_failure(activity));
+        activity.error_is_exit_reason = true;
     }
 }
 
@@ -1548,6 +1574,9 @@ impl Inner {
             plugin_notice: None,
             stderr_log_path: None,
             host_terminal_status: None,
+            server_message: None,
+            account_in_use: false,
+            error_is_exit_reason: false,
             exit_reason: None,
             host_reported_exit: false,
             process_exited: false,
@@ -1840,9 +1869,7 @@ impl Inner {
                         .as_ref()
                         .and_then(|supervisor| supervisor.exit_code());
                 }
-                if activity.exit_code.is_some_and(|code| code != 0) && activity.error.is_none() {
-                    activity.error = Some(read_startup_failure(activity));
-                }
+                word_exit_failure(activity);
                 if !activity.is_terminal() {
                     activity.set_state(LauncherActivityState::Exited, now);
                     activity.status = activity.host_terminal_status.clone().unwrap_or_else(|| {
@@ -1908,11 +1935,19 @@ impl Inner {
 
         if activity.is_terminal() {
             match event.kind {
-                StatusEventKind::Exited { code, reason } => {
+                StatusEventKind::Exited {
+                    code,
+                    reason,
+                    server_message,
+                    account_in_use,
+                } => {
                     activity.exit_code.get_or_insert(code);
                     activity.host_reported_exit = true;
                     let status = format!("Exited: {reason} (code {code}).");
                     activity.exit_reason.get_or_insert(reason);
+                    activity.server_message = server_message;
+                    activity.account_in_use = account_in_use;
+                    word_exit_failure(activity);
                     let status = activity.host_terminal_status.get_or_insert(status).clone();
                     if activity.state == LauncherActivityState::Exited {
                         activity.status = status;
@@ -1974,18 +2009,25 @@ impl Inner {
                 }
                 activity.status = format!("Disconnected: {reason}.");
             }
-            StatusEventKind::Exited { code, reason } => {
+            StatusEventKind::Exited {
+                code,
+                reason,
+                server_message,
+                account_in_use,
+            } => {
                 activity.set_state(LauncherActivityState::Exited, now);
                 activity.exit_code = Some(code);
                 activity.host_reported_exit = true;
                 let status = format!("Exited: {reason} (code {code}).");
                 activity.exit_reason = Some(reason);
-                if code != 0 && activity.error.is_none() {
-                    activity.error = Some(read_startup_failure(activity));
-                }
+                activity.server_message = server_message;
+                activity.account_in_use = account_in_use;
+                word_exit_failure(activity);
                 activity.host_terminal_status = Some(status.clone());
                 activity.status = status;
             }
+            // Progress only; the not-responding check reads it.
+            StatusEventKind::Heartbeat => {}
             StatusEventKind::Malformed { error } => {
                 activity.error = Some(format!("Malformed host status event: {error}"));
             }

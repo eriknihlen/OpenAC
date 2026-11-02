@@ -4,6 +4,7 @@
 
 mod capabilities;
 mod executables;
+mod exit_reason;
 mod orchestrator;
 mod relaunch;
 mod snapshot;
@@ -16,6 +17,7 @@ pub use capabilities::{
 pub use executables::{
     ExecutablePaths, HEADLESS_ENVIRONMENT_VARIABLE, LauncherExecutableSet, PathPredicate,
 };
+pub use exit_reason::{ClientExit, describe_client_exit};
 pub use orchestrator::{
     AccountCapabilities, Clock, FIRST_RUN_REQUIRED, LauncherOrchestrator, OrchestratorError,
     OrchestratorParts, SERVER_SESSION_HOLD, SessionIdFactory, StateChangedListener,

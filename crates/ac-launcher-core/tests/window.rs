@@ -171,6 +171,8 @@ fn session(state: LauncherActivityState) -> LauncherSessionSnapshot {
         created_at: UNIX_EPOCH,
         exit_reason: None,
         exited_gracefully: false,
+        server_message: None,
+        account_in_use: false,
         plugin_notice: None,
         has_live_process: None,
         startup_in_flight: false,

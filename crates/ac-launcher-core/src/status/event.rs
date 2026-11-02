@@ -101,7 +101,16 @@ pub enum StatusEventKind {
         code: i32,
         /// Why.
         reason: String,
+        /// The server's own words, when a refusal from it ended the session
+        /// (`serverMessage`, an addition to OpenAC's vocabulary).
+        server_message: Option<String>,
+        /// That refusal only says the account, or one of its characters, is
+        /// still logged on (`accountInUse`; absent means false).
+        account_in_use: bool,
     },
+    /// The client's session loop is making progress (`heartbeat`, an
+    /// addition to OpenAC's vocabulary).
+    Heartbeat,
     /// A game window opened on the session (an addition to OpenAC's
     /// vocabulary).
     WindowOpened,
@@ -143,7 +152,7 @@ impl StatusEvent {
     }
 }
 
-const KNOWN: [&str; 14] = [
+const KNOWN: [&str; 15] = [
     "started",
     "connected",
     "characterList",
@@ -158,6 +167,7 @@ const KNOWN: [&str; 14] = [
     "windowOpened",
     "windowClosed",
     "windowFailed",
+    "heartbeat",
 ];
 
 fn member<'a>(root: &'a Node, name: &str) -> Option<&'a Node> {
@@ -202,6 +212,22 @@ fn require_string(root: &Node, name: &str) -> Result<String, String> {
     match &require(root, name)?.value {
         Value::String(text) => Ok(text.clone()),
         _ => Err(format!("status event field '{name}' is not a string.")),
+    }
+}
+
+fn optional_string(root: &Node, name: &str) -> Result<Option<String>, String> {
+    match member(root, name).map(|node| &node.value) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(format!("status event field '{name}' is not a string.")),
+    }
+}
+
+fn optional_bool(root: &Node, name: &str) -> Result<bool, String> {
+    match member(root, name).map(|node| &node.value) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(format!("status event field '{name}' is not a boolean.")),
     }
 }
 
@@ -303,7 +329,10 @@ fn parse_known(root: &Node, e: &str) -> Result<(StatusEnvelope, StatusEventKind)
         "exited" => StatusEventKind::Exited {
             code: require_int32(root, "code")?,
             reason: require_string(root, "reason")?,
+            server_message: optional_string(root, "serverMessage")?,
+            account_in_use: optional_bool(root, "accountInUse")?,
         },
+        "heartbeat" => StatusEventKind::Heartbeat,
         "windowOpened" => StatusEventKind::WindowOpened,
         "windowClosed" => StatusEventKind::WindowClosed {
             reason: require_string(root, "reason")?,

@@ -508,12 +508,25 @@ fn entered_world(session_id: &str, character_name: &str) -> StatusEvent {
 }
 
 fn exited(session_id: &str, code: i32, reason: &str) -> StatusEvent {
+    refused(session_id, code, reason, None, false)
+}
+
+/// An `exited` naming the server's refusal.
+fn refused(
+    session_id: &str,
+    code: i32,
+    reason: &str,
+    server_message: Option<&str>,
+    account_in_use: bool,
+) -> StatusEvent {
     event(
         session_id,
         "exited",
         StatusEventKind::Exited {
             code,
             reason: reason.into(),
+            server_message: server_message.map(str::to_owned),
+            account_in_use,
         },
     )
 }
@@ -1383,6 +1396,61 @@ fn host_exit_reason_survives_the_later_process_exit_callback() {
     );
 }
 
+// Not an OpenAC test: a failed client says why in plain words, not just its
+// exit code; the server's refusal is shown in the server's own words, even
+// when the process is seen to end before the client's report is read.
+#[test]
+fn a_failed_client_says_why_in_plain_words() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let statuses = Arc::new(QueueStatusSourceFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            statuses: statuses.clone(),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    supervisors.single().exit(-1);
+    assert_eq!(
+        single_session(&orchestrator).error.as_deref(),
+        Some("The client closed unexpectedly. (exit code -1)")
+    );
+    orchestrator.clear_finished_sessions().unwrap();
+
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    let refused_supervisor = Arc::clone(&supervisors.created()[1]);
+    refused_supervisor.exit(6);
+    let queue = {
+        let created = lock(&statuses.created);
+        Arc::clone(&created[1].0)
+    };
+    enqueue(
+        &queue,
+        refused(
+            "s2",
+            6,
+            "the server ended the session: Another account is already logged on from this \
+             client. (error 0x1)",
+            Some("Another account is already logged on from this client."),
+            true,
+        ),
+    );
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert_eq!(
+        session.error.as_deref(),
+        Some("Another account is already logged on from this client. (exit code 6)")
+    );
+    assert_eq!(
+        session.server_message.as_deref(),
+        Some("Another account is already logged on from this client.")
+    );
+    assert!(session.account_in_use);
+}
+
 #[test]
 fn start_failure_is_visible_but_redacts_the_credential_everywhere() {
     let root = TempDir::new("orchestrator");
@@ -2056,6 +2124,8 @@ mod relaunch {
             created_at: SystemTime::UNIX_EPOCH + Duration::from_secs(id),
             exit_reason: None,
             exited_gracefully: false,
+            server_message: None,
+            account_in_use: false,
             plugin_notice: None,
             has_live_process: Some(live),
             startup_in_flight: false,
