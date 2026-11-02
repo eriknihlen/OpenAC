@@ -560,6 +560,18 @@ impl PluginBinding<'_> {
                     c.orientation.z,
                 ),
                 sees_outside: c.sees_outside,
+                doorways: c
+                    .doorways
+                    .iter()
+                    .map(|d| abi::CellDoorway {
+                        other_cell_id: d.other_cell_id,
+                        leads_outside: d.leads_outside,
+                        exact_match: d.exact_match,
+                        portal_side: d.portal_side,
+                        center: (d.center.x, d.center.y, d.center.z),
+                    })
+                    .collect(),
+                visible_cells: c.visible_cells.clone(),
             })
             .collect()
     }

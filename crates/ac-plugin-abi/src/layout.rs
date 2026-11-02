@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0xe6e9_4c4d_4522_8e79;
+    const PUBLISHED: u64 = 0xaa91_d1fb_20b2_bd41;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {
@@ -259,10 +259,15 @@ mod tests {
             assert_ne!(import.shape(), shape, "{import:?}");
         }
         for import in Import::ALL {
-            if import.since().is_at_most(v1_1) && !API_1_1_IMPORTS.iter().any(|(i, _)| i == import)
+            if import.since().is_at_most(v1_1)
+                && !API_1_1_IMPORTS.iter().any(|(i, _)| i == import)
+                && !API_1_4_CHANGED.iter().any(|(i, _)| i == import)
             {
                 assert_eq!(import.shape_at(v1_1), import.shape(), "{import:?}");
             }
+        }
+        for (import, shape) in API_1_4_CHANGED {
+            assert_eq!(import.shape_at(v1_1), shape, "{import:?}");
         }
     }
 
@@ -307,14 +312,24 @@ mod tests {
     /// preview's plan without the grid it reused or the worker's time).
     const API_1_4_CORE: u64 = 0xc98c_762b_1ce4_4a3c;
 
+    /// The calls API 1.5 changed, with the shape each had before: the
+    /// indoor cells gained their doorways and the cells seen from them.
+    const API_1_4_CHANGED: [(Import, u64); 1] =
+        [(Import::DungeonIndoorCells, 0xca99_6144_2871_7333)];
+
     /// API 1.5 added fields at the end of a path preview's plan, which
-    /// changes the core shape: an API 1.4 plugin keeps its own, and every
-    /// import it has is as it was.
+    /// changes the core shape, and to the records of the calls in
+    /// [`API_1_4_CHANGED`]: an API 1.4 plugin keeps its own shapes for all
+    /// of them, and every other import it has is as it was.
     #[test]
     fn api_1_4_plugins_keep_their_core_and_import_shapes() {
         let v1_4 = ApiVersion::new(1, 4);
         assert_eq!(core_shape(v1_4), API_1_4_CORE);
         assert_ne!(CORE_SHAPE, API_1_4_CORE);
+        for (import, shape) in API_1_4_CHANGED {
+            assert_eq!(import.shape_at(v1_4), shape, "{import:?}");
+            assert_ne!(import.shape(), shape, "{import:?}");
+        }
         let section = PluginLayout::parse(&section_at(v1_4)).unwrap();
         for import in Import::ALL {
             let expected = import
@@ -322,6 +337,9 @@ mod tests {
                 .is_at_most(v1_4)
                 .then(|| import.shape_at(v1_4));
             assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
+            if expected.is_some() && !API_1_4_CHANGED.iter().any(|(i, _)| i == import) {
+                assert_eq!(import.shape_at(v1_4), import.shape(), "{import:?}");
+            }
         }
     }
 
@@ -368,9 +386,14 @@ mod tests {
         for import in Import::ALL {
             if API_1_4_FONTS.contains(import) {
                 assert_eq!(section.import_shape(import.name()), None, "{import:?}");
-            } else if !API_1_3_CHANGED.iter().any(|(changed, _)| changed == import) {
+            } else if !API_1_3_CHANGED.iter().any(|(changed, _)| changed == import)
+                && !API_1_4_CHANGED.iter().any(|(changed, _)| changed == import)
+            {
                 assert_eq!(import.shape_at(v1_3), import.shape(), "{import:?}");
             }
+        }
+        for (import, shape) in API_1_4_CHANGED {
+            assert_eq!(import.shape_at(v1_3), shape, "{import:?}");
         }
     }
 

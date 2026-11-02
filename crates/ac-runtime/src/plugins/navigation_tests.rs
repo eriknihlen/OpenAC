@@ -524,3 +524,62 @@ fn a_distance_out_of_range_ahead_is_unknown() {
 
     assert_eq!(room.status, RoomAheadStatus::Unknown);
 }
+
+/// A dungeon's indoor cells from the installed game files, asked as a
+/// plugin built for this API and as one built for API 1.4 asks: this one
+/// hears each cell's doorways and the cells seen from it, every doorway
+/// onto a cell the landblock lists; the older plugin is sent the records
+/// as they were, byte for byte.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_dungeons_indoor_cells_carry_their_doorways_and_older_plugins_get_the_records_they_knew() {
+    use ac_plugin::abi::world::IndoorCell;
+    use ac_plugin::abi::{API_CURRENT, ApiVersion, Import};
+    const DUNGEON: u32 = 0x0032_0000;
+    let mut session = Session::at(60.0, 150.0);
+    let Session { state, outbox, .. } = &mut session;
+    with_binding(state, outbox, |b| {
+        let cells = call_as::<calls::DungeonIndoorCells>(b, "a", &DUNGEON);
+        assert!(cells.len() > 300, "{} cells", cells.len());
+        let ids: std::collections::HashSet<u32> = cells.iter().map(|c| c.cell_id).collect();
+        let doorways: usize = cells.iter().map(|c| c.doorways.len()).sum();
+        assert!(doorways >= cells.len(), "{doorways} doorways");
+        for cell in &cells {
+            for doorway in &cell.doorways {
+                assert_eq!(doorway.leads_outside, doorway.other_cell_id == 0);
+                assert!(
+                    doorway.leads_outside || ids.contains(&doorway.other_cell_id),
+                    "0x{:08X} opens onto 0x{:08X}",
+                    cell.cell_id,
+                    doorway.other_cell_id
+                );
+            }
+            assert!(
+                cell.visible_cells
+                    .iter()
+                    .all(|id| id >> 16 == DUNGEON >> 16)
+            );
+        }
+        assert!(cells.iter().any(|c| !c.visible_cells.is_empty()));
+
+        let v1_4 = ApiVersion::new(1, 4);
+        let ask = |b: &mut PluginBinding<'_>, version| {
+            let caller = Caller {
+                plugin_id: "a",
+                api_version: version,
+            };
+            b.call(caller, Import::DungeonIndoorCells, &DUNGEON.to_bytes())
+                .unwrap()
+        };
+        let older = ask(b, v1_4);
+        assert_eq!(older, cells.to_bytes_at(v1_4));
+        assert_eq!(ask(b, API_CURRENT), cells.to_bytes());
+        let read = Vec::<IndoorCell>::from_bytes_at(&older, v1_4).unwrap();
+        assert_eq!(read.len(), cells.len());
+        assert!(
+            read.iter()
+                .all(|c| c.doorways.is_empty() && c.visible_cells.is_empty())
+        );
+        assert_eq!(read[0].cell_id, cells[0].cell_id);
+    });
+}

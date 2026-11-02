@@ -205,3 +205,52 @@ fn previews_in_installed_dungeons_are_timed() {
         );
     }
 }
+
+/// The first read of a dungeon's indoor cells and floorplan, which a
+/// plugin's call does on the session thread, and the kept answer after.
+#[test]
+#[ignore = "needs the retail dat files and OPENAC_DIAGNOSTIC_TESTS=1"]
+fn dungeon_reads_are_timed() {
+    if std::env::var("OPENAC_DIAGNOSTIC_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set OPENAC_DIAGNOSTIC_TESTS=1 to run diagnostic tests");
+        return;
+    }
+    let dats = support::dats();
+    for landblock in [0x0032_0000u32, 0x5B48_0000, 0x0125_0000] {
+        // What the read cost before it took in the doorways: the cells
+        // alone, from files not yet read.
+        let fresh = support::dats();
+        let read = Instant::now();
+        let info: ac_dat::objects::LandBlockInfo = fresh
+            .get(landblock | 0xFFFE)
+            .expect("read the landblock")
+            .expect("the landblock");
+        for offset in 0..info.num_cells {
+            let _: Option<ac_dat::objects::EnvCell> = fresh
+                .get(landblock | (0x0100 + offset))
+                .expect("read a cell");
+        }
+        let cells_alone = milliseconds(read);
+
+        let mut indoor = ac_nav::indoor::IndoorCellCache::new();
+        let read = Instant::now();
+        let cells = indoor.capture(&dats, landblock).expect("the cells read");
+        let first = milliseconds(read);
+        let again = Instant::now();
+        let _ = indoor.capture(&dats, landblock).expect("the cells read");
+        let kept = milliseconds(again);
+        let doorways: usize = cells.iter().map(|c| c.doorways.len()).sum();
+        let seen: usize = cells.iter().map(|c| c.visible_cells.len()).sum();
+
+        let mut builder = ac_nav::floorplan::DungeonFloorplanBuilder::new();
+        let read = Instant::now();
+        let plan = builder.try_build(&dats, landblock).expect("the cells read");
+        let plan_first = milliseconds(read);
+        println!(
+            "0x{:04X}: cells alone {cells_alone:.2} ms; indoor cells first {first:.2} ms, kept {kept:.3} ms ({} cells, {doorways} doorways, {seen} seen); floorplan first {plan_first:.2} ms ({} cells)",
+            landblock >> 16,
+            cells.len(),
+            plan.map_or(0, |p| p.cells.len()),
+        );
+    }
+}

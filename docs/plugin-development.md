@@ -88,7 +88,8 @@ for anything that is not a hook). API 1.4 added five plugin themes: a plugin
 built for an older version is told `ThemeKind::Moss` under any of them, with
 the theme's real name and colours. API 1.5 added, at the end of a path
 preview's `NavigationPlan`, whether it reused a grid and how long the client's
-worker took. Everything the client offers
+worker took, and at the end of `IndoorCell` its doorways and the cells seen
+from it. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -224,6 +225,18 @@ preview is kept for the walks and previews after it, until it goes unused for
 grid was there already (API 1.5), and `took_ms` how long the worker spent:
 the first preview in a dungeon builds the grid, and the ones after it are
 quicker.
+
+**Dungeon data.** `Host::dungeon_floorplan` and `Host::indoor_cells` read a
+landblock's cells from the game files once and keep them, so only the first
+call for a landblock costs a few milliseconds. Each `IndoorCell` lists its
+`doorways` (API 1.5): the cell each opens onto, or `leads_outside` for a
+doorway to the landscape, and the doorway's middle in landblock metres. It
+also lists `visible_cells`, the cells the game files say can be seen from
+this one. That is the list the game draws from when the camera is in the
+cell, worked out ahead of time from the doorways, so it is coarser than a
+line of sight: it can take in a cell round a corner or behind a closed door.
+A doorway is where the dungeon is open, not whether a door stands in it; a
+door is a world object, and walks open it or go round it when it is locked.
 
 ## Testing natively
 

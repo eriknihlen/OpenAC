@@ -643,10 +643,37 @@ wire_record! {
 }
 
 wire_record! {
+    /// One doorway of an indoor cell (API 1.5): the opening its portal
+    /// polygon makes onto a neighbouring cell or the outdoors, as the game
+    /// data stores it. A door that stands in it is an object, not part of
+    /// this: whether it is shut or locked is for the world objects to say.
+    pub struct CellDoorway {
+        /// The full id of the cell on the other side, landblock in the high
+        /// half; 0 when the doorway leads outdoors.
+        pub other_cell_id: u32,
+        /// No cell is on the other side: the doorway leads outdoors (a
+        /// dungeon's exit to the landscape, a building's door).
+        pub leads_outside: bool,
+        /// The data's exact-match flag: the opening must line up exactly
+        /// with its partner on the other side.
+        pub exact_match: bool,
+        /// The data's portal-side flag as stored (set for side 0, clear
+        /// for side 1): which side of its polygon the cell lies on.
+        pub portal_side: bool,
+        /// The middle of the doorway, landblock-local metres (x east, y
+        /// north, z up): the middle of the box around its polygon's corners
+        /// placed as the cell is, so both sides of a doorway give the same
+        /// point. The cell's origin when the data has no such polygon.
+        pub center: (f32, f32, f32),
+    }
+}
+
+wire_record! {
     /// One indoor cell exactly as the game data places it: which
     /// environment piece it is built from and how that piece stands in the
-    /// landblock. A plugin that draws dungeons from its own tiles, one per
-    /// piece, places each tile with this.
+    /// landblock, its doorways, and the cells the data lists as seen from
+    /// it. A plugin that draws dungeons from its own tiles, one per piece,
+    /// places each tile with this.
     pub struct IndoorCell {
         /// The full cell id, landblock in the high half.
         pub cell_id: u32,
@@ -665,6 +692,16 @@ wire_record! {
         /// The cell sees the landscape (a building's room); false for a
         /// sealed dungeon's cell.
         pub sees_outside: bool,
+        /// The cell's doorways, in the data's order (API 1.5): which cell
+        /// each opens onto, or whether it leads outdoors.
+        since (1, 5) pub doorways: Vec<CellDoorway>,
+        /// The full ids of the cells the data lists as seen from this one,
+        /// in the data's order (API 1.5). This is the list the game draws
+        /// from when the camera is in this cell, not a line of sight: it is
+        /// worked out from doorways ahead of time, so it takes in cells round
+        /// a corner or behind a closed door, and a cell in it may be far
+        /// from or hidden from a point in this one.
+        since (1, 5) pub visible_cells: Vec<u32>,
     }
 }
 

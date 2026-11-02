@@ -171,7 +171,9 @@ impl Host<'_> {
     }
 
     /// Every indoor cell a landblock lists, with its environment piece and
-    /// placement as the data stores them (OpenAC `CaptureIndoorCells`).
+    /// placement as the data stores them (OpenAC `CaptureIndoorCells`), and
+    /// from API 1.5 its doorways and the cells the data lists as seen from
+    /// it. Read from the game files once per landblock and kept.
     pub fn indoor_cells(&mut self, landblock_id: u32) -> Vec<IndoorCell> {
         self.call::<calls::DungeonIndoorCells>(&landblock_id)
     }

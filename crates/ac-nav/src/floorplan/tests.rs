@@ -185,8 +185,10 @@ pub(crate) const CELL_SEEING_OUTSIDE: u32 = TWO_ROOMS | 0x0102;
 pub(crate) const EMPTY_LANDBLOCK: u32 = 0x89AB_0000;
 
 /// One landblock of two box rooms: one turned a quarter turn with a doorway
-/// in its east wall, the other a storey higher with its north wall in two
-/// pieces; a third cell has no geometry; a second landblock has no cells.
+/// in its east wall onto the other, which it sees; the other a storey
+/// higher with its north wall in two pieces and a doorway outdoors through a
+/// polygon its structure lacks; a third cell has no geometry; a second
+/// landblock has no cells.
 pub(crate) fn two_rooms() -> FakeDats {
     const ENV: u16 = 0x0123;
     let walls = |split: bool| {
@@ -223,26 +225,37 @@ pub(crate) fn two_rooms() -> FakeDats {
         },
     );
     let quarter = std::f32::consts::FRAC_PI_4;
-    dats.add(
+    let mut turned = env_cell(
         TURNED_ROOM,
-        env_cell(
-            TURNED_ROOM,
-            ENV,
-            1,
-            v(20.0, 30.0, 0.5),
-            Quaternion {
-                w: quarter.cos(),
-                x: 0.0,
-                y: 0.0,
-                z: quarter.sin(),
-            },
-            &[(EAST_WALL, 0x0101)],
-        ),
+        ENV,
+        1,
+        v(20.0, 30.0, 0.5),
+        Quaternion {
+            w: quarter.cos(),
+            x: 0.0,
+            y: 0.0,
+            z: quarter.sin(),
+        },
+        &[(EAST_WALL, 0x0101)],
     );
-    dats.add(
-        UPSTAIRS_ROOM,
-        env_cell(UPSTAIRS_ROOM, ENV, 2, v(40.0, 30.0, 7.2), IDENTITY, &[]),
-    );
+    turned.visible_cells = vec![0x0101];
+    dats.add(TURNED_ROOM, turned);
+    let mut upstairs = env_cell(UPSTAIRS_ROOM, ENV, 2, v(40.0, 30.0, 7.2), IDENTITY, &[]);
+    upstairs.cell_portals.push(CellPortal {
+        flags: CellPortal::NO_OTHER_CELL | CellPortal::EXACT_MATCH | CellPortal::PORTAL_SIDE,
+        polygon_id: 99,
+        other_cell_id: 0xFFFF,
+        other_portal_id: 0,
+    });
+    // Another way out, named only by the cell it does not open onto.
+    upstairs.cell_portals.push(CellPortal {
+        flags: 0,
+        polygon_id: 98,
+        other_cell_id: 0xFFFF,
+        other_portal_id: 0,
+    });
+    upstairs.visible_cells = vec![0x0100, 0x0102];
+    dats.add(UPSTAIRS_ROOM, upstairs);
     let mut outside = env_cell(CELL_SEEING_OUTSIDE, 0, 0, v(0.0, 0.0, 0.0), IDENTITY, &[]);
     outside.flags = EnvCellFlags(EnvCellFlags::SEEN_OUTSIDE);
     dats.add(CELL_SEEING_OUTSIDE, outside);
