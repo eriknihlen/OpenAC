@@ -417,9 +417,20 @@ fn a_boot_ends_a_windowless_session_without_logging_in_again() {
     let mut seen = Seen::default();
     let summary = seen.end(&handle);
     let no_second_login = server.join().unwrap();
+    let progress = handle.progress();
     handle.join();
 
     assert_eq!(seen.entered, 1);
+    assert!(progress > 0, "the session loop counts its passes");
+    // The launcher shows the server's words and may try again shortly.
+    assert_eq!(
+        summary.server_refusal,
+        Some(super::ServerRefusal {
+            code: 0x01,
+            message: "Another account is already logged on from this client.".into(),
+            still_logged_on: true,
+        })
+    );
     assert!(
         summary
             .error

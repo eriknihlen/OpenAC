@@ -860,12 +860,49 @@ pub fn ends_the_session(error: CharacterError) -> bool {
     )
 }
 
+/// Whether a character error refuses the login because the account, or
+/// one of its characters, is still logged on: an earlier session the
+/// server has not let go of yet (a client that crashed or was killed).
+/// Such a refusal clears by itself once the server drops the old session,
+/// so a launcher may try again shortly.
+#[must_use]
+pub fn means_still_logged_on(error: CharacterError) -> bool {
+    use CharacterErrorCode as C;
+    matches!(
+        error.code(),
+        Some(
+            C::Logon
+                | C::LoggedOn
+                | C::EnterGameCharacterInWorld
+                | C::EnterGameCharacterInWorldServer
+        )
+    )
+}
+
 #[cfg(test)]
 mod tests {
     //! Ported from OpenAC
     //! `tests/AcDream.Runtime.Tests/Session/RuntimeCharacterSelectionStateTests.cs`.
     use super::*;
     use ac_proto::character::CreatedCharacter;
+
+    // Not an OpenAC test: the refusals a launcher may retry after a short
+    // wait, by their codes' names (another log on, the account or a
+    // character of it still in the world).
+    #[test]
+    fn only_a_login_still_held_by_the_server_means_still_logged_on() {
+        let held = [0x01, 0x02, 0x0D, 0x10];
+        for raw in 0u32..=0x1A {
+            let error = CharacterError {
+                raw_error_code: raw,
+            };
+            assert_eq!(
+                means_still_logged_on(error),
+                held.contains(&raw),
+                "code {raw:#x}"
+            );
+        }
+    }
 
     #[test]
     fn the_errors_that_end_the_session_are_the_games_disconnected_screen_set() {

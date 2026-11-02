@@ -13,7 +13,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use ac_host::json::{self, Node, Value};
 use ac_host::status::format_status_line;
-use ac_host::{FileSink, RosterEntry, RosterReport, StatusWriter, WriterSink};
+use ac_host::{FileSink, RosterEntry, RosterReport, ServerRefusalNote, StatusWriter, WriterSink};
 use common::{TempDir, TempFile};
 
 fn parse(line: &str) -> Node {
@@ -273,6 +273,80 @@ fn second_connected_edge_first_closes_the_retiring_connection() {
     let events: Vec<_> = lines.iter().map(|line| event(line)).collect();
     assert_eq!(events, ["connected", "disconnected", "connected"]);
     assert_eq!(text(&parse(&lines[1]), "reason"), "reconnect");
+}
+
+// Not an OpenAC test: the server's refusal on `exited` and the heartbeat
+// are additions to its vocabulary, for the launcher's plain-words reason
+// and its not-responding check.
+#[test]
+fn exited_names_the_servers_refusal_and_heartbeats_carry_only_the_envelope() {
+    let (mut writer, buffer) = memory_writer();
+
+    writer.heartbeat("s1");
+    writer.exited_by(
+        "s1",
+        6,
+        "the server ended the session",
+        Some(ServerRefusalNote {
+            message: "Another account is already logged on from this client.",
+            account_in_use: true,
+        }),
+    );
+    writer.heartbeat("s1");
+
+    let lines = buffer.lines();
+    assert_eq!(lines.len(), 2, "nothing is written after exited");
+    let heartbeat = parse(&lines[0]);
+    assert_eq!(text(&heartbeat, "e"), "heartbeat");
+    assert_eq!(names(&heartbeat), ["v", "e", "t", "sessionId"]);
+    let exited = parse(&lines[1]);
+    assert_eq!(
+        names(&exited),
+        [
+            "v",
+            "e",
+            "t",
+            "sessionId",
+            "code",
+            "reason",
+            "serverMessage",
+            "accountInUse"
+        ]
+    );
+    assert_eq!(
+        text(&exited, "serverMessage"),
+        "Another account is already logged on from this client."
+    );
+
+    // A plain exit keeps OpenAC's shape.
+    let (mut writer, buffer) = memory_writer();
+    writer.exited_by(
+        "s1",
+        6,
+        "booted",
+        Some(ServerRefusalNote {
+            message: "The server disconnected.",
+            account_in_use: false,
+        }),
+    );
+    assert_eq!(
+        names(&parse(&buffer.lines()[0])),
+        [
+            "v",
+            "e",
+            "t",
+            "sessionId",
+            "code",
+            "reason",
+            "serverMessage"
+        ]
+    );
+    let (mut writer, buffer) = memory_writer();
+    writer.exited("s1", 0, "graceful");
+    assert_eq!(
+        names(&parse(&buffer.lines()[0])),
+        ["v", "e", "t", "sessionId", "code", "reason"]
+    );
 }
 
 #[test]

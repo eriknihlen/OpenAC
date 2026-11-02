@@ -455,6 +455,11 @@ pub(crate) fn monitor(
     let mut policy_done = false;
     let mut policy_failure: Option<String> = None;
     let started = std::time::Instant::now();
+    // A heartbeat goes out every interval in which the session thread made
+    // progress: a stuck session loop stops it, and its launcher shows the
+    // client as not responding.
+    let mut last_heartbeat = std::time::Instant::now();
+    let mut beat_progress = handle.progress();
     // A policy acts on its clock between events too; it is stepped at least
     // every 50 ms (OpenAC ticks it once per host frame).
     let poll = if policy.is_some() {
@@ -464,6 +469,14 @@ pub(crate) fn monitor(
     };
     let summary = loop {
         let event = handle.next_event(poll);
+        if last_heartbeat.elapsed() >= ac_host::HEARTBEAT_INTERVAL {
+            last_heartbeat = std::time::Instant::now();
+            let progress = handle.progress();
+            if progress != beat_progress {
+                beat_progress = progress;
+                status.heartbeat(id);
+            }
+        }
         for note in crate::window_state::drain(window.as_ref()) {
             note.report(id, &mut status);
         }
@@ -656,10 +669,18 @@ pub(crate) fn monitor(
     let error = summary.error.clone().or(policy_failure);
     let code = end_code(error.as_deref());
     status.disconnected(id, error.as_deref().unwrap_or("logoff"));
-    status.exited(
+    let refusal = summary
+        .server_refusal
+        .as_ref()
+        .map(|refusal| ac_host::ServerRefusalNote {
+            message: &refusal.message,
+            account_in_use: refusal.still_logged_on,
+        });
+    status.exited_by(
         id,
         i32::from(code.code()),
         error.as_deref().unwrap_or("graceful"),
+        refusal,
     );
     status.close();
     outln!(

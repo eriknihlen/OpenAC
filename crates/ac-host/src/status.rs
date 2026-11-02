@@ -25,6 +25,20 @@ use crate::paths::full_path;
 /// The vocabulary version every line carries as `v`.
 pub const STATUS_VOCABULARY_VERSION: u32 = 1;
 
+/// How often a session that makes progress writes `heartbeat`.
+pub const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The server's refusal an `exited` line names: its words, and whether it
+/// only says the account is still logged on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerRefusalNote<'a> {
+    /// What the game says for it (`serverMessage`).
+    pub message: &'a str,
+    /// The account, or one of its characters, is still logged on
+    /// (`accountInUse`).
+    pub account_in_use: bool,
+}
+
 /// One character in a `characterList` event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterEntry {
@@ -85,7 +99,17 @@ pub enum StatusEvent<'a> {
     Exited {
         code: i32,
         reason: &'a str,
+        /// The server's own words, when a refusal from it ended the
+        /// session (`serverMessage`; an addition to OpenAC's vocabulary).
+        server_message: Option<&'a str>,
+        /// That refusal only says the account, or one of its characters,
+        /// is still logged on (`accountInUse`, written only when true).
+        account_in_use: bool,
     },
+    /// The session is alive and its loop makes progress (an addition to
+    /// OpenAC's vocabulary): written every [`HEARTBEAT_INTERVAL`] while it
+    /// does, so a launcher can tell a client that stopped responding.
+    Heartbeat,
     /// A game window opened on the session (an addition to OpenAC's
     /// vocabulary: the launcher follows it to show the row's mode).
     WindowOpened,
@@ -115,6 +139,7 @@ impl StatusEvent<'_> {
             Self::LoginCommandFailed { .. } => "loginCommandFailed",
             Self::Disconnected { .. } => "disconnected",
             Self::Exited { .. } => "exited",
+            Self::Heartbeat => "heartbeat",
             Self::WindowOpened => "windowOpened",
             Self::WindowClosed { .. } => "windowClosed",
             Self::WindowFailed { .. } => "windowFailed",
@@ -137,7 +162,10 @@ pub fn format_status_line(session_id: &str, event: &StatusEvent<'_>, at: SystemT
         write_string(line, value);
     };
     match *event {
-        StatusEvent::Started | StatusEvent::Connected | StatusEvent::WindowOpened => {}
+        StatusEvent::Started
+        | StatusEvent::Connected
+        | StatusEvent::WindowOpened
+        | StatusEvent::Heartbeat => {}
         StatusEvent::CharacterList(roster) => {
             text(&mut line, "accountName", &roster.account_name);
             let _ = write!(
@@ -186,9 +214,20 @@ pub fn format_status_line(session_id: &str, event: &StatusEvent<'_>, at: SystemT
             text(&mut line, "error", error);
         }
         StatusEvent::Disconnected { reason } => text(&mut line, "reason", reason),
-        StatusEvent::Exited { code, reason } => {
+        StatusEvent::Exited {
+            code,
+            reason,
+            server_message,
+            account_in_use,
+        } => {
             let _ = write!(line, ",\"code\":{code}");
             text(&mut line, "reason", reason);
+            if let Some(message) = server_message {
+                text(&mut line, "serverMessage", message);
+            }
+            if account_in_use {
+                line.push_str(",\"accountInUse\":true");
+            }
         }
         StatusEvent::WindowClosed { reason } => text(&mut line, "reason", reason),
         StatusEvent::WindowFailed { error } => text(&mut line, "error", error),
@@ -521,6 +560,12 @@ impl<S: StatusSink> StatusWriter<S> {
         self.write(session_id, &StatusEvent::WindowFailed { error });
     }
 
+    /// The session is alive and making progress (see
+    /// [`StatusEvent::Heartbeat`]).
+    pub fn heartbeat(&mut self, session_id: &str) {
+        self.write(session_id, &StatusEvent::Heartbeat);
+    }
+
     /// The connection ended.
     pub fn disconnected(&mut self, session_id: &str, reason: &str) {
         if !self.accepting() {
@@ -534,6 +579,18 @@ impl<S: StatusSink> StatusWriter<S> {
     /// The session ended. Only the first call writes; an open connection is
     /// closed first with reason `process-exit`.
     pub fn exited(&mut self, session_id: &str, code: i32, reason: &str) {
+        self.exited_by(session_id, code, reason, None);
+    }
+
+    /// As [`exited`](Self::exited), naming the server's refusal that ended
+    /// the session, when one did.
+    pub fn exited_by(
+        &mut self,
+        session_id: &str,
+        code: i32,
+        reason: &str,
+        refusal: Option<ServerRefusalNote<'_>>,
+    ) {
         if !self.accepting() {
             return;
         }
@@ -548,7 +605,13 @@ impl<S: StatusSink> StatusWriter<S> {
             }
             self.connected = false;
         }
-        if self.try_write(session_id, &StatusEvent::Exited { code, reason }) {
+        let event = StatusEvent::Exited {
+            code,
+            reason,
+            server_message: refusal.map(|refusal| refusal.message),
+            account_in_use: refusal.is_some_and(|refusal| refusal.account_in_use),
+        };
+        if self.try_write(session_id, &event) {
             self.exited = true;
         }
     }

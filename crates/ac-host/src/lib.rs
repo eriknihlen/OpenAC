@@ -45,7 +45,10 @@ pub use credentials::{
 pub use exit::ExitCode;
 pub use install_lease::InstallSessionLease;
 pub use paths::{KnownFolder, Os, PathOverrides, PathSet, Platform, RootSource, SystemPlatform};
-pub use status::{FileSink, RosterEntry, RosterReport, StatusSink, StatusWriter, WriterSink};
+pub use status::{
+    FileSink, HEARTBEAT_INTERVAL, RosterEntry, RosterReport, ServerRefusalNote, StatusSink,
+    StatusWriter, WriterSink,
+};
 
 use std::path::Path;
 

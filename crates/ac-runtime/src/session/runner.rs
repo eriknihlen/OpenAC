@@ -12,6 +12,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,7 +28,7 @@ use ac_core::journal::JournalPage;
 use ac_plugin::PluginSession;
 use ac_plugin::abi::CharacterInfo;
 use ac_plugin::abi::callback::InterceptDecision;
-use ac_proto::{Inbound, Opcode, read_opcode};
+use ac_proto::{CharacterError, Inbound, Opcode, read_opcode};
 
 use super::creation::{CreationCommand, CreationSnapshot, SeededRandom};
 use super::diagnostics::{
@@ -586,6 +587,46 @@ pub struct SessionSummary {
     pub parse_failures: BTreeMap<u32, u64>,
     /// Connections made (more than one after a reconnect).
     pub connections: u32,
+    /// The server's own refusal, when a character error ended the session.
+    pub server_refusal: Option<ServerRefusal>,
+}
+
+/// A character error the server ended the session with: its code, the
+/// game's words for it, and whether it only says the login is still held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerRefusal {
+    /// The character error code as sent.
+    pub code: u32,
+    /// What the game says for it.
+    pub message: String,
+    /// The account or one of its characters is still logged on (see
+    /// [`super::selection::means_still_logged_on`]).
+    pub still_logged_on: bool,
+}
+
+impl ServerRefusal {
+    /// The refusal behind `error`, when a character error from the server
+    /// is what ended the session.
+    #[must_use]
+    pub fn from_error(error: &SessionError) -> Option<Self> {
+        let (code, message) = match error {
+            SessionError::ServerEnded { code, reason } => (*code, reason.clone()),
+            SessionError::CharacterRejected(code) => {
+                let error = CharacterError {
+                    raw_error_code: *code,
+                };
+                (*code, super::selection::error_message(error))
+            }
+            _ => return None,
+        };
+        Some(Self {
+            code,
+            message,
+            still_logged_on: super::selection::means_still_logged_on(CharacterError {
+                raw_error_code: code,
+            }),
+        })
+    }
 }
 
 /// The host's side of a running session.
@@ -594,6 +635,7 @@ pub struct SessionHandle {
     commands: Sender<SessionCommand>,
     events: Receiver<HostEvent>,
     thread: Option<JoinHandle<()>>,
+    progress: Arc<AtomicU64>,
 }
 
 impl SessionHandle {
@@ -625,6 +667,15 @@ impl SessionHandle {
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.thread.as_ref().is_none_or(JoinHandle::is_finished)
+    }
+
+    /// How far the session thread has got: a count it raises on every pass
+    /// of its loop while connected. A count that stops rising while the
+    /// thread lives means the session is stuck (a launcher shows the client
+    /// as not responding).
+    #[must_use]
+    pub fn progress(&self) -> u64 {
+        self.progress.load(Ordering::Relaxed)
     }
 
     /// Wait for the session thread to finish and say whether it faulted
@@ -690,13 +741,16 @@ impl Timing {
 fn spawn_timed(config: SessionConfig, timing: Timing) -> std::io::Result<SessionHandle> {
     let (command_tx, command_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
+    let progress = Arc::new(AtomicU64::new(0));
+    let counter = Arc::clone(&progress);
     let thread = thread::Builder::new()
         .name(format!("session-{}", config.account))
-        .spawn(move || run(&config, timing, &command_rx, &event_tx))?;
+        .spawn(move || run(&config, timing, &command_rx, &event_tx, &counter))?;
     Ok(SessionHandle {
         commands: command_tx,
         events: event_rx,
         thread: Some(thread),
+        progress,
     })
 }
 
@@ -732,6 +786,7 @@ fn run(
     timing: Timing,
     commands: &Receiver<SessionCommand>,
     events: &Sender<HostEvent>,
+    progress: &AtomicU64,
 ) {
     let mut summary = SessionSummary {
         error: None,
@@ -743,6 +798,7 @@ fn run(
         player_described: false,
         parse_failures: BTreeMap::new(),
         connections: 0,
+        server_refusal: None,
     };
     let mut state = SessionState::new(config.communication_paths());
     if let Some(tables) = &config.tables {
@@ -870,6 +926,7 @@ fn run(
                 connection.set_server_silence_timeout(timing.server_silence);
                 state.generation = generation;
                 let mut session = Drive {
+                    progress,
                     config,
                     flow: SessionFlow::with_generation(
                         driver.now().as_duration(),
@@ -1010,6 +1067,7 @@ fn run(
                     state: LifecycleState::Faulted,
                     ..Lifecycle::stopped(generation)
                 });
+                summary.server_refusal = ended_by.as_ref().and_then(ServerRefusal::from_error);
                 break Err(error);
             }
         }
@@ -1234,6 +1292,8 @@ fn direct_launch(config: &SessionConfig, enter_attempted: bool, auto_entering: b
 
 /// One connection's loop and the state it keeps between passes.
 struct Drive<'a> {
+    /// Raised on every pass of the loop (see [`SessionHandle::progress`]).
+    progress: &'a AtomicU64,
     config: &'a SessionConfig,
     flow: SessionFlow,
     state: &'a mut SessionState,
@@ -1305,6 +1365,7 @@ impl Drive<'_> {
     ) -> Result<DriveEnd, String> {
         let mut pending: VecDeque<ac_net::InboundMessage> = VecDeque::new();
         loop {
+            self.progress.fetch_add(1, Ordering::Relaxed);
             pending.extend(
                 driver
                     .pump(connection, PUMP_WAIT)
@@ -2667,6 +2728,7 @@ mod tests {
             commands,
             events,
             thread: Some(thread),
+            progress: Arc::default(),
         }
     }
 

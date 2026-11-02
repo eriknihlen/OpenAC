@@ -143,7 +143,13 @@ comments and trailing commas are refused:
   window on the session: `windowOpened`, `windowClosed` (`reason`:
   `requested`, `closedByUser`, `renderFailed`, `shutdown`) and
   `windowFailed` (`error`; a `/window` the client could not carry out, such
-  as one without window support).
+  as one without window support). Also added: `heartbeat` (the envelope
+  only), written every 10 s in which the session's loop made progress, so a
+  launcher can tell a client that stopped responding; and on `exited`, when
+  a refusal from the server ended the session, `serverMessage` (the game's
+  words for it) and `accountInUse: true` when it only says the account or
+  one of its characters is still logged on (an earlier session the server
+  has not let go of yet).
 - A server silent for more than 140 s is gone (not configurable). A session
   with no window attached at that moment writes `disconnected` with reason
   `connection-lost` and logs in again every 30 s, entering its configured
