@@ -1,0 +1,7 @@
+{
+  "id": "openac.suite",
+  "displayName": "Suite",
+  "version": "0.1.0",
+  "entry": "suite.wasm",
+  "apiVersion": "1.5"
+}

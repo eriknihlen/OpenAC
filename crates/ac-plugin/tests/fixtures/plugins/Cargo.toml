@@ -2,7 +2,7 @@
 # (tests only). Their own workspace, so the client's workspace never builds
 # them natively and they get the plugin build profile below.
 [workspace]
-members = ["hello", "probe", "misbehave", "uidemo", "fetcher", "parity", "rawbytes"]
+members = ["hello", "probe", "misbehave", "uidemo", "fetcher", "parity", "rawbytes", "suite"]
 resolver = "3"
 
 [workspace.package]

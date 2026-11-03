@@ -34,7 +34,7 @@ use crate::discovery::{self, Discovered};
 use crate::engine::CheckedModule;
 use crate::engine::{PluginEngine, check_api_version, check_module};
 use crate::host_calls::{Context, Others, Services, handle_import};
-use crate::instance::{ImportHandler, Instance, SlowCall};
+use crate::instance::{Handled, ImportHandler, Instance, SlowCall};
 use crate::manifest::PluginManifest;
 use crate::reload::FolderWatch;
 use crate::settings::PluginSessionSettings;
@@ -662,16 +662,22 @@ impl PluginSession {
             services,
             settings: &options.settings,
             storage_roots: &options.storage,
+            lent: std::time::Duration::ZERO,
         };
         let mut handler = |import: Import, request: &[u8]| {
-            handle_import(
+            cx.lent = std::time::Duration::ZERO;
+            let reply = handle_import(
                 import,
                 request,
                 manifest,
                 directory,
                 &mut cx,
                 Some(&mut others),
-            )
+            )?;
+            Ok(Handled {
+                reply,
+                lent: cx.lent,
+            })
         };
         let result = call(instance, &mut handler);
         // The slow calls: this one, and those of the plugins it asked

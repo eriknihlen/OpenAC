@@ -7,7 +7,10 @@
 //! plugin is idle (only the caller is inside a call), and the callback's
 //! own imports are served like any other, except that they cannot ask a
 //! third plugin. A plugin that faults while answering is unloaded once the
-//! caller's call returns ([`Services::faulted`]).
+//! caller's call returns ([`Services::faulted`]). The answer's time is the
+//! answering plugin's ([`Context::lent`]), not the caller's.
+
+use std::time::{Duration, Instant};
 
 use ac_plugin_abi::callback::{Callback, CallbackAnswer, LootQuestion};
 use ac_plugin_abi::items::{
@@ -21,6 +24,7 @@ use ac_plugin_abi::{
 use crate::api::{Caller, SessionApi};
 use crate::classifiers::ClassifierRegistry;
 use crate::commands::CommandRegistry;
+use crate::instance::Handled;
 use crate::interceptors::{FilterRegistry, InterceptorRegistry};
 use crate::manifest::PluginManifest;
 use crate::session::Loaded;
@@ -157,6 +161,10 @@ pub(crate) struct Context<'a> {
     pub(crate) services: &'a mut Services,
     pub(crate) settings: &'a PluginSessionSettings,
     pub(crate) storage_roots: &'a StorageRoots,
+    /// How long other plugins took to answer the questions the import being
+    /// carried out asked them: their time, left out of the caller's
+    /// ([`crate::instance::Handled::lent`]).
+    pub(crate) lent: Duration,
 }
 
 /// Carries out one import for the plugin `manifest`. `others` is none
@@ -558,9 +566,10 @@ fn ask_plugin(
     } = target;
     let manifest: &PluginManifest = manifest;
     let directory: &std::path::Path = directory;
+    let started = Instant::now();
     let result = {
         let mut handler = |import: Import, request: &[u8]| {
-            handle_import(import, request, manifest, directory, cx, None)
+            handle_import(import, request, manifest, directory, cx, None).map(Handled::from)
         };
         instance.callback(
             &bytes,
@@ -568,6 +577,7 @@ fn ask_plugin(
             &mut handler,
         )
     };
+    cx.lent += started.elapsed();
     match result {
         Ok(Some(answer)) => CallbackAnswer::from_bytes_at(&answer, version).ok(),
         Ok(None) => None,

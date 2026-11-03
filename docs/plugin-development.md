@@ -391,7 +391,11 @@ basics (game state, commands, UI, its own storage) need none.
 Each call into a plugin runs under a deadline: a tick, event, command or
 callback slower than 100 ms is reported (a warning in the log and one chat
 line), and one still running after 10 s is taken for stuck, stopped, and the
-plugin unloaded. Starting and stopping get 30 s. Memory is capped by
+plugin unloaded. Starting and stopping get 30 s. When a call asks another
+plugin something (a loot classifier, a command's completions), the answer
+runs as that plugin's own callback under these limits, and the asking
+call's clock stops meanwhile: a slow or stuck answer counts against the
+plugin that gave it, never the one that asked. Memory is capped by
 `limits.memoryMiB`. What a plugin saves through storage lands in
 `plugins/<id>/files/` inside its own folder, which installs, updates and
 removal of its code never touch.

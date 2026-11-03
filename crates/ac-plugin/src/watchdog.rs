@@ -16,6 +16,12 @@
 //! to a running call's clock when it goes on, so a breakpoint does not get
 //! the plugin it interrupted stopped.
 //!
+//! A call's time is its own. When it asks another plugin something (a loot
+//! classifier, a command's completions), that plugin's answer runs as a
+//! call of its own, with its own deadline and slow-call time, and the
+//! asking call's clock stops meanwhile: a slow answer warns, or a stuck one
+//! stops, the plugin that gave it, never the one that asked.
+//!
 //! Every report names the entry call ([`Entry`]) and the client functions
 //! it called on the way ([`ImportTally`]): the fault of a stuck plugin, the
 //! slow-call warning, and the opt-in slow log
@@ -33,7 +39,8 @@ use ac_plugin_abi::world::ObjectChangeKind;
 use ac_plugin_abi::{Event, Import};
 
 /// A tick, event, command or callback that takes longer than this, wall
-/// time (the client's work on its imports included), is reported as slow:
+/// time (the client's work on its imports included, what other plugins took
+/// to answer it left out), is reported as slow:
 /// a warning in the client log and one chat line per plugin per session.
 /// It keeps running.
 pub const SLOW_CALL: Duration = Duration::from_millis(100);

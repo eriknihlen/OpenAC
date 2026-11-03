@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use ac_plugin_abi::{Import, MODULE, exports};
 use wasmtime::{
-    Caller, Extern, Linker, Memory, ResourceLimiter, Store, Trap, TypedFunc, WasmParams,
-    WasmResults,
+    AsContextMut, Caller, Extern, Linker, Memory, ResourceLimiter, Store, Trap, TypedFunc,
+    WasmParams, WasmResults,
 };
 
 use crate::engine::{PluginEngine, PluginModule};
@@ -36,7 +36,28 @@ use crate::watchdog::{Entry, ImportTally, TimeLimits, duration_words, epochs};
 const MAX_REQUEST: usize = 16 << 20;
 
 /// What a plugin call needs from its caller: carry out one import.
-pub(crate) type ImportHandler<'a> = dyn FnMut(Import, &[u8]) -> Result<Vec<u8>, String> + 'a;
+pub(crate) type ImportHandler<'a> = dyn FnMut(Import, &[u8]) -> Result<Handled, String> + 'a;
+
+/// One import carried out.
+#[derive(Debug, Default)]
+pub(crate) struct Handled {
+    /// The encoded reply.
+    pub(crate) reply: Vec<u8>,
+    /// How long another plugin spent answering a question the import asked
+    /// it (a loot classifier, a command's completions): that plugin's time,
+    /// counted against its own call, so it is left out of this call's
+    /// deadline and slow-call time.
+    pub(crate) lent: Duration,
+}
+
+impl From<Vec<u8>> for Handled {
+    fn from(reply: Vec<u8>) -> Self {
+        Self {
+            reply,
+            lent: Duration::ZERO,
+        }
+    }
+}
 
 /// The request a waiting import made and the reply it waits for, shared by
 /// the import stub (inside the plugin's call) and the caller driving it.
@@ -44,6 +65,9 @@ pub(crate) type ImportHandler<'a> = dyn FnMut(Import, &[u8]) -> Result<Vec<u8>, 
 struct Exchange {
     pending: Option<(Import, Vec<u8>)>,
     reply: Option<Vec<u8>>,
+    /// The call's deadline again, in epochs from now, when the import lent
+    /// time to another plugin: the stub sets it before the plugin goes on.
+    deadline: Option<u64>,
 }
 
 fn lock(exchange: &Mutex<Exchange>) -> MutexGuard<'_, Exchange> {
@@ -131,7 +155,8 @@ pub(crate) struct Instance {
     memory_mib: u32,
     /// How long a call may take.
     limits: TimeLimits,
-    /// The wall time of the last finished call.
+    /// The wall time of the last finished call, less what other plugins
+    /// took to answer it.
     last_time: Duration,
     /// The imports the call running (or the last one) made.
     tally: ImportTally,
@@ -148,7 +173,8 @@ pub(crate) struct Instance {
 pub(crate) struct SlowCall {
     /// The entry call (`tick`, `event chat line`, ...).
     pub entry: String,
-    /// Its wall time, the client's work on its imports included.
+    /// Its wall time, the client's work on its imports included (what
+    /// other plugins took to answer it left out).
     pub time: Duration,
     /// Where it would have been stopped.
     pub deadline: Duration,
@@ -237,7 +263,10 @@ fn link(linker: &mut Linker<StoreData>, import: Import) -> wasmtime::Result<()> 
                         let request = read_request(&mut caller, ptr, len)?;
                         let exchange = Arc::clone(&caller.data().exchange);
                         lock(&exchange).pending = Some((import, request));
-                        let reply = Reply(exchange).await;
+                        let reply = Reply(Arc::clone(&exchange)).await;
+                        if let Some(deadline) = lock(&exchange).deadline.take() {
+                            caller.as_context_mut().set_epoch_deadline(deadline);
+                        }
                         let len = i32::try_from(reply.len())
                             .map_err(|_| wasmtime::format_err!("a reply larger than 2 GiB"))?;
                         caller.data_mut().reply = reply;
@@ -250,14 +279,40 @@ fn link(linker: &mut Linker<StoreData>, import: Import) -> wasmtime::Result<()> 
     Ok(())
 }
 
+/// One call's clock: when it started, its deadline, and the time it lent
+/// other plugins ([`Handled::lent`]), which is not its own.
+#[derive(Debug, Clone, Copy)]
+struct CallClock {
+    started: Instant,
+    deadline: Duration,
+    lent: Duration,
+}
+
+impl CallClock {
+    fn start(deadline: Duration) -> Self {
+        Self {
+            started: Instant::now(),
+            deadline,
+            lent: Duration::ZERO,
+        }
+    }
+
+    /// The call's own time so far: its wall time less what it lent.
+    fn own(&self) -> Duration {
+        self.started.elapsed().saturating_sub(self.lent)
+    }
+}
+
 /// Drives one call into the plugin to its end: each time it waits on an
 /// import, `handler` carries the import out and the call goes on with the
-/// reply. `Err` is the handler's own failure (the call is abandoned);
-/// `Ok` holds what the engine returned.
+/// reply. Time the import lent another plugin moves the call's deadline
+/// on by as much ([`CallClock`]). `Err` is the handler's own failure (the
+/// call is abandoned); `Ok` holds what the engine returned.
 fn drive<R>(
     call: impl Future<Output = wasmtime::Result<R>>,
     exchange: &Mutex<Exchange>,
     tally: &mut ImportTally,
+    clock: &mut CallClock,
     handler: &mut ImportHandler<'_>,
 ) -> Result<wasmtime::Result<R>, String> {
     let mut call = pin!(call);
@@ -270,15 +325,20 @@ fn drive<R>(
             return Err("a plugin call stopped without a request".to_owned());
         };
         let started = Instant::now();
-        let reply = handler(import, &request)?;
-        tally.record(import, started.elapsed());
-        lock(exchange).reply = Some(reply);
+        let handled = handler(import, &request)?;
+        tally.record(import, started.elapsed().saturating_sub(handled.lent));
+        let mut exchange = lock(exchange);
+        exchange.reply = Some(handled.reply);
+        if !handled.lent.is_zero() {
+            clock.lent += handled.lent;
+            exchange.deadline = Some(epochs(clock.deadline.saturating_sub(clock.own())));
+        }
     }
 }
 
 /// The handler for instantiation, which runs before the plugin may call the
 /// client (`openac_enable` is its first chance).
-fn no_imports_yet(_: Import, _: &[u8]) -> Result<Vec<u8>, String> {
+fn no_imports_yet(_: Import, _: &[u8]) -> Result<Handled, String> {
     Err("the plugin called the client while it was being instantiated".to_owned())
 }
 
@@ -322,6 +382,7 @@ impl Instance {
             linker.instantiate_async(&mut store, module.module()),
             &exchange,
             &mut tally,
+            &mut CallClock::start(start_deadline),
             &mut no_imports_yet,
         )?;
         let instance = started.map_err(|error| {
@@ -393,7 +454,8 @@ impl Instance {
     }
 
     /// The wall time of the last finished call into the plugin, the
-    /// client's work on its imports included.
+    /// client's work on its imports included and what other plugins took
+    /// to answer it left out.
     pub(crate) fn last_time(&self) -> Duration {
         self.last_time
     }
@@ -481,7 +543,8 @@ impl Instance {
     }
 
     /// Runs one export (for entry call `entry`) to its end, carrying out
-    /// each import it makes.
+    /// each import it makes. Its time is its own: what another plugin took
+    /// to answer it is that plugin's ([`Handled::lent`]).
     fn run<P: WasmParams + Sync, R: WasmResults + Sync>(
         &mut self,
         func: TypedFunc<P, R>,
@@ -494,14 +557,15 @@ impl Instance {
         self.store.data_mut().panic = None;
         *lock(&self.exchange) = Exchange::default();
         self.tally.clear();
-        let started = Instant::now();
+        let mut clock = CallClock::start(deadline);
         let result = drive(
             func.call_async(&mut self.store, params),
             &self.exchange,
             &mut self.tally,
+            &mut clock,
             handler,
         )?;
-        let time = started.elapsed();
+        let time = clock.own();
         match result {
             Ok(result) => {
                 self.last_time = time;

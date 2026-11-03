@@ -2948,6 +2948,128 @@ fn a_slow_call_warns_and_goes_on() {
     assert_eq!(plugins.loaded_ids(), ["openac.misbehave"]);
 }
 
+// --- Whose time an answer is: the plugin's that gave it ---
+
+/// Two plugins of the suite on `engine`: `openac.suite` answers, and
+/// `openac.asker` (the same module under another id) asks; the client's
+/// clock runs (the suite works by it).
+fn suite_pair(tag: &str, engine: Arc<PluginEngine>) -> (Root, PluginSession, FakeSession) {
+    let root = Root::new(tag);
+    let suite = install(&root.0, "suite");
+    let asker = root.0.join("asker");
+    std::fs::create_dir_all(&asker).unwrap();
+    for file in ["plugin.json", "suite.wasm"] {
+        std::fs::copy(suite.join(file), asker.join(file)).unwrap();
+    }
+    edit_manifest(&asker, "\"openac.suite\"", "\"openac.asker\"");
+    edit_manifest(&asker, "\"Suite\"", "\"Asker\"");
+    let mut plugins = PluginSession::new(
+        engine,
+        options(&[&root.0], Some(&["openac.suite", "openac.asker"])),
+    );
+    let mut api = FakeSession {
+        clock: true,
+        ..FakeSession::default()
+    };
+    plugins.start(&mut api);
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+    plugins.take_reports();
+    (root, plugins, api)
+}
+
+/// A slow answer warns the plugin that gave it, in its callback, and
+/// never the plugin that asked: the asking call's clock stops while the
+/// other plugin answers.
+#[test]
+fn a_slow_answer_warns_the_plugin_that_gave_it_not_the_one_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("slow-answer", engine());
+    assert!(plugins.handle_line("/asker ask openac.suite/rules work:150", &mut api));
+    assert_eq!(
+        api.messages("openac.asker").last().unwrap(),
+        "asker ask: Keep"
+    );
+    let asked = plugins.last_call_time("openac.asker").unwrap();
+    assert!(asked < ac_plugin::SLOW_CALL, "{asked:?}");
+    let answered = plugins.last_call_time("openac.suite").unwrap();
+    assert!(answered > ac_plugin::SLOW_CALL, "{answered:?}");
+    let warned: Vec<&str> = api
+        .logs
+        .iter()
+        .filter(|(_, level, _)| *level == LogLevel::Warn)
+        .map(|(id, _, _)| id.as_str())
+        .collect();
+    assert_eq!(warned, ["openac.suite"]);
+    assert!(
+        api.messages("openac.suite")
+            .last()
+            .unwrap()
+            .starts_with("plugin 'openac.suite' was slow in callback loot classify: "),
+        "{:?}",
+        api.logs
+    );
+    let slow: Vec<&String> = api
+        .posts
+        .iter()
+        .filter(|p| p.contains("was slow"))
+        .collect();
+    assert_eq!(slow.len(), 1, "{slow:?}");
+    assert!(
+        slow[0].starts_with("[plugin] Suite was slow (callback loot classify, "),
+        "{slow:?}"
+    );
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A stuck answer is stopped at the answering plugin's own deadline and
+/// unloads that plugin; the plugin that asked hears no answer and runs on.
+#[test]
+fn a_stuck_answer_stops_the_plugin_that_gave_it_not_the_one_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("stuck-answer", short_engine());
+    assert!(plugins.handle_line("/asker ask openac.suite/rules loop", &mut api));
+    assert_eq!(
+        api.messages("openac.asker").last().unwrap(),
+        "asker ask: none"
+    );
+    let reports = plugins.take_reports();
+    assert_eq!(
+        failed(&reports, "openac.suite").as_deref(),
+        Some(
+            "plugin 'openac.suite' stopped: ran for more than 1 s in one call (it looks stuck) \
+             in callback loot classify; last imports: none"
+        )
+    );
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(plugins.loaded_ids(), ["openac.asker"]);
+}
+
+/// The time another plugin takes to answer is left out of the asking
+/// call's deadline: the asker works 800 ms of its own around an answer
+/// that takes 700 ms, longer together than the 1 s deadline, and neither
+/// is stopped.
+#[test]
+fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("lent-time", short_engine());
+    let started = std::time::Instant::now();
+    assert!(plugins.handle_line("/asker ask openac.suite/rules work:700 400", &mut api));
+    assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
+    assert!(
+        api.messages("openac.asker")
+            .contains(&"asker ask: Keep".to_owned())
+    );
+    assert!(
+        plugins
+            .take_reports()
+            .iter()
+            .all(|r| !matches!(r, PluginReport::Failed { .. }))
+    );
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+    let asked = plugins.last_call_time("openac.asker").unwrap();
+    assert!(
+        asked >= std::time::Duration::from_millis(800) && asked < TEST_DEADLINE,
+        "{asked:?}"
+    );
+}
+
 // --- The compile cache (`ac_plugin::ModuleCache`) ---
 
 /// The first load compiles and writes the cache file; the next engine
