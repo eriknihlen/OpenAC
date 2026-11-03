@@ -1,9 +1,10 @@
 //! Plugin management: the curated list, `plugin.json` (read by the
 //! client's own parser), compatibility with the installed client, the
 //! installed inventory (managed, direct and bundled), release resolution on
-//! GitHub (stable and beta `wasm-v` and `wasm-<plugin id>-v` releases), and the installer. Plugins
-//! are downloaded and unzipped, never loaded or run, and never enabled for
-//! any character by an install.
+//! GitHub (stable and beta `wasm-v` and `wasm-<plugin id>-v` releases, and a
+//! repository's plugin index), and the installer. Plugins are downloaded and
+//! unzipped, never loaded or run, and never enabled for any character by an
+//! install.
 
 mod catalog;
 mod index;

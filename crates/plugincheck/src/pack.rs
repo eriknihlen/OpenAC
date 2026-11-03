@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use ac_launcher_core::fsutil;
 use ac_launcher_core::integrity::sha256_hex;
-use ac_launcher_core::plugins::{ICON_FILE_NAME, InstallRules, PluginManifest, release_tag};
+use ac_launcher_core::plugins::{
+    ICON_FILE_NAME, InstallRules, PluginIndex, PluginManifest, plugin_release_tag, release_tag,
+};
 
 /// What `pack` wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +15,8 @@ pub struct PackedRelease {
     pub id: String,
     /// Its version.
     pub version: String,
-    /// The release tag to publish under (`wasm-v<version>`).
+    /// The release tag to publish under (`wasm-v<version>`, or
+    /// `wasm-<id>-v<version>` when packed into an index).
     pub tag: String,
     /// The zip.
     pub zip: PathBuf,
@@ -90,6 +93,40 @@ fn collect(folder: &Path) -> Result<Vec<(String, Vec<u8>)>, PackError> {
 /// The manifest is missing or would be refused, a file cannot be read or
 /// written, or the folder holds a link.
 pub fn pack(folder: &Path, out: &Path) -> Result<PackedRelease, PackError> {
+    pack_as(folder, out, false)
+}
+
+/// Packs as [`pack`] does, for a repository publishing several plugins:
+/// the release is tagged `wasm-<id>-v<version>`, and this plugin's entry in
+/// the repository's plugin index `index_file` (started when the file does
+/// not exist) is set to that tag, as its stable or beta release, keeping
+/// every other entry. The index is checked before anything is written.
+///
+/// # Errors
+/// As [`pack`], and the existing index file cannot be read or would be
+/// refused by the launcher.
+pub fn pack_into_index(
+    folder: &Path,
+    out: &Path,
+    index_file: &Path,
+) -> Result<PackedRelease, PackError> {
+    let mut index = match std::fs::read(index_file) {
+        Ok(bytes) => PluginIndex::parse(&String::from_utf8_lossy(
+            bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes),
+        ))
+        .map_err(|error| PackError::Refused(format!("{}: {error}", index_file.display())))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => PluginIndex::new(),
+        Err(error) => return Err(io(index_file, &error)),
+    };
+    let packed = pack_as(folder, out, true)?;
+    index
+        .set_release(&packed.id, &packed.tag)
+        .map_err(|error| PackError::Refused(error.to_string()))?;
+    std::fs::write(index_file, index.to_json()).map_err(|e| io(index_file, &e))?;
+    Ok(packed)
+}
+
+fn pack_as(folder: &Path, out: &Path, by_id: bool) -> Result<PackedRelease, PackError> {
     let manifest_path = folder.join("plugin.json");
     let manifest_bytes = std::fs::read(&manifest_path).map_err(|e| io(&manifest_path, &e))?;
     let text = String::from_utf8_lossy(
@@ -127,8 +164,13 @@ pub fn pack(folder: &Path, out: &Path) -> Result<PackedRelease, PackError> {
         let bytes = std::fs::read(&icon).map_err(|e| io(&icon, &e))?;
         write(out.join(ICON_FILE_NAME), &bytes)?;
     }
+    let tag = if by_id {
+        plugin_release_tag(&manifest.id, &manifest.version)
+    } else {
+        release_tag(&manifest.version)
+    };
     Ok(PackedRelease {
-        tag: release_tag(&manifest.version),
+        tag,
         id: manifest.id,
         version: manifest.version,
         zip,

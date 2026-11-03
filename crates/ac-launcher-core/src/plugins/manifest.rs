@@ -14,8 +14,10 @@ pub use ac_plugin::manifest::{ManifestError, PermissionDeclaration, PluginManife
 
 use crate::updates::{LauncherVersion, is_windows_device_name};
 
-/// How every WebAssembly release tag begins: `wasm-v<version>`. OpenAC's C#
-/// launcher reads only `v<version>` tags, so it never picks one of these.
+/// How a WebAssembly release tag of a repository's one plugin begins:
+/// `wasm-v<version>` (one publishing several uses [`plugin_tag_prefix`]).
+/// OpenAC's C# launcher reads only `v<version>` tags, so it never picks one
+/// of these.
 pub const WASM_TAG_PREFIX: &str = "wasm-v";
 
 /// The release tag of a WebAssembly build of `version`.

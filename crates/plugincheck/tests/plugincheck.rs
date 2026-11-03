@@ -9,8 +9,13 @@ use std::sync::{Arc, Mutex};
 
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::net::{HttpError, HttpRequest, HttpResponse, HttpTransport};
-use ac_launcher_core::plugins::{InstalledPluginRecordStore, PluginInstaller, github};
-use plugincheck::{CheckMode, CheckReport, CheckStatus, CheckVerdict, pack, run, run_check};
+use ac_launcher_core::plugins::{
+    InstalledPluginRecordStore, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex, PluginInstaller,
+    PluginReleaseChannel, PluginReleaseClient, PluginReleaseResolver, github,
+};
+use plugincheck::{
+    CheckMode, CheckReport, CheckStatus, CheckVerdict, pack, pack_into_index, run, run_check,
+};
 
 #[path = "../../ac-launcher-core/tests/common/png.rs"]
 mod png;
@@ -677,6 +682,85 @@ fn pack_refuses_a_manifest_the_launcher_would_refuse() {
     assert!(!root.join("out").exists());
 }
 
+// A repository publishing several plugins: each is packed under its own
+// tag, and its entry merged into the repository's index.
+#[test]
+fn pack_with_an_index_tags_by_plugin_id_and_merges_its_entry() {
+    let root = Root::new("pack-index");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    std::fs::write(
+        &index,
+        r#"{ "schemaVersion": 1, "plugins": [
+            { "id": "acme.other", "stable": "wasm-acme.other-v2.0.0" },
+            { "id": "acme.hello", "stable": "wasm-acme.hello-v0.9.0",
+              "beta": "wasm-acme.hello-v1.0.0-beta.1" } ] }"#,
+    )
+    .unwrap();
+    let packed = pack_into_index(&folder, &root.join("release"), &index).unwrap();
+    assert_eq!(packed.tag, "wasm-acme.hello-v1.0.0");
+    let merged = PluginIndex::parse(&std::fs::read_to_string(&index).unwrap()).unwrap();
+    let hello = merged.entry(ID).unwrap();
+    assert_eq!(hello.stable.as_deref(), Some("wasm-acme.hello-v1.0.0"));
+    assert_eq!(hello.beta.as_deref(), Some("wasm-acme.hello-v1.0.0-beta.1"));
+    assert_eq!(
+        merged.entry("acme.other").unwrap().stable.as_deref(),
+        Some("wasm-acme.other-v2.0.0")
+    );
+
+    // A new index file is started; the command says where each part goes.
+    let fresh = root.join("new-index.json");
+    let (code, output, error) = run_with(&[
+        "pack",
+        folder.to_str().unwrap(),
+        root.join("again").to_str().unwrap(),
+        "--index",
+        fresh.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{output}{error}");
+    assert!(
+        output.contains("the release tagged wasm-acme.hello-v1.0.0"),
+        "{output}"
+    );
+    assert!(
+        output.contains(&format!(
+            "as {PLUGIN_INDEX_ASSET} to the release tagged {PLUGIN_INDEX_TAG}"
+        )),
+        "{output}"
+    );
+    let started = PluginIndex::parse(&std::fs::read_to_string(&fresh).unwrap()).unwrap();
+    assert_eq!(started.plugins.len(), 1);
+}
+
+#[test]
+fn pack_refuses_a_malformed_index_and_writes_nothing() {
+    let root = Root::new("pack-bad-index");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    std::fs::write(
+        &index,
+        r#"{ "schemaVersion": 1, "plugins": [ { "id": "x" } ] }"#,
+    )
+    .unwrap();
+    let (code, _, error) = run_with(&[
+        "pack",
+        folder.to_str().unwrap(),
+        root.join("out").to_str().unwrap(),
+        "--index",
+        index.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 1);
+    assert!(error.contains("plugin index is invalid"), "{error}");
+    assert!(!root.join("out").exists());
+    // Only `--index <file>` follows the two paths.
+    let out = root.join("out");
+    for extra in [vec!["--index"], vec!["--other", "x"]] {
+        let mut arguments = vec!["pack", folder.to_str().unwrap(), out.to_str().unwrap()];
+        arguments.extend(extra);
+        assert_eq!(run_with(&arguments).0, 2);
+    }
+}
+
 // --- A packed release installs through the launcher ------------------------------
 
 /// GitHub as a map of addresses to files; anything else is 404.
@@ -751,4 +835,58 @@ fn a_packed_release_installs_through_the_launcher_installer() {
     // What the launcher installed is what a session loads.
     let report = run_check(&installed).unwrap();
     assert_no_failure(&report);
+}
+
+// A plugin pushed off its repository's feed is still found through the
+// index pack wrote, and installs.
+#[test]
+fn a_release_packed_into_an_index_resolves_and_installs() {
+    let root = Root::new("pack-index-install");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    let packed = pack_into_index(&folder, &root.join("release"), &index).unwrap();
+    let repo = "acme/openac-suite";
+    let releases = Releases::default();
+    for file in &packed.files {
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        releases.add(
+            github::tagged_asset(repo, &packed.tag, &name)
+                .unwrap()
+                .to_string(),
+            std::fs::read(file).unwrap(),
+        );
+    }
+    releases.add(
+        github::tagged_asset(repo, PLUGIN_INDEX_TAG, PLUGIN_INDEX_ASSET)
+            .unwrap()
+            .to_string(),
+        std::fs::read(&index).unwrap(),
+    );
+    // The feed shows only another plugin's releases.
+    let entries: String = (0..10)
+        .map(|patch| {
+            format!(
+                r#"<entry><link rel="alternate" href="https://github.com/{repo}/releases/tag/wasm-acme.other-v1.0.{patch}"/></entry>"#
+            )
+        })
+        .collect();
+    releases.add(
+        github::releases_feed(repo).unwrap().to_string(),
+        format!(r#"<feed xmlns="http://www.w3.org/2005/Atom">{entries}</feed>"#).into_bytes(),
+    );
+    let transport = Arc::new(releases);
+    let resolver = PluginReleaseResolver::new(PluginReleaseClient::new(transport.clone()));
+    let resolved = resolver
+        .resolve_plugin(repo, ID, PluginReleaseChannel::Stable, &CancelToken::none())
+        .unwrap();
+    let tag = resolved.resolution().unwrap().tag.clone();
+    assert_eq!(tag, packed.tag);
+    let paths =
+        ac_host::PathSet::from_members(root.join("config"), root.join("data"), root.join("cache"));
+    let records = Arc::new(Mutex::new(InstalledPluginRecordStore::for_paths(&paths)));
+    let installer = PluginInstaller::new(&paths, transport, records);
+    let result = installer
+        .install_or_update(repo, &tag, None, None, None, None, &CancelToken::none())
+        .unwrap();
+    assert_eq!(result.id, ID);
 }
