@@ -1262,3 +1262,196 @@ fn an_item_inside_a_corpse_reports_the_colours_it_would_on_the_ground() {
         }
     );
 }
+
+/// A chest on the ground and a ruby inside it.
+const CHEST: u32 = 0x7000_00C1;
+const RUBY: u32 = 0x8000_00C2;
+
+/// [`packed`] with [`CHEST`] open (its use answered and its contents, the
+/// ruby, listed) and the outbox emptied.
+fn with_open_chest() -> (SessionState, Outbox) {
+    use ac_core::items::{ItemType, ItemUseable, PublicWeenieFlags};
+    use ac_proto::{GameEventType, Inbound};
+
+    use crate::inventory::{ItemCommand, ObjectRef};
+    use crate::session::SessionCommand;
+    use crate::world::tests::{create, game_event, position, stamps};
+
+    let mut state = packed();
+    let mut outbox = Outbox::new();
+    let mut chest = create(CHEST, stamps(1, 1), Some(position(0xA9B4_0031, 5.0)));
+    if let Inbound::CreateObject(create) = &mut chest {
+        create.weenie = Some(ac_proto::PublicWeenieDesc {
+            name: "Chest".into(),
+            item_type: ItemType::CONTAINER.bits(),
+            object_description_flags: PublicWeenieFlags::OPENABLE.bits(),
+            useability: Some(ItemUseable::REMOTE.bits()),
+            items_capacity: Some(24),
+            ..ac_proto::PublicWeenieDesc::default()
+        });
+    }
+    state.apply(&chest, &mut outbox, true, CLOCKS);
+    let mut ruby = create(RUBY, stamps(1, 1), None);
+    if let Inbound::CreateObject(create) = &mut ruby {
+        create.weenie = Some(ac_proto::PublicWeenieDesc {
+            name: "Ruby".into(),
+            item_type: ItemType::GEM.bits(),
+            container_id: Some(CHEST),
+            ..ac_proto::PublicWeenieDesc::default()
+        });
+    }
+    state.apply(&ruby, &mut outbox, true, CLOCKS);
+    state.command(
+        SessionCommand::Item(ItemCommand::Use(ObjectRef::Guid(CHEST))),
+        &mut outbox,
+        true,
+        CLOCKS,
+    );
+    for (event, payload) in [
+        (GameEventType::VIEW_CONTENTS, &[CHEST, 1, RUBY, 0][..]),
+        (GameEventType::USE_DONE, &[0][..]),
+    ] {
+        let body = game_event(event, payload);
+        state.apply(&Inbound::parse(&body).unwrap(), &mut outbox, true, CLOCKS);
+    }
+    assert_eq!(
+        state.inventory.external_containers().current_container_id(),
+        CHEST
+    );
+    outbox.drain().for_each(drop);
+    (state, outbox)
+}
+
+fn put(object_id: u32, container_id: u32, amount: u32, placement: i32) -> MoveRequest {
+    MoveRequest {
+        object_id,
+        container_id,
+        amount,
+        placement,
+    }
+}
+
+/// What went out, as message bodies.
+fn sent(outbox: &mut Outbox) -> Vec<Vec<u8>> {
+    outbox.drain().map(|o| o.body).collect()
+}
+
+// A put into the open container needs one open, and names it.
+#[test]
+fn a_put_with_no_container_open_is_an_invalid_target() {
+    let mut state = packed();
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidTarget);
+        let result = call::<calls::LootPut>(b, &put(GEM, 0, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidTarget);
+    });
+    assert!(outbox.is_empty());
+}
+
+#[test]
+fn a_put_into_a_container_that_is_not_the_open_one_is_an_invalid_target() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, PLAYER, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidTarget);
+        let result = call::<calls::LootPut>(b, &put(GEM, 0x9999, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidTarget);
+    });
+    assert!(outbox.is_empty());
+}
+
+// The item is the character's own or already in the open container.
+#[test]
+fn a_put_of_an_item_neither_owned_nor_in_the_open_container_is_an_invalid_item() {
+    let (mut state, mut outbox) = with_open_chest();
+    state.world.apply(&crate::world::tests::create(
+        LOOSE,
+        crate::world::tests::stamps(1, 1),
+        Some(crate::world::tests::position(0xA9B4_0031, 7.0)),
+    ));
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(LOOSE, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidItem);
+        let result = call::<calls::LootPut>(b, &put(0x9999, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidItem);
+        let result = call::<calls::LootPut>(b, &put(CHEST, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::InvalidItem);
+    });
+    assert!(outbox.is_empty());
+}
+
+// The whole stack goes as the container window's drop does: a put into the
+// chest at that slot.
+#[test]
+fn a_whole_owned_stack_is_put_into_the_open_chest_at_its_slot() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::Started);
+    });
+    assert_eq!(
+        sent(&mut outbox),
+        [ac_proto::inventory::build_put_item_in_container(
+            2, GEM, CHEST, 3
+        )]
+    );
+}
+
+// Part of a stack splits off into the chest at the slot.
+#[test]
+fn part_of_an_owned_stack_splits_into_the_open_chest() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 2, 3));
+        assert_eq!(result.status, ItemStatus::Started);
+    });
+    assert_eq!(
+        sent(&mut outbox),
+        [ac_proto::inventory::build_stackable_split_to_container(
+            2, GEM, CHEST, 3, 2
+        )]
+    );
+}
+
+// An item already in the chest moves to another slot of it.
+#[test]
+fn an_item_in_the_open_chest_is_reordered_within_it() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(RUBY, CHEST, 0, 1));
+        assert_eq!(result.status, ItemStatus::Started);
+    });
+    assert_eq!(
+        sent(&mut outbox),
+        [ac_proto::inventory::build_put_item_in_container(
+            2, RUBY, CHEST, 1
+        )]
+    );
+}
+
+// One request at a time: a second put while the first is in flight is
+// busy and sends nothing more.
+#[test]
+fn a_put_while_a_request_is_in_flight_is_busy() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let first = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 3));
+        assert_eq!(first.status, ItemStatus::Started);
+        let second = call::<calls::LootPut>(b, &put(RUBY, CHEST, 0, 1));
+        assert_eq!(second.status, ItemStatus::Busy);
+    });
+    assert_eq!(sent(&mut outbox).len(), 1);
+}
+
+#[test]
+fn a_put_of_more_than_the_stack_is_refused() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 6, 3));
+        assert_eq!(result.status, ItemStatus::Refused);
+        assert_eq!(result.notice.as_deref(), Some("Invalid stack quantity."));
+    });
+    assert!(outbox.is_empty());
+}

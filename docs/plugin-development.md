@@ -92,7 +92,8 @@ worker took, at the end of `IndoorCell` its doorways and the cells seen
 from it, and at the end of the floorplan's `DungeonCell` its bounds and floor
 height. It also added `Host::reachable_cells` and its answer,
 `Event::NavigationReach`, which a plugin built for an older version never
-hears. Everything the client offers
+hears, and `Host::put_in_open_container`, which puts an owned item into the
+open chest at a slot, or moves one already in it to another. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.

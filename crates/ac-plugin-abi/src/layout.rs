@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0xd295_5983_861d_a7be;
+    const PUBLISHED: u64 = 0xcdfe_f06c_6f4d_60f8;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {

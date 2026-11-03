@@ -626,6 +626,12 @@ macro_rules! import_table {
             /// Pick an item out of the open container.
             LootPickup = loot_pickup($crate::items::PickupRequest) -> $crate::items::ItemResult,
                 permission: None, window: false, since: (1, 0);
+            /// Put an item into the open container at a placement (API
+            /// 1.5): the whole stack (amount 0) or that many split off. The
+            /// item is the character's own, or already in the open
+            /// container (a reorder); the container is the open one.
+            LootPut = loot_put($crate::items::MoveRequest) -> $crate::items::ItemResult,
+                permission: None, window: false, since: (1, 5);
             /// Register a loot classifier other plugins can ask (scoped as
             /// `<plugin id>/<id>`); the plugin's handle for it.
             LootClassifierRegister = loot_classifier_register(

@@ -159,6 +159,7 @@ loot_open -
 loot_close -
 loot_identify -
 loot_pickup -
+loot_put -
 loot_classifier_register -
 loot_classifier_unregister -
 loot_classifiers -

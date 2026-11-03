@@ -530,6 +530,7 @@ impl SessionApi for PluginBinding<'_> {
             LootClose => |id| self.loot_close(id),
             LootIdentify => |id| self.loot_identify(id),
             LootPickup => |request| self.loot_pickup(request),
+            LootPut => |request| self.loot_put(request),
             // H. Trade and vendor.
             TradeState => |()| self.trade_state(),
             TradeAdd => |item| self.trade_add(item),

@@ -1187,6 +1187,67 @@ impl PluginBinding<'_> {
             Some(BackpackPlacement::Sent) | None => ran,
         }
     }
+
+    /// Put an item into the open container at a slot, as a drop on that
+    /// container's window does: the whole stack, or `amount` of it split
+    /// off. The item is the player's own or already in the open container
+    /// (a reorder).
+    pub(super) fn loot_put(&mut self, request: MoveRequest) -> ItemResult {
+        if !self.in_world() {
+            return ItemResult::of(ItemStatus::Unavailable);
+        }
+        let root = self
+            .state
+            .inventory
+            .external_containers()
+            .current_container_id();
+        if request.container_id == 0 || request.container_id != root {
+            return ItemResult::of(ItemStatus::InvalidTarget);
+        }
+        let player = self.player();
+        let items = self.state.world.items();
+        let item = owned(items, player, request.object_id).or_else(|| {
+            container_ids(items, root)
+                .contains(&request.object_id)
+                .then(|| items.get(request.object_id))
+                .flatten()
+        });
+        let Some(item) = item else {
+            return ItemResult::of(ItemStatus::InvalidItem);
+        };
+        if !valid_amount(item, request.amount) {
+            return ItemResult::because(ItemStatus::Refused, "Invalid stack quantity.");
+        }
+        // Everything the drop waits on is busy here, before anything runs: a
+        // request in flight, an item shown waiting at a slot, a wield.
+        let inventory = &self.state.inventory;
+        if !inventory.transactions().can_begin_request()
+            || inventory.pending_placement().is_some()
+            || inventory.is_wield_busy()
+        {
+            return ItemResult::of(ItemStatus::Busy);
+        }
+        let ran = self.run_item(ItemCommand::DropInto {
+            item: ObjectRef::Guid(request.object_id),
+            container: ObjectRef::Guid(root),
+            slot: request.placement,
+            amount: request.amount,
+            pickup: false,
+            join_stack: false,
+        });
+        // A put the inventory did not send is never a start, or a plugin
+        // would wait for an answer that never comes.
+        let sent = self
+            .state
+            .inventory
+            .transactions()
+            .pending()
+            .is_some_and(|p| p.dispatched && p.item_id == request.object_id);
+        if ran.status == ItemStatus::Started && !sent {
+            return ItemResult::because(ItemStatus::Refused, "the put did not go out");
+        }
+        ran
+    }
 }
 
 #[cfg(test)]

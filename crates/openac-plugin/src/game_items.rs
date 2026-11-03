@@ -220,6 +220,29 @@ impl Host<'_> {
         })
     }
 
+    /// Put an item into the open container at `placement` (API 1.5), as a
+    /// drop on that container's window does: the whole stack (`amount` 0)
+    /// or that many split off. The item is one the character owns, or one
+    /// already in the open container (a reorder); `container_id` must be
+    /// the open container ([`LootState::current_container_id`]).
+    /// `InvalidTarget` when it is not, `InvalidItem` for any other item,
+    /// `Refused` for an amount over the stack or a put that did not go
+    /// out, `Busy` while another item request is in flight.
+    pub fn put_in_open_container(
+        &mut self,
+        object_id: u32,
+        container_id: u32,
+        amount: u32,
+        placement: i32,
+    ) -> ItemResult {
+        self.call::<calls::LootPut>(&MoveRequest {
+            object_id,
+            container_id,
+            amount,
+            placement,
+        })
+    }
+
     /// Register a loot classifier other plugins can ask; it is answered
     /// through [`crate::Plugin::callback`] with the returned handle. Its
     /// scoped id is `<plugin id>/<id>`.

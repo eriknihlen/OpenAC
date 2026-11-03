@@ -648,6 +648,33 @@ mod tests {
         );
     }
 
+    // A put into the open container answers Unavailable from a host that
+    // offers none; then a result a test sets coming back, and the request
+    // carrying the item, the container, the amount and the slot.
+    #[test]
+    fn a_put_into_the_open_container_is_unavailable_until_set_and_carries_its_slot() {
+        use ac_plugin_abi::items::{ItemResult, ItemStatus, MoveRequest};
+        let mut fake = FakeHost::new("test.put");
+        {
+            let mut host = Host::with_transport(&mut fake);
+            let result = host.put_in_open_container(7, 9, 0, 0);
+            assert_eq!(result.status, ItemStatus::Unavailable);
+        }
+        fake.set_reply::<calls::LootPut>(&ItemResult::of(ItemStatus::Started));
+        let mut host = Host::with_transport(&mut fake);
+        let result = host.put_in_open_container(7, 9, 2, 3);
+        assert_eq!(result.status, ItemStatus::Started);
+        assert_eq!(
+            fake.requests::<calls::LootPut>().last(),
+            Some(&MoveRequest {
+                object_id: 7,
+                container_id: 9,
+                amount: 2,
+                placement: 3,
+            })
+        );
+    }
+
     // The process numbers read as zeros from a host that gives none; then
     // values a test sets coming back through the encoding.
     #[test]
