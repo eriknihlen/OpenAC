@@ -1,9 +1,9 @@
 //! Putting an item into a container: whether the move is legal, which pack
 //! an item picked up goes into, and the notice when it cannot go anywhere.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use super::{ClientObject, ClientObjectTable, ItemType};
+use super::{ClientObject, ClientObjectTable, EquipMask, ItemType};
 
 /// Why an item may not go into a container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,26 +408,103 @@ pub fn loose_contents(objects: &ClientObjectTable, container_id: u32) -> Vec<u32
 /// the packs, the split [`is_pack`] and [`loose_contents`] use. The game
 /// keeps the two kinds in separate lists and reads an item's place off
 /// its list, so this is the number it shows for the item, whatever slot
-/// the server last named. -1 when the object is in no container or its
-/// container's list does not hold it; 0 when its container has no list at
-/// all (never listed, or its view closed), as the game counts it.
+/// the server last named. -1 when the object is in no container, is worn
+/// or wielded (the game takes it out of the list; the table may still name
+/// the wielder as its container) or its container's list does not hold
+/// it; 0 when its container has no list at all (never listed, or its view
+/// closed), as the game counts it. [`ContainerPlaces`] answers the same
+/// for many items with one walk of each list.
 #[must_use]
 pub fn place_in_container_list(objects: &ClientObjectTable, item_id: u32) -> i32 {
-    let Some(item) = objects.get(item_id) else {
-        return -1;
-    };
-    if item.container_id == 0 {
+    objects.get(item_id).map_or(-1, |item| {
+        place_by_rule(objects, item, |contents| {
+            let mut places = PlaceCounter::default();
+            contents
+                .iter()
+                .find_map(|&id| places.next(objects, id).filter(|_| id == item_id))
+        })
+    })
+}
+
+/// Worn or wielded: on the character, in no container's list.
+fn is_worn(item: &ClientObject) -> bool {
+    item.wielder_id != 0 || item.currently_equipped_location != EquipMask::NONE
+}
+
+/// The rule around the list: no container or worn is -1, a container with
+/// no list is 0, else `find` reads the place off the container's list.
+fn place_by_rule(
+    objects: &ClientObjectTable,
+    item: &ClientObject,
+    find: impl FnOnce(&[u32]) -> Option<i32>,
+) -> i32 {
+    if item.container_id == 0 || is_worn(item) {
         return -1;
     }
-    let Some(contents) = objects.contents_list(item.container_id) else {
-        return 0;
-    };
-    let packs = is_pack(item);
-    contents
-        .iter()
-        .filter(|&&id| objects.get(id).is_some_and(is_pack) == packs)
-        .position(|&id| id == item_id)
-        .map_or(-1, |place| i32::try_from(place).unwrap_or(i32::MAX))
+    objects
+        .contents_list(item.container_id)
+        .map_or(0, |contents| find(contents).unwrap_or(-1))
+}
+
+/// Counts a contents list's members as one walks it, loose items and packs
+/// apart, skipping worn ones.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PlaceCounter {
+    loose: i32,
+    packs: i32,
+}
+
+impl PlaceCounter {
+    /// The place of the list's next member, `id`; `None` for a worn one,
+    /// which takes no place.
+    pub fn next(&mut self, objects: &ClientObjectTable, id: u32) -> Option<i32> {
+        let member = objects.get(id);
+        if member.is_some_and(is_worn) {
+            return None;
+        }
+        let count = if member.is_some_and(is_pack) {
+            &mut self.packs
+        } else {
+            &mut self.loose
+        };
+        let place = *count;
+        *count = count.saturating_add(1);
+        Some(place)
+    }
+}
+
+/// Every listed object's place in its own container's list, from one walk
+/// of each list: [`place_in_container_list`] for a whole table at once.
+#[derive(Debug, Default)]
+pub struct ContainerPlaces {
+    places: BTreeMap<u32, i32>,
+}
+
+impl ContainerPlaces {
+    /// Walks every contents list once.
+    #[must_use]
+    pub fn of(objects: &ClientObjectTable) -> Self {
+        let mut places = BTreeMap::new();
+        for (container, contents) in objects.contents_lists() {
+            let mut counter = PlaceCounter::default();
+            for &id in contents {
+                if let Some(place) = counter.next(objects, id)
+                    && objects.get(id).is_some_and(|m| m.container_id == container)
+                {
+                    places.insert(id, place);
+                }
+            }
+        }
+        Self { places }
+    }
+
+    /// The item's place, as [`place_in_container_list`] gives it.
+    #[must_use]
+    pub fn place(&self, objects: &ClientObjectTable, item: &ClientObject) -> i32 {
+        place_by_rule(objects, item, |_| {
+            self.places.get(&item.object_id()).copied()
+        })
+    }
 }
 
 /// Whether sending the whole of the loose item at `source_index` (of
@@ -985,7 +1062,18 @@ mod place_in_list_tests {
     //! An item's place in its container's list, as the game counts it: its
     //! index among its own kind (loose items, or packs) in that list.
 
-    use super::place_in_container_list as place;
+    use super::{ContainerPlaces, place_in_container_list};
+
+    /// The item's place, asserting the whole-table walk agrees with the
+    /// single lookup.
+    fn place(t: &ClientObjectTable, id: u32) -> i32 {
+        let single = place_in_container_list(t, id);
+        let walked = t
+            .get(id)
+            .map_or(-1, |item| ContainerPlaces::of(t).place(t, item));
+        assert_eq!(single, walked, "{id:#x}");
+        single
+    }
     use crate::items::{
         ClientObjectTable, ContainerContentEntry, EquipMask, ItemType, TableEvent, WeenieData,
     };
@@ -1082,6 +1170,32 @@ mod place_in_list_tests {
         assert_eq!((kept.container_id, kept.container_slot), (PACK, 0));
         assert_eq!(place(&t, 0xA04), -1);
         assert_eq!(place(&t, 0xDEAD), -1);
+    }
+
+    // A worn item is in no container's list, even where the table names
+    // the wielder as its container and lists it there; nor does it take a
+    // place from the items listed after it.
+    #[test]
+    fn a_worn_item_has_no_place_and_takes_none() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.ingest(&in_container(0xA05, 0), &mut ev);
+        t.move_item(0xA05, PLAYER, 0, EquipMask::CHEST_WEAR, None, &mut ev);
+        t.ingest(&in_container(0xA01, PLAYER), &mut ev);
+        t.ingest(
+            &WeenieData {
+                wielder_id: Some(PLAYER),
+                ..in_container(0xA06, PLAYER)
+            },
+            &mut ev,
+        );
+        let listed = t.get_contents(PLAYER);
+        assert!(listed.contains(&0xA05) && listed.contains(&0xA06));
+        assert!(
+            listed.iter().position(|&id| id == 0xA05) < listed.iter().position(|&id| id == 0xA01)
+        );
+        assert_eq!((place(&t, 0xA05), place(&t, 0xA06)), (-1, -1));
+        assert_eq!(place(&t, 0xA01), 0);
     }
 
     // A container with no contents list at all (never listed, or its view

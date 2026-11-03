@@ -131,9 +131,9 @@ wire_record! {
         /// pack's (or spell focus's) among its packs, both from 0 in the
         /// order the container lists them. The same for the main pack, a
         /// side pack or an open chest. -1 when it is in no container
-        /// (wielded, on the ground) or its container's list does not hold
-        /// it; 0 when its container has no list at all (never listed, or
-        /// its view closed).
+        /// (worn or wielded, on the ground) or its container's list does
+        /// not hold it; 0 when its container has no list at all (never
+        /// listed, or its view closed).
         pub container_slot: i32,
         /// Items a container holds.
         pub items_capacity: i32,

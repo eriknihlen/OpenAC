@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use ac_core::items::TinkerValues;
 use ac_core::items::placement::{
-    evaluate_container_placement, is_pack, loose_contents, place_in_container_list,
-    placement_leaves_item_in_place, placement_rejection_text,
+    ContainerPlaces, PlaceCounter, evaluate_container_placement, is_pack, loose_contents,
+    place_in_container_list, placement_leaves_item_in_place, placement_rejection_text,
 };
 use ac_core::items::vendor::{VendorSellCandidate, evaluate_sell, per_unit_value};
 use ac_core::items::{
@@ -118,9 +118,13 @@ pub(super) fn palettes_with(
 
 /// One item as a plugin sees it (OpenAC `ProjectInventoryItem`): the tinker
 /// values from the appraisal, the requirement and gear numbers from the
-/// properties, the palettes from its look.
+/// properties, the palettes from its look. `container_slot` is its place in
+/// its container's list among its kind, as the game shows it
+/// ([`place_in_container_list`]): the table keeps no slot for an item listed
+/// before it is described (every side-pack item at login, a chest's
+/// contents).
 pub(super) fn project_item(
-    items: &ClientObjectTable,
+    container_slot: i32,
     item: &ClientObject,
     palettes: Vec<Palette>,
 ) -> InventoryItem {
@@ -192,10 +196,7 @@ pub(super) fn project_item(
         gear_critical_damage: int(item, PropertyInt::GEAR_CRIT_DAMAGE),
         gear_critical_damage_resistance: int(item, PropertyInt::GEAR_CRIT_DAMAGE_RESIST),
         maximum_stack_size: item.stack_size_max,
-        // Its place in its container's list among its kind, as the game
-        // shows it: the table keeps no slot for an item listed before it
-        // is described (every side-pack item at login, a chest's contents).
-        container_slot: place_in_container_list(items, item.object_id()),
+        container_slot,
         items_capacity: item.items_capacity,
         containers_capacity: item.containers_capacity,
         burden: item.burden,
@@ -290,15 +291,25 @@ fn container_tree(
     out: &mut Vec<InventoryItem>,
 ) {
     let items = world.items();
+    // Places are counted on this walk of the list; every member counts,
+    // whether or not it is projected here.
+    let mut places = PlaceCounter::default();
     for &child_id in items.get_contents(container) {
+        let counted = places.next(items, child_id);
         if !seen.insert(child_id) {
             continue;
         }
         let Some(child) = items.get(child_id) else {
             continue;
         };
+        // One this list holds but that names another container (or is
+        // worn) has its place by the rule, not this list.
+        let place = match counted {
+            Some(place) if child.container_id == container => place,
+            _ => place_in_container_list(items, child_id),
+        };
         out.push(project_item(
-            items,
+            place,
             child,
             palettes_of(world, content, child_id),
         ));
@@ -390,12 +401,13 @@ impl PluginBinding<'_> {
             return Vec::new();
         }
         let items = self.state.world.items();
+        let places = ContainerPlaces::of(items);
         let mut owned: Vec<InventoryItem> = items
             .objects()
             .filter(|i| is_player_owned(i, player, items))
             .map(|i| {
                 project_item(
-                    items,
+                    places.place(items, i),
                     i,
                     palettes_of(
                         &self.state.world,

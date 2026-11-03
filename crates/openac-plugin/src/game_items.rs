@@ -17,9 +17,9 @@ impl Host<'_> {
     /// Everything the character owns, by name then id. Each item's
     /// `container_slot` is its place in its own container (the main pack
     /// or a side pack) among its kind, loose items and packs counted
-    /// apart; -1 for one in no container, such as a wielded item, or one
-    /// its container's list does not hold; 0 when that container has no
-    /// list at all.
+    /// apart; -1 for one in no container, such as a worn or wielded item,
+    /// or one its container's list does not hold; 0 when that container
+    /// has no list at all.
     pub fn owned_items(&mut self) -> Vec<InventoryItem> {
         self.call::<calls::ItemsOwned>(&())
     }
