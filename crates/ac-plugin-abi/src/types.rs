@@ -276,6 +276,9 @@ wire_union! {
         /// [`Self::ChatReceived`] (sent only to plugins with the `chat`
         /// permission, built for API 1.1 or later).
         25 => StatusTextReceived(String) since (1, 1),
+        /// A reach search the plugin asked for ended (only to that plugin;
+        /// API 1.5).
+        26 => NavigationReach(crate::navigation::NavigationReach) since (1, 5),
         /// One of the plugin's panels or canvases was used ([`crate::ui`];
         /// the tag is `crate::ui::EVENT_TAG`).
         100 => Ui(crate::ui::UiEvent),

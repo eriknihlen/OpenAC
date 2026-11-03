@@ -460,7 +460,7 @@ fn plan(
         profile,
         leaps,
     );
-    let end = search.run(|node| near_goal_seen && goal.is_reached_at(node));
+    let end = search.run(|node, _| near_goal_seen && goal.is_reached_at(node));
     if end >= 0 {
         return routed(
             grid,
@@ -663,7 +663,7 @@ fn find_toward_with(
         PROFILES[0],
         leaps,
     );
-    let end = search.run(|node| {
+    let end = search.run(|node, _| {
         let away_here = away(grid.position(node), goal);
         if away_here < nearest_away {
             nearest = node;
@@ -1209,6 +1209,110 @@ fn distance_beyond(grid: &NavGrid, point: Vec3) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Every node a body reaches from one start, each by its cheapest route:
+/// what [`flood`] found.
+#[derive(Debug, Clone)]
+pub struct NavFlood {
+    /// The node the routes start from.
+    pub start: i32,
+    cost: Vec<f32>,
+    by_drop: Vec<bool>,
+    /// The nodes expanded.
+    pub expansions: i32,
+    /// Whether the search stopped at [`MAXIMUM_EXPANSIONS`] before it had
+    /// gone as far as it was asked to.
+    pub gave_up: bool,
+}
+
+impl NavFlood {
+    /// Whether the node was reached within the distance asked for.
+    #[must_use]
+    pub fn reached(&self, node: i32) -> bool {
+        self.cost(node).is_finite()
+    }
+
+    /// The cost of the cheapest route to the node, or infinity when it was
+    /// not reached. The cost is metres along the grid's steps, before the
+    /// route is straightened, plus the height climbed or dropped, plus each
+    /// leap's penalty (a few metres more for a harder or riskier one), as a
+    /// route search counts it.
+    #[must_use]
+    pub fn cost(&self, node: i32) -> f32 {
+        self.cost
+            .get(node as usize)
+            .copied()
+            .unwrap_or(f32::INFINITY)
+    }
+
+    /// Whether the cheapest route to the node steps or leaps down farther
+    /// than the body steps up, so the character could not walk back up the
+    /// way it came (a jump might still take it back).
+    #[must_use]
+    pub fn by_drop(&self, node: i32) -> bool {
+        self.by_drop.get(node as usize).copied().unwrap_or(false)
+    }
+}
+
+/// Every node a body reaches from `from` along routes costing at most
+/// `max_meters` (see [`NavFlood::cost`]), keeping out of the avoided spots
+/// and leaping where `leaps` allows, as [`find`] would route to each: one
+/// search, with no goal, cheapest first. `None` when no node stands near
+/// enough to `from` to start from.
+#[must_use]
+pub fn flood(
+    grid: &NavGrid,
+    from: Vec3,
+    max_meters: f32,
+    avoid: &[NavAvoidance],
+    leaps: Option<NavLeapAbility>,
+) -> Option<NavFlood> {
+    let mut start = grid.find_walkable_node(from, START_RADIUS, START_HEIGHT_TOLERANCE);
+    if start < 0 {
+        start = grid.find_standing_node(from, START_RADIUS, START_HEIGHT_TOLERANCE);
+    }
+    if start < 0 {
+        return None;
+    }
+    let finder = leaps.map(|ability| NavLeapFinder::new(grid, ability));
+    let mut search = Search::new(
+        grid,
+        start,
+        from,
+        f32::INFINITY,
+        avoid,
+        &[],
+        PROFILES[2],
+        finder.as_ref(),
+    );
+    let mut order = Vec::new();
+    let end = search.run(|node, cost| {
+        if cost > max_meters {
+            return true;
+        }
+        order.push(node);
+        false
+    });
+    let mut cost = vec![f32::INFINITY; search.cost.len()];
+    let mut by_drop = vec![false; search.cost.len()];
+    let rise_limit = grid.body().step_up_height + 1e-3;
+    for &node in &order {
+        let index = node as usize;
+        cost[index] = search.cost[index];
+        let parent = search.parent[index];
+        if parent != node {
+            let drop = grid.position(parent).z - grid.position(node).z;
+            by_drop[index] = by_drop[parent as usize] || drop > rise_limit;
+        }
+    }
+    Some(NavFlood {
+        start,
+        cost,
+        by_drop,
+        expansions: search.expansions,
+        gave_up: end == Search::GAVE_UP,
+    })
+}
+
 /// A best-first expansion of the clear nodes reachable from a start,
 /// ordered by the cost so far plus the distance left to a point.
 struct Search<'g, 'f> {
@@ -1272,15 +1376,16 @@ impl<'g, 'f> Search<'g, 'f> {
     }
 
     /// Expands nodes until one is an end and returns it, or returns
-    /// [`Self::EXHAUSTED`] or [`Self::GAVE_UP`].
-    fn run(&mut self, mut is_end: impl FnMut(i32) -> bool) -> i32 {
+    /// [`Self::EXHAUSTED`] or [`Self::GAVE_UP`]. The end test is given each
+    /// node as it is expanded, with the cost of the cheapest route to it.
+    fn run(&mut self, mut is_end: impl FnMut(i32, f32) -> bool) -> i32 {
         while let Some((node, _)) = self.open.dequeue() {
             if self.closed[node as usize] {
                 continue;
             }
             self.closed[node as usize] = true;
             self.expansions += 1;
-            if is_end(node) {
+            if is_end(node, self.cost[node as usize]) {
                 return node;
             }
             if self.expansions >= MAXIMUM_EXPANSIONS {

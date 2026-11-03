@@ -86,7 +86,13 @@ record without it (API 1.2 added `hook_item_types` to the inventory and
 world-object records: the item-type bits saying what a house hook takes, 0
 for anything that is not a hook). API 1.4 added five plugin themes: a plugin
 built for an older version is told `ThemeKind::Moss` under any of them, with
-the theme's real name and colours. Everything the client offers
+the theme's real name and colours. API 1.5 added, at the end of a path
+preview's `NavigationPlan`, whether it reused a grid and how long the client's
+worker took, at the end of `IndoorCell` its doorways and the cells seen
+from it, and at the end of the floorplan's `DungeonCell` its bounds and floor
+height. It also added `Host::reachable_cells` and its answer,
+`Event::NavigationReach`, which a plugin built for an older version never
+hears. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -206,6 +212,73 @@ bridge, a dungeon) it lies flat at the anchor's height. The client draws shapes
 centred within 250 m of the camera and in view, nearest first when a frame holds
 more than it has room for.
 
+**Navigation.** `Host::go_to` and `Host::go_to_place` walk the character,
+and `Host::go_to_report` says how the latest walk stands. The client plans
+over a grid of 0.25 m columns built from the collision loaded now; inside a
+sealed dungeon one grid covers every cell. `Host::preview_path` and
+`Host::preview_path_to_place` plan a route without moving the character: each
+returns a handle (0 never), and the plan arrives later as
+`Event::NavigationPlan` with that handle, to this plugin only. Only asking
+happens on the session thread. The grid build and the search run on a worker,
+so a plan can take tens of milliseconds and several can be out at once. A
+preview searches the grid a walk or an earlier preview built when it still
+stands for the world there. Inside a sealed dungeon a grid built for a
+preview is kept for the walks and previews after it, until it goes unused for
+30 seconds or the dungeon unloads. The plan's `grid_reused` says whether its
+grid was there already (API 1.5), and `took_ms` how long the worker spent:
+the first preview in a dungeon builds the grid, and the ones after it are
+quicker.
+
+Inside a sealed dungeon, `Host::reachable_cells(max_meters)` (API 1.5) asks
+for every cell the character can walk to from where it stands, each with the
+length of its route, from one search. Use `f32::INFINITY` as the distance for
+the whole dungeon. It returns a handle, or 0 when nothing can be searched
+from: out of the world, in portal space or the air, or not in a sealed
+dungeon. The answer arrives as `Event::NavigationReach` with that handle, to
+this plugin only. It runs on a worker over the same grid as walks and
+previews, and in a dungeon of a few hundred cells it takes about 10 to 15 ms
+once the grid is built. Each `CellReach` gives:
+
+- `route_meters`: the search's cost by the shortest way over the grid's
+  steps, before the route is straightened. That is metres walked, plus the
+  height climbed or dropped, plus a few metres for each jump. In the
+  installed dungeons it comes within about 15% of a preview's
+  `length_meters` to the same place, usually a little under, since a walk
+  keeps off walls.
+- `place`: the point on the cell's floor the length is measured to, ready
+  for `go_to_place` or a preview.
+- `by_drop`: the way there steps or leaps down farther than the character
+  steps up, so it could not walk back up the way it came. A jump, or
+  another way round, might still take it back.
+
+The cells come nearest first, the character's own among them. A cell left
+out cannot be walked to from where the character stands now, within the
+distance. It may lie behind a portal or an object in the way, in a part of
+the dungeon joined only by a portal, or up a drop it cannot climb. It is
+still part of the dungeon. A cell with no floor of its own (`floor_z` is
+`None`) is never listed; the cell under it is. Doors are not in the grid, so
+a shut or locked door stops neither a reach search nor a preview. A walk
+opens a shut door when it reaches it and goes round a locked one.
+
+**Dungeon data.** `Host::dungeon_floorplan` and `Host::indoor_cells` read a
+landblock's cells from the game files once and keep them, so only the first
+call for a landblock costs a few milliseconds. Each `IndoorCell` lists its
+`doorways` (API 1.5): the cell each opens onto, or `leads_outside` for a
+doorway to the landscape, and the doorway's middle in landblock metres. It
+also lists `visible_cells`, the cells the game files say can be seen from
+this one. That is the list the game draws from when the camera is in the
+cell, worked out ahead of time from the doorways, so it is coarser than a
+line of sight: it can take in a cell round a corner or behind a closed door.
+A doorway is where the dungeon is open, not whether a door stands in it; a
+door is a world object, and walks open it or go round it when it is locked.
+Each floorplan `DungeonCell` has `bounds_min` and `bounds_max`, the box
+around its polygons, and `floor_z`, the height of its lowest floor (API 1.5).
+Use `floor_z`, not `layer_z`, to tell floors apart: `layer_z` is a 6 m band,
+and a tall room's cell can sit a band above a low corridor on the same floor.
+`floor_z` is `None` for a cell with no floor of its own. Tall rooms are built
+as one cell on top of another, so the upper cell has none; nor does a shaft.
+A plugin that needs a floor for such a cell can follow its doorways down.
+
 ## Testing natively
 
 On a native target the SDK has `testing::FakeHost`, which answers every
@@ -235,7 +308,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.4",
+  "apiVersion": "1.5",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -251,7 +324,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.4"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.5"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |
