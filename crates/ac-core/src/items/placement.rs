@@ -380,6 +380,50 @@ pub fn item_list_drop_placement(
     Some(placement)
 }
 
+/// Whether an item window shows the object among a container's packs
+/// rather than its loose items: it says it is a container, or it holds
+/// items.
+#[must_use]
+pub fn is_pack(item: &ClientObject) -> bool {
+    item.container_type_hint != 0
+        || item.item_type.intersects(ItemType::CONTAINER)
+        || item.items_capacity > 0
+}
+
+/// A container's loose items (everything directly in it that is not a
+/// pack), in its order: what its item list shows, and what a placement in
+/// that list counts.
+#[must_use]
+pub fn loose_contents(objects: &ClientObjectTable, container_id: u32) -> Vec<u32> {
+    objects
+        .get_contents(container_id)
+        .iter()
+        .copied()
+        .filter(|&id| !objects.get(id).is_some_and(is_pack))
+        .collect()
+}
+
+/// Whether sending the whole of the loose item at `source_index` (of
+/// `item_count`) to `placement`, the slot as sent, leaves it where it is:
+/// the drop an item list resolves to [`item_list_drop_placement`]'s `None`.
+/// The server takes the item out of its slot before inserting it, so the
+/// drop that sends `placement` is on that slot when it lies before the
+/// item, and on the next one otherwise.
+#[must_use]
+pub fn placement_leaves_item_in_place(
+    placement: i32,
+    item_count: usize,
+    source_index: usize,
+) -> bool {
+    let source = i32::try_from(source_index).unwrap_or(i32::MAX);
+    let drop_index = if placement < source {
+        placement
+    } else {
+        placement.saturating_add(1)
+    };
+    item_list_drop_placement(drop_index, item_count, Some(source_index), true).is_none()
+}
+
 #[cfg(test)]
 mod drop_placement_tests {
     //! Ported from OpenAC `tests/AcDream.Core.Tests/Items/ItemListDropPlacementTests.cs`.
@@ -418,6 +462,36 @@ mod drop_placement_tests {
     fn an_arrival_from_elsewhere_takes_the_hovered_slot() {
         for (drop, count, expected) in [(0, 3, 0), (2, 3, 2), (7, 3, 3), (0, 0, 0), (-1, 3, 0)] {
             assert_eq!(resolve(drop, count, None, true), Some(expected));
+        }
+    }
+
+    // A placement as sent leaves the item in place exactly when every drop
+    // that would send it is one the list resolves to nothing: its own slot,
+    // or past the end for the last item.
+    #[test]
+    fn a_placement_as_sent_leaves_the_item_in_place_only_at_its_own_slot() {
+        use super::placement_leaves_item_in_place as stays;
+        for (placement, count, source) in [(2, 4, 2), (0, 4, 0), (-1, 4, 0), (3, 4, 3), (9, 4, 3)] {
+            assert!(
+                stays(placement, count, source),
+                "{placement} {count} {source}"
+            );
+        }
+        for (placement, count, source) in [(1, 4, 2), (3, 4, 2), (0, 4, 3), (1, 4, 0), (9, 4, 2)] {
+            assert!(
+                !stays(placement, count, source),
+                "{placement} {count} {source}"
+            );
+            // The drop that sends it is resolved to that very placement.
+            let drop = if placement < i32::try_from(source).unwrap() {
+                placement
+            } else {
+                placement + 1
+            };
+            assert_eq!(
+                resolve(drop, count, Some(source), true),
+                Some(placement.clamp(0, i32::try_from(count).unwrap() - 1))
+            );
         }
     }
 }

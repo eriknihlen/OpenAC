@@ -219,9 +219,7 @@ fn configure_resize_layout(ui: &mut UiRoot, layout: &ImportedLayout) {
 }
 
 pub(crate) fn is_bag(item: &ClientObject) -> bool {
-    item.container_type_hint != 0
-        || item.item_type.intersects(ItemType::CONTAINER)
-        || item.items_capacity > 0
+    ac_core::items::placement::is_pack(item)
 }
 
 fn is_capacity_rejection(r: Option<PlacementRejection>) -> bool {
