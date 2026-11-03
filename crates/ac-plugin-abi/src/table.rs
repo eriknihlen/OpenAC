@@ -627,9 +627,12 @@ macro_rules! import_table {
             LootPickup = loot_pickup($crate::items::PickupRequest) -> $crate::items::ItemResult,
                 permission: None, window: false, since: (1, 0);
             /// Put an item into the open container at a placement (API
-            /// 1.5): the whole stack (amount 0) or that many split off. The
-            /// item is the character's own, or already in the open
-            /// container (a reorder); the container is the open one.
+            /// 1.5), with its window's checks: the whole stack (amount 0)
+            /// or that many split off. The item is the character's own, or
+            /// one of the open container's own loose items (a reorder; the
+            /// placement counts its loose items, the moved one taken out
+            /// first); the container is the open one. Completed, with
+            /// nothing sent, when the item is already there.
             LootPut = loot_put($crate::items::MoveRequest) -> $crate::items::ItemResult,
                 permission: None, window: false, since: (1, 5);
             /// Register a loot classifier other plugins can ask (scoped as

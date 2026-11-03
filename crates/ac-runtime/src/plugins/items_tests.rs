@@ -1263,13 +1263,22 @@ fn an_item_inside_a_corpse_reports_the_colours_it_would_on_the_ground() {
     );
 }
 
-/// A chest on the ground and a ruby inside it.
+/// A chest on the ground holding a ruby and an emerald (its loose items, in
+/// that order) and a sack with a pearl in it.
 const CHEST: u32 = 0x7000_00C1;
 const RUBY: u32 = 0x8000_00C2;
+const EMERALD: u32 = 0x8000_00C3;
+const SACK: u32 = 0x8000_00C4;
+const PEARL: u32 = 0x8000_00C5;
 
-/// [`packed`] with [`CHEST`] open (its use answered and its contents, the
-/// ruby, listed) and the outbox emptied.
+/// [`open_chest_of`] with room to spare.
 fn with_open_chest() -> (SessionState, Outbox) {
+    open_chest_of(24)
+}
+
+/// [`packed`] with [`CHEST`] (taking `capacity` loose items) open: its use
+/// answered and its contents listed. The outbox is emptied.
+fn open_chest_of(capacity: i8) -> (SessionState, Outbox) {
     use ac_core::items::{ItemType, ItemUseable, PublicWeenieFlags};
     use ac_proto::{GameEventType, Inbound};
 
@@ -1286,21 +1295,30 @@ fn with_open_chest() -> (SessionState, Outbox) {
             item_type: ItemType::CONTAINER.bits(),
             object_description_flags: PublicWeenieFlags::OPENABLE.bits(),
             useability: Some(ItemUseable::REMOTE.bits()),
-            items_capacity: Some(24),
+            items_capacity: Some(capacity),
+            containers_capacity: Some(4),
             ..ac_proto::PublicWeenieDesc::default()
         });
     }
     state.apply(&chest, &mut outbox, true, CLOCKS);
-    let mut ruby = create(RUBY, stamps(1, 1), None);
-    if let Inbound::CreateObject(create) = &mut ruby {
-        create.weenie = Some(ac_proto::PublicWeenieDesc {
-            name: "Ruby".into(),
-            item_type: ItemType::GEM.bits(),
-            container_id: Some(CHEST),
-            ..ac_proto::PublicWeenieDesc::default()
-        });
+    for (guid, name, item_type, container, items) in [
+        (RUBY, "Ruby", ItemType::GEM, CHEST, None),
+        (EMERALD, "Emerald", ItemType::GEM, CHEST, None),
+        (SACK, "Sack", ItemType::CONTAINER, CHEST, Some(8)),
+        (PEARL, "Pearl", ItemType::GEM, SACK, None),
+    ] {
+        let mut item = create(guid, stamps(1, 1), None);
+        if let Inbound::CreateObject(create) = &mut item {
+            create.weenie = Some(ac_proto::PublicWeenieDesc {
+                name: name.into(),
+                item_type: item_type.bits(),
+                container_id: Some(container),
+                items_capacity: items,
+                ..ac_proto::PublicWeenieDesc::default()
+            });
+        }
+        state.apply(&item, &mut outbox, true, CLOCKS);
     }
-    state.apply(&ruby, &mut outbox, true, CLOCKS);
     state.command(
         SessionCommand::Item(ItemCommand::Use(ObjectRef::Guid(CHEST))),
         &mut outbox,
@@ -1308,7 +1326,10 @@ fn with_open_chest() -> (SessionState, Outbox) {
         CLOCKS,
     );
     for (event, payload) in [
-        (GameEventType::VIEW_CONTENTS, &[CHEST, 1, RUBY, 0][..]),
+        (
+            GameEventType::VIEW_CONTENTS,
+            &[CHEST, 3, RUBY, 0, EMERALD, 0, SACK, 1][..],
+        ),
         (GameEventType::USE_DONE, &[0][..]),
     ] {
         let body = game_event(event, payload);
@@ -1318,6 +1339,11 @@ fn with_open_chest() -> (SessionState, Outbox) {
         state.inventory.external_containers().current_container_id(),
         CHEST
     );
+    assert_eq!(
+        state.world.items().get_contents(CHEST),
+        [RUBY, EMERALD, SACK]
+    );
+    assert_eq!(state.world.items().get_contents(SACK), [PEARL]);
     outbox.drain().for_each(drop);
     (state, outbox)
 }
@@ -1452,6 +1478,166 @@ fn a_put_of_more_than_the_stack_is_refused() {
         let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 6, 3));
         assert_eq!(result.status, ItemStatus::Refused);
         assert_eq!(result.notice.as_deref(), Some("Invalid stack quantity."));
+    });
+    assert!(outbox.is_empty());
+}
+
+// The open container's window takes only its own loose items for a
+// reorder: a pack in it, or an item inside such a pack, is not one.
+#[test]
+fn a_pack_in_the_open_chest_or_an_item_inside_it_is_an_invalid_item() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(PEARL, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::InvalidItem);
+        let result = call::<calls::LootPut>(b, &put(SACK, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::InvalidItem);
+    });
+    assert!(outbox.is_empty());
+}
+
+// The window refuses a pack dropped on the container's item list, in its
+// own words, and sends nothing.
+#[test]
+fn an_owned_pack_is_refused_as_the_window_refuses_it() {
+    const POUCH: u32 = 0x8000_0030;
+    let (mut state, mut outbox) = with_open_chest();
+    state.world.apply(&owned(POUCH, "Pouch", 0x200, |w| {
+        w.items_capacity = Some(8);
+        w.stack_size = None;
+    }));
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(POUCH, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::Refused);
+        assert_eq!(
+            result.notice.as_deref(),
+            Some("The Chest can fit no more containers!")
+        );
+    });
+    assert!(outbox.is_empty());
+}
+
+// A chest with no free item slot takes nothing more, but still lets its own
+// items be reordered.
+#[test]
+fn a_full_chest_refuses_a_new_item_but_takes_a_reorder() {
+    let (mut state, mut outbox) = open_chest_of(2);
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::Refused);
+        assert_eq!(
+            result.notice.as_deref(),
+            Some("The Chest is completely full!")
+        );
+    });
+    assert!(outbox.is_empty());
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(EMERALD, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::Started);
+    });
+    assert_eq!(
+        sent(&mut outbox),
+        [ac_proto::inventory::build_put_item_in_container(
+            2, EMERALD, CHEST, 0
+        )]
+    );
+}
+
+// An item staged in a trade goes nowhere; the notice names the stack as
+// the client does (a stack of five gems is "Gems").
+#[test]
+fn an_item_in_a_trade_is_refused() {
+    let (mut state, mut outbox) = with_open_chest();
+    state.world.set_trade_state(GEM, 1);
+    with_binding(&mut state, &mut outbox, |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::Refused);
+        assert_eq!(result.notice.as_deref(), Some("The Gems is being traded"));
+    });
+    assert!(outbox.is_empty());
+}
+
+// The window sends nothing for a drop that leaves an item where it is; a
+// put to the slot the item has (or past the end, for the last) is done
+// already.
+#[test]
+fn a_put_that_leaves_the_item_where_it_is_is_completed_and_sends_nothing() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let ruby = call::<calls::LootPut>(b, &put(RUBY, CHEST, 0, 0));
+        assert_eq!(ruby.status, ItemStatus::Completed);
+        let emerald = call::<calls::LootPut>(b, &put(EMERALD, CHEST, 0, 1));
+        assert_eq!(emerald.status, ItemStatus::Completed);
+        let past_the_end = call::<calls::LootPut>(b, &put(EMERALD, CHEST, 0, 7));
+        assert_eq!(past_the_end.status, ItemStatus::Completed);
+    });
+    assert!(outbox.is_empty());
+}
+
+// With the session's link down nothing can go out, and the put says so
+// rather than reporting a start.
+#[test]
+fn a_put_with_the_link_down_is_unavailable_and_sends_nothing() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        b.link.as_mut().unwrap().active = false;
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 3));
+        assert_eq!(result.status, ItemStatus::Unavailable);
+    });
+    assert!(outbox.is_empty());
+}
+
+// An item shown waiting at a slot holds the next put up until the server
+// answers it.
+#[test]
+fn a_put_while_an_item_waits_at_a_slot_is_busy() {
+    let (mut state, mut outbox) = with_open_chest();
+    with_binding(&mut state, &mut outbox, |b| {
+        let first = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 1));
+        assert_eq!(first.status, ItemStatus::Started);
+        assert!(b.state.inventory.pending_placement().is_some());
+        let second = call::<calls::LootPut>(b, &put(KIT, CHEST, 0, 0));
+        assert_eq!(second.status, ItemStatus::Busy);
+    });
+    assert_eq!(sent(&mut outbox).len(), 1);
+}
+
+// A weapon switch in flight (the worn axe being moved aside for the sword)
+// holds a put up.
+#[test]
+fn a_put_while_a_wield_is_in_flight_is_busy() {
+    const AXE: u32 = 0x8000_0004;
+    const MELEE: u32 = 0x0000_0001;
+    let (mut state, mut outbox) = with_open_chest();
+    state.world.apply(&owned(SWORD, "Sword", 0x1, |w| {
+        w.valid_locations = Some(MELEE);
+        w.combat_use = Some(1);
+        w.stack_size = None;
+    }));
+    state.world.apply(&owned(AXE, "Axe", 0x1, |w| {
+        w.valid_locations = Some(MELEE);
+        w.combat_use = Some(1);
+        w.stack_size = None;
+        w.container_id = None;
+        w.wielder_id = Some(PLAYER);
+        w.currently_wielded_location = Some(MELEE);
+    }));
+    state.world.drain_changes().for_each(drop);
+    at(&mut state, &mut outbox, Duration::from_secs(5), |b| {
+        let sword = EquipRequest {
+            object_id: SWORD,
+            location: 0,
+        };
+        assert_eq!(
+            call::<calls::EquipmentEquip>(b, &sword).status,
+            EquipmentStatus::Started
+        );
+        assert!(b.state.inventory.is_wield_busy());
+    });
+    outbox.drain().for_each(drop);
+    at(&mut state, &mut outbox, Duration::from_secs(6), |b| {
+        let result = call::<calls::LootPut>(b, &put(GEM, CHEST, 0, 0));
+        assert_eq!(result.status, ItemStatus::Busy);
     });
     assert!(outbox.is_empty());
 }

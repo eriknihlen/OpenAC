@@ -7,8 +7,14 @@
 use std::collections::HashSet;
 
 use ac_core::items::TinkerValues;
+use ac_core::items::placement::{
+    evaluate_container_placement, is_pack, loose_contents, placement_leaves_item_in_place,
+    placement_rejection_text,
+};
 use ac_core::items::vendor::{VendorSellCandidate, evaluate_sell, per_unit_value};
-use ac_core::items::{ClientObject, ClientObjectTable, EquipMask, InventoryRequestKind, ItemType};
+use ac_core::items::{
+    ClientObject, ClientObjectTable, EquipMask, InventoryRequestKind, ItemType, PlacementRejection,
+};
 use ac_core::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInt, PropertyString,
 };
@@ -1189,9 +1195,11 @@ impl PluginBinding<'_> {
     }
 
     /// Put an item into the open container at a slot, as a drop on that
-    /// container's window does: the whole stack, or `amount` of it split
-    /// off. The item is the player's own or already in the open container
-    /// (a reorder).
+    /// container's window does, with the window's checks: the whole stack,
+    /// or `amount` of it split off. The item is the player's own or one of
+    /// the open container's own loose items (a reorder; the window lists
+    /// no others). A put that would leave the item where it is is done
+    /// already, and sends nothing, as the window's drop does.
     pub(super) fn loot_put(&mut self, request: MoveRequest) -> ItemResult {
         if !self.in_world() {
             return ItemResult::of(ItemStatus::Unavailable);
@@ -1206,17 +1214,31 @@ impl PluginBinding<'_> {
         }
         let player = self.player();
         let items = self.state.world.items();
-        let item = owned(items, player, request.object_id).or_else(|| {
-            container_ids(items, root)
-                .contains(&request.object_id)
-                .then(|| items.get(request.object_id))
-                .flatten()
-        });
+        let listed = loose_contents(items, root);
+        let source = listed.iter().position(|&id| id == request.object_id);
+        let item = if source.is_some() {
+            items.get(request.object_id)
+        } else {
+            owned(items, player, request.object_id)
+        };
         let Some(item) = item else {
             return ItemResult::of(ItemStatus::InvalidItem);
         };
         if !valid_amount(item, request.amount) {
             return ItemResult::because(ItemStatus::Refused, "Invalid stack quantity.");
+        }
+        let full = item.stack_size.max(1).unsigned_abs();
+        let whole_stack = request.amount == 0 || request.amount >= full;
+        // The window takes no pack on its item list, and nothing the
+        // placement rules refuse (a full container, an item in a trade).
+        let rejection = if is_pack(item) {
+            Err(PlacementRejection::ContainerCapacityFull)
+        } else {
+            evaluate_container_placement(items, request.object_id, root, 0, whole_stack)
+        };
+        if let Err(rejection) = rejection {
+            let text = placement_rejection_text(rejection, Some(item), items.get(root), 0);
+            return ItemResult::because(ItemStatus::Refused, &text);
         }
         // Everything the drop waits on is busy here, before anything runs: a
         // request in flight, an item shown waiting at a slot, a wield.
@@ -1226,6 +1248,13 @@ impl PluginBinding<'_> {
             || inventory.is_wield_busy()
         {
             return ItemResult::of(ItemStatus::Busy);
+        }
+        if whole_stack
+            && source.is_some_and(|at| {
+                placement_leaves_item_in_place(request.placement, listed.len(), at)
+            })
+        {
+            return ItemResult::of(ItemStatus::Completed);
         }
         let ran = self.run_item(ItemCommand::DropInto {
             item: ObjectRef::Guid(request.object_id),
