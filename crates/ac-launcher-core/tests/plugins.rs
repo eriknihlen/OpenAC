@@ -19,14 +19,15 @@ use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::plugins::{
     ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, InstallRules, InstalledPluginInfo,
     InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
-    PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PendingPluginInstall, Permission,
-    PermissionDeclaration, PluginCatalog, PluginInstallSource, PluginInstaller, PluginInventory,
-    PluginManifest, PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseClient,
-    PluginReleaseFetchResult, PluginReleaseResolution, PluginReleaseResolveResult,
-    PluginReleaseResolver, PluginSha256File, SESSION_LEASE_REFUSAL, THIS_CLIENT, describe,
-    direct_install_refusal, evaluate_version_compatibility, find_block_reason, github,
-    highest_prerelease, highest_stable, is_built_for_csharp, plugin_release_tag, release_tag,
-    validate_icon, validate_plugin_content, version_only_reason, without_client_version,
+    PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PLUGIN_INDEX_ASSET,
+    PLUGIN_INDEX_TAG, PendingPluginInstall, Permission, PermissionDeclaration, PluginCatalog,
+    PluginIndex, PluginInstallSource, PluginInstaller, PluginInventory, PluginManifest,
+    PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseClient, PluginReleaseFetchResult,
+    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver, PluginSha256File,
+    SESSION_LEASE_REFUSAL, THIS_CLIENT, describe, direct_install_refusal,
+    evaluate_version_compatibility, find_block_reason, github, highest_prerelease, highest_stable,
+    is_built_for_csharp, plugin_release_tag, release_tag, validate_icon, validate_plugin_content,
+    version_only_reason, without_client_version,
 };
 use ac_launcher_core::updates::{
     ClientVersionResolution, ClientVersionState, ExtractedFileRecord, LauncherVersion, UpdateError,
@@ -2110,6 +2111,140 @@ fn a_tag_naming_the_wrong_version_is_still_invalid() {
         resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
         PluginReleaseResolveResult::Invalid(_)
     ));
+}
+
+// --- The plugin index ------------------------------------------------------------------------------
+
+const SUITE_INDEX: &str = r#"{
+  "schemaVersion": 1,
+  "plugins": [
+    { "id": "aethrix.vision", "stable": "wasm-aethrix.vision-v1.2.0",
+      "beta": "wasm-aethrix.vision-v1.3.0-beta.1" },
+    { "id": "aethrix.navigation", "stable": "wasm-aethrix.navigation-v0.4.0" },
+    { "id": "aethrix.macro", "beta": "wasm-v0.1.0-beta.2" }
+  ]
+}"#;
+
+#[test]
+fn the_index_names_each_plugins_releases() {
+    let index = PluginIndex::parse(SUITE_INDEX).unwrap();
+    assert_eq!(index.plugins.len(), 3);
+    let vision = index.entry("aethrix.vision").unwrap();
+    assert_eq!(vision.stable.as_deref(), Some("wasm-aethrix.vision-v1.2.0"));
+    assert_eq!(
+        vision.beta.as_deref(),
+        Some("wasm-aethrix.vision-v1.3.0-beta.1")
+    );
+    let releases = index.releases_for("aethrix.vision");
+    let tags: Vec<&str> = releases
+        .iter()
+        .map(|release| release.tag.as_str())
+        .collect();
+    assert_eq!(
+        tags,
+        [
+            "wasm-aethrix.vision-v1.2.0",
+            "wasm-aethrix.vision-v1.3.0-beta.1"
+        ]
+    );
+    assert_eq!(releases[1].version.value(), "1.3.0-beta.1");
+    assert_eq!(
+        index.releases_for("aethrix.macro")[0].tag,
+        "wasm-v0.1.0-beta.2"
+    );
+    assert!(index.entry("AETHRIX.Navigation").is_some());
+    assert!(index.entry("aethrix.other").is_none());
+    assert!(index.releases_for("aethrix.other").is_empty());
+    assert_eq!(PLUGIN_INDEX_TAG, "wasm-index");
+    assert_eq!(PLUGIN_INDEX_ASSET, "plugins-index.json");
+    // The index is read only for this repository's own plugins: an empty one
+    // is a repository that has published none yet.
+    assert!(
+        PluginIndex::parse(r#"{ "schemaVersion": 1, "plugins": [] }"#)
+            .unwrap()
+            .plugins
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_index_is_read_strictly() {
+    let entry = |body: &str| format!(r#"{{ "schemaVersion": 1, "plugins": [ {body} ] }}"#);
+    for text in [
+        String::new(),
+        "null".into(),
+        "[]".into(),
+        r#"{ "plugins": [] }"#.into(),
+        r#"{ "schemaVersion": 2, "plugins": [] }"#.into(),
+        r#"{ "schemaVersion": 1 }"#.into(),
+        r#"{ "schemaVersion": 1, "plugins": [], "extra": 1 }"#.into(),
+        r#"{ "schemaVersion": 1, "SchemaVersion": 1, "plugins": [] }"#.into(),
+        entry(r#"{ "stable": "wasm-v1.0.0" }"#),
+        entry(r#"{ "id": "nodot", "stable": "wasm-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-v1.0.0", "notes": "x" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.c-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0.0+build.1" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0.0-beta.1" }"#),
+        entry(r#"{ "id": "a.b", "beta": "wasm-a.b-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "" }"#),
+        entry(r#"{ "id": "a.b", "stable": 1 }"#),
+        entry(
+            r#"{ "id": "a.b", "stable": "wasm-v1.0.0" }, { "id": "A.B", "stable": "wasm-v1.1.0" }"#,
+        ),
+    ] {
+        assert!(PluginIndex::parse(&text).is_err(), "{text}");
+    }
+    // A missing `beta` and an explicit null are the same.
+    let index = PluginIndex::parse(&entry(
+        r#"{ "id": "a.b", "stable": "wasm-v1.0.0", "beta": null }"#,
+    ))
+    .unwrap();
+    assert_eq!(index.entry("a.b").unwrap().beta, None);
+}
+
+#[test]
+fn the_index_round_trips_and_an_entry_can_be_replaced() {
+    let mut index = PluginIndex::parse(SUITE_INDEX).unwrap();
+    index
+        .set_release("aethrix.vision", "wasm-aethrix.vision-v1.2.1")
+        .unwrap();
+    index
+        .set_release("aethrix.macro", "wasm-aethrix.macro-v0.1.0")
+        .unwrap();
+    index
+        .set_release("aethrix.new", "wasm-aethrix.new-v0.1.0-beta.1")
+        .unwrap();
+    assert!(
+        index
+            .set_release("aethrix.new", "wasm-aethrix.other-v0.2.0")
+            .is_err()
+    );
+    assert!(index.set_release("bad", "wasm-v1.0.0").is_err());
+    let again = PluginIndex::parse(&index.to_json()).unwrap();
+    assert_eq!(again, index);
+    let vision = again.entry("aethrix.vision").unwrap();
+    assert_eq!(vision.stable.as_deref(), Some("wasm-aethrix.vision-v1.2.1"));
+    assert_eq!(
+        vision.beta.as_deref(),
+        Some("wasm-aethrix.vision-v1.3.0-beta.1")
+    );
+    let macro_entry = again.entry("aethrix.macro").unwrap();
+    assert_eq!(
+        macro_entry.stable.as_deref(),
+        Some("wasm-aethrix.macro-v0.1.0")
+    );
+    assert_eq!(macro_entry.beta.as_deref(), Some("wasm-v0.1.0-beta.2"));
+    assert_eq!(
+        again.entry("aethrix.new").unwrap().beta.as_deref(),
+        Some("wasm-aethrix.new-v0.1.0-beta.1")
+    );
+    assert_eq!(
+        PluginIndex::new().to_json(),
+        "{\n  \"schemaVersion\": 1,\n  \"plugins\": []\n}\n"
+    );
 }
 
 // --- PluginInstallerTests ---------------------------------------------------------------------

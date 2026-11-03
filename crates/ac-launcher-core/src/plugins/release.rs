@@ -214,12 +214,15 @@ pub fn wasm_releases(
 /// `wasm-<id>-v<version>` tags, matched by exact prefix, and the repository's
 /// `wasm-v<version>` tags (a plugin's `plugin.json` decides whose they are).
 pub fn plugin_releases(tags: &[String], id: &str) -> Vec<PluginFeedRelease> {
-    let prefix = plugin_tag_prefix(id);
     tags.iter()
-        .filter_map(|tag| {
-            parse_release(tag, &prefix).or_else(|| parse_release(tag, WASM_TAG_PREFIX))
-        })
+        .filter_map(|tag| plugin_release(tag, id))
         .collect()
+}
+
+/// The release `tag` names when it may be plugin `id`'s:
+/// `wasm-<id>-v<version>` or `wasm-v<version>`.
+pub(super) fn plugin_release(tag: &str, id: &str) -> Option<PluginFeedRelease> {
+    parse_release(tag, &plugin_tag_prefix(id)).or_else(|| parse_release(tag, WASM_TAG_PREFIX))
 }
 
 /// Every release tag a repository's releases feed links to, by the link

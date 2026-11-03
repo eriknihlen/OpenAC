@@ -6,6 +6,7 @@
 //! any character by an install.
 
 mod catalog;
+mod index;
 mod installer;
 mod inventory;
 mod manifest;
@@ -16,6 +17,10 @@ mod rules;
 pub use catalog::{
     CURRENT_CATALOG_SCHEMA_VERSION, OPENAC_CLIENT, PLUGIN_LIST_ASSET, PLUGIN_LIST_REPO,
     PluginBlock, PluginCatalog, PluginCatalogEntry, THIS_CLIENT,
+};
+pub use index::{
+    CURRENT_INDEX_SCHEMA_VERSION, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex,
+    PluginIndexEntry,
 };
 pub use installer::{
     AfterOldCodeSetAside, LocalPluginZipPreview, PACKAGED_FILES_REFUSAL,
