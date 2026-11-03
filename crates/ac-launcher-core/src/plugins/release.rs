@@ -390,8 +390,9 @@ impl PluginReleaseCandidates {
 /// the highest pre-release. Without a plugin id only `wasm-v<version>` tags
 /// count; with one, its `wasm-<id>-v<version>` tags count too, together with
 /// the tags the repository's plugin index names for it (read only when the
-/// feed shows a repository publishing several plugins, or nothing for this
-/// one: the feed lists only the latest ten releases), and a candidate whose
+/// feed shows a repository publishing several plugins, or no release whose
+/// `plugin.json` is this plugin's: the feed lists only the latest ten
+/// releases), and a candidate whose
 /// `plugin.json` names another plugin is skipped for the next highest. A repository's `releases/latest` belongs to OpenAC's C#
 /// launcher and is never read.
 ///
@@ -508,34 +509,98 @@ impl PluginReleaseResolver {
             Ok(tags) => tags,
             Err(result) => return only(result),
         };
+        let Some(id) = id else {
+            return self.wasm_v_candidates(repo, &tags, channel, cancel);
+        };
+        // Within one call the feed, index and manifests are read once, even
+        // when the index is read after the feed's candidates were tried.
+        let pass = if self.pass.is_some() {
+            self.clone()
+        } else {
+            self.pass()
+        };
+        let mut releases = plugin_releases(&tags, id);
+        let mut index_read = false;
         let mut index_warning = None;
-        let releases = match id {
-            None => tags
-                .iter()
-                .filter_map(|tag| parse_release(tag, WASM_TAG_PREFIX))
-                .collect(),
-            Some(id) => {
-                let mut releases = plugin_releases(&tags, id);
-                if needs_index(&tags, &releases) {
-                    match self.index(repo, cancel)? {
-                        IndexRead::Read(index) => {
-                            for release in index.releases_for(id) {
-                                if !releases.iter().any(|known| known.tag == release.tag) {
-                                    releases.push(release);
-                                }
-                            }
+        let mut index_rate_limited = false;
+        let mut read_index = |releases: &mut Vec<PluginFeedRelease>| -> Result<(), UpdateError> {
+            match pass.index(repo, cancel)? {
+                IndexRead::Read(index) => {
+                    for release in index.releases_for(id) {
+                        if !releases.iter().any(|known| known.tag == release.tag) {
+                            releases.push(release);
                         }
-                        IndexRead::Malformed(warning) => index_warning = Some(warning),
-                        IndexRead::RateLimited if releases.is_empty() => {
-                            return only(PluginReleaseResolveResult::RateLimited);
-                        }
-                        IndexRead::RateLimited | IndexRead::Missing => {}
                     }
                 }
-                releases
+                IndexRead::Malformed(warning) => index_warning = Some(warning),
+                IndexRead::RateLimited => index_rate_limited = true,
+                IndexRead::Missing => {}
             }
+            Ok(())
         };
-        let stable = match self.first_release(repo, id, &releases, false, cancel)? {
+        if needs_index(&tags, &releases) {
+            read_index(&mut releases)?;
+            index_read = true;
+        }
+        loop {
+            let stable = pass.first_release(repo, Some(id), &releases, false, cancel)?;
+            let stable_found = matches!(stable, Some(PluginReleaseResolveResult::Success(_)));
+            // The highest pre-release, for the beta channel, and on stable for
+            // saying the plugin has only pre-releases.
+            let pre_release = if stable_found && channel != PluginReleaseChannel::Beta {
+                None
+            } else {
+                match pass.first_release(repo, Some(id), &releases, true, cancel) {
+                    Ok(found) => found,
+                    Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
+                    // A beta that cannot be read is simply not offered.
+                    Err(_) => None,
+                }
+            };
+            let pre_release = pre_release
+                .filter(|result| matches!(result, PluginReleaseResolveResult::Success(_)));
+            // Every feed candidate was another plugin's (or there were none):
+            // this plugin's releases may have left the feed.
+            if !index_read && !stable_found && pre_release.is_none() {
+                read_index(&mut releases)?;
+                index_read = true;
+                continue;
+            }
+            if index_rate_limited && !stable_found && pre_release.is_none() {
+                return only(PluginReleaseResolveResult::RateLimited);
+            }
+            let stable = match stable {
+                Some(result) => result,
+                None => match pre_release.as_ref().and_then(|result| result.resolution()) {
+                    Some(found) => PluginReleaseResolveResult::Prerelease(format!(
+                        "the latest release of '{repo}' is a pre-release ({})",
+                        found.manifest.version
+                    )),
+                    None => PluginReleaseResolveResult::Unavailable,
+                },
+            };
+            let beta = pre_release.filter(|_| channel == PluginReleaseChannel::Beta);
+            return Ok(PluginReleaseCandidates {
+                stable,
+                beta,
+                index_warning,
+            });
+        }
+    }
+
+    /// The candidates of the repository's `wasm-v` tags, with no plugin id.
+    fn wasm_v_candidates(
+        &self,
+        repo: &str,
+        tags: &[String],
+        channel: PluginReleaseChannel,
+        cancel: &CancelToken,
+    ) -> Result<PluginReleaseCandidates, UpdateError> {
+        let releases: Vec<PluginFeedRelease> = tags
+            .iter()
+            .filter_map(|tag| parse_release(tag, WASM_TAG_PREFIX))
+            .collect();
+        let stable = match self.first_release(repo, None, &releases, false, cancel)? {
             Some(result) => result,
             None => match highest(&releases, true) {
                 Some(pre_release) => PluginReleaseResolveResult::Prerelease(format!(
@@ -547,7 +612,7 @@ impl PluginReleaseResolver {
         };
         let beta = if channel == PluginReleaseChannel::Beta {
             // A beta that cannot be read is simply not offered.
-            match self.first_release(repo, id, &releases, true, cancel) {
+            match self.first_release(repo, None, &releases, true, cancel) {
                 Ok(Some(result @ PluginReleaseResolveResult::Success(_))) => Some(result),
                 Ok(_) => None,
                 Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
@@ -559,7 +624,7 @@ impl PluginReleaseResolver {
         Ok(PluginReleaseCandidates {
             stable,
             beta,
-            index_warning,
+            index_warning: None,
         })
     }
 
@@ -858,7 +923,9 @@ fn ids_in_tag(tag: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Whether resolving plugin `id` reads its repository's index: when the feed
+/// Whether resolving plugin `id` reads its repository's index before trying
+/// the feed's candidates (it is also read after them when none was the
+/// plugin's): when the feed
 /// shows a tag other than `wasm-v<version>` in this client's `wasm-` space (a
 /// plugin-named tag, or the index's own release), or has no release that may
 /// be the plugin's. A repository publishing one plugin under `wasm-v` tags

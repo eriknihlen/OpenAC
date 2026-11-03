@@ -2470,6 +2470,57 @@ fn a_pass_keeps_no_rate_limited_fetch() {
     assert_eq!(tag_of(&result), "wasm-v0.2.0");
 }
 
+// Erik's case: a new plugin in a repository whose older plugin used `wasm-v`
+// tags, the new one's releases pushed off the feed.
+#[test]
+fn a_feed_of_another_plugins_wasm_v_tags_still_reads_the_index() {
+    let server = suite_server(&[
+        ("wasm-v0.9.2", "aethrix.vision", "0.9.2"),
+        ("wasm-v0.9.1", "aethrix.vision", "0.9.1"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.4.0");
+    assert_eq!(server.count(&index_uri()), 1);
+    // Each refused manifest was read once, not again after the index.
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.9.2", "plugin.json")),
+        1
+    );
+    // The plugin those tags are is still found without the index.
+    let server = suite_server(&[("wasm-v0.9.2", "aethrix.vision", "0.9.2")]);
+    let result = resolve_plugin(&server, "aethrix.vision", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.2");
+    assert_eq!(server.count(&index_uri()), 0);
+}
+
+#[test]
+fn the_pre_release_message_names_only_this_plugins_pre_release() {
+    // Another plugin's `wasm-v` beta is not this plugin's pre-release.
+    let server = suite_server(&[("wasm-v1.0.0-beta.1", "aethrix.vision", "1.0.0-beta.1")]);
+    assert_eq!(
+        resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Unavailable
+    );
+    let server = suite_server(&[(
+        "wasm-aethrix.navigation-v0.5.0-beta.1",
+        "aethrix.navigation",
+        "0.5.0-beta.1",
+    )]);
+    let PluginReleaseResolveResult::Prerelease(message) =
+        resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable)
+    else {
+        panic!("expected a pre-release");
+    };
+    assert!(message.contains("0.5.0-beta.1"), "{message}");
+}
+
 // --- Every plugin a repository publishes (Add from URL) ---------------------------------------
 
 fn repository_ids(server: &FakeServer) -> Vec<(String, String)> {
