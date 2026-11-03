@@ -5,7 +5,8 @@
 //! naming `entryDll` was built for OpenAC's C# host and that parser refuses
 //! it ("built for OpenAC (C#)"). This module adds what a published plugin
 //! must also meet (OpenAC's install rules) and the release tag that names a
-//! WebAssembly build (`wasm-v<version>`).
+//! WebAssembly build (`wasm-v<version>`, or `wasm-<plugin id>-v<version>`
+//! in a repository that publishes several plugins).
 
 pub use ac_plugin::HostVersion;
 pub use ac_plugin::abi::{API_CURRENT, API_MINIMUM, ApiVersion, PERMISSIONS_VERSION, Permission};
@@ -20,6 +21,18 @@ pub const WASM_TAG_PREFIX: &str = "wasm-v";
 /// The release tag of a WebAssembly build of `version`.
 pub fn release_tag(version: &str) -> String {
     format!("{WASM_TAG_PREFIX}{version}")
+}
+
+/// How a release tag of one plugin in a repository that publishes several
+/// begins: `wasm-<plugin id>-v`.
+pub fn plugin_tag_prefix(id: &str) -> String {
+    format!("wasm-{id}-v")
+}
+
+/// The release tag of a WebAssembly build of plugin `id` at `version`, for
+/// a repository that publishes several plugins.
+pub fn plugin_release_tag(id: &str, version: &str) -> String {
+    format!("{}{version}", plugin_tag_prefix(id))
 }
 
 /// Whether the parser refused a manifest because its permission vocabulary
@@ -73,8 +86,8 @@ pub trait InstallRules {
     /// and the note rules.)
     fn validate_for_install(&self) -> Result<(), ManifestError>;
 
-    /// Whether a release tag names this manifest's version
-    /// (`wasm-v<version>`).
+    /// Whether a release tag names this manifest's version, as
+    /// `wasm-v<version>` or `wasm-<id>-v<version>`.
     fn matches_tag(&self, tag: &str) -> bool;
 }
 
@@ -120,7 +133,7 @@ impl InstallRules for PluginManifest {
     }
 
     fn matches_tag(&self, tag: &str) -> bool {
-        tag == release_tag(&self.version)
+        tag == release_tag(&self.version) || tag == plugin_release_tag(&self.id, &self.version)
     }
 }
 

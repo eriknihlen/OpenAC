@@ -1,11 +1,12 @@
 //! Plugin releases on GitHub: fetching small release documents (catching
 //! the tag a `latest` redirect resolves to, which the curated list uses),
-//! reading the releases Atom feed for this client's `wasm-v` releases, and
-//! resolving a repository to the release to offer.
+//! reading the releases Atom feed for this client's releases (`wasm-v`, and
+//! `wasm-<plugin id>-v` in a repository that publishes several plugins), and
+//! resolving a repository (and plugin id) to the release to offer.
 
 use std::sync::Arc;
 
-use super::manifest::{InstallRules, PluginManifest, WASM_TAG_PREFIX};
+use super::manifest::{InstallRules, PluginManifest, WASM_TAG_PREFIX, plugin_tag_prefix};
 use super::record_store::PluginReleaseChannel;
 use super::rules::github;
 use crate::cancel::CancelToken;
@@ -18,6 +19,10 @@ pub const MAXIMUM_DOCUMENT_BYTES: u64 = 256 * 1024;
 
 /// Largest releases feed.
 pub const FEED_MAXIMUM_BYTES: u64 = 1024 * 1024;
+
+/// How many candidates naming another plugin a channel skips before it
+/// gives up, bounding the `plugin.json` fetches one resolution makes.
+pub const MAXIMUM_REFUSED_CANDIDATES: usize = 3;
 
 /// A fetched document and, when a `latest/download` redirect named one, the
 /// release tag.
@@ -139,7 +144,7 @@ const ATOM: &str = "http://www.w3.org/2005/Atom";
 /// A WebAssembly release found on a feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginFeedRelease {
-    /// Its tag (`wasm-v` + version).
+    /// Its tag (`wasm-v` or `wasm-<plugin id>-v`, then the version).
     pub tag: String,
     /// Its version.
     pub version: LauncherVersion,
@@ -150,7 +155,8 @@ pub struct PluginFeedRelease {
 #[error("{0}")]
 pub struct PluginReleaseFeedError(pub String);
 
-fn match_release(href: &str, repo: &str) -> Option<PluginFeedRelease> {
+/// The release tag a feed link names, when it is this repository's.
+fn match_release_link(href: &str, repo: &str) -> Option<String> {
     let url = WebUrl::parse(href)?;
     if !url.is_https()
         || !url.host().eq_ignore_ascii_case("github.com")
@@ -170,8 +176,13 @@ fn match_release(href: &str, repo: &str) -> Option<PluginFeedRelease> {
     {
         return None;
     }
-    let tag = segments[4];
-    let version_text = tag.strip_prefix(WASM_TAG_PREFIX)?;
+    Some(segments[4].to_owned())
+}
+
+/// The release `tag` names when it is `prefix` followed by a strict SemVer
+/// version with no build metadata.
+fn parse_release(tag: &str, prefix: &str) -> Option<PluginFeedRelease> {
+    let version_text = tag.strip_prefix(prefix)?;
     if version_text.contains('+') {
         return None;
     }
@@ -186,12 +197,34 @@ fn match_release(href: &str, repo: &str) -> Option<PluginFeedRelease> {
 /// that is a direct child of an `entry` counts, naming
 /// `https://github.com/<owner>/<repo>/releases/tag/wasm-v<version>` for this
 /// repository with no query, fragment or build metadata; any other tag (an
-/// OpenAC C# release's `v<version>` among them) is not this client's.
+/// OpenAC C# release's `v<version>` and a plugin-named
+/// `wasm-<plugin id>-v<version>` among them) is not counted here.
 /// Malformed XML or a DTD is an error.
 pub fn wasm_releases(
     content: &[u8],
     repo: &str,
 ) -> Result<Vec<PluginFeedRelease>, PluginReleaseFeedError> {
+    Ok(feed_tags(content, repo)?
+        .iter()
+        .filter_map(|tag| parse_release(tag, WASM_TAG_PREFIX))
+        .collect())
+}
+
+/// The releases among `tags` that may be plugin `id`'s: its own
+/// `wasm-<id>-v<version>` tags, matched by exact prefix, and the repository's
+/// `wasm-v<version>` tags (a plugin's `plugin.json` decides whose they are).
+pub fn plugin_releases(tags: &[String], id: &str) -> Vec<PluginFeedRelease> {
+    let prefix = plugin_tag_prefix(id);
+    tags.iter()
+        .filter_map(|tag| {
+            parse_release(tag, &prefix).or_else(|| parse_release(tag, WASM_TAG_PREFIX))
+        })
+        .collect()
+}
+
+/// Every release tag a repository's releases feed links to, by the link
+/// rules of [`wasm_releases`], before any tag form is read.
+pub fn feed_tags(content: &[u8], repo: &str) -> Result<Vec<String>, PluginReleaseFeedError> {
     let text = std::str::from_utf8(content)
         .map_err(|_| PluginReleaseFeedError("the releases feed is not UTF-8".into()))?;
     // roxmltree refuses a DTD unless asked to allow one.
@@ -203,7 +236,7 @@ pub fn wasm_releases(
             "the releases feed has no <feed> root".into(),
         ));
     }
-    let mut releases = Vec::new();
+    let mut tags = Vec::new();
     for entry in feed
         .children()
         .filter(|node| node.is_element() && node.has_tag_name((ATOM, "entry")))
@@ -212,15 +245,15 @@ pub fn wasm_releases(
             .children()
             .filter(|node| node.is_element() && node.has_tag_name((ATOM, "link")))
         {
-            if let Some(release) = link
+            if let Some(tag) = link
                 .attribute("href")
-                .and_then(|href| match_release(href, repo))
+                .and_then(|href| match_release_link(href, repo))
             {
-                releases.push(release);
+                tags.push(tag);
             }
         }
     }
-    Ok(releases)
+    Ok(tags)
 }
 
 fn highest(releases: &[PluginFeedRelease], pre_release: bool) -> Option<&PluginFeedRelease> {
@@ -330,10 +363,12 @@ impl PluginReleaseCandidates {
 }
 
 /// Resolves repositories to releases. Both channels come from one fetch of
-/// the repository's releases feed: the highest `wasm-v<version>` stable
-/// release, and on beta the highest `wasm-v<version>` pre-release. A
-/// repository's
-/// `releases/latest` belongs to OpenAC's C# launcher and is never read.
+/// the repository's releases feed: the highest stable release, and on beta
+/// the highest pre-release. Without a plugin id only `wasm-v<version>` tags
+/// count; with one, its `wasm-<id>-v<version>` tags count too, and a
+/// candidate whose `plugin.json` names another plugin is skipped for the
+/// next highest. A repository's `releases/latest` belongs to OpenAC's C#
+/// launcher and is never read.
 #[derive(Debug, Clone)]
 pub struct PluginReleaseResolver {
     client: PluginReleaseClient,
@@ -346,10 +381,46 @@ impl PluginReleaseResolver {
     }
 
     /// Resolves the stable release and, on beta, the highest pre-release
-    /// too.
+    /// too, from the repository's `wasm-v` tags.
     pub fn resolve_candidates(
         &self,
         repo: &str,
+        channel: PluginReleaseChannel,
+        cancel: &CancelToken,
+    ) -> Result<PluginReleaseCandidates, UpdateError> {
+        self.candidates(repo, None, channel, cancel)
+    }
+
+    /// Resolves plugin `id`'s stable release and, on beta, its highest
+    /// pre-release too.
+    pub fn resolve_plugin_candidates(
+        &self,
+        repo: &str,
+        id: &str,
+        channel: PluginReleaseChannel,
+        cancel: &CancelToken,
+    ) -> Result<PluginReleaseCandidates, UpdateError> {
+        self.candidates(repo, Some(id), channel, cancel)
+    }
+
+    /// The release the channel offers for plugin `id`.
+    pub fn resolve_plugin(
+        &self,
+        repo: &str,
+        id: &str,
+        channel: PluginReleaseChannel,
+        cancel: &CancelToken,
+    ) -> Result<PluginReleaseResolveResult, UpdateError> {
+        Ok(self
+            .resolve_plugin_candidates(repo, id, channel, cancel)?
+            .for_channel(channel)
+            .clone())
+    }
+
+    fn candidates(
+        &self,
+        repo: &str,
+        id: Option<&str>,
         channel: PluginReleaseChannel,
         cancel: &CancelToken,
     ) -> Result<PluginReleaseCandidates, UpdateError> {
@@ -372,31 +443,78 @@ impl PluginReleaseResolver {
             // An oversized feed or a redirect off HTTPS: no release can be read from it.
             Err(_) => return only(PluginReleaseResolveResult::Unavailable),
         };
-        let releases = match wasm_releases(&feed.content, repo) {
-            Ok(releases) => releases,
+        let tags = match feed_tags(&feed.content, repo) {
+            Ok(tags) => tags,
             Err(error) => return only(PluginReleaseResolveResult::Invalid(error.to_string())),
         };
-        let stable = match (highest(&releases, false), highest(&releases, true)) {
-            (Some(release), _) => self.resolve_tag(repo, &release.tag, cancel)?,
-            (None, Some(pre_release)) => PluginReleaseResolveResult::Prerelease(format!(
-                "the latest release of '{repo}' is a pre-release ({})",
-                pre_release.version.value()
-            )),
-            (None, None) => PluginReleaseResolveResult::Unavailable,
+        let releases = match id {
+            Some(id) => plugin_releases(&tags, id),
+            None => tags
+                .iter()
+                .filter_map(|tag| parse_release(tag, WASM_TAG_PREFIX))
+                .collect(),
         };
-        let beta = match highest(&releases, true) {
-            Some(release) if channel == PluginReleaseChannel::Beta => {
-                // A beta that cannot be read is simply not offered.
-                match self.resolve_tag(repo, &release.tag, cancel) {
-                    Ok(result @ PluginReleaseResolveResult::Success(_)) => Some(result),
-                    Ok(_) => None,
-                    Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
-                    Err(_) => None,
-                }
+        let stable = match self.first_release(repo, id, &releases, false, cancel)? {
+            Some(result) => result,
+            None => match highest(&releases, true) {
+                Some(pre_release) => PluginReleaseResolveResult::Prerelease(format!(
+                    "the latest release of '{repo}' is a pre-release ({})",
+                    pre_release.version.value()
+                )),
+                None => PluginReleaseResolveResult::Unavailable,
+            },
+        };
+        let beta = if channel == PluginReleaseChannel::Beta {
+            // A beta that cannot be read is simply not offered.
+            match self.first_release(repo, id, &releases, true, cancel) {
+                Ok(Some(result @ PluginReleaseResolveResult::Success(_))) => Some(result),
+                Ok(_) => None,
+                Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
+                Err(_) => None,
             }
-            _ => None,
+        } else {
+            None
         };
         Ok(PluginReleaseCandidates { stable, beta })
+    }
+
+    /// The highest stable release (or pre-release) of `releases` whose
+    /// `plugin.json` is plugin `id`'s, skipping at most
+    /// [`MAXIMUM_REFUSED_CANDIDATES`] that name another plugin; `None` when
+    /// none is found. On a tie a `wasm-<id>-v` tag is tried before `wasm-v`.
+    fn first_release(
+        &self,
+        repo: &str,
+        id: Option<&str>,
+        releases: &[PluginFeedRelease],
+        pre_release: bool,
+        cancel: &CancelToken,
+    ) -> Result<Option<PluginReleaseResolveResult>, UpdateError> {
+        let mut candidates: Vec<&PluginFeedRelease> = releases
+            .iter()
+            .filter(|release| release.version.is_pre_release() == pre_release)
+            .collect();
+        candidates.sort_by(|a, b| {
+            b.version.cmp(&a.version).then_with(|| {
+                a.tag
+                    .starts_with(WASM_TAG_PREFIX)
+                    .cmp(&b.tag.starts_with(WASM_TAG_PREFIX))
+            })
+        });
+        candidates.dedup_by(|a, b| a.tag == b.tag);
+        let mut refused = 0;
+        for candidate in candidates {
+            match self.resolve_tag(repo, &candidate.tag, id, cancel)? {
+                TagOutcome::Resolved(result) => return Ok(Some(result)),
+                TagOutcome::AnotherPlugin => {
+                    refused += 1;
+                    if refused == MAXIMUM_REFUSED_CANDIDATES {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// The release the channel offers.
@@ -413,15 +531,17 @@ impl PluginReleaseResolver {
     }
 
     /// The release tagged `tag`: its `plugin.json`, read by the client's
-    /// parser, naming the tag's version.
+    /// parser, naming plugin `id` (when given) and the tag's version.
     fn resolve_tag(
         &self,
         repo: &str,
         tag: &str,
+        id: Option<&str>,
         cancel: &CancelToken,
-    ) -> Result<PluginReleaseResolveResult, UpdateError> {
+    ) -> Result<TagOutcome, UpdateError> {
+        let resolved = |result| Ok(TagOutcome::Resolved(result));
         let Some(url) = github::tagged_asset(repo, tag, "plugin.json") else {
-            return Ok(PluginReleaseResolveResult::Unavailable);
+            return resolved(PluginReleaseResolveResult::Unavailable);
         };
         let document = match self
             .client
@@ -429,10 +549,10 @@ impl PluginReleaseResolver {
         {
             PluginReleaseFetchResult::Success(document) => document,
             PluginReleaseFetchResult::RateLimited => {
-                return Ok(PluginReleaseResolveResult::RateLimited);
+                return resolved(PluginReleaseResolveResult::RateLimited);
             }
             PluginReleaseFetchResult::Unavailable => {
-                return Ok(PluginReleaseResolveResult::Unavailable);
+                return resolved(PluginReleaseResolveResult::Unavailable);
             }
         };
         let content = document
@@ -441,15 +561,18 @@ impl PluginReleaseResolver {
             .unwrap_or(&document.content);
         let manifest = match PluginManifest::parse(&String::from_utf8_lossy(content)) {
             Ok(manifest) => manifest,
-            Err(error) => return Ok(PluginReleaseResolveResult::Invalid(error.to_string())),
+            Err(error) => return resolved(PluginReleaseResolveResult::Invalid(error.to_string())),
         };
+        if id.is_some_and(|id| !manifest.id.eq_ignore_ascii_case(id)) {
+            return Ok(TagOutcome::AnotherPlugin);
+        }
         if !manifest.matches_tag(tag) {
-            return Ok(PluginReleaseResolveResult::Invalid(format!(
+            return resolved(PluginReleaseResolveResult::Invalid(format!(
                 "the release tag does not match plugin version {}",
                 manifest.version
             )));
         }
-        Ok(PluginReleaseResolveResult::Success(Box::new(
+        resolved(PluginReleaseResolveResult::Success(Box::new(
             PluginReleaseResolution {
                 tag: tag.to_owned(),
                 manifest_bytes: document.content,
@@ -457,4 +580,12 @@ impl PluginReleaseResolver {
             },
         )))
     }
+}
+
+/// What one tag's `plugin.json` gave.
+enum TagOutcome {
+    /// A result for the plugin asked for.
+    Resolved(PluginReleaseResolveResult),
+    /// The release is another plugin's.
+    AnotherPlugin,
 }

@@ -25,8 +25,8 @@ use ac_launcher_core::plugins::{
     PluginReleaseFetchResult, PluginReleaseResolution, PluginReleaseResolveResult,
     PluginReleaseResolver, PluginSha256File, SESSION_LEASE_REFUSAL, THIS_CLIENT, describe,
     direct_install_refusal, evaluate_version_compatibility, find_block_reason, github,
-    highest_prerelease, highest_stable, is_built_for_csharp, release_tag, validate_icon,
-    validate_plugin_content, version_only_reason, without_client_version,
+    highest_prerelease, highest_stable, is_built_for_csharp, plugin_release_tag, release_tag,
+    validate_icon, validate_plugin_content, version_only_reason, without_client_version,
 };
 use ac_launcher_core::updates::{
     ClientVersionResolution, ClientVersionState, ExtractedFileRecord, LauncherVersion, UpdateError,
@@ -184,6 +184,22 @@ fn matches_tag_requires_a_wasm_v_leading_version() {
     assert!(!manifest.matches_tag("wasm-v0.1.1"));
     assert!(!manifest.matches_tag("v0.1.0"));
     assert!(!manifest.matches_tag("0.1.0"));
+}
+
+// A repository that publishes several plugins tags each one
+// `wasm-<plugin id>-v<version>`; the old `wasm-v` form still matches.
+#[test]
+fn matches_tag_accepts_the_plugin_id_form_for_its_own_id_only() {
+    let manifest = parse(VALID_JSON);
+    assert_eq!(
+        plugin_release_tag("edwards.hello", "0.1.0"),
+        "wasm-edwards.hello-v0.1.0"
+    );
+    assert!(manifest.matches_tag("wasm-edwards.hello-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hello-v0.1.1"));
+    assert!(!manifest.matches_tag("wasm-edwards.other-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hell-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hello-0.1.0"));
 }
 
 // OpenAC LauncherPluginManifestTests.AbsentCapabilitiesParseToEmpty.
@@ -1945,6 +1961,155 @@ fn only_the_beta_channel_fetches_the_pre_release_manifest() {
     assert!(candidates.beta.is_some());
     assert_eq!(server.count(&feed_uri()), 2);
     assert_eq!(server.count(&beta_manifest), 1);
+}
+
+// --- Several plugins in one repository ---------------------------------------------------------
+
+fn plugin_manifest(id: &str, version: &str) -> Vec<u8> {
+    format!(
+        r#"{{ "id": "{id}", "displayName": "P", "version": "{version}", "entry": "p.wasm",
+              "apiVersion": "1.0" }}"#
+    )
+    .into_bytes()
+}
+
+/// A repository whose feed lists each `(tag, id, version)` in order, the
+/// tag serving a manifest naming `id` and `version`.
+fn suite_server(releases: &[(&str, &str, &str)]) -> FakeServer {
+    let server = FakeServer::new();
+    let entries: String = releases.iter().map(|(tag, ..)| entry(&link(tag))).collect();
+    server.add(&feed_uri(), &feed(&entries));
+    for (tag, id, version) in releases {
+        server.add(
+            &tagged(HELLO_REPO, tag, "plugin.json"),
+            &plugin_manifest(id, version),
+        );
+    }
+    server
+}
+
+fn resolve_plugin(
+    server: &FakeServer,
+    id: &str,
+    channel: PluginReleaseChannel,
+) -> PluginReleaseResolveResult {
+    resolver(server)
+        .resolve_plugin(HELLO_REPO, id, channel, &none())
+        .unwrap()
+}
+
+#[test]
+fn a_plugin_resolves_from_its_own_tags_beside_another_plugins() {
+    let server = suite_server(&[
+        ("wasm-edwards.other-v2.0.0", "edwards.other", "2.0.0"),
+        ("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0"),
+        ("wasm-edwards.hello-v0.2.0", "edwards.hello", "0.2.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.3.0");
+    let result = resolve_plugin(&server, "edwards.other", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.other-v2.0.0");
+    // Another plugin's tag is never fetched.
+    assert_eq!(
+        server.count(&tagged(
+            HELLO_REPO,
+            "wasm-edwards.hello-v0.2.0",
+            "plugin.json"
+        )),
+        0
+    );
+    // The id-less resolution reads only `wasm-v` tags, as before.
+    assert_eq!(
+        resolver(&server)
+            .resolve(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+            .unwrap(),
+        PluginReleaseResolveResult::Unavailable
+    );
+}
+
+#[test]
+fn old_wasm_v_tags_count_only_for_the_plugin_their_manifest_names() {
+    // A new plugin in a repository whose older plugin used `wasm-v` tags.
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "edwards.other", "0.9.0"),
+        ("wasm-edwards.hello-v0.1.0", "edwards.hello", "0.1.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0");
+    let result = resolve_plugin(&server, "edwards.other", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.0");
+    // A plugin moving from `wasm-v` to its own tags keeps both.
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "edwards.hello", "0.9.0"),
+        ("wasm-edwards.hello-v0.8.0", "edwards.hello", "0.8.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.0");
+}
+
+#[test]
+fn a_tag_another_id_parses_as_is_skipped_for_the_next_highest() {
+    // `edwards.hello-v1.0.0` is a valid id, so its tag reads as a
+    // pre-release of `edwards.hello`.
+    let server = suite_server(&[
+        (
+            "wasm-edwards.hello-v1.0.0-v2.0.0",
+            "edwards.hello-v1.0.0",
+            "2.0.0",
+        ),
+        (
+            "wasm-edwards.hello-v0.5.0-beta.1",
+            "edwards.hello",
+            "0.5.0-beta.1",
+        ),
+        ("wasm-edwards.hello-v0.4.0", "edwards.hello", "0.4.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.5.0-beta.1");
+}
+
+#[test]
+fn skipping_stops_after_three_refused_candidates() {
+    let refused = |count: usize| -> Vec<(String, String)> {
+        (0..count)
+            .map(|index| {
+                let version = format!("0.{}.0", 9 - index);
+                (format!("wasm-v{version}"), version)
+            })
+            .collect()
+    };
+    for (count, found) in [(2, true), (3, false)] {
+        let others = refused(count);
+        let mut releases: Vec<(&str, &str, &str)> = others
+            .iter()
+            .map(|(tag, version)| (tag.as_str(), "edwards.other", version.as_str()))
+            .collect();
+        releases.push(("wasm-edwards.hello-v0.1.0", "edwards.hello", "0.1.0"));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+        if found {
+            assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0");
+        } else {
+            assert_eq!(result, PluginReleaseResolveResult::Unavailable, "{count}");
+            assert_eq!(
+                server.count(&tagged(
+                    HELLO_REPO,
+                    "wasm-edwards.hello-v0.1.0",
+                    "plugin.json"
+                )),
+                0
+            );
+        }
+    }
+}
+
+#[test]
+fn a_tag_naming_the_wrong_version_is_still_invalid() {
+    let server = suite_server(&[("wasm-edwards.hello-v0.2.0", "edwards.hello", "0.3.0")]);
+    assert!(matches!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Invalid(_)
+    ));
 }
 
 // --- PluginInstallerTests ---------------------------------------------------------------------
