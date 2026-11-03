@@ -1906,6 +1906,7 @@ fn candidates_choose_by_channel_and_precedence() {
     let only_stable = PluginReleaseCandidates {
         stable: stable.clone(),
         beta: None,
+        index_warning: None,
     };
     assert_eq!(only_stable.for_channel(PluginReleaseChannel::Beta), &stable);
 
@@ -1914,6 +1915,7 @@ fn candidates_choose_by_channel_and_precedence() {
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.4.0-beta.1",
         ))),
+        index_warning: None,
     };
     assert_eq!(
         tag_of(failed_stable.for_channel(PluginReleaseChannel::Beta)),
@@ -1926,12 +1928,14 @@ fn candidates_choose_by_channel_and_precedence() {
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.4.0-beta.1",
         ))),
+        index_warning: None,
     };
     let lower = PluginReleaseCandidates {
         stable,
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.3.0-beta.2",
         ))),
+        index_warning: None,
     };
     assert_eq!(
         tag_of(higher.for_channel(PluginReleaseChannel::Beta)),
@@ -2245,6 +2249,145 @@ fn the_index_round_trips_and_an_entry_can_be_replaced() {
         PluginIndex::new().to_json(),
         "{\n  \"schemaVersion\": 1,\n  \"plugins\": []\n}\n"
     );
+}
+
+// --- Resolving from the feed and the index together -----------------------------------------------
+
+fn index_uri() -> String {
+    tagged(HELLO_REPO, PLUGIN_INDEX_TAG, PLUGIN_INDEX_ASSET)
+}
+
+fn serve_manifest(server: &FakeServer, tag: &str, id: &str, version: &str) {
+    server.add(
+        &tagged(HELLO_REPO, tag, "plugin.json"),
+        &plugin_manifest(id, version),
+    );
+}
+
+#[test]
+fn a_plugin_pushed_off_the_feed_is_found_through_the_index() {
+    let vision: Vec<(String, String)> = (0..10)
+        .map(|patch| {
+            let version = format!("1.0.{patch}");
+            (format!("wasm-aethrix.vision-v{version}"), version)
+        })
+        .collect();
+    let releases: Vec<(&str, &str, &str)> = vision
+        .iter()
+        .map(|(tag, version)| (tag.as_str(), "aethrix.vision", version.as_str()))
+        .collect();
+    let server = suite_server(&releases);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.4.0");
+    assert_eq!(server.count(&index_uri()), 1);
+    // A plugin still on the feed takes the highest of both: the index's 1.2.0
+    // over the feed's 1.0.9.
+    serve_manifest(
+        &server,
+        "wasm-aethrix.vision-v1.2.0",
+        "aethrix.vision",
+        "1.2.0",
+    );
+    let result = resolve_plugin(&server, "aethrix.vision", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.vision-v1.2.0");
+}
+
+#[test]
+fn a_stale_index_never_hides_a_newer_release_on_the_feed() {
+    let server = suite_server(&[(
+        "wasm-aethrix.navigation-v0.5.0",
+        "aethrix.navigation",
+        "0.5.0",
+    )]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.5.0");
+}
+
+#[test]
+fn a_single_plugin_repository_never_fetches_the_index() {
+    let server = release_server(&["v0.9.0", "wasm-v0.2.0", "wasm-v0.1.0"]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+    resolver(&server)
+        .resolve(HELLO_REPO, PluginReleaseChannel::Beta, &none())
+        .unwrap();
+    assert_eq!(server.count(&index_uri()), 0);
+}
+
+#[test]
+fn the_index_is_fetched_when_the_feed_has_nothing_for_the_plugin() {
+    // Only C# releases: one request for an index that is not there.
+    let server = release_server(&["v0.5.1"]);
+    assert_eq!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Unavailable
+    );
+    assert_eq!(server.count(&index_uri()), 1);
+    // The id-less resolution never reads it.
+    resolver(&server)
+        .resolve(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+        .unwrap();
+    assert_eq!(server.count(&index_uri()), 1);
+}
+
+#[test]
+fn a_rate_limited_index_is_reported_only_when_the_feed_had_nothing() {
+    let server = release_server(&["v0.5.1"]);
+    server.add_route(&index_uri(), Route::Status(429));
+    assert_eq!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::RateLimited
+    );
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add_route(&index_uri(), Route::Status(429));
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.3.0");
+}
+
+#[test]
+fn a_malformed_index_is_ignored_with_a_warning() {
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(
+        &index_uri(),
+        br#"{ "schemaVersion": 1, "plugins": [ { "id": "x" } ] }"#,
+    );
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&candidates.stable), "wasm-edwards.hello-v0.3.0");
+    let warning = candidates.index_warning.unwrap();
+    assert!(warning.contains("plugin index is invalid"), "{warning}");
+    // A good index gives no warning.
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(candidates.index_warning, None);
 }
 
 // --- PluginInstallerTests ---------------------------------------------------------------------

@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::index::{PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex};
 use super::manifest::{InstallRules, PluginManifest, WASM_TAG_PREFIX, plugin_tag_prefix};
 use super::record_store::PluginReleaseChannel;
 use super::rules::github;
@@ -335,6 +336,9 @@ pub struct PluginReleaseCandidates {
     pub stable: PluginReleaseResolveResult,
     /// The beta candidate, when asked for and found.
     pub beta: Option<PluginReleaseResolveResult>,
+    /// Why the repository's plugin index was ignored, when it was published
+    /// but could not be read: for the publisher, not the player.
+    pub index_warning: Option<String>,
 }
 
 impl PluginReleaseCandidates {
@@ -368,9 +372,11 @@ impl PluginReleaseCandidates {
 /// Resolves repositories to releases. Both channels come from one fetch of
 /// the repository's releases feed: the highest stable release, and on beta
 /// the highest pre-release. Without a plugin id only `wasm-v<version>` tags
-/// count; with one, its `wasm-<id>-v<version>` tags count too, and a
-/// candidate whose `plugin.json` names another plugin is skipped for the
-/// next highest. A repository's `releases/latest` belongs to OpenAC's C#
+/// count; with one, its `wasm-<id>-v<version>` tags count too, together with
+/// the tags the repository's plugin index names for it (read only when the
+/// feed shows a repository publishing several plugins, or nothing for this
+/// one: the feed lists only the latest ten releases), and a candidate whose
+/// `plugin.json` names another plugin is skipped for the next highest. A repository's `releases/latest` belongs to OpenAC's C#
 /// launcher and is never read.
 #[derive(Debug, Clone)]
 pub struct PluginReleaseResolver {
@@ -427,35 +433,43 @@ impl PluginReleaseResolver {
         channel: PluginReleaseChannel,
         cancel: &CancelToken,
     ) -> Result<PluginReleaseCandidates, UpdateError> {
-        let feed_url = github::releases_feed(repo).ok_or_else(|| {
-            UpdateError::failed(format!("'{repo}' is not an 'owner/name' repository."))
-        })?;
-        let only = |stable| Ok(PluginReleaseCandidates { stable, beta: None });
-        let feed = match self
-            .client
-            .fetch_document(&feed_url, FEED_MAXIMUM_BYTES, cancel)
-        {
-            Ok(PluginReleaseFetchResult::Success(document)) => document,
-            Ok(PluginReleaseFetchResult::RateLimited) => {
-                return only(PluginReleaseResolveResult::RateLimited);
-            }
-            Ok(PluginReleaseFetchResult::Unavailable) => {
-                return only(PluginReleaseResolveResult::Unavailable);
-            }
-            Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
-            // An oversized feed or a redirect off HTTPS: no release can be read from it.
-            Err(_) => return only(PluginReleaseResolveResult::Unavailable),
+        let only = |stable| {
+            Ok(PluginReleaseCandidates {
+                stable,
+                beta: None,
+                index_warning: None,
+            })
         };
-        let tags = match feed_tags(&feed.content, repo) {
+        let tags = match self.read_feed(repo, cancel)? {
             Ok(tags) => tags,
-            Err(error) => return only(PluginReleaseResolveResult::Invalid(error.to_string())),
+            Err(result) => return only(result),
         };
+        let mut index_warning = None;
         let releases = match id {
-            Some(id) => plugin_releases(&tags, id),
             None => tags
                 .iter()
                 .filter_map(|tag| parse_release(tag, WASM_TAG_PREFIX))
                 .collect(),
+            Some(id) => {
+                let mut releases = plugin_releases(&tags, id);
+                if needs_index(&tags, &releases) {
+                    match self.read_index(repo, cancel)? {
+                        IndexRead::Read(index) => {
+                            for release in index.releases_for(id) {
+                                if !releases.iter().any(|known| known.tag == release.tag) {
+                                    releases.push(release);
+                                }
+                            }
+                        }
+                        IndexRead::Malformed(warning) => index_warning = Some(warning),
+                        IndexRead::RateLimited if releases.is_empty() => {
+                            return only(PluginReleaseResolveResult::RateLimited);
+                        }
+                        IndexRead::RateLimited | IndexRead::Missing => {}
+                    }
+                }
+                releases
+            }
         };
         let stable = match self.first_release(repo, id, &releases, false, cancel)? {
             Some(result) => result,
@@ -478,7 +492,71 @@ impl PluginReleaseResolver {
         } else {
             None
         };
-        Ok(PluginReleaseCandidates { stable, beta })
+        Ok(PluginReleaseCandidates {
+            stable,
+            beta,
+            index_warning,
+        })
+    }
+
+    /// The release tags on `repo`'s feed, or the result to give when it
+    /// cannot be read.
+    fn read_feed(
+        &self,
+        repo: &str,
+        cancel: &CancelToken,
+    ) -> Result<Result<Vec<String>, PluginReleaseResolveResult>, UpdateError> {
+        let feed_url = github::releases_feed(repo).ok_or_else(|| {
+            UpdateError::failed(format!("'{repo}' is not an 'owner/name' repository."))
+        })?;
+        let feed = match self
+            .client
+            .fetch_document(&feed_url, FEED_MAXIMUM_BYTES, cancel)
+        {
+            Ok(PluginReleaseFetchResult::Success(document)) => document,
+            Ok(PluginReleaseFetchResult::RateLimited) => {
+                return Ok(Err(PluginReleaseResolveResult::RateLimited));
+            }
+            Ok(PluginReleaseFetchResult::Unavailable) => {
+                return Ok(Err(PluginReleaseResolveResult::Unavailable));
+            }
+            Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
+            // An oversized feed or a redirect off HTTPS: no release can be read from it.
+            Err(_) => return Ok(Err(PluginReleaseResolveResult::Unavailable)),
+        };
+        Ok(feed_tags(&feed.content, repo)
+            .map_err(|error| PluginReleaseResolveResult::Invalid(error.to_string())))
+    }
+
+    /// `repo`'s plugin index.
+    fn read_index(&self, repo: &str, cancel: &CancelToken) -> Result<IndexRead, UpdateError> {
+        let Some(url) = github::tagged_asset(repo, PLUGIN_INDEX_TAG, PLUGIN_INDEX_ASSET) else {
+            return Ok(IndexRead::Missing);
+        };
+        let document = match self
+            .client
+            .fetch_document(&url, MAXIMUM_DOCUMENT_BYTES, cancel)
+        {
+            Ok(PluginReleaseFetchResult::Success(document)) => document,
+            Ok(PluginReleaseFetchResult::RateLimited) => return Ok(IndexRead::RateLimited),
+            Ok(PluginReleaseFetchResult::Unavailable) => return Ok(IndexRead::Missing),
+            Err(UpdateError::Cancelled) => return Err(UpdateError::Cancelled),
+            Err(error) => {
+                return Ok(IndexRead::Malformed(format!(
+                    "The plugin index is invalid: {error}"
+                )));
+            }
+        };
+        let content = document
+            .content
+            .strip_prefix(b"\xEF\xBB\xBF")
+            .unwrap_or(&document.content);
+        Ok(
+            match PluginIndex::parse(&String::from_utf8_lossy(content)) {
+                Ok(index) => IndexRead::Read(index),
+                Err(error) => IndexRead::Malformed(error.to_string()),
+            },
+        )
     }
 
     /// The highest stable release (or pre-release) of `releases` whose
@@ -583,6 +661,30 @@ impl PluginReleaseResolver {
             },
         )))
     }
+}
+
+/// Whether resolving plugin `id` reads its repository's index: when the feed
+/// shows a tag other than `wasm-v<version>` in this client's `wasm-` space (a
+/// plugin-named tag, or the index's own release), or has no release that may
+/// be the plugin's. A repository publishing one plugin under `wasm-v` tags
+/// never needs it.
+fn needs_index(tags: &[String], releases: &[PluginFeedRelease]) -> bool {
+    releases.is_empty()
+        || tags
+            .iter()
+            .any(|tag| tag.starts_with("wasm-") && parse_release(tag, WASM_TAG_PREFIX).is_none())
+}
+
+/// How reading a repository's index went.
+enum IndexRead {
+    /// Read.
+    Read(PluginIndex),
+    /// Not published.
+    Missing,
+    /// GitHub is rate limiting.
+    RateLimited,
+    /// Published but unusable; the text says why, for the publisher.
+    Malformed(String),
 }
 
 /// What one tag's `plugin.json` gave.
