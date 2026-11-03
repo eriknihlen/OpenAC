@@ -6,6 +6,12 @@ name: Release
 # launcher's update feed, schema version 1) and publishes everything as one
 # GitHub release.
 #
+# The launcher carries a fingerprint, one SHA-256 over what it is built from
+# (the `fingerprint` job says what counts), and the release publishes it as
+# launcher-fingerprint.json beside manifest.json. A launcher whose
+# fingerprint matches the release's does not update itself; it only
+# installs the new client. The release version alone changes nothing.
+#
 # Assets per platform (<rid> is win-x64, linux-x64 or osx-arm64):
 #   openac-<rid>.zip    both programs, for players to download and unzip
 #   client-<rid>.zip    `openac` at the root (the launcher's client payload)
@@ -76,9 +82,102 @@ jobs:
             *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
+  fingerprint:
+    name: the launcher's fingerprint
+    runs-on: ubuntu-latest
+    outputs:
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup show
+
+      # The inputs: every package the launcher links on any platform (our
+      # crates by their committed files apart from tests, benches and
+      # examples; other crates by name, version and source; each with its
+      # resolved features), the workspace's build settings without the
+      # release version, the toolchain, the files embedded in it or shipped
+      # beside it, and how it is built and packaged (this file and the macOS
+      # bundle script). Files are read as git object ids from the commit, so
+      # the value is the same on every runner and line-ending setting.
+      - id: fingerprint
+        name: Compute the fingerprint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $metadata = (cargo metadata --locked --format-version 1) -join '' |
+            ConvertFrom-Json -AsHashtable -Depth 64
+          $root = ($metadata.workspace_root -replace '\\', '/').TrimEnd('/') + '/'
+          $packages = @{}
+          foreach ($package in $metadata.packages) { $packages[$package.id] = $package }
+          $nodes = @{}
+          foreach ($node in $metadata.resolve.nodes) { $nodes[$node.id] = $node }
+
+          # Normal and build dependencies, followed to the end; test-only
+          # dependencies are not built into the launcher.
+          $start = @($metadata.packages |
+            Where-Object { $_.name -eq 'openac-launcher' -and $null -eq $_.source })[0].id
+          $linked = [Collections.Generic.HashSet[string]]::new([string[]]@($start))
+          $queue = [Collections.Generic.Queue[string]]::new([string[]]@($start))
+          while ($queue.Count) {
+            foreach ($dependency in $nodes[$queue.Dequeue()].deps) {
+              $built = @($dependency.dep_kinds | Where-Object { $null -eq $_.kind -or $_.kind -eq 'build' })
+              if ($built.Count -and $linked.Add($dependency.pkg)) { $queue.Enqueue($dependency.pkg) }
+            }
+          }
+
+          $inputs = [Collections.Generic.List[string]]::new()
+          foreach ($id in $linked) {
+            $package = $packages[$id]
+            $features = [string[]]@($nodes[$id].features)
+            [Array]::Sort($features, [StringComparer]::Ordinal)
+            if ($null -eq $package.source) {
+              # Our crates and the patched copies under vendor/.
+              $manifest = $package.manifest_path -replace '\\', '/'
+              $directory = $manifest.Substring($root.Length, $manifest.Length - $root.Length - '/Cargo.toml'.Length)
+              $entries = foreach ($line in git ls-tree HEAD -- "$directory/") {
+                $fields, $path = $line -split "`t", 2
+                $name = $path.Substring($directory.Length + 1)
+                if ($name -notin 'tests', 'benches', 'examples') { "${name}:$(($fields -split ' ')[2])" }
+              }
+              $inputs.Add("path $directory [$($features -join ',')] $($entries -join ' ')")
+            } else {
+              $inputs.Add("crate $($package.name) $($package.version) $($package.source) [$($features -join ',')]")
+            }
+          }
+
+          $section = ''
+          $settings = foreach ($line in (git show 'HEAD:Cargo.toml') -replace "`r", '') {
+            if ($line -match '^\[') { $section = $line }
+            if ($line -match '^\s*(#|$)') { continue }
+            if ($section -eq '[workspace.package]' -and $line -notmatch '^version\s*=') { $line }
+            elseif ($section -like '`[profile.*') { $line }
+          }
+          $inputs.Add("cargo $($settings -join ' | ')")
+
+          foreach ($path in 'rust-toolchain.toml', 'assets/icons', 'assets/fonts', 'LICENSE', 'NOTICE.md',
+                            'about.toml', 'about.hbs', 'scripts/bundle-macos.sh', '.github/workflows/release.yml') {
+            $inputs.Add("file $path $("$(git rev-parse "HEAD:$path")".Trim())")
+          }
+
+          $sorted = $inputs.ToArray()
+          [Array]::Sort($sorted, [StringComparer]::Ordinal)
+          $sorted | ForEach-Object { Write-Host $_ }
+          $bytes = [Text.Encoding]::UTF8.GetBytes(($sorted -join "`n") + "`n")
+          $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+          Write-Host "launcher fingerprint: $fingerprint"
+          "fingerprint=$fingerprint" >> $env:GITHUB_OUTPUT
+
   build:
     name: build (${{ matrix.rid }})
-    needs: version
+    needs: [version, fingerprint]
     strategy:
       fail-fast: true
       matrix:
@@ -102,6 +201,8 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      # Read by the launcher's build, not when it runs.
+      OPENAC_LAUNCHER_FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
     steps:
       - uses: actions/checkout@v4
 
@@ -127,6 +228,8 @@ jobs:
           bin="target/${{ matrix.target }}/release"
           "$bin/openac-launcher${{ matrix.exe }}" --verify-publish
           "$bin/openac${{ matrix.exe }}" --help > /dev/null
+          # The launcher carries the release's fingerprint.
+          grep -a -q -F "$OPENAC_LAUNCHER_FINGERPRINT" "$bin/openac-launcher${{ matrix.exe }}"
 
       - name: Install cargo-about
         shell: bash
@@ -215,11 +318,14 @@ jobs:
 
   build-macos:
     name: build (osx-arm64)
-    needs: version
+    needs: [version, fingerprint]
     # macos-latest is an Apple-silicon image; the bundle's minimum macOS is in
     # scripts/bundle-macos.sh (LSMinimumSystemVersion).
     runs-on: macos-latest
     timeout-minutes: 90
+    env:
+      # Read by the launcher's build, not when it runs.
+      OPENAC_LAUNCHER_FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
     steps:
       - uses: actions/checkout@v4
 
@@ -286,6 +392,7 @@ jobs:
           test -x "$app/Contents/MacOS/openac"
           codesign --verify --deep --strict "$app"
           "$app/Contents/MacOS/openac-launcher" --verify-publish
+          grep -a -q -F "$OPENAC_LAUNCHER_FINGERPRINT" "$app/Contents/MacOS/openac-launcher"
           test -x "$check/client/openac"
           test -s "$check/client/THIRD-PARTY-LICENSES.html"
           codesign --verify --strict "$check/client/openac"
@@ -299,7 +406,7 @@ jobs:
 
   publish:
     name: publish the release
-    needs: [version, build, build-macos]
+    needs: [version, fingerprint, build, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -315,7 +422,8 @@ jobs:
       # version no newer than the release, HTTPS URLs, lowercase SHA-256 and a
       # size in bytes for each payload, keyed by runtime identifier. The
       # minimum is the release itself: a launcher older than the release
-      # updates itself before it installs the new client.
+      # updates itself before it installs the new client, unless its
+      # fingerprint matches the release's (launcher-fingerprint.json).
       - name: Write manifest.json
         shell: bash
         env:
@@ -342,7 +450,23 @@ jobs:
                 '{schemaVersion: 1, version: $version, minimumLauncherVersion: $version,
                   clients: $clients, launchers: $launchers}' > dist/manifest.json
           cat dist/manifest.json
-          (cd dist && sha256sum *.zip manifest.json > SHA256SUMS.txt)
+
+      # Beside manifest.json, not in it: a launcher from before fingerprints
+      # reads manifest.json strictly and would refuse a member it does not
+      # know. Read strictly too: these members only.
+      - name: Write launcher-fingerprint.json
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          [[ "$FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          jq -n --arg version "$VERSION" --arg fingerprint "$FINGERPRINT" \
+                '{schemaVersion: 1, version: $version, fingerprint: $fingerprint}' \
+                > dist/launcher-fingerprint.json
+          cat dist/launcher-fingerprint.json
+          (cd dist && sha256sum *.zip manifest.json launcher-fingerprint.json > SHA256SUMS.txt)
 
       - name: Create the GitHub release
         if: github.ref_type == 'tag'
