@@ -423,7 +423,9 @@ impl PluginReleaseResolver {
     }
 
     /// A resolver for one pass over several plugins (an update check, a
-    /// Discover pass), sharing what it reads between them.
+    /// Discover pass), sharing what it reads between them. A pass is meant
+    /// to resolve one plugin after another: two threads asking for the same
+    /// document at once may both fetch it.
     #[must_use]
     pub fn pass(&self) -> Self {
         Self {
