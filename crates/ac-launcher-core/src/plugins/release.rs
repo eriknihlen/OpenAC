@@ -4,7 +4,8 @@
 //! `wasm-<plugin id>-v` in a repository that publishes several plugins), and
 //! resolving a repository (and plugin id) to the release to offer.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::index::{PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex};
 use super::manifest::{InstallRules, PluginManifest, WASM_TAG_PREFIX, plugin_tag_prefix};
@@ -378,15 +379,63 @@ impl PluginReleaseCandidates {
 /// one: the feed lists only the latest ten releases), and a candidate whose
 /// `plugin.json` names another plugin is skipped for the next highest. A repository's `releases/latest` belongs to OpenAC's C#
 /// launcher and is never read.
+///
+/// A resolver made by [`PluginReleaseResolver::pass`] reads each
+/// repository's feed and index, and each release's `plugin.json`, once for
+/// every plugin it resolves; a rate-limited answer is asked again.
 #[derive(Debug, Clone)]
 pub struct PluginReleaseResolver {
     client: PluginReleaseClient,
+    pass: Option<Arc<Mutex<PassCache>>>,
+}
+
+/// What one pass has read, by repository (ignoring case).
+#[derive(Debug, Default)]
+struct PassCache {
+    feeds: HashMap<String, Result<Vec<String>, PluginReleaseResolveResult>>,
+    indexes: HashMap<String, IndexRead>,
+    manifests: HashMap<(String, String), PluginReleaseFetchResult>,
 }
 
 impl PluginReleaseResolver {
     /// A resolver over `client`.
     pub fn new(client: PluginReleaseClient) -> Self {
-        Self { client }
+        Self { client, pass: None }
+    }
+
+    /// A resolver for one pass over several plugins (an update check, a
+    /// Discover pass), sharing what it reads between them.
+    #[must_use]
+    pub fn pass(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            pass: Some(Arc::default()),
+        }
+    }
+
+    fn cached<K, V: Clone>(
+        &self,
+        table: impl Fn(&mut PassCache) -> &mut HashMap<K, V>,
+        key: K,
+        read: impl FnOnce() -> Result<V, UpdateError>,
+        keep: impl Fn(&V) -> bool,
+    ) -> Result<V, UpdateError>
+    where
+        K: std::hash::Hash + Eq,
+    {
+        let Some(pass) = &self.pass else {
+            return read();
+        };
+        let lock = || pass.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(value) = table(&mut lock()).get(&key) {
+            return Ok(value.clone());
+        }
+        // Not held across the request: another plugin may read meanwhile.
+        let value = read()?;
+        if keep(&value) {
+            table(&mut lock()).insert(key, value.clone());
+        }
+        Ok(value)
     }
 
     /// Resolves the stable release and, on beta, the highest pre-release
@@ -440,7 +489,12 @@ impl PluginReleaseResolver {
                 index_warning: None,
             })
         };
-        let tags = match self.read_feed(repo, cancel)? {
+        let tags = match self.cached(
+            |cache| &mut cache.feeds,
+            repo.to_lowercase(),
+            || self.read_feed(repo, cancel),
+            |feed| !matches!(feed, Err(PluginReleaseResolveResult::RateLimited)),
+        )? {
             Ok(tags) => tags,
             Err(result) => return only(result),
         };
@@ -453,7 +507,12 @@ impl PluginReleaseResolver {
             Some(id) => {
                 let mut releases = plugin_releases(&tags, id);
                 if needs_index(&tags, &releases) {
-                    match self.read_index(repo, cancel)? {
+                    match self.cached(
+                        |cache| &mut cache.indexes,
+                        repo.to_lowercase(),
+                        || self.read_index(repo, cancel),
+                        |index| !matches!(index, IndexRead::RateLimited),
+                    )? {
                         IndexRead::Read(index) => {
                             for release in index.releases_for(id) {
                                 if !releases.iter().any(|known| known.tag == release.tag) {
@@ -624,10 +683,15 @@ impl PluginReleaseResolver {
         let Some(url) = github::tagged_asset(repo, tag, "plugin.json") else {
             return resolved(PluginReleaseResolveResult::Unavailable);
         };
-        let document = match self
-            .client
-            .fetch_document(&url, MAXIMUM_DOCUMENT_BYTES, cancel)?
-        {
+        let document = match self.cached(
+            |cache| &mut cache.manifests,
+            (repo.to_lowercase(), tag.to_owned()),
+            || {
+                self.client
+                    .fetch_document(&url, MAXIMUM_DOCUMENT_BYTES, cancel)
+            },
+            |fetch| !matches!(fetch, PluginReleaseFetchResult::RateLimited),
+        )? {
             PluginReleaseFetchResult::Success(document) => document,
             PluginReleaseFetchResult::RateLimited => {
                 return resolved(PluginReleaseResolveResult::RateLimited);
@@ -676,6 +740,7 @@ fn needs_index(tags: &[String], releases: &[PluginFeedRelease]) -> bool {
 }
 
 /// How reading a repository's index went.
+#[derive(Debug, Clone)]
 enum IndexRead {
     /// Read.
     Read(PluginIndex),

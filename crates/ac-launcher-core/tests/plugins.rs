@@ -2390,6 +2390,86 @@ fn a_malformed_index_is_ignored_with_a_warning() {
     assert_eq!(candidates.index_warning, None);
 }
 
+#[test]
+fn one_pass_reads_a_repositorys_feed_index_and_manifests_once() {
+    let server = suite_server(&[
+        ("wasm-aethrix.vision-v1.2.0", "aethrix.vision", "1.2.0"),
+        ("wasm-v0.0.9", "aethrix.vision", "0.0.9"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let pass = resolver(&server).pass();
+    for _ in 0..2 {
+        for id in ["aethrix.vision", "aethrix.navigation", "aethrix.macro"] {
+            pass.resolve_plugin(HELLO_REPO, id, PluginReleaseChannel::Beta, &none())
+                .unwrap();
+        }
+    }
+    assert_eq!(server.count(&feed_uri()), 1);
+    assert_eq!(server.count(&index_uri()), 1);
+    // `aethrix.macro` tries the `wasm-v` tag (`aethrix.vision`'s) in both rounds.
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.0.9", "plugin.json")),
+        1
+    );
+    // The same repository spelled in another case is the same repository.
+    pass.resolve_plugin(
+        &HELLO_REPO.to_uppercase(),
+        "aethrix.vision",
+        PluginReleaseChannel::Stable,
+        &none(),
+    )
+    .unwrap();
+    assert_eq!(server.count(&feed_uri()), 1);
+    // A new pass reads afresh.
+    let fresh = resolver(&server).pass();
+    fresh
+        .resolve_plugin(
+            HELLO_REPO,
+            "aethrix.vision",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(server.count(&feed_uri()), 2);
+}
+
+#[test]
+fn a_pass_keeps_no_rate_limited_fetch() {
+    let server = FakeServer::new();
+    server.add_route(&feed_uri(), Route::Status(429));
+    let pass = resolver(&server).pass();
+    assert_eq!(
+        pass.resolve_plugin(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none()
+        )
+        .unwrap(),
+        PluginReleaseResolveResult::RateLimited
+    );
+    server.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    server.add(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        &resolver_manifest("0.2.0"),
+    );
+    let result = pass
+        .resolve_plugin(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+}
+
 // --- PluginInstallerTests ---------------------------------------------------------------------
 
 struct Release {
