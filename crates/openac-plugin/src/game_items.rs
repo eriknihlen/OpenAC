@@ -227,7 +227,8 @@ impl Host<'_> {
     /// the open container ([`LootState::current_container_id`]).
     /// `InvalidTarget` when it is not, `InvalidItem` for any other item,
     /// `Refused` for an amount over the stack or a put that did not go
-    /// out, `Busy` while another item request is in flight.
+    /// out, `Busy` while another item request, an item waiting at a slot
+    /// or a wield is in flight.
     pub fn put_in_open_container(
         &mut self,
         object_id: u32,
