@@ -36,11 +36,146 @@
 //!
 //! and another plugin calls it by its scoped id:
 //! `host.call_service_raw("example.navigation/distance", &id.to_le_bytes())`.
+//!
+//! With the feature `json` (off by default), requests and replies are types
+//! of the plugins' own, sent as JSON: `Host::register_service` gives a
+//! `Service`, whose `Service::answer` decodes a request and encodes the
+//! reply, and `Host::call_service` encodes the request and decodes the
+//! reply. Both plugins derive serde's `Serialize` and `Deserialize` for the
+//! types they share.
 
 use ac_plugin_abi::calls;
 use ac_plugin_abi::services::{ServiceCall, ServiceError, ServiceInfo, ServiceRegistration};
 
 use crate::Host;
+
+#[cfg(feature = "json")]
+pub use json::{CallError, Service};
+
+#[cfg(feature = "json")]
+mod json {
+    use std::fmt;
+    use std::marker::PhantomData;
+
+    use ac_plugin_abi::callback::CallbackAnswer;
+    use ac_plugin_abi::services::{ServiceError, ServiceRequest};
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+
+    use crate::Host;
+
+    /// One of the plugin's services, its requests `Req` and its replies
+    /// `Rep` sent as JSON ([`Host::register_service`]).
+    pub struct Service<Req, Rep> {
+        handle: u32,
+        types: PhantomData<fn(Req) -> Rep>,
+    }
+
+    impl<Req, Rep> fmt::Debug for Service<Req, Rep> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Service")
+                .field("handle", &self.handle)
+                .finish()
+        }
+    }
+
+    impl<Req: DeserializeOwned, Rep: Serialize> Service<Req, Rep> {
+        /// The plugin's handle for it ([`Host::unregister_service`]).
+        #[must_use]
+        pub fn handle(&self) -> u32 {
+            self.handle
+        }
+
+        /// The answer to `request` when it calls this service, else `None`
+        /// (another of the plugin's services): the request decoded and
+        /// handed to `answer`, whose reply goes back encoded, or whose
+        /// error refuses the call. A request that does not decode is
+        /// refused, saying why.
+        pub fn answer(
+            &self,
+            request: &ServiceRequest,
+            answer: impl FnOnce(Req) -> Result<Rep, String>,
+        ) -> Option<CallbackAnswer> {
+            if request.handle != self.handle {
+                return None;
+            }
+            let reply = serde_json::from_slice::<Req>(&request.payload)
+                .map_err(|error| format!("the request does not decode: {error}"))
+                .and_then(answer)
+                .and_then(|reply| {
+                    serde_json::to_vec(&reply)
+                        .map_err(|error| format!("the reply does not encode: {error}"))
+                });
+            Some(CallbackAnswer::Service(reply))
+        }
+    }
+
+    /// Why a call made with [`Host::call_service`] has no reply.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CallError {
+        /// The service gave none ([`ServiceError`]).
+        Service(ServiceError),
+        /// The request does not encode as JSON.
+        Request(String),
+        /// The reply does not decode as the reply type.
+        Reply(String),
+    }
+
+    impl fmt::Display for CallError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Service(error) => error.fmt(f),
+                Self::Request(why) => write!(f, "the request does not encode: {why}"),
+                Self::Reply(why) => write!(f, "the reply does not decode: {why}"),
+            }
+        }
+    }
+
+    impl std::error::Error for CallError {}
+
+    impl From<ServiceError> for CallError {
+        fn from(error: ServiceError) -> Self {
+            Self::Service(error)
+        }
+    }
+
+    /// P. Plugin services, as JSON.
+    impl Host<'_> {
+        /// [`Self::register_service_raw`] for a service whose requests are
+        /// `Req` and replies `Rep`, sent as JSON: answer each
+        /// [`crate::Callback::ServiceRequest`] with [`Service::answer`].
+        ///
+        /// # Errors
+        /// As [`Self::register_service_raw`].
+        pub fn register_service<Req: DeserializeOwned, Rep: Serialize>(
+            &mut self,
+            name: &str,
+            description: &str,
+        ) -> Result<Service<Req, Rep>, ServiceError> {
+            Ok(Service {
+                handle: self.register_service_raw(name, description)?,
+                types: PhantomData,
+            })
+        }
+
+        /// [`Self::call_service_raw`] with a request of type `Req` and a
+        /// reply of type `Rep`, sent as JSON.
+        ///
+        /// # Errors
+        /// No reply ([`CallError::Service`]), or a request that does not
+        /// encode or a reply that does not decode as `Rep`.
+        pub fn call_service<Req: Serialize, Rep: DeserializeOwned>(
+            &mut self,
+            service_id: &str,
+            request: &Req,
+        ) -> Result<Rep, CallError> {
+            let request = serde_json::to_vec(request)
+                .map_err(|error| CallError::Request(error.to_string()))?;
+            let reply = self.call_service_raw(service_id, &request)?;
+            serde_json::from_slice(&reply).map_err(|error| CallError::Reply(error.to_string()))
+        }
+    }
+}
 
 /// P. Plugin services.
 impl Host<'_> {

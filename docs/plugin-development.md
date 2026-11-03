@@ -351,6 +351,18 @@ about a request, such as "no such object", belongs in its reply.
 `Event::ServiceChanged` when a service comes or goes, and a plugin that
 starts first hears one for every service already offered.
 
+With the SDK's `json` feature (`openac-plugin = { ..., features = ["json"] }`,
+off by default so a plugin without services builds no serde), the request
+and reply are types the two plugins share, deriving serde's `Serialize` and
+`Deserialize`, sent as JSON. `host.register_service::<DistanceTo,
+Distance>("distance", "Metres to an object")` gives a `Service`, and in
+`Plugin::callback`, `service.answer(&request, |asked| Ok(Distance { .. }))`
+answers a request for it (`None` for another service), refusing one that
+does not decode. The caller uses `host.call_service::<DistanceTo,
+Distance>("example.navigation/distance", &DistanceTo { object })`, which
+gives the reply or a `CallError`: the `ServiceError`, or a reply that does
+not decode.
+
 An answer runs as the offering plugin's own callback, under its own limits
 ([Limits](#limits)): a slow answer warns, and a stuck one stops, the plugin
 that offers the service. The caller's clock stops while it waits.
@@ -376,7 +388,10 @@ assert_eq!(host.posted[0].text, "Hello, world!");
 ```
 
 `FakeHost::set_reply` sets what a client function answers; anything not set
-gets the inert answer (nothing found, unavailable).
+gets the inert answer (nothing found, unavailable). For services,
+`FakeHost::set_service` stands in for another plugin's service, and
+`FakeHost::request_service` calls one of the plugin's own as another plugin
+would.
 
 ## plugin.json
 

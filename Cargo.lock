@@ -2428,6 +2428,9 @@ version = "0.1.10"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
+ "openac-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

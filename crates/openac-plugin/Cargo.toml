@@ -9,8 +9,16 @@ publish.workspace = true
 # MIT, so plugins under any licence can use it.
 license = "MIT"
 
+[features]
+# Typed service requests and replies as JSON (`Host::register_service`,
+# `Host::call_service`). Off by default: a plugin that does not use them
+# builds neither serde nor serde_json, and its lock file does not change.
+json = ["dep:serde", "dep:serde_json"]
+
 [dependencies]
 ac-plugin-abi.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 # Natively the fake host keeps plugin UI exactly as the client does (the same
 # state and the same import handling), so a plugin's markup and bindings are
@@ -18,6 +26,11 @@ ac-plugin-abi.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ac-plugin-abi = { workspace = true, features = ["ui-host"] }
 ac-plugin-ui.workspace = true
+
+[dev-dependencies]
+# The SDK's own tests cover the `json` feature.
+openac-plugin = { path = ".", features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true

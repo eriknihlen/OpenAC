@@ -69,6 +69,8 @@ pub use game_storage::StorageLock;
 pub use host::Host;
 #[cfg(not(target_arch = "wasm32"))]
 pub use host::Transport;
+#[cfg(feature = "json")]
+pub use plugin_services::{CallError, Service};
 
 /// A client function a plugin can call through [`Host::call`]: every marker
 /// type in [`calls`].

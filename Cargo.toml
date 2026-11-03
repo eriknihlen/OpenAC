@@ -111,6 +111,11 @@ arboard = { version = "3.6.1", default-features = false }
 egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
 egui-wgpu = { version = "0.36.2", default-features = false }
 egui-winit = { version = "0.36.2", default-features = false, features = ["x11", "wayland"] }
+# JSON for typed plugin service requests and replies (openac-plugin's `json` feature, off by
+# default, so a plugin that does not use it builds neither). Pure Rust; their build scripts only
+# read the compiler's version. serde is already in the graph through wasmtime.
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
 # The WebAssembly engine for plugins (ac-plugin): wasmtime with its Cranelift compiler, about ten
 # times faster than the wasmi interpreter it replaced. It is the one dependency that compiles
 # C: two small files, built by `cc`: `helpers.c` on Linux and macOS (a weak-symbol probe) and
