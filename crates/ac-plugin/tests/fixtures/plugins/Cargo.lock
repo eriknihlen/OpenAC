@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "ac-plugin-abi"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "ac-plugin-ui",
 ]
 
 [[package]]
 name = "ac-plugin-ui"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "fontdue",
  "miniz_oxide",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
