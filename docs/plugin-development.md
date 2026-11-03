@@ -479,6 +479,56 @@ Players install it with the launcher's **Add from URL**
 (`https://github.com/<owner>/<repo>`), and the launcher checks the
 repository's releases for updates.
 
+### Several plugins in one repository
+
+A repository can publish several plugins (a suite built to work together,
+say). Tag each plugin's releases with its id, and keep a plugin index:
+
+```bash
+plugincheck pack <plugin folder> <out dir> --index plugins-index.json
+```
+
+- **Tag `wasm-<plugin id>-v<version>`**, for example
+  `wasm-acme.vision-v1.2.0`. `pack --index` prints it. The launcher matches
+  the exact `wasm-<id>-v` prefix for the plugin it wants and checks that the
+  release's `plugin.json` names that id, so another plugin's release is
+  never offered in its place.
+- **The index**: `pack --index <file>` sets this plugin's entry in the local
+  file (starting it if it does not exist) and keeps every other plugin's.
+  Upload it as `plugins-index.json` to a release tagged `wasm-index`, not
+  marked latest, replacing the copy there, every time you publish a plugin:
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "plugins": [
+      { "id": "acme.vision", "stable": "wasm-acme.vision-v1.2.0",
+        "beta": "wasm-acme.vision-v1.3.0-beta.1" },
+      { "id": "acme.navigation", "stable": "wasm-acme.navigation-v0.4.0" }
+    ]
+  }
+  ```
+
+  GitHub's releases feed, which the launcher reads, lists only a
+  repository's latest ten releases, so one plugin's releases can push
+  another's off it; the index keeps every plugin findable. It only points
+  at tags: the launcher still reads each tag's `plugin.json`, takes the
+  highest version from the feed and the index together, and ignores an
+  index it cannot read (noting why in its log), so a stale index at worst
+  offers an older release. A repository publishing one plugin under
+  `wasm-v` tags needs no index and the launcher never asks for one.
+- **Moving an existing plugin over**: its `wasm-v` releases keep counting
+  for it (their `plugin.json` names it), so it can switch to its own tags
+  at its next release. A new plugin in a repository whose older plugin used
+  `wasm-v` tags needs its own tags from the start.
+- **Older launchers**: launchers 0.1.10 and earlier read only `wasm-v`
+  tags. A plugin published only under `wasm-<id>-v` tags shows there as
+  having no release, and one that switches stops getting updates there.
+
+**Add from URL** on such a repository lists the plugins not yet installed
+and asks which one to add; each listed plugin is its own entry on the
+plugin list, all naming the same repository.
+
 ## Getting listed
 
 A listed plugin appears in the launcher's **Discover** panel. The list is
