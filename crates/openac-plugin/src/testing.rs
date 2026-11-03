@@ -675,8 +675,6 @@ mod tests {
         );
     }
 
-    // The process numbers read as zeros from a host that gives none; then
-    // values a test sets coming back through the encoding.
     // The landscape reads answer empty on a host without game files; then
     // the replies a test sets come back, and the request carries the
     // landblocks asked for.
@@ -717,6 +715,8 @@ mod tests {
         );
     }
 
+    // The process numbers read as zeros from a host that gives none; then
+    // values a test sets coming back through the encoding.
     #[test]
     fn process_stats_read_zero_until_set() {
         use ac_plugin_abi::host::ProcessStats;

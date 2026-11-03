@@ -287,3 +287,39 @@ fn without_a_road_texture_the_palette_has_no_road() {
         }]
     );
 }
+
+#[test]
+fn a_texture_that_does_not_decode_gives_its_type_no_colour() {
+    let mut dats = FakeDats::default();
+    image(&mut dats, 0x0500_0001, 0x0600_0001, [0; 8]);
+    // Three bytes for a 2 x 1 image of four bytes a texel.
+    dats.add(
+        0x0600_0001,
+        RenderSurface {
+            id: 0x0600_0001,
+            data_category: 0,
+            width: 2,
+            height: 1,
+            format: PixelFormat::A8R8G8B8,
+            data: vec![1, 2, 3],
+            default_palette_id: 0,
+        },
+    );
+    let terrain = TerrainDesc {
+        terrain_types: vec![terrain_type("BarrenRock", 0x64_9664)],
+        land_surfaces: LandSurf {
+            surf_type: 0,
+            tex_merge: TexMerge {
+                base_tex_size: 2,
+                corner_terrain_maps: Vec::new(),
+                side_terrain_maps: Vec::new(),
+                road_maps: Vec::new(),
+                terrain_desc: vec![desc(0, 0x0500_0001)],
+            },
+        },
+    };
+    let palette = read_terrain_palette(&dats, &terrain).unwrap();
+    assert_eq!(palette.len(), 1);
+    assert_eq!(palette[0].rgb, 0);
+    assert_eq!(palette[0].map_rgb, 0x0064_9664);
+}

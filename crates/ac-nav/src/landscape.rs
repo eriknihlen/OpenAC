@@ -12,7 +12,7 @@ use ac_dat::objects::{
     LandBlock, Palette, RenderSurface, SurfaceTexture, TerrainDesc, TmTerrainDesc, VERTEX_COUNT,
     VERTICES_PER_SIDE,
 };
-use ac_dat::texture::{self, DecodeOptions, TextureError};
+use ac_dat::texture::{self, DecodeOptions};
 use ac_physics::TerrainSurface;
 use ac_physics::content::DatSource;
 
@@ -120,7 +120,7 @@ pub struct TerrainColor {
     /// The terrain type, or [`ROAD_TERRAIN_TYPE`] for the road.
     pub terrain_type: u8,
     /// The mean colour of its landscape texture, `0xRRGGBB`; 0 when the
-    /// files have no texture for it.
+    /// files have no texture for it or it does not decode.
     pub rgb: u32,
     /// The colour the region assigns the type for maps, `0xRRGGBB`; the
     /// region has none for the road, whose entry repeats `rgb`.
@@ -133,25 +133,14 @@ pub struct TerrainColor {
 /// Why the terrain palette could not be read.
 #[derive(Debug)]
 pub enum PaletteError {
-    /// A dat read or decode failure.
+    /// A dat read failure.
     Dat(DatError),
-    /// A landscape texture's pixels could not be decoded.
-    Texture {
-        /// The render surface.
-        render_surface_id: u32,
-        /// What was wrong.
-        error: TextureError,
-    },
 }
 
 impl std::fmt::Display for PaletteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dat(error) => error.fmt(f),
-            Self::Texture {
-                render_surface_id,
-                error,
-            } => write!(f, "texture {render_surface_id:#010x}: {error}"),
         }
     }
 }
@@ -178,7 +167,7 @@ const TERRAIN_TYPE_COUNT: usize = 32;
 /// its entry repeats the texture's colour and is named "Road".
 ///
 /// # Errors
-/// A dat read failure, or a texture that does not decode.
+/// A dat read failure.
 pub fn read_terrain_palette<D: DatSource>(
     dats: &D,
     terrain: &TerrainDesc,
@@ -245,12 +234,12 @@ fn texture_mean_rgb<D: DatSource>(
     } else {
         dats.object::<Palette>(surface.default_palette_id)?
     };
-    let decoded = texture::decode(&surface, palette.as_deref(), DecodeOptions::default()).map_err(
-        |error| PaletteError::Texture {
-            render_surface_id,
-            error,
-        },
-    )?;
+    // A texture that does not decode gives its type no colour (0), as one
+    // the files lack does, rather than failing the whole palette.
+    let Ok(decoded) = texture::decode(&surface, palette.as_deref(), DecodeOptions::default())
+    else {
+        return Ok(None);
+    };
     Ok(Some(mean_rgb(&decoded.rgba)))
 }
 

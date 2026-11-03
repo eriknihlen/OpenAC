@@ -132,7 +132,8 @@ fn every_terrain_type_and_the_road_have_their_colours_and_names() {
 }
 
 /// A full request (256 landblocks, a 16 by 16 square around Holtburg) read
-/// cold and then from the cache, timed.
+/// cold and then from the cache, timed, through the shared dat cache (the
+/// client reads past it; its own test times that path).
 #[test]
 #[ignore = "needs the retail dat files"]
 fn a_full_request_of_landblocks_takes_a_few_milliseconds() {

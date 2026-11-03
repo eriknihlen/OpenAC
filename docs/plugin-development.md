@@ -309,7 +309,9 @@ entry for roads, `terrain_type` 32 (`world::ROAD_TERRAIN_TYPE`), named
 game's data gives roads no map colour, its `map_rgb` repeats `rgb`. Use it
 where a vertex's `road` is non-zero; there the game draws the road over the
 vertex's terrain type. The palette is worked out once a session, about 20 ms
-the first time. Neither call needs a permission; both are empty without the
+the first time, so ask for it once (at start, or when the map is first drawn)
+and keep it. A texture that does not decode gives its type an `rgb` of 0.
+Neither call needs a permission; both are empty without the
 game files.
 
 ## Testing natively

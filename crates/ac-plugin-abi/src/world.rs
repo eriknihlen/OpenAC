@@ -812,7 +812,7 @@ wire_record! {
         /// or [`ROAD_TERRAIN_TYPE`].
         pub terrain_type: u8,
         /// The mean colour of the type's landscape texture, `0xRRGGBB`; 0
-        /// when the game files have no texture for it.
+        /// when the game files have no texture for it or it does not decode.
         pub rgb: u32,
         /// The colour the game's data assigns the type for maps,
         /// `0xRRGGBB`, as the region file stores it. The region has none
