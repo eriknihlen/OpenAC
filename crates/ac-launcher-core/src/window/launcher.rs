@@ -38,8 +38,8 @@ use crate::orchestration::{
 use crate::plugins::{
     ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
     PermissionDeclaration, PluginInstallResult, PluginManifest, PluginReleaseCandidates,
-    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolveResult, describe, github,
-    is_built_for_csharp, is_well_formed_id,
+    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolveResult,
+    PluginReleaseResolver, describe, github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
     LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherTextEditorKind,
@@ -3209,8 +3209,9 @@ impl LauncherWindow {
             let mut saw_rate_limited = false;
             let mut saw_transport_failure = false;
             let catalog = backend.current_catalog();
+            let resolver = backend.release_resolver.pass();
             for (id, repo) in pending {
-                let fetch = fetch_plugin_manifest(&backend, &repo, channel);
+                let fetch = fetch_plugin_manifest(&backend, &resolver, &repo, &id, channel);
                 match &fetch {
                     ManifestFetch::RateLimited => saw_rate_limited = true,
                     ManifestFetch::Failed => saw_transport_failure = true,
@@ -3518,11 +3519,18 @@ impl LauncherWindow {
     fn open_install_dialog(&mut self, request: InstallDialogRequest) {
         let needs_permissions = request.permissions.is_none();
         let repo = request.repo.clone();
+        let id = request.plugin_id.clone();
         let channel = request.channel.unwrap_or(PluginReleaseChannel::Stable);
         let generation = self.plugins.install_dialog.open(request);
         if needs_permissions && let Some(backend) = self.plugin_backend.clone() {
             self.run(move |sender, wake| {
-                let result = match fetch_plugin_manifest(&backend, &repo, channel) {
+                let result = match fetch_plugin_manifest(
+                    &backend,
+                    &backend.release_resolver,
+                    &repo,
+                    &id,
+                    channel,
+                ) {
                     ManifestFetch::Found(found) => Ok(found.manifest.permissions),
                     ManifestFetch::RateLimited => Err("GitHub is rate limiting; try later.".into()),
                     ManifestFetch::Message(message) => Err(message),
@@ -3592,6 +3600,7 @@ impl LauncherWindow {
                     None => resolve_latest_tag(
                         &backend,
                         &request.repo,
+                        &request.plugin_id,
                         request.channel.unwrap_or(PluginReleaseChannel::Stable),
                         &cancel,
                     )?,
@@ -4074,19 +4083,20 @@ enum ManifestFetch {
     Failed,
 }
 
-/// Resolves `repo` on `channel`, as the update check and Discover do.
+/// Resolves plugin `id` of `repo` on `channel`, as the update check and
+/// Discover do.
 fn fetch_plugin_manifest(
     backend: &PluginComposition,
+    resolver: &PluginReleaseResolver,
     repo: &str,
+    id: &str,
     channel: PluginReleaseChannel,
 ) -> ManifestFetch {
-    let Ok(candidates) =
-        backend
-            .release_resolver
-            .resolve_candidates(repo, channel, &CancelToken::new())
+    let Ok(candidates) = resolver.resolve_plugin_candidates(repo, id, channel, &CancelToken::new())
     else {
         return ManifestFetch::Failed;
     };
+    backend.log_index_warning(repo, &candidates);
     match candidates.for_channel(channel).clone() {
         PluginReleaseResolveResult::Success(resolution) => {
             ManifestFetch::Found(Box::new(FoundManifest {
@@ -4195,12 +4205,13 @@ fn discover_icon(
 fn resolve_latest_tag(
     backend: &PluginComposition,
     repo: &str,
+    id: &str,
     channel: PluginReleaseChannel,
     cancel: &CancelToken,
 ) -> Result<String, String> {
     match backend
         .release_resolver
-        .resolve(repo, channel, cancel)
+        .resolve_plugin(repo, id, channel, cancel)
         .map_err(|error| error.to_string())?
     {
         PluginReleaseResolveResult::Success(resolution) => Ok(resolution.tag),

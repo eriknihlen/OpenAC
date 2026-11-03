@@ -2562,6 +2562,38 @@ impl PanelFixture {
             .add(&tagged, manifest_json(id, version).as_bytes());
     }
 
+    /// Publishes each `(tag, id, version)` on the repository's releases feed,
+    /// the tag serving `id`'s manifest at `version`.
+    fn releases(&self, releases: &[(&str, &str, &str)]) {
+        let links: String = releases
+            .iter()
+            .map(|(tag, ..)| {
+                format!(
+                    r#"<entry><link rel="alternate" href="https://github.com/{HELLO_REPO}/releases/tag/{tag}"/></entry>"#
+                )
+            })
+            .collect();
+        let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+            .unwrap()
+            .to_string();
+        self.server.add(
+            &feed,
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">{links}</feed>"#
+            )
+            .as_bytes(),
+        );
+        for (tag, id, version) in releases {
+            let tagged =
+                ac_launcher_core::plugins::github::tagged_asset(HELLO_REPO, tag, "plugin.json")
+                    .unwrap()
+                    .to_string();
+            self.server
+                .add(&tagged, manifest_json(id, version).as_bytes());
+        }
+    }
+
     fn window(&self) -> LauncherWindow {
         self.window_with(Arc::new(Fake::default()))
     }
@@ -2784,6 +2816,114 @@ fn update_is_offered_only_for_launcher_managed_plugins_but_remove_is_offered_for
     assert!(direct.update.is_none());
     assert!(!direct.show_beta_toggle);
     assert_eq!(direct.source_badge, "Direct install");
+}
+
+// A repository publishing several plugins: each is checked against its own
+// releases, never another plugin's newer one.
+#[test]
+fn the_update_check_offers_only_the_installed_plugins_own_release() {
+    let withheld = |releases: &[(&str, &str, &str)]| {
+        let fixture = PanelFixture::new();
+        fixture.write_manifest("edwards.managed", "0.1.0");
+        fixture.add_record("edwards.managed", "0.1.0");
+        fixture.list(&[], "");
+        fixture.releases(releases);
+        let mut window = fixture.window();
+        check(&mut window);
+        window
+            .plugins
+            .installed
+            .iter()
+            .find(|row| row.info.id == "edwards.managed")
+            .unwrap()
+            .update_withheld_reason
+            .clone()
+    };
+    // Another plugin's newer release, in either tag form, is no update.
+    assert_eq!(withheld(&[("wasm-v0.2.0", "edwards.other", "0.2.0")]), None);
+    assert_eq!(
+        withheld(&[("wasm-edwards.other-v0.2.0", "edwards.other", "0.2.0")]),
+        None
+    );
+    // Its own is found (and withheld only for want of a client).
+    assert_eq!(
+        withheld(&[
+            ("wasm-edwards.other-v0.3.0", "edwards.other", "0.3.0"),
+            ("wasm-edwards.managed-v0.2.0", "edwards.managed", "0.2.0"),
+        ])
+        .as_deref(),
+        Some("client not installed")
+    );
+}
+
+#[test]
+fn discover_offers_each_plugin_of_one_repository_reading_its_feed_once() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.vision", "edwards.navigation"], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.select_plugins_tab();
+    window.poll();
+    let view = window.plugins.discover_view();
+    let mut offered: Vec<(String, Option<String>)> = view
+        .iter()
+        .map(|&row| {
+            let row = &window.plugins.discover[row];
+            (
+                row.entry.id.clone(),
+                row.latest_version().map(str::to_owned),
+            )
+        })
+        .collect();
+    offered.sort();
+    assert_eq!(
+        offered,
+        [
+            ("edwards.navigation".to_owned(), Some("0.4.0".to_owned())),
+            ("edwards.vision".to_owned(), Some("1.2.0".to_owned())),
+        ]
+    );
+    let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+        .unwrap()
+        .to_string();
+    assert_eq!(fixture.server.count(&feed), 1);
+}
+
+// A broken index is a publisher's mistake: the player still gets the feed's
+// releases, and the launcher log says why the index was ignored.
+#[test]
+fn a_malformed_plugin_index_is_logged_and_the_feed_still_offers() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.vision"], "");
+    fixture.releases(&[("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0")]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    check(&mut window);
+    window.select_plugins_tab();
+    window.poll();
+    assert_eq!(window.plugins.discover_view().len(), 1);
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Plugin index of {HELLO_REPO} ignored: The plugin index is invalid"
+        )),
+        "{log}"
+    );
 }
 
 // OpenAC LauncherWindowViewModelTests.DiscoverHidesABlockedListedPluginAndMakesNoDetailRequestForIt.
