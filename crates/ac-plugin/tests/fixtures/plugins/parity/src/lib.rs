@@ -285,6 +285,9 @@ impl Plugin for Parity {
             Callback::LootLooted((handle, _)) => (4, *handle),
             Callback::LootRemoved((handle, _)) => (5, *handle),
             Callback::CommandComplete(_) => (6, 0),
+            Callback::ServiceRequest(request) => (7, request.handle),
+            // A kind a later API version adds.
+            _ => return CallbackAnswer::Nothing,
         };
         host.info(&format!("parity callback {}", hex(&callback.to_bytes())));
         self.answer(tag, handle, &callback)

@@ -3070,6 +3070,257 @@ fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
     );
 }
 
+// --- Plugin services: one plugin calls another and waits for its reply ---
+
+/// Gives plugin `openac.<verb>` the order `/<verb> <order>`; the last line
+/// it logged.
+fn order(plugins: &mut PluginSession, api: &mut FakeSession, verb: &str, order: &str) -> String {
+    assert!(plugins.handle_line(&format!("/{verb} {order}"), api));
+    api.messages(&format!("openac.{verb}"))
+        .last()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// How many times plugin `id` logged `line`.
+fn logged(api: &FakeSession, id: &str, line: &str) -> usize {
+    api.messages(id).iter().filter(|m| *m == line).count()
+}
+
+/// A service offered by one plugin is listed, called by another by its
+/// scoped id (ignoring case) with the reply coming back, and heard of by
+/// every plugin, its owner too; once withdrawn it is gone and heard gone.
+#[test]
+fn a_plugin_calls_another_plugins_service_and_gets_its_reply() {
+    let (_root, mut plugins, mut api) = suite_pair("service-call", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Ok(1)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "list"),
+        "asker list: openac.suite/echo (openac.suite, suite's echo)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "call OPENAC.SUITE/echo hi"),
+        "asker call: Ok(suite heard openac.asker: hi)"
+    );
+    p.deliver(a);
+    let offered = "heard service openac.suite/echo openac.suite true";
+    assert_eq!(logged(a, "openac.asker", &format!("asker {offered}")), 1);
+    assert_eq!(logged(a, "openac.suite", &format!("suite {offered}")), 1);
+
+    assert_eq!(
+        order(p, a, "suite", "withdraw echo"),
+        "suite withdraw echo: true"
+    );
+    assert_eq!(
+        order(p, a, "suite", "withdraw echo"),
+        "suite withdraw echo: false"
+    );
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
+    assert_eq!(order(p, a, "asker", "list"), "asker list: ");
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+}
+
+/// Every way a call goes unanswered says why, and every plugin keeps
+/// running: no such service, the caller's own, the service refusing or
+/// giving no answer, a request or reply over the limit, a call made while
+/// answering one; and an offer under a bad or taken name is refused.
+#[test]
+fn a_service_call_says_why_it_got_no_reply() {
+    let (_root, mut plugins, mut api) = suite_pair("service-errors", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Ok(1)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "offer mine"),
+        "asker offer mine: Ok(2)"
+    );
+    for (call, expected) in [
+        ("call openac.suite/nope x", "Err(NotFound)"),
+        ("call openac.asker/mine x", "Err(SelfCall)"),
+        ("call openac.suite/echo refuse", "Err(Refused(\"not now\"))"),
+        (
+            "call openac.suite/echo nothing",
+            "Err(Refused(\"the service gave no answer\"))",
+        ),
+        ("call openac.suite/echo big", "Err(TooLarge(65536))"),
+        ("call-big openac.suite/echo", "Err(TooLarge(65536))"),
+        (
+            "call openac.suite/echo nest:openac.asker/mine",
+            "Ok(Err(Nested))",
+        ),
+    ] {
+        assert_eq!(
+            order(p, a, "asker", call),
+            format!("asker call: {expected}"),
+            "{call}"
+        );
+    }
+    assert_eq!(
+        order(p, a, "suite", "offer Echo"),
+        "suite offer Echo: Err(InvalidName)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Err(AlreadyRegistered)"
+    );
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A service whose plugin panics while answering: the caller hears it
+/// faulted and runs on; the owner is unloaded, and its service is gone
+/// and heard gone.
+#[test]
+fn a_service_that_fails_while_answering_stops_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-fault", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo panic"),
+        "asker call: Err(Faulted)"
+    );
+    let reports = p.take_reports();
+    let fault = failed(&reports, "openac.suite").unwrap();
+    assert!(fault.contains("suite's service panicked"), "{fault}");
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(p.loaded_ids(), ["openac.asker"]);
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+}
+
+/// A service that never answers is stopped at its plugin's own deadline,
+/// in its callback; the caller hears it timed out and runs on.
+#[test]
+fn a_stuck_service_stops_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-stuck", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo loop"),
+        "asker call: Err(TimedOut)"
+    );
+    let reports = p.take_reports();
+    assert_eq!(
+        failed(&reports, "openac.suite").as_deref(),
+        Some(
+            "plugin 'openac.suite' stopped: ran for more than 1 s in one call (it looks stuck) \
+             in callback service request; last imports: none"
+        )
+    );
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(p.loaded_ids(), ["openac.asker"]);
+}
+
+/// A slow service warns the plugin that offers it, in its callback, never
+/// the caller, whose own time leaves the answer out.
+#[test]
+fn a_slow_service_warns_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-slow", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo work:150"),
+        "asker call: Ok(done)"
+    );
+    let asked = p.last_call_time("openac.asker").unwrap();
+    assert!(asked < ac_plugin::SLOW_CALL, "{asked:?}");
+    let warned: Vec<(&str, &str)> = a
+        .logs
+        .iter()
+        .filter(|(_, level, _)| *level == LogLevel::Warn)
+        .map(|(id, _, m)| (id.as_str(), m.as_str()))
+        .collect();
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert_eq!(warned[0].0, "openac.suite");
+    assert!(
+        warned[0]
+            .1
+            .starts_with("plugin 'openac.suite' was slow in callback service request: "),
+        "{warned:?}"
+    );
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A service's time is left out of the caller's deadline: the caller
+/// works 800 ms of its own around a 700 ms answer, longer together than
+/// the 1 s deadline, and neither is stopped.
+#[test]
+fn a_services_time_does_not_count_against_the_callers_deadline() {
+    let (_root, mut plugins, mut api) = suite_pair("service-lent", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    let started = std::time::Instant::now();
+    order(p, a, "asker", "call openac.suite/echo work:700 400");
+    assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
+    assert_eq!(logged(a, "openac.asker", "asker call: Ok(done)"), 1);
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A plugin that starts hears every service already offered, once: a
+/// reloaded caller hears the offer again as it starts, and nothing more
+/// with the next events. A reloaded owner's service goes with the old
+/// copy.
+#[test]
+fn a_plugin_that_starts_hears_every_service_already_offered() {
+    let (_root, mut plugins, mut api) = suite_pair("service-replay", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    p.deliver(a);
+    let offered = "asker heard service openac.suite/echo openac.suite true";
+    assert_eq!(logged(a, "openac.asker", offered), 1);
+    p.request_reload("openac.asker");
+    p.pump(0.0, None, a);
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+    assert_eq!(logged(a, "openac.asker", offered), 2);
+    p.deliver(a);
+    assert_eq!(logged(a, "openac.asker", offered), 2);
+
+    p.request_reload("openac.suite");
+    p.pump(0.0, None, a);
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
+}
+
 // --- The compile cache (`ac_plugin::ModuleCache`) ---
 
 /// The first load compiles and writes the cache file; the next engine

@@ -907,6 +907,28 @@ macro_rules! import_table {
             StatusCapture = status_capture(String) -> Vec<(String, String)>,
                 permission: None, window: false, since: (1, 0);
 
+            // ── P. Plugin services (`crate::services`) ──────────────────
+            /// Offer a service other plugins can call (scoped as
+            /// `<plugin id>/<name>`), answered through the callback export;
+            /// the plugin's handle for it.
+            ServiceRegister = service_register($crate::services::ServiceRegistration)
+                -> Result<u32, $crate::services::ServiceError>
+                = Err($crate::services::ServiceError::Refused(
+                    "plugin services are unavailable".to_owned())),
+                permission: None, window: false, since: (1, 6);
+            /// Withdraw one of the plugin's services; false for a handle it
+            /// does not hold.
+            ServiceUnregister = service_unregister(u32) -> bool,
+                permission: None, window: false, since: (1, 6);
+            /// Every service on offer, by id.
+            Services = services(()) -> Vec<$crate::services::ServiceInfo>,
+                permission: None, window: false, since: (1, 6);
+            /// Call another plugin's service and wait for its reply.
+            ServiceCall = service_call($crate::services::ServiceCall)
+                -> Result<Vec<u8>, $crate::services::ServiceError>
+                = Err($crate::services::ServiceError::NotFound),
+                permission: None, window: false, since: (1, 6);
+
             // ── N. Storage ──────────────────────────────────────────────
             /// The bytes stored under a key, none when nothing is.
             StorageRead = storage_read($crate::storage::StorageKey)

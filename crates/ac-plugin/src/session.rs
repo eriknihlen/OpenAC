@@ -527,7 +527,8 @@ impl PluginSession {
 
     /// Instantiates and enables a prepared plugin at `position` in the load
     /// order (the end when `None`); it then hears every object already in
-    /// the world. On failure nothing of it stays registered.
+    /// the world and every service the plugins were told is on offer. On
+    /// failure nothing of it stays registered.
     fn enable_prepared(
         &mut self,
         prepared: Prepared,
@@ -580,9 +581,23 @@ impl PluginSession {
                 // world, once (OpenAC `RuntimeWorldEntityProjection.Subscribe`).
                 let entities = api.entities();
                 let ids: Vec<u32> = entities.iter().map(|e| e.id).collect();
-                for entity in entities {
-                    let (entry, bytes) =
-                        encode(&Event::EntitySpawned(entity), self.version_of(index));
+                // Then every service the others were told is on offer; the
+                // offers and withdrawals not yet told reach it with theirs.
+                let services = self
+                    .services
+                    .plugin_services
+                    .told()
+                    .iter()
+                    .cloned()
+                    .map(Event::ServiceChanged)
+                    .filter(|event| hears(&self.plugins[index].manifest, event));
+                let replay: Vec<Event> = entities
+                    .into_iter()
+                    .map(Event::EntitySpawned)
+                    .chain(services.collect::<Vec<_>>())
+                    .collect();
+                for event in replay {
+                    let (entry, bytes) = encode(&event, self.version_of(index));
                     if let Err(fault) = self.invoke(index, api, |instance, handler| {
                         instance.event(&bytes, entry, handler)
                     }) {
@@ -664,6 +679,7 @@ impl PluginSession {
             storage_roots: &options.storage,
             lent: std::time::Duration::ZERO,
         };
+        let answers = instance.answers_callbacks();
         let mut handler = |import: Import, request: &[u8]| {
             cx.lent = std::time::Duration::ZERO;
             let reply = handle_import(
@@ -671,6 +687,7 @@ impl PluginSession {
                 request,
                 manifest,
                 directory,
+                answers,
                 &mut cx,
                 Some(&mut others),
             )?;
@@ -1052,9 +1069,17 @@ impl PluginSession {
     /// announcing something that cannot wait for its next pass, such as
     /// the character leaving the world before the session is torn down).
     pub fn deliver(&mut self, api: &mut dyn SessionApi) {
-        while let Some(event) = self.events.pop_front() {
+        loop {
+            self.queue_service_changes();
+            let Some(event) = self.events.pop_front() else {
+                break;
+            };
             let spawned = match &event {
                 Event::EntitySpawned(entity) => Some(entity.id),
+                Event::ServiceChanged(change) => {
+                    self.services.plugin_services.told_of(change);
+                    None
+                }
                 _ => None,
             };
             let entry = Entry::of_event(&event);
@@ -1091,6 +1116,16 @@ impl PluginSession {
         }
         self.replayed.clear();
         self.unload_faulted(api);
+    }
+
+    /// The services offered and withdrawn since the last look join the
+    /// events, in the order they happened: every plugin built for API 1.6
+    /// or later hears each (a plugin's own too). Queued even with no plugin
+    /// loaded, so what the plugins were told stays true.
+    fn queue_service_changes(&mut self) {
+        for change in self.services.plugin_services.take_changes() {
+            self.events.push_back(Event::ServiceChanged(change));
+        }
     }
 
     /// The loaded plugins' ids in load order (`chat`: only those allowed

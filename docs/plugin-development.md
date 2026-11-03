@@ -100,7 +100,11 @@ canvas pointer event, `PointerEvent::HOVER` (the pointer over a listening
 canvas with no button held, at most one per delivery at the latest place) and
 `PointerEvent::LEAVE` (one when the hovering ends: the pointer moved off, a
 press began elsewhere, or the canvas hid or went), for tooltips; a plugin built
-for an older version hears neither. Everything the client offers
+for an older version hears neither. API 1.6 also added plugin
+services, through which plugins built to work together call each other
+([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
+`Callback::ServiceRequest`, which a plugin built for an older version never
+gets. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -318,6 +322,42 @@ the first time, so ask for it once (at start, or when the map is first drawn)
 and keep it. A texture that does not decode gives its type an `rgb` of 0.
 Neither call needs a permission; both are empty without the
 game files.
+
+## Plugin services
+
+Plugins built to work together, a suite, call each other through services
+(API 1.6). One plugin offers a service by name and answers it; another calls
+it and waits for the reply. The request and the reply are bytes the two
+plugins agree on; the client never reads them.
+
+The plugin offering it registers the service, `host.register_service_raw("distance",
+"Metres to an object")`, which is then known to every plugin as
+`<plugin id>/distance`. The returned handle comes back in each
+`Callback::ServiceRequest`, which carries the caller's id and the request.
+The plugin answers in `Plugin::callback` with
+`CallbackAnswer::Service(Ok(reply))`, or with `Err(reason)` to refuse. A name
+is 1 to 64 bytes of `a-z`, `0-9` and `-`, and a plugin offers at most 32. The
+service goes when the plugin calls `unregister_service` or stops.
+
+The calling plugin uses `host.call_service_raw("example.navigation/distance",
+&request)`, matching the id ignoring case, and gets the reply's bytes, or a
+`ServiceError` saying why there is none: no such service (`NotFound`), its
+own (`SelfCall`: a plugin calls its own code directly), a call made while
+answering a callback (`Nested`), a request or reply over 64 KiB
+(`TooLarge`), the service refusing (`Refused`), or the service's plugin
+stopping while it answered (`TimedOut`, `Faulted`). What the service says
+about a request, such as "no such object", belongs in its reply.
+`host.services()` lists what is on offer. Every plugin hears
+`Event::ServiceChanged` when a service comes or goes, and a plugin that
+starts first hears one for every service already offered.
+
+An answer runs as the offering plugin's own callback, under its own limits
+([Limits](#limits)): a slow answer warns, and a stuck one stops, the plugin
+that offers the service. The caller's clock stops while it waits.
+
+For state that changes over time and that any plugin may read, such as
+what a plugin is doing now, the status board (`status_publish`,
+`status_read`) fits better than a service.
 
 ## Testing natively
 

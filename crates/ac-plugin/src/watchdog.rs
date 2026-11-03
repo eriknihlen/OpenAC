@@ -240,6 +240,7 @@ impl Entry {
             Event::ThemeChanged(_) => "theme changed",
             Event::NavigationPlan(_) => "navigation plan",
             Event::NavigationReach(_) => "navigation reach",
+            Event::ServiceChanged(_) => "service changed",
             Event::StatusTextReceived(_) => "status text",
             Event::Ui(UiEvent::Action(_)) => "ui action",
             Event::Ui(UiEvent::Pointer(_)) => "ui pointer",
@@ -262,6 +263,10 @@ impl Entry {
             Callback::LootLooted(_) => "loot looted",
             Callback::LootRemoved(_) => "loot removed",
             Callback::CommandComplete(_) => "command completion",
+            Callback::ServiceRequest(_) => "service request",
+            // `Callback` is non-exhaustive: a kind added later reads as this
+            // until it is named here.
+            _ => "(unnamed kind)",
         })
     }
 }

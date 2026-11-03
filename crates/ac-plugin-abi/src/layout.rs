@@ -204,7 +204,7 @@ mod tests {
     /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
     /// published the same value as 1.5: it added two values of a pointer
     /// event's kind byte, not a shape.
-    const PUBLISHED: u64 = 0x56b1_6fd9_0db8_834f;
+    const PUBLISHED: u64 = 0xf589_5c50_dd35_66e1;
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;
@@ -384,6 +384,44 @@ mod tests {
             );
         }
         assert_eq!(core_shape(ApiVersion::new(1, 4)), API_1_4_CORE);
+    }
+
+    /// The imports API 1.6 added for plugin services.
+    const API_1_6_SERVICES: [Import; 4] = [
+        Import::ServiceRegister,
+        Import::ServiceUnregister,
+        Import::Services,
+        Import::ServiceCall,
+    ];
+
+    /// API 1.6 added plugin services: their imports, and the event, the
+    /// callback and the answer they carry, each marked `since`. An API 1.5
+    /// plugin keeps its core shape, has none of the new imports, and every
+    /// import it has is as it was.
+    #[test]
+    fn api_1_5_plugins_keep_their_core_and_import_shapes() {
+        let v1_5 = ApiVersion::new(1, 5);
+        assert_eq!(core_shape(v1_5), API_1_5_CORE);
+        assert_ne!(CORE_SHAPE, API_1_5_CORE);
+        let older = PluginLayout::parse(&section_at(v1_5)).unwrap();
+        let newer = PluginLayout::parse(&section_at(ApiVersion::new(1, 6))).unwrap();
+        for import in Import::ALL {
+            if API_1_6_SERVICES.contains(import) {
+                assert_eq!(import.since(), ApiVersion::new(1, 6), "{import:?}");
+                assert_eq!(older.import_shape(import.name()), None, "{import:?}");
+                assert_eq!(
+                    newer.import_shape(import.name()),
+                    Some(import.shape()),
+                    "{import:?}"
+                );
+            } else {
+                assert_eq!(
+                    older.import_shape(import.name()),
+                    newer.import_shape(import.name()),
+                    "{import:?}"
+                );
+            }
+        }
     }
 
     /// API 1.3 added only imports (the world triangles and markers): an API

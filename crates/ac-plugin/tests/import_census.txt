@@ -226,6 +226,10 @@ peers_import_command -
 status_publish -
 status_read -
 status_capture -
+service_register -
+service_unregister -
+services -
+service_call -
 storage_read -
 storage_read_text -
 storage_write -

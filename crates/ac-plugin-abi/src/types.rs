@@ -279,6 +279,10 @@ wire_union! {
         /// A reach search the plugin asked for ended (only to that plugin;
         /// API 1.5).
         26 => NavigationReach(crate::navigation::NavigationReach) since (1, 5),
+        /// A plugin service came or went ([`crate::services`]): offered,
+        /// withdrawn, or gone with its plugin. A plugin just enabled first
+        /// hears one for every service already offered (API 1.6).
+        27 => ServiceChanged(crate::services::ServiceChange) since (1, 6),
         /// One of the plugin's panels or canvases was used ([`crate::ui`];
         /// the tag is `crate::ui::EVENT_TAG`).
         100 => Ui(crate::ui::UiEvent),

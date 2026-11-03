@@ -166,6 +166,8 @@ pub(crate) struct Instance {
     slow_notes: Vec<String>,
     /// The calls over the slow-call time since the last take.
     slow_calls: Vec<SlowCall>,
+    /// Whether the last call was stopped at its deadline.
+    stuck: bool,
 }
 
 /// A call that took longer than the slow-call time and finished.
@@ -427,6 +429,7 @@ impl Instance {
             slow_log,
             slow_notes: Vec::new(),
             slow_calls: Vec::new(),
+            stuck: false,
         })
     }
 
@@ -469,6 +472,18 @@ impl Instance {
     /// The calls over the slow-call time since the last take.
     pub(crate) fn take_slow_calls(&mut self) -> Vec<SlowCall> {
         std::mem::take(&mut self.slow_calls)
+    }
+
+    /// Whether the plugin exports `openac_callback`, so it can answer
+    /// callbacks.
+    pub(crate) fn answers_callbacks(&self) -> bool {
+        self.callback.is_some()
+    }
+
+    /// Whether the last call faulted by running past its deadline (rather
+    /// than by a panic or a trap).
+    pub(crate) fn was_stuck(&self) -> bool {
+        self.stuck
     }
 
     /// Stops the plugin.
@@ -557,6 +572,7 @@ impl Instance {
         self.store.data_mut().panic = None;
         *lock(&self.exchange) = Exchange::default();
         self.tally.clear();
+        self.stuck = false;
         let mut clock = CallClock::start(deadline);
         let result = drive(
             func.call_async(&mut self.store, params),
@@ -589,6 +605,8 @@ impl Instance {
             }
             Err(error) => {
                 let panic = self.store.data_mut().panic.take();
+                self.stuck = panic.is_none()
+                    && matches!(error.downcast_ref::<Trap>(), Some(Trap::Interrupt));
                 Err(describe(
                     &error,
                     panic,

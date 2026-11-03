@@ -3,5 +3,5 @@
   "displayName": "Suite",
   "version": "0.1.0",
   "entry": "suite.wasm",
-  "apiVersion": "1.5"
+  "apiVersion": "1.6"
 }

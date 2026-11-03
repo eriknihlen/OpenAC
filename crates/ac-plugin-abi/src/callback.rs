@@ -1,10 +1,12 @@
 //! Callbacks: the client asking a plugin something it registered to
-//! answer (a chat filter or input interceptor, a loot classifier), through
+//! answer (a chat filter or input interceptor, a loot classifier, a
+//! service), through
 //! the plugin's `openac_callback` export
 //! ([`crate::exports::CALLBACK`]). The client never calls a plugin back
 //! while that plugin is inside a call of its own.
 
 use crate::items::{LootClassification, LootContext, LootedItem};
+use crate::services::ServiceRequest;
 use crate::types::{ChatLine, CommandCall, CommandCompletion};
 use crate::{wire_record, wire_union};
 
@@ -21,7 +23,10 @@ wire_record! {
 }
 
 wire_union! {
-    /// What the client asks.
+    /// What the client asks. New kinds come with new API minor versions
+    /// (marked `since`), so a plugin matches with a catch-all arm; the client
+    /// asks a plugin only what it registered to answer.
+    #[non_exhaustive]
     pub enum Callback: "callback" {
         /// Should this chat line (or status notice, kind 100) be dropped?
         /// (filter handle, line); `Bool(true)` drops it.
@@ -39,6 +44,11 @@ wire_union! {
         /// Offer completions for a partly typed command of one of the
         /// plugin's verbs; answer [`CallbackAnswer::Completions`].
         6 => CommandComplete(CommandCall),
+        /// Another plugin calls one of the plugin's services
+        /// ([`crate::services`]); answer [`CallbackAnswer::Service`]. Only
+        /// a plugin built for API 1.6 or later offers one, so only such a
+        /// plugin is asked.
+        7 => ServiceRequest(ServiceRequest) since (1, 6),
     }
 }
 
@@ -74,6 +84,9 @@ wire_union! {
         3 => Classification(Option<LootClassification>),
         /// Completions for a command, best first.
         4 => Completions(Vec<CommandCompletion>),
+        /// A service's reply, or why it refuses the call (the caller gets
+        /// [`crate::services::ServiceError::Refused`] with the reason).
+        5 => Service(Result<Vec<u8>, String>) since (1, 6),
     }
 }
 

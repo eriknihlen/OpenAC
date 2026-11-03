@@ -32,6 +32,7 @@ mod instance;
 pub mod interceptors;
 pub mod manifest;
 pub mod reload;
+pub mod services;
 pub mod session;
 pub mod settings;
 pub mod status;
