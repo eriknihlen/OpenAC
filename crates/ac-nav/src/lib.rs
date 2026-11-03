@@ -27,6 +27,7 @@ pub mod floorplan;
 pub mod geometry;
 pub mod grid;
 pub mod indoor;
+pub mod landscape;
 pub mod leaps;
 pub mod motor;
 pub mod order;

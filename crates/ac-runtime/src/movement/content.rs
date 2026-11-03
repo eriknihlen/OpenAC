@@ -115,6 +115,13 @@ impl WorldContent {
         &self.height_table
     }
 
+    /// The region record (terrain types and textures among it), read
+    /// through the dat cache; none when it cannot be read.
+    #[must_use]
+    pub fn region(&self) -> Option<Arc<Region>> {
+        self.dats.get::<Region>(REGION_ID).ok().flatten()
+    }
+
     /// A setup.
     #[must_use]
     pub fn setup(&self, id: u32) -> Option<Arc<Setup>> {

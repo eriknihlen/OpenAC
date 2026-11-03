@@ -18,7 +18,7 @@ use ac_plugin_abi::magic::{
 };
 use ac_plugin_abi::world::{
     ActivationCompletion, Contract, EntitySnapshot, Floorplan, IndoorCell, ItemProperties,
-    WorldObject, WorldTime,
+    LandblockTerrain, TerrainColor, WorldObject, WorldTime,
 };
 
 use crate::Host;
@@ -178,6 +178,27 @@ impl Host<'_> {
     /// it. Read from the game files once per landblock and kept.
     pub fn indoor_cells(&mut self, landblock_id: u32) -> Vec<IndoorCell> {
         self.call::<calls::DungeonIndoorCells>(&landblock_id)
+    }
+
+    /// The outdoor terrain of each landblock in `landblocks` (`x << 8 |
+    /// y`), in the order asked, from the game files (API 1.5): 81
+    /// vertices each, 24 m apart, vertex `(x, y)` (east, north of the
+    /// south-west corner) at index `x * 9 + y` ([`LandblockTerrain::vertex`]),
+    /// with its terrain type, road bits and height in metres. A landblock
+    /// with no terrain in the files is left out. Only the first
+    /// [`LANDSCAPE_TERRAIN_MAX`](crate::world::LANDSCAPE_TERRAIN_MAX)
+    /// (256) are answered: a map of the whole world asks a page at a time,
+    /// over several ticks.
+    pub fn landscape_terrain(&mut self, landblocks: &[u16]) -> Vec<LandblockTerrain> {
+        self.call::<calls::LandscapeTerrain>(&landblocks.to_vec())
+    }
+
+    /// Each terrain type the region defines, with the mean colour of its
+    /// landscape texture (`0xRRGGBB`) and its name (API 1.5), so a map
+    /// drawn from [`Self::landscape_terrain`] looks like the game. Worked
+    /// out once a session; empty without the game files.
+    pub fn terrain_palette(&mut self) -> Vec<TerrainColor> {
+        self.call::<calls::LandscapeTerrainPalette>(&())
     }
 
     /// Whether projectile paths can be asked now (in the world).

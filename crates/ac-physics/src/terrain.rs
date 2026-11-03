@@ -59,7 +59,7 @@ impl TerrainSurface {
         let mut z = [[0.0; HEIGHTMAP_SIDE]; HEIGHTMAP_SIDE];
         for (x, column) in z.iter_mut().enumerate() {
             for (y, h) in column.iter_mut().enumerate() {
-                *h = height_table[usize::from(heights[x * HEIGHTMAP_SIDE + y])];
+                *h = Self::vertex_height(heights, height_table, x, y);
             }
         }
         let mut corner_is_water = [[false; HEIGHTMAP_SIDE]; HEIGHTMAP_SIDE];
@@ -109,6 +109,15 @@ impl TerrainSurface {
             landblock_x,
             landblock_y,
         }
+    }
+
+    /// The ground's height, metres, at corner `(x, y)` (`x` east, `y`
+    /// north of the landblock's south-west corner, each 0 to 8): its
+    /// height index (the 81 indexed `x * 9 + y`) through the region's
+    /// height table.
+    #[must_use]
+    pub fn vertex_height(heights: &[u8; 81], height_table: &[f32; 256], x: usize, y: usize) -> f32 {
+        height_table[usize::from(heights[x * HEIGHTMAP_SIDE + y])]
     }
 
     /// The whole block: 0 no water, 1 some water, 2 every cell fully under
@@ -307,7 +316,7 @@ fn heightmap_corners(
     cx: usize,
     cy: usize,
 ) -> [f32; 4] {
-    let h = |x: usize, y: usize| height_table[usize::from(heights[x * HEIGHTMAP_SIDE + y])];
+    let h = |x: usize, y: usize| TerrainSurface::vertex_height(heights, height_table, x, y);
     [h(cx, cy), h(cx + 1, cy), h(cx + 1, cy + 1), h(cx, cy + 1)]
 }
 

@@ -402,6 +402,19 @@ macro_rules! import_table {
             /// too); empty for a landblock with none.
             DungeonIndoorCells = dungeon_indoor_cells(u32) -> Vec<$crate::world::IndoorCell>,
                 permission: None, window: false, since: (1, 0);
+            /// The outdoor terrain of each landblock asked for (`x << 8 |
+            /// y`), in the order asked, from the game files (API 1.5): its
+            /// 9 by 9 vertices' terrain types, roads and heights. A
+            /// landblock with no terrain in the files is left out; only the
+            /// first `world::LANDSCAPE_TERRAIN_MAX` asked are answered.
+            LandscapeTerrain = landscape_terrain(Vec<u16>) -> Vec<$crate::world::LandblockTerrain>,
+                permission: None, window: false, since: (1, 5);
+            /// Each terrain type the region defines, with the mean colour
+            /// of its landscape texture and its name (API 1.5); empty
+            /// without the game files.
+            LandscapeTerrainPalette = landscape_terrain_palette(())
+                -> Vec<$crate::world::TerrainColor>,
+                permission: None, window: false, since: (1, 5);
             /// Whether projectile paths can be asked now (in the world).
             ProjectilesAvailable = projectiles_available(()) -> bool,
                 permission: None, window: false, since: (1, 0);

@@ -70,7 +70,7 @@ pub use geometry::{Polygon, SidesType, Stippling, Uv, Vertex, VertexArray};
 pub use gfx_obj::{GfxObj, GfxObjFlags};
 pub use gfx_obj_degrade_info::{GfxObjDegradeInfo, GfxObjInfo};
 pub use iteration::Iteration;
-pub use landblock::{LandBlock, TerrainInfo};
+pub use landblock::{LandBlock, TerrainInfo, VERTEX_COUNT, VERTICES_PER_SIDE};
 pub use landblock_info::{BuildingInfo, BuildingPortal, LandBlockInfo, Stab};
 pub use palette::{Palette, PaletteSet};
 pub use render_surface::{PixelFormat, RenderSurface};

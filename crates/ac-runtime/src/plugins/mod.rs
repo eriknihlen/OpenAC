@@ -470,6 +470,8 @@ impl SessionApi for PluginBinding<'_> {
             DungeonIsSealed => |cell| self.dungeon_is_sealed(cell),
             DungeonFloorplan => |landblock| self.dungeon_floorplan(landblock),
             DungeonIndoorCells => |landblock| self.dungeon_indoor_cells(landblock),
+            LandscapeTerrain => |landblocks| self.landscape_terrain(&landblocks),
+            LandscapeTerrainPalette => |()| self.landscape_terrain_palette(),
             ProjectilesAvailable => |()| self.projectiles_available(),
             ProjectilesEvaluatePath => |query| self.projectiles_evaluate_path(&query),
             // E. Spells and magic.
@@ -720,6 +722,8 @@ mod combat_tests;
 mod events_tests;
 #[cfg(test)]
 mod items_tests;
+#[cfg(test)]
+mod landscape_tests;
 #[cfg(test)]
 mod magic_tests;
 #[cfg(test)]

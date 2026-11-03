@@ -741,6 +741,78 @@ impl IndoorCell {
     }
 }
 
+/// The most landblocks one [`crate::calls::LandscapeTerrain`] answers: the
+/// first this many of a longer request are answered, the rest left out.
+pub const LANDSCAPE_TERRAIN_MAX: usize = 256;
+
+/// Vertices along one side of a landblock's terrain grid.
+pub const TERRAIN_VERTICES_PER_SIDE: usize = 9;
+
+/// Metres between neighbouring terrain vertices.
+pub const TERRAIN_VERTEX_SPACING_METERS: f32 = 24.0;
+
+/// Metres along one side of a landblock.
+pub const LANDBLOCK_METERS: f32 = 192.0;
+
+wire_record! {
+    /// One vertex of a landblock's terrain grid (API 1.5), as the game
+    /// files store it.
+    pub struct TerrainVertex {
+        /// The terrain type, 0 to 31: an index into the region's terrain
+        /// types ([`TerrainColor`]).
+        pub terrain_type: u8,
+        /// The road bits, 0 to 3: non-zero where a road runs over the
+        /// vertex.
+        pub road: u8,
+        /// The ground's height at the vertex, metres, through the region's
+        /// land height table: the height the character stands at there.
+        pub height_meters: f32,
+    }
+}
+
+wire_record! {
+    /// A landblock's outdoor terrain (API 1.5): a 9 by 9 grid of vertices
+    /// 24 m apart, covering the landblock's 192 m square edge to edge (a
+    /// landblock's east and north edges are its neighbours' west and south
+    /// edges).
+    pub struct LandblockTerrain {
+        /// The landblock, `x << 8 | y` (x counts east, y north).
+        pub landblock: u16,
+        /// The 81 vertices; vertex `(x, y)` is at index `x * 9 + y`, `x`
+        /// counting east and `y` north from vertex `(0, 0)`, the
+        /// landblock's south-west corner. It stands at landblock-local
+        /// `(24 x, 24 y)` metres.
+        pub vertices: Vec<TerrainVertex>,
+    }
+}
+
+impl LandblockTerrain {
+    /// The vertex `x` east and `y` north of the south-west corner (each 0
+    /// to 8); none outside the grid.
+    #[must_use]
+    pub fn vertex(&self, x: usize, y: usize) -> Option<&TerrainVertex> {
+        if x >= TERRAIN_VERTICES_PER_SIDE || y >= TERRAIN_VERTICES_PER_SIDE {
+            return None;
+        }
+        self.vertices.get(x * TERRAIN_VERTICES_PER_SIDE + y)
+    }
+}
+
+wire_record! {
+    /// How one of the region's terrain types looks (API 1.5), so a map
+    /// drawn from [`LandblockTerrain`] looks like the game.
+    pub struct TerrainColor {
+        /// The terrain type, as [`TerrainVertex::terrain_type`] names it.
+        pub terrain_type: u8,
+        /// The mean colour of the type's landscape texture, `0xRRGGBB`; 0
+        /// when the game files have no texture for it.
+        pub rgb: u32,
+        /// The type's name as the game files give it; none when they give
+        /// none.
+        pub name: Option<String>,
+    }
+}
+
 wire_enum! {
     /// The flight a projectile path test models.
     pub enum ProjectilePathKind: "projectile path kind" {
@@ -931,5 +1003,55 @@ mod tests {
             let off = (yaw - expected).abs().min(360.0 - (yaw - expected).abs());
             assert!(off < 0.01, "turn {turn}: {yaw}");
         }
+    }
+
+    // A landblock's terrain and the terrain colours cross the boundary as
+    // they were sent, and a vertex is found by its place east and north of
+    // the south-west corner.
+    #[test]
+    fn landscape_records_round_trip_and_vertices_are_found_by_place() {
+        use crate::wire::Wire;
+        let terrain = LandblockTerrain {
+            landblock: 0xA9B4,
+            vertices: (0..81u8)
+                .map(|i| TerrainVertex {
+                    terrain_type: i % 32,
+                    road: i % 4,
+                    height_meters: f32::from(i) * 2.0,
+                })
+                .collect(),
+        };
+        let sent = vec![terrain.clone()];
+        assert_eq!(
+            Vec::<LandblockTerrain>::from_bytes(&sent.to_bytes()).unwrap(),
+            sent
+        );
+        assert_eq!(terrain.vertex(0, 0).unwrap().height_meters, 0.0);
+        // One step east is nine along: the grid runs north first.
+        assert_eq!(terrain.vertex(1, 0).unwrap().height_meters, 18.0);
+        assert_eq!(terrain.vertex(0, 1).unwrap().height_meters, 2.0);
+        assert_eq!(terrain.vertex(8, 8).unwrap().height_meters, 160.0);
+        assert!(terrain.vertex(9, 0).is_none() && terrain.vertex(0, 9).is_none());
+        assert_eq!(
+            TERRAIN_VERTEX_SPACING_METERS * (TERRAIN_VERTICES_PER_SIDE - 1) as f32,
+            LANDBLOCK_METERS
+        );
+
+        let colours = vec![
+            TerrainColor {
+                terrain_type: 1,
+                rgb: 0x5A_5E30,
+                name: Some("Grassland".into()),
+            },
+            TerrainColor {
+                terrain_type: 2,
+                rgb: 0,
+                name: None,
+            },
+        ];
+        assert_eq!(
+            Vec::<TerrainColor>::from_bytes(&colours.to_bytes()).unwrap(),
+            colours
+        );
     }
 }

@@ -99,6 +99,35 @@ impl SessionApi for FakeSession {
                 }
             })
             .map_err(|error| error.to_string()),
+            // Each landblock asked for, its vertices at the landblock's
+            // number in metres.
+            Import::LandscapeTerrain => serve::<calls::LandscapeTerrain>(request, |landblocks| {
+                landblocks
+                    .into_iter()
+                    .map(|landblock| ac_plugin::abi::world::LandblockTerrain {
+                        landblock,
+                        vertices: vec![
+                            ac_plugin::abi::world::TerrainVertex {
+                                terrain_type: 1,
+                                road: 0,
+                                height_meters: f32::from(landblock),
+                            };
+                            81
+                        ],
+                    })
+                    .collect()
+            })
+            .map_err(|error| error.to_string()),
+            Import::LandscapeTerrainPalette => {
+                serve::<calls::LandscapeTerrainPalette>(request, |()| {
+                    vec![ac_plugin::abi::world::TerrainColor {
+                        terrain_type: 1,
+                        rgb: 0x5A_5E30,
+                        name: Some("Grassland".into()),
+                    }]
+                })
+                .map_err(|error| error.to_string())
+            }
             other => Ok(other.default_reply()),
         }
     }
@@ -1538,6 +1567,64 @@ fn the_whole_spell_table_is_read_in_one_call_page_by_page() {
         "{:?}",
         api.messages("openac.probe")
     );
+    plugins.shutdown(&mut api);
+}
+
+/// The landscape reads through a real module (the parity relay, which calls
+/// a client function by name): the request reaches the client as the plugin
+/// encoded it, and the client's answers reach the plugin whole.
+#[test]
+fn the_landscape_reads_reach_a_real_plugin() {
+    use ac_plugin::abi::world::{LandblockTerrain, TerrainColor};
+    let root = Root::new("landscape");
+    install(&root.0, "parity");
+    let mut api = FakeSession::default();
+    let mut plugins = session(&[&root.0], None);
+    plugins.start(&mut api);
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    let unhex = |text: &str| -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+            .collect()
+    };
+    let mut reply = |seq: u32, import: Import, request: &[u8]| -> Vec<u8> {
+        let line = format!("/parity call {seq} {} {}", import.name(), hex(request));
+        assert!(plugins.handle_line(&line, &mut api));
+        let prefix = format!("parity reply {seq} ");
+        let messages = api.messages("openac.parity");
+        let answer = messages
+            .iter()
+            .find_map(|m| m.strip_prefix(&prefix))
+            .unwrap_or_else(|| panic!("no reply {seq}: {messages:?}"));
+        unhex(answer)
+    };
+    let asked: Vec<u16> = vec![0xA9B4, 0x01B4];
+    let terrain =
+        Vec::<LandblockTerrain>::from_bytes(&reply(1, Import::LandscapeTerrain, &asked.to_bytes()))
+            .unwrap();
+    let answered: Vec<(u16, usize, f32)> = terrain
+        .iter()
+        .map(|t| {
+            (
+                t.landblock,
+                t.vertices.len(),
+                t.vertex(8, 8).unwrap().height_meters,
+            )
+        })
+        .collect();
+    assert_eq!(
+        answered,
+        [
+            (0xA9B4, 81, f32::from(0xA9B4u16)),
+            (0x01B4, 81, f32::from(0x01B4u16))
+        ]
+    );
+    let palette =
+        Vec::<TerrainColor>::from_bytes(&reply(2, Import::LandscapeTerrainPalette, &[])).unwrap();
+    assert_eq!(palette.len(), 1);
+    assert_eq!(palette[0].rgb, 0x5A_5E30);
+    assert_eq!(palette[0].name.as_deref(), Some("Grassland"));
     plugins.shutdown(&mut api);
 }
 

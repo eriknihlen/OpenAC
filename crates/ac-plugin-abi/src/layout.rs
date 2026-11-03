@@ -202,7 +202,7 @@ mod tests {
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt.
-    const PUBLISHED: u64 = 0xcdfe_f06c_6f4d_60f8;
+    const PUBLISHED: u64 = 0xf5fa_b413_ebc9_cb75;
 
     #[test]
     fn the_fingerprint_is_the_published_one() {
@@ -344,6 +344,28 @@ mod tests {
                 assert_eq!(import.shape_at(v1_4), import.shape(), "{import:?}");
             }
         }
+    }
+
+    /// The imports API 1.5 added for drawing the landscape: not in an
+    /// older plugin's section at all, so a plugin built for 1.4 or before
+    /// loads as it did.
+    const API_1_5_LANDSCAPE: [Import; 2] =
+        [Import::LandscapeTerrain, Import::LandscapeTerrainPalette];
+
+    #[test]
+    fn the_landscape_imports_are_new_in_api_1_5() {
+        let v1_4 = PluginLayout::parse(&section_at(ApiVersion::new(1, 4))).unwrap();
+        let v1_5 = PluginLayout::parse(&section_at(ApiVersion::new(1, 5))).unwrap();
+        for import in API_1_5_LANDSCAPE {
+            assert_eq!(import.since(), ApiVersion::new(1, 5), "{import:?}");
+            assert_eq!(v1_4.import_shape(import.name()), None, "{import:?}");
+            assert_eq!(
+                v1_5.import_shape(import.name()),
+                Some(import.shape()),
+                "{import:?}"
+            );
+        }
+        assert_eq!(core_shape(ApiVersion::new(1, 4)), API_1_4_CORE);
     }
 
     /// API 1.3 added only imports (the world triangles and markers): an API

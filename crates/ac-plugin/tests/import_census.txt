@@ -102,6 +102,8 @@ dungeon_landblock -
 dungeon_is_sealed -
 dungeon_floorplan -
 dungeon_indoor_cells -
+landscape_terrain -
+landscape_terrain_palette -
 projectiles_available -
 projectiles_evaluate_path -
 spells_page -

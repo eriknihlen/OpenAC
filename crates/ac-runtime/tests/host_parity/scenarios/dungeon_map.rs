@@ -1,8 +1,8 @@
 //! A plugin asking where the character is and what shape the place has
 //! (OpenAC `Scenarios/DungeonMapParityTests.cs`): the landblock comes from
 //! the character's place, and with no game files in either arm the sealed
-//! question, the plan, the indoor cells and a reach search are answered the
-//! same inert way.
+//! question, the plan, the indoor cells, the landscape and a reach search
+//! are answered the same inert way.
 
 use ac_plugin::abi::calls;
 
@@ -35,6 +35,15 @@ fn the_dungeon_map_is_answered_the_same_on_both_clients() {
         let cells = arm.call::<calls::DungeonIndoorCells>(&landblock);
         transcript.record("cells", cells.len());
         assert!(cells.is_empty());
+
+        transcript.step("the landscape around it, without the files to read");
+        #[allow(clippy::cast_possible_truncation)]
+        let terrain = arm.call::<calls::LandscapeTerrain>(&vec![(landblock >> 16) as u16]);
+        transcript.record("terrain", terrain.len());
+        assert!(terrain.is_empty());
+        let palette = arm.call::<calls::LandscapeTerrainPalette>(&());
+        transcript.record("colours", palette.len());
+        assert!(palette.is_empty());
 
         transcript.step("a reach search, with nothing to search from");
         let handle = arm.call::<calls::NavigationReachableCells>(

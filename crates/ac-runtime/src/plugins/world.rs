@@ -576,6 +576,78 @@ impl PluginBinding<'_> {
             .collect()
     }
 
+    /// The outdoor terrain of each landblock asked for, in the order asked,
+    /// at most [`abi::LANDSCAPE_TERRAIN_MAX`]; a landblock the files have
+    /// no terrain for is left out.
+    ///
+    /// Each landblock is read once and kept (the 1024 read last). The
+    /// terrain files are read past the shared dat cache: a map asks for
+    /// the whole world a page at a time, and that would push out what the
+    /// session's own loading keeps there.
+    pub(super) fn landscape_terrain(&mut self, landblocks: &[u16]) -> Vec<abi::LandblockTerrain> {
+        let Some(content) = self.state.movement.content().cloned() else {
+            return Vec::new();
+        };
+        let cache = &mut self.state.plugin_services.landscape;
+        landblocks
+            .iter()
+            .take(abi::LANDSCAPE_TERRAIN_MAX)
+            .filter_map(|&landblock| {
+                // A read failure leaves that landblock out, as one the
+                // files lack is.
+                cache
+                    .terrain(content.dats().uncached(), content.height_table(), landblock)
+                    .ok()
+                    .flatten()
+            })
+            .map(|terrain| abi::LandblockTerrain {
+                landblock: terrain.landblock,
+                vertices: terrain
+                    .vertices
+                    .iter()
+                    .map(|v| abi::TerrainVertex {
+                        terrain_type: v.terrain_type,
+                        road: v.road,
+                        height_meters: v.height_meters,
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Each terrain type the region defines with its colour and name,
+    /// worked out once (decoding every terrain texture, about 20 ms) and
+    /// kept; empty, and tried again on the next call, when the files
+    /// cannot be read.
+    pub(super) fn landscape_terrain_palette(&mut self) -> Vec<abi::TerrainColor> {
+        if let Some(kept) = &self.state.plugin_services.terrain_palette {
+            return kept.clone();
+        }
+        let Some(content) = self.state.movement.content().cloned() else {
+            return Vec::new();
+        };
+        let Some(region) = content.region() else {
+            return Vec::new();
+        };
+        // Past the shared cache: each texture is decoded once, here.
+        let Ok(colours) = ac_nav::landscape::read_terrain_palette(
+            content.dats().uncached(),
+            &region.terrain_info,
+        ) else {
+            return Vec::new();
+        };
+        let colours: Vec<abi::TerrainColor> = colours
+            .into_iter()
+            .map(|c| abi::TerrainColor {
+                terrain_type: c.terrain_type,
+                rgb: c.rgb,
+                name: c.name,
+            })
+            .collect();
+        self.state.plugin_services.terrain_palette = Some(colours.clone());
+        colours
+    }
+
     /// A landblock's floorplan, built once from the dats and kept.
     pub(super) fn dungeon_floorplan(&mut self, landblock_id: u32) -> Option<Floorplan> {
         let content = self.state.movement.content()?.clone();

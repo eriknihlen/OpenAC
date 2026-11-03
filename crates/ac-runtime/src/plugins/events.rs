@@ -49,6 +49,10 @@ pub struct PluginServices {
     pub(super) floorplans: ac_nav::floorplan::DungeonFloorplanBuilder,
     /// Landblocks' indoor cells, read once each.
     pub(super) indoor_cells: ac_nav::indoor::IndoorCellCache,
+    /// Landblocks' outdoor terrain, read once each.
+    pub(super) landscape: ac_nav::landscape::LandscapeTerrainCache,
+    /// The region's terrain colours, worked out once.
+    pub(super) terrain_palette: Option<Vec<ac_plugin::abi::world::TerrainColor>>,
     /// What plugins reported and the client confirmed of enchantments.
     pub(super) enchantments: super::magic::EnchantmentTracker,
     /// The known-spell lists plugins read, and their revision.
@@ -142,6 +146,8 @@ impl Default for PluginServices {
             activations: Activations::default(),
             floorplans: ac_nav::floorplan::DungeonFloorplanBuilder::new(),
             indoor_cells: ac_nav::indoor::IndoorCellCache::new(),
+            landscape: ac_nav::landscape::LandscapeTerrainCache::new(),
+            terrain_palette: None,
             enchantments: super::magic::EnchantmentTracker::default(),
             known_spells: super::magic::KnownSpells::default(),
             armed_attack_target: 0,
