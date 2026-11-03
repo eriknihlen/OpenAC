@@ -5,6 +5,48 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## openac-rust 0.1.10 (2026-11-03)
+
+Close every client before updating: the first start moves your files into a
+new folder layout (logs by server, character and start time; each plugin's
+data inside its own folder) and deletes logs older than 7 days.
+
+**New**
+
+- **Plugin dock** in place of the plugin shelf: on any screen edge, across or
+  down, in three sizes; it closes to an icon, can peek open on hover, and its
+  end is dragged to set how many plugins it shows. *(David Smith)*
+- **Five more plugin themes:** Lavender Dusk, Ember, Bloodmoon, Glacier and
+  Parchment (the first light one), with rounded, shadowed windows and new
+  controls. *(David Smith)*
+- **Landscape Detail Textures** (Options, off by default): the fine ground
+  grit older clients repeated over the terrain.
+- **Launcher:** says why a client ended, with the server's own message; shows
+  a frozen client as "Not responding"; after a crash counts down 30 s until
+  the character can log in again; keeps relaunching while the server
+  answers; closes over running clients with progress.
+- Every session keeps its own folder with the client's full output and each
+  plugin's log.
+- Using something says "Using the …" or "Approaching …", and a locked chest
+  says it is locked.
+- **Plugin API 1.5:** plugin fonts, light and dark colours and image files in
+  markup, dock icons (1.4); every reachable cell of a dungeon with its walking
+  distance, faster path previews, and cells' doorways, bounds and floor
+  height (1.5). *(David Smith)*
+
+**Fixed**
+
+- Long farming sessions no longer grow by hundreds of MB of recoloured
+  textures. *(reported by LiamWestray)*
+- An examined spell shows foci and infusions among its components and marks
+  the ones you don't carry; special chests show their contents once
+  unlocked; the chase camera stops at rising ground instead of bouncing over
+  it. *(reported by Rumpadump)*
+- Dropping your main pack on a vendor sells what's in it and never your spell
+  foci.
+- Changing an option no longer puts back other settings, such as the plugin
+  dock's place, after a restart.
+
 ## OpenAC 0.1.32 (2026-10-31)
 
 Brings OpenAC level with openac-rust 0.1.9, except texture detail applying at
