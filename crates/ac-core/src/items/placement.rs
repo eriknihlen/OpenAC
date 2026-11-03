@@ -403,6 +403,30 @@ pub fn loose_contents(objects: &ClientObjectTable, container_id: u32) -> Vec<u32
         .collect()
 }
 
+/// An object's place in its container's contents list, counted among its
+/// own kind: a loose item among the loose items, a pack (or focus) among
+/// the packs, the split [`is_pack`] and [`loose_contents`] use. The game
+/// keeps the two kinds in separate lists and reads an item's place off
+/// its list, so this is the number it shows for the item, whatever slot
+/// the server last named. -1 when the object is in no container or its
+/// container's list does not hold it.
+#[must_use]
+pub fn place_in_container_list(objects: &ClientObjectTable, item_id: u32) -> i32 {
+    let Some(item) = objects.get(item_id) else {
+        return -1;
+    };
+    if item.container_id == 0 {
+        return -1;
+    }
+    let packs = is_pack(item);
+    objects
+        .get_contents(item.container_id)
+        .iter()
+        .filter(|&&id| objects.get(id).is_some_and(is_pack) == packs)
+        .position(|&id| id == item_id)
+        .map_or(-1, |place| i32::try_from(place).unwrap_or(i32::MAX))
+}
+
 /// Whether sending the whole of the loose item at `source_index` (of
 /// `item_count`) to `placement`, the slot as sent, leaves it where it is:
 /// the drop an item list resolves to [`item_list_drop_placement`]'s `None`.
@@ -950,5 +974,132 @@ mod tests {
             PLAYER,
             true
         ));
+    }
+}
+
+#[cfg(test)]
+mod place_in_list_tests {
+    //! An item's place in its container's list, as the game counts it: its
+    //! index among its own kind (loose items, or packs) in that list.
+
+    use super::place_in_container_list as place;
+    use crate::items::{
+        ClientObjectTable, ContainerContentEntry, EquipMask, ItemType, TableEvent, WeenieData,
+    };
+
+    const PLAYER: u32 = 0x5000_0001;
+    const PACK: u32 = 0x6000_0010;
+
+    fn entry(guid: u32, container_type: u32) -> ContainerContentEntry {
+        ContainerContentEntry {
+            guid,
+            container_type,
+        }
+    }
+
+    fn in_container(guid: u32, container: u32) -> WeenieData {
+        WeenieData {
+            guid,
+            name: Some("Gem".into()),
+            item_type: Some(ItemType::GEM),
+            container_id: Some(container),
+            ..WeenieData::default()
+        }
+    }
+
+    fn pack_in(guid: u32, container: u32) -> WeenieData {
+        WeenieData {
+            item_type: Some(ItemType::CONTAINER),
+            items_capacity: Some(24),
+            ..in_container(guid, container)
+        }
+    }
+
+    // The login shape: a side pack's listing, then each item's description.
+    // The descriptions name the pack but no slot, so the table keeps none;
+    // the place comes from the list.
+    #[test]
+    fn a_side_pack_item_listed_before_its_description_has_its_list_place() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.initialize_inventory_manifest(PLAYER, &[entry(PACK, 1)], &mut ev);
+        t.replace_contents(PACK, &[entry(0xA01, 0), entry(0xA02, 0)], &mut ev);
+        t.ingest(&pack_in(PACK, PLAYER), &mut ev);
+        t.ingest(&in_container(0xA02, PACK), &mut ev);
+        t.ingest(&in_container(0xA01, PACK), &mut ev);
+        assert_eq!(t.get(0xA01).unwrap().container_slot, -1);
+        assert_eq!((place(&t, 0xA01), place(&t, 0xA02)), (0, 1));
+    }
+
+    // Packs and loose items are counted apart: a pack inside a pack is
+    // counted among the packs, and the items after it do not count it.
+    #[test]
+    fn a_pack_inside_a_pack_counts_among_the_packs() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.replace_contents(
+            PACK,
+            &[
+                entry(0xA01, 0),
+                entry(0xB01, 1),
+                entry(0xA02, 0),
+                entry(0xB02, 1),
+            ],
+            &mut ev,
+        );
+        for guid in [0xA01, 0xA02] {
+            t.ingest(&in_container(guid, PACK), &mut ev);
+        }
+        for guid in [0xB01, 0xB02] {
+            t.ingest(&pack_in(guid, PACK), &mut ev);
+        }
+        assert_eq!((place(&t, 0xA01), place(&t, 0xA02)), (0, 1));
+        assert_eq!((place(&t, 0xB01), place(&t, 0xB02)), (0, 1));
+    }
+
+    // In no list: not in a container at all (wielded), or named in a
+    // container whose list no longer holds it.
+    #[test]
+    fn an_item_in_no_list_has_no_place() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.ingest(
+            &WeenieData {
+                wielder_id: Some(PLAYER),
+                current_wielded_location: Some(EquipMask::MELEE_WEAPON),
+                ..in_container(0xA03, 0)
+            },
+            &mut ev,
+        );
+        assert_eq!(place(&t, 0xA03), -1);
+        t.ingest(&in_container(0xA04, 0), &mut ev);
+        t.move_item(0xA04, PACK, 0, EquipMask::NONE, None, &mut ev);
+        t.replace_contents(PACK, &[], &mut ev);
+        let kept = t.get(0xA04).unwrap();
+        assert_eq!((kept.container_id, kept.container_slot), (PACK, 0));
+        assert_eq!(place(&t, 0xA04), -1);
+        assert_eq!(place(&t, 0xDEAD), -1);
+    }
+
+    // The main pack as the character description lists it (loose items
+    // first, then the packs): the loose items' places are the slots the
+    // table already keeps; the packs are counted among the packs.
+    #[test]
+    fn main_pack_items_keep_the_numbers_the_table_keeps() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.initialize_inventory_manifest(
+            PLAYER,
+            &[entry(0xA01, 0), entry(0xA02, 0), entry(PACK, 1)],
+            &mut ev,
+        );
+        t.ingest(&in_container(0xA02, PLAYER), &mut ev);
+        t.ingest(&in_container(0xA01, PLAYER), &mut ev);
+        t.ingest(&pack_in(PACK, PLAYER), &mut ev);
+        for guid in [0xA01, 0xA02] {
+            assert_eq!(place(&t, guid), t.get(guid).unwrap().container_slot);
+        }
+        assert_eq!((place(&t, 0xA01), place(&t, 0xA02)), (0, 1));
+        assert_eq!(place(&t, PACK), 0);
     }
 }

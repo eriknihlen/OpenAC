@@ -14,7 +14,10 @@ use crate::Host;
 
 /// G. Items, equipment, loot.
 impl Host<'_> {
-    /// Everything the character owns, by name then id.
+    /// Everything the character owns, by name then id. Each item's
+    /// `container_slot` is its place in its own container (the main pack
+    /// or a side pack) among its kind, loose items and packs counted
+    /// apart; -1 for one in no container, such as a wielded item.
     pub fn owned_items(&mut self) -> Vec<InventoryItem> {
         self.call::<calls::ItemsOwned>(&())
     }
@@ -187,7 +190,10 @@ impl Host<'_> {
         self.call::<calls::LootCorpses>(&maximum_metres)
     }
 
-    /// What the open container holds.
+    /// What the open container holds, packs inside included. Each item's
+    /// `container_slot` is its place in the container that holds it (the
+    /// open one or a pack inside it) among its kind, loose items and packs
+    /// counted apart.
     pub fn loot_contents(&mut self) -> Vec<InventoryItem> {
         self.call::<calls::LootContents>(&())
     }

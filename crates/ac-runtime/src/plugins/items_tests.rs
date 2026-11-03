@@ -1279,6 +1279,12 @@ fn with_open_chest() -> (SessionState, Outbox) {
 /// [`packed`] with [`CHEST`] (taking `capacity` loose items) open: its use
 /// answered and its contents listed. The outbox is emptied.
 fn open_chest_of(capacity: i8) -> (SessionState, Outbox) {
+    open_chest(capacity, false)
+}
+
+/// [`open_chest_of`], with the chest's listing arriving before or after its
+/// items' descriptions (`listed_first`: the server's order on an open).
+fn open_chest(capacity: i8, listed_first: bool) -> (SessionState, Outbox) {
     use ac_core::items::{ItemType, ItemUseable, PublicWeenieFlags};
     use ac_proto::{GameEventType, Inbound};
 
@@ -1301,23 +1307,28 @@ fn open_chest_of(capacity: i8) -> (SessionState, Outbox) {
         });
     }
     state.apply(&chest, &mut outbox, true, CLOCKS);
-    for (guid, name, item_type, container, items) in [
-        (RUBY, "Ruby", ItemType::GEM, CHEST, None),
-        (EMERALD, "Emerald", ItemType::GEM, CHEST, None),
-        (SACK, "Sack", ItemType::CONTAINER, CHEST, Some(8)),
-        (PEARL, "Pearl", ItemType::GEM, SACK, None),
-    ] {
-        let mut item = create(guid, stamps(1, 1), None);
-        if let Inbound::CreateObject(create) = &mut item {
-            create.weenie = Some(ac_proto::PublicWeenieDesc {
-                name: name.into(),
-                item_type: item_type.bits(),
-                container_id: Some(container),
-                items_capacity: items,
-                ..ac_proto::PublicWeenieDesc::default()
-            });
+    let describe_items = |state: &mut SessionState, outbox: &mut Outbox| {
+        for (guid, name, item_type, container, items) in [
+            (RUBY, "Ruby", ItemType::GEM, CHEST, None),
+            (EMERALD, "Emerald", ItemType::GEM, CHEST, None),
+            (SACK, "Sack", ItemType::CONTAINER, CHEST, Some(8)),
+            (PEARL, "Pearl", ItemType::GEM, SACK, None),
+        ] {
+            let mut item = create(guid, stamps(1, 1), None);
+            if let Inbound::CreateObject(create) = &mut item {
+                create.weenie = Some(ac_proto::PublicWeenieDesc {
+                    name: name.into(),
+                    item_type: item_type.bits(),
+                    container_id: Some(container),
+                    items_capacity: items,
+                    ..ac_proto::PublicWeenieDesc::default()
+                });
+            }
+            state.apply(&item, outbox, true, CLOCKS);
         }
-        state.apply(&item, &mut outbox, true, CLOCKS);
+    };
+    if !listed_first {
+        describe_items(&mut state, &mut outbox);
     }
     state.command(
         SessionCommand::Item(ItemCommand::Use(ObjectRef::Guid(CHEST))),
@@ -1334,6 +1345,9 @@ fn open_chest_of(capacity: i8) -> (SessionState, Outbox) {
     ] {
         let body = game_event(event, payload);
         state.apply(&Inbound::parse(&body).unwrap(), &mut outbox, true, CLOCKS);
+    }
+    if listed_first {
+        describe_items(&mut state, &mut outbox);
     }
     assert_eq!(
         state.inventory.external_containers().current_container_id(),
@@ -1640,4 +1654,137 @@ fn a_put_while_a_wield_is_in_flight_is_busy() {
         assert_eq!(result.status, ItemStatus::Busy);
     });
     assert!(outbox.is_empty());
+}
+
+// An item's container slot is its place in its container's list among its
+// own kind (loose items, or packs), whatever slot the server last named:
+// the number the game shows for it. Side-pack items arrive listed first
+// and described after, naming no slot.
+
+/// The character's description listing `inventory`, then `listings` (each
+/// a container and its contents as guid, container type pairs), then the
+/// items described.
+fn logged_in_with(
+    inventory: &[(u32, u32)],
+    listings: &[(u32, &[u32])],
+    items: &[ac_proto::Inbound<'static>],
+) -> SessionState {
+    use ac_proto::{GameEventType, Inbound};
+    let mut state = in_world();
+    let mut description = crate::world::tests::empty_description();
+    description.inventory = inventory
+        .iter()
+        .map(|&(guid, container_type)| ac_proto::InventoryEntry {
+            guid,
+            container_type,
+        })
+        .collect();
+    state.world.apply_player_description(&description);
+    for &(container, payload) in listings {
+        let mut words = vec![container, u32::try_from(payload.len() / 2).unwrap()];
+        words.extend_from_slice(payload);
+        let view = crate::world::tests::game_event(GameEventType::VIEW_CONTENTS, &words);
+        state.world.apply(&Inbound::parse(&view).unwrap());
+    }
+    for item in items {
+        state.world.apply(item);
+    }
+    state.world.drain_changes().for_each(drop);
+    state
+}
+
+/// The container slots a plugin reads for `ids` among the owned items.
+fn slots_seen(state: &mut SessionState, ids: &[u32]) -> Vec<i32> {
+    let mut outbox = Outbox::new();
+    with_binding(state, &mut outbox, |b| {
+        let items = call::<calls::ItemsOwned>(b, &());
+        ids.iter()
+            .map(|id| {
+                items
+                    .iter()
+                    .find(|i| i.object_id == *id)
+                    .unwrap()
+                    .container_slot
+            })
+            .collect()
+    })
+}
+
+const SIDE_PACK: u32 = 0x8000_0040;
+const INNER_PACK: u32 = 0x8000_0041;
+
+fn pack_in(guid: u32, container: u32) -> ac_proto::Inbound<'static> {
+    owned(guid, "Pack", 0x200, |w| {
+        w.container_id = Some(container);
+        w.items_capacity = Some(24);
+        w.stack_size = None;
+    })
+}
+
+fn gem_in(guid: u32, container: u32) -> ac_proto::Inbound<'static> {
+    owned(guid, "Gem", 0x800, |w| w.container_id = Some(container))
+}
+
+#[test]
+fn a_side_pack_item_listed_at_login_reports_its_place_in_the_pack() {
+    let mut state = logged_in_with(
+        &[(SIDE_PACK, 1)],
+        &[(SIDE_PACK, &[GEM, 0, INNER_PACK, 1, KIT, 0])],
+        &[
+            pack_in(SIDE_PACK, PLAYER),
+            gem_in(KIT, SIDE_PACK),
+            pack_in(INNER_PACK, SIDE_PACK),
+            gem_in(GEM, SIDE_PACK),
+        ],
+    );
+    // The pack between them is counted among the packs, not the items.
+    assert_eq!(slots_seen(&mut state, &[GEM, KIT, INNER_PACK]), [0, 1, 0]);
+}
+
+#[test]
+fn main_pack_items_report_the_slots_they_did_and_a_wielded_one_none() {
+    let mut state = logged_in_with(
+        &[(GEM, 0), (KIT, 0), (SIDE_PACK, 1)],
+        &[(SIDE_PACK, &[])],
+        &[
+            gem_in(KIT, PLAYER),
+            gem_in(GEM, PLAYER),
+            pack_in(SIDE_PACK, PLAYER),
+            owned(SWORD, "Sword", 0x1, |w| {
+                w.container_id = None;
+                w.wielder_id = Some(PLAYER);
+                w.valid_locations = Some(0x0010_0000);
+                w.currently_wielded_location = Some(0x0010_0000);
+                w.stack_size = None;
+            }),
+        ],
+    );
+    let stored: Vec<i32> = [GEM, KIT]
+        .iter()
+        .map(|&id| state.world.items().get(id).unwrap().container_slot)
+        .collect();
+    assert_eq!(stored, [0, 1]);
+    assert_eq!(slots_seen(&mut state, &[GEM, KIT]), stored);
+    // The pack is the first of the packs (the description's flat list put
+    // it third), and the sword is in no list.
+    assert_eq!(slots_seen(&mut state, &[SIDE_PACK, SWORD]), [0, -1]);
+}
+
+#[test]
+fn an_item_in_the_open_chest_reports_its_place_among_the_loose_items() {
+    let (mut state, mut outbox) = open_chest(24, true);
+    with_binding(&mut state, &mut outbox, |b| {
+        let contents = call::<calls::LootContents>(b, &());
+        let slot = |id: u32| {
+            contents
+                .iter()
+                .find(|i| i.object_id == id)
+                .unwrap()
+                .container_slot
+        };
+        assert_eq!(
+            [slot(RUBY), slot(EMERALD), slot(SACK), slot(PEARL)],
+            [0, 1, 0, 0]
+        );
+    });
 }

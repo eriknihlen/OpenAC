@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use ac_core::items::TinkerValues;
 use ac_core::items::placement::{
-    evaluate_container_placement, is_pack, loose_contents, placement_leaves_item_in_place,
-    placement_rejection_text,
+    evaluate_container_placement, is_pack, loose_contents, place_in_container_list,
+    placement_leaves_item_in_place, placement_rejection_text,
 };
 use ac_core::items::vendor::{VendorSellCandidate, evaluate_sell, per_unit_value};
 use ac_core::items::{
@@ -119,7 +119,11 @@ pub(super) fn palettes_with(
 /// One item as a plugin sees it (OpenAC `ProjectInventoryItem`): the tinker
 /// values from the appraisal, the requirement and gear numbers from the
 /// properties, the palettes from its look.
-pub(super) fn project_item(item: &ClientObject, palettes: Vec<Palette>) -> InventoryItem {
+pub(super) fn project_item(
+    items: &ClientObjectTable,
+    item: &ClientObject,
+    palettes: Vec<Palette>,
+) -> InventoryItem {
     let tinker = TinkerValues::of(item);
     let p = &item.properties;
     InventoryItem {
@@ -188,7 +192,10 @@ pub(super) fn project_item(item: &ClientObject, palettes: Vec<Palette>) -> Inven
         gear_critical_damage: int(item, PropertyInt::GEAR_CRIT_DAMAGE),
         gear_critical_damage_resistance: int(item, PropertyInt::GEAR_CRIT_DAMAGE_RESIST),
         maximum_stack_size: item.stack_size_max,
-        container_slot: item.container_slot,
+        // Its place in its container's list among its kind, as the game
+        // shows it: the table keeps no slot for an item listed before it
+        // is described (every side-pack item at login, a chest's contents).
+        container_slot: place_in_container_list(items, item.object_id()),
         items_capacity: item.items_capacity,
         containers_capacity: item.containers_capacity,
         burden: item.burden,
@@ -290,7 +297,11 @@ fn container_tree(
         let Some(child) = items.get(child_id) else {
             continue;
         };
-        out.push(project_item(child, palettes_of(world, content, child_id)));
+        out.push(project_item(
+            items,
+            child,
+            palettes_of(world, content, child_id),
+        ));
         if child.items_capacity != 0
             || child.containers_capacity != 0
             || child.item_type.intersects(ItemType::CONTAINER)
@@ -384,6 +395,7 @@ impl PluginBinding<'_> {
             .filter(|i| is_player_owned(i, player, items))
             .map(|i| {
                 project_item(
+                    items,
                     i,
                     palettes_of(
                         &self.state.world,
