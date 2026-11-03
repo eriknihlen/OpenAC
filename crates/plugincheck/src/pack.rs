@@ -122,7 +122,10 @@ pub fn pack_into_index(
     index
         .set_release(&packed.id, &packed.tag)
         .map_err(|error| PackError::Refused(error.to_string()))?;
-    std::fs::write(index_file, index.to_json()).map_err(|e| io(index_file, &e))?;
+    // Through a temporary file and a rename: a write that fails leaves the
+    // previous index whole.
+    fsutil::write_via_tmp(index_file, index.to_json().as_bytes(), false)
+        .map_err(|e| io(index_file, &e))?;
     Ok(packed)
 }
 

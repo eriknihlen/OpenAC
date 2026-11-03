@@ -761,6 +761,21 @@ fn pack_refuses_a_malformed_index_and_writes_nothing() {
     }
 }
 
+#[test]
+fn a_failed_index_write_leaves_the_previous_index_whole() {
+    let root = Root::new("pack-index-write");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    let previous = r#"{ "schemaVersion": 1, "plugins": [
+        { "id": "acme.other", "stable": "wasm-acme.other-v2.0.0" } ] }"#;
+    std::fs::write(&index, previous).unwrap();
+    // Something in the way of the replacement's temporary file.
+    let blocker = root.join("plugins-index.json.tmp");
+    std::fs::create_dir_all(blocker.join("inside")).unwrap();
+    assert!(pack_into_index(&folder, &root.join("release"), &index).is_err());
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), previous);
+}
+
 // --- A packed release installs through the launcher ------------------------------
 
 /// GitHub as a map of addresses to files; anything else is 404.
