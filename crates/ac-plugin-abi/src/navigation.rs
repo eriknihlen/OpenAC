@@ -413,6 +413,77 @@ wire_record! {
         pub reason: String,
         /// The route's length, metres.
         pub length_meters: f32,
+        /// Whether the search ran over a grid already built (or being
+        /// built) for a walk or an earlier preview, rather than one built
+        /// for this preview alone.
+        since (1, 5) pub grid_reused: bool,
+        /// How long the client's worker spent on it, milliseconds: waiting
+        /// for a grid under way, building one, and searching it. The time
+        /// to answer the call itself is not in it.
+        since (1, 5) pub took_ms: f32,
+    }
+}
+
+wire_record! {
+    /// Every cell to rank by its walking distance
+    /// ([`crate::calls::NavigationReachableCells`]; API 1.5).
+    pub struct ReachRequest {
+        /// Go no farther than this, metres of route (above 0; infinity for
+        /// the whole dungeon).
+        pub max_meters: f32,
+    }
+}
+
+wire_record! {
+    /// One cell a reach search reached (API 1.5).
+    pub struct CellReach {
+        /// The cell, landblock in the high half.
+        pub cell_id: u32,
+        /// How far it is to walk there from where the character stood: the
+        /// search's cost over the client's 0.25 m grid by the shortest way,
+        /// before the route is straightened. That is metres walked plus the
+        /// height climbed or dropped, plus a few metres for each jump. It
+        /// comes within about 15% of a preview's `length_meters` to the same
+        /// place, usually a little under, since a walk keeps off walls.
+        pub route_meters: f32,
+        /// The point on the cell's floor that length is measured to, as map
+        /// coordinates and elevation (heading 0): a place to hand straight
+        /// to a walk or a preview.
+        pub place: Position,
+        /// The way there steps or leaps down farther than the character
+        /// steps up, so it could not walk back up the way it came (a jump,
+        /// or another way round, might still take it back).
+        pub by_drop: bool,
+    }
+}
+
+wire_record! {
+    /// What a reach search found ([`crate::Event::NavigationReach`]; API
+    /// 1.5): a snapshot of the collision loaded when it was asked for.
+    pub struct NavigationReach {
+        /// The handle [`crate::calls::NavigationReachableCells`] returned.
+        pub handle: u32,
+        /// `Routed` with the cells reached; `NoRoute` when the character
+        /// stood nowhere a route starts from; `Failed` when the grid build
+        /// or the search broke down.
+        pub status: NavigationPlanStatus,
+        /// Every cell reached, nearest by route first. A cell left out
+        /// cannot be walked to from where the character stood within
+        /// `max_meters`: it lies past the distance, behind a portal or an
+        /// object in the way, in a part of the dungeon joined to this one
+        /// only by a portal, or up a drop the character cannot climb. It is
+        /// still in the dungeon. A cell with no floor of its own (the upper
+        /// half of a tall room) is never listed; the cell under it is.
+        /// Doors do not stop the search: a cell behind a shut or locked door
+        /// is listed.
+        pub cells: Vec<CellReach>,
+        /// Why, in words.
+        pub reason: String,
+        /// Whether the search ran over a grid already built (or being
+        /// built) for a walk, a preview or an earlier reach search.
+        pub grid_reused: bool,
+        /// How long the client's worker spent on it, milliseconds.
+        pub took_ms: f32,
     }
 }
 

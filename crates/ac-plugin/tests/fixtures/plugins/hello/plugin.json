@@ -3,7 +3,7 @@
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.4",
+  "apiVersion": "1.5",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [

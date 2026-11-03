@@ -371,6 +371,7 @@ fn a_plan_point_reads_as_map_coordinates() {
             ],
             reason: "routed".into(),
             length_meters: 12.5,
+            ..NavPlan::default()
         },
     );
     assert_eq!(plan.handle, 7);
@@ -522,4 +523,276 @@ fn a_distance_out_of_range_ahead_is_unknown() {
     let room = look_ahead(&mut session, 11.0);
 
     assert_eq!(room.status, RoomAheadStatus::Unknown);
+}
+
+/// A dungeon's indoor cells from the installed game files, asked as a
+/// plugin built for this API and as one built for API 1.4 asks: this one
+/// hears each cell's doorways and the cells seen from it, every doorway
+/// onto a cell the landblock lists; the older plugin is sent the records
+/// as they were, byte for byte.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_dungeons_indoor_cells_carry_their_doorways_and_older_plugins_get_the_records_they_knew() {
+    use ac_plugin::abi::world::IndoorCell;
+    use ac_plugin::abi::{API_CURRENT, ApiVersion, Import};
+    const DUNGEON: u32 = 0x0032_0000;
+    let mut session = Session::at(60.0, 150.0);
+    let Session { state, outbox, .. } = &mut session;
+    with_binding(state, outbox, |b| {
+        let cells = call_as::<calls::DungeonIndoorCells>(b, "a", &DUNGEON);
+        assert!(cells.len() > 300, "{} cells", cells.len());
+        let ids: std::collections::HashSet<u32> = cells.iter().map(|c| c.cell_id).collect();
+        let doorways: usize = cells.iter().map(|c| c.doorways.len()).sum();
+        assert!(doorways >= cells.len(), "{doorways} doorways");
+        for cell in &cells {
+            for doorway in &cell.doorways {
+                assert_eq!(doorway.leads_outside, doorway.other_cell_id == 0);
+                assert!(
+                    doorway.leads_outside || ids.contains(&doorway.other_cell_id),
+                    "0x{:08X} opens onto 0x{:08X}",
+                    cell.cell_id,
+                    doorway.other_cell_id
+                );
+            }
+            assert!(
+                cell.visible_cells
+                    .iter()
+                    .all(|id| id >> 16 == DUNGEON >> 16)
+            );
+        }
+        assert!(cells.iter().any(|c| !c.visible_cells.is_empty()));
+
+        let v1_4 = ApiVersion::new(1, 4);
+        let ask = |b: &mut PluginBinding<'_>, version| {
+            let caller = Caller {
+                plugin_id: "a",
+                api_version: version,
+            };
+            b.call(caller, Import::DungeonIndoorCells, &DUNGEON.to_bytes())
+                .unwrap()
+        };
+        let older = ask(b, v1_4);
+        assert_eq!(older, cells.to_bytes_at(v1_4));
+        assert_eq!(ask(b, API_CURRENT), cells.to_bytes());
+        let read = Vec::<IndoorCell>::from_bytes_at(&older, v1_4).unwrap();
+        assert_eq!(read.len(), cells.len());
+        assert!(
+            read.iter()
+                .all(|c| c.doorways.is_empty() && c.visible_cells.is_empty())
+        );
+        assert_eq!(read[0].cell_id, cells[0].cell_id);
+    });
+}
+
+/// A dungeon's floorplan from the installed game files: each cell's box
+/// holds its middle and its floor, and a plugin built for API 1.4 is sent
+/// the plan as it was, byte for byte. Prints how often the band a cell is
+/// drawn in and the band of its own floor differ, and which cells one list
+/// has and the other has not.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_dungeons_floorplan_cells_carry_their_bounds_and_floor() {
+    use ac_plugin::abi::world::Floorplan;
+    use ac_plugin::abi::{API_CURRENT, ApiVersion, Import};
+    const DUNGEON: u32 = 0x0032_0000;
+    let mut session = Session::at(60.0, 150.0);
+    let Session { state, outbox, .. } = &mut session;
+    with_binding(state, outbox, |b| {
+        let plan = call_as::<calls::DungeonFloorplan>(b, "a", &DUNGEON).expect("a plan");
+        let indoor = call_as::<calls::DungeonIndoorCells>(b, "a", &DUNGEON);
+        let mut floorless = 0;
+        let mut off_band = 0;
+        for cell in &plan.cells {
+            let (low, high) = (cell.bounds_min, cell.bounds_max);
+            let inside = |(x, y, z): (f32, f32, f32)| {
+                x >= low.0 - 1e-3
+                    && y >= low.1 - 1e-3
+                    && z >= low.2 - 1e-3
+                    && x <= high.0 + 1e-3
+                    && y <= high.1 + 1e-3
+                    && z <= high.2 + 1e-3
+            };
+            assert!(inside(cell.center), "0x{:08X}", cell.cell_id);
+            match cell.floor_z {
+                Some(floor) => {
+                    assert!(
+                        floor >= low.2 - 1e-3 && floor <= high.2 + 1e-3,
+                        "0x{:08X}",
+                        cell.cell_id
+                    );
+                    if ac_nav::floorplan::layer_key(floor) != cell.layer_z {
+                        off_band += 1;
+                    }
+                }
+                None => floorless += 1,
+            }
+        }
+        let planned: std::collections::HashSet<u32> =
+            plan.cells.iter().map(|c| c.cell_id).collect();
+        let listed: std::collections::HashSet<u32> = indoor.iter().map(|c| c.cell_id).collect();
+        println!(
+            "0x{:04X}: {} cells on the plan, {} listed; {floorless} without a floor, {off_band} drawn off their floor's band; listed only: {:X?}; planned only: {:X?}",
+            DUNGEON >> 16,
+            planned.len(),
+            listed.len(),
+            listed.difference(&planned).collect::<Vec<_>>(),
+            planned.difference(&listed).collect::<Vec<_>>(),
+        );
+        assert!(planned.is_subset(&listed));
+
+        let v1_4 = ApiVersion::new(1, 4);
+        let ask = |b: &mut PluginBinding<'_>, version| {
+            let caller = Caller {
+                plugin_id: "a",
+                api_version: version,
+            };
+            b.call(caller, Import::DungeonFloorplan, &DUNGEON.to_bytes())
+                .unwrap()
+        };
+        let older = ask(b, v1_4);
+        let plan = Some(plan);
+        assert_eq!(older, plan.to_bytes_at(v1_4));
+        assert_eq!(ask(b, API_CURRENT), plan.to_bytes());
+        let read = Option::<Floorplan>::from_bytes_at(&older, v1_4)
+            .unwrap()
+            .unwrap();
+        assert!(read.cells.iter().all(|c| c.floor_z.is_none()));
+    });
+}
+
+// A reach search asks for nothing while there is nothing to search from,
+// or for a distance that is not above 0: the handle is 0 and no answer
+// follows.
+#[test]
+fn a_reach_search_with_nothing_to_search_from_has_no_handle() {
+    use super::navigation::follow_previews;
+    use ac_plugin::abi::navigation::ReachRequest;
+    let mut state = in_world();
+    let mut outbox = Outbox::new();
+    let handles = with_binding(&mut state, &mut outbox, |b| {
+        [50.0, f32::INFINITY, 0.0, -1.0, f32::NAN].map(|max_meters| {
+            call_as::<calls::NavigationReachableCells>(b, "test.a", &ReachRequest { max_meters })
+        })
+    });
+    assert_eq!(handles, [0; 5], "no dats, so no walks");
+    assert!(follow_previews(&mut state).is_empty());
+}
+
+// A reach answer as plugins read it: each cell's place as map coordinates
+// with its cell, as a preview's points are.
+#[test]
+fn a_reach_answer_reads_as_map_coordinates() {
+    use super::navigation::project_reach;
+    use ac_nav::walk::{CellReach, NavReach, PlanStatus};
+    use ac_plugin::abi::navigation::NavigationPlanStatus;
+    use glam::Vec3;
+    let reach = project_reach(
+        9,
+        NavReach {
+            status: PlanStatus::Routed,
+            cells: vec![CellReach {
+                cell_id: 0xA9B4_0100,
+                route_meters: 12.5,
+                place: Vec3::new(24_468.0 + 240.0, 24_468.0 - 480.0, -30.0),
+                by_drop: true,
+            }],
+            reason: "1 cells reached".into(),
+            grid_reused: true,
+            took_ms: 4.0,
+        },
+    );
+    assert_eq!(reach.handle, 9);
+    assert_eq!(reach.status, NavigationPlanStatus::Routed);
+    assert!(reach.grid_reused);
+    assert_eq!(reach.took_ms, 4.0);
+    let cell = &reach.cells[0];
+    assert_eq!(
+        (cell.cell_id, cell.route_meters, cell.by_drop),
+        (0xA9B4_0100, 12.5, true)
+    );
+    assert!((cell.place.east_west - 1.0).abs() < 1e-9);
+    assert!((cell.place.north_south + 2.0).abs() < 1e-9);
+    assert!((cell.place.elevation + 0.125).abs() < 1e-9);
+    assert!(!cell.place.is_outdoor);
+}
+
+/// A reach search in an installed dungeon through the plugin call: the
+/// plugin that asked hears every cell it can walk to, each placed on that
+/// cell's floor, its own cell first; another plugin hears nothing.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_reach_search_in_a_dungeon_answers_the_plugin_that_asked() {
+    use super::navigation::follow_previews;
+    use ac_plugin::abi::navigation::{NavigationPlanStatus, ReachRequest};
+    const CELL: u32 = 0x0032_0000;
+    // Stood on the floor of a cell with one, in the middle of its box.
+    let content = crate::navigation::walk_tests::content();
+    let plan = ac_nav::floorplan::DungeonFloorplanBuilder::new()
+        .try_build(content.dats(), CELL)
+        .unwrap()
+        .unwrap();
+    let (cell, floor) = plan
+        .cells
+        .iter()
+        .find_map(|c| c.floor_z.map(|z| (c, z)))
+        .expect("a cell with a floor");
+    let middle = (cell.bounds.min + cell.bounds.max) * 0.5;
+    let mut session = Session::in_cell(
+        cell.cell_id,
+        ac_proto::Vector3 {
+            x: middle.x,
+            y: middle.y,
+            z: floor + 0.05,
+        },
+    );
+    for _ in 0..300 {
+        if session.state.movement.controller().is_some() {
+            break;
+        }
+        session.frames(1);
+    }
+    session.frames(60);
+    let handle = {
+        let Session { state, outbox, .. } = &mut session;
+        with_binding(state, outbox, |b| {
+            call_as::<calls::NavigationReachableCells>(
+                b,
+                "test.a",
+                &ReachRequest {
+                    max_meters: f32::INFINITY,
+                },
+            )
+        })
+    };
+    assert_ne!(handle, 0, "in a sealed dungeon");
+    // The search runs on a worker, much slower in a debug build.
+    let mut answers = Vec::new();
+    let asked = std::time::Instant::now();
+    while answers.is_empty() && asked.elapsed() < std::time::Duration::from_secs(120) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        session.frames(1);
+        answers.extend(follow_previews(&mut session.state));
+    }
+    let [(owner, Event::NavigationReach(reach))] = answers.as_slice() else {
+        panic!("one reach answer, got {answers:?}");
+    };
+    assert_eq!(owner, "test.a");
+    assert_eq!(reach.handle, handle);
+    assert_eq!(
+        reach.status,
+        NavigationPlanStatus::Routed,
+        "{}",
+        reach.reason
+    );
+    assert!(reach.cells.len() > 200, "{}", reach.reason);
+    assert!(reach.cells[0].route_meters < 1.0, "{:?}", reach.cells[0]);
+    assert!(
+        reach
+            .cells
+            .windows(2)
+            .all(|w| w[0].route_meters <= w[1].route_meters)
+    );
+    assert!(reach.cells.iter().all(|c| c.place.cell_id == c.cell_id
+        && c.cell_id >> 16 == CELL >> 16
+        && !c.place.is_outdoor));
 }

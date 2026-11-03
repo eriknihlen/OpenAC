@@ -1,20 +1,55 @@
 //! Plan-only path previews (OpenAC `NavigationWalkController.Preview`): a
 //! route to an object or a place searched over the collision loaded now,
 //! without moving the character, owning navigation or touching a walk
-//! under way. What the world holds is captured on the calling thread; the
-//! grid build and the route search run like a walk's (on a worker, or at
-//! once inline). The answer is a detached list of route points from the
+//! under way. The grid a walk keeps is searched when it still stands for
+//! the world around the character and the goal; inside a sealed dungeon a
+//! grid built for a preview is kept the same way, for the walks and
+//! previews after it. What the world holds is read on the calling thread;
+//! the grid build and the route search run like a walk's (on a worker, or
+//! at once inline). The answer is a detached list of route points from the
 //! character toward the goal, each with its cell, measured from the corner
 //! of the first landblock.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Instant;
 
 use ac_physics::{CellSurface, TerrainSurface};
 use glam::Vec3;
 
 use super::{
-    DEFAULT_CELL_SIZE, Job, LANDBLOCK_SIZE, MAXIMUM_DUNGEON_REGION, NavAvoidance, NavGrid,
-    NavRouteOutcome, NavRouteRequest, WalkController, WalkWorld, around_obstacles, flat,
-    planning_radius, radius_of, route, try_choose_region, try_choose_square,
+    COVER_MARGIN, DEFAULT_CELL_SIZE, Job, LANDBLOCK_SIZE, MAXIMUM_DUNGEON_REGION, NavAvoidance,
+    NavGeometry, NavGrid, NavRouteOutcome, NavRouteRequest, SharedBuild, WalkBodySample,
+    WalkController, WalkWorld, around_obstacles, flat, planning_radius, radius_of, route,
+    try_choose_region, try_choose_square,
 };
+
+/// The grid a search runs over: one already built, one being built that it
+/// waits for, or one it builds for itself from geometry captured now.
+pub(super) enum GridSource {
+    Built(Arc<NavGrid>),
+    Building(SharedBuild),
+    Capture(Box<NavGeometry>, super::NavBody),
+}
+
+impl GridSource {
+    /// The grid, built on the calling thread when it is the search's own.
+    pub(super) fn grid(self) -> Result<Arc<NavGrid>, String> {
+        match self {
+            Self::Built(grid) => Ok(grid),
+            Self::Building(build) => build.wait(),
+            Self::Capture(geometry, body) => NavGrid::build(&geometry, body, DEFAULT_CELL_SIZE)
+                .map(Arc::new)
+                .map_err(|e| format!("{e:?}")),
+        }
+    }
+
+    /// Whether the grid is the controller's, kept or being built, rather
+    /// than one the search builds for itself and drops.
+    pub(super) fn is_kept(&self) -> bool {
+        !matches!(self, Self::Capture(..))
+    }
+}
 
 /// What a preview plans toward.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,6 +65,31 @@ pub enum PreviewTarget {
         /// The point.
         local: Vec3,
     },
+}
+
+/// The ground a preview searches, and what it was built over.
+pub(super) struct PreviewGround {
+    pub(super) source: GridSource,
+    /// Whether the grid was there or under way before the preview asked.
+    pub(super) reused: bool,
+    pub(super) landblock_ids: Vec<u32>,
+    pub(super) object_ids: Arc<HashSet<u32>>,
+    /// The square the grid covers, which may be larger than the one asked
+    /// for when a kept grid is searched: `(origin_x, origin_y, size)`.
+    pub(super) square: (f32, f32, f32),
+}
+
+impl PreviewGround {
+    /// The middle of the grid and the radius that takes in all of it, for
+    /// finding the portals and objects a route over it must keep out of.
+    pub(super) fn around(&self) -> (Vec3, f32) {
+        let (origin_x, origin_y, size) = self.square;
+        let half = size * 0.5;
+        (
+            Vec3::new(origin_x + half, origin_y + half, 0.0),
+            half * std::f32::consts::SQRT_2,
+        )
+    }
 }
 
 /// How a preview ended (OpenAC `PluginNavigationPlanStatus`).
@@ -69,6 +129,12 @@ pub struct NavPlan {
     pub reason: String,
     /// The route's length, metres.
     pub length_meters: f32,
+    /// Whether the search ran over a grid already built or under way,
+    /// rather than one built for this preview.
+    pub grid_reused: bool,
+    /// How long the worker took, milliseconds: waiting for a grid under
+    /// way, building one, and searching it.
+    pub took_ms: f32,
 }
 
 impl NavPlan {
@@ -80,6 +146,8 @@ impl NavPlan {
             path: Vec::new(),
             reason: reason.to_owned(),
             length_meters: 0.0,
+            grid_reused: false,
+            took_ms: 0.0,
         }
     }
 }
@@ -189,41 +257,36 @@ impl WalkController {
                 "the destination is outside one planning region",
             ));
         };
-        let stands_on = |id: u32| cx.goals.stands_still(id);
-        let dungeon = (sample.cell_id & 0xFFFF_0000) | 0xFFFF;
-        let captured = if dungeon_cells.is_some() {
-            super::geometry::capture_dungeon(
-                cx.physics,
-                dungeon,
-                origin_x,
-                origin_y,
-                size,
-                Some(&stands_on),
-            )
+        let sealed = dungeon_cells.is_some();
+        let grid_dungeon = if sealed {
+            (sample.cell_id & 0xFFFF_0000) | 0xFFFF
         } else {
-            super::geometry::capture(cx.physics, origin_x, origin_y, size, Some(&stands_on))
+            0
         };
-        let Some(geometry) = captured else {
+        let Some(ground) =
+            self.preview_ground(cx, &sample, grid_dungeon, goal, (origin_x, origin_y, size))
+        else {
             return PathPreview::ready(NavPlan::failed(
                 PlanStatus::NoRoute,
                 "no collision is loaded around the character",
             ));
         };
-        // Cell surfaces do not change once loaded: they go with the
-        // geometry so the worker can name each point's floor.
-        let cells: Vec<CellSurface> = geometry
-            .landblock_ids
-            .iter()
-            .filter_map(|&id| cx.physics.landblock(id))
-            .flat_map(|landblock| landblock.cells.iter().cloned())
-            .collect();
+        // The portals and objects are looked for over the whole grid the
+        // route is searched on, which a kept grid may make larger than the
+        // region asked for.
+        let (centre, reach) = ground.around();
+        let PreviewGround {
+            source,
+            reused,
+            landblock_ids,
+            object_ids,
+            ..
+        } = ground;
+        let cells = self.cells_of(cx, &landblock_ids, source.is_kept());
         let crowd = self.crowd(cx, &sample, object_id);
         let body = sample.body;
         let start = sample.position;
         let leaps = sample.leaps;
-        let half = size * 0.5;
-        let centre = Vec3::new(origin_x + half, origin_y + half, 0.0);
-        let reach = half * std::f32::consts::SQRT_2;
         let widen = |spot: NavAvoidance| NavAvoidance::new(spot.centre, spot.radius + body.radius);
         let portals: Vec<NavAvoidance> = cx
             .goals
@@ -233,20 +296,25 @@ impl WalkController {
             .collect();
         let obstacles: Vec<NavAvoidance> = cx
             .goals
-            .find_obstacles(centre, reach, object_id, Some(&geometry.object_ids))
+            .find_obstacles(centre, reach, object_id, Some(&object_ids))
             .into_iter()
             .map(widen)
             .collect();
-        let sealed = dungeon_cells.is_some();
         let start_cell = sample.cell_id;
         PathPreview(Job::start(self.mode, move || {
-            let grid = match NavGrid::build(&geometry, body, DEFAULT_CELL_SIZE) {
+            let begun = Instant::now();
+            let took = || begun.elapsed().as_secs_f32() * 1000.0;
+            let grid = match source.grid() {
                 Ok(grid) => grid,
                 Err(error) => {
-                    return NavPlan::failed(
-                        PlanStatus::Failed,
-                        &format!("the search failed: {error:?}"),
-                    );
+                    return NavPlan {
+                        grid_reused: reused,
+                        took_ms: took(),
+                        ..NavPlan::failed(
+                            PlanStatus::Failed,
+                            &format!("the search failed: {error}"),
+                        )
+                    };
                 }
             };
             let found = around_obstacles(goal, &portals, &obstacles, |spots| {
@@ -265,7 +333,11 @@ impl WalkController {
                 )
             });
             if found.outcome != NavRouteOutcome::Routed || !found.ends_in_sight {
-                return NavPlan::failed(PlanStatus::NoRoute, &found.reason);
+                return NavPlan {
+                    grid_reused: reused,
+                    took_ms: took(),
+                    ..NavPlan::failed(PlanStatus::NoRoute, &found.reason)
+                };
             }
             NavPlan {
                 status: PlanStatus::Routed,
@@ -278,8 +350,141 @@ impl WalkController {
                     .collect(),
                 reason: found.reason,
                 length_meters: found.length,
+                grid_reused: reused,
+                took_ms: took(),
             }
         }))
+    }
+
+    /// The grid a preview from `sample` to `goal` searches: the one kept
+    /// when it still stands for the world there (the same body, dungeon and
+    /// resident landblocks, both ends inside it, and the objects a body
+    /// stands on unchanged), else the one being built when it will cover
+    /// both ends, else one built from what is captured now. Inside a sealed
+    /// dungeon a grid built for a preview is kept, as a walk's is, when
+    /// nothing else is being built. `None` when no collision is loaded.
+    pub(super) fn preview_ground(
+        &mut self,
+        cx: &WalkWorld<'_>,
+        sample: &WalkBodySample,
+        grid_dungeon: u32,
+        goal: Vec3,
+        (origin_x, origin_y, size): (f32, f32, f32),
+    ) -> Option<PreviewGround> {
+        if let Some(grid) = self.grid.clone().filter(|grid| {
+            grid.body() == sample.body
+                && self.grid_dungeon == grid_dungeon
+                && grid.contains(sample.position, COVER_MARGIN)
+                && grid.contains(goal, COVER_MARGIN)
+                && !self.is_stale(cx, grid, grid_dungeon)
+                && !self.objects_moved(cx, grid)
+        }) {
+            self.grid_idle_since = f64::NAN;
+            return Some(PreviewGround {
+                landblock_ids: grid.landblock_ids().to_vec(),
+                object_ids: Arc::clone(grid.object_ids()),
+                square: (grid.origin_x(), grid.origin_y(), grid.size()),
+                source: GridSource::Built(grid),
+                reused: true,
+            });
+        }
+        if let Some(building) = self.building.as_ref().filter(|building| {
+            building.body == sample.body
+                && building.dungeon == grid_dungeon
+                && building.covers(sample.position, COVER_MARGIN)
+                && building.covers(goal, COVER_MARGIN)
+        }) {
+            return Some(PreviewGround {
+                source: GridSource::Building(building.build.clone()),
+                reused: true,
+                landblock_ids: building.landblock_ids.clone(),
+                object_ids: Arc::clone(&building.object_ids),
+                square: (building.origin_x, building.origin_y, building.size),
+            });
+        }
+        let stands_on = |id: u32| cx.goals.stands_still(id);
+        let captured = if grid_dungeon != 0 {
+            super::geometry::capture_dungeon(
+                cx.physics,
+                grid_dungeon,
+                origin_x,
+                origin_y,
+                size,
+                Some(&stands_on),
+            )
+        } else {
+            super::geometry::capture(cx.physics, origin_x, origin_y, size, Some(&stands_on))
+        }?;
+        let landblock_ids = captured.landblock_ids.clone();
+        let object_ids = Arc::new(captured.object_ids.clone());
+        let square = (captured.origin_x, captured.origin_y, captured.size);
+        // A walk asked for meanwhile waits for this build rather than starting
+        // its own: over a sealed dungeon it covers every cell, as the walk's
+        // would.
+        let source = if grid_dungeon != 0 && self.building.is_none() {
+            self.grid_idle_since = f64::NAN;
+            GridSource::Building(self.share_build(
+                captured,
+                sample.body,
+                grid_dungeon,
+                "a preview needed one over the dungeon".to_owned(),
+                false,
+            ))
+        } else {
+            GridSource::Capture(Box::new(captured), sample.body)
+        };
+        Some(PreviewGround {
+            source,
+            reused: false,
+            landblock_ids,
+            object_ids,
+            square,
+        })
+    }
+
+    /// The cell surfaces of the landblocks a grid covers. For the grid the
+    /// controller keeps (`kept`) they are copied once while those landblocks
+    /// stay where they are loaded, and let go with the grid; for a grid a
+    /// search builds for itself they are copied for that search alone. The
+    /// surfaces are in the world frame, so a landblock loaded again at
+    /// another offset is copied again.
+    pub(super) fn cells_of(
+        &mut self,
+        cx: &WalkWorld<'_>,
+        landblock_ids: &[u32],
+        kept: bool,
+    ) -> Arc<[CellSurface]> {
+        if !kept {
+            return landblock_ids
+                .iter()
+                .filter_map(|&id| cx.physics.landblock(id))
+                .flat_map(|landblock| landblock.cells.iter().cloned())
+                .collect();
+        }
+        let placed: Vec<super::PlacedLandblock> = landblock_ids
+            .iter()
+            .filter_map(|&id| {
+                cx.physics.landblock(id).map(|landblock| {
+                    (
+                        id,
+                        landblock.world_offset_x.to_bits(),
+                        landblock.world_offset_y.to_bits(),
+                    )
+                })
+            })
+            .collect();
+        if let Some((kept, cells)) = &self.grid_cells
+            && *kept == placed
+        {
+            return Arc::clone(cells);
+        }
+        let cells: Arc<[CellSurface]> = landblock_ids
+            .iter()
+            .filter_map(|&id| cx.physics.landblock(id))
+            .flat_map(|landblock| landblock.cells.iter().cloned())
+            .collect();
+        self.grid_cells = Some((placed, Arc::clone(&cells)));
+        cells
     }
 }
 

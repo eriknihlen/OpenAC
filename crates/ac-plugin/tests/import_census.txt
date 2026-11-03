@@ -201,6 +201,7 @@ navigation_follow -
 navigation_stop_go_to -
 navigation_go_to_report -
 navigation_preview_path -
+navigation_reachable_cells -
 navigation_pause -
 navigation_pause_set -
 navigation_pause_release -
