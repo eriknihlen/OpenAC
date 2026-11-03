@@ -1,5 +1,6 @@
 //! The Plugins tab's state: Installed and Discover, their searches, the
-//! remove dialog, Add from URL and Show beta plugins. The slow steps (a
+//! remove dialog, Add from URL (and its pick of one plugin from a repository
+//! publishing several) and Show beta plugins. The slow steps (a
 //! Check pass, Discover's per-plugin release check, installs) are run by
 //! the window; this holds what they produced.
 
@@ -11,7 +12,8 @@ use super::install_dialog::PluginInstallDialog;
 use super::plugins::{PluginCheckOutcome, PluginDiscoverEntry, PluginUpdateAvailability};
 use crate::plugins::{
     COMPATIBLE_PREFIX, InstalledPluginInfo, InstalledPluginSource, PermissionDeclaration,
-    PluginInstallSource, PluginReleaseChannel, permissions_match, without_client_version,
+    PluginInstallSource, PluginReleaseChannel, PluginReleaseResolution, permissions_match,
+    without_client_version,
 };
 use crate::updates::LauncherVersion;
 
@@ -389,6 +391,19 @@ impl PluginInstalledRow {
     }
 }
 
+/// One plugin Add from URL can offer when a repository publishes several.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddFromUrlChoice {
+    /// `owner/name`.
+    pub repo: String,
+    /// Its name.
+    pub display_name: String,
+    /// The release version offered.
+    pub version: String,
+    /// The release.
+    pub resolution: Box<PluginReleaseResolution>,
+}
+
 /// The Plugins tab.
 #[derive(Debug, Default)]
 pub struct PluginsPanel {
@@ -424,6 +439,10 @@ pub struct PluginsPanel {
     pub installed_icon_cache: HashMap<(String, String), Option<PluginIcon>>,
     /// The Add from URL field.
     pub add_from_url_text: String,
+    /// The plugins Add from URL found in a repository publishing several
+    /// that are not installed, by name, for the player to pick one; empty
+    /// otherwise.
+    pub add_from_url_choices: Vec<AddFromUrlChoice>,
     /// The Install from ZIP field: a plugin ZIP's path.
     pub local_zip_text: String,
     /// When the cached list in use was written.

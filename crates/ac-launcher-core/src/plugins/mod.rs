@@ -43,10 +43,11 @@ pub use record_store::{
     PluginReleaseChannel,
 };
 pub use release::{
-    FEED_MAXIMUM_BYTES, MAXIMUM_DOCUMENT_BYTES, MAXIMUM_REFUSED_CANDIDATES, PluginFeedRelease,
-    PluginReleaseCandidates, PluginReleaseClient, PluginReleaseDocument, PluginReleaseFeedError,
-    PluginReleaseFetchResult, PluginReleaseResolution, PluginReleaseResolveResult,
-    PluginReleaseResolver, feed_tags, highest_prerelease, highest_stable, plugin_releases,
+    FEED_MAXIMUM_BYTES, MAXIMUM_DOCUMENT_BYTES, MAXIMUM_REFUSED_CANDIDATES,
+    MAXIMUM_REPOSITORY_PLUGINS, PluginFeedRelease, PluginReleaseCandidates, PluginReleaseClient,
+    PluginReleaseDocument, PluginReleaseFeedError, PluginReleaseFetchResult,
+    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver,
+    PluginRepositoryResolution, feed_tags, highest_prerelease, highest_stable, plugin_releases,
     wasm_releases,
 };
 pub use rules::{

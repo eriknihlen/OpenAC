@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use super::index::{PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex};
-use super::manifest::{InstallRules, PluginManifest, WASM_TAG_PREFIX, plugin_tag_prefix};
+use super::manifest::{
+    InstallRules, PluginManifest, WASM_TAG_PREFIX, is_well_formed_id, plugin_tag_prefix,
+};
 use super::record_store::PluginReleaseChannel;
 use super::rules::github;
 use crate::cancel::CancelToken;
@@ -21,6 +23,10 @@ pub const MAXIMUM_DOCUMENT_BYTES: u64 = 256 * 1024;
 
 /// Largest releases feed.
 pub const FEED_MAXIMUM_BYTES: u64 = 1024 * 1024;
+
+/// The most plugins one repository is searched for (each costs at least one
+/// `plugin.json` request).
+pub const MAXIMUM_REPOSITORY_PLUGINS: usize = 16;
 
 /// How many candidates naming another plugin a channel skips before it
 /// gives up, bounding the `plugin.json` fetches one resolution makes.
@@ -329,6 +335,15 @@ impl PluginReleaseResolveResult {
     }
 }
 
+/// Every plugin found in a repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginRepositoryResolution {
+    /// Each plugin's release on the channel, in the order found.
+    pub plugins: Vec<PluginReleaseResolution>,
+    /// When none was found, why (`Unavailable` when nothing more is known).
+    pub failure: PluginReleaseResolveResult,
+}
+
 /// Both candidates of one pass: the stable release (always) and the highest
 /// pre-release (only on the beta channel).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,12 +504,7 @@ impl PluginReleaseResolver {
                 index_warning: None,
             })
         };
-        let tags = match self.cached(
-            |cache| &mut cache.feeds,
-            repo.to_lowercase(),
-            || self.read_feed(repo, cancel),
-            |feed| !matches!(feed, Err(PluginReleaseResolveResult::RateLimited)),
-        )? {
+        let tags = match self.feed(repo, cancel)? {
             Ok(tags) => tags,
             Err(result) => return only(result),
         };
@@ -507,12 +517,7 @@ impl PluginReleaseResolver {
             Some(id) => {
                 let mut releases = plugin_releases(&tags, id);
                 if needs_index(&tags, &releases) {
-                    match self.cached(
-                        |cache| &mut cache.indexes,
-                        repo.to_lowercase(),
-                        || self.read_index(repo, cancel),
-                        |index| !matches!(index, IndexRead::RateLimited),
-                    )? {
+                    match self.index(repo, cancel)? {
                         IndexRead::Read(index) => {
                             for release in index.releases_for(id) {
                                 if !releases.iter().any(|known| known.tag == release.tag) {
@@ -556,6 +561,114 @@ impl PluginReleaseResolver {
             beta,
             index_warning,
         })
+    }
+
+    /// Every plugin `repo` publishes with a release on `channel`, for Add
+    /// from URL: the plugin of its newest `wasm-v` release, each plugin a
+    /// `wasm-<id>-v` tag on its feed may name, and each plugin its index
+    /// names (read as resolving a plugin would), at most
+    /// [`MAXIMUM_REPOSITORY_PLUGINS`], each resolved by its id. A tag that
+    /// splits into an id and a version more than one way is tried each way;
+    /// only the plugin its `plugin.json` names is found.
+    pub fn resolve_repository(
+        &self,
+        repo: &str,
+        channel: PluginReleaseChannel,
+        cancel: &CancelToken,
+    ) -> Result<PluginRepositoryResolution, UpdateError> {
+        let pass = if self.pass.is_some() {
+            self.clone()
+        } else {
+            self.pass()
+        };
+        let newest = pass.resolve(repo, channel, cancel)?;
+        let none_found = |failure| {
+            Ok(PluginRepositoryResolution {
+                plugins: Vec::new(),
+                failure,
+            })
+        };
+        let tags = match pass.feed(repo, cancel)? {
+            Ok(tags) => tags,
+            Err(failure) => return none_found(failure),
+        };
+        let mut ids: Vec<String> = Vec::new();
+        let mut add = |id: &str| {
+            if !ids.iter().any(|known| known.eq_ignore_ascii_case(id)) {
+                ids.push(id.to_owned());
+            }
+        };
+        if let Some(resolution) = newest.resolution() {
+            add(&resolution.manifest.id);
+        }
+        for tag in &tags {
+            for id in ids_in_tag(tag) {
+                add(id);
+            }
+        }
+        let names_others = tags
+            .iter()
+            .any(|tag| tag.starts_with("wasm-") && parse_release(tag, WASM_TAG_PREFIX).is_none());
+        if (names_others || newest.resolution().is_none())
+            && let IndexRead::Read(index) = pass.index(repo, cancel)?
+        {
+            for entry in &index.plugins {
+                add(&entry.id);
+            }
+        }
+        let mut plugins: Vec<PluginReleaseResolution> = Vec::new();
+        let mut failures = Vec::new();
+        for id in ids.iter().take(MAXIMUM_REPOSITORY_PLUGINS) {
+            match pass.resolve_plugin(repo, id, channel, cancel)? {
+                PluginReleaseResolveResult::Success(resolution) => {
+                    if !plugins.iter().any(|known| {
+                        known
+                            .manifest
+                            .id
+                            .eq_ignore_ascii_case(&resolution.manifest.id)
+                    }) {
+                        plugins.push(*resolution);
+                    }
+                }
+                failure => failures.push(failure),
+            }
+        }
+        let failure = if failures.contains(&PluginReleaseResolveResult::RateLimited) {
+            PluginReleaseResolveResult::RateLimited
+        } else if newest != PluginReleaseResolveResult::Unavailable && newest.resolution().is_none()
+        {
+            newest
+        } else {
+            failures
+                .into_iter()
+                .find(|failure| *failure != PluginReleaseResolveResult::Unavailable)
+                .unwrap_or(PluginReleaseResolveResult::Unavailable)
+        };
+        Ok(PluginRepositoryResolution { plugins, failure })
+    }
+
+    /// `repo`'s feed tags, read once a pass.
+    fn feed(
+        &self,
+        repo: &str,
+        cancel: &CancelToken,
+    ) -> Result<Result<Vec<String>, PluginReleaseResolveResult>, UpdateError> {
+        self.cached(
+            |cache| &mut cache.feeds,
+            repo.to_lowercase(),
+            || self.read_feed(repo, cancel),
+            |feed| !matches!(feed, Err(PluginReleaseResolveResult::RateLimited)),
+        )
+    }
+
+    /// `repo`'s plugin index, read once a pass.
+    fn index(&self, repo: &str, cancel: &CancelToken) -> Result<IndexRead, UpdateError> {
+        self.cached(
+            |cache| &mut cache.indexes,
+            repo.to_lowercase(),
+            || self.read_index(repo, cancel),
+            |index| !matches!(index, IndexRead::RateLimited),
+        )
     }
 
     /// The release tags on `repo`'s feed, or the result to give when it
@@ -725,6 +838,24 @@ impl PluginReleaseResolver {
             },
         )))
     }
+}
+
+/// Every plugin id a `wasm-<id>-v<version>` tag may name: each way it splits
+/// at a `-v` into a well-formed id and a strict SemVer version without build
+/// metadata.
+fn ids_in_tag(tag: &str) -> Vec<&str> {
+    let Some(rest) = tag.strip_prefix("wasm-") else {
+        return Vec::new();
+    };
+    rest.match_indices("-v")
+        .map(|(at, _)| (&rest[..at], &rest[at + 2..]))
+        .filter(|(id, version)| {
+            is_well_formed_id(id)
+                && !version.contains('+')
+                && LauncherVersion::try_parse(version).is_some()
+        })
+        .map(|(id, _)| id)
+        .collect()
 }
 
 /// Whether resolving plugin `id` reads its repository's index: when the feed

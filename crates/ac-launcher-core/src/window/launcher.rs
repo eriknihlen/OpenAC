@@ -21,7 +21,9 @@ use super::first_run::FirstRunSetup;
 use super::icon::{PluginIcon, decode_icon};
 use super::install_dialog::{InstallDialogRequest, PluginCharacterOption};
 use super::plugins::{PluginCheckOutcome, PluginComposition, PluginSingleCheckResult};
-use super::plugins_panel::{DiscoverChannelOption, DiscoverDetails, PluginsPanel};
+use super::plugins_panel::{
+    AddFromUrlChoice, DiscoverChannelOption, DiscoverDetails, PluginsPanel,
+};
 use super::profile_editor::ProfileTextEditor;
 use super::sessions::SessionRow;
 use super::update_prompt::UpdatePrompt;
@@ -38,8 +40,9 @@ use crate::orchestration::{
 use crate::plugins::{
     ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
     PermissionDeclaration, PluginInstallResult, PluginManifest, PluginReleaseCandidates,
-    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolveResult,
-    PluginReleaseResolver, describe, github, is_built_for_csharp, is_well_formed_id,
+    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolution,
+    PluginReleaseResolveResult, PluginReleaseResolver, PluginRepositoryResolution, describe,
+    github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
     LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherTextEditorKind,
@@ -227,7 +230,7 @@ enum Message {
         result: Result<Vec<PermissionDeclaration>, String>,
     },
     InstallFinished(Result<PluginInstallResult, String>),
-    AddFromUrlResolved(Result<PluginReleaseResolveResult, String>),
+    AddFromUrlResolved(Result<PluginRepositoryResolution, String>),
     BetaToggled {
         id: String,
         is_beta: bool,
@@ -3836,7 +3839,9 @@ impl LauncherWindow {
             && !self.plugins.add_from_url_text.trim().is_empty()
     }
 
-    /// Add from URL (`https://github.com/owner/name`).
+    /// Add from URL (`https://github.com/owner/name`). The repository is
+    /// read before anything is said: it may publish several plugins, some
+    /// installed and some not.
     pub fn add_from_url(&mut self) {
         let Some(backend) = self.plugin_backend.clone() else {
             return;
@@ -3848,116 +3853,153 @@ impl LauncherWindow {
             self.plugins.error = Some("Enter a URL like https://github.com/owner/name.".into());
             return;
         };
-        let installed_by_repo = backend
-            .records()
-            .records
-            .iter()
-            .find(|record| record.repo.eq_ignore_ascii_case(&repo))
-            .map(|record| record.id.clone());
-        if let Some(id) = installed_by_repo {
-            self.plugins.add_from_url_text.clear();
-            let name = backend
-                .find_installed(&id, (self.client_version)().as_ref(), None)
-                .map_or(id, |info| info.display_name);
-            self.plugins.status_text = Some(format!("{name} is already installed."));
-            return;
-        }
         self.plugins.is_busy = true;
         self.plugins.error = None;
         self.plugins.status_text = None;
+        self.plugins.add_from_url_choices.clear();
         let channel = self.plugins.discover_channel();
         let pending_repo = repo.clone();
         self.plugins.add_from_url_text = repo;
         self.run(move |sender, wake| {
             let result = backend
                 .release_resolver
-                .resolve(&pending_repo, channel, &CancelToken::new())
+                .resolve_repository(&pending_repo, channel, &CancelToken::new())
                 .map_err(|error| error.to_string());
             let _ = sender.send(Message::AddFromUrlResolved(result));
             wake();
         });
     }
 
-    fn apply_add_from_url(&mut self, result: Result<PluginReleaseResolveResult, String>) {
+    fn apply_add_from_url(&mut self, result: Result<PluginRepositoryResolution, String>) {
         self.plugins.is_busy = false;
         let repo = self.plugins.add_from_url_text.clone();
         let Some(backend) = self.plugin_backend.clone() else {
             return;
         };
-        match result {
-            Ok(PluginReleaseResolveResult::Success(resolution)) => {
-                let manifest = resolution.manifest.clone();
-                self.plugins.add_from_url_text.clear();
-                let installed_by_id = backend.find_record(&manifest.id);
-                if let Some(record) = &installed_by_id {
-                    if record.repo.eq_ignore_ascii_case(&repo) {
-                        self.plugins.status_text =
-                            Some(format!("{} is already installed.", manifest.display_name));
-                    } else {
-                        self.plugins.error = Some(format!(
-                            "'{}' is already installed from '{}'.",
-                            manifest.id, record.repo
-                        ));
-                    }
-                    return;
-                }
-                let version = LauncherVersion::try_parse(&manifest.version);
-                if let Some(reason) = backend.current_catalog().and_then(|catalog| {
-                    catalog
-                        .block_reason(&manifest.id, version.as_ref())
-                        .map(str::to_owned)
-                }) {
-                    self.plugins.error = Some(format!("'{}' is blocked: {reason}", manifest.id));
-                    return;
-                }
-                let request = InstallDialogRequest {
-                    is_listed: self.is_listed(&repo),
-                    repo,
-                    plugin_id: manifest.id.clone(),
-                    display_name: manifest.display_name.clone(),
-                    is_update: false,
-                    offered_version: Some(manifest.version.clone()),
-                    pinned_tag: Some(resolution.tag.clone()),
-                    channel: None,
-                    characters: self.character_options(),
-                    permissions: Some(manifest.permissions.clone()),
-                    installed_permissions: None,
-                    affected_characters: Vec::new(),
-                    local_zip: None,
-                };
-                self.open_install_dialog(request);
-            }
-            Ok(PluginReleaseResolveResult::RateLimited) => {
-                self.plugins.error = Some("GitHub is rate limiting; try later.".into());
-            }
-            Ok(PluginReleaseResolveResult::Invalid(reason)) => {
-                self.plugins.error = Some(
-                    if is_built_for_csharp(&crate::plugins::ManifestError(reason)) {
-                        "That repository's release is built for OpenAC (C#), not this client."
-                            .into()
-                    } else {
-                        "That repository's plugin.json could not be read.".into()
-                    },
-                );
-            }
-            Ok(PluginReleaseResolveResult::Prerelease(message)) => {
-                self.plugins.error = Some(message);
-            }
-            Ok(PluginReleaseResolveResult::Unavailable) => {
-                self.plugins.error = Some(
-                    "No release for this client was found for that repository (its releases \
-                     must be tagged wasm-v<version>)."
-                        .into(),
-                );
-            }
+        let found = match result {
+            Ok(found) => found,
             Err(error) => {
                 self.plugins.error = Some(if error.trim().is_empty() {
                     "Could not add that plugin.".into()
                 } else {
                     error
                 });
+                return;
+            }
+        };
+        if found.plugins.is_empty() {
+            self.report_add_from_url_failure(found.failure);
+            return;
+        }
+        self.plugins.add_from_url_text.clear();
+        let (installed, mut fresh): (Vec<_>, Vec<_>) = found
+            .plugins
+            .into_iter()
+            .partition(|plugin| backend.find_record(&plugin.manifest.id).is_some());
+        match fresh.len() {
+            0 => {
+                let [only] = installed.as_slice() else {
+                    self.plugins.status_text =
+                        Some("Every plugin of that repository is already installed.".into());
+                    return;
+                };
+                let manifest = &only.manifest;
+                match backend.find_record(&manifest.id) {
+                    Some(record) if !record.repo.eq_ignore_ascii_case(&repo) => {
+                        self.plugins.error = Some(format!(
+                            "'{}' is already installed from '{}'.",
+                            manifest.id, record.repo
+                        ));
+                    }
+                    _ => {
+                        self.plugins.status_text =
+                            Some(format!("{} is already installed.", manifest.display_name));
+                    }
+                }
+            }
+            1 => self.offer_add_from_url(repo, fresh.remove(0)),
+            _ => {
+                let mut choices: Vec<AddFromUrlChoice> = fresh
+                    .into_iter()
+                    .map(|resolution| AddFromUrlChoice {
+                        repo: repo.clone(),
+                        display_name: resolution.manifest.display_name.clone(),
+                        version: resolution.manifest.version.clone(),
+                        resolution: Box::new(resolution),
+                    })
+                    .collect();
+                choices.sort_by_key(|choice| choice.display_name.to_lowercase());
+                self.plugins.add_from_url_choices = choices;
             }
         }
+    }
+
+    /// Picks one plugin of a repository publishing several.
+    pub fn choose_add_from_url(&mut self, index: usize) {
+        if index >= self.plugins.add_from_url_choices.len() {
+            return;
+        }
+        let choice = self.plugins.add_from_url_choices.swap_remove(index);
+        self.plugins.add_from_url_choices.clear();
+        self.offer_add_from_url(choice.repo, *choice.resolution);
+    }
+
+    /// Closes the pick of one plugin without offering any.
+    pub fn cancel_add_from_url_choice(&mut self) {
+        self.plugins.add_from_url_choices.clear();
+    }
+
+    /// Opens the install dialog for a plugin Add from URL found, unless it is
+    /// blocked.
+    fn offer_add_from_url(&mut self, repo: String, resolution: PluginReleaseResolution) {
+        let Some(backend) = self.plugin_backend.clone() else {
+            return;
+        };
+        let manifest = resolution.manifest;
+        let version = LauncherVersion::try_parse(&manifest.version);
+        if let Some(reason) = backend.current_catalog().and_then(|catalog| {
+            catalog
+                .block_reason(&manifest.id, version.as_ref())
+                .map(str::to_owned)
+        }) {
+            self.plugins.error = Some(format!("'{}' is blocked: {reason}", manifest.id));
+            return;
+        }
+        let request = InstallDialogRequest {
+            is_listed: self.is_listed(&repo),
+            repo,
+            plugin_id: manifest.id.clone(),
+            display_name: manifest.display_name.clone(),
+            is_update: false,
+            offered_version: Some(manifest.version.clone()),
+            pinned_tag: Some(resolution.tag),
+            channel: None,
+            characters: self.character_options(),
+            permissions: Some(manifest.permissions.clone()),
+            installed_permissions: None,
+            affected_characters: Vec::new(),
+            local_zip: None,
+        };
+        self.open_install_dialog(request);
+    }
+
+    fn report_add_from_url_failure(&mut self, failure: PluginReleaseResolveResult) {
+        self.plugins.error = Some(match failure {
+            PluginReleaseResolveResult::RateLimited => "GitHub is rate limiting; try later.".into(),
+            PluginReleaseResolveResult::Invalid(reason) => {
+                if is_built_for_csharp(&crate::plugins::ManifestError(reason)) {
+                    "That repository's release is built for OpenAC (C#), not this client.".into()
+                } else {
+                    "That repository's plugin.json could not be read.".into()
+                }
+            }
+            PluginReleaseResolveResult::Prerelease(message) => message,
+            PluginReleaseResolveResult::Success(_) | PluginReleaseResolveResult::Unavailable => {
+                "No release for this client was found for that repository (its releases must \
+                 be tagged wasm-v<version>, or wasm-<plugin id>-v<version>)."
+                    .into()
+            }
+        });
     }
 
     /// A managed plugin's Beta updates toggle: sets the channel, then

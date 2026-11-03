@@ -2470,6 +2470,113 @@ fn a_pass_keeps_no_rate_limited_fetch() {
     assert_eq!(tag_of(&result), "wasm-v0.2.0");
 }
 
+// --- Every plugin a repository publishes (Add from URL) ---------------------------------------
+
+fn repository_ids(server: &FakeServer) -> Vec<(String, String)> {
+    let found = resolver(server)
+        .resolve_repository(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+        .unwrap();
+    found
+        .plugins
+        .iter()
+        .map(|plugin| (plugin.manifest.id.clone(), plugin.tag.clone()))
+        .collect()
+}
+
+#[test]
+fn a_repository_lists_every_plugin_from_its_tags_and_index() {
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "aethrix.vision", "0.9.0"),
+        ("wasm-aethrix.vision-v1.2.0", "aethrix.vision", "1.2.0"),
+        ("wasm-aethrix.macro-v0.2.0", "aethrix.macro", "0.2.0"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let mut found = repository_ids(&server);
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            (
+                "aethrix.macro".to_owned(),
+                "wasm-aethrix.macro-v0.2.0".to_owned()
+            ),
+            (
+                "aethrix.navigation".to_owned(),
+                "wasm-aethrix.navigation-v0.4.0".to_owned()
+            ),
+            // Its newest, not the old `wasm-v` release.
+            (
+                "aethrix.vision".to_owned(),
+                "wasm-aethrix.vision-v1.2.0".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(server.count(&feed_uri()), 1);
+    assert_eq!(server.count(&index_uri()), 1);
+}
+
+#[test]
+fn a_single_plugin_repository_lists_its_one_plugin_without_the_index() {
+    let server = release_server(&["v0.9.0", "wasm-v0.2.0", "wasm-v0.1.0"]);
+    assert_eq!(
+        repository_ids(&server),
+        [("edwards.hello".to_owned(), "wasm-v0.2.0".to_owned())]
+    );
+    assert_eq!(server.count(&index_uri()), 0);
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json")),
+        1
+    );
+}
+
+#[test]
+fn a_tag_split_two_ways_lists_only_the_plugin_its_manifest_names() {
+    // `wasm-edwards.hello-v1.0.0-v2.0.0` reads as `edwards.hello` 1.0.0-v2.0.0
+    // or `edwards.hello-v1.0.0` 2.0.0; its manifest says which.
+    let server = suite_server(&[(
+        "wasm-edwards.hello-v1.0.0-v2.0.0",
+        "edwards.hello-v1.0.0",
+        "2.0.0",
+    )]);
+    assert_eq!(
+        repository_ids(&server),
+        [(
+            "edwards.hello-v1.0.0".to_owned(),
+            "wasm-edwards.hello-v1.0.0-v2.0.0".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_repository_with_nothing_for_this_client_says_why() {
+    let found = |server: &FakeServer| {
+        resolver(server)
+            .resolve_repository(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+            .unwrap()
+    };
+    let server = release_server(&["v0.5.1"]);
+    let result = found(&server);
+    assert!(result.plugins.is_empty());
+    assert_eq!(result.failure, PluginReleaseResolveResult::Unavailable);
+    let server = release_server(&["wasm-v1.3.0-beta.1"]);
+    assert!(matches!(
+        found(&server).failure,
+        PluginReleaseResolveResult::Prerelease(_)
+    ));
+    let server = FakeServer::new();
+    server.add_route(&feed_uri(), Route::Status(429));
+    assert_eq!(
+        found(&server).failure,
+        PluginReleaseResolveResult::RateLimited
+    );
+}
+
 // --- PluginInstallerTests ---------------------------------------------------------------------
 
 struct Release {

@@ -1034,6 +1034,30 @@ fn plugins_tab(app: &mut LauncherApp, ui: &mut Ui) {
                 );
             });
         });
+        // A repository publishing several plugins: the player picks one.
+        if !window.plugins.add_from_url_choices.is_empty() {
+            let mut chosen = None;
+            let mut cancelled = false;
+            ui.horizontal_wrapped(|ui| {
+                ui.label("That repository publishes several plugins. Add:");
+                for (index, choice) in window.plugins.add_from_url_choices.iter().enumerate() {
+                    if ui
+                        .button(format!("{} {}", choice.display_name, choice.version))
+                        .clicked()
+                    {
+                        chosen = Some(index);
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    cancelled = true;
+                }
+            });
+            if let Some(index) = chosen {
+                window.choose_add_from_url(index);
+            } else if cancelled {
+                window.cancel_add_from_url_choice();
+            }
+        }
         // No file picker here: the ZIP's path is typed, or the ZIP is dropped on
         // the window.
         ui.horizontal(|ui| {

@@ -3128,14 +3128,36 @@ fn without_an_installed_version_the_client_beside_the_launcher_is_used() {
 // --- Add from URL, Remove, Show beta plugins ----------------------------------------------
 
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnAlreadyInstalledRepoShowsAMessageWithNoExtraRequest
-// and AddFromUrlMatchesAnAlreadyInstalledRepoCaseInsensitively.
+// and AddFromUrlMatchesAnAlreadyInstalledRepoCaseInsensitively. A repository
+// can publish several plugins, so it is read before "already installed" is
+// said: one of its other plugins may not be.
 #[test]
-fn add_from_url_for_an_already_installed_repo_shows_a_message_with_no_extra_request() {
+fn add_from_url_for_an_already_installed_plugin_shows_a_message() {
     let fixture = PanelFixture::new();
     fixture.write_manifest("edwards.hello", "0.1.0");
     fixture.add_record("edwards.hello", "0.1.0");
+    // GitHub answers a repository in any case; the record matches ignoring it.
+    let typed = "ShaneEdwards/OpenAC-Plugin-Hello";
+    let feed = ac_launcher_core::plugins::github::releases_feed(typed)
+        .unwrap()
+        .to_string();
+    fixture.server.add(
+        &feed,
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><entry><link rel="alternate" href="https://github.com/{HELLO_REPO}/releases/tag/wasm-v0.2.0"/></entry></feed>"#
+        )
+        .as_bytes(),
+    );
+    let tagged =
+        ac_launcher_core::plugins::github::tagged_asset(typed, "wasm-v0.2.0", "plugin.json")
+            .unwrap()
+            .to_string();
+    fixture
+        .server
+        .add(&tagged, manifest_json("edwards.hello", "0.2.0").as_bytes());
     let mut window = fixture.window();
-    window.plugins.add_from_url_text = "https://github.com/ShaneEdwards/OpenAC-Plugin-Hello".into();
+    window.plugins.add_from_url_text = format!("https://github.com/{typed}");
     window.add_from_url();
     window.poll();
     assert_eq!(
@@ -3143,7 +3165,84 @@ fn add_from_url_for_an_already_installed_repo_shows_a_message_with_no_extra_requ
         Some("edwards.hello is already installed.")
     );
     assert!(window.plugins.add_from_url_text.is_empty());
-    assert!(fixture.server.requests().is_empty());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
+#[test]
+fn add_from_url_asks_which_plugin_when_a_repository_publishes_several() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(!window.plugins.install_dialog.is_open);
+    let choices: Vec<(String, String)> = window
+        .plugins
+        .add_from_url_choices
+        .iter()
+        .map(|choice| (choice.display_name.clone(), choice.version.clone()))
+        .collect();
+    assert_eq!(
+        choices,
+        [
+            ("edwards.navigation".to_owned(), "0.4.0".to_owned()),
+            ("edwards.vision".to_owned(), "1.2.0".to_owned()),
+        ]
+    );
+    window.choose_add_from_url(1);
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    let dialog = &window.plugins.install_dialog;
+    assert!(dialog.is_open);
+    assert_eq!(dialog.display_name(), "edwards.vision");
+    assert_eq!(
+        dialog.request.as_ref().unwrap().pinned_tag.as_deref(),
+        Some("wasm-edwards.vision-v1.2.0")
+    );
+    // Cancelling the picker offers nothing.
+    window.close_install_dialog();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.add_from_url_choices.len(), 2);
+    window.cancel_add_from_url_choice();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
+#[test]
+fn add_from_url_offers_the_one_plugin_of_a_repository_not_yet_installed() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.vision", "1.2.0");
+    fixture.add_record("edwards.vision", "1.2.0");
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    let dialog = &window.plugins.install_dialog;
+    assert!(dialog.is_open);
+    assert_eq!(dialog.display_name(), "edwards.navigation");
 }
 
 // OpenAC LauncherPluginsViewModel.AddFromUrlAsync (a URL that is not a repository).
