@@ -3298,14 +3298,16 @@ impl LauncherWindow {
             .collect()
     }
 
-    fn is_listed(&self, repo: &str) -> bool {
+    /// Whether plugin `id` of `repo` is on the list: the list names plugins,
+    /// and a repository can publish several, listed or not.
+    fn is_listed(&self, repo: &str, id: &str) -> bool {
         self.plugin_backend
             .as_ref()
             .and_then(|backend| backend.current_catalog())
             .is_some_and(|catalog| {
-                catalog
-                    .entries_for_this_client()
-                    .any(|entry| entry.repo == repo)
+                catalog.entries_for_this_client().any(|entry| {
+                    entry.repo.eq_ignore_ascii_case(repo) && entry.id.eq_ignore_ascii_case(id)
+                })
             })
     }
 
@@ -3330,7 +3332,7 @@ impl LauncherWindow {
             repo: row.entry.repo.clone(),
             plugin_id: row.entry.id.clone(),
             display_name: row.entry.name.clone(),
-            is_listed: self.is_listed(&row.entry.repo),
+            is_listed: self.is_listed(&row.entry.repo, &row.entry.id),
             is_update: false,
             offered_version: Some(option.version.clone()),
             pinned_tag: Some(option.tag.clone()),
@@ -3362,7 +3364,7 @@ impl LauncherWindow {
         };
         let affected = self.characters_with_plugin_enabled(&row.info.id);
         let request = InstallDialogRequest {
-            is_listed: self.is_listed(&repo),
+            is_listed: self.is_listed(&repo, &row.info.id),
             repo,
             plugin_id: row.info.id.clone(),
             display_name: row.info.display_name.clone(),
@@ -3966,7 +3968,7 @@ impl LauncherWindow {
             return;
         }
         let request = InstallDialogRequest {
-            is_listed: self.is_listed(&repo),
+            is_listed: self.is_listed(&repo, &manifest.id),
             repo,
             plugin_id: manifest.id.clone(),
             display_name: manifest.display_name.clone(),

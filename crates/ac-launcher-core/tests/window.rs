@@ -3280,6 +3280,38 @@ fn add_from_url_refuses_a_plugin_blocked_for_all_versions() {
     assert!(!window.plugins.install_dialog.is_open);
 }
 
+// The list names plugins, not repositories: another plugin of a listed
+// plugin's repository is still unlisted.
+#[test]
+fn add_from_url_marks_an_unlisted_plugin_of_a_listed_repository_unlisted() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.vision", "1.2.0");
+    fixture.add_record("edwards.vision", "1.2.0");
+    fixture.list(&["edwards.vision"], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    let dialog = &window.plugins.install_dialog;
+    assert_eq!(dialog.display_name(), "edwards.navigation");
+    assert!(
+        dialog
+            .warning_text()
+            .contains("This plugin is not on the OpenAC plugin list."),
+        "{}",
+        dialog.warning_text()
+    );
+}
+
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnUnlistedRepoOpensTheInstallDialog (the
 // unlisted notice, UnlistedInstallNoticeAddsANotOnTheListLine).
 #[test]
