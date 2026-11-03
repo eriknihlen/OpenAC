@@ -555,36 +555,38 @@ impl Wire for () {
     fn read(_r: &mut Reader<'_>) -> Self {}
 }
 
-/// `Result<T, String>`: tag 0 then the value, or tag 1 then the message.
-impl<T: Wire> Wire for Result<T, String> {
-    const SHAPE: u64 = Shape::new("result").of(T::SHAPE).of(String::SHAPE).finish();
+/// `Result<T, E>`: tag 0 then the value, or tag 1 then the error (most
+/// often a message, `E = String`).
+impl<T: Wire, E: Wire> Wire for Result<T, E> {
+    const SHAPE: u64 = Shape::new("result").of(T::SHAPE).of(E::SHAPE).finish();
     fn encode(&self, w: &mut Writer) {
         match self {
             Ok(value) => {
                 w.put_raw(&[0]);
                 value.encode(w);
             }
-            Err(message) => {
+            Err(error) => {
                 w.put_raw(&[1]);
-                message.encode(w);
+                error.encode(w);
             }
         }
     }
     fn read(r: &mut Reader<'_>) -> Self {
         match u8::read(r) {
             0 => Ok(T::read(r)),
-            1 => Err(String::read(r)),
+            1 => Err(E::read(r)),
             other => {
                 r.fail(DecodeError::InvalidFlag(other));
-                Err(String::new())
+                // A stand-in read from the failed reader (no bytes left).
+                Err(E::read(r))
             }
         }
     }
-    const VERSIONED: bool = T::VERSIONED;
+    const VERSIONED: bool = T::VERSIONED || E::VERSIONED;
     fn shape_at(version: ApiVersion) -> u64 {
         Shape::new("result")
             .of(T::shape_at(version))
-            .of(String::SHAPE)
+            .of(E::shape_at(version))
             .finish()
     }
     fn encode_at(&self, version: ApiVersion, w: &mut Writer) {
@@ -593,19 +595,19 @@ impl<T: Wire> Wire for Result<T, String> {
                 w.put_raw(&[0]);
                 value.encode_at(version, w);
             }
-            Err(message) => {
+            Err(error) => {
                 w.put_raw(&[1]);
-                message.encode(w);
+                error.encode_at(version, w);
             }
         }
     }
     fn read_at(r: &mut Reader<'_>, version: ApiVersion) -> Self {
         match u8::read(r) {
             0 => Ok(T::read_at(r, version)),
-            1 => Err(String::read(r)),
+            1 => Err(E::read_at(r, version)),
             other => {
                 r.fail(DecodeError::InvalidFlag(other));
-                Err(String::new())
+                Err(E::read_at(r, version))
             }
         }
     }
@@ -1123,6 +1125,13 @@ mod tests {
         let err: Result<u32, String> = Err("no".to_owned());
         assert_eq!(Result::<u32, String>::from_bytes(&ok.to_bytes()), Ok(ok));
         assert_eq!(Result::<u32, String>::from_bytes(&err.to_bytes()), Ok(err));
+        // An error may be any record; its shape is part of the result's.
+        let typed: Result<u32, Colour> = Err(Colour::Red);
+        assert_eq!(
+            Result::<u32, Colour>::from_bytes(&typed.to_bytes()),
+            Ok(typed)
+        );
+        assert_ne!(Result::<u32, Colour>::SHAPE, Result::<u32, String>::SHAPE);
         let some = Some("x".to_owned());
         assert_eq!(Option::<String>::from_bytes(&some.to_bytes()), Ok(some));
     }
