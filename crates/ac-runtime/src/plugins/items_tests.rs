@@ -1766,7 +1766,7 @@ fn main_pack_items_report_the_slots_they_did_and_a_wielded_one_none() {
     assert_eq!(stored, [0, 1]);
     assert_eq!(slots_seen(&mut state, &[GEM, KIT]), stored);
     // The pack is the first of the packs (the description's flat list put
-    // it third), and the sword is in no list.
+    // it third), and the sword is in no container.
     assert_eq!(slots_seen(&mut state, &[SIDE_PACK, SWORD]), [0, -1]);
 }
 

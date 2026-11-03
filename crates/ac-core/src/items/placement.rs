@@ -409,7 +409,8 @@ pub fn loose_contents(objects: &ClientObjectTable, container_id: u32) -> Vec<u32
 /// keeps the two kinds in separate lists and reads an item's place off
 /// its list, so this is the number it shows for the item, whatever slot
 /// the server last named. -1 when the object is in no container or its
-/// container's list does not hold it.
+/// container's list does not hold it; 0 when its container has no list at
+/// all (never listed, or its view closed), as the game counts it.
 #[must_use]
 pub fn place_in_container_list(objects: &ClientObjectTable, item_id: u32) -> i32 {
     let Some(item) = objects.get(item_id) else {
@@ -418,9 +419,11 @@ pub fn place_in_container_list(objects: &ClientObjectTable, item_id: u32) -> i32
     if item.container_id == 0 {
         return -1;
     }
+    let Some(contents) = objects.contents_list(item.container_id) else {
+        return 0;
+    };
     let packs = is_pack(item);
-    objects
-        .get_contents(item.container_id)
+    contents
         .iter()
         .filter(|&&id| objects.get(id).is_some_and(is_pack) == packs)
         .position(|&id| id == item_id)
@@ -1079,6 +1082,23 @@ mod place_in_list_tests {
         assert_eq!((kept.container_id, kept.container_slot), (PACK, 0));
         assert_eq!(place(&t, 0xA04), -1);
         assert_eq!(place(&t, 0xDEAD), -1);
+    }
+
+    // A container with no contents list at all (never listed, or its view
+    // closed, which drops the list) puts what names it at place 0, as the
+    // game does; only a list that does not hold the item gives -1.
+    #[test]
+    fn an_item_whose_container_has_no_list_is_at_place_zero() {
+        let mut t = ClientObjectTable::new();
+        let mut ev: Vec<TableEvent> = Vec::new();
+        t.replace_contents(PACK, &[entry(0xA01, 0), entry(0xA02, 0)], &mut ev);
+        t.ingest(&in_container(0xA01, PACK), &mut ev);
+        t.ingest(&in_container(0xA02, PACK), &mut ev);
+        assert_eq!(place(&t, 0xA02), 1);
+        t.stop_viewing_contents(PACK, &mut ev);
+        assert!(t.contents_list(PACK).is_none());
+        assert_eq!(t.get(0xA02).unwrap().container_id, PACK);
+        assert_eq!((place(&t, 0xA01), place(&t, 0xA02)), (0, 0));
     }
 
     // The main pack as the character description lists it (loose items
