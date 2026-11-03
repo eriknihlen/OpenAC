@@ -43,6 +43,12 @@ impl GridSource {
                 .map_err(|e| format!("{e:?}")),
         }
     }
+
+    /// Whether the grid is the controller's, kept or being built, rather
+    /// than one the search builds for itself and drops.
+    pub(super) fn is_kept(&self) -> bool {
+        !matches!(self, Self::Capture(..))
+    }
 }
 
 /// What a preview plans toward.
@@ -276,7 +282,7 @@ impl WalkController {
             object_ids,
             ..
         } = ground;
-        let cells = self.cells_of(cx, &landblock_ids);
+        let cells = self.cells_of(cx, &landblock_ids, source.is_kept());
         let crowd = self.crowd(cx, &sample, object_id);
         let body = sample.body;
         let start = sample.position;
@@ -376,7 +382,7 @@ impl WalkController {
             self.grid_idle_since = f64::NAN;
             return Some(PreviewGround {
                 landblock_ids: grid.landblock_ids().to_vec(),
-                object_ids: Arc::new(grid.object_ids().clone()),
+                object_ids: Arc::clone(grid.object_ids()),
                 square: (grid.origin_x(), grid.origin_y(), grid.size()),
                 source: GridSource::Built(grid),
                 reused: true,
@@ -436,15 +442,25 @@ impl WalkController {
         })
     }
 
-    /// The cell surfaces of the landblocks a grid covers, copied once while
-    /// those landblocks stay where they are loaded. The surfaces are in the
-    /// world frame, so a landblock loaded again at another offset is copied
-    /// again.
+    /// The cell surfaces of the landblocks a grid covers. For the grid the
+    /// controller keeps (`kept`) they are copied once while those landblocks
+    /// stay where they are loaded, and let go with the grid; for a grid a
+    /// search builds for itself they are copied for that search alone. The
+    /// surfaces are in the world frame, so a landblock loaded again at
+    /// another offset is copied again.
     pub(super) fn cells_of(
         &mut self,
         cx: &WalkWorld<'_>,
         landblock_ids: &[u32],
+        kept: bool,
     ) -> Arc<[CellSurface]> {
+        if !kept {
+            return landblock_ids
+                .iter()
+                .filter_map(|&id| cx.physics.landblock(id))
+                .flat_map(|landblock| landblock.cells.iter().cloned())
+                .collect();
+        }
         let placed: Vec<super::PlacedLandblock> = landblock_ids
             .iter()
             .filter_map(|&id| {

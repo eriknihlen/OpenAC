@@ -150,7 +150,7 @@ impl WalkController {
             object_ids,
             ..
         } = ground;
-        let cells = self.cells_of(cx, &landblock_ids);
+        let cells = self.cells_of(cx, &landblock_ids, source.is_kept());
         let body = sample.body;
         let widen = |spot: NavAvoidance| NavAvoidance::new(spot.centre, spot.radius + body.radius);
         let mut avoid: Vec<NavAvoidance> = cx

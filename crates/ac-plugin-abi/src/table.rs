@@ -780,8 +780,10 @@ macro_rules! import_table {
             /// Every cell of the sealed dungeon the character stands in that
             /// it can walk to within `max_meters`, each with the length of
             /// its route, from one search (API 1.5): a handle (never 0), or
-            /// 0 when nothing can be searched from (out of the world, in
-            /// portal space or in the air, or not in a sealed dungeon). The
+            /// 0 when nothing can be searched from (no session, out of the
+            /// world, in portal space or in the air, not in a sealed dungeon,
+            /// or before the game data walks need is loaded) or `max_meters`
+            /// is not above 0. The
             /// answer arrives as `Event::NavigationReach` to this plugin, at
             /// the earliest after the call returns. The search runs on a
             /// worker over the grid walks and previews use.

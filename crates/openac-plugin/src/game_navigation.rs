@@ -186,8 +186,9 @@ impl Host<'_> {
     /// walk to along routes of at most `max_meters` (`f32::INFINITY` for
     /// all of them), each with its route's length, from one search (API
     /// 1.5). Returns the search's handle, or 0 when nothing can be searched
-    /// from: out of the world, in portal space or the air, or not in a
-    /// sealed dungeon. The answer arrives as `Event::NavigationReach` with
+    /// from (out of the world, in portal space or the air, not in a sealed
+    /// dungeon, or before the game data walks need is loaded) or
+    /// `max_meters` is not above 0. The answer arrives as `Event::NavigationReach` with
     /// that handle on a later event pass, nearest by route first; a cell it
     /// leaves out cannot be walked to from here now. The search runs on the
     /// client's worker over the grid walks and previews use.

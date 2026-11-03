@@ -412,8 +412,10 @@ struct GridBuilding {
     size: f32,
     landblock_ids: Vec<u32>,
     object_ids: Arc<HashSet<u32>>,
-    /// Whether a walk asked for it, so that a failed build ends the walk.
-    for_walk: bool,
+    /// Whether a walk asked for it or has waited on it, so that a failed
+    /// build ends the walk; a build only a preview or the grid view waits on
+    /// ends nothing.
+    walk_waits: bool,
 }
 
 impl GridBuilding {
@@ -1297,6 +1299,17 @@ impl WalkController {
             || self.routing.as_ref().is_some_and(Job::is_finished)
     }
 
+    /// Whether a walk must wait for a grid build or route search under way.
+    /// A build it waits on is marked so, whoever started it, so that the
+    /// build failing ends the walk.
+    fn waits_on_search(&mut self) -> bool {
+        if let Some(building) = self.building.as_mut() {
+            building.walk_waits = true;
+            return true;
+        }
+        self.routing.is_some()
+    }
+
     /// Whether a request is waiting, being planned or being walked.
     #[must_use]
     pub fn is_busy(&self) -> bool {
@@ -1583,7 +1596,7 @@ impl WalkController {
             self.drive(cx, active, sample);
             return;
         }
-        if self.building.is_some() || self.routing.is_some() {
+        if self.waits_on_search() {
             return;
         }
         if sample.in_portal_space {
@@ -3183,7 +3196,7 @@ impl WalkController {
         body: NavBody,
         dungeon: u32,
         why: String,
-        for_walk: bool,
+        walk_waits: bool,
     ) -> bool {
         let stands_on = |id: u32| cx.goals.stands_still(id);
         let captured: Option<NavGeometry> = if dungeon == 0 {
@@ -3201,7 +3214,7 @@ impl WalkController {
         let Some(captured) = captured else {
             return false;
         };
-        self.share_build(captured, body, dungeon, why, for_walk);
+        self.share_build(captured, body, dungeon, why, walk_waits);
         true
     }
 
@@ -3214,7 +3227,7 @@ impl WalkController {
         body: NavBody,
         dungeon: u32,
         why: String,
-        for_walk: bool,
+        walk_waits: bool,
     ) -> SharedBuild {
         let (origin_x, origin_y, size) = (captured.origin_x, captured.origin_y, captured.size);
         let landblock_ids = captured.landblock_ids.clone();
@@ -3231,7 +3244,7 @@ impl WalkController {
             size,
             landblock_ids,
             object_ids,
-            for_walk,
+            walk_waits,
         };
         let build = building.build.clone();
         self.building = Some(building);
@@ -3374,7 +3387,9 @@ impl WalkController {
             Ok(grid) => grid,
             Err(message) => {
                 self.say(&format!("Navmesh: the build failed: {message}"));
-                if !building.for_walk {
+                // The cell surfaces a search over it copied go with it.
+                self.grid_cells = None;
+                if !building.walk_waits {
                     return;
                 }
                 if let Some(mut active) = self.active.take() {
@@ -3850,7 +3865,7 @@ impl WalkController {
                 active.leader_aloft_since = self.seconds;
             }
             if self.seconds - active.leader_aloft_since < FOLLOW_ALOFT_SECONDS {
-                if self.driver.is_some() || self.building.is_some() || self.routing.is_some() {
+                if self.driver.is_some() || self.waits_on_search() {
                     return false;
                 }
                 self.publish(
@@ -3891,7 +3906,7 @@ impl WalkController {
         }
 
         let was_seen = active.leader_seen;
-        if self.building.is_some() || self.routing.is_some() {
+        if self.waits_on_search() {
             active.leader_last_seen = leader;
             return false;
         }
@@ -3960,7 +3975,7 @@ impl WalkController {
     /// Walks into the portal the player left by, uses it once there, and
     /// waits for it to take the character.
     fn chase_portal(&mut self, cx: &mut WalkWorld<'_>, active: &mut Request, portal: u32) -> bool {
-        if self.driver.is_some() || self.building.is_some() || self.routing.is_some() {
+        if self.driver.is_some() || self.waits_on_search() {
             return false;
         }
         if !active.settled {

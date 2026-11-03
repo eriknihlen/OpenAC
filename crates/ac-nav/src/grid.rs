@@ -164,7 +164,7 @@ pub struct NavGrid {
     side: i32,
     landblock_ids: Vec<u32>,
     object_fingerprint: u64,
-    object_ids: std::collections::HashSet<u32>,
+    object_ids: std::sync::Arc<std::collections::HashSet<u32>>,
     body: NavBody,
     nearest_wall: f32,
     column_nodes: ColumnTiles<ColumnNodes>,
@@ -225,9 +225,10 @@ impl NavGrid {
         self.object_fingerprint
     }
 
-    /// The objects the server placed whose collision the grid holds.
+    /// The objects the server placed whose collision the grid holds,
+    /// shared rather than copied by the searches that run over the grid.
     #[must_use]
-    pub fn object_ids(&self) -> &std::collections::HashSet<u32> {
+    pub fn object_ids(&self) -> &std::sync::Arc<std::collections::HashSet<u32>> {
         &self.object_ids
     }
 
@@ -899,7 +900,7 @@ impl NavGrid {
             side,
             landblock_ids: geometry.landblock_ids.clone(),
             object_fingerprint: geometry.object_fingerprint,
-            object_ids: geometry.object_ids.clone(),
+            object_ids: std::sync::Arc::new(geometry.object_ids.clone()),
             body,
             nearest_wall,
             column_nodes,

@@ -713,8 +713,9 @@ impl PluginBinding<'_> {
 
     /// A reach search: the handle the answer will carry, or 0 when nothing
     /// can be searched from (no session, out of the world, in portal space
-    /// or the air, or not in a sealed dungeon) or the distance is not above
-    /// 0. The answer reaches only this plugin.
+    /// or the air, not in a sealed dungeon, or before the game data walks
+    /// need is loaded) or the distance is not above 0. The answer reaches
+    /// only this plugin.
     pub(super) fn navigation_reachable_cells(
         &mut self,
         owner: &str,
