@@ -857,6 +857,26 @@ fn cancel_stops_what_the_drive_began() {
     assert!(driver.advance(&body.sample(), &none()).is_empty());
 }
 
+#[test]
+fn a_drive_that_takes_over_moves_stops_them_when_cancelled_before_its_first_step() {
+    let mut body = SimulatedBody::default();
+    drive(
+        &mut driver(&[v(0.0, 0.0, 0.0), v(0.0, 30.0, 0.0)]),
+        &mut body,
+        1.0,
+        &none(),
+        None,
+    );
+    assert!(body.travelling());
+    let legs = [body.position.extend(0.0), v(0.5, 30.0, 0.0)];
+
+    let taking_over = RouteDriver::new(&legs, &[], true).unwrap().cancel();
+    let fresh = RouteDriver::new(&legs, &[], false).unwrap().cancel();
+
+    assert!(taking_over.stop_travel && taking_over.stop_turn);
+    assert!(fresh.is_empty(), "a drive that owns nothing stops nothing");
+}
+
 fn deck(edge: f32, height: f32) -> impl Fn(Vec2) -> f32 {
     move |at: Vec2| if at.y < edge { height } else { 0.0 }
 }

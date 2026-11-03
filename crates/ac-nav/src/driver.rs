@@ -858,7 +858,10 @@ impl RouteDriver {
         }
     }
 
-    /// Ends the drive at once, stopping whatever it had begun.
+    /// Ends the drive at once, stopping whatever it had begun. A drive
+    /// that takes over the moves under way owns them from the start: ended
+    /// before its first step, it still stops them (the drive it replaced
+    /// let them go to it).
     pub fn cancel(&mut self) -> RouteDriveStep {
         if self.state != RouteDriveState::Driving {
             return RouteDriveStep::default();
@@ -866,9 +869,10 @@ impl RouteDriver {
         self.phase = LeapPhase::None;
         self.sidestep_to = None;
         self.state = RouteDriveState::Interrupted;
+        let owns_moves = self.started || self.take_over_moves;
         RouteDriveStep {
-            stop_travel: self.started,
-            stop_turn: self.started,
+            stop_travel: owns_moves,
+            stop_turn: owns_moves,
             ..RouteDriveStep::default()
         }
     }
