@@ -417,9 +417,21 @@ fn a_boot_ends_a_windowless_session_without_logging_in_again() {
     let mut seen = Seen::default();
     let summary = seen.end(&handle);
     let no_second_login = server.join().unwrap();
+    let progress = handle.progress();
     handle.join();
 
     assert_eq!(seen.entered, 1);
+    assert!(progress > 0, "the session loop counts its passes");
+    // The launcher shows the server's words; booted out of the world, the
+    // login is not one still held (no quick retry).
+    assert_eq!(
+        summary.server_refusal,
+        Some(super::ServerRefusal {
+            code: 0x01,
+            message: "Another account is already logged on from this client.".into(),
+            still_logged_on: false,
+        })
+    );
     assert!(
         summary
             .error
@@ -431,6 +443,34 @@ fn a_boot_ends_a_windowless_session_without_logging_in_again() {
     assert_eq!(summary.connections, 1);
     assert!(seen.relogins.is_empty(), "{:?}", seen.relogins);
     assert!(no_second_login, "the session did not log in again");
+}
+
+// Not an OpenAC test: the server refusing the login itself (an earlier
+// session it has not let go of) says the login is still held, so a
+// launcher may try again once the server drops it.
+#[test]
+fn a_refused_login_says_the_account_is_still_logged_on() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.send(&words(&[0xF659, 0x01]));
+    });
+
+    let handle = spawn_timed(config(address, None), TIMING).unwrap();
+    let mut seen = Seen::default();
+    let summary = seen.end(&handle);
+    server.join().unwrap();
+    handle.join();
+
+    assert_eq!(seen.entered, 0);
+    assert_eq!(
+        summary.server_refusal,
+        Some(super::ServerRefusal {
+            code: 0x01,
+            message: "Another account is already logged on from this client.".into(),
+            still_logged_on: true,
+        })
+    );
 }
 
 #[test]

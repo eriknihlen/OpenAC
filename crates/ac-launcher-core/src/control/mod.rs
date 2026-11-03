@@ -315,6 +315,19 @@ impl LauncherControlHandler {
         if selected.has_running_activity {
             return ControlReply::refused("Account already has an active session.");
         }
+        // The server may still hold the account after an unclean exit: say
+        // so, with the seconds left, rather than start a login it refuses.
+        match self.launcher.account_launch_capability(
+            &selected.server_name,
+            &selected.account_name,
+            LaunchMode::Headless,
+        ) {
+            Ok(capability) if capability.is_available => {}
+            Ok(capability) => {
+                return ControlReply::refused(capability.reason.as_deref().unwrap_or(REFUSED));
+            }
+            Err(_) => return ControlReply::refused(REFUSED),
+        }
         match self.launcher.launch(
             &selected.server_name,
             &selected.account_name,

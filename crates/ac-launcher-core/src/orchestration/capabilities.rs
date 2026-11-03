@@ -1,6 +1,8 @@
 //! What this platform can launch, and the yes/no-with-a-reason answer every
 //! launch question gets.
 
+use std::time::Duration;
+
 use crate::profiles::LaunchMode;
 
 /// Whether something may be done now, and why not when it may not.
@@ -10,6 +12,9 @@ pub struct LauncherCapability {
     pub is_available: bool,
     /// Why not, for the player.
     pub reason: Option<String>,
+    /// How much longer the server may hold the account after an unclean
+    /// exit, when that is why not (a window counts it down).
+    pub held_for: Option<Duration>,
 }
 
 impl LauncherCapability {
@@ -17,6 +22,7 @@ impl LauncherCapability {
     pub const AVAILABLE: Self = Self {
         is_available: true,
         reason: None,
+        held_for: None,
     };
 
     /// It may not be done, because `reason`.
@@ -24,6 +30,20 @@ impl LauncherCapability {
         Self {
             is_available: false,
             reason: Some(reason.into()),
+            held_for: None,
+        }
+    }
+
+    /// It may not be done for `remaining` more: the server may still hold
+    /// the account.
+    pub fn held(remaining: Duration) -> Self {
+        let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0);
+        Self {
+            is_available: false,
+            reason: Some(format!(
+                "The server may still hold this account. Ready in {seconds} s."
+            )),
+            held_for: Some(remaining),
         }
     }
 }

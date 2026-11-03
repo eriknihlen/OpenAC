@@ -4,6 +4,7 @@
 
 mod capabilities;
 mod executables;
+mod exit_reason;
 mod orchestrator;
 mod relaunch;
 mod snapshot;
@@ -16,10 +17,11 @@ pub use capabilities::{
 pub use executables::{
     ExecutablePaths, HEADLESS_ENVIRONMENT_VARIABLE, LauncherExecutableSet, PathPredicate,
 };
+pub use exit_reason::{ClientExit, describe_client_exit};
 pub use orchestrator::{
-    AccountCapabilities, Clock, FIRST_RUN_REQUIRED, LauncherOrchestrator, OrchestratorError,
-    OrchestratorParts, SERVER_SESSION_HOLD, SessionIdFactory, StateChangedListener,
-    WINDOW_SWITCH_TIMEOUT, create_session_id,
+    AccountCapabilities, Clock, FIRST_RUN_REQUIRED, LAUNCHER_CLOSING, LauncherOrchestrator,
+    NOT_RESPONDING_AFTER, OrchestratorError, OrchestratorParts, SERVER_SESSION_HOLD,
+    SessionIdFactory, StateChangedListener, WINDOW_SWITCH_TIMEOUT, create_session_id,
 };
 pub use relaunch::{
     DEFAULT_RELAUNCH_DELAY_SECONDS, LauncherRelaunchController, LauncherRelaunchSelection,
@@ -29,6 +31,6 @@ pub use relaunch::{
 pub use snapshot::{
     LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
     LauncherCharacterSnapshot, LauncherServerSnapshot, LauncherSessionSnapshot,
-    LauncherSessionWindow, LauncherStateSnapshot,
+    LauncherSessionStop, LauncherSessionWindow, LauncherStateSnapshot,
 };
 pub use stop_gate::LauncherStopGate;

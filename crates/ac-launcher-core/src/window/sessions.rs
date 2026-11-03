@@ -1,7 +1,9 @@
 //! A session as the session log shows it: who is playing, and are they in
 //! yet, not which launch mode started the process.
 
-use crate::orchestration::{LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot};
+use crate::orchestration::{
+    LauncherActivityKind, LauncherActivityState, LauncherSessionSnapshot, LauncherSessionStop,
+};
 
 /// One line of the session log.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,16 +70,35 @@ pub fn describe_status(snapshot: &LauncherSessionSnapshot) -> String {
     }
     // Not graceful: the host never reported its own exit, or reported a failure. The server may
     // still be holding the account, and saying so here is what stops the next login failure
-    // being a mystery.
+    // being a mystery. A refusal from the server is told in its own words,
+    // and says the server may hold the account only when that is what it
+    // refused for (not, say, a full server or an unknown account).
+    if snapshot.stop == Some(LauncherSessionStop::Forced) {
+        return "Stopped (did not respond, closed by force) — the server may hold this account \
+                for a short while."
+            .into();
+    }
+    if let Some(message) = snapshot
+        .server_message
+        .as_deref()
+        .map(|message| message.trim().trim_end_matches('.'))
+        .filter(|message| !message.is_empty())
+    {
+        return if snapshot.account_in_use {
+            format!("{message} — the server may hold this account for a short while.")
+        } else {
+            format!("{message}.")
+        };
+    }
     let detail = match snapshot.exit_reason.as_deref() {
         Some("connection-error") => "Could not reach the server",
         Some("credential-error") => "The account or password was rejected",
         Some("configuration-error") => "The session configuration was rejected",
         Some("usage-error") => "The client rejected how it was started",
-        None | Some("") => "Crashed",
+        None | Some("") => "Closed unexpectedly",
         Some(_) => "Stopped unexpectedly",
     };
-    format!("{detail} — the server may hold this account for a few minutes.")
+    format!("{detail} — the server may hold this account for a short while.")
 }
 
 /// `Character refresh` for a refresh, the character once known, else
@@ -103,6 +124,7 @@ pub fn describe_state(snapshot: &LauncherSessionSnapshot) -> &'static str {
                 "Character select"
             }
         }
+        LauncherActivityState::InWorld if snapshot.not_responding => "Not responding",
         LauncherActivityState::InWorld => "In game",
         LauncherActivityState::Disconnected | LauncherActivityState::Stopping => "Stopping",
         LauncherActivityState::Failed => "Failed",

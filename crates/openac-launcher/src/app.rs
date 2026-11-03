@@ -156,14 +156,15 @@ impl LauncherUi for LauncherApp {
     }
 
     fn wants_exit(&mut self) -> bool {
-        // A staged launcher update's helper took over: it waits for this process to end.
-        self.exit || self.window.is_shutdown_requested() || self.window.is_close_confirmed()
+        // A confirmed close, or a staged launcher update's helper that waits for this process
+        // to end: the window first shows its clients closing, then closes.
+        self.exit || self.window.should_exit()
     }
 
     fn on_exit(&mut self) {
         self.window.dispose();
-        // As OpenAC's exit: every session the launcher started is stopped (each up to five
-        // seconds before a kill).
+        // Every session the launcher started is stopped (all at once, each up to five seconds
+        // before a kill); after the closing view there is none left to stop.
         self.orchestrator.dispose();
     }
 }

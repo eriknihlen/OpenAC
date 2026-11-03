@@ -18,7 +18,8 @@ use crate::fsutil;
 use crate::launching::LauncherProcessSpec;
 use crate::profiles::LaunchMode;
 use crate::updates::{
-    ClientVersionStore, detect_rid, graphical_host_for_rid, headless_host_for_rid,
+    ClientVersionResolution, ClientVersionStore, detect_rid, graphical_host_for_rid,
+    headless_host_for_rid, predates_the_folder_layout, predates_the_folder_layout_message,
     suffix_for_current_os,
 };
 
@@ -29,6 +30,17 @@ pub const HEADLESS_ENVIRONMENT_VARIABLE: &str = "OPENAC_HEADLESS";
 pub type PathPredicate = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
 
 type Resolver = Arc<dyn Fn() -> Result<ExecutablePaths, String> + Send + Sync>;
+
+/// An installed client older than the install's folder layout is never
+/// started: it would read and write the folders the layout moved.
+fn refuse_old_client(resolution: &ClientVersionResolution) -> Result<(), String> {
+    match resolution.version.as_ref() {
+        Some(version) if resolution.is_verified() && predates_the_folder_layout(version) => {
+            Err(predates_the_folder_layout_message(version))
+        }
+        _ => Ok(()),
+    }
+}
 
 /// The executables and the directory they run in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +116,7 @@ impl LauncherExecutableSet {
     pub fn from_current_version_store(store: Arc<ClientVersionStore>) -> Self {
         Self::from_resolver(Arc::new(move || {
             let resolution = store.cached_resolution();
+            refuse_old_client(&resolution)?;
             match (&resolution.directory, resolution.is_verified()) {
                 (Some(directory), true) => Ok(paths_in(directory)),
                 _ => Err(resolution.status),
@@ -123,9 +136,14 @@ impl LauncherExecutableSet {
         let beside = paths_in(side_by_side);
         Self::from_resolver(Arc::new(move || {
             let resolution = store.cached_resolution();
-            match (&resolution.directory, resolution.is_verified()) {
-                (Some(directory), true) => Ok(paths_in(directory)),
+            // The client beside the launcher is the launcher's own build, so
+            // it also stands in for an installed one too old for the
+            // install's folder layout.
+            let usable = refuse_old_client(&resolution);
+            match (&resolution.directory, resolution.is_verified(), usable) {
+                (Some(directory), true, Ok(())) => Ok(paths_in(directory)),
                 _ if beside.graphical_host_path.is_file() => Ok(beside.clone()),
+                (_, _, Err(old)) => Err(old),
                 _ => Err(resolution.status),
             }
         }))
@@ -181,7 +199,7 @@ impl LauncherExecutableSet {
         &self,
         mode: LaunchMode,
         config_file_path: &Path,
-        stderr_log_path: Option<&Path>,
+        output_log_path: Option<&Path>,
     ) -> Result<LauncherProcessSpec, OrchestratorError> {
         require_path(config_file_path)?;
         let paths = self.require_available(mode)?;
@@ -194,7 +212,7 @@ impl LauncherExecutableSet {
                 // Window support stays on, so the row can open a window on it.
                 environment: Vec::new(),
                 supports_console_graceful_stop: true,
-                stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+                output_log_path: output_log_path.map(Path::to_path_buf),
                 keep_standard_input_open: true,
             }
         } else {
@@ -207,7 +225,7 @@ impl LauncherExecutableSet {
                 // The client logs off and exits on the console stop with or
                 // without a window (a deliberate divergence from OpenAC).
                 supports_console_graceful_stop: true,
-                stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+                output_log_path: output_log_path.map(Path::to_path_buf),
                 keep_standard_input_open: true,
             }
         };
@@ -218,7 +236,7 @@ impl LauncherExecutableSet {
     pub fn create_probe_spec(
         &self,
         config_file_path: &Path,
-        stderr_log_path: Option<&Path>,
+        output_log_path: Option<&Path>,
     ) -> Result<LauncherProcessSpec, OrchestratorError> {
         require_path(config_file_path)?;
         let paths = self.require_available(LaunchMode::Headless)?;
@@ -232,7 +250,7 @@ impl LauncherExecutableSet {
             working_directory: paths.working_directory,
             environment: vec![(HEADLESS_ENVIRONMENT_VARIABLE.into(), "1".into())],
             supports_console_graceful_stop: true,
-            stderr_log_path: stderr_log_path.map(Path::to_path_buf),
+            output_log_path: output_log_path.map(Path::to_path_buf),
             keep_standard_input_open: false,
         })
     }

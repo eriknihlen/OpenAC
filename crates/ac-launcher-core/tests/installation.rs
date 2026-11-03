@@ -586,20 +586,20 @@ impl MoveFixture {
     fn seed_install(&self) {
         self.write("app/current.json", "{}");
         self.write("app/0.1.15/openac.exe", "x");
-        self.write("data/pak/acdream.pak", "pak");
+        self.write("game/pak/acdream.pak", "pak");
         self.write(
-            "data/install.json",
+            "game/install.json",
             &record_naming(
                 &self
                     .default_root
-                    .join("data")
+                    .join("game")
                     .join("pak")
                     .join("acdream.pak"),
             ),
         );
         self.write("settings/settings.json", "{}");
         self.write("plugins/p/plugin.json", "{}");
-        self.write("plugins/p/files/a.json", "{}");
+        self.write("plugins/p/data/a.json", "{}");
         self.write("cache/plugins.json", "{}");
     }
 
@@ -644,23 +644,19 @@ fn a_move_carries_the_install_and_points_the_default_at_it() {
         assert!(target.join("app").join("current.json").is_file());
         assert!(
             target
-                .join("data")
+                .join("game")
                 .join("pak")
                 .join("acdream.pak")
                 .is_file()
         );
         assert!(target.join("settings").join("settings.json").is_file());
-        let kept = target
-            .join("plugins")
-            .join("p")
-            .join("files")
-            .join("a.json");
+        let kept = target.join("plugins").join("p").join("data").join("a.json");
         assert!(kept.is_file());
         assert!(!target.join("cache").exists());
         assert_eq!(
-            recorded_asset(&target.join("data").join("install.json")),
+            recorded_asset(&target.join("game").join("install.json")),
             target
-                .join("data")
+                .join("game")
                 .join("pak")
                 .join("acdream.pak")
                 .to_string_lossy()
@@ -850,7 +846,7 @@ fn a_refused_rename_is_rolled_back() {
     );
     let package = fixture
         .default_root
-        .join("data")
+        .join("game")
         .join("pak")
         .join("acdream.pak");
     assert!(package.is_file());
@@ -867,7 +863,7 @@ fn a_refused_rename_is_rolled_back() {
 fn an_unreadable_install_record_does_not_stop_the_move() {
     let fixture = MoveFixture::new();
     fixture.seed_install();
-    fixture.write("data/install.json", "not json");
+    fixture.write("game/install.json", "not json");
     let target = fixture.scratch.join("Games").join("OpenAC");
 
     let result = fixture.mover(Some(true)).move_to(&target, &mut |_| {});
@@ -894,14 +890,14 @@ fn repair_points_moved_records_at_this_roots_content_only() {
         .scratch
         .join("Elsewhere")
         .join("OpenAC")
-        .join("data")
+        .join("game")
         .join("pak")
         .join("acdream.pak");
-    fixture.write("data/install.json", &record_naming(&elsewhere));
+    fixture.write("game/install.json", &record_naming(&elsewhere));
 
     assert!(repair_content_records(&fixture.paths).unwrap().is_empty());
 
-    fixture.write("data/pak/acdream.pak", "pak");
+    fixture.write("game/pak/acdream.pak", "pak");
     assert_eq!(
         repair_content_records(&fixture.paths).unwrap(),
         std::slice::from_ref(&record)
@@ -910,7 +906,7 @@ fn repair_points_moved_records_at_this_roots_content_only() {
     assert!(repair_content_records(&fixture.paths).unwrap().is_empty());
 
     fixture.write(
-        "data/install.json",
+        "game/install.json",
         &record_naming(&data.join("custom.pak")),
     );
     assert!(repair_content_records(&fixture.paths).unwrap().is_empty());

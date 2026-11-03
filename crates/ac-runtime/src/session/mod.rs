@@ -29,7 +29,7 @@ pub use outbox::{Outbox, Outgoing, Queue};
 pub use relogin::{LOST_CONNECTION_RETRY_INTERVAL, Relogin};
 pub use runner::{
     HostEvent, LifecycleCommand, LoginAutomation, ObjectSummary, PresentationEvent,
-    RECONNECT_QUIESCENCE, Recall, SessionCommand, SessionConfig, SessionEnd, SessionHandle,
-    SessionSummary, spawn,
+    RECONNECT_QUIESCENCE, Recall, ServerRefusal, SessionCommand, SessionConfig, SessionEnd,
+    SessionHandle, SessionSummary, spawn,
 };
 pub use state::{Clocks, SessionState};

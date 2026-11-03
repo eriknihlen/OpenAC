@@ -207,9 +207,32 @@ fn parses_disconnected_and_exited() {
         exited.kind,
         StatusEventKind::Exited {
             code: 0,
-            reason: "graceful".into()
+            reason: "graceful".into(),
+            server_message: None,
+            account_in_use: false,
         }
     );
+}
+
+// Not an OpenAC test: the client's additions, the server's refusal on
+// `exited` and the heartbeat.
+#[test]
+fn exited_carries_the_servers_refusal_and_heartbeat_is_known() {
+    let exited = parse_status_line(
+        r#"{"v":1,"e":"exited","t":"2026-08-14T12:00:07Z","sessionId":"s1","code":6,"reason":"the server ended the session","serverMessage":"Another account is already logged on from this client.","accountInUse":true}"#,
+    );
+    assert_eq!(
+        exited.kind,
+        StatusEventKind::Exited {
+            code: 6,
+            reason: "the server ended the session".into(),
+            server_message: Some("Another account is already logged on from this client.".into()),
+            account_in_use: true,
+        }
+    );
+    let heartbeat =
+        parse_status_line(r#"{"v":1,"e":"heartbeat","t":"2026-08-14T12:00:08Z","sessionId":"s1"}"#);
+    assert_eq!(heartbeat.kind, StatusEventKind::Heartbeat);
 }
 
 #[test]
@@ -321,6 +344,7 @@ fn every_line_the_host_writer_produces_parses_back() {
     writer.window_opened("s1");
     writer.window_closed("s1", "closedByUser");
     writer.window_failed("s1", "no window support");
+    writer.heartbeat("s1");
     writer.exited("s1", 0, "graceful");
     writer.close();
     let events = StatusFileTailer::new(&path).read_new_events();

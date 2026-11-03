@@ -6,6 +6,12 @@
 //! hands out at most one due attempt, the caller runs the ordinary launch,
 //! and [`finish`] records how it went.
 //!
+//! A relaunched client the server refuses because the account is still
+//! logged on is tried again as soon as the server's hold ends, for as long
+//! as the server keeps answering: a refusal means the server is up. A
+//! client that cannot reach the server ends like any other and waits the
+//! full delay before the next try.
+//!
 //! [`poll`]: LauncherRelaunchController::poll
 //! [`finish`]: LauncherRelaunchController::finish
 
@@ -15,7 +21,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::capabilities::LauncherCapability;
 use super::orchestrator::OrchestratorError;
-use super::snapshot::{LauncherActivityKind, LauncherSessionSnapshot, LauncherStateSnapshot};
+use super::snapshot::{
+    LauncherActivityKind, LauncherSessionSnapshot, LauncherSessionStop, LauncherStateSnapshot,
+};
 use crate::cancel::CancelToken;
 use crate::profiles::{LaunchMode, same_account};
 
@@ -87,6 +95,10 @@ struct Entry {
     tracked_session: Option<String>,
     terminal_since: Option<Duration>,
     cancellation: Option<CancelToken>,
+    /// The server refused the tracked session because the account was still
+    /// logged on: the next attempt waits only for the server's hold, not the
+    /// full delay.
+    retry_after_hold: bool,
 }
 
 /// Schedules ordinary launches for the play sessions of checked accounts.
@@ -238,6 +250,14 @@ impl LauncherRelaunchController {
                         entry.seen_created_at = Some(latest.created_at);
                         entry.tracked_session = Some(latest.session_id.clone());
                         entry.terminal_since = None;
+                        // A session someone else started waits the full
+                        // delay after it ends. One that appears while an
+                        // attempt runs is the attempt's own (its launch
+                        // reports the state change before the attempt is
+                        // finished).
+                        if entry.cancellation.is_none() {
+                            entry.retry_after_hold = false;
+                        }
                     }
                     index
                 }
@@ -256,6 +276,7 @@ impl LauncherRelaunchController {
                                 .map(|session| session.session_id.clone()),
                             terminal_since: None,
                             cancellation: None,
+                            retry_after_hold: false,
                         },
                     ));
                     self.entries.len() - 1
@@ -265,13 +286,34 @@ impl LauncherRelaunchController {
             let Some(tracked) = &entry.tracked_session else {
                 continue;
             };
-            if sessions
-                .get(tracked.as_str())
-                .is_some_and(|session| session.is_process_or_start_active())
-            {
-                entry.terminal_since = None;
-            } else if entry.terminal_since.is_none() {
-                entry.terminal_since = Some(now);
+            let session = sessions.get(tracked.as_str()).copied();
+            match session {
+                Some(session) if session.is_process_or_start_active() => {
+                    entry.terminal_since = None;
+                }
+                Some(session) if session.stop == Some(LauncherSessionStop::Forced) => {
+                    // A Stop that had to kill the client is still the
+                    // player's stop, not a crash: it is not relaunched.
+                    entry.tracked_session = None;
+                    entry.terminal_since = None;
+                    entry.retry_after_hold = false;
+                }
+                ended => {
+                    if entry.terminal_since.is_none() {
+                        entry.terminal_since = Some(now);
+                        // An end waits the full delay unless it shows a
+                        // refusal.
+                        entry.retry_after_hold = false;
+                    }
+                    // The client's exit report, which says the server still
+                    // held the account, is often read after the end itself
+                    // was seen: whenever it shows, the next try waits only
+                    // for the hold. The server answered, so it is up: there
+                    // is no limit on these tries.
+                    if ended.is_some_and(|session| session.account_in_use) {
+                        entry.retry_after_hold = true;
+                    }
+                }
             }
         }
     }
@@ -295,7 +337,9 @@ impl LauncherRelaunchController {
             let Some(since) = entry.terminal_since else {
                 continue;
             };
-            if now.saturating_sub(since) < delay {
+            // After a refusal the server's hold, checked through `capability`,
+            // is the only wait.
+            if !entry.retry_after_hold && now.saturating_sub(since) < delay {
                 continue;
             }
             let choice = &entry.selection;
@@ -339,6 +383,10 @@ impl LauncherRelaunchController {
             Err(error) => {
                 if !self.disposed {
                     failure = Some(error);
+                }
+                // A launch that failed outright waits the full delay.
+                if let Some(entry) = self.live_entry(attempt) {
+                    entry.retry_after_hold = false;
                 }
             }
         }

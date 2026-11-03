@@ -120,7 +120,8 @@ fn every_member_lives_in_its_folder_under_the_root() {
 
     assert_eq!(paths.root_directory(), root);
     assert_eq!(paths.app_directory(), root.join("app"));
-    assert_eq!(paths.game_data_directory(), root.join("data"));
+    assert_eq!(paths.game_data_directory(), root.join("game"));
+    assert_eq!(paths.layout_marker_file(), root.join("layout.json"));
     assert_eq!(paths.config_directory, root.join("settings"));
     assert_eq!(
         paths.settings_file(),
@@ -134,17 +135,28 @@ fn every_member_lives_in_its_folder_under_the_root() {
     assert_eq!(paths.plugin_storage_directory(), root.join("plugins"));
     assert_eq!(
         paths.plugin_files_directory("acdream.mosstank"),
-        root.join("plugins").join("acdream.mosstank").join("files")
+        root.join("plugins").join("acdream.mosstank").join("data")
     );
-    assert_eq!(paths.vtank_profiles_directory(), root.join("vtank"));
+    assert_eq!(
+        paths.vtank_profiles_directory(),
+        root.join("plugins").join("acdream.mosstank").join("vtank")
+    );
     assert_eq!(paths.logs_directory(), root.join("logs"));
     assert_eq!(
         paths.crash_reports_directory(),
         root.join("logs").join("crash")
     );
     assert_eq!(
-        paths.launcher_sessions_directory(),
-        root.join("logs").join("launcher")
+        paths.launcher_log_file(),
+        root.join("logs").join("launcher").join("launcher.log")
+    );
+    assert_eq!(
+        paths.session_logs_directory("Coldeve", "Tester"),
+        root.join("logs").join("Coldeve").join("Tester")
+    );
+    assert_eq!(
+        paths.old_plugin_logs_directory(),
+        root.join("logs").join("old plugin logs")
     );
     assert_eq!(paths.cache_directory, root.join("cache"));
     assert_eq!(

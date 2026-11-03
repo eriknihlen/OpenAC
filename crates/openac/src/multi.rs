@@ -25,10 +25,21 @@ use ac_runtime::session::{
 use crate::console::{self, ConsoleInput};
 use crate::window_state::{WindowNote, WindowTracker};
 
-/// Takes the install's session lock shared for the caller to hold for its
-/// whole run; the reason to refuse the start while an update or a move
-/// holds it exclusively.
+/// How long a starting client waits for another process (the launcher, or
+/// a client started at the same moment) to finish moving the install into
+/// the current folder layout.
+const LAYOUT_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Moves the install into the current folder layout if it is not there yet
+/// (before anything reads its folders), then takes the install's session
+/// lock shared for the caller to hold for its whole run; the reason to
+/// refuse the start when the files could not be moved, or while an update
+/// or a move holds the lock exclusively.
 pub fn hold_install(paths: &ac_host::PathSet) -> Result<ac_host::InstallSessionLease, String> {
+    let migration = ac_host::layout::migrate_waiting(paths, LAYOUT_PATIENCE)?;
+    for note in &migration.notes {
+        errln!("layout: {note}");
+    }
     match ac_host::InstallSessionLease::try_acquire_shared(paths) {
         Ok(Some(lease)) => Ok(lease),
         Ok(None) => Err(ac_host::InstallSessionLease::busy_message(paths)),
@@ -71,6 +82,10 @@ pub fn run(
             return exit(HostExit::Configuration);
         }
     };
+    // A launcher session's folder (none for a document written by hand),
+    // held for the whole run so the launcher's cleanup leaves it alone.
+    let session_folder =
+        ac_host::layout::LauncherSessionFolder::claim(&plan.paths, &plan.config_path);
 
     let logins = {
         let stdin = std::io::stdin();
@@ -238,13 +253,17 @@ pub fn run(
         let printer = ChatPrinter {
             stream: chat_stream,
             session: several.then(|| id.clone()),
+            plugin_logs: session_folder
+                .as_ref()
+                .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory),
         };
         let notes = window_notes.remove(&id);
+        let liveness = Liveness::requested(host_handle.clone());
         monitors.push(
             std::thread::Builder::new()
                 .name(format!("monitor-{id}"))
                 .spawn(move || {
-                    let code = monitor(&id, handle, status, &printer, policy, notes);
+                    let code = monitor(&id, handle, status, &printer, policy, notes, liveness);
                     if let Ok(mut codes) = codes.lock() {
                         codes.push(code);
                     }
@@ -377,6 +396,10 @@ pub(crate) struct ChatPrinter {
     pub(crate) stream: Option<ConsoleStream>,
     /// The session id put in front of each line when several run.
     pub(crate) session: Option<String>,
+    /// The launcher session folder's plugin log folder: every line a plugin
+    /// logs is appended to `<plugin id>.log` there, and its debug lines go
+    /// only there. `None` for a client started by hand.
+    pub(crate) plugin_logs: Option<std::path::PathBuf>,
 }
 
 impl ChatPrinter {
@@ -398,9 +421,9 @@ impl ChatPrinter {
     }
 
     /// Whether a line for the client log (standard error, which the
-    /// launcher keeps as `client.err.log`) must be written there too: not
-    /// when this printer already writes to it, nor when a person reads the
-    /// console on the terminal standard error also shows.
+    /// launcher keeps in `client.log` with standard output) must be written
+    /// there too: not when this printer already writes to it, nor when a
+    /// person reads the console on the terminal standard error also shows.
     fn client_log_unseen(&self) -> bool {
         match self.stream {
             Some(ConsoleStream::Stderr) => false,
@@ -443,6 +466,7 @@ pub(crate) fn monitor(
     printer: &ChatPrinter,
     mut policy: Option<Box<dyn session::policy::Policy>>,
     window: Option<std::sync::mpsc::Receiver<WindowNote>>,
+    liveness: Option<Liveness>,
 ) -> HostExit {
     status.started(id);
     // A notice names its session only when several share the console, as
@@ -455,6 +479,16 @@ pub(crate) fn monitor(
     let mut policy_done = false;
     let mut policy_failure: Option<String> = None;
     let started = std::time::Instant::now();
+    let mut plugin_logs = printer
+        .plugin_logs
+        .clone()
+        .map(crate::plugins::PluginLogFiles::new);
+    // When the launcher asked for them, a heartbeat goes out every interval
+    // in which the session made progress (and, while the window shows it,
+    // the window's event loop too): a stuck loop stops them, and the
+    // launcher shows the client as not responding.
+    let mut heartbeat = HeartbeatGate::new(std::time::Instant::now(), handle.progress());
+    let mut window_open = false;
     // A policy acts on its clock between events too; it is stepped at least
     // every 50 ms (OpenAC ticks it once per host frame).
     let poll = if policy.is_some() {
@@ -465,7 +499,25 @@ pub(crate) fn monitor(
     let summary = loop {
         let event = handle.next_event(poll);
         for note in crate::window_state::drain(window.as_ref()) {
+            window_open = match note {
+                WindowNote::Opened => true,
+                WindowNote::Closed(_) | WindowNote::Failed(_) => false,
+            };
             note.report(id, &mut status);
+        }
+        if let Some(liveness) = &liveness {
+            let probe = liveness.window.as_ref().filter(|_| window_open);
+            let answered = probe.map(ac_render::HostHandle::answered_pings);
+            if let Some(beat) =
+                heartbeat.check(std::time::Instant::now(), handle.progress(), answered)
+            {
+                if let Some(host) = probe {
+                    let _ = host.ping();
+                }
+                if beat {
+                    status.heartbeat(id);
+                }
+            }
         }
         if let Some(policy) = policy.as_mut().filter(|_| !policy_done) {
             if let Some(event) = event.as_ref() {
@@ -586,10 +638,23 @@ pub(crate) fn monitor(
                     PluginEvent::Report(PluginReport::SlowCall { .. })
                     | PluginEvent::Log { .. } => {}
                 }
-                printer.print(&console::notice(
-                    &crate::plugins::event_line(&event),
-                    printer.session.as_deref(),
-                ));
+                if let (
+                    Some(logs),
+                    PluginEvent::Log {
+                        plugin,
+                        level,
+                        message,
+                    },
+                ) = (plugin_logs.as_mut(), &event)
+                {
+                    logs.append(plugin, *level, message);
+                }
+                if !crate::plugins::only_in_plugin_log(&event, plugin_logs.is_some()) {
+                    printer.print(&console::notice(
+                        &crate::plugins::event_line(&event),
+                        printer.session.as_deref(),
+                    ));
+                }
                 if crate::plugins::for_client_log(&event) && printer.client_log_unseen() {
                     errln!(
                         "{}",
@@ -656,10 +721,18 @@ pub(crate) fn monitor(
     let error = summary.error.clone().or(policy_failure);
     let code = end_code(error.as_deref());
     status.disconnected(id, error.as_deref().unwrap_or("logoff"));
-    status.exited(
+    let refusal = summary
+        .server_refusal
+        .as_ref()
+        .map(|refusal| ac_host::ServerRefusalNote {
+            message: &refusal.message,
+            account_in_use: refusal.still_logged_on,
+        });
+    status.exited_by(
         id,
         i32::from(code.code()),
         error.as_deref().unwrap_or("graceful"),
+        refusal,
     );
     status.close();
     outln!(
@@ -687,6 +760,75 @@ pub(crate) fn monitor(
         );
     }
     code
+}
+
+/// What a session's heartbeat watches, when the launcher asked for
+/// heartbeats: the session loop, and the process's window host while its
+/// window shows the session.
+#[derive(Debug, Clone)]
+pub(crate) struct Liveness {
+    /// The window host, when the process has one.
+    pub(crate) window: Option<ac_render::HostHandle>,
+}
+
+impl Liveness {
+    /// Liveness when the launcher asked for heartbeats (its environment
+    /// variable), otherwise `None`.
+    pub(crate) fn requested(window: Option<ac_render::HostHandle>) -> Option<Self> {
+        ac_host::heartbeat_requested(|name| std::env::var(name).ok()).then_some(Self { window })
+    }
+}
+
+/// Decides when a heartbeat is written: once per interval, when the session
+/// loop moved since the last check and, while a window shows the session,
+/// its event loop answered the ping sent at the last check. A window that
+/// is minimized still answers (a ping wakes its loop); a hung one does not.
+#[derive(Debug)]
+pub(crate) struct HeartbeatGate {
+    last: std::time::Instant,
+    progress: u64,
+    /// The answered count when the last ping went out.
+    ping_sent: Option<u64>,
+}
+
+impl HeartbeatGate {
+    pub(crate) fn new(now: std::time::Instant, progress: u64) -> Self {
+        Self {
+            last: now,
+            progress,
+            ping_sent: None,
+        }
+    }
+
+    /// At `now`, with the session loop's `progress` and, while a window
+    /// shows the session, how many pings its event loop has `answered`:
+    /// `None` until an interval has passed, then whether to write a
+    /// heartbeat (and a new ping is due when `answered` was given).
+    pub(crate) fn check(
+        &mut self,
+        now: std::time::Instant,
+        progress: u64,
+        answered: Option<u64>,
+    ) -> Option<bool> {
+        if now.saturating_duration_since(self.last) < ac_host::HEARTBEAT_INTERVAL {
+            return None;
+        }
+        self.last = now;
+        let moved = progress != self.progress;
+        self.progress = progress;
+        let turning = match answered {
+            Some(answered) => {
+                let turning = self.ping_sent.is_none_or(|sent| answered > sent);
+                self.ping_sent = Some(answered);
+                turning
+            }
+            None => {
+                self.ping_sent = None;
+                true
+            }
+        };
+        Some(moved && turning)
+    }
 }
 
 /// Console: `/sessions`, `/session <id>` (where unaddressed lines go),
@@ -895,6 +1037,28 @@ fn end_code(error: Option<&str>) -> HostExit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Not an OpenAC test: a heartbeat needs the session loop to have moved
+    // and, while a window shows the session, its event loop to have
+    // answered the last ping; a closed window is not asked.
+    #[test]
+    fn a_heartbeat_needs_the_session_and_its_window_to_make_progress() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let mut gate = HeartbeatGate::new(start, 0);
+        assert_eq!(gate.check(at(5), 10, None), None, "not yet due");
+        assert_eq!(gate.check(at(10), 10, None), Some(true));
+        assert_eq!(gate.check(at(20), 10, None), Some(false), "session stuck");
+        assert_eq!(gate.check(at(30), 11, None), Some(true));
+        // A window opens: its first check sends the first ping.
+        assert_eq!(gate.check(at(40), 12, Some(0)), Some(true));
+        assert_eq!(gate.check(at(50), 13, Some(1)), Some(true), "answered");
+        assert_eq!(gate.check(at(60), 14, Some(1)), Some(false), "window hung");
+        assert_eq!(gate.check(at(70), 15, Some(1)), Some(false), "still hung");
+        assert_eq!(gate.check(at(80), 16, Some(2)), Some(true), "turning again");
+        // The window closed: only the session counts.
+        assert_eq!(gate.check(at(90), 17, None), Some(true));
+    }
 
     // OpenAC HeadlessSessionHost.ResolveTerminalStatus: a start that does
     // not reach the world (no character included) exits 5.

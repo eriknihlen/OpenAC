@@ -1,10 +1,15 @@
 //! Where a host keeps everything: one install root and the folders beneath
 //! it, and the platform facts that decide it.
 //!
-//! The root holds `app/`, `data/`, `settings/`, `plugins/`, `vtank/`,
-//! `logs/` and `cache/`. The three members (settings, data, cache) stay
-//! separately overridable so automation can isolate one on its own; the data
-//! member is the root itself.
+//! The root holds `app/`, `game/`, `settings/`, `plugins/`, `logs/`,
+//! `screenshots/`, `journal/` and `cache/`. Each plugin's folder holds its
+//! code and the player's `data/` for it; MossTank's folder also holds the
+//! shared VTank profiles (`vtank/`). `logs/` holds one folder per
+//! launcher-started session (`<server>/<character>/<start time>/`), the
+//! launcher's own log, crash reports and the plugin logs an older layout
+//! kept. The three members (settings, data, cache) stay separately
+//! overridable so automation can isolate one on its own; the data member is
+//! the root itself.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -21,7 +26,80 @@ pub const DATA_DIR_VAR: &str = "OPENAC_DATA_DIR";
 pub const CACHE_DIR_VAR: &str = "OPENAC_CACHE_DIR";
 
 /// The name of the per-plugin folder that holds its private files.
-pub const PLUGIN_FILES_FOLDER_NAME: &str = "files";
+pub const PLUGIN_FILES_FOLDER_NAME: &str = "data";
+
+/// The name of the folder inside [`VTANK_PLUGIN_ID`]'s folder that holds the
+/// shared VTank profiles.
+pub const VTANK_FOLDER_NAME: &str = "vtank";
+
+/// The plugin whose folder holds the shared VTank profiles. The folder is
+/// the plugins' `profiles` storage root, shared by every plugin allowed it,
+/// and it is kept there even while that plugin is not installed.
+pub const VTANK_PLUGIN_ID: &str = "acdream.mosstank";
+
+/// The launcher's profile document in the settings folder.
+pub const LAUNCHER_PROFILES_FILE_NAME: &str = "launcher-profiles.v2.json";
+
+/// A session folder's session-config document.
+pub const SESSION_CONFIG_FILE_NAME: &str = "session.json";
+/// A session folder's status file.
+pub const SESSION_STATUS_FILE_NAME: &str = "status.jsonl";
+/// A session folder's client log: the client's standard output and error.
+pub const SESSION_CLIENT_LOG_FILE_NAME: &str = "client.log";
+/// A session folder's folder of plugin logs, one `<plugin id>.log` each.
+pub const SESSION_PLUGIN_LOGS_FOLDER_NAME: &str = "plugins";
+
+/// The folders directly in `logs/` that are not a server's sessions. A
+/// server whose name is one of these gets its folder name changed (see
+/// [`PathSet::session_logs_directory`]).
+pub const RESERVED_LOG_FOLDER_NAMES: [&str; 4] =
+    ["crash", "launcher", "old plugin logs", "unsorted"];
+
+/// Whether a top-level folder in a plugin's folder holds the player's
+/// files rather than the plugin's code: the plugin's own `data` folder and
+/// the shared VTank profiles' `vtank` folder. Installs, updates and code
+/// removal never touch them, a package may not ship them, and a plugin
+/// folder holding only them is not an install.
+pub fn is_player_folder(name: &str) -> bool {
+    name.eq_ignore_ascii_case(PLUGIN_FILES_FOLDER_NAME)
+        || name.eq_ignore_ascii_case(VTANK_FOLDER_NAME)
+}
+
+/// `name` as a single file or folder name every supported system accepts:
+/// characters Windows reserves and control characters become `_`, as do
+/// trailing dots and spaces; a reserved device name (`CON`, `NUL`, `COM1`,
+/// ... with or without an extension) gets a `_` after its stem; an empty
+/// name is `_`.
+pub fn file_name_safe(name: &str) -> String {
+    let mut safe: Vec<char> = name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    for c in safe.iter_mut().rev() {
+        if *c == '.' || *c == ' ' {
+            *c = '_';
+        } else {
+            break;
+        }
+    }
+    let mut safe: String = safe.into_iter().collect();
+    if safe.is_empty() {
+        safe.push('_');
+    }
+    let stem_end = safe.find('.').unwrap_or(safe.len());
+    let stem = safe[..stem_end].to_ascii_uppercase();
+    let numbered = (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.len() == 4
+        && matches!(stem.as_bytes()[3], b'1'..=b'9');
+    if numbered || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        safe.insert(stem_end, '_');
+    }
+    safe
+}
 
 /// The default root's folder name under each platform folder. It differs
 /// from OpenAC's (`OpenAC`, `openac` on Linux) so the two programs never
@@ -259,10 +337,26 @@ impl PathSet {
 
     /// The prepared game content and its install record.
     pub fn game_data_directory(&self) -> PathBuf {
-        self.data_directory.join("data")
+        self.data_directory.join("game")
     }
 
-    /// Chat logs, and the crash and launcher folders.
+    /// The marker saying which folder layout the root is in.
+    pub fn layout_marker_file(&self) -> PathBuf {
+        self.data_directory.join("layout.json")
+    }
+
+    /// The lock a process holds while it moves the root into the current
+    /// layout.
+    pub fn layout_lock_file(&self) -> PathBuf {
+        self.data_directory.join("layout.lock")
+    }
+
+    /// The launcher's profile document, which names the servers.
+    pub fn launcher_profiles_file(&self) -> PathBuf {
+        self.config_directory.join(LAUNCHER_PROFILES_FILE_NAME)
+    }
+
+    /// Session folders, chat logs, and the crash and launcher folders.
     pub fn logs_directory(&self) -> PathBuf {
         self.data_directory.join("logs")
     }
@@ -272,10 +366,43 @@ impl PathSet {
         self.logs_directory().join("crash")
     }
 
-    /// One folder per launcher-started session: its config, status and
-    /// error log.
-    pub fn launcher_sessions_directory(&self) -> PathBuf {
+    /// The launcher's own log folder.
+    pub fn launcher_log_directory(&self) -> PathBuf {
         self.logs_directory().join("launcher")
+    }
+
+    /// The launcher's own log.
+    pub fn launcher_log_file(&self) -> PathBuf {
+        self.launcher_log_directory().join("launcher.log")
+    }
+
+    /// The plugin debug logs an older layout kept in a plugin's data.
+    pub fn old_plugin_logs_directory(&self) -> PathBuf {
+        self.logs_directory().join("old plugin logs")
+    }
+
+    /// Session folders from an older layout whose server and character
+    /// could not be told.
+    pub fn unsorted_logs_directory(&self) -> PathBuf {
+        self.logs_directory().join("unsorted")
+    }
+
+    /// The folder holding one character's launcher-started sessions, one
+    /// folder per session named by its start time:
+    /// `logs/<server>/<character>`. Both names are made file-name safe
+    /// ([`file_name_safe`]); a server named like one of the other folders
+    /// in `logs/` ([`RESERVED_LOG_FOLDER_NAMES`]) gets a `_` after it.
+    pub fn session_logs_directory(&self, server: &str, character: &str) -> PathBuf {
+        let mut server = file_name_safe(server);
+        if RESERVED_LOG_FOLDER_NAMES
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(&server))
+        {
+            server.push('_');
+        }
+        self.logs_directory()
+            .join(server)
+            .join(file_name_safe(character))
     }
 
     /// Screenshots.
@@ -294,7 +421,7 @@ impl PathSet {
     }
 
     /// The root plugin private storage is keyed under: a plugin's own
-    /// files live at `<id>/files` beneath it, inside the plugin's folder,
+    /// files live at `<id>/data` beneath it, inside the plugin's folder,
     /// where installs, updates and code removal never touch them. The same
     /// place on every host, so a plugin run by a bot and by a window reads
     /// and writes the same files.
@@ -309,9 +436,12 @@ impl PathSet {
             .join(PLUGIN_FILES_FOLDER_NAME)
     }
 
-    /// Shared VTank profiles.
+    /// Shared VTank profiles, in MossTank's plugin folder
+    /// ([`VTANK_PLUGIN_ID`], [`VTANK_FOLDER_NAME`]).
     pub fn vtank_profiles_directory(&self) -> PathBuf {
-        self.data_directory.join("vtank")
+        self.plugins_directory()
+            .join(VTANK_PLUGIN_ID)
+            .join(VTANK_FOLDER_NAME)
     }
 
     /// Local diagnostics: the GPU capability report.

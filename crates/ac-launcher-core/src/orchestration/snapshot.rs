@@ -142,6 +142,16 @@ impl LauncherSessionWindow {
     }
 }
 
+/// A Stop the player asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LauncherSessionStop {
+    /// Asked for: a graceful logout, then a kill after the timeout.
+    Requested,
+    /// The client did not log out in time and was killed. It is a stop, not
+    /// a crash (no relaunch), but the server may still hold the account.
+    Forced,
+}
+
 /// One session or refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LauncherSessionSnapshot {
@@ -171,6 +181,16 @@ pub struct LauncherSessionSnapshot {
     pub exit_reason: Option<String>,
     /// The client reported its own exit with code 0.
     pub exited_gracefully: bool,
+    /// The server's own words, when a refusal from it ended the session.
+    pub server_message: Option<String>,
+    /// That refusal only said the account, or one of its characters, was
+    /// still logged on: trying again once the server lets go can succeed.
+    pub account_in_use: bool,
+    /// The player stopped it, and how that went.
+    pub stop: Option<LauncherSessionStop>,
+    /// In the world, its client has stopped reporting progress (it may
+    /// be frozen); detection only.
+    pub not_responding: bool,
     /// Plugins left out at launch (blocked ids), kept apart from the status
     /// so later updates do not hide it.
     pub plugin_notice: Option<String>,

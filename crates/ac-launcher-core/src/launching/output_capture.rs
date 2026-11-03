@@ -1,6 +1,6 @@
-//! A size-bounded log of a child's error output (`client.err.log`) that
+//! A size-bounded log of a child's output (`client.log`) that
 //! keeps the most recent output: at most 2 MiB per file by default, then the
-//! file rotates to `client.err.log.1` (older generations shifting up to
+//! file rotates to `client.log.1` (older generations shifting up to
 //! `.3`, the oldest dropped). A write failure turns the capture off rather
 //! than failing the session.
 

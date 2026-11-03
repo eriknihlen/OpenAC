@@ -24,6 +24,7 @@ pub mod credentials;
 pub mod exit;
 pub mod install_lease;
 pub mod json;
+pub mod layout;
 pub mod local_time;
 pub mod paths;
 pub mod process_stats;
@@ -45,9 +46,12 @@ pub use credentials::{
 pub use exit::ExitCode;
 pub use install_lease::InstallSessionLease;
 pub use paths::{KnownFolder, Os, PathOverrides, PathSet, Platform, RootSource, SystemPlatform};
-pub use status::{FileSink, RosterEntry, RosterReport, StatusSink, StatusWriter, WriterSink};
+pub use status::{
+    FileSink, HEARTBEAT_INTERVAL, HEARTBEAT_VARIABLE, RosterEntry, RosterReport, ServerRefusalNote,
+    StatusSink, StatusWriter, WriterSink, heartbeat_requested,
+};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Why startup stopped, sorted by exit code.
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +112,8 @@ pub enum Startup {
 pub struct RunPlan {
     /// The checked document (at least one session).
     pub config: HostConfig,
+    /// The document's file.
+    pub config_path: PathBuf,
     /// The resolved directories; credential files resolve against
     /// `paths.config_directory`.
     pub paths: PathSet,
@@ -169,6 +175,7 @@ pub fn start(
     }
     Ok(Startup::Run(RunPlan {
         config,
+        config_path: PathBuf::from(&command_line.config_path),
         paths,
         direct_credentials: command_line.direct_credentials,
         console,

@@ -17,16 +17,17 @@ use ac_host::PathSet;
 
 use super::capabilities::{LauncherCapability, LauncherPlatformCapabilities};
 use super::executables::LauncherExecutableSet;
+use super::exit_reason::{ClientExit, describe_client_exit};
 use super::snapshot::{
     LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
     LauncherCharacterSnapshot, LauncherServerSnapshot, LauncherSessionSnapshot,
-    LauncherSessionWindow, LauncherStateSnapshot,
+    LauncherSessionStop, LauncherSessionWindow, LauncherStateSnapshot,
 };
 use crate::cancel::{CancelToken, Cancelled, LinkedToken};
 use crate::installation::LauncherInstallRecord;
 use crate::launching::{
     LauncherProcessSupervisorFactory, LauncherSessionConfigService, LauncherSessionState,
-    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService,
+    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StopOutcome,
 };
 use crate::plugins::PluginCatalog;
 use crate::profiles::{
@@ -41,8 +42,11 @@ use crate::status::{
 use crate::updates::{SessionLease, UpdateSessionBarrier};
 
 /// How long the server may keep holding an account after a session ended
-/// without logging out cleanly.
-pub const SERVER_SESSION_HOLD: Duration = Duration::from_secs(3 * 60);
+/// without logging out cleanly. A login during it is usually refused, but
+/// the attempt itself makes the server drop the stale login, so the next
+/// one gets in: the launcher waits this long, and a refusal starts the
+/// wait again.
+pub const SERVER_SESSION_HOLD: Duration = Duration::from_secs(30);
 
 /// Why nothing may launch before first-run setup.
 pub const FIRST_RUN_REQUIRED: &str =
@@ -50,7 +54,15 @@ pub const FIRST_RUN_REQUIRED: &str =
 
 const INSTALL_VERIFIED: &str = "Client content SHA-256, size, and bake-tool version verified.";
 const INSTALL_CONFIGURED: &str = "Client content paths are configured.";
+/// Why nothing starts while the launcher closes.
+pub const LAUNCHER_CLOSING: &str = "The launcher is closing.";
 const ALREADY_RUNNING: &str = "A session or character refresh is already running for this account.";
+/// How long a client in the world may go without reporting progress (it
+/// writes a heartbeat every 10 s) before it shows as not responding.
+pub const NOT_RESPONDING_AFTER: Duration = Duration::from_secs(30);
+const NOT_RESPONDING: &str = "Not responding.";
+/// A Stop that had to kill: a stop, not a crash.
+const FORCED_STOP: &str = "Stopped (did not respond, closed by force).";
 const STOP_TIMEOUT_ON_DISPOSE: Duration = Duration::from_secs(5);
 
 /// How long a running session's client has to report a switched window
@@ -168,6 +180,12 @@ struct State {
     install_record: Option<LauncherInstallRecord>,
     installation_status: String,
     plugin_catalog: Option<Arc<PluginCatalog>>,
+    /// The launcher is closing: nothing new may start.
+    closing: bool,
+    /// When sessions cleared from the list ended uncleanly, by server and
+    /// account: the server may hold the account whether or not the session
+    /// is still listed.
+    cleared_holds: Vec<(String, String, SystemTime)>,
     disposed: bool,
 }
 
@@ -215,10 +233,26 @@ struct Activity {
     exit_code: Option<i32>,
     error: Option<String>,
     plugin_notice: Option<String>,
-    stderr_log_path: Option<PathBuf>,
+    output_log_path: Option<PathBuf>,
     host_terminal_status: Option<String>,
     /// The client's own exit reason; set only when it reported its exit.
     exit_reason: Option<String>,
+    /// The server's own words, when a refusal from it ended the session.
+    server_message: Option<String>,
+    /// That refusal only said the account was still logged on.
+    account_in_use: bool,
+    /// The player stopped it, and how that went.
+    stop: Option<LauncherSessionStop>,
+    /// When its last status line was read (launcher clock).
+    last_progress_at: Option<SystemTime>,
+    /// Its client writes heartbeats; only such a client is judged
+    /// unresponsive by its silence.
+    heartbeats_seen: bool,
+    /// In the world and silent for [`NOT_RESPONDING_AFTER`].
+    not_responding: bool,
+    /// `error` is the exit's reason, worded from what was known then; a
+    /// later exit report words it again.
+    error_is_exit_reason: bool,
     /// The client reported its own exit, rather than the launcher only
     /// seeing the process end.
     host_reported_exit: bool,
@@ -283,6 +317,10 @@ impl Activity {
             created_at: self.created_at,
             exit_reason: self.exit_reason.clone(),
             exited_gracefully: self.exited_gracefully(),
+            server_message: self.server_message.clone(),
+            account_in_use: self.account_in_use,
+            stop: self.stop,
+            not_responding: self.not_responding && self.state == LauncherActivityState::InWorld,
             plugin_notice: self.plugin_notice.clone(),
             has_live_process: Some(self.has_live_process()),
             startup_in_flight: self.startup_in_flight,
@@ -357,25 +395,71 @@ fn safe_error(prefix: &str, detail: &str, secret: Option<&str>) -> String {
     }
 }
 
-/// The error a failed start shows: a specific one when the client said its
-/// prepared content is from another version, otherwise the exit code.
-fn read_startup_failure(activity: &Activity) -> String {
-    if let Some(path) = &activity.stderr_log_path
-        && let Ok(file) = std::fs::File::open(path)
-    {
-        let mut buffer = Vec::with_capacity(4096);
-        if file.take(4096).read_to_end(&mut buffer).is_ok() {
-            let text = String::from_utf8_lossy(&buffer);
-            if text.contains("bake tool") && text.contains("does not match") {
-                return "The installed client and prepared game files are different versions. \
-                        Update the client to match your game files before trying again."
-                    .to_owned();
-            }
+/// Whether any line of a client log (the file and the older files it rotated
+/// to, each at most [`crate::launching::DEFAULT_MAX_BYTES`] long) matches.
+/// The log holds the client's standard output with its error stream, so
+/// a line can sit anywhere in it.
+fn log_has_line(path: &std::path::Path, matches: impl Fn(&str) -> bool) -> bool {
+    use std::io::BufRead as _;
+    let generations = (0..crate::launching::DEFAULT_MAX_FILES).map(|generation| {
+        if generation == 0 {
+            path.to_path_buf()
+        } else {
+            let mut name = path.as_os_str().to_owned();
+            name.push(format!(".{generation}"));
+            PathBuf::from(name)
         }
+    });
+    generations.into_iter().any(|file| {
+        let Ok(file) = std::fs::File::open(&file) else {
+            return false;
+        };
+        // Bounded by the capture's own limit, and a little over for the
+        // line that ends past it.
+        let reader =
+            std::io::BufReader::new(file.take(crate::launching::DEFAULT_MAX_BYTES + 64 * 1024));
+        reader
+            .split(b'\n')
+            .map_while(Result::ok)
+            .any(|line| matches(&String::from_utf8_lossy(&line)))
+    })
+}
+
+/// The error a failed client shows: a specific one when the client said its
+/// prepared content is from another version, otherwise why it ended in
+/// plain words (see [`describe_client_exit`]).
+fn read_exit_failure(activity: &Activity) -> String {
+    let mismatch = activity.output_log_path.as_deref().is_some_and(|path| {
+        log_has_line(path, |line| {
+            line.contains("bake tool") && line.contains("does not match")
+        })
+    });
+    if mismatch {
+        return "The installed client and prepared game files are different versions. \
+                Update the client to match your game files before trying again."
+            .to_owned();
     }
-    match activity.exit_code {
-        Some(code) => format!("Client exited with code {code}. See the session log for details."),
-        None => "Client exited with code . See the session log for details.".to_owned(),
+    describe_client_exit(ClientExit {
+        code: activity.exit_code,
+        reported_reason: activity
+            .exit_reason
+            .as_deref()
+            .filter(|_| activity.host_reported_exit),
+        server_message: activity.server_message.as_deref(),
+    })
+}
+
+/// Words the activity's exit failure again from what is known now: a
+/// failed exit gets its reason unless an error of another kind is already
+/// shown; a graceful one keeps its error as it is.
+fn word_exit_failure(activity: &mut Activity) {
+    // A process the player's Stop ended without its own report (killed
+    // after the timeout) did not fail.
+    let stopped = activity.stop.is_some() && !activity.host_reported_exit;
+    let failed = activity.exit_code.is_some_and(|code| code != 0) && !stopped;
+    if failed && (activity.error.is_none() || activity.error_is_exit_reason) {
+        activity.error = Some(read_exit_failure(activity));
+        activity.error_is_exit_reason = true;
     }
 }
 
@@ -548,6 +632,8 @@ impl LauncherOrchestrator {
                 install_record,
                 installation_status,
                 plugin_catalog: None,
+                closing: false,
+                cleared_holds: Vec::new(),
                 disposed: false,
             }),
             paths,
@@ -629,7 +715,9 @@ impl LauncherOrchestrator {
             return Ok(executable);
         }
         let state = self.inner.state()?;
-        Ok(if state.install_record.is_none() {
+        Ok(if state.closing {
+            LauncherCapability::unavailable(LAUNCHER_CLOSING)
+        } else if state.install_record.is_none() {
             LauncherCapability::unavailable(FIRST_RUN_REQUIRED)
         } else {
             LauncherCapability::AVAILABLE
@@ -659,9 +747,12 @@ impl LauncherOrchestrator {
                 active.kind.lower_name()
             )));
         }
-        Ok(self
-            .inner
-            .reconnect_hold(&state.activities, server_name, account_name))
+        Ok(self.inner.reconnect_hold(
+            &state.activities,
+            &state.cleared_holds,
+            server_name,
+            account_name,
+        ))
     }
 
     /// [`account_launch_capability`](Self::account_launch_capability) for
@@ -687,8 +778,12 @@ impl LauncherOrchestrator {
                         active.kind.lower_name()
                     ))
                 } else {
-                    self.inner
-                        .reconnect_hold(&state.activities, &server.name, &account.account)
+                    self.inner.reconnect_hold(
+                        &state.activities,
+                        &state.cleared_holds,
+                        &server.name,
+                        &account.account,
+                    )
                 };
                 result.insert((server.name.clone(), account.account.clone()), capability);
             }
@@ -716,6 +811,9 @@ impl LauncherOrchestrator {
         find_account(&state.store, server_name, account_name)?;
         if state.install_record.is_none() {
             return Ok(LauncherCapability::unavailable(FIRST_RUN_REQUIRED));
+        }
+        if state.closing {
+            return Ok(LauncherCapability::unavailable(LAUNCHER_CLOSING));
         }
         Ok(
             match find_active(&state.activities, server_name, account_name) {
@@ -1069,8 +1167,25 @@ impl LauncherOrchestrator {
         let request = {
             let mut guard = self.inner.state()?;
             let state = &mut *guard;
+            if state.closing {
+                return Err(OrchestratorError::Operation(LAUNCHER_CLOSING.into()));
+            }
             if find_active(&state.activities, server_name, account_name).is_some() {
                 return Err(OrchestratorError::Operation(ALREADY_RUNNING.into()));
+            }
+            // Every start obeys the hold: the window's, automatic relaunch's
+            // and the control endpoint's.
+            let hold = self.inner.reconnect_hold(
+                &state.activities,
+                &state.cleared_holds,
+                server_name,
+                account_name,
+            );
+            if !hold.is_available {
+                return Err(OrchestratorError::Operation(
+                    hold.reason
+                        .unwrap_or_else(|| "Launch is unavailable.".into()),
+                ));
             }
             let server = find_server(&state.store, server_name)?;
             let account = find_account(&state.store, server_name, account_name)?;
@@ -1148,6 +1263,9 @@ impl LauncherOrchestrator {
         let request = {
             let mut guard = self.inner.state()?;
             let state = &mut *guard;
+            if state.closing {
+                return Err(OrchestratorError::Operation(LAUNCHER_CLOSING.into()));
+            }
             if find_active(&state.activities, server_name, account_name).is_some() {
                 return Err(OrchestratorError::Operation(ALREADY_RUNNING.into()));
             }
@@ -1283,13 +1401,13 @@ impl LauncherOrchestrator {
         }
     }
 
-    /// The file a session's error output is captured in.
+    /// The file a session's output (standard output and error) is captured in.
     pub fn session_log_path(&self, session_id: &str) -> Option<PathBuf> {
         lock(&self.inner.gate)
             .activities
             .iter()
             .find(|activity| activity.session_id == session_id)
-            .and_then(|activity| activity.stderr_log_path.clone())
+            .and_then(|activity| activity.output_log_path.clone())
     }
 
     /// Stops a session: cancels a start still running and stops the
@@ -1317,6 +1435,7 @@ impl LauncherOrchestrator {
             }
             activity.set_state(LauncherActivityState::Stopping, now);
             activity.status = "Stopping session…".into();
+            activity.stop.get_or_insert(LauncherSessionStop::Requested);
             (
                 activity.supervisor.clone(),
                 activity.start_cancellation.clone(),
@@ -1330,7 +1449,28 @@ impl LauncherOrchestrator {
         let Some(supervisor) = supervisor else {
             return Ok(());
         };
-        if let Err(error) = supervisor.stop(timeout) {
+        let outcome = supervisor.stop(timeout);
+        if let Ok(StopOutcome::Killed) = outcome {
+            {
+                let mut state = lock(&self.inner.gate);
+                if let Some(activity) = state
+                    .activities
+                    .iter_mut()
+                    .find(|activity| activity.session_id == session_id)
+                {
+                    activity.stop = Some(LauncherSessionStop::Forced);
+                    if activity.error_is_exit_reason {
+                        activity.error = None;
+                        activity.error_is_exit_reason = false;
+                    }
+                    if activity.is_terminal() {
+                        activity.status = FORCED_STOP.into();
+                    }
+                }
+            }
+            self.inner.raise_state_changed();
+        }
+        if let Err(error) = outcome {
             let message = safe_error("Could not stop the session", &error.to_string(), None);
             {
                 let mut state = lock(&self.inner.gate);
@@ -1375,6 +1515,7 @@ impl LauncherOrchestrator {
             }
         }
         changed |= self.inner.expire_window_switches();
+        changed |= self.inner.judge_responsiveness();
         if changed {
             self.inner.raise_state_changed();
         }
@@ -1390,6 +1531,24 @@ impl LauncherOrchestrator {
                     .into_iter()
                     .partition(|activity| !activity.is_active());
             state.activities = kept;
+            // Clearing the list does not end the server's hold: an unclean
+            // end is remembered for its account (only the newest matters).
+            let now = (self.inner.clock)();
+            state.cleared_holds.retain(|(_, _, ended_at)| {
+                now.duration_since(*ended_at).unwrap_or_default() < SERVER_SESSION_HOLD
+            });
+            for activity in finished
+                .iter()
+                .filter(|activity| !activity.exited_gracefully())
+            {
+                if let Some(ended_at) = activity.terminal_at {
+                    state.cleared_holds.push((
+                        activity.server_name.clone(),
+                        activity.account_name.clone(),
+                        ended_at,
+                    ));
+                }
+            }
             finished
         };
         let any = !removed.is_empty();
@@ -1402,9 +1561,19 @@ impl LauncherOrchestrator {
         Ok(())
     }
 
-    /// Stops every session (each up to five seconds before a kill) and
-    /// refuses further use. Blocks until every process is seen to end.
-    /// Dropping the orchestrator does this too.
+    /// Refuses every new session or refresh from now on (the launcher is
+    /// closing): the window's, automatic relaunch's and the control
+    /// endpoint's. Running sessions are left to their stops.
+    pub fn close_to_new_sessions(&self) -> Result<(), OrchestratorError> {
+        self.inner.state()?.closing = true;
+        self.inner.raise_state_changed();
+        Ok(())
+    }
+
+    /// Stops every session (each up to five seconds before a kill, all at
+    /// once) and refuses further use. Blocks until every process is seen to
+    /// end. Dropping the orchestrator does this too, so no client outlives
+    /// the launcher even when the window's closing is skipped.
     pub fn dispose(&self) {
         let activities = {
             let mut state = lock(&self.inner.gate);
@@ -1414,9 +1583,24 @@ impl LauncherOrchestrator {
             state.disposed = true;
             std::mem::take(&mut state.activities)
         };
-        for activity in activities {
-            dispose_activity(activity);
-        }
+        std::thread::scope(|scope| {
+            for activity in activities {
+                // One thread per session, so they stop at once; when no
+                // thread can be had, this one stops it.
+                let slot = Arc::new(Mutex::new(Some(activity)));
+                let worker_slot = Arc::clone(&slot);
+                let spawned = std::thread::Builder::new()
+                    .name("launcher-dispose".into())
+                    .spawn_scoped(scope, move || {
+                        let activity = lock(&worker_slot).take();
+                        activity.into_iter().for_each(dispose_activity);
+                    });
+                if spawned.is_err() {
+                    let activity = lock(&slot).take();
+                    activity.into_iter().for_each(dispose_activity);
+                }
+            }
+        });
     }
 }
 
@@ -1546,8 +1730,15 @@ impl Inner {
             exit_code: None,
             error: None,
             plugin_notice: None,
-            stderr_log_path: None,
+            output_log_path: None,
             host_terminal_status: None,
+            server_message: None,
+            account_in_use: false,
+            error_is_exit_reason: false,
+            stop: None,
+            last_progress_at: None,
+            heartbeats_seen: false,
+            not_responding: false,
             exit_reason: None,
             host_reported_exit: false,
             process_exited: false,
@@ -1587,11 +1778,12 @@ impl Inner {
     fn reconnect_hold(
         &self,
         activities: &[Activity],
+        cleared: &[(String, String, SystemTime)],
         server_name: &str,
         account_name: &str,
     ) -> LauncherCapability {
         let now = (self.clock)();
-        let Some(terminal_at) = activities
+        let listed = activities
             .iter()
             .filter(|activity| {
                 activity.is_terminal()
@@ -1599,9 +1791,14 @@ impl Inner {
                     && activity.server_name == server_name
                     && same_account(&activity.account_name, account_name)
             })
-            .filter_map(|activity| activity.terminal_at)
-            .max()
-        else {
+            .filter_map(|activity| activity.terminal_at);
+        let cleared = cleared
+            .iter()
+            .filter(|(server, account, _)| {
+                server == server_name && same_account(account, account_name)
+            })
+            .map(|(_, _, ended_at)| *ended_at);
+        let Some(terminal_at) = listed.chain(cleared).max() else {
             return LauncherCapability::AVAILABLE;
         };
         let elapsed = now.duration_since(terminal_at).unwrap_or(Duration::ZERO);
@@ -1611,11 +1808,7 @@ impl Inner {
         if remaining.is_zero() {
             return LauncherCapability::AVAILABLE;
         }
-        let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0);
-        LauncherCapability::unavailable(format!(
-            "The last session for this account did not log out cleanly, so the server may still \
-             be holding it. Try again in {seconds} s."
-        ))
+        LauncherCapability::held(remaining)
     }
 
     fn with_activity<T>(&self, serial: u64, action: impl FnOnce(&mut Activity) -> T) -> Option<T> {
@@ -1786,7 +1979,7 @@ impl Inner {
             .with_activity(request.serial, |activity| {
                 activity.supervisor = Some(Arc::clone(&supervisor));
                 activity.status_source = Some(status_source);
-                activity.stderr_log_path = Some(composed.stderr_log_path.clone());
+                activity.output_log_path = Some(composed.client_log_path.clone());
                 activity.plugin_notice = plugin_notice;
                 activity.status = "Starting host process…".into();
             })
@@ -1797,11 +1990,11 @@ impl Inner {
         let mut spec = match request.launch_mode {
             None => inner
                 .executables
-                .create_probe_spec(&composed.config_file_path, Some(&composed.stderr_log_path)),
+                .create_probe_spec(&composed.config_file_path, Some(&composed.client_log_path)),
             Some(mode) => inner.executables.create_play_spec(
                 mode,
                 &composed.config_file_path,
-                Some(&composed.stderr_log_path),
+                Some(&composed.client_log_path),
             ),
         }
         .map_err(|error| StartFailure::Error(error.to_string()))?;
@@ -1840,13 +2033,15 @@ impl Inner {
                         .as_ref()
                         .and_then(|supervisor| supervisor.exit_code());
                 }
-                if activity.exit_code.is_some_and(|code| code != 0) && activity.error.is_none() {
-                    activity.error = Some(read_startup_failure(activity));
-                }
+                word_exit_failure(activity);
                 if !activity.is_terminal() {
                     activity.set_state(LauncherActivityState::Exited, now);
                     activity.status = activity.host_terminal_status.clone().unwrap_or_else(|| {
                         match activity.exit_code {
+                            _ if activity.stop == Some(LauncherSessionStop::Forced) => {
+                                FORCED_STOP.to_owned()
+                            }
+                            _ if activity.stop.is_some() => "Stopped.".to_owned(),
                             Some(code) => format!("Host process exited with code {code}."),
                             None => "Host process exited.".to_owned(),
                         }
@@ -1864,6 +2059,30 @@ impl Inner {
         };
         drop(lease);
         self.raise_state_changed();
+    }
+
+    /// Marks the clients in the world that have gone silent for
+    /// [`NOT_RESPONDING_AFTER`] as not responding (detection only: nothing
+    /// is stopped); true when one changed.
+    fn judge_responsiveness(&self) -> bool {
+        let now = (self.clock)();
+        let mut state = lock(&self.gate);
+        let mut changed = false;
+        for activity in &mut state.activities {
+            let silent = activity.last_progress_at.is_some_and(|at| {
+                now.duration_since(at).unwrap_or_default() >= NOT_RESPONDING_AFTER
+            });
+            if silent
+                && activity.heartbeats_seen
+                && !activity.not_responding
+                && activity.state == LauncherActivityState::InWorld
+            {
+                activity.not_responding = true;
+                activity.status = NOT_RESPONDING.into();
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Gives up the window switches their clients did not answer in time;
@@ -1905,14 +2124,33 @@ impl Inner {
             activity.error = Some("Ignored a status event for a different session id.".into());
             return;
         }
+        // Any line is progress; a heartbeat also says the client keeps them
+        // coming while it is well.
+        activity.last_progress_at = Some(now);
+        if event.kind == StatusEventKind::Heartbeat {
+            activity.heartbeats_seen = true;
+        }
+        if std::mem::take(&mut activity.not_responding)
+            && activity.state == LauncherActivityState::InWorld
+        {
+            activity.status = "In world.".into();
+        }
 
         if activity.is_terminal() {
             match event.kind {
-                StatusEventKind::Exited { code, reason } => {
+                StatusEventKind::Exited {
+                    code,
+                    reason,
+                    server_message,
+                    account_in_use,
+                } => {
                     activity.exit_code.get_or_insert(code);
                     activity.host_reported_exit = true;
                     let status = format!("Exited: {reason} (code {code}).");
                     activity.exit_reason.get_or_insert(reason);
+                    activity.server_message = server_message;
+                    activity.account_in_use = account_in_use;
+                    word_exit_failure(activity);
                     let status = activity.host_terminal_status.get_or_insert(status).clone();
                     if activity.state == LauncherActivityState::Exited {
                         activity.status = status;
@@ -1974,18 +2212,25 @@ impl Inner {
                 }
                 activity.status = format!("Disconnected: {reason}.");
             }
-            StatusEventKind::Exited { code, reason } => {
+            StatusEventKind::Exited {
+                code,
+                reason,
+                server_message,
+                account_in_use,
+            } => {
                 activity.set_state(LauncherActivityState::Exited, now);
                 activity.exit_code = Some(code);
                 activity.host_reported_exit = true;
                 let status = format!("Exited: {reason} (code {code}).");
                 activity.exit_reason = Some(reason);
-                if code != 0 && activity.error.is_none() {
-                    activity.error = Some(read_startup_failure(activity));
-                }
+                activity.server_message = server_message;
+                activity.account_in_use = account_in_use;
+                word_exit_failure(activity);
                 activity.host_terminal_status = Some(status.clone());
                 activity.status = status;
             }
+            // Progress only; the not-responding check reads it.
+            StatusEventKind::Heartbeat => {}
             StatusEventKind::Malformed { error } => {
                 activity.error = Some(format!("Malformed host status event: {error}"));
             }

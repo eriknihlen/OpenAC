@@ -181,6 +181,10 @@ pub struct AccountServerRow {
     pub latency_milliseconds: Option<f64>,
     /// Why Play is refused, empty when it may run (refreshed by the window).
     pub disabled_reason: String,
+    /// Play waits only for the server to let go of the account after an
+    /// unclean exit: the countdown the row shows in place of its status
+    /// (refreshed by the window every frame).
+    pub hold_text: Option<String>,
     /// False while the profile filter hides this row.
     pub is_visible: bool,
     /// The account's profile tags on this server.
@@ -209,6 +213,7 @@ impl AccountServerRow {
             server_status_text: "Not checked".into(),
             latency_milliseconds: None,
             disabled_reason: String::new(),
+            hold_text: None,
             is_visible: true,
             profiles: Vec::new(),
             active_session_id: None,
@@ -437,8 +442,11 @@ impl AccountServerRow {
             })
             .map(|session| session.window.clone());
         self.active_character_name = active.and_then(|session| session.character_name.clone());
-        self.status = session
-            .and_then(|session| session.error.clone())
+        // A client that stopped responding says so before an older error.
+        self.status = active
+            .filter(|session| session.not_responding)
+            .map(|_| "Not responding".to_owned())
+            .or_else(|| session.and_then(|session| session.error.clone()))
             .or_else(|| session.map(|session| session.status.clone()))
             .unwrap_or_else(|| account.activity_status.clone());
         self.launch_error = session.and_then(|session| session.error.clone());

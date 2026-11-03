@@ -17,6 +17,9 @@
 //!   launcher through (`--control-pipe`).
 //! - [`classic_migration`]: copying a classic VirindiTank and UtilityBelt
 //!   setup to where MossTank reads it.
+//! - [`layout_gate`]: moving the install into the current folder layout at
+//!   start, and clearing out old logs; [`launcher_log`]: the launcher's own
+//!   log.
 //!
 //! Nothing here opens a network connection. Every HTTP request goes through
 //! [`net::HttpTransport`], which the host implements (the TLS choice is the
@@ -30,7 +33,9 @@ pub mod ids;
 pub mod installation;
 pub mod integrity;
 pub mod json;
+pub mod launcher_log;
 pub mod launching;
+pub mod layout_gate;
 pub mod net;
 pub mod orchestration;
 pub mod plugins;

@@ -19,8 +19,8 @@ use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{
     BoundedProcessOutputCapture, ChildProcess, ChildProcessFactory, ComposeError,
     ComposedSessionConfig, DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, ExitCallback, LauncherProcessSpec,
-    LauncherProcessSupervisor, LauncherSessionState, ProcessSupervisor, SystemChildProcessFactory,
-    compose, compose_probe, serialize, write,
+    LauncherProcessSupervisor, LauncherSessionState, ProcessSupervisor, StopOutcome,
+    SystemChildProcessFactory, compose, compose_probe, serialize, write,
 };
 use ac_launcher_core::plugins::{
     InstalledPluginRecord, InstalledPluginRecordStore, PluginCatalog, PluginInstallSource,
@@ -48,6 +48,8 @@ fn every_child_is_told_the_root_and_each_member() {
     assert_eq!(value("OPENAC_CONFIG_DIR"), Some(root.join("elsewhere")));
     assert_eq!(value("OPENAC_DATA_DIR"), Some(root.clone()));
     assert_eq!(value("OPENAC_CACHE_DIR"), Some(root.join("cache")));
+    // An addition: the client writes heartbeats only when asked.
+    assert_eq!(value("OPENAC_STATUS_HEARTBEAT"), Some(PathBuf::from("1")));
 }
 
 // --- SessionConfigComposerTests -------------------------------------------------
@@ -206,16 +208,24 @@ fn gui_mode_includes_character_selector_and_omits_policy() {
         session.login_commands.as_deref(),
         Some(&["/tell someone, hi".to_owned()][..])
     );
+    // In the character's folder of the server's, in a folder named by the
+    // local start time.
+    let status_file = session.status_file.clone().unwrap();
+    assert_eq!(status_file, composed.status_file_path);
+    assert_eq!(status_file.file_name().unwrap(), "status.jsonl");
+    let folder = status_file.parent().unwrap();
+    assert_eq!(folder, composed.session_directory);
     assert_eq!(
-        session.status_file.as_deref(),
-        Some(
-            paths()
-                .launcher_sessions_directory()
-                .join("session-gui")
-                .join("status.jsonl")
-                .as_path()
-        )
+        folder.parent().unwrap(),
+        paths().session_logs_directory("Local ACE", "+Acdream")
     );
+    let name = folder.file_name().unwrap().to_string_lossy();
+    assert!(
+        ac_host::layout::parse_session_folder_name(&name).is_some(),
+        "{name}"
+    );
+    assert_eq!(composed.config_file_path, folder.join("session.json"));
+    assert_eq!(composed.client_log_path, folder.join("client.log"));
     let json = serialize(&composed.document);
     assert!(json.contains("\"provider\": \"standardInput\""));
     assert!(json.contains("\"reference\": \"session\""));
@@ -602,21 +612,80 @@ fn compose_and_write_writes_the_document_under_the_expected_path() {
         None,
     ))
     .unwrap();
-    let expected = paths
-        .launcher_sessions_directory()
-        .join("session-write")
-        .join("session.json");
-    assert_eq!(composed.config_file_path, expected);
-    let text = std::fs::read_to_string(&expected).unwrap();
+    assert_eq!(
+        composed
+            .config_file_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap(),
+        paths.session_logs_directory("Local ACE", "+Acdream")
+    );
+    let text = std::fs::read_to_string(&composed.config_file_path).unwrap();
     assert!(!text.contains(PASSWORD));
 
+    // A probe picks no character: it is filed under the account.
     let probe =
         write(compose_probe(&server(), &account(), &install(), &paths, "probe-write").unwrap())
             .unwrap();
+    assert_eq!(
+        probe.session_directory.parent().unwrap(),
+        paths.session_logs_directory("Local ACE", "testaccount")
+    );
     let json = std::fs::read_to_string(&probe.config_file_path).unwrap();
     assert!(json.contains("\"mode\": \"probe\""));
     assert!(!json.contains("\"character\""));
     assert!(!json.contains(PASSWORD));
+}
+
+#[test]
+fn a_second_session_in_the_same_second_gets_its_own_folder() {
+    let root = TempDir::new("composer-same-second");
+    let paths = root.path_set();
+    let composed = compose_simple(
+        &character(LaunchMode::Gui, Some("0x5000000A")),
+        "first",
+        &paths,
+        None,
+    );
+    // Both composed for the same folder name, as two starts in one second.
+    let mut second = composed.clone();
+    second.session_id = "second".into();
+    let first = write(composed).unwrap();
+    let second = write(second).unwrap();
+    assert_ne!(first.session_directory, second.session_directory);
+    let name = second
+        .session_directory
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(name.ends_with(" (2)"), "{name}");
+    assert_eq!(
+        second.config_file_path.parent(),
+        Some(second.session_directory.as_path())
+    );
+    assert_eq!(
+        second.document.sessions[0].status_file.as_deref(),
+        Some(second.session_directory.join("status.jsonl").as_path())
+    );
+    let written = std::fs::read_to_string(&second.config_file_path).unwrap();
+    assert!(written.contains(" (2)"));
+    assert!(first.config_file_path.is_file());
+}
+
+#[test]
+fn a_character_select_session_is_filed_under_the_account() {
+    let composed = compose_simple(
+        &character(LaunchMode::GuiSelect, Some("0x5000000A")),
+        "session-select",
+        &paths(),
+        None,
+    );
+    assert_eq!(
+        composed.session_directory.parent().unwrap(),
+        paths().session_logs_directory("Local ACE", "testaccount")
+    );
 }
 
 #[test]
@@ -787,7 +856,7 @@ fn a_log_spamming_child_cannot_grow_the_logs_unboundedly() {
 #[test]
 fn capture_creates_its_directory_and_refuses_bad_arguments() {
     let root = TempDir::new("capture-dir");
-    let path = root.join("session").join("client.err.log");
+    let path = root.join("session").join("client.log");
     let capture = BoundedProcessOutputCapture::with_default_cap(&path).unwrap();
     capture.append_line(Some("hello"));
     assert!(path.is_file());
@@ -1064,7 +1133,10 @@ fn stop_closes_gracefully_or_kills_after_the_timeout() {
     let factory = FakeFactory::new(true);
     let supervisor = LauncherProcessSupervisor::new(factory.clone());
     supervisor.start(&spec(), Some("pw")).unwrap();
-    supervisor.stop(Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        supervisor.stop(Duration::from_millis(50)).unwrap(),
+        StopOutcome::Exited
+    );
     let fake = factory.last();
     assert_eq!(fake.state().calls, ["gracefulStop", "closeMainWindow"]);
     assert_eq!(fake.state().kills, 0);
@@ -1080,7 +1152,12 @@ fn stop_closes_gracefully_or_kills_after_the_timeout() {
     let factory = FakeFactory::new(false);
     let supervisor = LauncherProcessSupervisor::new(factory.clone());
     supervisor.start(&spec(), Some("pw")).unwrap();
-    supervisor.stop(Duration::from_millis(50)).unwrap();
+    // A stop that had to kill says so (the launcher counts it as a stop,
+    // not a crash).
+    assert_eq!(
+        supervisor.stop(Duration::from_millis(50)).unwrap(),
+        StopOutcome::Killed
+    );
     assert_eq!(factory.last().state().kills, 1);
     assert_eq!(
         ProcessSupervisor::state(&*supervisor),
@@ -1269,6 +1346,14 @@ fn fixture_console_child() {
             }
             std::process::exit(code);
         }
+        "write-both" => {
+            let count: usize = args[1].parse().unwrap();
+            for index in 0..count {
+                println!("out-line-{index}");
+                eprintln!("err-line-{index}");
+            }
+            std::process::exit(0);
+        }
         "echo-exit" => {
             let mut input = String::new();
             let _ = std::io::stdin().read_to_string(&mut input);
@@ -1390,7 +1475,7 @@ fn real_child_stderr_is_captured_for_both_child_kinds() {
         let stderr = root.join("client.err.log");
         let mut spec = fixture_spec(&["write-stderr", code, "3", prefix]);
         spec.supports_console_graceful_stop = console_stop;
-        spec.stderr_log_path = Some(stderr.clone());
+        spec.output_log_path = Some(stderr.clone());
         let supervisor = LauncherProcessSupervisor::system();
         supervisor.start(&spec, None).unwrap();
         assert!(wait_for_exited(&supervisor, Duration::from_secs(30)));
@@ -1399,6 +1484,59 @@ fn real_child_stderr_is_captured_for_both_child_kinds() {
         assert!(captured.contains(&format!("{prefix}0")));
         assert!(captured.contains(&format!("{prefix}1")));
     }
+}
+
+#[test]
+fn the_client_log_holds_standard_output_and_error_in_whole_lines() {
+    let root = TempDir::new("both-capture");
+    let log = root.join("session").join("client.log");
+    let mut spec = fixture_spec(&["write-both", "200"]);
+    spec.output_log_path = Some(log.clone());
+    let supervisor = LauncherProcessSupervisor::system();
+    supervisor.start(&spec, None).unwrap();
+    assert!(wait_for_exited(&supervisor, Duration::from_secs(30)));
+    // The log only grows, so once both last lines were seen it holds all.
+    read_eventually_containing(&log, "err-line-199");
+    let captured = read_eventually_containing(&log, "out-line-199");
+    // Every line arrives, and none is cut by a line of the other stream.
+    // (The test harness itself may start a line on standard output before
+    // the child's first one, so a line is judged by how it ends.)
+    for index in 0..200 {
+        for stream in ["out", "err"] {
+            let line = format!("{stream}-line-{index}");
+            assert!(
+                captured
+                    .lines()
+                    .any(|candidate| candidate.trim_end().ends_with(&line)),
+                "{line} is not in the log"
+            );
+        }
+    }
+    for line in captured.lines() {
+        let marks = line.matches("-line-").count();
+        assert!(marks <= 1, "two lines ran together: {line}");
+        if marks == 1 {
+            assert!(
+                line.trim_end()
+                    .rsplit('-')
+                    .next()
+                    .is_some_and(|n| n.parse::<u32>().is_ok()),
+                "a line was cut: {line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_child_whose_log_cannot_be_written_still_has_its_output_read() {
+    // A log path that cannot be a file: the capture is never made, and the
+    // child must still be able to write everything it has to say.
+    let mut spec = fixture_spec(&["write-both", "5000"]);
+    spec.output_log_path = Some(PathBuf::from("   "));
+    let supervisor = LauncherProcessSupervisor::system();
+    supervisor.start(&spec, None).unwrap();
+    assert!(wait_for_exited(&supervisor, Duration::from_secs(30)));
+    assert_eq!(supervisor.exit_code(), Some(0));
 }
 
 /// A child process that counts kills, around a real one.

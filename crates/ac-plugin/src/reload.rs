@@ -6,12 +6,13 @@
 //! The plugin folders are looked at every [`POLL_INTERVAL_SECONDS`] of
 //! session time. Only what makes up the plugin counts, so a plugin writing
 //! its own logs or data beside its code does not hold its reload back
-//! forever, and the player's `files` folder never counts.
+//! forever, and the player's folders (`data`, and MossTank's `vtank`) never
+//! count.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use ac_host::paths::PLUGIN_FILES_FOLDER_NAME;
+use ac_host::paths::is_player_folder;
 
 use crate::discovery::MANIFEST_FILE;
 
@@ -59,11 +60,8 @@ fn package_files(directory: &Path) -> Option<Vec<Seen>> {
                 continue;
             };
             if metadata.is_dir() {
-                let players = folder == directory
-                    && entry
-                        .file_name()
-                        .to_string_lossy()
-                        .eq_ignore_ascii_case(PLUGIN_FILES_FOLDER_NAME);
+                let players =
+                    folder == directory && is_player_folder(&entry.file_name().to_string_lossy());
                 if !players {
                     pending.push(path);
                 }
@@ -241,10 +239,13 @@ mod tests {
         let folder = Folder::new("players");
         let mut watch = FolderWatch::default();
         watch.watch(&folder.0, "openac.hello");
-        let files = folder.0.join(PLUGIN_FILES_FOLDER_NAME);
+        let files = folder.0.join(ac_host::paths::PLUGIN_FILES_FOLDER_NAME);
         std::fs::create_dir_all(&files).unwrap();
         std::fs::write(files.join("plugin.json"), "{}").unwrap();
         std::fs::write(files.join("hello.wasm"), "not the plugin").unwrap();
+        let vtank = folder.0.join(ac_host::paths::VTANK_FOLDER_NAME);
+        std::fs::create_dir_all(&vtank).unwrap();
+        std::fs::write(vtank.join("loot.xml"), "<shared/>").unwrap();
         std::fs::write(folder.0.join("plugin.log"), "a line").unwrap();
         assert!(watch.advance(0.3).is_empty());
         assert!(!watch.has_pending("openac.hello"));

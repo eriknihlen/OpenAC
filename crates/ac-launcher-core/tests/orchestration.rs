@@ -18,13 +18,13 @@ use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{
     ComposeError, ComposedSessionConfig, LauncherProcessSpec, LauncherSessionState,
-    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StateListener,
+    ProcessSupervisor, ProcessSupervisorFactory, SessionConfigService, StateListener, StopOutcome,
     SupervisorError, compose, compose_probe, serialize,
 };
 use ac_launcher_core::orchestration::{
     Clock, LauncherActivityKind, LauncherActivityState, LauncherExecutableSet,
-    LauncherOrchestrator, LauncherPlatformCapabilities, OrchestratorError, OrchestratorParts,
-    SERVER_SESSION_HOLD, UNSUPPORTED_PLATFORM_GRAPHICAL_LAUNCH_DISABLED_REASON,
+    LauncherOrchestrator, LauncherPlatformCapabilities, LauncherSessionStop, OrchestratorError,
+    OrchestratorParts, SERVER_SESSION_HOLD, UNSUPPORTED_PLATFORM_GRAPHICAL_LAUNCH_DISABLED_REASON,
     WINDOW_SWITCH_TIMEOUT,
 };
 use ac_launcher_core::plugins::PluginCatalog;
@@ -197,6 +197,8 @@ struct FakeSupervisorState {
     lines: Vec<String>,
     /// The child takes no console input.
     refuses_lines: bool,
+    /// The child does not log out when asked: a stop kills it.
+    ignores_stop: bool,
 }
 
 /// Records the spec and password; `exit` ends it. With
@@ -219,6 +221,7 @@ impl FakeSupervisor {
                 stop_calls: 0,
                 lines: Vec::new(),
                 refuses_lines: false,
+                ignores_stop: false,
             }),
             listeners: Mutex::new(Vec::new()),
             start_error,
@@ -261,6 +264,10 @@ impl FakeSupervisor {
     fn refuse_lines(&self) {
         lock(&self.state).refuses_lines = true;
     }
+
+    fn ignore_stop(&self) {
+        lock(&self.state).ignores_stop = true;
+    }
 }
 
 impl ProcessSupervisor for FakeSupervisor {
@@ -299,15 +306,21 @@ impl ProcessSupervisor for FakeSupervisor {
         Ok(())
     }
 
-    fn stop(&self, _timeout: Duration) -> Result<(), SupervisorError> {
-        {
+    fn stop(&self, _timeout: Duration) -> Result<StopOutcome, SupervisorError> {
+        let killed = {
             let mut state = lock(&self.state);
             state.stop_calls += 1;
             state.state = LauncherSessionState::Exited;
-            state.exit_code = Some(0);
-        }
+            // A killed child ends with the code a kill gives it.
+            state.exit_code = Some(if state.ignores_stop { 1 } else { 0 });
+            state.ignores_stop
+        };
         self.publish(LauncherSessionState::Exited);
-        Ok(())
+        Ok(if killed {
+            StopOutcome::Killed
+        } else {
+            StopOutcome::Exited
+        })
     }
 
     fn try_send_line(&self, line: &str) -> bool {
@@ -398,11 +411,11 @@ impl ProcessSupervisor for BlockingStopSupervisor {
         Ok(())
     }
 
-    fn stop(&self, _timeout: Duration) -> Result<(), SupervisorError> {
+    fn stop(&self, _timeout: Duration) -> Result<StopOutcome, SupervisorError> {
         self.stop_entered.set();
         self.allow_terminal.wait(None);
         self.publish(LauncherSessionState::Exited);
-        Ok(())
+        Ok(StopOutcome::Exited)
     }
 
     fn try_send_line(&self, _line: &str) -> bool {
@@ -508,12 +521,25 @@ fn entered_world(session_id: &str, character_name: &str) -> StatusEvent {
 }
 
 fn exited(session_id: &str, code: i32, reason: &str) -> StatusEvent {
+    refused(session_id, code, reason, None, false)
+}
+
+/// An `exited` naming the server's refusal.
+fn refused(
+    session_id: &str,
+    code: i32,
+    reason: &str,
+    server_message: Option<&str>,
+    account_in_use: bool,
+) -> StatusEvent {
     event(
         session_id,
         "exited",
         StatusEventKind::Exited {
             code,
             reason: reason.into(),
+            server_message: server_message.map(str::to_owned),
+            account_in_use,
         },
     )
 }
@@ -687,6 +713,34 @@ fn set_show_beta_plugins_persists_to_disk_for_a_fresh_orchestrator_instance() {
 }
 
 #[test]
+fn the_exit_diagnosis_finds_its_line_after_a_lot_of_standard_output() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
+    let supervisor = supervisors.single();
+    let path = supervisor.spec().output_log_path.unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut log = "window: a line the client printed on standard output
+"
+    .repeat(4000);
+    log.push_str(
+        "prepared asset package does not match: bake tool 10 != 6
+",
+    );
+    std::fs::write(&path, log).unwrap();
+    supervisor.exit(1);
+    let error = single_session(&orchestrator).error.unwrap();
+    assert!(error.contains("Update the client"), "{error}");
+}
+
+#[test]
 fn asset_version_crash_produces_actionable_error_without_exposing_stderr() {
     let root = TempDir::new("orchestrator");
     let supervisors = Arc::new(FakeSupervisorFactory::default());
@@ -699,7 +753,7 @@ fn asset_version_crash_produces_actionable_error_without_exposing_stderr() {
     );
     launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
     let supervisor = supervisors.single();
-    let path = supervisor.spec().stderr_log_path.unwrap();
+    let path = supervisor.spec().output_log_path.unwrap();
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(
         &path,
@@ -765,6 +819,79 @@ fn dispose_keeps_update_lease_until_live_child_is_observed_terminal() {
     assert_eq!(supervisor.state(), LauncherSessionState::Exited);
     assert!(*lock(&supervisor.disposed));
     supervisors.allow_every_stop();
+}
+
+// Not an OpenAC test: disposing stops every session at once (each stop on
+// its own thread), not one after another.
+#[test]
+fn dispose_stops_every_session_at_once() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(BlockingStopSupervisorFactory::default());
+    let orchestrator = Arc::new(create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    ));
+    orchestrator
+        .add_account("Local ACE", "otheraccount", PASSWORD)
+        .unwrap();
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    orchestrator
+        .launch(
+            "Local ACE",
+            "otheraccount",
+            None,
+            LaunchMode::GuiSelect,
+            &none(),
+        )
+        .unwrap();
+    let created: Vec<Arc<BlockingStopSupervisor>> = lock(&supervisors.created).clone();
+    assert_eq!(created.len(), 2);
+
+    let disposing = Arc::clone(&orchestrator);
+    let disposal = std::thread::spawn(move || disposing.dispose());
+    // Both stops are entered while neither may finish.
+    for supervisor in &created {
+        assert!(supervisor.stop_entered.wait(Some(Duration::from_secs(5))));
+    }
+    assert!(!disposal.is_finished());
+    supervisors.allow_every_stop();
+    disposal.join().unwrap();
+    for supervisor in &created {
+        assert!(*lock(&supervisor.disposed));
+    }
+}
+
+// Not an OpenAC test: once the launcher closes, nothing new starts.
+#[test]
+fn a_closing_launcher_starts_nothing_new() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    orchestrator.close_to_new_sessions().unwrap();
+    let refused = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap_err();
+    assert_eq!(refused.to_string(), "The launcher is closing.");
+    assert!(
+        orchestrator
+            .probe("Local ACE", "testaccount", &none())
+            .is_err()
+    );
+    let capability = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap();
+    assert_eq!(
+        capability.reason.as_deref(),
+        Some("The launcher is closing.")
+    );
+    assert!(supervisors.created().is_empty());
 }
 
 #[test]
@@ -1383,6 +1510,73 @@ fn host_exit_reason_survives_the_later_process_exit_callback() {
     );
 }
 
+// Not an OpenAC test: a failed client says why in plain words, not just its
+// exit code; the server's refusal is shown in the server's own words, even
+// when the process is seen to end before the client's report is read.
+#[test]
+fn a_failed_client_says_why_in_plain_words() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let statuses = Arc::new(QueueStatusSourceFactory::default());
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let now = Arc::new(Mutex::new(start));
+    let clock_now = Arc::clone(&now);
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            statuses: statuses.clone(),
+            clock: Some(Arc::new(move || *lock(&clock_now))),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    supervisors.single().exit(-1);
+    assert_eq!(
+        single_session(&orchestrator).error.as_deref(),
+        Some("The client closed unexpectedly. (exit code -1)")
+    );
+    orchestrator.clear_finished_sessions().unwrap();
+    // Clearing the list does not lift the server's hold.
+    assert!(
+        launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless)
+            .unwrap_err()
+            .to_string()
+            .starts_with("The server may still hold this account.")
+    );
+    *lock(&now) = start + SERVER_SESSION_HOLD;
+
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    let refused_supervisor = Arc::clone(&supervisors.created()[1]);
+    refused_supervisor.exit(6);
+    let queue = {
+        let created = lock(&statuses.created);
+        Arc::clone(&created[1].0)
+    };
+    enqueue(
+        &queue,
+        refused(
+            "s2",
+            6,
+            "the server ended the session: Another account is already logged on from this \
+             client. (error 0x1)",
+            Some("Another account is already logged on from this client."),
+            true,
+        ),
+    );
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert_eq!(
+        session.error.as_deref(),
+        Some("Another account is already logged on from this client. (exit code 6)")
+    );
+    assert_eq!(
+        session.server_message.as_deref(),
+        Some("Another account is already logged on from this client.")
+    );
+    assert!(session.account_in_use);
+}
+
 #[test]
 fn start_failure_is_visible_but_redacts_the_credential_everywhere() {
     let root = TempDir::new("orchestrator");
@@ -1475,6 +1669,96 @@ fn stop_runs_through_the_supervisor_and_makes_the_account_probeable_again() {
             .unwrap()
             .is_available
     );
+}
+
+// Not an OpenAC test: a client in the world that writes heartbeats and then
+// falls silent for 30 s shows as not responding until its next line; a
+// client that never wrote one (an older build) is not judged.
+#[test]
+fn a_silent_client_in_the_world_shows_as_not_responding() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let statuses = Arc::new(QueueStatusSourceFactory::default());
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let now = Arc::new(Mutex::new(start));
+    let clock_now = Arc::clone(&now);
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            statuses: statuses.clone(),
+            clock: Some(Arc::new(move || *lock(&clock_now))),
+            ..Setup::default()
+        },
+    );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    let queue = statuses.single();
+    enqueue(&queue, connected("s1"));
+    enqueue(&queue, entered_world("s1", "+Acdream"));
+    orchestrator.poll_status().unwrap();
+    // No heartbeat yet: silence is not judged.
+    *lock(&now) = start + Duration::from_secs(60);
+    orchestrator.poll_status().unwrap();
+    assert!(!single_session(&orchestrator).not_responding);
+
+    let heartbeat = |queue: &EventQueue| {
+        enqueue(queue, event("s1", "heartbeat", StatusEventKind::Heartbeat));
+    };
+    heartbeat(&queue);
+    orchestrator.poll_status().unwrap();
+    *lock(&now) = start + Duration::from_secs(60 + 29);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(!session.not_responding);
+    assert_eq!(session.status, "In world.");
+
+    *lock(&now) = start + Duration::from_secs(60 + 30);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(session.not_responding);
+    assert_eq!(session.state, LauncherActivityState::InWorld);
+    assert_eq!(session.status, "Not responding.");
+    assert_eq!(supervisors.single().stop_calls(), 0, "detection only");
+
+    heartbeat(&queue);
+    orchestrator.poll_status().unwrap();
+    let session = single_session(&orchestrator);
+    assert!(!session.not_responding);
+    assert_eq!(session.status, "In world.");
+}
+
+// Not an OpenAC test: a Stop that has to kill the client is a stop, not a
+// crash (no crash error), but the server may still hold the login, so the
+// hold applies.
+#[test]
+fn a_stop_that_has_to_kill_is_a_stop_not_a_crash() {
+    let root = TempDir::new("orchestrator");
+    let supervisors = Arc::new(FakeSupervisorFactory::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            supervisors: supervisors.clone(),
+            ..Setup::default()
+        },
+    );
+    let launched = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
+    supervisors.single().ignore_stop();
+    orchestrator
+        .stop_session(&launched.session_id, Duration::from_millis(10), &none())
+        .unwrap();
+
+    let session = single_session(&orchestrator);
+    assert_eq!(session.state, LauncherActivityState::Exited);
+    assert_eq!(session.stop, Some(LauncherSessionStop::Forced));
+    assert_eq!(session.error, None);
+    assert_eq!(
+        session.status,
+        "Stopped (did not respond, closed by force)."
+    );
+    let hold = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap();
+    assert!(hold.held_for.is_some(), "{hold:?}");
 }
 
 // OpenAC LauncherOrchestratorTests.BatchAvailabilityChecksHostFilesOnceForManyAccountsAndSeesChanges.
@@ -1573,7 +1857,7 @@ fn batch_availability_preserves_active_and_reconnect_refusals() {
     check("Stop the running");
     supervisors.single().exit(23);
     assert!(!single_session(&orchestrator).is_process_or_start_active());
-    check("Try again");
+    check("Ready in");
 }
 
 // OpenAC LauncherOrchestratorTests.StopDuringStartupRemainsOwnedUntilCancelledOrFailedStartFinishes.
@@ -1702,9 +1986,10 @@ fn failed_startup_with_live_child_retains_account_and_update_ownership() {
 }
 
 // Not an OpenAC test: the reconnect hold OpenAC's orchestrator applies after
-// an unclean exit, checked with a controlled clock.
+// an unclean exit (here 30 s: one login attempt makes the server drop a
+// stale login), checked with a controlled clock; a launch obeys it too.
 #[test]
-fn an_unclean_exit_holds_the_account_for_three_minutes() {
+fn an_unclean_exit_holds_the_account_for_thirty_seconds() {
     let root = TempDir::new("orchestrator");
     let supervisors = Arc::new(FakeSupervisorFactory::default());
     let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
@@ -1725,7 +2010,17 @@ fn an_unclean_exit_holds_the_account_for_three_minutes() {
         .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
         .unwrap();
     assert!(!held.is_available);
-    assert!(held.reason.unwrap().ends_with("Try again in 180 s."));
+    assert_eq!(held.held_for, Some(Duration::from_secs(30)));
+    assert_eq!(
+        held.reason.as_deref(),
+        Some("The server may still hold this account. Ready in 30 s.")
+    );
+    let refused = launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "The server may still hold this account. Ready in 30 s."
+    );
+    assert_eq!(supervisors.created().len(), 1, "nothing started");
 
     *lock(&now) = start + Duration::from_millis(500);
     let reason = orchestrator
@@ -1733,15 +2028,24 @@ fn an_unclean_exit_holds_the_account_for_three_minutes() {
         .unwrap()
         .reason
         .unwrap();
-    assert!(reason.ends_with("Try again in 180 s."), "{reason}");
+    assert!(reason.ends_with("Ready in 30 s."), "{reason}");
+    *lock(&now) = start + Duration::from_secs(5);
+    let reason = orchestrator
+        .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
+        .unwrap()
+        .reason
+        .unwrap();
+    assert!(reason.ends_with("Ready in 25 s."), "{reason}");
 
     *lock(&now) = start + SERVER_SESSION_HOLD;
+    assert_eq!(SERVER_SESSION_HOLD, Duration::from_secs(30));
     assert!(
         orchestrator
             .account_launch_capability("Local ACE", "testaccount", LaunchMode::Headless)
             .unwrap()
             .is_available
     );
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Headless).unwrap();
 }
 
 // ---- profile text while sessions run ----------------------------------------
@@ -2024,8 +2328,8 @@ mod relaunch {
     use ac_launcher_core::orchestration::{
         LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState, LauncherCapability,
         LauncherPlatformCapabilities, LauncherRelaunchController, LauncherRelaunchSelection,
-        LauncherServerSnapshot, LauncherSessionSnapshot, LauncherStateSnapshot, LauncherStopGate,
-        OrchestratorError,
+        LauncherServerSnapshot, LauncherSessionSnapshot, LauncherSessionStop,
+        LauncherStateSnapshot, LauncherStopGate, OrchestratorError,
     };
     use ac_launcher_core::profiles::LaunchMode;
 
@@ -2056,6 +2360,10 @@ mod relaunch {
             created_at: SystemTime::UNIX_EPOCH + Duration::from_secs(id),
             exit_reason: None,
             exited_gracefully: false,
+            server_message: None,
+            account_in_use: false,
+            stop: None,
+            not_responding: false,
             plugin_notice: None,
             has_live_process: Some(live),
             startup_in_flight: false,
@@ -2335,6 +2643,133 @@ mod relaunch {
         clock.advance(2);
         host.poll(&mut scheduler, true);
         assert_eq!(host.launches.len(), 1);
+    }
+
+    // Not an OpenAC test: a relaunch the server refuses because the account
+    // is still logged on is tried again once the server's hold ends (the
+    // capability), not after the full delay, for as long as the server keeps
+    // answering.
+    #[test]
+    fn a_refused_relaunch_retries_after_the_hold_while_the_server_answers() {
+        let mut host = Host::new();
+        let clock = Clock::default();
+        let mut scheduler = clock.controller();
+        scheduler.set_delay_seconds(60).unwrap();
+        host.sessions = vec![session(1, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        // A crash: the first relaunch waits the full delay.
+        host.sessions = vec![session(1, false)];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(59);
+        host.poll(&mut scheduler, true);
+        assert!(host.launches.is_empty());
+        clock.advance(1);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 1);
+        for attempt in 1..=20u64 {
+            // The relaunched client is refused: the account is still held.
+            let mut refused = session(100 + attempt, false);
+            refused.account_in_use = true;
+            refused.server_message =
+                Some("Another account is already logged on from this client.".into());
+            host.sessions = vec![refused];
+            host.observe(&mut scheduler, &[choice()]);
+            // The hold is the only wait.
+            host.capability = LauncherCapability::held(Duration::from_secs(30));
+            host.poll(&mut scheduler, true);
+            assert_eq!(host.launches.len() as u64, attempt, "held");
+            host.capability = LauncherCapability::AVAILABLE;
+            clock.advance(30);
+            host.poll(&mut scheduler, true);
+            assert_eq!(host.launches.len() as u64, attempt + 1, "retried");
+        }
+        // A client that could not reach the server ends like any other: the
+        // next try waits the full delay.
+        host.sessions = vec![session(300, false)];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(30);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 21, "a plain end waits the delay");
+        clock.advance(30);
+        host.poll(&mut scheduler, true);
+        assert_eq!(host.launches.len(), 22);
+    }
+
+    // Not an OpenAC test: the window hears of a relaunched session (the
+    // launch's state change) before the attempt is finished, and often
+    // sees a session end before its exit report says the server refused
+    // it. In every order a refusal is retried after the hold alone.
+    #[test]
+    fn refusals_retry_after_the_hold_whatever_order_the_window_sees_them_in() {
+        for (observe_before_finish, report_after_end) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let case = format!("early {observe_before_finish}, late {report_after_end}");
+            let mut host = Host::new();
+            let clock = Clock::default();
+            let mut scheduler = clock.controller();
+            scheduler.set_delay_seconds(60).unwrap();
+            host.sessions = vec![session(1, true)];
+            host.observe(&mut scheduler, &[choice()]);
+            host.sessions = vec![session(1, false)];
+            host.observe(&mut scheduler, &[choice()]);
+            clock.advance(60);
+            let mut launches = 0u64;
+            while let Some(attempt) = scheduler
+                .poll(true, &mut |_| Ok(LauncherCapability::AVAILABLE))
+                .unwrap()
+            {
+                launches += 1;
+                if launches == 10 {
+                    break;
+                }
+                // Starting: a refused login never reaches the world.
+                let mut launched = session(100 + launches, true);
+                launched.state = LauncherActivityState::Starting;
+                if observe_before_finish {
+                    host.sessions = vec![launched.clone()];
+                    host.observe(&mut scheduler, &[choice()]);
+                }
+                assert!(scheduler.finish(&attempt, Ok(launched)).is_none());
+                let mut ended = session(100 + launches, false);
+                if report_after_end {
+                    host.sessions = vec![ended.clone()];
+                    host.observe(&mut scheduler, &[choice()]);
+                }
+                ended.account_in_use = true;
+                ended.server_message =
+                    Some("Another account is already logged on from this client.".into());
+                host.sessions = vec![ended];
+                host.observe(&mut scheduler, &[choice()]);
+                host.observe(&mut scheduler, &[choice()]);
+                // Less than the delay: only the hold is waited out.
+                clock.advance(30);
+            }
+            assert_eq!(launches, 10, "{case}");
+        }
+    }
+
+    // Not an OpenAC test: a Stop that had to kill the client is the player's
+    // stop, so it is not relaunched (a graceful Stop still is, as above).
+    #[test]
+    fn a_forced_stop_is_not_relaunched() {
+        let mut host = Host::new();
+        let clock = Clock::default();
+        let mut scheduler = clock.controller();
+        scheduler.set_delay_seconds(5).unwrap();
+        host.sessions = vec![session(1, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        // The process is seen to end before the stop records the kill.
+        let mut stopping = session(1, false);
+        stopping.stop = Some(LauncherSessionStop::Requested);
+        host.sessions = vec![stopping.clone()];
+        host.observe(&mut scheduler, &[choice()]);
+        stopping.stop = Some(LauncherSessionStop::Forced);
+        host.sessions = vec![stopping];
+        host.observe(&mut scheduler, &[choice()]);
+        clock.advance(600);
+        host.poll(&mut scheduler, true);
+        assert!(host.launches.is_empty());
     }
 
     #[test]
