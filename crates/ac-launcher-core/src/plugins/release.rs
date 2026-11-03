@@ -342,6 +342,9 @@ pub struct PluginRepositoryResolution {
     pub plugins: Vec<PluginReleaseResolution>,
     /// When none was found, why (`Unavailable` when nothing more is known).
     pub failure: PluginReleaseResolveResult,
+    /// Why the repository's plugin index was ignored, when it was published
+    /// but could not be read: for the publisher, not the player.
+    pub index_warning: Option<String>,
 }
 
 /// Both candidates of one pass: the stable release (always) and the highest
@@ -651,6 +654,7 @@ impl PluginReleaseResolver {
             Ok(PluginRepositoryResolution {
                 plugins: Vec::new(),
                 failure,
+                index_warning: None,
             })
         };
         let tags = match pass.feed(repo, cancel)? {
@@ -674,17 +678,26 @@ impl PluginReleaseResolver {
         let names_others = tags
             .iter()
             .any(|tag| tag.starts_with("wasm-") && parse_release(tag, WASM_TAG_PREFIX).is_none());
-        if (names_others || newest.resolution().is_none())
-            && let IndexRead::Read(index) = pass.index(repo, cancel)?
-        {
-            for entry in &index.plugins {
-                add(&entry.id);
+        let mut index_warning = None;
+        if names_others || newest.resolution().is_none() {
+            match pass.index(repo, cancel)? {
+                IndexRead::Read(index) => {
+                    for entry in &index.plugins {
+                        add(&entry.id);
+                    }
+                }
+                IndexRead::Malformed(warning) => index_warning = Some(warning),
+                IndexRead::Missing | IndexRead::RateLimited => {}
             }
         }
         let mut plugins: Vec<PluginReleaseResolution> = Vec::new();
         let mut failures = Vec::new();
         for id in ids.iter().take(MAXIMUM_REPOSITORY_PLUGINS) {
-            match pass.resolve_plugin(repo, id, channel, cancel)? {
+            let candidates = pass.resolve_plugin_candidates(repo, id, channel, cancel)?;
+            if index_warning.is_none() {
+                index_warning.clone_from(&candidates.index_warning);
+            }
+            match candidates.for_channel(channel).clone() {
                 PluginReleaseResolveResult::Success(resolution) => {
                     if !plugins.iter().any(|known| {
                         known
@@ -709,7 +722,11 @@ impl PluginReleaseResolver {
                 .find(|failure| *failure != PluginReleaseResolveResult::Unavailable)
                 .unwrap_or(PluginReleaseResolveResult::Unavailable)
         };
-        Ok(PluginRepositoryResolution { plugins, failure })
+        Ok(PluginRepositoryResolution {
+            plugins,
+            failure,
+            index_warning,
+        })
     }
 
     /// `repo`'s feed tags, read once a pass.

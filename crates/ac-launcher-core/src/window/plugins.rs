@@ -137,7 +137,12 @@ impl PluginComposition {
     /// Keeps a repository's index warning in the launcher log: a publisher's
     /// mistake the player never sees.
     pub fn log_index_warning(&self, repo: &str, candidates: &PluginReleaseCandidates) {
-        if let Some(warning) = &candidates.index_warning {
+        self.log_index_warning_text(repo, candidates.index_warning.as_deref());
+    }
+
+    /// As [`Self::log_index_warning`], from the warning itself.
+    pub fn log_index_warning_text(&self, repo: &str, warning: Option<&str>) {
+        if let Some(warning) = warning {
             self.log
                 .line(&format!("Plugin index of {repo} ignored: {warning}"));
         }

@@ -3312,6 +3312,36 @@ fn add_from_url_marks_an_unlisted_plugin_of_a_listed_repository_unlisted() {
     );
 }
 
+#[test]
+fn add_from_url_logs_a_malformed_plugin_index() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0")]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(
+        window.plugins.install_dialog.display_name(),
+        "edwards.vision"
+    );
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert_eq!(
+        log.matches(&format!("Plugin index of {HELLO_REPO} ignored:"))
+            .count(),
+        1,
+        "{log}"
+    );
+}
+
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnUnlistedRepoOpensTheInstallDialog (the
 // unlisted notice, UnlistedInstallNoticeAddsANotOnTheListLine).
 #[test]
