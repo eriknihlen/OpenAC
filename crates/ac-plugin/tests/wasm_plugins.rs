@@ -896,6 +896,53 @@ fn a_plugin_built_for_api_1_5_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
+/// An object change reaches a plugin exactly as its API version encodes
+/// it, through a real module: `rawbytes` built for API 1.5 is handed the
+/// world object without the server's last position (byte for byte the 1.5
+/// encoding); built for this API it gets it.
+#[test]
+fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_6() {
+    use ac_plugin::abi::world::{ObjectChange, Position, WorldObject};
+    let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
+    let event = Event::ObjectChanged(ObjectChange {
+        object_id: 0x8012_D57D,
+        revision: 4,
+        current: Some(WorldObject {
+            object_id: 0x8012_D57D,
+            name: "Drift-Touched Tusker Bull".into(),
+            position: Some(Position::from_cell(0x0032_01DE, [92.7, -19.0, 18.0], 0.0)),
+            server_position: Some(server.clone()),
+            ..WorldObject::default()
+        }),
+        ..ObjectChange::default()
+    });
+    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+        let root = Root::new(&format!("raw-server-position-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        assert_eq!(handed, [event.to_bytes_at(version)], "{version}");
+        let Ok(Event::ObjectChanged(read)) = Event::from_bytes_at(&handed[0], version) else {
+            panic!("{version}: an object change");
+        };
+        let read = read.current.unwrap();
+        assert_eq!(read.name, "Drift-Touched Tusker Bull", "{version}");
+        if version == API_CURRENT {
+            assert_eq!(handed[0], event.to_bytes());
+            assert_eq!(read.server_position, Some(server.clone()));
+        } else {
+            assert!(handed[0].len() < event.to_bytes().len(), "{version}");
+            assert_eq!(read.server_position, None, "{version}");
+        }
+    }
+}
+
 /// A path preview's plan reaches a plugin exactly as its API version
 /// encodes it, through a real module: `rawbytes` built for API 1.4 is
 /// handed the plan without the grid it reused or the worker's time (byte

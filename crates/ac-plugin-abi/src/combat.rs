@@ -67,6 +67,11 @@ wire_record! {
         pub height_difference: f32,
         /// It died (this incarnation).
         pub is_dead: bool,
+        /// The last position the server sent for it. `distance`, the angle
+        /// and the height difference are measured to where the client has
+        /// it now (its simulated body), which can stand apart from this.
+        /// Added in API 1.6.
+        since (1, 6) pub server_position: Option<crate::world::Position>,
     }
 }
 

@@ -1647,7 +1647,9 @@ mod tests {
         let mut encodings = Encodings::new(&event);
         assert_eq!(encodings.at(API_CURRENT), event.to_bytes().as_slice());
         let older = encodings.at(v1_1).to_vec();
-        assert_eq!(older.len() + 4, event.to_bytes().len());
+        // The hook's item types (4 bytes) and, since API 1.6, the server's
+        // position (none: 1 byte) are left out.
+        assert_eq!(older.len() + 5, event.to_bytes().len());
         assert_eq!(encodings.at(v1_1), older.as_slice());
         assert_eq!(encodings.made.len(), 2);
         let Ok(Event::ObjectChanged(read)) = Event::from_bytes_at(&older, v1_1) else {

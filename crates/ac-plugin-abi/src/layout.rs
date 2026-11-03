@@ -204,7 +204,7 @@ mod tests {
     /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
     /// published the same value as 1.5: it added two values of a pointer
     /// event's kind byte, not a shape.
-    const PUBLISHED: u64 = 0x8389_0d22_d22f_1776;
+    const PUBLISHED: u64 = 0xc405_192c_0293_a6c2;
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;
@@ -281,7 +281,11 @@ mod tests {
                 && !API_1_1_IMPORTS.iter().any(|(i, _)| i == import)
                 && !API_1_4_CHANGED.iter().any(|(i, _)| i == import)
             {
-                assert_eq!(import.shape_at(v1_1), import.shape(), "{import:?}");
+                assert_eq!(
+                    import.shape_at(v1_1),
+                    shape_before_1_6(*import),
+                    "{import:?}"
+                );
             }
         }
         for (import, shape) in API_1_4_CHANGED {
@@ -359,8 +363,54 @@ mod tests {
                 .then(|| import.shape_at(v1_4));
             assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
             if expected.is_some() && !API_1_4_CHANGED.iter().any(|(i, _)| i == import) {
-                assert_eq!(import.shape_at(v1_4), import.shape(), "{import:?}");
+                assert_eq!(
+                    import.shape_at(v1_4),
+                    shape_before_1_6(*import),
+                    "{import:?}"
+                );
             }
+        }
+    }
+
+    /// The calls API 1.6 changed, with the shape each had before: the
+    /// world-object and hostile-target records gained the server's last
+    /// position.
+    const API_1_5_CHANGED: [(Import, u64); 3] = [
+        (Import::WorldObjects, 0x2b96_526a_8808_fe9b),
+        (Import::WorldObject, 0x9034_777b_f0a1_0329),
+        (Import::CombatHostileTargets, 0x4011_5314_7d89_c991),
+    ];
+
+    /// An import's shape as API 1.5 had it: its shape before API 1.6
+    /// changed it, else its shape now.
+    fn shape_before_1_6(import: Import) -> u64 {
+        API_1_5_CHANGED
+            .iter()
+            .find(|(i, _)| *i == import)
+            .map_or_else(|| import.shape(), |(_, shape)| *shape)
+    }
+
+    /// API 1.6 added a field at the end of the world-object and
+    /// hostile-target records, which changes the core shape (an event
+    /// carries a world object) and the calls in [`API_1_5_CHANGED`]: an API
+    /// 1.5 plugin keeps its own shapes for all of them, and every other
+    /// import it has is as it was.
+    #[test]
+    fn api_1_5_plugins_keep_their_world_object_shapes() {
+        let v1_5 = ApiVersion::new(1, 5);
+        assert_eq!(core_shape(v1_5), API_1_5_CORE);
+        assert_ne!(CORE_SHAPE, API_1_5_CORE);
+        for (import, shape) in API_1_5_CHANGED {
+            assert_eq!(import.shape_at(v1_5), shape, "{import:?}");
+            assert_ne!(import.shape(), shape, "{import:?}");
+        }
+        let section = PluginLayout::parse(&section_at(v1_5)).unwrap();
+        for import in Import::ALL {
+            let expected = import
+                .since()
+                .is_at_most(v1_5)
+                .then(|| shape_before_1_6(*import));
+            assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
         }
     }
 
@@ -472,7 +522,11 @@ mod tests {
             } else if !API_1_3_CHANGED.iter().any(|(changed, _)| changed == import)
                 && !API_1_4_CHANGED.iter().any(|(changed, _)| changed == import)
             {
-                assert_eq!(import.shape_at(v1_3), import.shape(), "{import:?}");
+                assert_eq!(
+                    import.shape_at(v1_3),
+                    shape_before_1_6(*import),
+                    "{import:?}"
+                );
             }
         }
         for (import, shape) in API_1_4_CHANGED {

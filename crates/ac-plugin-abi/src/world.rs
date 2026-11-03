@@ -341,6 +341,12 @@ wire_record! {
         /// Added in API 1.2: a plugin built for an older version is sent
         /// the record without it.
         since (1, 2) pub hook_item_types: u32,
+        /// The last position the server sent for it, when it is placed in
+        /// the world. [`Self::position`] is where the client has it now: a
+        /// creature's simulated body, which moves between the server's
+        /// positions and can stand apart from the last one. Added in API
+        /// 1.6.
+        since (1, 6) pub server_position: Option<Position>,
     }
 }
 

@@ -954,6 +954,35 @@ mod tests {
         assert!(essence.is_pet_device());
     }
 
+    // API 1.6: a hostile target and a world object carry the server's last
+    // position beside the client's own place, through the encoding.
+    #[test]
+    fn a_hostile_target_carries_the_servers_last_position() {
+        use ac_plugin_abi::combat::CombatTarget;
+        use ac_plugin_abi::world::{Position, WorldObject};
+
+        let mut fake = FakeHost::new("test.targets");
+        let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
+        fake.set_reply::<calls::CombatHostileTargets>(&vec![CombatTarget {
+            object_id: 0x8012_D57D,
+            distance: 2.38,
+            server_position: Some(server.clone()),
+            ..CombatTarget::default()
+        }]);
+        fake.set_reply::<calls::WorldObject>(&Some(WorldObject {
+            object_id: 0x8012_D57D,
+            position: Some(Position::from_cell(0x0032_01DE, [92.0, -19.0, 18.0], 0.0)),
+            server_position: Some(server.clone()),
+            ..WorldObject::default()
+        }));
+        let mut host = Host::with_transport(&mut fake);
+        let targets = host.hostile_targets(5.0);
+        assert_eq!(targets[0].server_position.as_ref(), Some(&server));
+        let object = host.object(0x8012_D57D).unwrap();
+        assert_eq!(object.server_position, Some(server));
+        assert_ne!(object.position, object.server_position);
+    }
+
     // OpenAC `NavigationAutomation.cs`: `INavigationAutomation.CheckRoomAhead`
     // answers Unknown by default; then a clear answer a test sets coming
     // back through the encoding.

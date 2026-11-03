@@ -104,7 +104,12 @@ for an older version hears neither. API 1.6 also added plugin
 services, through which plugins built to work together call each other
 ([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
 `Callback::ServiceRequest`, which a plugin built for an older version never
-gets. Everything the client offers
+gets. It also added
+`server_position` at the end of `WorldObject` and `CombatTarget`: the last
+position the server sent for the object, beside `position` (and, for a target,
+`distance`), which give where the client has it now, a creature's simulated
+body. The two can stand apart while the body catches up to the server's
+place. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.

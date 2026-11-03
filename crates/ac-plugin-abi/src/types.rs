@@ -202,6 +202,9 @@ wire_union! {
     /// new API minor versions (marked `since`), so a plugin matches with a
     /// catch-all arm; the client sends a plugin only the kinds of the API
     /// version it was built for.
+    // An object change carries a whole world object, so it is the largest
+    // kind by far; boxing it would change the type every plugin matches on.
+    #[allow(clippy::large_enum_variant)]
     #[non_exhaustive]
     pub enum Event: "event" {
         /// A window attached to (`true`) or left (`false`) the session.
