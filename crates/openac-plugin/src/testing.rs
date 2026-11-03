@@ -704,11 +704,13 @@ mod tests {
         fake.set_reply::<calls::LandscapeTerrainPalette>(&vec![TerrainColor {
             terrain_type: 1,
             rgb: 0x5A_5E30,
+            map_rgb: 0x64_9664,
             name: Some("Grassland".into()),
         }]);
         let mut host = Host::with_transport(&mut fake);
         assert_eq!(host.landscape_terrain(&[0xA9B4, 0xFF00]), [holtburg]);
-        assert_eq!(host.terrain_palette()[0].rgb, 0x5A_5E30);
+        let palette = host.terrain_palette();
+        assert_eq!((palette[0].rgb, palette[0].map_rgb), (0x5A_5E30, 0x64_9664));
         assert_eq!(
             fake.requests::<calls::LandscapeTerrain>(),
             [vec![0xA9B4], vec![0xA9B4, 0xFF00]]

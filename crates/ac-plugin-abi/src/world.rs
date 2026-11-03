@@ -798,17 +798,28 @@ impl LandblockTerrain {
     }
 }
 
+/// The palette entry for roads ([`TerrainColor::terrain_type`]): not a
+/// terrain type a vertex has, but the texture the game lays over the ground
+/// where a vertex's [`TerrainVertex::road`] bits are non-zero.
+pub const ROAD_TERRAIN_TYPE: u8 = 32;
+
 wire_record! {
     /// How one of the region's terrain types looks (API 1.5), so a map
-    /// drawn from [`LandblockTerrain`] looks like the game.
+    /// drawn from [`LandblockTerrain`] looks like the game. The palette
+    /// also has one entry for roads, [`ROAD_TERRAIN_TYPE`].
     pub struct TerrainColor {
-        /// The terrain type, as [`TerrainVertex::terrain_type`] names it.
+        /// The terrain type, as [`TerrainVertex::terrain_type`] names it,
+        /// or [`ROAD_TERRAIN_TYPE`].
         pub terrain_type: u8,
         /// The mean colour of the type's landscape texture, `0xRRGGBB`; 0
         /// when the game files have no texture for it.
         pub rgb: u32,
-        /// The type's name as the game files give it; none when they give
-        /// none.
+        /// The colour the game's data assigns the type for maps,
+        /// `0xRRGGBB`, as the region file stores it. The region has none
+        /// for roads: their entry repeats `rgb`.
+        pub map_rgb: u32,
+        /// The type's name as the game files give it, "Road" for roads;
+        /// none when the files give none.
         pub name: Option<String>,
     }
 }
@@ -1041,11 +1052,13 @@ mod tests {
             TerrainColor {
                 terrain_type: 1,
                 rgb: 0x5A_5E30,
+                map_rgb: 0x64_9664,
                 name: Some("Grassland".into()),
             },
             TerrainColor {
                 terrain_type: 2,
                 rgb: 0,
+                map_rgb: 0,
                 name: None,
             },
         ];

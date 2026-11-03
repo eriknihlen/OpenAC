@@ -9,7 +9,9 @@ mod support;
 use std::time::Instant;
 
 use ac_dat::objects::{LandBlock, Region};
-use ac_nav::landscape::{LandscapeTerrainCache, read_landblock_terrain, read_terrain_palette};
+use ac_nav::landscape::{
+    LandscapeTerrainCache, ROAD_TERRAIN_TYPE, read_landblock_terrain, read_terrain_palette,
+};
 use ac_physics::TerrainSurface;
 
 /// The region record: terrain types, textures and the height table.
@@ -93,7 +95,7 @@ fn a_sea_landblock_is_all_water_and_one_the_files_lack_has_none() {
 
 #[test]
 #[ignore = "needs the retail dat files"]
-fn every_terrain_type_has_a_colour_and_the_regions_name() {
+fn every_terrain_type_and_the_road_have_their_colours_and_names() {
     let dats = support::dats();
     let region = region(&dats);
     let started = Instant::now();
@@ -103,18 +105,30 @@ fn every_terrain_type_has_a_colour_and_the_regions_name() {
         palette.len(),
         started.elapsed().as_secs_f64() * 1000.0
     );
-    assert_eq!(palette.len(), region.terrain_info.terrain_types.len());
-    for (i, (colour, defined)) in palette
-        .iter()
-        .zip(&region.terrain_info.terrain_types)
-        .enumerate()
-    {
+    // One entry a terrain type, then the road.
+    let types = &region.terrain_info.terrain_types;
+    assert_eq!(palette.len(), types.len() + 1);
+    for (i, (colour, defined)) in palette.iter().zip(types).enumerate() {
         assert_eq!(usize::from(colour.terrain_type), i);
         assert_ne!(colour.rgb, 0, "{i} {:?}", colour.name);
         assert!(colour.rgb <= 0xFF_FFFF);
+        let c = defined.terrain_color;
+        let map = u32::from(c.red) << 16 | u32::from(c.green) << 8 | u32::from(c.blue);
+        assert_eq!(colour.map_rgb, map, "{i}");
         assert_eq!(colour.name.as_deref(), Some(defined.terrain_name.as_str()));
-        println!("{i:2} {:06X} {:?}", colour.rgb, colour.name);
+        println!(
+            "{i:2} texture {:06X} map {:06X} {:?}",
+            colour.rgb, colour.map_rgb, colour.name
+        );
     }
+    // The dat's golden: the first type's map colour is stored 0xFF649664.
+    assert_eq!(palette[0].map_rgb, 0x0064_9664);
+    let road = palette.last().unwrap();
+    println!("road texture {:06X}", road.rgb);
+    assert_eq!(road.terrain_type, ROAD_TERRAIN_TYPE);
+    assert_eq!(road.name.as_deref(), Some("Road"));
+    assert_ne!(road.rgb, 0);
+    assert_eq!(road.map_rgb, road.rgb);
 }
 
 /// A full request (256 landblocks, a 16 by 16 square around Holtburg) read

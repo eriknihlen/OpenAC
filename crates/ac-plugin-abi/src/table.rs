@@ -410,8 +410,10 @@ macro_rules! import_table {
             LandscapeTerrain = landscape_terrain(Vec<u16>) -> Vec<$crate::world::LandblockTerrain>,
                 permission: None, window: false, since: (1, 5);
             /// Each terrain type the region defines, with the mean colour
-            /// of its landscape texture and its name (API 1.5); empty
-            /// without the game files.
+            /// of its landscape texture, the colour the game's data assigns
+            /// it for maps and its name, then the road's entry
+            /// (`world::ROAD_TERRAIN_TYPE`) (API 1.5); empty without the
+            /// game files.
             LandscapeTerrainPalette = landscape_terrain_palette(())
                 -> Vec<$crate::world::TerrainColor>,
                 permission: None, window: false, since: (1, 5);

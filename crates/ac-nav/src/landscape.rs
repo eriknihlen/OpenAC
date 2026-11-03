@@ -9,11 +9,17 @@ use std::sync::Arc;
 use ac_dat::DatError;
 
 use ac_dat::objects::{
-    LandBlock, Palette, RenderSurface, SurfaceTexture, TerrainDesc, VERTEX_COUNT, VERTICES_PER_SIDE,
+    LandBlock, Palette, RenderSurface, SurfaceTexture, TerrainDesc, TmTerrainDesc, VERTEX_COUNT,
+    VERTICES_PER_SIDE,
 };
 use ac_dat::texture::{self, DecodeOptions, TextureError};
 use ac_physics::TerrainSurface;
 use ac_physics::content::DatSource;
+
+/// The palette entry for the road: the texture laid where a vertex's road
+/// bits are set, after the 32 terrain types.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub const ROAD_TERRAIN_TYPE: u8 = TmTerrainDesc::ROAD_TERRAIN_TYPE as u8;
 
 /// How many landblocks' terrain is kept; the landblock read longest ago
 /// goes first once it is full. Four full requests' worth.
@@ -108,15 +114,19 @@ impl LandscapeTerrainCache {
     }
 }
 
-/// How one of the region's terrain types looks.
+/// How one of the region's terrain types, or the road, looks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerrainColor {
-    /// The terrain type.
+    /// The terrain type, or [`ROAD_TERRAIN_TYPE`] for the road.
     pub terrain_type: u8,
     /// The mean colour of its landscape texture, `0xRRGGBB`; 0 when the
     /// files have no texture for it.
     pub rgb: u32,
-    /// Its name as the region gives it; none for an empty one.
+    /// The colour the region assigns the type for maps, `0xRRGGBB`; the
+    /// region has none for the road, whose entry repeats `rgb`.
+    pub map_rgb: u32,
+    /// Its name as the region gives it, "Road" for the road; none for an
+    /// empty one.
     pub name: Option<String>,
 }
 
@@ -159,10 +169,13 @@ impl From<DatError> for PaletteError {
 const TERRAIN_TYPE_COUNT: usize = 32;
 
 /// Each terrain type the region's terrain description `terrain` defines, in
-/// type order: the mean colour of the landscape texture the region gives it
-/// and its name. The texture is the first the region lists for the type,
-/// as the landscape is drawn, decoded as the renderer decodes it: the
-/// texture's first (full-size) image with its default palette.
+/// type order, then the road when the region lists a road texture: the
+/// mean colour of the landscape texture the region gives each, the colour
+/// the region assigns each type for maps, and its name. The texture is the
+/// first the region lists for the type, as the landscape is drawn, decoded
+/// as the renderer decodes it: the texture's first (full-size) image with
+/// its default palette. The region has no map colour or name for the road:
+/// its entry repeats the texture's colour and is named "Road".
 ///
 /// # Errors
 /// A dat read failure, or a texture that does not decode.
@@ -171,25 +184,41 @@ pub fn read_terrain_palette<D: DatSource>(
     terrain: &TerrainDesc,
 ) -> Result<Vec<TerrainColor>, PaletteError> {
     let textures = &terrain.land_surfaces.tex_merge.terrain_desc;
-    let mut palette = Vec::with_capacity(terrain.terrain_types.len());
+    let first_texture = |terrain_type: i32| {
+        textures
+            .iter()
+            .find(|desc| desc.terrain_type == terrain_type)
+            .map(|desc| desc.terrain_tex.texture_id)
+    };
+    let mean_of = |texture_id: Option<u32>| -> Result<u32, PaletteError> {
+        Ok(match texture_id {
+            Some(id) => texture_mean_rgb(dats, id)?.unwrap_or(0),
+            None => 0,
+        })
+    };
+    let mut palette = Vec::with_capacity(terrain.terrain_types.len() + 1);
     for (index, defined) in terrain
         .terrain_types
         .iter()
         .enumerate()
         .take(TERRAIN_TYPE_COUNT)
     {
-        let texture_id = textures
-            .iter()
-            .find(|desc| usize::try_from(desc.terrain_type) == Ok(index))
-            .map(|desc| desc.terrain_tex.texture_id);
-        let rgb = match texture_id {
-            Some(id) => texture_mean_rgb(dats, id)?.unwrap_or(0),
-            None => 0,
-        };
+        let terrain_type = u8::try_from(index).unwrap_or(u8::MAX);
+        let map = defined.terrain_color;
         palette.push(TerrainColor {
-            terrain_type: u8::try_from(index).unwrap_or(u8::MAX),
-            rgb,
+            terrain_type,
+            rgb: mean_of(first_texture(i32::from(terrain_type)))?,
+            map_rgb: u32::from(map.red) << 16 | u32::from(map.green) << 8 | u32::from(map.blue),
             name: Some(defined.terrain_name.clone()).filter(|name| !name.is_empty()),
+        });
+    }
+    if let Some(road) = first_texture(TmTerrainDesc::ROAD_TERRAIN_TYPE) {
+        let rgb = mean_of(Some(road))?;
+        palette.push(TerrainColor {
+            terrain_type: ROAD_TERRAIN_TYPE,
+            rgb,
+            map_rgb: rgb,
+            name: Some("Road".to_owned()),
         });
     }
     Ok(palette)

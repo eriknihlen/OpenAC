@@ -704,6 +704,11 @@ pub struct TmTerrainDesc {
 }
 
 impl TmTerrainDesc {
+    /// The terrain-type value the region's texture list gives the road
+    /// texture, laid where a vertex's road bits are set; the landscape's
+    /// own terrain types are 0 to 31.
+    pub const ROAD_TERRAIN_TYPE: i32 = 0x20;
+
     fn unpack(r: &mut Reader<'_>) -> Result<Self> {
         Ok(Self {
             terrain_type: r.i32()?,

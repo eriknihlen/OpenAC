@@ -193,10 +193,13 @@ impl Host<'_> {
         self.call::<calls::LandscapeTerrain>(&landblocks.to_vec())
     }
 
-    /// Each terrain type the region defines, with the mean colour of its
-    /// landscape texture (`0xRRGGBB`) and its name (API 1.5), so a map
-    /// drawn from [`Self::landscape_terrain`] looks like the game. Worked
-    /// out once a session; empty without the game files.
+    /// Each terrain type the region defines (API 1.5), with the mean colour
+    /// of its landscape texture (`rgb`), the colour the game's data assigns
+    /// it for maps (`map_rgb`), both `0xRRGGBB`, and its name; then one
+    /// entry for roads, [`ROAD_TERRAIN_TYPE`](crate::world::ROAD_TERRAIN_TYPE),
+    /// to draw where a vertex's `road` is non-zero. So a map drawn from
+    /// [`Self::landscape_terrain`] looks like the game. Worked out once a
+    /// session; empty without the game files.
     pub fn terrain_palette(&mut self) -> Vec<TerrainColor> {
         self.call::<calls::LandscapeTerrainPalette>(&())
     }

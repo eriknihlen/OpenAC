@@ -39,9 +39,6 @@ use crate::world_frame::LandblockCoord;
 /// The retail region (terrain textures, height table, sky).
 pub const REGION_ID: u32 = 0x1300_0000;
 
-/// The terrain-type value of roads in the region's texture list.
-const ROAD_TERRAIN_TYPE: i32 = 0x20;
-
 /// A four-byte-per-texel image with its mip chain (level 0 first): RGBA,
 /// or BGRA for the terrain layers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,7 +215,7 @@ pub fn build_terrain_atlas(
         {
             *slot = layer;
         }
-        if *terrain_type == ROAD_TERRAIN_TYPE {
+        if *terrain_type == ac_dat::objects::TmTerrainDesc::ROAD_TERRAIN_TYPE {
             blending.road_layer = layer;
         }
         tiling_entries.push((u32::from(layer), *tiling));

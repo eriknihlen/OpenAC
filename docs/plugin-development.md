@@ -299,10 +299,18 @@ in the files is left out. A call answers at most 256 landblocks
 so a map of the whole world asks for it a page at a time over several ticks.
 Each landblock is read once and kept; a full request takes a few
 milliseconds at most.
-`Host::terrain_palette()` gives each terrain type the region defines its
-name and the mean colour of its landscape texture, `0xRRGGBB`, so a map
-looks like the game. It is worked out once a session, about 20 ms the first
-time. Neither needs a permission; both are empty without the game files.
+`Host::terrain_palette()` lists each terrain type the region defines, so a
+map looks like the game. Each `TerrainColor` has the type's name and two
+colours, both `0xRRGGBB`. `rgb` is the mean colour of the type's landscape
+texture, what the ground looks like close up. `map_rgb` is the colour the
+game's data assigns the type for maps. After the 32 terrain types comes one
+entry for roads, `terrain_type` 32 (`world::ROAD_TERRAIN_TYPE`), named
+"Road": its `rgb` is the mean colour of the road texture, and since the
+game's data gives roads no map colour, its `map_rgb` repeats `rgb`. Use it
+where a vertex's `road` is non-zero; there the game draws the road over the
+vertex's terrain type. The palette is worked out once a session, about 20 ms
+the first time. Neither call needs a permission; both are empty without the
+game files.
 
 ## Testing natively
 

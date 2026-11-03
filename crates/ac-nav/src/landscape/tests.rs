@@ -122,10 +122,17 @@ fn the_mean_colour_is_each_channels_rounded_mean() {
     assert_eq!(mean_rgb(&[255, 128, 0, 255]), 0xFF_80_00);
 }
 
-fn terrain_type(name: &str) -> TerrainType {
+/// A terrain type with its map colour, `0xRRGGBB`.
+fn terrain_type(name: &str, map_rgb: u32) -> TerrainType {
+    let [_, red, green, blue] = map_rgb.to_be_bytes();
     TerrainType {
         terrain_name: name.to_owned(),
-        terrain_color: ColorArgb::default(),
+        terrain_color: ColorArgb {
+            blue,
+            green,
+            red,
+            alpha: 255,
+        },
         scene_types: Vec::new(),
     }
 }
@@ -198,9 +205,9 @@ fn each_terrain_type_has_its_first_textures_mean_colour_and_its_name() {
     );
     let terrain = TerrainDesc {
         terrain_types: vec![
-            terrain_type("BarrenRock"),
-            terrain_type("Grassland"),
-            terrain_type(""),
+            terrain_type("BarrenRock", 0x64_9664),
+            terrain_type("Grassland", 0x12_3456),
+            terrain_type("", 0),
         ],
         land_surfaces: LandSurf {
             surf_type: 0,
@@ -213,7 +220,7 @@ fn each_terrain_type_has_its_first_textures_mean_colour_and_its_name() {
                     desc(0, 0x0500_0001),
                     desc(1, 0x0500_0003),
                     desc(0, 0x0500_0002),
-                    // The road texture is not a terrain type.
+                    // The road texture: its own entry, after the types.
                     desc(32, 0x0500_0002),
                 ],
             },
@@ -226,19 +233,57 @@ fn each_terrain_type_has_its_first_textures_mean_colour_and_its_name() {
             TerrainColor {
                 terrain_type: 0,
                 rgb: 0x0064_0032,
+                map_rgb: 0x0064_9664,
                 name: Some("BarrenRock".into()),
             },
             TerrainColor {
                 terrain_type: 1,
-                rgb: 0x00_46_00,
+                rgb: 0x0000_4600,
+                map_rgb: 0x0012_3456,
                 name: Some("Grassland".into()),
             },
             // No texture listed, and no name.
             TerrainColor {
                 terrain_type: 2,
                 rgb: 0,
+                map_rgb: 0,
                 name: None,
             },
+            // The region gives the road no map colour: it repeats the
+            // texture's.
+            TerrainColor {
+                terrain_type: ROAD_TERRAIN_TYPE,
+                rgb: 0x0009_0909,
+                map_rgb: 0x0009_0909,
+                name: Some("Road".into()),
+            },
         ]
+    );
+}
+
+#[test]
+fn without_a_road_texture_the_palette_has_no_road() {
+    let terrain = TerrainDesc {
+        terrain_types: vec![terrain_type("BarrenRock", 0x64_9664)],
+        land_surfaces: LandSurf {
+            surf_type: 0,
+            tex_merge: TexMerge {
+                base_tex_size: 2,
+                corner_terrain_maps: Vec::new(),
+                side_terrain_maps: Vec::new(),
+                road_maps: Vec::new(),
+                terrain_desc: Vec::new(),
+            },
+        },
+    };
+    let palette = read_terrain_palette(&FakeDats::default(), &terrain).unwrap();
+    assert_eq!(
+        palette,
+        [TerrainColor {
+            terrain_type: 0,
+            rgb: 0,
+            map_rgb: 0x0064_9664,
+            name: Some("BarrenRock".into()),
+        }]
     );
 }

@@ -641,6 +641,7 @@ impl PluginBinding<'_> {
             .map(|c| abi::TerrainColor {
                 terrain_type: c.terrain_type,
                 rgb: c.rgb,
+                map_rgb: c.map_rgb,
                 name: c.name,
             })
             .collect();

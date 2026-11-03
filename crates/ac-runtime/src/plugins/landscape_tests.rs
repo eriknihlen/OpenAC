@@ -6,7 +6,9 @@ use std::time::Instant;
 
 use ac_dat::objects::LandBlock;
 use ac_physics::TerrainSurface;
-use ac_plugin::abi::world::{LANDSCAPE_TERRAIN_MAX, LandblockTerrain, TerrainColor};
+use ac_plugin::abi::world::{
+    LANDSCAPE_TERRAIN_MAX, LandblockTerrain, ROAD_TERRAIN_TYPE, TerrainColor,
+};
 use ac_plugin::abi::{Wire, calls};
 use ac_plugin::{Caller, SessionApi};
 
@@ -137,11 +139,11 @@ fn a_request_is_answered_for_its_first_256_landblocks() {
     assert_eq!(again, answered);
 }
 
-/// One colour a terrain type, each with the region's name, worked out once
-/// and kept.
+/// One entry a terrain type, each with its texture and map colours and the
+/// region's name, then the road's; worked out once and kept.
 #[test]
 #[ignore = "needs the retail dat files"]
-fn every_terrain_type_has_a_colour_and_its_name() {
+fn every_terrain_type_and_the_road_have_their_colours_and_names() {
     let mut session = Session::at(60.0, 150.0);
     let started = Instant::now();
     let colours = palette(&mut session);
@@ -156,7 +158,7 @@ fn every_terrain_type_has_a_colour_and_its_name() {
         kept.as_secs_f64() * 1000.0
     );
     let region = content().region().expect("the region");
-    assert_eq!(colours.len(), region.terrain_info.terrain_types.len());
+    assert_eq!(colours.len(), region.terrain_info.terrain_types.len() + 1);
     for (i, (colour, defined)) in colours
         .iter()
         .zip(&region.terrain_info.terrain_types)
@@ -165,6 +167,16 @@ fn every_terrain_type_has_a_colour_and_its_name() {
         assert_eq!(usize::from(colour.terrain_type), i);
         assert!(colour.rgb != 0 && colour.rgb <= 0xFF_FFFF, "{colour:?}");
         assert_eq!(colour.name.as_deref(), Some(defined.terrain_name.as_str()));
+        let c = defined.terrain_color;
+        let map = u32::from(c.red) << 16 | u32::from(c.green) << 8 | u32::from(c.blue);
+        assert_eq!(colour.map_rgb, map, "{colour:?}");
     }
+    let road = colours.last().unwrap();
+    assert_eq!(
+        (road.terrain_type, road.name.as_deref()),
+        (ROAD_TERRAIN_TYPE, Some("Road"))
+    );
+    assert!(road.rgb != 0 && road.map_rgb == road.rgb, "{road:?}");
+    assert_eq!(ROAD_TERRAIN_TYPE, ac_nav::landscape::ROAD_TERRAIN_TYPE);
     assert_eq!(again, colours);
 }

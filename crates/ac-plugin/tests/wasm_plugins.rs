@@ -123,6 +123,7 @@ impl SessionApi for FakeSession {
                     vec![ac_plugin::abi::world::TerrainColor {
                         terrain_type: 1,
                         rgb: 0x5A_5E30,
+                        map_rgb: 0x64_9664,
                         name: Some("Grassland".into()),
                     }]
                 })
@@ -1623,7 +1624,7 @@ fn the_landscape_reads_reach_a_real_plugin() {
     let palette =
         Vec::<TerrainColor>::from_bytes(&reply(2, Import::LandscapeTerrainPalette, &[])).unwrap();
     assert_eq!(palette.len(), 1);
-    assert_eq!(palette[0].rgb, 0x5A_5E30);
+    assert_eq!((palette[0].rgb, palette[0].map_rgb), (0x5A_5E30, 0x64_9664));
     assert_eq!(palette[0].name.as_deref(), Some("Grassland"));
     plugins.shutdown(&mut api);
 }
