@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "ac-audio"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-dat",
  "cpal",
@@ -32,14 +32,14 @@ dependencies = [
 
 [[package]]
 name = "ac-bits"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "ac-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "glam",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "ac-dat"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "ac-host"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-host",
  "ac-plugin",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-net"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-host",
  "ac-launcher-core",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "ac-motion"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-dat",
  "glam",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "ac-nav"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "ac-net"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "ac-physics"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -148,14 +148,14 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-abi"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-plugin-ui",
 ]
 
 [[package]]
 name = "ac-plugin-net"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-plugin-abi",
  "ac-proxy",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-ui"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "fontdue",
  "miniz_oxide",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "ac-proto"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "ac-proxy"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "sha2 0.11.0",
  "windows-sys 0.61.2",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "ac-render"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-audio",
  "ac-bits",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "ac-runtime"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -259,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "ac-vfx"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "actool"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -2389,7 +2389,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openac"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "openac-launcher"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-host",
  "ac-launcher-core",
@@ -2424,7 +2424,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
@@ -2435,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin-compat"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "fancy-regex",
  "thiserror 2.0.21",
@@ -2594,7 +2594,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plugincheck"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ac-host",
  "ac-launcher-core",
