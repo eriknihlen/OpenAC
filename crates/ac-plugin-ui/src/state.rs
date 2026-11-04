@@ -1707,9 +1707,10 @@ impl PluginUi {
         std::mem::take(&mut self.theme_changed).then_some(self.theme)
     }
 
-    /// A held pointer's move or release, or a hover, as the plugin should
-    /// hear it, just before it does: measured from where the plugin last put
-    /// the canvas, not from where the window still had it. A plugin that
+    /// A held pointer's move or release, or a hover or its leave, as the
+    /// plugin should hear it, just before it does: measured from where the
+    /// plugin last put the canvas, not from where the window still had it
+    /// (a hover and its leave share one reference). A plugin that
     /// moves its canvas by how far the pointer is from a grabbed point would
     /// otherwise count each step again until the window caught up, and
     /// overshoot. A press stays as the player saw it, and so does an event
@@ -1727,7 +1728,7 @@ impl PluginUi {
         if let Some(place) = place
             && matches!(
                 pointer.kind,
-                PointerKind::Move | PointerKind::Up | PointerKind::Hover
+                PointerKind::Move | PointerKind::Up | PointerKind::Hover | PointerKind::Leave
             )
             && let Some(c) = self.canvases.iter().find(|c| c.id == canvas)
         {

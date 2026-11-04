@@ -2827,6 +2827,16 @@ impl AttachedWindow {
         self.follow_settings();
     }
 
+    /// The cursor left the window: the UI's hover ends there (its tooltip
+    /// goes, a plugin canvas hears its leave).
+    pub(crate) fn cursor_left(&mut self) {
+        let routed = match self.ui.as_mut() {
+            Some(ui) if self.input.is_accepting() => ui_input::left::<KeyCode>(ui.host_mut()),
+            _ => return,
+        };
+        let _ = self.after_ui(routed);
+    }
+
     /// The cursor moved: the UI hovers and drags; over the world, dragging
     /// with the left button turns the orbit camera.
     pub(crate) fn cursor_moved(&mut self, x: f64, y: f64) {

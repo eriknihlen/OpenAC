@@ -729,6 +729,9 @@ fn a_held_pointer_is_measured_from_where_the_plugin_last_put_the_canvas() {
     assert_eq!(heard(&ui, PointerKind::Up), (5.0, 15.0));
     // A press stays as the player saw it.
     assert_eq!(heard(&ui, PointerKind::Down), (15.0, 25.0));
+    // A hover and its leave are measured alike.
+    assert_eq!(heard(&ui, PointerKind::Hover), (5.0, 15.0));
+    assert_eq!(heard(&ui, PointerKind::Leave), (5.0, 15.0));
 }
 
 #[test]

@@ -837,6 +837,7 @@ impl ApplicationHandler<HostCommand> for HostApp {
             WindowEvent::CursorMoved { position, .. } => {
                 window.cursor_moved(position.x, position.y);
             }
+            WindowEvent::CursorLeft { .. } => window.cursor_left(),
             _ => {}
         }
     }

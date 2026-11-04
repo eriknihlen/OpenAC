@@ -162,6 +162,13 @@ pub fn button<K>(
     Routed::new(world.filter(|_| fell), outputs)
 }
 
+/// The pointer left the window: nothing in it is hovered any more (a
+/// tooltip goes, a plugin canvas hears its leave). The world hears nothing.
+pub fn left<K>(ui: &mut UiHost) -> Routed<K> {
+    ui.pointer_left();
+    Routed::new(None, ui.take_outputs())
+}
+
 /// The pointer moved to window pixel (`x`, `y`).
 pub fn moved<K>(ui: &mut UiHost, x: i32, y: i32, mouse_look: bool) -> Routed<K> {
     if mouse_look {
@@ -316,6 +323,16 @@ mod tests {
         assert_eq!(r.world, Some(WorldInput::KeyUp(17)));
         // An F-key while typing is the entry's too (keyboard captured).
         assert_eq!(down(&mut ui, 62, Key::F4, None).world, None);
+    }
+
+    #[test]
+    fn the_pointer_leaving_the_window_ends_the_hover_and_the_world_hears_nothing() {
+        let (mut ui, entry) = host();
+        let _: Routed<u32> = moved(&mut ui, 20, 20, false);
+        assert_eq!(ui.root.hovered(), Some(entry));
+        let r: Routed<u32> = left(&mut ui);
+        assert_eq!(r.world, None);
+        assert_eq!(ui.root.hovered(), None);
     }
 
     #[test]

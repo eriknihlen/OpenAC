@@ -1017,6 +1017,13 @@ impl UiRoot {
         }
     }
 
+    /// True while any mouse button is held, wherever it went down (the
+    /// world takes no capture, so its drags reach the UI as plain moves).
+    #[must_use]
+    pub fn any_button_down(&self) -> bool {
+        self.left_down || self.right_down || self.middle_down
+    }
+
     /// The element with keyboard focus.
     #[must_use]
     pub fn keyboard_focus(&self) -> Option<ElementId> {
@@ -2134,7 +2141,7 @@ impl UiRoot {
 
     /// Nothing is hovered any more: the hovered element hears it left, and
     /// a tooltip it showed goes.
-    fn leave_hover(&mut self) {
+    pub fn leave_hover(&mut self) {
         if let Some(hover) = self.hover {
             let e = self.event_for(hover, kind::HOVER_LEAVE);
             self.send_event(hover, &e);

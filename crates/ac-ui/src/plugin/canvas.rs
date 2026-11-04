@@ -188,9 +188,10 @@ impl CanvasWidget {
 
     /// The pointer is over it with no button held (`e` element-local). The
     /// same place again (the UI checking the hover after a wheel turn) is
-    /// not news.
-    fn hover(&mut self, e: &UiEvent) -> bool {
-        if !self.canvas.takes_input() {
+    /// not news. A button held anywhere (a drag begun on the world, which
+    /// takes no capture) makes the moves over it no hover.
+    fn hover(&mut self, ui: &UiRoot, e: &UiEvent) -> bool {
+        if !self.canvas.takes_input() || ui.any_button_down() {
             return false;
         }
         let at = (e.data1, e.data2, e.modifiers.0 & 7);
@@ -253,9 +254,9 @@ impl Widget for CanvasWidget {
                     );
                     true
                 }
-                None => self.hover(e),
+                None => self.hover(ui, e),
             },
-            kind::HOVER_ENTER => self.held.is_none() && self.hover(e),
+            kind::HOVER_ENTER => self.held.is_none() && self.hover(ui, e),
             kind::HOVER_LEAVE => {
                 self.leave(ui, me);
                 false
@@ -535,6 +536,21 @@ impl CanvasLayer {
                 e.width = size.0;
                 e.height = size.1;
                 e.click_through = !takes_input;
+            }
+            if !takes_input {
+                // It stopped taking the pointer: the hover ends now, though
+                // the pointer may not move again, and a listen after starts
+                // a new stretch.
+                if ui.hovered() == Some(el) {
+                    ui.leave_hover();
+                }
+                let (mx, my) = ui.mouse();
+                let (sx, sy) = ui.screen_position(el);
+                if let Some(w) = ui.widget_mut::<CanvasWidget>(el)
+                    && w.hovering.take().is_some()
+                {
+                    w.deliver(PointerKind::Leave, mx as f32 - sx, my as f32 - sy, 0, 0, 0);
+                }
             }
             ui.set_visible(el, canvas.visible);
         }

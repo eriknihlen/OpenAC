@@ -410,6 +410,12 @@ impl UiHost {
         self.pump();
     }
 
+    /// The pointer left the window: nothing is hovered any more.
+    pub fn pointer_left(&mut self) {
+        self.root.leave_hover();
+        self.pump();
+    }
+
     /// Mouse button down.
     pub fn mouse_down(&mut self, button: MouseButton, x: i32, y: i32, flags: u32) {
         self.root.on_mouse_down(button, x, y, flags);
