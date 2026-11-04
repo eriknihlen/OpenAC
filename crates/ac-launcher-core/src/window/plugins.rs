@@ -245,6 +245,7 @@ impl PluginComposition {
         let mut update_withheld_reasons = HashMap::new();
         if !rate_limited {
             let resolver = self.release_resolver.pass();
+            let mut warned = HashSet::new();
             for info in &installed {
                 let Some(record) = self.find_record(&info.id) else {
                     continue;
@@ -252,8 +253,14 @@ impl PluginComposition {
                 if record.pending.is_some() {
                     continue;
                 }
-                let check =
-                    self.evaluate_update(&resolver, &record, catalog.as_ref(), client, cancel);
+                let check = self.evaluate_update(
+                    &resolver,
+                    &record,
+                    catalog.as_ref(),
+                    client,
+                    &mut warned,
+                    cancel,
+                );
                 if let Some(available) = check.available {
                     updates_available.insert(info.id.to_lowercase(), available);
                 } else if let Some(reason) = check.withheld_reason {
@@ -320,19 +327,22 @@ impl PluginComposition {
             &record,
             catalog.as_ref(),
             client,
+            &mut HashSet::new(),
             cancel,
         )
     }
 
     /// An advisory badge, not an enforcement decision (the installer refuses
     /// the update itself). Names a reason only when a newer release exists
-    /// but is not offered; already current stays silent.
+    /// but is not offered; already current stays silent. A repository's
+    /// index warning is logged once for the repositories in `warned`.
     fn evaluate_update(
         &self,
         resolver: &PluginReleaseResolver,
         record: &InstalledPluginRecord,
         catalog: Option<&PluginCatalog>,
         client: Option<&ClientVersionResolution>,
+        warned: &mut HashSet<String>,
         cancel: &CancelToken,
     ) -> PluginSingleCheckResult {
         let Some(current) = record
@@ -347,7 +357,9 @@ impl PluginComposition {
         else {
             return PluginSingleCheckResult::default();
         };
-        self.log_index_warning(&record.repo, &candidates);
+        if candidates.index_warning.is_some() && warned.insert(record.repo.to_lowercase()) {
+            self.log_index_warning(&record.repo, &candidates);
+        }
         let PluginReleaseResolveResult::Success(resolution) =
             candidates.for_channel(record.channel)
         else {

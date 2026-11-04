@@ -2502,20 +2502,32 @@ impl PanelFixture {
     }
 
     fn add_record(&self, id: &str, version: &str) {
+        self.add_records(&[(id, version)]);
+    }
+
+    /// Records each `(id, version)` as installed from the test repository.
+    fn add_records(&self, plugins: &[(&str, &str)]) {
         let path = self
             .paths()
             .data_directory
             .join("app")
             .join("plugins-installed.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let records = plugins
+            .iter()
+            .map(|(id, version)| {
+                format!(
+                    r#"{{ "id": "{id}", "repo": "{HELLO_REPO}",
+                      "source": "listed", "version": "{version}", "tag": "wasm-v{version}",
+                      "zipSha256": "{}", "installedAt": "2026-01-01T00:00:00Z", "pending": null }}"#,
+                    "a".repeat(64)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         std::fs::write(
             &path,
-            format!(
-                r#"{{ "schemaVersion": 1, "plugins": [{{ "id": "{id}", "repo": "{HELLO_REPO}",
-                  "source": "listed", "version": "{version}", "tag": "wasm-v{version}",
-                  "zipSha256": "{}", "installedAt": "2026-01-01T00:00:00Z", "pending": null }}] }}"#,
-                "a".repeat(64)
-            ),
+            format!(r#"{{ "schemaVersion": 1, "plugins": [{records}] }}"#),
         )
         .unwrap();
     }
@@ -2922,6 +2934,42 @@ fn a_malformed_plugin_index_is_logged_and_the_feed_still_offers() {
         log.contains(&format!(
             "Plugin index of {HELLO_REPO} ignored: The plugin index is invalid"
         )),
+        "{log}"
+    );
+}
+
+// Two installed plugins of one repository share its index: a broken one is
+// logged once a check, not once for each of them.
+#[test]
+fn a_malformed_plugin_index_is_logged_once_a_check_for_a_repository() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.write_manifest("edwards.vision", "1.0.0");
+    fixture.write_manifest("edwards.navigation", "0.3.0");
+    fixture.add_records(&[("edwards.vision", "1.0.0"), ("edwards.navigation", "0.3.0")]);
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    check(&mut window);
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert_eq!(
+        log.matches(&format!("Plugin index of {HELLO_REPO} ignored"))
+            .count(),
+        1,
         "{log}"
     );
 }
