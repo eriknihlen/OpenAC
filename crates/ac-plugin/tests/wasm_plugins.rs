@@ -3118,14 +3118,14 @@ fn a_stuck_answer_stops_the_plugin_that_gave_it_not_the_one_that_asked() {
 }
 
 /// The time another plugin takes to answer is left out of the asking
-/// call's deadline: the asker works 800 ms of its own around an answer
+/// call's deadline: the asker works 600 ms of its own around an answer
 /// that takes 700 ms, longer together than the 1 s deadline, and neither
 /// is stopped.
 #[test]
 fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
     let (_root, mut plugins, mut api) = suite_pair("lent-time", short_engine());
     let started = std::time::Instant::now();
-    assert!(plugins.handle_line("/asker ask openac.suite/rules work:700 400", &mut api));
+    assert!(plugins.handle_line("/asker ask openac.suite/rules work:700 300", &mut api));
     assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
     assert!(
         api.messages("openac.asker")
@@ -3140,7 +3140,7 @@ fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
     assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
     let asked = plugins.last_call_time("openac.asker").unwrap();
     assert!(
-        asked >= std::time::Duration::from_millis(800) && asked < TEST_DEADLINE,
+        asked >= std::time::Duration::from_millis(600) && asked < TEST_DEADLINE,
         "{asked:?}"
     );
 }
@@ -3498,7 +3498,7 @@ fn a_slow_service_warns_its_plugin_not_the_caller() {
 }
 
 /// A service's time is left out of the caller's deadline: the caller
-/// works 800 ms of its own around a 700 ms answer, longer together than
+/// works 600 ms of its own around a 700 ms answer, longer together than
 /// the 1 s deadline, and neither is stopped.
 #[test]
 fn a_services_time_does_not_count_against_the_callers_deadline() {
@@ -3506,7 +3506,7 @@ fn a_services_time_does_not_count_against_the_callers_deadline() {
     let (p, a) = (&mut plugins, &mut api);
     order(p, a, "suite", "offer echo");
     let started = std::time::Instant::now();
-    order(p, a, "asker", "call openac.suite/echo work:700 400");
+    order(p, a, "asker", "call openac.suite/echo work:700 300");
     assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
     assert_eq!(logged(a, "openac.asker", "asker call: Ok(done)"), 1);
     assert!(p.take_reports().is_empty());
