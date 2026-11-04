@@ -411,7 +411,7 @@ pub struct NavLeapLimits {
     pub takeoff_radius: f32,
     /// What landings come nearer.
     pub toward: Vec3,
-    /// How near it a leap must come to rest, metres.
+    /// How near it a leap must come to rest, metres; infinite for anywhere.
     pub landing_within: f32,
 }
 

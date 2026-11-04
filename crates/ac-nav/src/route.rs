@@ -143,10 +143,10 @@ const LEAP_RISK_COST: f32 = 6.0;
 /// A route toward a goal beyond the grid found with leaps is taken only when
 /// it ends this much nearer the goal, metres.
 const LEAP_WORTH_METERS: f32 = 1.0;
-/// How far from where a walk toward a goal beyond the grid came nearest it
-/// the leaps sought after it may take off, metres: those that cross what
-/// stopped the walk there.
-pub const TOWARD_LEAP_TAKEOFF_METERS: f32 = 48.0;
+/// How far from where a walk that did not arrive came nearest its goal the
+/// leaps sought after it may take off, metres: those that cross what stopped
+/// the walk there.
+pub const LEAP_TAKEOFF_METERS: f32 = 48.0;
 
 /// A route may pass through the spots creatures and players stand in, since
 /// they move aside when bumped, but it pays to. Stepping onto a node inside
@@ -244,7 +244,9 @@ pub struct NavRouteRequest<'a> {
 /// of those alike, the one least untidy to walk. When no walked route
 /// arrives and the request says what the body can leap, the route is
 /// planned again the first way with leaps, and the better of the two is
-/// returned.
+/// returned. Those leaps take off within [`LEAP_TAKEOFF_METERS`] of where the
+/// walk came nearest the goal, so a body that jumps far does not aim at
+/// every rock and roof of the grid.
 #[must_use]
 pub fn find(
     grid: &NavGrid,
@@ -324,11 +326,12 @@ fn find_with(
     } else {
         PROFILES.len()
     };
-    let plans: Vec<(NavRoute, f32)> = std::thread::scope(|scope| {
+    let (plans, nearest): (Vec<(NavRoute, f32)>, Vec<Vec3>) = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..count)
             .map(|index| {
                 scope.spawn(move || {
-                    plan(
+                    let mut nearest = from;
+                    let planned = plan(
                         grid,
                         from,
                         to,
@@ -341,14 +344,16 @@ fn find_with(
                         arrive_on_goal_floor,
                         onto,
                         goal_radius,
-                    )
+                        &mut nearest,
+                    );
+                    (planned, nearest)
                 })
             })
             .collect();
         handles
             .into_iter()
             .map(|handle| handle.join().expect("a route search panicked"))
-            .collect()
+            .unzip()
     });
     let mut tidiest = tidiest_of(&plans[..PROFILES.len()]);
     if priced {
@@ -363,7 +368,21 @@ fn find_with(
     if rank(&tidiest.0) > 0
         && let Some(ability) = leaps
     {
-        let finder = NavLeapFinder::new(grid, ability);
+        let frontier = nearest
+            .into_iter()
+            .min_by(|a, b| away(*a, to).total_cmp(&away(*b, to)))
+            .unwrap_or(from);
+        let finder = NavLeapFinder::limited(
+            grid,
+            ability,
+            NavLeapLimits {
+                takeoff_near: frontier,
+                takeoff_radius: LEAP_TAKEOFF_METERS,
+                toward: to,
+                landing_within: f32::INFINITY,
+            },
+        );
+        let mut came_nearest = from;
         let leapt = plan(
             grid,
             from,
@@ -377,6 +396,7 @@ fn find_with(
             arrive_on_goal_floor,
             onto,
             goal_radius,
+            &mut came_nearest,
         );
         if rank(&leapt.0) < rank(&tidiest.0) {
             tidiest = leapt;
@@ -411,6 +431,8 @@ fn rank(route: &NavRoute) -> i32 {
     }
 }
 
+/// Plans one route in one profile, with its untidiness; `nearest` is moved
+/// to each node expanded that lies nearer the goal, across, than it.
 #[allow(clippy::too_many_arguments)]
 fn plan(
     grid: &NavGrid,
@@ -425,6 +447,7 @@ fn plan(
     arrive_on_goal_floor: bool,
     onto: Option<&InsertionSet>,
     goal_radius: f32,
+    nearest: &mut Vec3,
 ) -> (NavRoute, f32) {
     let clock = Instant::now();
     let object_radius = if goal_radius.is_finite() {
@@ -464,7 +487,16 @@ fn plan(
         profile,
         leaps,
     );
-    let end = search.run(|node, _| near_goal_seen && goal.is_reached_at(node));
+    let mut nearest_away = away(*nearest, to);
+    let end = search.run(|node, _| {
+        let at = grid.position(node);
+        let away_here = away(at, to);
+        if away_here < nearest_away {
+            *nearest = at;
+            nearest_away = away_here;
+        }
+        near_goal_seen && goal.is_reached_at(node)
+    });
     if end >= 0 {
         return routed(
             grid,
@@ -579,7 +611,7 @@ fn plan(
 /// grid's edge toward the goal (the edge of its loaded ground) and the
 /// request says what the body can leap, it is found again with leaps, and
 /// taken when it ends nearer the goal. Those leaps take off within
-/// [`TOWARD_LEAP_TAKEOFF_METERS`] of where the walk came nearest the goal
+/// [`LEAP_TAKEOFF_METERS`] of where the walk came nearest the goal
 /// and come down nearer it, so a body that jumps far does not aim at every
 /// rock and roof of the grid.
 #[must_use]
@@ -635,7 +667,7 @@ fn find_toward_passes(
         ability,
         NavLeapLimits {
             takeoff_near: frontier,
-            takeoff_radius: TOWARD_LEAP_TAKEOFF_METERS,
+            takeoff_radius: LEAP_TAKEOFF_METERS,
             toward: goal,
             landing_within: away(frontier, goal),
         },

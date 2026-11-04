@@ -1406,6 +1406,65 @@ fn a_stage_takes_no_leap_far_from_where_its_walk_came_nearest() {
     in_range(route.legs.last().unwrap().y, 0.0, 10.0);
 }
 
+/// The same floors, the goal on the far floor inside the grid: a walk's
+/// leaps take off only near where it came nearest the goal, so the way
+/// round by the narrow gap 90 m north is not sought and the walk does not
+/// arrive.
+#[test]
+fn a_walk_takes_no_leap_far_from_where_it_came_nearest() {
+    let grid = build_with(
+        join(&[
+            floor(0.0, 0.0, 30.0, 128.0, 0.0),
+            floor(50.0, 0.0, 128.0, 90.0, 0.0),
+            floor(33.0, 95.0, 128.0, 128.0, 0.0),
+        ]),
+        Vec::new(),
+        128.0,
+        Vec::new(),
+    );
+
+    let route = route::find(
+        &grid,
+        v(5.0, 5.0, 0.0),
+        v(100.0, 5.0, 0.0),
+        2.0,
+        &leaping(LEAPER),
+    );
+
+    assert!(
+        route.reason != "routed" && route.leaps.is_empty(),
+        "{}",
+        described(&route)
+    );
+}
+
+/// A floor 100 m long and a gap 3 m wide at its end before the goal: the
+/// walk comes nearest the goal far from where it started, and its leap
+/// takes off there.
+#[test]
+fn a_walk_leaps_the_gap_it_stops_at_far_from_its_start() {
+    let grid = build_with(
+        join(&[
+            floor(0.0, 0.0, 100.0, 16.0, 0.0),
+            floor(103.0, 0.0, 128.0, 16.0, 0.0),
+        ]),
+        Vec::new(),
+        128.0,
+        Vec::new(),
+    );
+
+    let route = route::find(
+        &grid,
+        v(5.0, 8.0, 0.0),
+        v(120.0, 8.0, 0.0),
+        2.0,
+        &leaping(LEAPER),
+    );
+
+    assert_eq!(route.reason, "routed", "{}", described(&route));
+    assert_eq!(route.leaps.len(), 1, "{}", described(&route));
+}
+
 /// A floor with a platform east and one west of the middle: a finder
 /// limited to landings nearer a goal far east than the middle leaps onto the
 /// east platform only, where an unlimited one leaps onto both.
