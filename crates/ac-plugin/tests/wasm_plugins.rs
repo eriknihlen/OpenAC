@@ -3217,11 +3217,27 @@ fn a_service_that_fails_while_answering_stops_its_plugin_not_the_caller() {
     let (_root, mut plugins, mut api) = suite_pair("service-fault", engine());
     let (p, a) = (&mut plugins, &mut api);
     order(p, a, "suite", "offer echo");
+    // A chat line arrives while the asker's command runs, as the asker's own
+    // chat posts do live: every plugin that hears chat, the failed owner
+    // too, would hear it before the command's round ends.
+    a.unheard.push(ChatLine {
+        kind: 4,
+        text: "a line".to_owned(),
+        ..ChatLine::default()
+    });
     assert_eq!(
         order(p, a, "asker", "call openac.suite/echo panic"),
         "asker call: Err(Faulted)"
     );
+    // Neither that line nor its own services' withdrawal reaches the
+    // failed owner: the report names what stopped it, once.
+    p.deliver(a);
     let reports = p.take_reports();
+    let faults: Vec<&PluginReport> = reports
+        .iter()
+        .filter(|r| matches!(r, PluginReport::Failed { .. }))
+        .collect();
+    assert_eq!(faults.len(), 1, "{faults:?}");
     let fault = failed(&reports, "openac.suite").unwrap();
     assert!(fault.contains("suite's service panicked"), "{fault}");
     assert_eq!(failed(&reports, "openac.asker"), None);

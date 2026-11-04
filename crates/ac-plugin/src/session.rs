@@ -791,6 +791,13 @@ impl PluginSession {
         asking: Asking,
         call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<(), String>,
     ) -> bool {
+        // A plugin that failed answering another earlier in this pass is
+        // not called again (its state is whatever the failure left): it
+        // goes now, reported with what stopped it.
+        if self.services.has_faulted(&self.plugins[index].manifest.id) {
+            self.unload_faulted(api);
+            return false;
+        }
         match self.invoke_as(index, api, asking, call) {
             Ok(()) => true,
             Err(reason) => {
@@ -831,6 +838,11 @@ impl PluginSession {
     /// logged, and its registrations are released regardless.
     fn disable_at(&mut self, index: usize, api: &mut dyn SessionApi) {
         let id = self.plugins[index].manifest.id.clone();
+        // One that failed answering is not called to stop: it is gone.
+        if self.services.has_faulted(&id) {
+            self.remove(index, api);
+            return;
+        }
         if let Err(reason) = self.invoke(index, api, Instance::disable) {
             api.log(
                 &id,

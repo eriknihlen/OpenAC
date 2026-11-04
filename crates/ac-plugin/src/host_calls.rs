@@ -154,7 +154,7 @@ impl Services {
 
     /// Whether plugin `id` failed answering a question and waits to be
     /// unloaded.
-    fn has_faulted(&self, id: &str) -> bool {
+    pub(crate) fn has_faulted(&self, id: &str) -> bool {
         self.faulted
             .iter()
             .any(|(faulted, _)| faulted.eq_ignore_ascii_case(id))
