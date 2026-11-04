@@ -3502,6 +3502,85 @@ fn add_from_url_refuses_a_plugin_blocked_for_all_versions() {
     assert!(!window.plugins.install_dialog.is_open);
 }
 
+// A blocked plugin of a repository publishing several is never one of the
+// choices, not at first and not when the pick comes back.
+#[test]
+fn add_from_url_never_offers_a_blocked_plugin_among_several() {
+    let fixture = PanelFixture::new();
+    let releases = [
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+        ("wasm-edwards.macro-v2.0.0", "edwards.macro", "2.0.0"),
+    ];
+    fixture.releases(&releases);
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(0);
+    window.close_install_dialog();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+    window.cancel_add_from_url_choice();
+    // With one plugin left that is not blocked, it is offered at once.
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." },
+           { "id": "edwards.vision", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert_eq!(
+        window.plugins.install_dialog.display_name(),
+        "edwards.navigation"
+    );
+}
+
+// A plugin blocked after the pick was shown is refused when chosen, and the
+// pick comes back without it.
+#[test]
+fn add_from_url_drops_a_choice_refused_as_blocked() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    check(&mut window);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(0);
+    assert_eq!(
+        window.plugins.error.as_deref(),
+        Some("'edwards.macro' is blocked: Sends chat spam.")
+    );
+    assert!(!window.plugins.install_dialog.is_open);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+}
+
 // The list names plugins, not repositories: another plugin of a listed
 // plugin's repository is still unlisted.
 #[test]

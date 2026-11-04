@@ -386,6 +386,16 @@ fn read_manifest(directory: &Path) -> Option<PluginManifest> {
         .and_then(|text| PluginManifest::parse(&text).ok())
 }
 
+/// Why the list in effect blocks this release, if it does.
+fn block_reason(backend: &PluginComposition, manifest: &PluginManifest) -> Option<String> {
+    let version = LauncherVersion::try_parse(&manifest.version);
+    backend.current_catalog().and_then(|catalog| {
+        catalog
+            .block_reason(&manifest.id, version.as_ref())
+            .map(str::to_owned)
+    })
+}
+
 /// `0.1.0` from `0.1.0+abc`.
 fn short_version(version: &str) -> String {
     version.split('+').next().unwrap_or(version).to_owned()
@@ -3901,11 +3911,17 @@ impl LauncherWindow {
             return;
         }
         self.plugins.add_from_url_text.clear();
-        let (installed, mut fresh): (Vec<_>, Vec<_>) = found
+        let (installed, fresh): (Vec<_>, Vec<_>) = found
             .plugins
             .into_iter()
             .partition(|plugin| backend.find_record(&plugin.manifest.id).is_some());
+        // A blocked plugin is never one of the choices; it is said only when
+        // nothing else could be added.
+        let (mut blocked, mut fresh): (Vec<_>, Vec<_>) = fresh
+            .into_iter()
+            .partition(|plugin| block_reason(&backend, &plugin.manifest).is_some());
         match fresh.len() {
+            0 if !blocked.is_empty() => self.offer_add_from_url(repo, blocked.remove(0)),
             0 => {
                 let [only] = installed.as_slice() else {
                     self.plugins.status_text =
@@ -3961,8 +3977,9 @@ impl LauncherWindow {
         self.plugins.add_from_url_offered.clear();
     }
 
-    /// Brings the pick back, once the install dialog it opened has closed,
-    /// with the plugins it offered that are still not installed.
+    /// Brings the pick back, once the install dialog it opened has closed (or
+    /// the choice was refused), with the plugins it offered that are still
+    /// not installed and not blocked.
     fn ask_again_for_add_from_url(&mut self) {
         let offered = std::mem::take(&mut self.plugins.add_from_url_offered);
         let Some(backend) = self.plugin_backend.clone() else {
@@ -3971,9 +3988,9 @@ impl LauncherWindow {
         self.plugins.add_from_url_choices = offered
             .into_iter()
             .filter(|choice| {
-                backend
-                    .find_record(&choice.resolution.manifest.id)
-                    .is_none()
+                let manifest = &choice.resolution.manifest;
+                backend.find_record(&manifest.id).is_none()
+                    && block_reason(&backend, manifest).is_none()
             })
             .collect();
     }
@@ -3985,12 +4002,7 @@ impl LauncherWindow {
             return;
         };
         let manifest = resolution.manifest;
-        let version = LauncherVersion::try_parse(&manifest.version);
-        if let Some(reason) = backend.current_catalog().and_then(|catalog| {
-            catalog
-                .block_reason(&manifest.id, version.as_ref())
-                .map(str::to_owned)
-        }) {
+        if let Some(reason) = block_reason(&backend, &manifest) {
             self.plugins.error = Some(format!("'{}' is blocked: {reason}", manifest.id));
             return;
         }
