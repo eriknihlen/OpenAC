@@ -191,6 +191,9 @@ pub(crate) struct Context<'a> {
     /// carried out asked them: their time, left out of the caller's
     /// ([`crate::instance::Handled::lent`]).
     pub(crate) lent: Duration,
+    /// The same, in the watchdog's epochs
+    /// ([`crate::instance::Handled::lent_epochs`]).
+    pub(crate) lent_epochs: u64,
 }
 
 /// Carries out one import for the plugin `manifest`, which can answer
@@ -690,6 +693,7 @@ fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked 
     let directory: &std::path::Path = directory;
     let answers = instance.answers_callbacks();
     let started = Instant::now();
+    let started_epoch = instance.epochs_now();
     let result = {
         let mut handler = |import: Import, request: &[u8]| {
             handle_import(import, request, manifest, directory, answers, cx, None)
@@ -702,6 +706,9 @@ fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked 
         )
     };
     cx.lent += started.elapsed();
+    cx.lent_epochs = cx
+        .lent_epochs
+        .saturating_add(instance.epochs_now().saturating_sub(started_epoch));
     match result {
         Ok(answer) => {
             Asked::Answered(answer.and_then(|a| CallbackAnswer::from_bytes_at(&a, version).ok()))

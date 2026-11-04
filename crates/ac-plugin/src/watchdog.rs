@@ -29,6 +29,8 @@
 //! threshold).
 
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -130,6 +132,26 @@ pub fn duration_words(duration: Duration) -> String {
     }
 }
 
+/// The epochs a [`Ticker`] has moved its engine on, counted beside the
+/// engine's own epoch (which wasmtime keeps to itself), so a call can
+/// measure in epochs, as its deadline does, how long another plugin took
+/// to answer it. Counted after the engine's epoch moves, so it is never
+/// ahead of it: a deadline worked out from it is never short.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct EpochCount(Arc<AtomicU64>);
+
+impl EpochCount {
+    /// The epochs counted so far.
+    pub(crate) fn now(&self) -> u64 {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// `ticks` more epochs.
+    pub(crate) fn advance(&self, ticks: u32) {
+        self.0.fetch_add(u64::from(ticks), Ordering::Release);
+    }
+}
+
 /// The thread that moves an engine's epoch on every [`EPOCH_TICK`] while
 /// it lives (its only work); dropping it ends the thread.
 pub(crate) struct Ticker {
@@ -144,11 +166,11 @@ impl fmt::Debug for Ticker {
 }
 
 impl Ticker {
-    /// Starts the thread for `engine`.
+    /// Starts the thread for `engine`, counting its epochs in `count`.
     ///
     /// # Errors
     /// The thread could not be started, in words.
-    pub(crate) fn start(engine: &wasmtime::Engine) -> Result<Self, String> {
+    pub(crate) fn start(engine: &wasmtime::Engine, count: EpochCount) -> Result<Self, String> {
         let (stop, stopped) = mpsc::channel::<()>();
         let engine = engine.clone();
         let thread = std::thread::Builder::new()
@@ -168,6 +190,7 @@ impl Ticker {
                     for _ in 0..ticks {
                         engine.increment_epoch();
                     }
+                    count.advance(ticks);
                 }
             })
             .map_err(|error| format!("the plugin watchdog could not start: {error}"))?;

@@ -704,10 +704,12 @@ impl PluginSession {
             settings: &options.settings,
             storage_roots: &options.storage,
             lent: std::time::Duration::ZERO,
+            lent_epochs: 0,
         };
         let answers = instance.answers_callbacks();
         let mut handler = |import: Import, request: &[u8]| {
             cx.lent = std::time::Duration::ZERO;
+            cx.lent_epochs = 0;
             let reply = handle_import(
                 import,
                 request,
@@ -723,6 +725,7 @@ impl PluginSession {
             Ok(Handled {
                 reply,
                 lent: cx.lent,
+                lent_epochs: cx.lent_epochs,
             })
         };
         let result = call(instance, &mut handler);
