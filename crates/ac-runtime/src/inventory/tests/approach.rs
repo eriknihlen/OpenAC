@@ -506,45 +506,42 @@ fn requested_container(f: &Fixture) -> u32 {
     f.inventory.external_containers().requested_container_id()
 }
 
-// OpenAC `RuntimeWorldObjectUse.TryUse` / `CompleteArmedUse` (the route
-// `Loot.Open`, `Objects.Activate` and `Items.Use` of a world object take):
-// the ground container is asked for when the use goes out, after the walk.
+// The route `Loot.Open`, `Objects.Activate` and `Items.Use` of a world
+// object take: a plugin's use out of reach goes to the server at once and
+// the server walks the character there, as a plugin's use does in retail.
+// The client walks nowhere and arms nothing, so no walk of its own can
+// stall short of the object; the ground container is asked for with the
+// use. (OpenAC walks first, `RuntimeWorldObjectUse.TryUse`.)
 #[test]
-fn a_plugins_open_out_of_reach_asks_for_the_container_only_on_arrival() {
+fn a_plugins_use_out_of_reach_goes_to_the_server_at_once() {
     const CORPSE: u32 = 0x8000_D101;
     let mut f = Fixture::new();
     place_corpse(&mut f, CORPSE);
     let mut body = Body::default();
     assert!(f.run_walking(ItemCommand::UseWorldObject(guid(CORPSE)), &mut body));
-    assert_eq!(body.begun, [(CORPSE, false)]);
-    assert!(f.sent().is_empty());
-    assert_eq!(requested_container(&f), 0);
-    assert!(!f.inventory.is_ready(true));
-
-    body.end(true);
-    f.frame(&mut body);
+    assert!(body.begun.is_empty());
     assert_eq!(f.sent(), [build_use(1, CORPSE)]);
+    assert!(!f.inventory.has_pending_use());
     assert_eq!(requested_container(&f), CORPSE);
+    // Busy until the server's use-done, as any use.
+    assert!(!f.inventory.is_ready(true));
+    f.server(GameEventType::USE_DONE, &[0]);
+    assert!(f.inventory.is_ready(true));
 }
 
-// OpenAC `RuntimeWorldObjectUse.TryGiveUpOnStalledUse` for an automation use
-// (`_armedUseSpokenFor` false): the walk is called off and the gate freed,
-// with nothing asked for and nothing said.
+// A plugin's use leaves a walk the character is on alone: a person's walk
+// or one the server ordered is neither called off nor answered for.
 #[test]
-fn a_plugins_walk_that_never_arrives_asks_for_nothing_and_says_nothing() {
+fn a_plugins_use_out_of_reach_calls_off_no_walk() {
     const CORPSE: u32 = 0x8000_D102;
     let mut f = Fixture::new();
     place_corpse(&mut f, CORPSE);
     let mut body = Body::default();
     assert!(f.run_walking(ItemCommand::UseWorldObject(guid(CORPSE)), &mut body));
-    body.stalled = Some(STALLED_APPROACH_GIVE_UP_TICKS);
     f.frame(&mut body);
 
-    assert_eq!(body.cancelled, 1);
-    assert!(f.sent().is_empty());
+    assert_eq!(body.cancelled, 0);
     assert!(f.notices().is_empty());
-    assert_eq!(requested_container(&f), 0);
-    assert!(f.inventory.is_ready(true));
 }
 
 // OpenAC `RuntimeItemInteraction.ExecuteUseActions`: a person's own
@@ -613,10 +610,10 @@ fn a_plugins_open_within_reach_goes_out_and_takes_the_contents() {
     assert!(f.inventory.is_ready(true));
 }
 
-// OpenAC `RuntimeWorldObjectUse.CompleteArmedUse`: after the walk the use
-// goes out, the container is asked for, and its contents are taken.
+// A plugin's open out of reach: the use goes out at once, the server walks
+// the character there, and the contents it then sends are taken.
 #[test]
-fn a_plugins_open_after_a_walk_takes_the_contents() {
+fn a_plugins_open_out_of_reach_takes_the_contents_the_server_sends() {
     const CORPSE: u32 = 0x8000_D107;
     const RUBY: u32 = 0x8000_D108;
     let mut f = Fixture::new();
@@ -624,8 +621,7 @@ fn a_plugins_open_after_a_walk_takes_the_contents() {
     place_ruby(&mut f, RUBY);
     let mut body = Body::default();
     assert!(f.run_walking(ItemCommand::UseWorldObject(guid(CORPSE)), &mut body));
-    body.end(true);
-    f.frame(&mut body);
+    assert!(body.begun.is_empty());
     assert_eq!(f.sent(), [build_use(1, CORPSE)]);
 
     f.server(GameEventType::VIEW_CONTENTS, &[CORPSE, 1, RUBY, 0]);

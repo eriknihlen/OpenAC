@@ -201,8 +201,13 @@ impl Inventory {
     }
 
     /// [`Inventory::request_use`] for a person (`spoken_for`: a walk given
-    /// up is said to the character) or for a plugin (answered with its
-    /// code only).
+    /// up is said to the character) or for a plugin. A plugin's use goes
+    /// out at once wherever the object stands: the server walks the
+    /// character there (to a portal's spot, else within the object's use
+    /// radius) and uses it on arrival, which is what plugins expect. A walk
+    /// of the client's own can stall short of an object it cannot get close
+    /// enough to and is given up on without a word, so the same object
+    /// would fail every time.
     pub(super) fn request_use_for(
         &mut self,
         object: u32,
@@ -211,7 +216,6 @@ impl Inventory {
     ) -> bool {
         let mut tx = Vec::new();
         let mut reservation = self.transactions.begin_use_request_reservation(&mut tx);
-        self.cancel_pending_approach();
         let owned = self.is_owned_by_player(object, ctx);
         let useable = owned
             || ctx
@@ -219,6 +223,10 @@ impl Inventory {
                 .item(object)
                 .and_then(|i| i.useability)
                 .is_some_and(|u| u.is_useable());
+        if !spoken_for {
+            return self.dispatch_reserved_use(object, owned, useable, reservation, ctx);
+        }
+        self.cancel_pending_approach();
         let use_radius = self.approach_use_radius(object);
         if useable && let Some(source) = ctx.approach.as_deref_mut() {
             let plan = source.plan(ctx.world, object, use_radius);

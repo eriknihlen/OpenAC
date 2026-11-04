@@ -29,9 +29,8 @@ fn busy(arm: &mut Arm) -> bool {
     arm.call::<calls::ItemsState>(&()).is_busy
 }
 
-/// With the dats the character has a body, which walks to a corpse out of
-/// reach (without one the server does the walking and the use goes at
-/// once).
+/// With the dats the character has a body; a plugin's use of a corpse out
+/// of reach still goes out at once, and the server does the walking.
 fn with_a_body() -> Setup {
     Setup {
         dats: true,
@@ -39,9 +38,11 @@ fn with_a_body() -> Setup {
     }
 }
 
-// OpenAC `WorldObjectUseParityTests.UsingACorpseSeveralMetresOffLooksTheSameOnBothClients`.
+// OpenAC `WorldObjectUseParityTests.UsingACorpseSeveralMetresOffLooksTheSameOnBothClients`
+// (where the client walks there first and sends nothing meanwhile): the use
+// goes out at once and holds the client busy until the server answers.
 #[test]
-#[ignore = "needs the retail dats: a body that walks to the corpse"]
+#[ignore = "needs the retail dats: a body that could walk to the corpse"]
 fn using_a_corpse_several_metres_off_looks_the_same_on_both_clients() {
     run_with(&with_a_body(), &[], true, |arm, transcript| {
         stage_world(arm);
@@ -54,7 +55,7 @@ fn using_a_corpse_several_metres_off_looks_the_same_on_both_clients() {
         let out = arm.record_outbound_while_walking(transcript);
         assert_eq!(used.status, ItemStatus::Started, "{}", arm.name());
         assert!(is_busy);
-        assert!(sent(&out, USE_ACTION).is_empty(), "{}: {out:?}", arm.name());
+        assert_eq!(one(&out, USE_ACTION).u32_at(12), world::CORPSE);
 
         transcript.step("a few frames later");
         arm.wait(std::time::Duration::from_millis(150));
@@ -102,7 +103,7 @@ fn using_the_character_itself_is_sent_the_same_way_on_both_clients() {
 
 // OpenAC `WorldObjectUseParityTests.TwoUsesInARowAreRefusedTheSameOnBothClients`.
 #[test]
-#[ignore = "needs the retail dats: a body that walks to the corpse"]
+#[ignore = "needs the retail dats: a body that could walk to the corpse"]
 fn two_uses_in_a_row_are_refused_the_same_on_both_clients() {
     run_with(&with_a_body(), &[], true, |arm, transcript| {
         stage_world(arm);
@@ -110,6 +111,8 @@ fn two_uses_in_a_row_are_refused_the_same_on_both_clients() {
         let first = arm.call::<calls::ItemsUse>(&world::CORPSE);
         record(transcript, "first", &first);
         assert_eq!(first.status, ItemStatus::Started, "{}", arm.name());
+        let out = arm.record_outbound_while_walking(transcript);
+        assert_eq!(one(&out, USE_ACTION).u32_at(12), world::CORPSE);
 
         transcript.step("ask again straight away");
         let second = arm.call::<calls::ItemsUse>(&world::CORPSE);

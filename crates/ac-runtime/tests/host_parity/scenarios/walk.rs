@@ -1,8 +1,8 @@
 //! Walks the character is sent on, on both arms (OpenAC
 //! `Scenarios/ServerMoveToParityTests.cs`, `WalkThenUseParityTests.cs`):
 //! the server ordering it to a creature, a plugin taking it back, a swing
-//! from out of range, and the walk a plugin gets when it uses something
-//! out of reach, its use on arrival and its give-up.
+//! from out of range, and a plugin's use of something out of reach, which
+//! goes to the server at once for the server to walk the character there.
 //!
 //! OpenAC reads the walk off the body's own move-to manager (what kind of
 //! walk was installed, what it seeks). A plugin sees the walk as the
@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use ac_plugin::abi::calls;
 use ac_plugin::abi::combat::{AttackHeight, AttackRequest, CombatMode, CombatStatus};
 use ac_plugin::abi::items::{ItemResult, ItemStatus};
-use ac_plugin::abi::navigation::{MovementIntent, NavigationStatus};
+use ac_plugin::abi::navigation::MovementIntent;
 
 use crate::host_parity::arm::{Arm, Setup, run_with};
 use crate::host_parity::scenarios::item::sent;
@@ -248,22 +248,20 @@ fn uses(out: &[crate::host_parity::server::Outbound]) -> usize {
     sent(out, USE_ACTION).len()
 }
 
-/// Walks until the use goes out (or the walk ends), collecting what left.
-fn walk_until_used(arm: &mut Arm) -> Vec<crate::host_parity::server::Outbound> {
-    let mut out = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while uses(&out) == 0 && Instant::now() < deadline {
-        arm.wait(Duration::from_millis(100));
-        out.extend(arm.outbound());
-    }
-    out
+/// The server answers the use: done, nothing wrong.
+fn use_done(arm: &mut Arm) {
+    arm.server
+        .game_event(world::PLAYER, 0x01C7, &wire::payload(&[0]));
+    arm.sync();
 }
 
-// OpenAC `WalkThenUseParityTests.AskingToUseACorpseOutOfReachWalksThereOnBothClients`
-// and `ArrivingSendsTheArmedUseOnBothClients`.
+// A plugin's use of something out of reach goes to the server at once, and
+// the server walks the character there (OpenAC walks it there first:
+// `WalkThenUseParityTests.AskingToUseACorpseOutOfReachWalksThereOnBothClients`
+// and `ArrivingSendsTheArmedUseOnBothClients`).
 #[test]
 #[ignore = "needs the retail dats: a body that walks"]
-fn using_a_corpse_out_of_reach_walks_there_and_uses_it_on_both_clients() {
+fn using_a_corpse_out_of_reach_goes_to_the_server_at_once_on_both_clients() {
     run_with(&with_a_body(), &[], true, |arm, transcript| {
         stage_corpse_out_of_reach(arm);
 
@@ -271,32 +269,20 @@ fn using_a_corpse_out_of_reach_walks_there_and_uses_it_on_both_clients() {
         let used = arm.call::<calls::ItemsUse>(&world::CORPSE);
         record_item(transcript, "use", &used);
         let out = arm.outbound();
-        // A walk is begun and nothing is sent from out of reach.
-        assert_eq!(used.status, ItemStatus::Started, "{}", arm.name());
-        assert_eq!(uses(&out), 0, "{}: {out:?}", arm.name());
-        let under_way = moving(arm);
-        transcript.record("walking", under_way);
-        assert!(under_way, "{}", arm.name());
-
-        transcript.step("the character arrives");
-        let out = walk_until_used(arm);
-        // Within reach: the walk ends once the gap between the two shapes
-        // (the corpse is staged with the human setup too) is inside the use
-        // radius, so the centres stay further apart than OpenAC's 1 m bound
-        // between shapeless bodies; it closed most of the three metres.
-        let apart = distance(arm, world::CORPSE);
-        let near = apart < 2.0;
-        transcript.record("near", near);
         transcript.record("useSent", uses(&out));
+        // The use goes out now and the client walks nowhere of its own.
+        assert_eq!(used.status, ItemStatus::Started, "{}", arm.name());
+        assert_eq!(uses(&out), 1, "{}: {out:?}", arm.name());
+        arm.wait(Duration::from_millis(200));
+        let walking = moving(arm);
+        transcript.record("walking", walking);
+        assert!(!walking, "{}", arm.name());
+        // The client waits on this corpse.
         let requested = record_loot(transcript, arm);
-        // The use went out on arrival, and the client waits on this corpse.
-        assert_eq!(uses(&out), 1, "{}", arm.name());
-        assert!(near, "{}: {apart:.2} m apart", arm.name());
         assert_eq!(requested, world::CORPSE);
 
         transcript.step("the corpse answers");
-        arm.server
-            .game_event(world::PLAYER, 0x01C7, &wire::payload(&[0]));
+        use_done(arm);
         world::deliver_corpse_contents(arm);
         arm.sync();
         record_loot(transcript, arm);
@@ -304,10 +290,11 @@ fn using_a_corpse_out_of_reach_walks_there_and_uses_it_on_both_clients() {
     });
 }
 
-// OpenAC `WalkThenUseParityTests.OpeningACorpseOutOfReachWalksThereOnBothClients`.
+// Opening a corpse out of reach is the same use (OpenAC
+// `WalkThenUseParityTests.OpeningACorpseOutOfReachWalksThereOnBothClients`).
 #[test]
 #[ignore = "needs the retail dats: a body that walks"]
-fn opening_a_corpse_out_of_reach_walks_there_on_both_clients() {
+fn opening_a_corpse_out_of_reach_goes_to_the_server_at_once_on_both_clients() {
     run_with(&with_a_body(), &[], true, |arm, transcript| {
         stage_corpse_out_of_reach(arm);
 
@@ -315,28 +302,26 @@ fn opening_a_corpse_out_of_reach_walks_there_on_both_clients() {
         let opened = arm.call::<calls::LootOpen>(&world::CORPSE);
         record_item(transcript, "open", &opened);
         let out = arm.outbound();
-        assert_eq!(uses(&out), 0, "{}: {out:?}", arm.name());
-
-        transcript.step("the character arrives");
-        let out = walk_until_used(arm);
         transcript.record("useSent", uses(&out));
         let requested = record_loot(transcript, arm);
-        assert_eq!(uses(&out), 1, "{}", arm.name());
+        assert_eq!(uses(&out), 1, "{}: {out:?}", arm.name());
         assert_eq!(requested, world::CORPSE);
 
         transcript.step("the corpse answers");
-        arm.server
-            .game_event(world::PLAYER, 0x01C7, &wire::payload(&[0]));
+        use_done(arm);
         world::deliver_corpse_contents(arm);
         arm.sync();
         record_loot(transcript, arm);
     });
 }
 
-// OpenAC `WalkThenUseParityTests.AWalkThatNeverArrivesIsGivenUpOnOnBothClients`.
+// A corpse no walk of the client's could reach (on a ledge) is used all
+// the same: the use goes to the server, which decides whether the
+// character can get there. OpenAC walks, stalls and gives the use up
+// unsent (`WalkThenUseParityTests.AWalkThatNeverArrivesIsGivenUpOnOnBothClients`).
 #[test]
 #[ignore = "needs the retail dats: a body that walks"]
-fn a_walk_that_never_arrives_is_given_up_on_on_both_clients() {
+fn a_corpse_no_walk_could_reach_is_used_through_the_server_on_both_clients() {
     run_with(&with_a_body(), &[], true, |arm, transcript| {
         stage_corpse_out_of_reach(arm);
         world::stage_corpse_out_of_every_reach(arm, -3.0);
@@ -345,70 +330,15 @@ fn a_walk_that_never_arrives_is_given_up_on_on_both_clients() {
         transcript.step("ask to use the corpse on the ledge");
         let used = arm.call::<calls::ItemsUse>(&world::CORPSE_OUT_OF_EVERY_REACH);
         record_item(transcript, "use", &used);
-        arm.wait(Duration::from_millis(200));
-        assert!(moving(arm), "{}", arm.name());
-
-        transcript.step("the walk stops getting anywhere");
-        let mut out = Vec::new();
-        until(
-            arm,
-            "the walk was never given up on",
-            Duration::from_secs(15),
-            |a| {
-                out.extend(a.outbound());
-                !moving(a) && !a.call::<calls::ItemsState>(&()).is_busy
-            },
-        );
-        out.extend(arm.outbound());
-        transcript.record("useSent", uses(&out));
-        // Nothing was sent for a use whose walk never arrived.
-        assert_eq!(uses(&out), 0, "{}", arm.name());
-
-        transcript.step("the next request is let through");
-        arm.wait(Duration::from_millis(700));
-        let again = arm.call::<calls::ItemsUse>(&world::CORPSE);
-        record_item(transcript, "use", &again);
-        assert_eq!(again.status, ItemStatus::Started, "{}", arm.name());
-    });
-}
-
-// OpenAC `WalkThenUseParityTests.AWalkCalledOffHalfWayLeavesNoUseOnBothClients`.
-#[test]
-#[ignore = "needs the retail dats: a body that walks"]
-fn a_walk_called_off_half_way_leaves_no_use_on_both_clients() {
-    run_with(&with_a_body(), &[], true, |arm, transcript| {
-        stage_corpse_out_of_reach(arm);
-
-        transcript.step("ask to use it");
-        let used = arm.call::<calls::ItemsUse>(&world::CORPSE);
-        record_item(transcript, "use", &used);
-        arm.wait(Duration::from_millis(200));
-        let out = arm.outbound();
-        assert!(moving(arm), "{}", arm.name());
-        assert_eq!(uses(&out), 0);
-
-        transcript.step("the plugin takes the character back");
-        let held = arm.call::<calls::NavigationSetIntent>(&MovementIntent {
-            backward: true,
-            ..MovementIntent::default()
-        });
-        transcript.record("plugin.status", held);
-        assert_eq!(held, NavigationStatus::Accepted);
-        arm.wait(Duration::from_millis(600));
         let out = arm.outbound();
         transcript.record("useSent", uses(&out));
-        record_loot(transcript, arm);
-        assert_eq!(uses(&out), 0, "{}", arm.name());
+        assert_eq!(used.status, ItemStatus::Started, "{}", arm.name());
+        assert_eq!(uses(&out), 1, "{}: {out:?}", arm.name());
+        arm.wait(Duration::from_millis(200));
+        assert!(!moving(arm), "{}", arm.name());
 
-        transcript.step("let go and ask again");
-        transcript.record(
-            "plugin.status",
-            arm.call::<calls::NavigationClearIntent>(&()),
-        );
-        transcript.record(
-            "plugin.stop",
-            arm.call::<calls::NavigationStopMoving>(&None),
-        );
+        transcript.step("the server answers and the next request is let through");
+        use_done(arm);
         arm.wait(Duration::from_millis(700));
         let again = arm.call::<calls::ItemsUse>(&world::CORPSE);
         record_item(transcript, "use", &again);
