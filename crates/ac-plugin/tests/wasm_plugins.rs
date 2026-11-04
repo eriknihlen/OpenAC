@@ -446,7 +446,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.6 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.7 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +655,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.7""#);
+    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.8""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.7, but this build supports 1.0..1.6"
+        "plugin 'openac.probe' declares apiVersion 1.8, but this build supports 1.0..1.7"
     );
 }
 
@@ -710,7 +710,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +824,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.6""#,
+        r#""apiVersion": "1.7""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -887,8 +887,9 @@ fn a_plugin_built_for_api_1_4_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
-/// API 1.6 added only pointer kinds (hover, leave), no shape: `probe` as an
-/// API 1.5 SDK built it still loads.
+/// API 1.6 added only pointer kinds (hover, leave), no shape, and API 1.7
+/// the server's last position at the end of the world-object records:
+/// `probe` as an API 1.5 SDK built it still loads.
 #[test]
 fn a_plugin_built_for_api_1_5_still_loads() {
     let v1_5 = ApiVersion::new(1, 5);
@@ -896,12 +897,22 @@ fn a_plugin_built_for_api_1_5_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
-/// An object change reaches a plugin exactly as its API version encodes
-/// it, through a real module: `rawbytes` built for API 1.5 is handed the
-/// world object without the server's last position (byte for byte the 1.5
-/// encoding); built for this API it gets it.
+/// API 1.7 gave the world-object and hostile-target records the server's
+/// last position at their end, and added plugin services: `probe` (which
+/// reads world objects) as an API 1.6 SDK built it still loads.
 #[test]
-fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_6() {
+fn a_plugin_built_for_api_1_6_still_loads() {
+    let v1_6 = ApiVersion::new(1, 6);
+    let (loaded, error) = load_probe_built_for("probe-1-6", "1.6", &section_at(v1_6));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// An object change reaches a plugin exactly as its API version encodes
+/// it, through a real module: `rawbytes` built for API 1.5 or 1.6 is
+/// handed the world object without the server's last position (byte for
+/// byte that version's encoding); built for this API it gets it.
+#[test]
+fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_7() {
     use ac_plugin::abi::world::{ObjectChange, Position, WorldObject};
     let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
     let event = Event::ObjectChanged(ObjectChange {
@@ -916,7 +927,7 @@ fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_6() {
         }),
         ..ObjectChange::default()
     });
-    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+    for version in [ApiVersion::new(1, 5), ApiVersion::new(1, 6), API_CURRENT] {
         let root = Root::new(&format!("raw-server-position-{version}"));
         install_built_for(&root.0, "rawbytes", version);
         let mut api = FakeSession::default();
@@ -1394,7 +1405,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.6 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.7 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2282,15 +2293,16 @@ fn the_session_hands_a_held_pointer_over_measured_from_the_canvass_latest_place(
     );
 }
 
-/// API 1.6 added hover and leave on a canvas. `uidemo` built for this API
-/// hears a hover (two moves before its pump are one hover, at the later
-/// place) and the leave; built for API 1.5 it hears neither, only the
-/// press it heard before: an older plugin may read an unknown kind as a
-/// drag.
+/// API 1.6 added hover and leave on a canvas. `uidemo` built for API 1.6
+/// or this API hears a hover (two moves before its pump are one hover, at
+/// the later place) and the leave; built for API 1.5 it hears neither,
+/// only the press it heard before: an older plugin may read an unknown
+/// kind as a drag.
 #[test]
 fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
     use ac_plugin_ui::{PointerEvent, PointerKind, UiInput};
-    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+    let v1_6 = ApiVersion::new(1, 6);
+    for version in [ApiVersion::new(1, 5), v1_6, API_CURRENT] {
         let root = Root::new(&format!("uidemo-hover-{version}"));
         install_built_for(&root.0, "uidemo", version);
         let mut api = FakeSession::default();
@@ -2327,7 +2339,7 @@ fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
             "uidemo pointer kind=0 at 30,50 button=1".to_owned(),
             "uidemo pointer kind=1 at 30,50 button=1".to_owned(),
         ];
-        if version == API_CURRENT {
+        if v1_6.is_at_most(version) {
             expected.insert(0, "uidemo pointer kind=5 at 30,50 button=0".to_owned());
             expected.push("uidemo pointer kind=6 at 30,50 button=0".to_owned());
         }
@@ -2658,7 +2670,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.6""#,
+            r#""apiVersion": "1.7""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),
@@ -3362,28 +3374,28 @@ fn a_service_that_fails_as_another_plugin_starts_goes_before_the_next_starts() {
     );
 }
 
-/// A module that says it was built for API 1.5 but imports a function
-/// API 1.6 added is refused at load, even with a layout section that
-/// matches: the plugin would never hear the 1.6 events that go with it.
+/// A module that says it was built for API 1.6 but imports a function
+/// API 1.7 added is refused at load, even with a layout section that
+/// matches: the plugin would never hear the 1.7 events that go with it.
 #[test]
 fn an_import_newer_than_the_plugins_api_version_is_refused() {
-    let root = Root::new("service-forged-1-5");
+    let root = Root::new("service-forged-1-6");
     let folder = install(&root.0, "suite");
-    let v1_5 = ApiVersion::new(1, 5);
+    let v1_6 = ApiVersion::new(1, 6);
     edit_manifest(
         &folder,
         &format!(r#""apiVersion": "{API_CURRENT}""#),
-        r#""apiVersion": "1.5""#,
+        r#""apiVersion": "1.6""#,
     );
-    // The 1.5 core, and every import this client has at its 1.5 shape.
-    let mut forged = core_shape(v1_5).to_le_bytes().to_vec();
+    // The 1.6 core, and every import this client has at its 1.6 shape.
+    let mut forged = core_shape(v1_6).to_le_bytes().to_vec();
     for import in Import::ALL {
         forged.extend_from_slice(&import_key(import.name()).to_le_bytes());
-        forged.extend_from_slice(&import.shape_at(v1_5).to_le_bytes());
+        forged.extend_from_slice(&import.shape_at(v1_6).to_le_bytes());
     }
     let wasm = folder.join("suite.wasm");
     let built = std::fs::read(&wasm).unwrap();
-    let built = with_custom_section(&built, "openac.api", Some(b"1.5"));
+    let built = with_custom_section(&built, "openac.api", Some(b"1.6"));
     let built = with_custom_section(&built, LAYOUT_SECTION, Some(&forged));
     std::fs::write(&wasm, built).unwrap();
     let mut api = FakeSession::default();
@@ -3391,7 +3403,7 @@ fn an_import_newer_than_the_plugins_api_version_is_refused() {
     plugins.start(&mut api);
     let error = failed(&plugins.take_reports(), "openac.suite").unwrap();
     assert!(
-        error.contains("which API 1.6 added (the plugin was built for API 1.5)"),
+        error.contains("which API 1.7 added (the plugin was built for API 1.6)"),
         "{error}"
     );
     assert!(plugins.loaded_ids().is_empty());

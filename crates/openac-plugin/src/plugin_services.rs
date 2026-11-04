@@ -1,5 +1,5 @@
 //! Typed [`Host`] methods for API group P: plugin services
-//! ([`crate::services`], API 1.6), so plugins built to work together call
+//! ([`crate::services`], API 1.7), so plugins built to work together call
 //! each other and wait for the answer.
 //!
 //! The plugin offering a service answers it in [`crate::Plugin::callback`]:

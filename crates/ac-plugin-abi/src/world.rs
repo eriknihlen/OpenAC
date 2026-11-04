@@ -345,8 +345,8 @@ wire_record! {
         /// the world. [`Self::position`] is where the client has it now: a
         /// creature's simulated body, which moves between the server's
         /// positions and can stand apart from the last one. Added in API
-        /// 1.6.
-        since (1, 6) pub server_position: Option<Position>,
+        /// 1.7.
+        since (1, 7) pub server_position: Option<Position>,
     }
 }
 

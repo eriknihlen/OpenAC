@@ -915,19 +915,19 @@ macro_rules! import_table {
                 -> Result<u32, $crate::services::ServiceError>
                 = Err($crate::services::ServiceError::Refused(
                     "plugin services are unavailable".to_owned())),
-                permission: None, window: false, since: (1, 6);
+                permission: None, window: false, since: (1, 7);
             /// Withdraw one of the plugin's services; false for a handle it
             /// does not hold.
             ServiceUnregister = service_unregister(u32) -> bool,
-                permission: None, window: false, since: (1, 6);
+                permission: None, window: false, since: (1, 7);
             /// Every service on offer, by id.
             Services = services(()) -> Vec<$crate::services::ServiceInfo>,
-                permission: None, window: false, since: (1, 6);
+                permission: None, window: false, since: (1, 7);
             /// Call another plugin's service and wait for its reply.
             ServiceCall = service_call($crate::services::ServiceCall)
                 -> Result<Vec<u8>, $crate::services::ServiceError>
                 = Err($crate::services::ServiceError::NotFound),
-                permission: None, window: false, since: (1, 6);
+                permission: None, window: false, since: (1, 7);
 
             // ── N. Storage ──────────────────────────────────────────────
             /// The bytes stored under a key, none when nothing is.

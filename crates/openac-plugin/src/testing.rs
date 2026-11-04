@@ -674,7 +674,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.6".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.7".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));
@@ -954,7 +954,7 @@ mod tests {
         assert!(essence.is_pet_device());
     }
 
-    // API 1.6: a hostile target and a world object carry the server's last
+    // API 1.7: a hostile target and a world object carry the server's last
     // position beside the client's own place, through the encoding.
     #[test]
     fn a_hostile_target_carries_the_servers_last_position() {

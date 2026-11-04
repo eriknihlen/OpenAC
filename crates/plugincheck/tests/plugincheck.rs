@@ -59,7 +59,7 @@ fn manifest_json(id: &str, version: &str, permissions: bool) -> String {
   "displayName": "Hello",
   "version": "{version}",
   "entry": "{ENTRY}",
-  "apiVersion": "1.6",
+  "apiVersion": "1.7",
   "minHostVersion": "0.1.0"{permissions}
 }}"#
     )
@@ -177,7 +177,7 @@ fn a_valid_directory_passes() {
     assert_no_failure(&report);
     let (status, message) = check(&report, "module matches its manifest");
     assert_eq!(status, CheckStatus::Pass);
-    assert!(message.starts_with("API 1.6;"), "{message}");
+    assert!(message.starts_with("API 1.7;"), "{message}");
     assert!(message.contains("Permissions used: chat"), "{message}");
 }
 
@@ -488,7 +488,7 @@ fn a_module_built_for_another_api_version_than_its_manifest_fails() {
     );
     assert_eq!(status, CheckStatus::Fail);
     assert!(
-        message.starts_with("the .wasm was built for API 2.0 but plugin.json says 1.6"),
+        message.starts_with("the .wasm was built for API 2.0 but plugin.json says 1.7"),
         "{message}"
     );
 }

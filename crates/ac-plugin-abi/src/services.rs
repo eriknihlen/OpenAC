@@ -1,4 +1,4 @@
-//! Plugin services (API 1.6): a plugin offers a named service, and another
+//! Plugin services (API 1.7): a plugin offers a named service, and another
 //! plugin calls it and waits for the answer, so plugins built to work
 //! together (a suite) ask each other things directly.
 //!

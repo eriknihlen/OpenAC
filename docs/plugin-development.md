@@ -100,17 +100,15 @@ canvas pointer event, `PointerEvent::HOVER` (the pointer over a listening
 canvas with no button held, at most one per delivery at the latest place) and
 `PointerEvent::LEAVE` (one when the hovering ends: the pointer moved off, a
 press began elsewhere, or the canvas hid or went), for tooltips; a plugin built
-for an older version hears neither. API 1.6 also added plugin
-services, through which plugins built to work together call each other
-([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
-`Callback::ServiceRequest`, which a plugin built for an older version never
-gets. It also added
-`server_position` at the end of `WorldObject` and `CombatTarget`: the last
-position the server sent for the object, beside `position` (and, for a target,
-`distance`), which give where the client has it now, a creature's simulated
-body. The two can stand apart while the body catches up to the server's
-place. Everything the client offers
-goes through `Host`: game state, items, chat, movement and navigation, trade
+for an older version hears neither. API 1.7 added plugin services, through which plugins built to work together
+call each other ([Plugin services](#plugin-services)), with
+`Event::ServiceChanged` and `Callback::ServiceRequest`, which a plugin built
+for an older version never gets. It also added `server_position` at the end
+of `WorldObject` and `CombatTarget`: the last position the server sent for
+the object, beside `position` (and, for a target, `distance`), which give
+where the client has it now, a creature's simulated body. The two can stand
+apart while the body catches up to the server's place. Everything the client
+offers goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
 
@@ -331,7 +329,7 @@ game files.
 ## Plugin services
 
 Plugins built to work together, a suite, call each other through services
-(API 1.6). One plugin offers a service by name and answers it; another calls
+(API 1.7). One plugin offers a service by name and answers it; another calls
 it and waits for the reply. The request and the reply are bytes the two
 plugins agree on; the client never reads them.
 
@@ -411,7 +409,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.6",
+  "apiVersion": "1.7",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -427,7 +425,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.6"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.7"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

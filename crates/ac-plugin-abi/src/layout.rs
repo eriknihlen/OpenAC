@@ -203,23 +203,24 @@ mod tests {
     /// import, event or `since`-marked field), say in the commit message
     /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
     /// published the same value as 1.5: it added two values of a pointer
-    /// event's kind byte, not a shape.
-    const PUBLISHED: u64 = 0xc405_192c_0293_a6c2;
+    /// event's kind byte, not a shape. API 1.7 (plugin services, the
+    /// server's last position on the world-object records) changed it.
+    const PUBLISHED: u64 = 0x4251_03f0_33c7_8df5;
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;
 
     /// API 1.6 added only the pointer kinds hover and leave, which the host
-    /// sends only to plugins built for 1.6: no record, event or import
-    /// changed shape, so a plugin built for 1.5 has this version's core
-    /// shape and section and loads unrebuilt.
+    /// sends only to plugins built for 1.6 or later: no record, event or
+    /// import changed shape, so a plugin built for 1.5 has 1.6's core shape
+    /// and section. API 1.7 changed both, so neither is this version's.
     #[test]
     fn api_1_5_plugins_have_the_api_1_6_shapes() {
         let (v1_5, v1_6) = (ApiVersion::new(1, 5), ApiVersion::new(1, 6));
         assert_eq!(core_shape(v1_5), API_1_5_CORE);
         assert_eq!(core_shape(v1_6), API_1_5_CORE);
         assert_eq!(section_at(v1_5), section_at(v1_6));
-        assert_eq!(section_at(v1_6), LAYOUT_SECTION_BYTES);
+        assert_ne!(section_at(v1_6), LAYOUT_SECTION_BYTES);
     }
 
     #[test]
@@ -283,7 +284,7 @@ mod tests {
             {
                 assert_eq!(
                     import.shape_at(v1_1),
-                    shape_before_1_6(*import),
+                    shape_before_1_7(*import),
                     "{import:?}"
                 );
             }
@@ -365,52 +366,10 @@ mod tests {
             if expected.is_some() && !API_1_4_CHANGED.iter().any(|(i, _)| i == import) {
                 assert_eq!(
                     import.shape_at(v1_4),
-                    shape_before_1_6(*import),
+                    shape_before_1_7(*import),
                     "{import:?}"
                 );
             }
-        }
-    }
-
-    /// The calls API 1.6 changed, with the shape each had before: the
-    /// world-object and hostile-target records gained the server's last
-    /// position.
-    const API_1_5_CHANGED: [(Import, u64); 3] = [
-        (Import::WorldObjects, 0x2b96_526a_8808_fe9b),
-        (Import::WorldObject, 0x9034_777b_f0a1_0329),
-        (Import::CombatHostileTargets, 0x4011_5314_7d89_c991),
-    ];
-
-    /// An import's shape as API 1.5 had it: its shape before API 1.6
-    /// changed it, else its shape now.
-    fn shape_before_1_6(import: Import) -> u64 {
-        API_1_5_CHANGED
-            .iter()
-            .find(|(i, _)| *i == import)
-            .map_or_else(|| import.shape(), |(_, shape)| *shape)
-    }
-
-    /// API 1.6 added a field at the end of the world-object and
-    /// hostile-target records, which changes the core shape (an event
-    /// carries a world object) and the calls in [`API_1_5_CHANGED`]: an API
-    /// 1.5 plugin keeps its own shapes for all of them, and every other
-    /// import it has is as it was.
-    #[test]
-    fn api_1_5_plugins_keep_their_world_object_shapes() {
-        let v1_5 = ApiVersion::new(1, 5);
-        assert_eq!(core_shape(v1_5), API_1_5_CORE);
-        assert_ne!(CORE_SHAPE, API_1_5_CORE);
-        for (import, shape) in API_1_5_CHANGED {
-            assert_eq!(import.shape_at(v1_5), shape, "{import:?}");
-            assert_ne!(import.shape(), shape, "{import:?}");
-        }
-        let section = PluginLayout::parse(&section_at(v1_5)).unwrap();
-        for import in Import::ALL {
-            let expected = import
-                .since()
-                .is_at_most(v1_5)
-                .then(|| shape_before_1_6(*import));
-            assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
         }
     }
 
@@ -436,41 +395,69 @@ mod tests {
         assert_eq!(core_shape(ApiVersion::new(1, 4)), API_1_4_CORE);
     }
 
-    /// The imports API 1.6 added for plugin services.
-    const API_1_6_SERVICES: [Import; 4] = [
+    /// The calls API 1.7 changed, with the shape each had in API 1.5 and
+    /// 1.6: the world-object and hostile-target records gained the server's
+    /// last position.
+    const API_1_6_CHANGED: [(Import, u64); 3] = [
+        (Import::WorldObjects, 0x2b96_526a_8808_fe9b),
+        (Import::WorldObject, 0x9034_777b_f0a1_0329),
+        (Import::CombatHostileTargets, 0x4011_5314_7d89_c991),
+    ];
+
+    /// An import's shape as API 1.6 had it: its shape before API 1.7
+    /// changed it, else its shape now.
+    fn shape_before_1_7(import: Import) -> u64 {
+        API_1_6_CHANGED
+            .iter()
+            .find(|(i, _)| *i == import)
+            .map_or_else(|| import.shape(), |(_, shape)| *shape)
+    }
+
+    /// The imports API 1.7 added for plugin services.
+    const API_1_7_SERVICES: [Import; 4] = [
         Import::ServiceRegister,
         Import::ServiceUnregister,
         Import::Services,
         Import::ServiceCall,
     ];
 
-    /// API 1.6 added plugin services: their imports, and the event, the
-    /// callback and the answer they carry, each marked `since`. An API 1.5
-    /// plugin keeps its core shape, has none of the new imports, and every
-    /// import it has is as it was.
+    /// API 1.7 added a field at the end of the world-object and
+    /// hostile-target records, which changes the core shape (an event
+    /// carries a world object) and the calls in [`API_1_6_CHANGED`], and
+    /// plugin services: their imports, and the event, the callback and the
+    /// answer they carry, each marked `since`. A plugin built for API 1.5
+    /// or 1.6 keeps its own shapes for all of them, has none of the new
+    /// imports, and every other import it has is as it was.
     #[test]
-    fn api_1_5_plugins_keep_their_core_and_import_shapes() {
-        let v1_5 = ApiVersion::new(1, 5);
-        assert_eq!(core_shape(v1_5), API_1_5_CORE);
-        assert_ne!(CORE_SHAPE, API_1_5_CORE);
-        let older = PluginLayout::parse(&section_at(v1_5)).unwrap();
-        let newer = PluginLayout::parse(&section_at(ApiVersion::new(1, 6))).unwrap();
-        for import in Import::ALL {
-            if API_1_6_SERVICES.contains(import) {
-                assert_eq!(import.since(), ApiVersion::new(1, 6), "{import:?}");
-                assert_eq!(older.import_shape(import.name()), None, "{import:?}");
+    fn api_1_5_and_1_6_plugins_keep_their_core_and_import_shapes() {
+        let current = PluginLayout::parse(&section_at(API_CURRENT)).unwrap();
+        for version in [ApiVersion::new(1, 5), ApiVersion::new(1, 6)] {
+            assert_eq!(core_shape(version), API_1_5_CORE, "{version}");
+            assert_ne!(CORE_SHAPE, API_1_5_CORE);
+            for (import, shape) in API_1_6_CHANGED {
+                assert_eq!(import.shape_at(version), shape, "{import:?} {version}");
+                assert_ne!(import.shape(), shape, "{import:?}");
+            }
+            let section = PluginLayout::parse(&section_at(version)).unwrap();
+            for import in Import::ALL {
+                let expected = import
+                    .since()
+                    .is_at_most(version)
+                    .then(|| shape_before_1_7(*import));
                 assert_eq!(
-                    newer.import_shape(import.name()),
-                    Some(import.shape()),
-                    "{import:?}"
-                );
-            } else {
-                assert_eq!(
-                    older.import_shape(import.name()),
-                    newer.import_shape(import.name()),
-                    "{import:?}"
+                    section.import_shape(import.name()),
+                    expected,
+                    "{import:?} {version}"
                 );
             }
+        }
+        for import in API_1_7_SERVICES {
+            assert_eq!(import.since(), ApiVersion::new(1, 7), "{import:?}");
+            assert_eq!(
+                current.import_shape(import.name()),
+                Some(import.shape()),
+                "{import:?}"
+            );
         }
     }
 
@@ -524,7 +511,7 @@ mod tests {
             {
                 assert_eq!(
                     import.shape_at(v1_3),
-                    shape_before_1_6(*import),
+                    shape_before_1_7(*import),
                     "{import:?}"
                 );
             }

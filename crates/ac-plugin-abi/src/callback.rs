@@ -46,9 +46,9 @@ wire_union! {
         6 => CommandComplete(CommandCall),
         /// Another plugin calls one of the plugin's services
         /// ([`crate::services`]); answer [`CallbackAnswer::Service`]. Only
-        /// a plugin built for API 1.6 or later offers one, so only such a
+        /// a plugin built for API 1.7 or later offers one, so only such a
         /// plugin is asked.
-        7 => ServiceRequest(ServiceRequest) since (1, 6),
+        7 => ServiceRequest(ServiceRequest) since (1, 7),
     }
 }
 
@@ -86,7 +86,7 @@ wire_union! {
         4 => Completions(Vec<CommandCompletion>),
         /// A service's reply, or why it refuses the call (the caller gets
         /// [`crate::services::ServiceError::Refused`] with the reason).
-        5 => Service(Result<Vec<u8>, String>) since (1, 6),
+        5 => Service(Result<Vec<u8>, String>) since (1, 7),
     }
 }
 

@@ -169,7 +169,7 @@ fn hostile_targets_name_their_species() {
     });
 }
 
-// API 1.6: a creature's world object and hostile-target entry carry the
+// API 1.7: a creature's world object and hostile-target entry carry the
 // server's last position beside the place the client has it now. Its
 // simulated body standing 3 m east of the server's place, the distance is
 // measured to the body and the server's place is the accepted one.
