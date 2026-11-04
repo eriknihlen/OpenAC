@@ -188,8 +188,9 @@ impl Host<'_> {
     /// service goes when the plugin withdraws it or stops.
     ///
     /// # Errors
-    /// The name is not 1 to 64 bytes of `a-z`, `0-9` and `-`, the plugin
-    /// already offers one by that name, or it offers 32 already.
+    /// The name is not 1 to 64 bytes of `a-z`, `0-9` and `-`, the
+    /// description is over 1 KiB, the plugin already offers one by that
+    /// name, or it offers 32 already.
     pub fn register_service_raw(
         &mut self,
         name: &str,
