@@ -1971,11 +1971,13 @@ impl Movement {
             has_animations: object.has_animations(),
             physics_state: object.physics().state,
         });
-        // The position log follows server positions for creatures near the
-        // character (its body's place before the update, when it has one).
+        // The position log follows server positions for objects near the
+        // character, other than the character and projectiles (its body's
+        // place before the update, when it has one).
         let logged = match message {
             Inbound::UpdatePosition(update)
-                if self.position_log.is_on()
+                if update.guid == guid
+                    && self.position_log.is_on()
                     && !is_player
                     && flying.is_none()
                     && distance <= position_log::NEAR_METRES =>
@@ -2140,7 +2142,7 @@ impl Movement {
             .map(|o| o + local_origin(p))
     }
 
-    /// Log one server position for a creature: `before` is its body's cell
+    /// Log one server position for an object: `before` is its body's cell
     /// and place before the update; its place after is read now.
     fn log_position_update(
         &mut self,
@@ -2180,7 +2182,7 @@ impl Movement {
     }
 
     /// Log a server position the world did not apply (its counters were
-    /// not newer, or it named no valid place), for a creature near the
+    /// not newer, or it named no valid place), for an object near the
     /// character.
     fn log_unapplied_position(
         &mut self,
@@ -2346,7 +2348,7 @@ impl Movement {
         )
     }
 
-    /// Log each creature near the character whose body stands more than
+    /// Log each object near the character whose body stands more than
     /// [`position_log::APART_METRES`] from the server's last place for it,
     /// at most every [`position_log::APART_EVERY`] each.
     fn log_apart_bodies(&mut self, world: &World, now: Duration) {

@@ -47,7 +47,7 @@ pub struct NetDiagnostics {
     /// container is asked for, opens, is refused or closes, when the open
     /// one leaves the world, and for each plugin close with its answer.
     pub probe_external_container: bool,
-    /// `OPENAC_POSITION_LOG=1`: `[position]` lines for creatures within
+    /// `OPENAC_POSITION_LOG=1`: `[position]` lines for objects within
     /// 30 m of the character (each server position and how it was handled,
     /// and a body that stays more than 4 m from the server's place), and
     /// for each movement the server orders for the character.

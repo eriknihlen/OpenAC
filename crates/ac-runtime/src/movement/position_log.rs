@@ -1,10 +1,11 @@
-//! The position log (`OPENAC_POSITION_LOG=1`), to find where a creature's
+//! The position log (`OPENAC_POSITION_LOG=1`), to find where an object's
 //! simulated body and the server's place for it part ways:
 //!
-//! - `update`: one line per server position for a creature within
-//!   [`NEAR_METRES`] of the character, saying how it was handled and how
-//!   far the body stood from the server's place before and after;
-//! - `apart`: one line every [`APART_EVERY`] per creature within
+//! - `update`: one line per server position for an object within
+//!   [`NEAR_METRES`] of the character (any but the character itself and
+//!   a projectile in flight, a creature or not), saying how it was handled
+//!   and how far the body stood from the server's place before and after;
+//! - `apart`: one line every [`APART_EVERY`] per object within
 //!   [`NEAR_METRES`] whose body stands more than [`APART_METRES`] from the
 //!   server's last place for it, with the time since its last update;
 //! - `order`: one line per movement the server orders for the character,
@@ -21,7 +22,7 @@ use ac_physics::movement::RemotePositionOutcome;
 
 use super::route::PositionDispositionRoute;
 
-/// Creatures farther than this from the character are not logged, metres.
+/// Objects farther than this from the character are not logged, metres.
 pub const NEAR_METRES: f32 = 30.0;
 
 /// A body farther than this from the server's place is reported as apart,
@@ -31,7 +32,7 @@ pub const APART_METRES: f32 = 4.0;
 /// How often a body that stays apart is reported again.
 pub const APART_EVERY: Duration = Duration::from_secs(2);
 
-/// How one server position for a creature was handled.
+/// How one server position for an object was handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handling {
     /// Queued for the body to catch up to.
@@ -52,7 +53,7 @@ pub enum Handling {
     },
     /// Not applied: why.
     Rejected(&'static str),
-    /// The creature has no simulated body for the update to move: why.
+    /// The object has no simulated body for the update to move: why.
     NoBody(&'static str),
 }
 
@@ -84,7 +85,7 @@ impl Handling {
     }
 }
 
-/// How a server position that reached a creature's body was handled, from
+/// How a server position that reached an object's body was handled, from
 /// what the body made of it (`outcome`), the route it took, whether it
 /// carried the on-ground flag, whether the body is near enough to the
 /// character to be advanced, whether it was the body's first server
@@ -157,10 +158,10 @@ fn metres_or_none(metres: Option<f32>) -> String {
     metres.map_or_else(|| "?".to_owned(), |m| format!("{m:.2}"))
 }
 
-/// One server position for a creature, as logged.
+/// One server position for an object, as logged.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateLine {
-    /// The creature.
+    /// The object.
     pub guid: u32,
     /// Its name.
     pub name: String,
@@ -206,10 +207,10 @@ impl fmt::Display for UpdateLine {
     }
 }
 
-/// A creature's body that stays apart from the server's place, as logged.
+/// An object's body that stays apart from the server's place, as logged.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApartLine {
-    /// The creature.
+    /// The object.
     pub guid: u32,
     /// Its name.
     pub name: String,
@@ -328,7 +329,7 @@ impl fmt::Display for OrderLine {
     }
 }
 
-/// What the log remembers of one creature.
+/// What the log remembers of one object.
 #[derive(Debug, Clone, Copy, Default)]
 struct Seen {
     last_update: Option<Duration>,
@@ -372,7 +373,7 @@ impl PositionLog {
         std::mem::take(&mut self.lines)
     }
 
-    /// Log a creature's server position.
+    /// Log an object's server position.
     pub fn update(&mut self, now: Duration, line: &UpdateLine) {
         if !self.on {
             return;
@@ -386,7 +387,7 @@ impl PositionLog {
     }
 
     /// Whether a body found apart at `now` is due a line (none for this
-    /// creature yet, or the last one [`APART_EVERY`] ago).
+    /// object yet, or the last one [`APART_EVERY`] ago).
     #[must_use]
     pub fn apart_due(&self, guid: u32, now: Duration) -> bool {
         self.on
@@ -419,7 +420,7 @@ impl PositionLog {
         self.lines.push(format!("{} {line}", stamp(now)));
     }
 
-    /// Forget a creature that left.
+    /// Forget an object that left.
     pub fn forget(&mut self, guid: u32) {
         self.seen.remove(&guid);
     }
