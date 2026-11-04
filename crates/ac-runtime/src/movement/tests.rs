@@ -4378,7 +4378,7 @@ fn gaps(line: &str) -> (f32, f32) {
     (before, parts.next().unwrap().parse().unwrap())
 }
 
-/// The first server position of a creature is taken outright, and the log
+/// The first server position of an object is taken outright, and the log
 /// says so.
 #[test]
 #[ignore = "needs the retail dat files"]
@@ -4391,7 +4391,6 @@ fn the_position_log_names_a_first_update_a_jump() {
     let standing = ground_position(&rig, 0xA9B4_0000, x + 2.0, y);
     position_update(&mut rig, LOGGED_DRUDGE, standing, (2, 0, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(
         line.contains("update 0x70000E01 \"Drudge\" seq=1/2/0/0 ground=yes jump (first update)"),
         "{line}"
@@ -4408,7 +4407,6 @@ fn the_position_log_names_a_near_update_a_glide_with_its_gap() {
     let near = ground_position(&rig, 0xA9B4_0000, x + 3.0, y);
     position_update(&mut rig, LOGGED_DRUDGE, near, (3, 0, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(line.contains("ground=yes glide server="), "{line}");
     let (before, after) = gaps(&line);
     assert!((before - 1.0).abs() < 0.05, "{line}");
@@ -4425,7 +4423,6 @@ fn the_position_log_names_a_far_update_a_jump_and_the_gap_closes() {
     let far = ground_position(&rig, 0xA9B4_0000, x + 8.0, y);
     position_update(&mut rig, LOGGED_DRUDGE, far, (3, 0, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(line.contains("jump (more than 4 m)"), "{line}");
     let (before, after) = gaps(&line);
     assert!((before - 6.0).abs() < 0.05, "{line}");
@@ -4441,7 +4438,6 @@ fn the_position_log_names_a_teleport_placed() {
     let there = ground_position(&rig, 0xA9B4_0000, x + 6.0, y + 6.0);
     position_update(&mut rig, LOGGED_DRUDGE, there, (3, 1, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(line.contains("placed (teleport)"), "{line}");
     assert!(gaps(&line).1 < 0.6, "{line}");
 }
@@ -4467,7 +4463,6 @@ fn the_position_log_names_an_update_off_the_ground_ignored_and_the_cell_it_wrote
     assert_ne!(here, across.cell_id, "the test needs another cell");
     airborne_position_update(&mut rig, LOGGED_DRUDGE, across, (3, 0, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(line.contains("ground=no"), "{line}");
     assert!(
         line.contains(&format!(
@@ -4491,7 +4486,6 @@ fn the_position_log_names_a_stale_update_rejected() {
     let near = ground_position(&rig, 0xA9B4_0000, x + 3.0, y);
     position_update(&mut rig, LOGGED_DRUDGE, near, (2, 0, 0));
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(
         line.contains("seq=1/2/0/0 ground=yes rejected (sequence)"),
         "{line}"
@@ -4500,10 +4494,10 @@ fn the_position_log_names_a_stale_update_rejected() {
     assert!((before - 1.0).abs() < 0.05 && before == after, "{line}");
 }
 
-/// A creature farther than 30 m is not logged.
+/// An object farther than 30 m is not logged.
 #[test]
 #[ignore = "needs the retail dat files"]
-fn the_position_log_leaves_out_creatures_beyond_30_m() {
+fn the_position_log_leaves_out_objects_beyond_30_m() {
     let mut rig = Rig::entered();
     rig.movement.enable_position_log();
     let (x, y) = SPOT;
@@ -4528,9 +4522,6 @@ fn the_position_log_reports_a_body_left_apart_every_two_seconds() {
     // 4.5 s of frames.
     rig.frames(270);
     let lines = rig.movement.take_position_log_lines();
-    for line in &lines {
-        println!("{line}");
-    }
     let apart: Vec<_> = lines.iter().filter(|l| l.contains(" apart ")).collect();
     assert_eq!(apart.len(), 3, "at 0, 2 and 4 s: {lines:#?}");
     assert!(
@@ -4590,7 +4581,6 @@ fn the_position_log_says_a_move_to_a_creature_steers_to_its_body() {
     let order = move_to_order(&rig, LOGGED_DRUDGE, 2);
     apply(&mut rig, &order);
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(
         line.contains("order MoveToObject target=0x70000E01"),
         "{line}"
@@ -4616,13 +4606,11 @@ fn the_position_log_says_when_a_move_to_falls_back_to_the_orders_place() {
     let order = move_to_order(&rig, CHEST, 2);
     apply(&mut rig, &order);
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(line.contains(" via=stand-in steer=0x"), "{line}");
 
     let order = move_to_order(&rig, 0x7000_0999, 3);
     apply(&mut rig, &order);
     let line = one_line(&mut rig);
-    println!("{line}");
     assert!(
         line.contains(" via=order place (no object here) steer=0x"),
         "{line}"
@@ -4643,4 +4631,68 @@ fn the_position_log_keeps_nothing_while_off() {
     apply(&mut rig, &order);
     rig.frames(150);
     assert!(rig.movement.take_position_log_lines().is_empty());
+}
+
+/// Where the drudge and the character are after each frame of one
+/// scenario, with the position log on or off: the drudge's first server
+/// position, a near one (a glide), a far one (a jump), one off the ground,
+/// a teleport and a stale one, then a server order sending the character to
+/// it; with the log on, it writes lines throughout.
+fn places_through_logged_scenario(log: bool) -> Vec<(Vec3, Vec3)> {
+    let mut rig = Rig::entered();
+    if log {
+        rig.movement.enable_position_log();
+    }
+    let (x, y) = SPOT;
+    drudge_at(&mut rig, LOGGED_DRUDGE, x + 2.0, y);
+    let mut places = Vec::new();
+    let mut run = |rig: &mut Rig, frames: u32| {
+        for _ in 0..frames {
+            rig.frames(1);
+            places.push((live(rig, LOGGED_DRUDGE), rig.body().0));
+        }
+    };
+    run(&mut rig, 2);
+    let updates = [
+        (x + 2.0, y, (2, 0, 0), true),
+        (x + 3.0, y, (3, 0, 0), true),
+        (x + 8.0, y, (4, 0, 0), true),
+        (x + 14.0, y, (5, 0, 0), false),
+        (x + 6.0, y + 6.0, (6, 1, 0), true),
+        (x + 9.0, y, (5, 1, 0), true),
+    ];
+    for (to_x, to_y, stamps, grounded) in updates {
+        let to = ground_position(&rig, 0xA9B4_0000, to_x, to_y);
+        if grounded {
+            position_update(&mut rig, LOGGED_DRUDGE, to, stamps);
+        } else {
+            airborne_position_update(&mut rig, LOGGED_DRUDGE, to, stamps);
+        }
+        run(&mut rig, 30);
+    }
+    let order = move_to_order(&rig, LOGGED_DRUDGE, 2);
+    apply(&mut rig, &order);
+    run(&mut rig, 120);
+    assert_eq!(
+        rig.movement.take_position_log_lines().is_empty(),
+        !log,
+        "the log writes only while on"
+    );
+    places
+}
+
+/// The position log only watches: the same scenario with it on and off
+/// moves the drudge and the character exactly alike, frame by frame.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_position_log_changes_nothing_about_where_bodies_go() {
+    let off = places_through_logged_scenario(false);
+    let on = places_through_logged_scenario(true);
+    assert_eq!(on.len(), off.len());
+    for (frame, (on, off)) in on.iter().zip(&off).enumerate() {
+        assert_eq!(on, off, "frame {frame}");
+    }
+    // The scenario moved both.
+    assert_ne!(off.first().unwrap().0, off.last().unwrap().0);
+    assert_ne!(off.first().unwrap().1, off.last().unwrap().1);
 }
