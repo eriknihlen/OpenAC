@@ -1034,30 +1034,6 @@ fn plugins_tab(app: &mut LauncherApp, ui: &mut Ui) {
                 );
             });
         });
-        // A repository publishing several plugins: the player picks one.
-        if !window.plugins.add_from_url_choices.is_empty() {
-            let mut chosen = None;
-            let mut cancelled = false;
-            ui.horizontal_wrapped(|ui| {
-                ui.label("That repository publishes several plugins. Add:");
-                for (index, choice) in window.plugins.add_from_url_choices.iter().enumerate() {
-                    if ui
-                        .button(format!("{} {}", choice.display_name, choice.version))
-                        .clicked()
-                    {
-                        chosen = Some(index);
-                    }
-                }
-                if ui.button("Cancel").clicked() {
-                    cancelled = true;
-                }
-            });
-            if let Some(index) = chosen {
-                window.choose_add_from_url(index);
-            } else if cancelled {
-                window.cancel_add_from_url_choice();
-            }
-        }
         // No file picker here: the ZIP's path is typed, or the ZIP is dropped on
         // the window.
         ui.horizontal(|ui| {
@@ -1556,6 +1532,11 @@ fn dialogs(app: &mut LauncherApp, ctx: &egui::Context) {
     }
     if window.plugins.is_remove_dialog_open {
         modal(ctx, "remove", 440.0, |ui| remove_dialog(window, ui));
+    }
+    if !window.plugins.add_from_url_choices.is_empty() {
+        modal(ctx, "add-from-url-choice", 520.0, |ui| {
+            add_from_url_choice(window, ui);
+        });
     }
     if window.remove_character_target.is_some() {
         modal(ctx, "remove-character", 440.0, |ui| {
@@ -2514,6 +2495,50 @@ fn install_dialog(window: &mut Window, ui: &mut Ui) {
             window.close_install_dialog();
         }
     });
+}
+
+/// A repository publishing several plugins: the player picks the one to add.
+fn add_from_url_choice(window: &mut Window, ui: &mut Ui) {
+    let repo = window
+        .plugins
+        .add_from_url_choices
+        .first()
+        .map(|choice| choice.repo.clone())
+        .unwrap_or_default();
+    dialog_title(ui, "Choose a plugin");
+    ui.label(muted(format!(
+        "{repo} publishes several plugins. Add one now; add the others the same way."
+    )));
+    ui.add_space(6.0);
+    let mut chosen = None;
+    for (index, choice) in window.plugins.add_from_url_choices.iter().enumerate() {
+        card_frame().inner_margin(Margin::same(10)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&choice.display_name).strong());
+                    ui.label(muted(format!(
+                        "{} · v{}",
+                        choice.resolution.manifest.id, choice.version
+                    )));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if primary(ui, "Add", true, true) {
+                        chosen = Some(index);
+                    }
+                });
+            });
+        });
+        ui.add_space(4.0);
+    }
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if button(ui, "Cancel", true) {
+            window.cancel_add_from_url_choice();
+        }
+    });
+    if let Some(index) = chosen {
+        window.choose_add_from_url(index);
+    }
 }
 
 fn remove_dialog(window: &mut Window, ui: &mut Ui) {

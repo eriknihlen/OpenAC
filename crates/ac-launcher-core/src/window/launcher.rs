@@ -1607,6 +1607,7 @@ impl LauncherWindow {
             || self.is_settings_open
             || self.plugins.install_dialog.is_open
             || self.plugins.is_remove_dialog_open
+            || !self.plugins.add_from_url_choices.is_empty()
             || self.remove_character_target.is_some()
             || self.profile_migration_notice.is_some()
             || self.close_prompt.is_some()
@@ -2864,6 +2865,8 @@ impl LauncherWindow {
             self.close_install_dialog();
         } else if self.plugins.is_remove_dialog_open && !self.plugins.is_busy {
             self.plugins.is_remove_dialog_open = false;
+        } else if !self.plugins.add_from_url_choices.is_empty() {
+            self.cancel_add_from_url_choice();
         }
     }
 

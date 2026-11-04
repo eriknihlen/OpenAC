@@ -3268,6 +3268,32 @@ fn add_from_url_asks_which_plugin_when_a_repository_publishes_several() {
     assert!(!window.plugins.install_dialog.is_open);
 }
 
+// The pick is a dialog: it holds the window, and Escape cancels it.
+#[test]
+fn add_from_url_asks_in_a_dialog_that_escape_cancels() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.add_from_url_choices.len(), 2);
+    assert!(window.is_modal_open());
+    window.close_active_modal();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.is_modal_open());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
 #[test]
 fn add_from_url_offers_the_one_plugin_of_a_repository_not_yet_installed() {
     let fixture = PanelFixture::new();
