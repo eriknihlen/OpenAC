@@ -2606,6 +2606,35 @@ impl PanelFixture {
         }
     }
 
+    /// Publishes the zip and its checksum for `id` at `version` under `tag`,
+    /// so an install of that release goes through.
+    fn release_zip(&self, tag: &str, id: &str, version: &str) {
+        let zip_name = format!("{id}-{version}.zip");
+        let wasm = format!("{id}.wasm");
+        let manifest = manifest_json(id, version);
+        let zip_bytes = common::fixtures::create_zip(
+            &[
+                ("plugin.json", manifest.as_bytes(), None),
+                (wasm.as_str(), b"binary".as_slice(), None),
+            ],
+            common::fixtures::Compression::Stored,
+        );
+        let asset = |name: &str| {
+            ac_launcher_core::plugins::github::tagged_asset(HELLO_REPO, tag, name)
+                .unwrap()
+                .to_string()
+        };
+        self.server.add(
+            &asset(&format!("{zip_name}.sha256")),
+            format!(
+                "{}  {zip_name}",
+                ac_launcher_core::integrity::sha256_hex(&zip_bytes)
+            )
+            .as_bytes(),
+        );
+        self.server.add(&asset(&zip_name), &zip_bytes);
+    }
+
     fn window(&self) -> LauncherWindow {
         self.window_with(Arc::new(Fake::default()))
     }
@@ -3266,6 +3295,95 @@ fn add_from_url_asks_which_plugin_when_a_repository_publishes_several() {
     window.cancel_add_from_url_choice();
     assert!(window.plugins.add_from_url_choices.is_empty());
     assert!(!window.plugins.install_dialog.is_open);
+}
+
+/// A window whose Add from URL found three plugins of the test repository,
+/// none installed, each release installable.
+fn add_from_url_with_three_plugins(fixture: &PanelFixture) -> LauncherWindow {
+    fixture.list(&[], "");
+    let releases = [
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+        ("wasm-edwards.macro-v2.0.0", "edwards.macro", "2.0.0"),
+    ];
+    fixture.releases(&releases);
+    for (tag, id, version) in releases {
+        fixture.release_zip(tag, id, version);
+    }
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    window
+}
+
+fn choice_names(window: &LauncherWindow) -> Vec<String> {
+    window
+        .plugins
+        .add_from_url_choices
+        .iter()
+        .map(|choice| choice.display_name.clone())
+        .collect()
+}
+
+// Adding one plugin of several brings the pick back with the rest, so the
+// player never types the address again.
+#[test]
+fn add_from_url_asks_again_for_the_rest_after_an_install() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(1);
+    assert!(window.plugins.install_dialog.is_open);
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    window.confirm_install();
+    window.poll();
+    assert!(
+        !window.plugins.install_dialog.is_open,
+        "{:?}",
+        window.plugins.install_dialog.error
+    );
+    assert!(
+        fixture
+            .paths()
+            .plugins_directory()
+            .join("edwards.navigation")
+            .join("plugin.json")
+            .is_file()
+    );
+    assert_eq!(choice_names(&window), ["edwards.macro", "edwards.vision"]);
+    // The last one left is still asked about, and Cancel ends it.
+    window.choose_add_from_url(0);
+    window.confirm_install();
+    window.poll();
+    assert_eq!(choice_names(&window), ["edwards.vision"]);
+    window.cancel_add_from_url_choice();
+    assert!(!window.is_modal_open());
+}
+
+// Cancelling the install of one goes back to the pick with every plugin
+// still not installed, that one included.
+#[test]
+fn add_from_url_asks_again_after_an_install_is_cancelled() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    window.choose_add_from_url(2);
+    window.close_install_dialog();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.close_active_modal();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.is_modal_open());
 }
 
 // The pick is a dialog: it holds the window, and Escape cancels it.

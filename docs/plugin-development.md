@@ -526,8 +526,9 @@ plugincheck pack <plugin folder> <out dir> --index plugins-index.json
   having no release, and one that switches stops getting updates there.
 
 **Add from URL** on such a repository lists the plugins not yet installed
-and asks which one to add; each listed plugin is its own entry on the
-plugin list, all naming the same repository.
+and asks which one to add, then asks again for the rest until the player
+cancels; each one added is its own entry on the plugin list, all naming
+the same repository.
 
 ## Getting listed
 

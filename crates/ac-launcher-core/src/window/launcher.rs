@@ -3558,6 +3558,7 @@ impl LauncherWindow {
             cancel.cancel();
         }
         self.plugins.install_dialog.close();
+        self.ask_again_for_add_from_url();
     }
 
     /// The install dialog's Install / Update.
@@ -3660,6 +3661,7 @@ impl LauncherWindow {
                     self.strip_from_every_character(&installed.id);
                 }
                 self.plugins_check_now();
+                self.ask_again_for_add_from_url();
             }
             Err(error) => self.plugins.install_dialog.error = Some(error),
         }
@@ -3862,6 +3864,7 @@ impl LauncherWindow {
         self.plugins.error = None;
         self.plugins.status_text = None;
         self.plugins.add_from_url_choices.clear();
+        self.plugins.add_from_url_offered.clear();
         let channel = self.plugins.discover_channel();
         let pending_repo = repo.clone();
         self.plugins.add_from_url_text = repo;
@@ -3942,17 +3945,37 @@ impl LauncherWindow {
 
     /// Picks one plugin of a repository publishing several.
     pub fn choose_add_from_url(&mut self, index: usize) {
-        if index >= self.plugins.add_from_url_choices.len() {
+        let Some(choice) = self.plugins.add_from_url_choices.get(index).cloned() else {
             return;
-        }
-        let choice = self.plugins.add_from_url_choices.swap_remove(index);
-        self.plugins.add_from_url_choices.clear();
+        };
+        self.plugins.add_from_url_offered = std::mem::take(&mut self.plugins.add_from_url_choices);
         self.offer_add_from_url(choice.repo, *choice.resolution);
+        if !self.plugins.install_dialog.is_open {
+            self.ask_again_for_add_from_url();
+        }
     }
 
     /// Closes the pick of one plugin without offering any.
     pub fn cancel_add_from_url_choice(&mut self) {
         self.plugins.add_from_url_choices.clear();
+        self.plugins.add_from_url_offered.clear();
+    }
+
+    /// Brings the pick back, once the install dialog it opened has closed,
+    /// with the plugins it offered that are still not installed.
+    fn ask_again_for_add_from_url(&mut self) {
+        let offered = std::mem::take(&mut self.plugins.add_from_url_offered);
+        let Some(backend) = self.plugin_backend.clone() else {
+            return;
+        };
+        self.plugins.add_from_url_choices = offered
+            .into_iter()
+            .filter(|choice| {
+                backend
+                    .find_record(&choice.resolution.manifest.id)
+                    .is_none()
+            })
+            .collect();
     }
 
     /// Opens the install dialog for a plugin Add from URL found, unless it is

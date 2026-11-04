@@ -443,6 +443,10 @@ pub struct PluginsPanel {
     /// that are not installed, by name, for the player to pick one; empty
     /// otherwise.
     pub add_from_url_choices: Vec<AddFromUrlChoice>,
+    /// Every plugin the pick offered, while the install dialog it opened is
+    /// open: once that closes, the pick comes back with those still not
+    /// installed. Empty otherwise.
+    pub add_from_url_offered: Vec<AddFromUrlChoice>,
     /// The Install from ZIP field: a plugin ZIP's path.
     pub local_zip_text: String,
     /// When the cached list in use was written.
