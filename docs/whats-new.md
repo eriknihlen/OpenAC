@@ -5,6 +5,42 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## openac-rust 0.1.11 (2026-11-04)
+
+**New**
+
+- **Plugins that work together** (plugin API 1.7 and 1.8): a plugin can offer
+  a named service that other plugins call and get an answer from, and can
+  follow another plugin's status values as they change. Limits on size and
+  time keep one plugin from holding up the game. *(David Smith)*
+- **Several plugins from one GitHub repository:** each plugin tags its own
+  releases, and an optional index lists them; Discover, Add from URL and the
+  update check find plugins by their id, and Add from URL asks which one to
+  add. *(David Smith)*
+- **Position log** for debugging (`OPENAC_POSITION_LOG=1`): shows when a
+  creature and the server's place for it drift apart; plugins can read the
+  server's last position too. *(David Smith)*
+- **More for plugins:** canvases hear the mouse hover and leave (1.6), and
+  plugins can put items into an open chest and read the landscape's terrain
+  and its map colours.
+- **New plugins in Discover:** MudSort (inventory sorting), GoArrow (routes
+  over walks, portals and recalls, with a Dereth map) and MossTank 0.6.5 with
+  a Comps HUD, LootOwnDeathCorpse, material names in `/ub` commands and a
+  Monster Weapon cell that cycles the Items page *(Johan Lundberg)*, and a
+  route of one point that holds still instead of turning in circles.
+
+**Fixed**
+
+- A plugin's `/ub use` on a portal or object no longer fails at some
+  distances and then never works for that object again: the server walks the
+  character there.
+- A plugin's walk that was stopped at the wrong moment no longer left the
+  character running on. *(David Smith)*
+- Walks through large areas plan much faster (one took 19.6 s, now 2.0 s).
+- MudSort 0.1.0 did not load on 0.1.10; MudSort 0.1.1 needs 0.1.11.
+
+Plugins built for API 1.0 to 1.7 keep loading unchanged.
+
 ## openac-rust 0.1.10 (2026-11-03)
 
 Close every client before updating: the first start moves your files into a
