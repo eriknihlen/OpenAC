@@ -110,10 +110,17 @@ impl std::fmt::Debug for PluginComposition {
 }
 
 impl PluginComposition {
-    /// Builds the backend for `paths` over `transport`. A record file that
-    /// cannot be read only costs the launcher its memory of which plugins it
-    /// manages; it never keeps the window from opening.
-    pub fn new(paths: &PathSet, list_uri: WebUrl, transport: Arc<dyn HttpTransport>) -> Self {
+    /// Builds the backend for `paths` over `transport`, writing what only a
+    /// publisher needs to `log` (the launcher's own, so one instance rolls
+    /// the file over). A record file that cannot be read only costs the
+    /// launcher its memory of which plugins it manages; it never keeps the
+    /// window from opening.
+    pub fn new(
+        paths: &PathSet,
+        list_uri: WebUrl,
+        transport: Arc<dyn HttpTransport>,
+        log: LauncherLog,
+    ) -> Self {
         let mut store = InstalledPluginRecordStore::for_paths(paths);
         if store.load().is_err() {
             store.records.clear();
@@ -130,7 +137,7 @@ impl PluginComposition {
             inventory: PluginInventory::new(paths),
             records,
             current_catalog: Mutex::new(None),
-            log: LauncherLog::open(paths),
+            log,
         }
     }
 

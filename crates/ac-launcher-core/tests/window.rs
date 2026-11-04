@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ac_host::PathSet;
 use ac_launcher_core::cancel::{CancelToken, Cancelled};
 use ac_launcher_core::installation::LauncherInstallRecord;
+use ac_launcher_core::launcher_log::LauncherLog;
 use ac_launcher_core::net::{HttpError, HttpRequest, HttpResponse, HttpTransport};
 use ac_launcher_core::orchestration::{
     AccountCapabilities, LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
@@ -1602,6 +1603,7 @@ impl ChecklistFixture {
             &self.paths,
             WebUrl::parse("https://example.test/plugins.json").unwrap(),
             Arc::new(NoNetwork),
+            LauncherLog::open(&self.paths),
         )));
         let mut window = LauncherWindow::new(parts);
         window.initialize();
@@ -2645,6 +2647,7 @@ impl PanelFixture {
             &self.paths(),
             WebUrl::parse(LIST_URI).unwrap(),
             self.server.transport(),
+            LauncherLog::open(&self.paths()),
         )));
         let mut window = LauncherWindow::new(parts);
         window.initialize();
@@ -3001,6 +3004,33 @@ fn a_malformed_plugin_index_is_logged_once_a_check_for_a_repository() {
         1,
         "{log}"
     );
+}
+
+// The backend writes to the launcher's own log, never a second instance on
+// the same file that would roll it over on its own count.
+#[test]
+fn the_plugin_backend_writes_to_the_log_it_is_given() {
+    let fixture = PanelFixture::new();
+    let given = fixture.paths().root_directory().join("given.log");
+    let composition = PluginComposition::new(
+        &fixture.paths(),
+        WebUrl::parse(LIST_URI).unwrap(),
+        fixture.server.transport(),
+        LauncherLog::at(
+            &given,
+            1024 * 1024,
+            ac_host::local_time::LocalZone::fixed(0),
+        ),
+    );
+    composition.log_index_warning_text(HELLO_REPO, Some("a test warning"));
+    let log = std::fs::read_to_string(&given).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Plugin index of {HELLO_REPO} ignored: a test warning"
+        )),
+        "{log}"
+    );
+    assert!(!fixture.paths().launcher_log_file().exists());
 }
 
 // OpenAC LauncherWindowViewModelTests.DiscoverHidesABlockedListedPluginAndMakesNoDetailRequestForIt.

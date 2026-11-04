@@ -326,6 +326,7 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
         paths,
         context.options.plugin_list_uri.clone(),
         Arc::clone(&context.transport),
+        log.clone(),
     ));
     let health = Arc::new(ServerHealthService::new(
         Arc::clone(&context.transport),
