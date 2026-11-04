@@ -43,12 +43,19 @@ impl StatusBoard {
             Some(value) => self.values.insert(slot.clone(), value),
             None => self.values.remove(&slot),
         };
-        // Held only while it differs from the value at the pass's start.
+        // Held only while it differs from the value at the pass's start, or
+        // a subscription made since then holds another value for it.
         let start = self.before.entry(slot.clone()).or_insert(was);
-        if self.values.get(&slot) == start.as_ref() {
+        if self.values.get(&slot) == start.as_ref() && !self.started_on(&slot) {
             self.before.remove(&slot);
         }
         true
+    }
+
+    /// Whether a subscription made since the changes were last taken holds
+    /// the value `slot` had then.
+    fn started_on(&self, (owner, key): &Slot) -> bool {
+        self.started.keys().any(|(_, o, k)| o == owner && k == key)
     }
 
     /// What `owner` published under `key`.
@@ -299,6 +306,25 @@ mod tests {
             board.take_changes(),
             [told("sub", "pub", "both", Some("6"))]
         );
+    }
+
+    // A key changed earlier in the pass and set back after a subscription
+    // is told: the subscriber read the changed value when it subscribed,
+    // so the value at the pass's start is news to it. A withdrawal by a
+    // publisher stopping is told the same way.
+    #[test]
+    fn a_key_set_back_after_a_subscription_is_told() {
+        let mut board = StatusBoard::default();
+        board.publish("pub", "k", Some("a".into()));
+        board.take_changes();
+        board.publish("pub", "k", Some("b".into()));
+        board.subscribe("sub", "pub");
+        board.publish("pub", "k", Some("a".into()));
+        assert_eq!(board.take_changes(), [told("sub", "pub", "k", Some("a"))]);
+        board.publish("pub", "new", Some("1".into()));
+        board.subscribe("late", "pub");
+        board.publish("pub", "new", None);
+        assert_eq!(board.take_changes(), [told("late", "pub", "new", None)]);
     }
 
     // Nothing is held for a change that changed nothing: a withdrawal of a
