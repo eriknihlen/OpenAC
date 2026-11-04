@@ -3643,6 +3643,47 @@ fn add_from_url_logs_a_malformed_plugin_index() {
     );
 }
 
+// A repository naming more plugins than one Add from URL searches: the
+// launcher log says how many were left out.
+#[test]
+fn add_from_url_logs_the_plugins_past_the_search_limit() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[("wasm-edwards.p00-v1.0.0", "edwards.p00", "1.0.0")]);
+    let entries: Vec<String> = (0..18)
+        .map(|n| {
+            format!(r#"{{ "id": "edwards.p{n:02}", "stable": "wasm-edwards.p{n:02}-v1.0.0" }}"#)
+        })
+        .collect();
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(
+        &index,
+        format!(
+            r#"{{ "schemaVersion": 1, "plugins": [{}] }}"#,
+            entries.join(",")
+        )
+        .as_bytes(),
+    );
+    let mut window = fixture.window();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.install_dialog.display_name(), "edwards.p00");
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Add from URL: {HELLO_REPO} names 2 more plugin(s) than the 16 searched"
+        )),
+        "{log}"
+    );
+}
+
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnUnlistedRepoOpensTheInstallDialog (the
 // unlisted notice, UnlistedInstallNoticeAddsANotOnTheListLine).
 #[test]

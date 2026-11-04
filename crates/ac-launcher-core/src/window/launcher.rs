@@ -3906,6 +3906,7 @@ impl LauncherWindow {
             }
         };
         backend.log_index_warning_text(&repo, found.index_warning.as_deref());
+        backend.log_plugins_not_searched(&repo, found.not_searched);
         if found.plugins.is_empty() {
             self.report_add_from_url_failure(found.failure);
             return;

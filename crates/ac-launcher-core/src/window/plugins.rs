@@ -15,8 +15,8 @@ use crate::launcher_log::LauncherLog;
 use crate::net::HttpTransport;
 use crate::plugins::{
     InstalledPluginInfo, InstalledPluginRecord, InstalledPluginRecordStore, MAXIMUM_DOCUMENT_BYTES,
-    PermissionDeclaration, PluginCatalog, PluginInstaller, PluginInventory,
-    PluginReleaseCandidates, PluginReleaseClient, PluginReleaseFetchResult,
+    MAXIMUM_REPOSITORY_PLUGINS, PermissionDeclaration, PluginCatalog, PluginInstaller,
+    PluginInventory, PluginReleaseCandidates, PluginReleaseClient, PluginReleaseFetchResult,
     PluginReleaseResolveResult, PluginReleaseResolver, describe, version_only_reason,
 };
 use crate::updates::{ClientVersionResolution, LauncherVersion};
@@ -152,6 +152,18 @@ impl PluginComposition {
         if let Some(warning) = warning {
             self.log
                 .line(&format!("Plugin index of {repo} ignored: {warning}"));
+        }
+    }
+
+    /// Notes in the launcher log that a repository names more plugins than
+    /// one Add from URL searches, so the publisher learns why some are
+    /// never offered.
+    pub fn log_plugins_not_searched(&self, repo: &str, not_searched: usize) {
+        if not_searched > 0 {
+            self.log.line(&format!(
+                "Add from URL: {repo} names {not_searched} more plugin(s) than the \
+                 {MAXIMUM_REPOSITORY_PLUGINS} searched; those were not offered."
+            ));
         }
     }
 

@@ -345,6 +345,9 @@ pub struct PluginRepositoryResolution {
     /// Why the repository's plugin index was ignored, when it was published
     /// but could not be read: for the publisher, not the player.
     pub index_warning: Option<String>,
+    /// How many more plugins its tags and index name than the
+    /// [`MAXIMUM_REPOSITORY_PLUGINS`] searched: for the publisher.
+    pub not_searched: usize,
 }
 
 /// Both candidates of one pass: the stable release (always) and the highest
@@ -670,6 +673,7 @@ impl PluginReleaseResolver {
                 plugins: Vec::new(),
                 failure,
                 index_warning: None,
+                not_searched: 0,
             })
         };
         let tags = match pass.feed(repo, cancel)? {
@@ -739,6 +743,7 @@ impl PluginReleaseResolver {
             plugins,
             failure,
             index_warning,
+            not_searched: ids.len().saturating_sub(MAXIMUM_REPOSITORY_PLUGINS),
         })
     }
 
