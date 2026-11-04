@@ -193,6 +193,16 @@ pub struct PluginSession {
     watch: FolderWatch,
 }
 
+/// Whom a call into a plugin may ask things of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asking {
+    /// The other plugins (their loot classifiers, command completions,
+    /// services): a call the plugin started itself.
+    Others,
+    /// No one: the plugin is answering a callback.
+    NoOne,
+}
+
 fn same_id(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
@@ -341,6 +351,9 @@ impl PluginSession {
                 |index| found.remove(index),
             );
             self.load_one(&id, item, None, api);
+            // A plugin its enable asked something and that failed answering
+            // goes now, before the next plugin starts and hears of it.
+            self.unload_faulted(api);
         }
         for loaded in &self.plugins {
             self.watch.watch(&loaded.directory, &loaded.manifest.id);
@@ -651,6 +664,19 @@ impl PluginSession {
         api: &mut dyn SessionApi,
         call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<T, String>,
     ) -> Result<T, String> {
+        self.invoke_as(index, api, Asking::Others, call)
+    }
+
+    /// [`Self::invoke`], for a call that may ask other plugins things (a
+    /// tick, an event, a command) or not (a callback the client asked: a
+    /// plugin answering a question cannot ask a third, whoever asked it).
+    fn invoke_as<T>(
+        &mut self,
+        index: usize,
+        api: &mut dyn SessionApi,
+        asking: Asking,
+        call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
         let Self {
             plugins,
             services,
@@ -689,7 +715,10 @@ impl PluginSession {
                 directory,
                 answers,
                 &mut cx,
-                Some(&mut others),
+                match asking {
+                    Asking::Others => Some(&mut others),
+                    Asking::NoOne => None,
+                },
             )?;
             Ok(Handled {
                 reply,
@@ -751,7 +780,18 @@ impl PluginSession {
         api: &mut dyn SessionApi,
         call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<(), String>,
     ) -> bool {
-        match self.invoke(index, api, call) {
+        self.call_as(index, api, Asking::Others, call)
+    }
+
+    /// [`Self::call`] as [`Self::invoke_as`].
+    fn call_as(
+        &mut self,
+        index: usize,
+        api: &mut dyn SessionApi,
+        asking: Asking,
+        call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<(), String>,
+    ) -> bool {
+        match self.invoke_as(index, api, asking, call) {
             Ok(()) => true,
             Err(reason) => {
                 let id = self.plugins[index].manifest.id.clone();
@@ -853,8 +893,8 @@ impl PluginSession {
         }
         for id in ids {
             self.reload(&id, api);
+            self.unload_faulted(api);
         }
-        self.unload_faulted(api);
     }
 
     /// Replaces a running plugin with the copy now on disk, or starts one
@@ -1218,7 +1258,7 @@ impl PluginSession {
             let version = self.version_of(index);
             let (entry, bytes) = (Entry::of_callback(&callback), callback.to_bytes_at(version));
             let mut answer = None;
-            self.call(index, api, |instance, handler| {
+            self.call_as(index, api, Asking::NoOne, |instance, handler| {
                 answer = instance.callback(&bytes, entry, handler)?;
                 Ok(())
             });
@@ -1260,7 +1300,7 @@ impl PluginSession {
             let version = self.version_of(index);
             let (entry, bytes) = (Entry::of_callback(&callback), callback.to_bytes_at(version));
             let mut answer = None;
-            self.call(index, api, |instance, handler| {
+            self.call_as(index, api, Asking::NoOne, |instance, handler| {
                 answer = instance.callback(&bytes, entry, handler)?;
                 Ok(())
             });

@@ -140,6 +140,25 @@ impl Services {
         self.plugin_services.release(id);
         self.net.release(id);
     }
+
+    /// Plugin `id` failed answering another plugin's question: it is
+    /// unloaded once the asking call returns, and until then its services
+    /// are gone and nothing asks it anything again. Noted once.
+    fn fault(&mut self, id: &str, reason: String) {
+        if self.has_faulted(id) {
+            return;
+        }
+        self.plugin_services.release(id);
+        self.faulted.push((id.to_owned(), reason));
+    }
+
+    /// Whether plugin `id` failed answering a question and waits to be
+    /// unloaded.
+    fn has_faulted(&self, id: &str) -> bool {
+        self.faulted
+            .iter()
+            .any(|(faulted, _)| faulted.eq_ignore_ascii_case(id))
+    }
 }
 
 /// The plugins other than the caller, which a call may ask something.
@@ -586,6 +605,9 @@ fn ask_plugin(
     if owner.eq_ignore_ascii_case(caller) {
         return None;
     }
+    if cx.services.has_faulted(owner) {
+        return None;
+    }
     match put(others?.find(owner)?, cx, callback) {
         Asked::Answered(answer) => answer,
         Asked::Faulted { .. } => None,
@@ -628,7 +650,11 @@ fn call_service(
             }
         }
         Asked::Answered(Some(CallbackAnswer::Service(Err(reason)))) => {
-            Err(ServiceError::Refused(reason))
+            if reason.len() > MAX_PAYLOAD {
+                Err(too_large())
+            } else {
+                Err(ServiceError::Refused(reason))
+            }
         }
         Asked::Answered(_) => Err(ServiceError::Refused(
             "the service gave no answer".to_owned(),
@@ -681,7 +707,7 @@ fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked 
             Asked::Answered(answer.and_then(|a| CallbackAnswer::from_bytes_at(&a, version).ok()))
         }
         Err(fault) => {
-            cx.services.faulted.push((manifest.id.clone(), fault));
+            cx.services.fault(&manifest.id, fault);
             Asked::Faulted {
                 stuck: instance.was_stuck(),
             }

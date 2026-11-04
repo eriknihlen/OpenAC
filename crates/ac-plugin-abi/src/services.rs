@@ -14,7 +14,9 @@
 //! An answer runs as the owner's own callback, under its own deadline and
 //! slow-call time: a slow or stuck answer counts against the owner, never
 //! the caller. A plugin cannot call a service while it is itself answering
-//! a callback, nor one of its own.
+//! a callback (a service request, a chat filter, an input interceptor, any
+//! other), nor one of its own. A plugin that fails while answering is
+//! stopped, and its services go at once.
 
 use std::fmt;
 
@@ -28,6 +30,9 @@ pub const MAX_NAME: usize = 64;
 
 /// How many services one plugin may offer at once.
 pub const MAX_SERVICES: usize = 32;
+
+/// The longest service description, bytes.
+pub const MAX_DESCRIPTION: usize = 1 << 10;
 
 /// Whether `name` may name a service: 1 to [`MAX_NAME`] bytes of `a-z`,
 /// `0-9` and `-`.
@@ -45,7 +50,7 @@ wire_record! {
     pub struct ServiceRegistration {
         /// Its name, scoped as `<plugin id>/<name>` ([`is_valid_name`]).
         pub name: String,
-        /// What it does, for people.
+        /// What it does, for people: at most [`MAX_DESCRIPTION`] bytes.
         pub description: String,
     }
 }
@@ -118,7 +123,8 @@ wire_union! {
         /// The service's plugin failed while answering (a panic, a trap); it
         /// is stopped.
         5 => Faulted,
-        /// The service refused the call, saying why.
+        /// The service refused the call, saying why (at most
+        /// [`MAX_PAYLOAD`] bytes, like a reply).
         6 => Refused(String),
         /// The name is not 1 to 64 bytes of `a-z`, `0-9` and `-`.
         7 => InvalidName,
@@ -128,6 +134,8 @@ wire_union! {
         9 => TooMany(u32),
         /// The plugin has no callback export, so it could not answer.
         10 => NoCallback,
+        /// The description is longer than the limit, bytes.
+        11 => DescriptionTooLarge(u32),
     }
 }
 
@@ -145,6 +153,9 @@ impl fmt::Display for ServiceError {
             Self::AlreadyRegistered => f.write_str("a service by that name is already offered"),
             Self::TooMany(limit) => write!(f, "a plugin offers at most {limit} services"),
             Self::NoCallback => f.write_str("the plugin has no callback export to answer with"),
+            Self::DescriptionTooLarge(limit) => {
+                write!(f, "a service description is at most {limit} bytes")
+            }
         }
     }
 }

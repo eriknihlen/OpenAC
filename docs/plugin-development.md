@@ -336,14 +336,17 @@ The plugin offering it registers the service, `host.register_service_raw("distan
 `Callback::ServiceRequest`, which carries the caller's id and the request.
 The plugin answers in `Plugin::callback` with
 `CallbackAnswer::Service(Ok(reply))`, or with `Err(reason)` to refuse. A name
-is 1 to 64 bytes of `a-z`, `0-9` and `-`, and a plugin offers at most 32. The
-service goes when the plugin calls `unregister_service` or stops.
+is 1 to 64 bytes of `a-z`, `0-9` and `-`, a description at most 1 KiB
+(`DescriptionTooLarge`), and a plugin offers at most 32. The service goes
+when the plugin calls `unregister_service` or stops; a plugin that fails
+while answering is stopped, and its services go at once.
 
 The calling plugin uses `host.call_service_raw("example.navigation/distance",
 &request)`, matching the id ignoring case, and gets the reply's bytes, or a
 `ServiceError` saying why there is none: no such service (`NotFound`), its
 own (`SelfCall`: a plugin calls its own code directly), a call made while
-answering a callback (`Nested`), a request or reply over 64 KiB
+answering any callback, a service request, a chat filter or an input
+interceptor (`Nested`), a request, reply or refusal over 64 KiB
 (`TooLarge`), the service refusing (`Refused`), or the service's plugin
 stopping while it answered (`TimedOut`, `Faulted`). What the service says
 about a request, such as "no such object", belongs in its reply.

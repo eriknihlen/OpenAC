@@ -2954,26 +2954,42 @@ fn a_slow_call_warns_and_goes_on() {
 /// `openac.asker` (the same module under another id) asks; the client's
 /// clock runs (the suite works by it).
 fn suite_pair(tag: &str, engine: Arc<PluginEngine>) -> (Root, PluginSession, FakeSession) {
+    let (root, mut plugins, api) = suite_session(tag, engine, &["suite", "asker"]);
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+    plugins.take_reports();
+    (root, plugins, api)
+}
+
+/// The suite installed once per verb, as `openac.<verb>` (the same module
+/// under each id), and started in that order on `engine`; the client's
+/// clock runs (the suite works by it).
+fn suite_session(
+    tag: &str,
+    engine: Arc<PluginEngine>,
+    verbs: &[&str],
+) -> (Root, PluginSession, FakeSession) {
     let root = Root::new(tag);
     let suite = install(&root.0, "suite");
-    let asker = root.0.join("asker");
-    std::fs::create_dir_all(&asker).unwrap();
-    for file in ["plugin.json", "suite.wasm"] {
-        std::fs::copy(suite.join(file), asker.join(file)).unwrap();
+    for verb in verbs.iter().filter(|v| **v != "suite") {
+        let copy = root.0.join(verb);
+        std::fs::create_dir_all(&copy).unwrap();
+        for file in ["plugin.json", "suite.wasm"] {
+            std::fs::copy(suite.join(file), copy.join(file)).unwrap();
+        }
+        edit_manifest(&copy, "\"openac.suite\"", &format!("\"openac.{verb}\""));
+        edit_manifest(&copy, "\"Suite\"", &format!("\"{verb}\""));
     }
-    edit_manifest(&asker, "\"openac.suite\"", "\"openac.asker\"");
-    edit_manifest(&asker, "\"Suite\"", "\"Asker\"");
-    let mut plugins = PluginSession::new(
-        engine,
-        options(&[&root.0], Some(&["openac.suite", "openac.asker"])),
-    );
+    if !verbs.contains(&"suite") {
+        std::fs::remove_dir_all(&suite).unwrap();
+    }
+    let ids: Vec<String> = verbs.iter().map(|v| format!("openac.{v}")).collect();
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut plugins = PluginSession::new(engine, options(&[&root.0], Some(&ids)));
     let mut api = FakeSession {
         clock: true,
         ..FakeSession::default()
     };
     plugins.start(&mut api);
-    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
-    plugins.take_reports();
     (root, plugins, api)
 }
 
@@ -3160,6 +3176,7 @@ fn a_service_call_says_why_it_got_no_reply() {
             "Err(Refused(\"the service gave no answer\"))",
         ),
         ("call openac.suite/echo big", "Err(TooLarge(65536))"),
+        ("call openac.suite/echo refuse-big", "Err(TooLarge(65536))"),
         ("call-big openac.suite/echo", "Err(TooLarge(65536))"),
         (
             "call openac.suite/echo nest:openac.asker/mine",
@@ -3179,6 +3196,14 @@ fn a_service_call_says_why_it_got_no_reply() {
     assert_eq!(
         order(p, a, "suite", "offer echo"),
         "suite offer echo: Err(AlreadyRegistered)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer-long long 1024"),
+        "suite offer long: Ok(3)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer-long longer 1025"),
+        "suite offer longer: Err(DescriptionTooLarge(1024))"
     );
     assert!(p.take_reports().is_empty());
     assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
@@ -3214,6 +3239,99 @@ fn a_service_that_fails_while_answering_stops_its_plugin_not_the_caller() {
         ),
         1
     );
+}
+
+/// A plugin answering a callback the client asked, a chat filter or an
+/// input interceptor, cannot call a service, as when answering another
+/// plugin: the call is `Nested`, and both plugins keep running.
+#[test]
+fn a_chat_filter_or_interceptor_cannot_call_a_service() {
+    let (_root, mut plugins, mut api) = suite_pair("service-in-callback", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "filter openac.suite/echo"),
+        "asker filter on: 1"
+    );
+    assert_eq!(
+        order(p, a, "asker", "intercept openac.suite/echo"),
+        "asker intercept on: Ok(1)"
+    );
+    let line = ChatLine {
+        kind: 4,
+        text: "a line".to_owned(),
+        ..ChatLine::default()
+    };
+    assert!(!p.filter_chat(&line, a));
+    assert_eq!(logged(a, "openac.asker", "asker filter: Err(Nested)"), 1);
+    assert_eq!(
+        p.intercept("hello", a),
+        ac_plugin::abi::callback::InterceptDecision::Pass
+    );
+    assert_eq!(logged(a, "openac.asker", "asker intercept: Err(Nested)"), 1);
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A plugin that fails answering is stopped at once: a second call in the
+/// same entry finds no such service rather than reaching it again. When
+/// that happens as a plugin starts, the failed plugin is unloaded before
+/// the next one starts, which then finds none of its services.
+#[test]
+fn a_service_that_fails_as_another_plugin_starts_goes_before_the_next_starts() {
+    let (_root, mut plugins, mut api) = suite_session(
+        "service-fault-at-start",
+        engine(),
+        &["offerer", "starter", "suite"],
+    );
+    assert_eq!(
+        api.messages("openac.starter").first().map(String::as_str),
+        Some("starter start: Err(Faulted) Err(NotFound)")
+    );
+    let reports = plugins.take_reports();
+    let fault = failed(&reports, "openac.offerer").unwrap();
+    assert!(fault.contains("suite's service panicked"), "{fault}");
+    assert_eq!(failed(&reports, "openac.starter"), None);
+    assert_eq!(plugins.loaded_ids(), ["openac.starter", "openac.suite"]);
+    assert_eq!(
+        order(&mut plugins, &mut api, "suite", "list"),
+        "suite list: "
+    );
+}
+
+/// A module that says it was built for API 1.5 but imports a function
+/// API 1.6 added is refused at load, even with a layout section that
+/// matches: the plugin would never hear the 1.6 events that go with it.
+#[test]
+fn an_import_newer_than_the_plugins_api_version_is_refused() {
+    let root = Root::new("service-forged-1-5");
+    let folder = install(&root.0, "suite");
+    let v1_5 = ApiVersion::new(1, 5);
+    edit_manifest(
+        &folder,
+        &format!(r#""apiVersion": "{API_CURRENT}""#),
+        r#""apiVersion": "1.5""#,
+    );
+    // The 1.5 core, and every import this client has at its 1.5 shape.
+    let mut forged = core_shape(v1_5).to_le_bytes().to_vec();
+    for import in Import::ALL {
+        forged.extend_from_slice(&import_key(import.name()).to_le_bytes());
+        forged.extend_from_slice(&import.shape_at(v1_5).to_le_bytes());
+    }
+    let wasm = folder.join("suite.wasm");
+    let built = std::fs::read(&wasm).unwrap();
+    let built = with_custom_section(&built, "openac.api", Some(b"1.5"));
+    let built = with_custom_section(&built, LAYOUT_SECTION, Some(&forged));
+    std::fs::write(&wasm, built).unwrap();
+    let mut api = FakeSession::default();
+    let mut plugins = session(&[&root.0], None);
+    plugins.start(&mut api);
+    let error = failed(&plugins.take_reports(), "openac.suite").unwrap();
+    assert!(
+        error.contains("which API 1.6 added (the plugin was built for API 1.5)"),
+        "{error}"
+    );
+    assert!(plugins.loaded_ids().is_empty());
 }
 
 /// A service that never answers is stopped at its plugin's own deadline,

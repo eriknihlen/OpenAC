@@ -38,8 +38,8 @@ use std::collections::{BTreeMap, HashMap};
 use ac_plugin_abi::callback::{Callback, CallbackAnswer};
 use ac_plugin_abi::host::Clock;
 use ac_plugin_abi::services::{
-    MAX_PAYLOAD, MAX_SERVICES, ServiceCall, ServiceError, ServiceInfo, ServiceRegistration,
-    ServiceRequest, is_valid_name,
+    MAX_DESCRIPTION, MAX_PAYLOAD, MAX_SERVICES, ServiceCall, ServiceError, ServiceInfo,
+    ServiceRegistration, ServiceRequest, is_valid_name,
 };
 use ac_plugin_abi::verbs::{already_registered, normalize_verb, split_command_line};
 use ac_plugin_abi::{
@@ -92,6 +92,9 @@ pub struct FakeHost {
     /// case: what they are, and what they answer.
     other_services: BTreeMap<String, (ServiceInfo, Result<Vec<u8>, ServiceError>)>,
     next_service: u32,
+    /// Whether the plugin is answering a callback ([`Self::ask`]): it cannot
+    /// call a service then, as in the client.
+    answering: bool,
 }
 
 impl FakeHost {
@@ -166,7 +169,9 @@ impl FakeHost {
     /// always does).
     pub fn ask<P: Plugin>(&mut self, plugin: &mut P, callback: &Callback) -> CallbackAnswer {
         let bytes = callback.to_bytes();
+        let was_answering = std::mem::replace(&mut self.answering, true);
         let answer = crate::__export::answer(plugin, &mut Host::with_transport(self), &bytes);
+        self.answering = was_answering;
         CallbackAnswer::from_bytes(&answer).expect("an encoded answer")
     }
 
@@ -210,6 +215,7 @@ impl FakeHost {
         match self.ask(plugin, &callback) {
             CallbackAnswer::Service(Ok(reply)) if reply.len() > MAX_PAYLOAD => Err(too_large()),
             CallbackAnswer::Service(Ok(reply)) => Ok(reply),
+            CallbackAnswer::Service(Err(reason)) if reason.len() > MAX_PAYLOAD => Err(too_large()),
             CallbackAnswer::Service(Err(reason)) => Err(ServiceError::Refused(reason)),
             _ => Err(ServiceError::Refused(
                 "the service gave no answer".to_owned(),
@@ -235,6 +241,11 @@ impl FakeHost {
         if !is_valid_name(&offer.name) {
             return Err(ServiceError::InvalidName);
         }
+        if offer.description.len() > MAX_DESCRIPTION {
+            return Err(ServiceError::DescriptionTooLarge(
+                u32::try_from(MAX_DESCRIPTION).unwrap_or(u32::MAX),
+            ));
+        }
         if self.services.values().any(|s| s.name == offer.name) {
             return Err(ServiceError::AlreadyRegistered);
         }
@@ -252,6 +263,9 @@ impl FakeHost {
         if call.payload.len() > MAX_PAYLOAD {
             return Err(too_large());
         }
+        if self.answering {
+            return Err(ServiceError::Nested);
+        }
         let id = call.service_id.trim().to_lowercase();
         let own = format!("{}/", self.plugin_id.to_lowercase());
         if let Some(name) = id.strip_prefix(&own)
@@ -261,6 +275,9 @@ impl FakeHost {
         }
         match self.other_services.get(&id) {
             Some((_, Ok(reply))) if reply.len() > MAX_PAYLOAD => Err(too_large()),
+            Some((_, Err(ServiceError::Refused(reason)))) if reason.len() > MAX_PAYLOAD => {
+                Err(too_large())
+            }
             Some((_, reply)) => reply.clone(),
             None => Err(ServiceError::NotFound),
         }

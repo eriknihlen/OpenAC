@@ -204,7 +204,7 @@ mod tests {
     /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
     /// published the same value as 1.5: it added two values of a pointer
     /// event's kind byte, not a shape.
-    const PUBLISHED: u64 = 0xf589_5c50_dd35_66e1;
+    const PUBLISHED: u64 = 0x8389_0d22_d22f_1776;
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;

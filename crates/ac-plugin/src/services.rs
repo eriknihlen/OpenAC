@@ -9,7 +9,8 @@
 //! exactly what is on offer, each change once.
 
 use ac_plugin_abi::services::{
-    MAX_SERVICES, ServiceChange, ServiceError, ServiceInfo, ServiceRegistration, is_valid_name,
+    MAX_DESCRIPTION, MAX_SERVICES, ServiceChange, ServiceError, ServiceInfo, ServiceRegistration,
+    is_valid_name,
 };
 
 #[derive(Debug, Clone)]
@@ -37,8 +38,9 @@ impl ServiceRegistry {
     /// Plugin `owner` offers a service; its handle for it.
     ///
     /// # Errors
-    /// The name is not a service name, `owner` already offers one by that
-    /// name, or it offers [`MAX_SERVICES`] already.
+    /// The name is not a service name, the description is longer than
+    /// [`MAX_DESCRIPTION`], `owner` already offers one by that name, or it
+    /// offers [`MAX_SERVICES`] already.
     pub fn register(
         &mut self,
         owner: &str,
@@ -46,6 +48,11 @@ impl ServiceRegistry {
     ) -> Result<u32, ServiceError> {
         if !is_valid_name(&registration.name) {
             return Err(ServiceError::InvalidName);
+        }
+        if registration.description.len() > MAX_DESCRIPTION {
+            return Err(ServiceError::DescriptionTooLarge(
+                u32::try_from(MAX_DESCRIPTION).unwrap_or(u32::MAX),
+            ));
         }
         let id = format!("{owner}/{}", registration.name);
         if self.find_entry(&id).is_some() {
@@ -212,6 +219,25 @@ mod tests {
         );
         // The limit is per plugin.
         assert!(registry.register("q", &offer("one-more")).is_ok());
+    }
+
+    #[test]
+    fn descriptions_are_limited() {
+        let mut registry = ServiceRegistry::default();
+        let described = |name: &str, len: usize| ServiceRegistration {
+            name: name.to_owned(),
+            description: "d".repeat(len),
+        };
+        assert!(
+            registry
+                .register("p", &described("at", MAX_DESCRIPTION))
+                .is_ok()
+        );
+        assert_eq!(
+            registry.register("p", &described("over", MAX_DESCRIPTION + 1)),
+            Err(ServiceError::DescriptionTooLarge(1024))
+        );
+        assert_eq!(registry.find("p/over"), None);
     }
 
     #[test]

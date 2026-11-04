@@ -2,7 +2,7 @@
 //! service and answers it, as bytes and as JSON, and calls another plugin's
 //! service, getting the reply or the reason there is none.
 
-use openac_plugin::services::{MAX_PAYLOAD, ServiceError};
+use openac_plugin::services::{MAX_DESCRIPTION, MAX_PAYLOAD, ServiceError};
 use openac_plugin::testing::FakeHost;
 use openac_plugin::{CallError, Callback, CallbackAnswer, Event, Host, Plugin, Service, StartInfo};
 use serde::{Deserialize, Serialize};
@@ -189,4 +189,80 @@ fn offers_list_and_follow_the_rules_the_client_keeps() {
         assert!(!h.unregister_service(2));
     });
     assert_eq!(host.services.len(), 1);
+}
+
+/// Offers `relay`, which calls `example.vision/distance` from inside its
+/// answer and replies with what came of it, and `refuse-big`, which
+/// refuses with a reason over the limit.
+#[derive(Default)]
+struct Relay {
+    relay: u32,
+    refuse_big: u32,
+}
+
+impl Plugin for Relay {
+    fn enable(&mut self, host: &mut Host<'_>, _: &StartInfo) -> Result<(), String> {
+        self.relay = host
+            .register_service_raw("relay", "Asks the vision plugin")
+            .map_err(|error| error.to_string())?;
+        self.refuse_big = host
+            .register_service_raw("refuse-big", "Refuses at length")
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn callback(&mut self, host: &mut Host<'_>, callback: Callback) -> CallbackAnswer {
+        let Callback::ServiceRequest(request) = callback else {
+            return CallbackAnswer::Nothing;
+        };
+        if request.handle == self.refuse_big {
+            return CallbackAnswer::Service(Err("x".repeat(MAX_PAYLOAD + 1)));
+        }
+        let asked = host.call_service_raw("example.vision/distance", b"{}");
+        CallbackAnswer::Service(Ok(format!("{asked:?}").into_bytes()))
+    }
+}
+
+/// As in the client: a service answering a call cannot call another, and
+/// a refusal over the limit reaches the caller as too large.
+#[test]
+fn the_fake_host_holds_a_service_to_the_clients_limits() {
+    let mut host = FakeHost::new("example.navigation");
+    host.set_service("example.vision/distance", Ok(b"{}".to_vec()));
+    let mut plugin = Relay::default();
+    host.enable(&mut plugin).unwrap();
+    assert_eq!(
+        host.request_service(&mut plugin, "relay", "example.vision", b""),
+        Ok(b"Err(Nested)".to_vec())
+    );
+    // Outside an answer, the same call goes through.
+    assert_eq!(
+        host.with_host(|h| h.call_service_raw("example.vision/distance", b"{}")),
+        Ok(b"{}".to_vec())
+    );
+    assert_eq!(
+        host.request_service(&mut plugin, "refuse-big", "example.vision", b""),
+        Err(ServiceError::TooLarge(65_536))
+    );
+    host.set_service(
+        "example.vision/refuse",
+        Err(ServiceError::Refused("x".repeat(MAX_PAYLOAD + 1))),
+    );
+    assert_eq!(
+        host.with_host(|h| h.call_service_raw("example.vision/refuse", b"")),
+        Err(ServiceError::TooLarge(65_536))
+    );
+}
+
+#[test]
+fn a_description_over_the_limit_is_refused() {
+    let mut host = FakeHost::new("example.navigation");
+    let (at, over) = host.with_host(|h| {
+        (
+            h.register_service_raw("at", &"d".repeat(MAX_DESCRIPTION)),
+            h.register_service_raw("over", &"d".repeat(MAX_DESCRIPTION + 1)),
+        )
+    });
+    assert!(at.is_ok());
+    assert_eq!(over, Err(ServiceError::DescriptionTooLarge(1024)));
 }

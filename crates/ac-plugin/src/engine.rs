@@ -561,6 +561,13 @@ pub fn check_module(
                  (the plugin was built for API {api_version})"
             ));
         };
+        if !known.since().is_at_most(api_version) {
+            return Err(format!(
+                "imports {MODULE}.{name}, which API {} added (the plugin was built for API \
+                 {api_version})",
+                known.since()
+            ));
+        }
         let ExternType::Func(ty) = import.ty() else {
             return Err(format!(
                 "imports {MODULE}.{name} as something other than a function"

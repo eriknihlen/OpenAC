@@ -2,7 +2,7 @@
 //! installs it twice under two ids, one to answer and one to ask, so the
 //! host's plugin-to-plugin calls (and whose time an answer is) can be
 //! tested. It works by the client's clock, so the session must answer it,
-//! and it needs no permission. Its verb is the last part of its id
+//! and it has the `chat` permission for its filter and interceptor. Its verb is the last part of its id
 //! (`/suite` for `openac.suite`); what it learns it logs, `<verb> ...`.
 //!
 //! Loot classifier:
@@ -15,24 +15,37 @@
 //!   logs `<verb> ask: <verdict>`.
 //!
 //! Services:
-//! - `/<verb> offer <name>` offers a service, `/<verb> withdraw <name>`
-//!   withdraws it, `/<verb> list` logs the services on offer.
+//! - `/<verb> offer <name>` offers a service, `/<verb> offer-long <name>
+//!   <bytes>` offers one with a description that long, `/<verb> withdraw
+//!   <name>` withdraws it, `/<verb> list` logs the services on offer.
 //! - `/<verb> call <scoped id> <request> [<ms>]` works `<ms>`, calls the
 //!   service with the request's text, works `<ms>` again, then logs
 //!   `<verb> call: Ok(<reply>)` or `Err(<error>)`; `/<verb> call-big <scoped
 //!   id>` calls it with a request one byte over the limit.
 //! - Its services answer by the request: `work:<ms>` works that long, then
 //!   replies `done`; `loop` never answers; `panic` panics; `refuse` refuses
-//!   with `not now`; `big` replies one byte over the limit; `nest:<scoped
+//!   with `not now`; `big` replies, and `refuse-big` refuses, one byte
+//!   over the limit; `nest:<scoped
 //!   id>` calls that service from inside the answer and replies with what
 //!   came of it; `nothing` gives no answer; anything else replies
 //!   `<verb> heard <caller>: <request>`.
 //! - It logs every service that comes or goes, `<verb> heard service <id>
 //!   <owner> <available>`.
+//!
+//! Callbacks the client asks (they need the `chat` permission):
+//! - `/<verb> filter <scoped id>` installs a chat filter, and `/<verb>
+//!   intercept <scoped id>` an input interceptor, that call that service
+//!   with an empty request when asked, log `<verb> filter: <result>` or
+//!   `<verb> intercept: <result>`, and let the line through.
+//!
+//! As it starts, by its verb:
+//! - `offerer` offers the service `boom`.
+//! - `starter` calls `openac.offerer/boom` with `panic` twice, logging
+//!   `starter start: <first> <second>`.
 
 use openac_plugin::items::{LootAction, LootClassification, LootContext};
 use openac_plugin::services::MAX_PAYLOAD;
-use openac_plugin::{Callback, CallbackAnswer, Event, Host, Plugin, StartInfo};
+use openac_plugin::{Callback, CallbackAnswer, Event, Host, InterceptDecision, Plugin, StartInfo};
 
 #[derive(Default)]
 pub struct Suite {
@@ -40,6 +53,8 @@ pub struct Suite {
     classifier: u32,
     /// The services it offers: (name, handle).
     offered: Vec<(String, u32)>,
+    /// The service its chat filter or input interceptor calls.
+    target: String,
 }
 
 impl Plugin for Suite {
@@ -48,6 +63,20 @@ impl Plugin for Suite {
         self.verb = id.rsplit('.').next().unwrap_or(id).to_owned();
         host.register_command(&self.verb, "Asks the other plugins of the suite")?;
         self.classifier = host.register_loot_classifier("rules", "Suite Rules")?;
+        match self.verb.as_str() {
+            "offerer" => {
+                let handle = host
+                    .register_service_raw("boom", "goes off")
+                    .map_err(|e| e.to_string())?;
+                self.offered.push(("boom".to_owned(), handle));
+            }
+            "starter" => {
+                let first = call_service(host, "openac.offerer/boom", b"panic".to_vec());
+                let second = call_service(host, "openac.offerer/boom", b"panic".to_vec());
+                host.info(&format!("starter start: {first} {second}"));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -80,6 +109,24 @@ impl Plugin for Suite {
                     self.offered.push(((*name).to_owned(), handle));
                 }
                 host.info(&format!("{verb} offer {name}: {offered:?}"));
+            }
+            ["offer-long", name, bytes] => {
+                let description = "d".repeat(bytes.parse().unwrap_or(0));
+                let offered = host.register_service_raw(name, &description);
+                if let Ok(handle) = offered {
+                    self.offered.push(((*name).to_owned(), handle));
+                }
+                host.info(&format!("{verb} offer {name}: {offered:?}"));
+            }
+            ["filter", id] => {
+                self.target = (*id).to_owned();
+                let handle = host.chat_add_filter();
+                host.info(&format!("{verb} filter on: {handle}"));
+            }
+            ["intercept", id] => {
+                self.target = (*id).to_owned();
+                let handle = host.chat_add_interceptor();
+                host.info(&format!("{verb} intercept on: {handle:?}"));
             }
             ["withdraw", name] => {
                 let handle = self
@@ -129,6 +176,16 @@ impl Plugin for Suite {
                     keep_count: 0,
                 }))
             }
+            Callback::ChatFilter(_) => {
+                let result = call_service(host, &self.target.clone(), Vec::new());
+                host.info(&format!("{} filter: {result}", self.verb));
+                CallbackAnswer::Bool(false)
+            }
+            Callback::ChatIntercept(_) => {
+                let result = call_service(host, &self.target.clone(), Vec::new());
+                host.info(&format!("{} intercept: {result}", self.verb));
+                CallbackAnswer::Intercept(InterceptDecision::Pass)
+            }
             Callback::ServiceRequest(request)
                 if self.offered.iter().any(|(_, h)| *h == request.handle) =>
             {
@@ -146,6 +203,9 @@ impl Plugin for Suite {
                     ("panic", _) => panic!("suite's service panicked"),
                     ("refuse", _) => return CallbackAnswer::Service(Err("not now".to_owned())),
                     ("big", _) => return CallbackAnswer::Service(Ok(vec![b'x'; MAX_PAYLOAD + 1])),
+                    ("refuse-big", _) => {
+                        return CallbackAnswer::Service(Err("x".repeat(MAX_PAYLOAD + 1)));
+                    }
                     ("nothing", _) => return CallbackAnswer::Nothing,
                     _ => format!("{} heard {}: {text}", self.verb, request.caller_id),
                 };
