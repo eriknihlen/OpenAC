@@ -3478,6 +3478,36 @@ fn a_services_time_does_not_count_against_the_callers_deadline() {
     assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
 }
 
+/// One entry call lends other plugins at most one call deadline in all:
+/// a caller calling a fast service in a loop (10 ms an answer, each under
+/// every limit) is answered `OutOfTime` once its answers add up to the 1 s
+/// deadline, without the service being asked again, so the loop ends and the
+/// session goes on. Neither plugin is stopped, and the next entry call may
+/// call again.
+#[test]
+fn a_call_lends_other_plugins_at_most_one_deadline_in_all() {
+    let (_root, mut plugins, mut api) = suite_pair("service-ceiling", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    let started = std::time::Instant::now();
+    let line = order(p, a, "asker", "call-until openac.suite/echo work:10 300");
+    let elapsed = started.elapsed();
+    let calls: u32 = line
+        .strip_prefix("asker call-until: ")
+        .and_then(|rest| rest.strip_suffix(" calls, Err(OutOfTime)"))
+        .and_then(|calls| calls.parse().ok())
+        .unwrap_or_else(|| panic!("{line}"));
+    // At 10 ms an answer the deadline holds about a hundred.
+    assert!(calls > 1 && calls < 300, "{calls}");
+    assert!(elapsed < 3 * TEST_DEADLINE, "{elapsed:?}");
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo work:10"),
+        "asker call: Ok(done)"
+    );
+}
+
 /// A plugin that starts hears every service already offered, once: a
 /// reloaded caller hears the offer again as it starts, and nothing more
 /// with the next events. A reloaded owner's service goes with the old

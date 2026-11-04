@@ -21,6 +21,10 @@
 //! call of its own, with its own deadline and slow-call time, and the
 //! asking call's clock stops meanwhile: a slow answer warns, or a stuck one
 //! stops, the plugin that gave it, never the one that asked.
+//! One entry call lends other plugins at most one [`CALL_DEADLINE`] in
+//! all: past that it asks no other plugin anything (a service call answers
+//! that it is out of time), so a plugin asking in a loop cannot hold its
+//! session however fast each answer is.
 //!
 //! Every report names the entry call ([`Entry`]) and the client functions
 //! it called on the way ([`ImportTally`]): the fault of a stuck plugin, the

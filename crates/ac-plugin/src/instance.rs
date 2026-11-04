@@ -516,6 +516,12 @@ impl Instance {
         self.epochs.now()
     }
 
+    /// The most one entry call into this plugin may lend other plugins in
+    /// all, epochs: one call deadline ([`TimeLimits::call`]).
+    pub(crate) fn lend_ceiling(&self) -> u64 {
+        epochs(self.limits.call)
+    }
+
     /// Whether the last call faulted by running past its deadline (rather
     /// than by a panic or a trap).
     pub(crate) fn was_stuck(&self) -> bool {

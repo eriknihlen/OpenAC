@@ -136,6 +136,11 @@ wire_union! {
         10 => NoCallback,
         /// The description is longer than the limit, bytes.
         11 => DescriptionTooLarge(u32),
+        /// The calling plugin's entry call (a tick, an event, a command)
+        /// already waited on other plugins' answers as long as one call may
+        /// take, so the service was not asked; the next entry call may ask
+        /// again.
+        12 => OutOfTime,
     }
 }
 
@@ -155,6 +160,9 @@ impl fmt::Display for ServiceError {
             Self::NoCallback => f.write_str("the plugin has no callback export to answer with"),
             Self::DescriptionTooLarge(limit) => {
                 write!(f, "a service description is at most {limit} bytes")
+            }
+            Self::OutOfTime => {
+                f.write_str("the caller already waited on other plugins as long as one call may")
             }
         }
     }

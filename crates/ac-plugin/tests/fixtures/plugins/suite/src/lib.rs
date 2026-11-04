@@ -22,6 +22,10 @@
 //!   service with the request's text, works `<ms>` again, then logs
 //!   `<verb> call: Ok(<reply>)` or `Err(<error>)`; `/<verb> call-big <scoped
 //!   id>` calls it with a request one byte over the limit.
+//! - `/<verb> call-until <scoped id> <request> <most>` calls the service
+//!   again and again, at most `<most>` times, until a call fails, then logs
+//!   `<verb> call-until: <calls> calls, <error>` (`no error` when none
+//!   failed).
 //! - Its services answer by the request: `work:<ms>` works that long, then
 //!   replies `done`; `loop` never answers; `panic` panics; `refuse` refuses
 //!   with `not now`; `big` replies, and `refuse-big` refuses, one byte
@@ -151,6 +155,20 @@ impl Plugin for Suite {
                 let reply = call_service(host, id, request.as_bytes().to_vec());
                 work(host, around);
                 host.info(&format!("{verb} call: {reply}"));
+            }
+            ["call-until", id, request, most] => {
+                let most: u32 = most.parse().unwrap_or(0);
+                let mut calls = 0;
+                let mut last = "no error".to_owned();
+                while calls < most {
+                    calls += 1;
+                    let reply = call_service(host, id, request.as_bytes().to_vec());
+                    if reply.starts_with("Err(") {
+                        last = reply;
+                        break;
+                    }
+                }
+                host.info(&format!("{verb} call-until: {calls} calls, {last}"));
             }
             ["call-big", id] => {
                 let reply = call_service(host, id, vec![b'x'; MAX_PAYLOAD + 1]);

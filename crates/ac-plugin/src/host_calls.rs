@@ -8,7 +8,8 @@
 //! own imports are served like any other, except that they cannot ask a
 //! third plugin. A plugin that faults while answering is unloaded once the
 //! caller's call returns ([`Services::faulted`]). The answer's time is the
-//! answering plugin's ([`Context::lent`]), not the caller's.
+//! answering plugin's ([`Context::lent`]), not the caller's, up to one call
+//! deadline per entry call of the caller ([`Context::lend_ceiling`]).
 
 use std::time::{Duration, Instant};
 
@@ -194,6 +195,22 @@ pub(crate) struct Context<'a> {
     /// The same, in the watchdog's epochs
     /// ([`crate::instance::Handled::lent_epochs`]).
     pub(crate) lent_epochs: u64,
+    /// The epochs the whole entry call (a tick, an event, a command) lent
+    /// other plugins so far, over all its imports.
+    pub(crate) lent_in_call: u64,
+    /// The most an entry call may lend other plugins, epochs: one call
+    /// deadline. Each answer has its own deadline, and the caller's clock
+    /// stops while it waits, so without it a caller asking in a loop would
+    /// hold the session for as long as it kept asking.
+    pub(crate) lend_ceiling: u64,
+}
+
+impl Context<'_> {
+    /// Whether the entry call already lent other plugins as much time as
+    /// it may: it asks no plugin anything more.
+    fn lent_enough(&self) -> bool {
+        self.lent_in_call >= self.lend_ceiling
+    }
 }
 
 /// Carries out one import for the plugin `manifest`, which can answer
@@ -597,7 +614,8 @@ fn ask_classifier(
 
 /// Asks plugin `owner` `callback`; `None` when it does not answer (it is
 /// the caller, has no callback export, the call is inside another
-/// callback, or it faults, which unloads it after the call).
+/// callback, the caller's entry call already lent other plugins all the
+/// time it may, or it faults, which unloads it after the call).
 fn ask_plugin(
     caller: &str,
     owner: &str,
@@ -608,7 +626,7 @@ fn ask_plugin(
     if owner.eq_ignore_ascii_case(caller) {
         return None;
     }
-    if cx.services.has_faulted(owner) {
+    if cx.services.has_faulted(owner) || cx.lent_enough() {
         return None;
     }
     match put(others?.find(owner)?, cx, callback) {
@@ -618,7 +636,9 @@ fn ask_plugin(
 }
 
 /// Calls service `call` of another plugin for plugin `caller`: the owner
-/// answers through its callback export, under its own deadline.
+/// answers through its callback export, under its own deadline, unless
+/// the caller's entry call already lent other plugins all the time it may
+/// ([`Context::lend_ceiling`]).
 fn call_service(
     caller: &str,
     call: ServiceCall,
@@ -639,6 +659,9 @@ fn call_service(
         return Err(ServiceError::SelfCall);
     }
     let target = others.find(&owner).ok_or(ServiceError::NotFound)?;
+    if cx.lent_enough() {
+        return Err(ServiceError::OutOfTime);
+    }
     let request = Callback::ServiceRequest(ServiceRequest {
         handle,
         caller_id: caller.to_owned(),
@@ -706,9 +729,9 @@ fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked 
         )
     };
     cx.lent += started.elapsed();
-    cx.lent_epochs = cx
-        .lent_epochs
-        .saturating_add(instance.epochs_now().saturating_sub(started_epoch));
+    let lent = instance.epochs_now().saturating_sub(started_epoch);
+    cx.lent_epochs = cx.lent_epochs.saturating_add(lent);
+    cx.lent_in_call = cx.lent_in_call.saturating_add(lent);
     match result {
         Ok(answer) => {
             Asked::Answered(answer.and_then(|a| CallbackAnswer::from_bytes_at(&a, version).ok()))

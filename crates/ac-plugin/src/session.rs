@@ -705,6 +705,10 @@ impl PluginSession {
             storage_roots: &options.storage,
             lent: std::time::Duration::ZERO,
             lent_epochs: 0,
+            // Kept over all the call's imports: the call may lend other
+            // plugins one call deadline in all.
+            lent_in_call: 0,
+            lend_ceiling: instance.lend_ceiling(),
         };
         let answers = instance.answers_callbacks();
         let mut handler = |import: Import, request: &[u8]| {

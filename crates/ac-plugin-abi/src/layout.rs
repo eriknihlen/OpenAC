@@ -205,7 +205,7 @@ mod tests {
     /// published the same value as 1.5: it added two values of a pointer
     /// event's kind byte, not a shape. API 1.7 (plugin services, the
     /// server's last position on the world-object records) changed it.
-    const PUBLISHED: u64 = 0x4251_03f0_33c7_8df5;
+    const PUBLISHED: u64 = 0x018f_6e7f_ded2_7246;
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;

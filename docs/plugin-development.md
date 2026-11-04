@@ -350,9 +350,11 @@ The calling plugin uses `host.call_service_raw("example.navigation/distance",
 own (`SelfCall`: a plugin calls its own code directly), a call made while
 answering any callback, a service request, a chat filter or an input
 interceptor (`Nested`), a request, reply or refusal over 64 KiB
-(`TooLarge`), the service refusing (`Refused`), or the service's plugin
-stopping while it answered (`TimedOut`, `Faulted`). What the service says
-about a request, such as "no such object", belongs in its reply.
+(`TooLarge`), the service refusing (`Refused`), the service's plugin
+stopping while it answered (`TimedOut`, `Faulted`), or the calling plugin's
+tick, event or command having already waited on other plugins' answers as
+long as one call may take (`OutOfTime`; the service is not asked). What the
+service says about a request, such as "no such object", belongs in its reply.
 `host.services()` lists what is on offer. Every plugin hears
 `Event::ServiceChanged` when a service comes or goes, and a plugin that
 starts first hears one for every service already offered.
@@ -371,7 +373,11 @@ not decode.
 
 An answer runs as the offering plugin's own callback, under its own limits
 ([Limits](#limits)): a slow answer warns, and a stuck one stops, the plugin
-that offers the service. The caller's clock stops while it waits.
+that offers the service. The caller's clock stops while it waits, but one
+tick, event or command of the caller may wait on other plugins (services,
+loot classifiers, command completions) for at most one call deadline in
+all; past it, a service call answers `OutOfTime`, and a classifier or a
+completion is not asked (no answer), until the caller's next call.
 
 For state that changes over time and that any plugin may read, such as
 what a plugin is doing now, the status board (`status_publish`,
