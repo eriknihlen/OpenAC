@@ -2073,18 +2073,22 @@ fn a_tag_another_id_parses_as_is_skipped_for_the_next_highest() {
     assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.5.0-beta.1");
 }
 
+/// `count` `wasm-v` releases of `edwards.other`, 0.9.0 downwards.
+fn other_plugins_wasm_v_tags(count: usize) -> Vec<(String, String)> {
+    (0..count)
+        .map(|index| {
+            let version = format!("0.{}.0", 9 - index);
+            (format!("wasm-v{version}"), version)
+        })
+        .collect()
+}
+
+// A new plugin in a repository whose older plugin used `wasm-v` tags: the
+// old plugin's tags are refused on their own budget, never the new one's.
 #[test]
-fn skipping_stops_after_three_refused_candidates() {
-    let refused = |count: usize| -> Vec<(String, String)> {
-        (0..count)
-            .map(|index| {
-                let version = format!("0.{}.0", 9 - index);
-                (format!("wasm-v{version}"), version)
-            })
-            .collect()
-    };
-    for (count, found) in [(2, true), (3, false)] {
-        let others = refused(count);
+fn another_plugins_wasm_v_tags_never_hide_a_plugins_own_tag() {
+    for count in [2, 3, 5] {
+        let others = other_plugins_wasm_v_tags(count);
         let mut releases: Vec<(&str, &str, &str)> = others
             .iter()
             .map(|(tag, version)| (tag.as_str(), "edwards.other", version.as_str()))
@@ -2092,14 +2096,70 @@ fn skipping_stops_after_three_refused_candidates() {
         releases.push(("wasm-edwards.hello-v0.1.0", "edwards.hello", "0.1.0"));
         let server = suite_server(&releases);
         let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+        assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0", "{count}");
+        // The old plugin's tags above it are still read (one may be this
+        // plugin's, moved over), at most three of them.
+        let read: usize = others
+            .iter()
+            .map(|(tag, _)| server.count(&tagged(HELLO_REPO, tag, "plugin.json")))
+            .sum();
+        assert_eq!(read, count.min(3), "{count}");
+    }
+}
+
+// The cap still stops a run of refusals within one tag form: three
+// `wasm-v` releases of another plugin hide a fourth that is this one's...
+#[test]
+fn skipping_stops_after_three_refused_candidates_of_one_form() {
+    for (count, found) in [(2, true), (3, false)] {
+        let others = other_plugins_wasm_v_tags(count);
+        let mut releases: Vec<(&str, &str, &str)> = others
+            .iter()
+            .map(|(tag, version)| (tag.as_str(), "edwards.other", version.as_str()))
+            .collect();
+        releases.push(("wasm-v0.1.0", "edwards.hello", "0.1.0"));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
         if found {
-            assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0");
+            assert_eq!(tag_of(&result), "wasm-v0.1.0");
         } else {
             assert_eq!(result, PluginReleaseResolveResult::Unavailable, "{count}");
             assert_eq!(
+                server.count(&tagged(HELLO_REPO, "wasm-v0.1.0", "plugin.json")),
+                0
+            );
+        }
+    }
+    // ...and three lookalike ids' pre-releases under the plugin's own prefix
+    // hide its real beta.
+    for (count, found) in [(2, true), (3, false)] {
+        let lookalikes: Vec<(String, String)> = (0..count)
+            .map(|index| {
+                (
+                    format!("wasm-edwards.hello-v1.0.{index}-v2.0.0"),
+                    format!("edwards.hello-v1.0.{index}"),
+                )
+            })
+            .collect();
+        let mut releases: Vec<(&str, &str, &str)> = lookalikes
+            .iter()
+            .map(|(tag, id)| (tag.as_str(), id.as_str(), "2.0.0"))
+            .collect();
+        releases.push((
+            "wasm-edwards.hello-v0.5.0-beta.1",
+            "edwards.hello",
+            "0.5.0-beta.1",
+        ));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+        if found {
+            assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.5.0-beta.1");
+        } else {
+            assert!(result.resolution().is_none(), "{result:?}");
+            assert_eq!(
                 server.count(&tagged(
                     HELLO_REPO,
-                    "wasm-edwards.hello-v0.1.0",
+                    "wasm-edwards.hello-v0.5.0-beta.1",
                     "plugin.json"
                 )),
                 0
@@ -2470,13 +2530,15 @@ fn a_pass_keeps_no_rate_limited_fetch() {
     assert_eq!(tag_of(&result), "wasm-v0.2.0");
 }
 
-// Erik's case: a new plugin in a repository whose older plugin used `wasm-v`
-// tags, the new one's releases pushed off the feed.
+// A new plugin in a repository whose older plugin used `wasm-v` tags, the
+// new one's releases pushed off the feed: the old plugin's three tags are
+// refused once, and never spend the budget of the tags the index names.
 #[test]
 fn a_feed_of_another_plugins_wasm_v_tags_still_reads_the_index() {
     let server = suite_server(&[
         ("wasm-v0.9.2", "aethrix.vision", "0.9.2"),
         ("wasm-v0.9.1", "aethrix.vision", "0.9.1"),
+        ("wasm-v0.9.0", "aethrix.vision", "0.9.0"),
     ]);
     serve_manifest(
         &server,
@@ -2500,25 +2562,89 @@ fn a_feed_of_another_plugins_wasm_v_tags_still_reads_the_index() {
     assert_eq!(server.count(&index_uri()), 0);
 }
 
+// The stable channel never reads a pre-release's `plugin.json`: it says the
+// plugin has only pre-releases from the feed, naming its own tag's version
+// before a `wasm-v` one (which may be another plugin's; only its
+// `plugin.json` could tell).
 #[test]
-fn the_pre_release_message_names_only_this_plugins_pre_release() {
-    // Another plugin's `wasm-v` beta is not this plugin's pre-release.
-    let server = suite_server(&[("wasm-v1.0.0-beta.1", "aethrix.vision", "1.0.0-beta.1")]);
-    assert_eq!(
-        resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable),
-        PluginReleaseResolveResult::Unavailable
-    );
-    let server = suite_server(&[(
-        "wasm-aethrix.navigation-v0.5.0-beta.1",
-        "aethrix.navigation",
-        "0.5.0-beta.1",
-    )]);
+fn the_pre_release_message_prefers_this_plugins_own_pre_release() {
+    let server = suite_server(&[
+        ("wasm-v1.0.0-beta.1", "aethrix.vision", "1.0.0-beta.1"),
+        (
+            "wasm-aethrix.navigation-v0.5.0-beta.1",
+            "aethrix.navigation",
+            "0.5.0-beta.1",
+        ),
+    ]);
     let PluginReleaseResolveResult::Prerelease(message) =
         resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable)
     else {
         panic!("expected a pre-release");
     };
     assert!(message.contains("0.5.0-beta.1"), "{message}");
+    for tag in [
+        "wasm-v1.0.0-beta.1",
+        "wasm-aethrix.navigation-v0.5.0-beta.1",
+    ] {
+        assert_eq!(server.count(&tagged(HELLO_REPO, tag, "plugin.json")), 0);
+    }
+}
+
+// As before several plugins: a single-plugin repository with only a
+// pre-release says so on stable, even when that pre-release is broken.
+#[test]
+fn the_stable_channel_says_pre_release_without_reading_it() {
+    let server = release_server(&[]);
+    server.add(&feed_uri(), &feed(&entry(&link("wasm-v1.3.0-beta.1"))));
+    let PluginReleaseResolveResult::Prerelease(message) =
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable)
+    else {
+        panic!("expected a pre-release");
+    };
+    assert!(message.contains("1.3.0-beta.1"), "{message}");
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v1.3.0-beta.1", "plugin.json")),
+        0
+    );
+}
+
+// A repository whose feed shows only `wasm-v` releases reads its index only
+// when none of them is the plugin's: a broken or rate-limited release of the
+// plugin, or a `wasm-v` tag that is not strict SemVer, never asks for it.
+#[test]
+fn a_wasm_v_repository_reads_the_index_only_when_no_release_is_the_plugins() {
+    let broken = release_server(&[]);
+    broken.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    broken.add(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        b"{ not json",
+    );
+    assert!(matches!(
+        resolve_plugin(&broken, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Invalid(_)
+    ));
+    assert_eq!(broken.count(&index_uri()), 0);
+
+    let limited = release_server(&[]);
+    limited.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    limited.add_route(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        Route::Status(429),
+    );
+    assert_eq!(
+        resolve_plugin(&limited, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::RateLimited
+    );
+    assert_eq!(limited.count(&index_uri()), 0);
+
+    let loose = release_server(&["wasm-v0.3", "wasm-v0.2.1+build.5", "wasm-v0.2.0"]);
+    let result = resolve_plugin(&loose, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+    assert_eq!(
+        repository_ids(&loose),
+        [("edwards.hello".to_owned(), "wasm-v0.2.0".to_owned())]
+    );
+    assert_eq!(loose.count(&index_uri()), 0);
 }
 
 // --- Every plugin a repository publishes (Add from URL) ---------------------------------------

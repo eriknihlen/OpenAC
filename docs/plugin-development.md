@@ -516,7 +516,11 @@ plugincheck pack <plugin folder> <out dir> --index plugins-index.json
   highest version from the feed and the index together, and ignores an
   index it cannot read (noting why in its log), so a stale index at worst
   offers an older release. A repository publishing one plugin under
-  `wasm-v` tags needs no index and the launcher never asks for one.
+  `wasm-v` tags needs no index. The launcher reads the index when the feed
+  shows a `wasm-<id>-v` tag or the `wasm-index` release, and otherwise
+  only when none of the feed's releases is the plugin's: there is none for
+  this client, each names another plugin, or (on the stable channel) all
+  are pre-releases. A missing index is then simply not found.
 - **Moving an existing plugin over**: its `wasm-v` releases keep counting
   for it (their `plugin.json` names it), so it can switch to its own tags
   at its next release. A new plugin in a repository whose older plugin used
