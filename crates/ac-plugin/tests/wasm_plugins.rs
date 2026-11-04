@@ -446,7 +446,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.5 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.6 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +655,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.6""#);
+    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.7""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.6, but this build supports 1.0..1.5"
+        "plugin 'openac.probe' declares apiVersion 1.7, but this build supports 1.0..1.6"
     );
 }
 
@@ -710,7 +710,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +824,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.5""#,
+        r#""apiVersion": "1.6""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -884,6 +884,15 @@ fn a_plugin_built_for_api_1_3_still_loads() {
 fn a_plugin_built_for_api_1_4_still_loads() {
     let v1_4 = ApiVersion::new(1, 4);
     let (loaded, error) = load_probe_built_for("probe-1-4", "1.4", &section_at(v1_4));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.6 added only pointer kinds (hover, leave), no shape: `probe` as an
+/// API 1.5 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_5_still_loads() {
+    let v1_5 = ApiVersion::new(1, 5);
+    let (loaded, error) = load_probe_built_for("probe-1-5", "1.5", &section_at(v1_5));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
@@ -1338,7 +1347,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.5 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.6 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2226,6 +2235,60 @@ fn the_session_hands_a_held_pointer_over_measured_from_the_canvass_latest_place(
     );
 }
 
+/// API 1.6 added hover and leave on a canvas. `uidemo` built for this API
+/// hears a hover (two moves before its pump are one hover, at the later
+/// place) and the leave; built for API 1.5 it hears neither, only the
+/// press it heard before: an older plugin may read an unknown kind as a
+/// drag.
+#[test]
+fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
+    use ac_plugin_ui::{PointerEvent, PointerKind, UiInput};
+    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+        let root = Root::new(&format!("uidemo-hover-{version}"));
+        install_built_for(&root.0, "uidemo", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.uidemo"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.uidemo"], "{version}");
+        let canvas = api.ui.canvases().next().unwrap().id;
+        let mut pointer = |kind, x, button| {
+            api.ui.input(UiInput::Pointer {
+                canvas,
+                event: PointerEvent {
+                    kind,
+                    x,
+                    y: 50.0,
+                    button,
+                    modifiers: 0,
+                    wheel_delta: 0,
+                },
+                place: None,
+            });
+        };
+        pointer(PointerKind::Hover, 20.0, 0);
+        pointer(PointerKind::Hover, 30.0, 0);
+        pointer(PointerKind::Down, 30.0, 1);
+        pointer(PointerKind::Up, 30.0, 1);
+        pointer(PointerKind::Leave, 30.0, 0);
+        plugins.pump(0.0, Some(1), &mut api);
+        let heard: Vec<String> = api
+            .messages("openac.uidemo")
+            .into_iter()
+            .filter(|m| m.starts_with("uidemo pointer"))
+            .collect();
+        let mut expected = vec![
+            "uidemo pointer kind=0 at 30,50 button=1".to_owned(),
+            "uidemo pointer kind=1 at 30,50 button=1".to_owned(),
+        ];
+        if version == API_CURRENT {
+            expected.insert(0, "uidemo pointer kind=5 at 30,50 button=0".to_owned());
+            expected.push("uidemo pointer kind=6 at 30,50 button=0".to_owned());
+        }
+        assert_eq!(heard, expected, "{version}");
+        plugins.shutdown(&mut api);
+    }
+}
+
 /// OpenAC hands a plugin's submit through the chat
 /// pipeline inside the call, and the lines it writes reach the chat
 /// subscribers there. Without re-entering the plugin, the submit is
@@ -2548,7 +2611,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.5""#,
+            r#""apiVersion": "1.6""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),

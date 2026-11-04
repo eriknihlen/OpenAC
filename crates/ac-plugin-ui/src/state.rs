@@ -250,6 +250,9 @@ pub struct PluginUi {
     budget: ImageBudget,
     changes: Vec<UiChange>,
     events: Vec<(String, UiEvent)>,
+    /// The canvases the pointer hovers, each owed a leave: its plugin and
+    /// the latest hover.
+    hovered: BTreeMap<u32, (String, crate::model::PointerEvent)>,
     reports: Vec<(String, String)>,
     hotkeys: crate::hotkeys::Hotkeys,
     /// The bound table as the window was last told it.
@@ -605,6 +608,11 @@ impl PluginUi {
                 self.hotkeys.set_client_chords(None);
                 self.follow_hotkeys();
                 self.detach_dialogs();
+                // No pointer is over anything any more.
+                let hovered: Vec<u32> = self.hovered.keys().copied().collect();
+                for canvas in hovered {
+                    self.end_hover(canvas);
+                }
             }
         }
     }
@@ -834,8 +842,26 @@ impl PluginUi {
         let removed = self.canvases.len() != before;
         if removed {
             self.changes.push(UiChange::CanvasRemoved(canvas));
+            self.end_hover(canvas);
         }
         removed
+    }
+
+    /// The leave a hovered canvas is owed, now: at the last place it was
+    /// hovered, with no modifiers.
+    fn end_hover(&mut self, canvas: u32) {
+        if let Some((owner, mut event)) = self.hovered.remove(&canvas) {
+            event.kind = PointerKind::Leave;
+            event.modifiers = 0;
+            self.events.push((
+                owner,
+                UiEvent::Pointer {
+                    canvas,
+                    event,
+                    place: None,
+                },
+            ));
+        }
     }
 
     /// The width of `text` in the interface font and its line height
@@ -1437,6 +1463,8 @@ impl PluginUi {
             .filter(|c| c.owner.id == owner)
             .map(|c| c.id)
             .collect();
+        // A plugin that is gone hears no leave.
+        self.hovered.retain(|_, (o, _)| o != owner);
         for canvas in canvases {
             self.remove_canvas(owner, canvas);
         }
@@ -1578,6 +1606,21 @@ impl PluginUi {
                 event,
                 place,
             } => {
+                if event.kind == PointerKind::Leave {
+                    // Owed whether or not the canvas still takes the
+                    // pointer; once only.
+                    if let Some((owner, _)) = self.hovered.remove(&canvas) {
+                        self.events.push((
+                            owner,
+                            UiEvent::Pointer {
+                                canvas,
+                                event,
+                                place,
+                            },
+                        ));
+                    }
+                    return;
+                }
                 let Some(c) = self.canvases.iter().find(|c| c.id == canvas) else {
                     return;
                 };
@@ -1585,6 +1628,21 @@ impl PluginUi {
                     return;
                 }
                 let owner = c.owner.id.clone();
+                if event.kind == PointerKind::Hover {
+                    self.hovered.insert(canvas, (owner.clone(), event));
+                    // A newer hover replaces one not yet delivered, so a
+                    // fast pointer does not flood the plugin; anything
+                    // since for this canvas keeps the older one.
+                    let last = self.events.iter().rposition(
+                        |(_, e)| matches!(e, UiEvent::Pointer { canvas: c, .. } if *c == canvas),
+                    );
+                    if let Some(at) = last
+                        && let UiEvent::Pointer { event: older, .. } = &self.events[at].1
+                        && older.kind == PointerKind::Hover
+                    {
+                        self.events.remove(at);
+                    }
+                }
                 self.events.push((
                     owner,
                     UiEvent::Pointer {
@@ -1649,13 +1707,13 @@ impl PluginUi {
         std::mem::take(&mut self.theme_changed).then_some(self.theme)
     }
 
-    /// A held pointer's move or release as the plugin should hear it, just
-    /// before it does: measured from where the plugin last put the canvas,
-    /// not from where the window still had it. A plugin that moves its canvas
-    /// by how far the pointer is from a grabbed point would otherwise count
-    /// each step again until the window caught up, and overshoot. A press
-    /// stays as the player saw it, and so does an event whose place is not
-    /// known.
+    /// A held pointer's move or release, or a hover, as the plugin should
+    /// hear it, just before it does: measured from where the plugin last put
+    /// the canvas, not from where the window still had it. A plugin that
+    /// moves its canvas by how far the pointer is from a grabbed point would
+    /// otherwise count each step again until the window caught up, and
+    /// overshoot. A press stays as the player saw it, and so does an event
+    /// whose place is not known.
     #[must_use]
     pub fn pointer_as_placed_now(&self, event: UiEvent) -> UiEvent {
         let UiEvent::Pointer {
@@ -1667,7 +1725,10 @@ impl PluginUi {
             return event;
         };
         if let Some(place) = place
-            && matches!(pointer.kind, PointerKind::Move | PointerKind::Up)
+            && matches!(
+                pointer.kind,
+                PointerKind::Move | PointerKind::Up | PointerKind::Hover
+            )
             && let Some(c) = self.canvases.iter().find(|c| c.id == canvas)
         {
             let size = (c.descriptor.width as f32, c.descriptor.height as f32);

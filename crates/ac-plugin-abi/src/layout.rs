@@ -201,8 +201,26 @@ mod tests {
     /// 1.0 is unfrozen, but never silently. Update this value in the same
     /// commit; when an existing record changed shape (not only a new
     /// import, event or `since`-marked field), say in the commit message
-    /// which plugins must be rebuilt.
+    /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
+    /// published the same value as 1.5: it added two values of a pointer
+    /// event's kind byte, not a shape.
     const PUBLISHED: u64 = 0x56b1_6fd9_0db8_834f;
+
+    /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
+    const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;
+
+    /// API 1.6 added only the pointer kinds hover and leave, which the host
+    /// sends only to plugins built for 1.6: no record, event or import
+    /// changed shape, so a plugin built for 1.5 has this version's core
+    /// shape and section and loads unrebuilt.
+    #[test]
+    fn api_1_5_plugins_have_the_api_1_6_shapes() {
+        let (v1_5, v1_6) = (ApiVersion::new(1, 5), ApiVersion::new(1, 6));
+        assert_eq!(core_shape(v1_5), API_1_5_CORE);
+        assert_eq!(core_shape(v1_6), API_1_5_CORE);
+        assert_eq!(section_at(v1_5), section_at(v1_6));
+        assert_eq!(section_at(v1_6), LAYOUT_SECTION_BYTES);
+    }
 
     #[test]
     fn the_fingerprint_is_the_published_one() {

@@ -488,6 +488,11 @@ pub enum PointerKind {
     Wheel,
     /// A press ended without its up (hidden, removed, taken).
     Cancelled,
+    /// The pointer is over it with no button held (plugins built for API
+    /// 1.6 or later hear it).
+    Hover,
+    /// The pointer stopped being over it after a hover (API 1.6 or later).
+    Leave,
 }
 
 /// Where the window had a canvas when the pointer did something on it: the

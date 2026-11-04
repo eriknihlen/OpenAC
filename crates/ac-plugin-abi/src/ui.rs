@@ -1361,7 +1361,9 @@ wire_record! {
     pub struct PointerEvent {
         /// The canvas.
         pub canvas: u32,
-        /// 0 down, 1 up, 2 move, 3 wheel, 4 cancelled.
+        /// 0 down, 1 up, 2 move, 3 wheel, 4 cancelled; from API 1.6 also
+        /// 5 hover and 6 leave (the constants [`PointerEvent::DOWN`] to
+        /// [`PointerEvent::LEAVE`]).
         pub kind: u8,
         /// Canvas pixels from its top-left (outside it only in a drag).
         pub x: f32,
@@ -1373,6 +1375,45 @@ wire_record! {
         pub modifiers: u8,
         /// Wheel notches, positive away from the user.
         pub wheel_delta: i32,
+    }
+}
+
+/// The API version that added the hover kinds, [`PointerEvent::HOVER`] and
+/// [`PointerEvent::LEAVE`].
+pub const POINTER_HOVER_SINCE: crate::ApiVersion = crate::ApiVersion::new(1, 6);
+
+impl PointerEvent {
+    /// A button went down inside the canvas.
+    pub const DOWN: u8 = 0;
+    /// The held button came up (wherever the pointer is).
+    pub const UP: u8 = 1;
+    /// The pointer moved with a button held (wherever it is).
+    pub const MOVE: u8 = 2;
+    /// The wheel turned over the canvas.
+    pub const WHEEL: u8 = 3;
+    /// A press ended without its up (the canvas was hidden or removed, or
+    /// the press was taken away).
+    pub const CANCELLED: u8 = 4;
+    /// The pointer is over the canvas with no button held (API 1.6): sent
+    /// when it comes onto the canvas and as it moves there, at most one
+    /// for a canvas in each delivery (the latest position); `button` is 0.
+    pub const HOVER: u8 = 5;
+    /// The pointer stopped being over the canvas after a [`Self::HOVER`]
+    /// (API 1.6): it moved off it or onto something drawn above it, a
+    /// press began elsewhere, the canvas was hidden, stopped taking the
+    /// pointer or was removed, or the window went. One leave ends each
+    /// stretch of hovers; a press on the canvas does not end it.
+    pub const LEAVE: u8 = 6;
+
+    /// The API version that added this event's kind: a plugin built for an
+    /// older version is never sent it (an older plugin may read any kind it
+    /// does not know as a drag).
+    #[must_use]
+    pub const fn since(&self) -> crate::ApiVersion {
+        match self.kind {
+            Self::HOVER | Self::LEAVE => POINTER_HOVER_SINCE,
+            _ => crate::ApiVersion::new(1, 0),
+        }
     }
 }
 

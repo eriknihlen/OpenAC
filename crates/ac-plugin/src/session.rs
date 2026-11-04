@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ac_plugin_abi::callback::{Callback, CallbackAnswer, InterceptDecision};
+use ac_plugin_abi::ui::UiEvent;
 use ac_plugin_abi::verbs::split_command_line;
 use ac_plugin_abi::{
     API_CURRENT, ApiVersion, ChatLine, Event, Import, LogLevel, Permission, StartInfo, Wire,
@@ -1263,10 +1264,11 @@ impl PluginSession {
                 Some(state) => state.pointer_as_placed_now(event),
                 None => event,
             };
-            let (entry, bytes) = encode(
-                &ac_plugin_abi::ui_host::event(event),
-                self.version_of(index),
-            );
+            let event = ac_plugin_abi::ui_host::event(event);
+            if !hears(&self.plugins[index].manifest, &event) {
+                continue;
+            }
+            let (entry, bytes) = encode(&event, self.version_of(index));
             self.call(index, api, |instance, handler| {
                 instance.event(&bytes, entry, handler)
             });
@@ -1450,10 +1452,18 @@ impl<'a> Encodings<'a> {
 /// Whether the plugin of `manifest` is sent `event`: it was built for the
 /// API version that added the event or a later one (an older SDK cannot
 /// read an event kind it does not know, and stops the plugin), and a chat
-/// line or status notice needs the `chat` permission.
+/// line or status notice needs the `chat` permission. A canvas pointer
+/// event of a kind a later version added (hover, leave) goes only to
+/// plugins built for that version or later: an older plugin may read a kind
+/// it does not know as a drag.
 #[must_use]
 pub fn hears(manifest: &PluginManifest, event: &Event) -> bool {
+    let kind_known = match event {
+        Event::Ui(UiEvent::Pointer(pointer)) => pointer.since().is_at_most(manifest.api_version),
+        _ => true,
+    };
     event.since().is_at_most(manifest.api_version)
+        && kind_known
         && (!matches!(event, Event::ChatReceived(_) | Event::StatusTextReceived(_))
             || manifest.allows(Permission::Chat))
 }
@@ -1498,6 +1508,30 @@ mod tests {
         assert!(!hears(&manifest("1.1", false), &status));
         assert!(!hears(&manifest("1.1", false), &chat));
         assert!(hears(&manifest("1.1", false), &Event::LoginComplete));
+    }
+
+    #[test]
+    fn a_canvas_hover_or_leave_goes_only_to_plugins_built_for_api_1_6() {
+        use ac_plugin_abi::ui::PointerEvent;
+        let pointer = |kind| {
+            Event::Ui(UiEvent::Pointer(PointerEvent {
+                kind,
+                ..PointerEvent::default()
+            }))
+        };
+        for kind in [PointerEvent::HOVER, PointerEvent::LEAVE] {
+            assert!(!hears(&manifest("1.5", false), &pointer(kind)));
+            assert!(hears(&manifest("1.6", false), &pointer(kind)));
+        }
+        for kind in [
+            PointerEvent::DOWN,
+            PointerEvent::UP,
+            PointerEvent::MOVE,
+            PointerEvent::WHEEL,
+            PointerEvent::CANCELLED,
+        ] {
+            assert!(hears(&manifest("1.0", false), &pointer(kind)));
+        }
     }
 
     // An object change carries the world object; API 1.2 gave that record

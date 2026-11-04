@@ -95,7 +95,12 @@ height. It also added `Host::reachable_cells` and its answer,
 hears, and `Host::put_in_open_container`, which puts an owned item into the
 open chest at a slot, or moves one already in it to another. It also added
 `Host::landscape_terrain` and `Host::terrain_palette`, which read the
-landscape from the player's game files for a map. Everything the client offers
+landscape from the player's game files for a map. API 1.6 added two kinds of
+canvas pointer event, `PointerEvent::HOVER` (the pointer over a listening
+canvas with no button held, at most one per delivery at the latest place) and
+`PointerEvent::LEAVE` (one when the hovering ends: the pointer moved off, a
+press began elsewhere, or the canvas hid or went), for tooltips; a plugin built
+for an older version hears neither. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -343,7 +348,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.5",
+  "apiVersion": "1.6",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -359,7 +364,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.5"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.6"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

@@ -551,6 +551,127 @@ fn pointer_input_reaches_a_listening_canvas_that_opted_in() {
     assert_eq!(ui.canvas("edwards.tank", map).unwrap().release_count, 1);
 }
 
+/// The pointer events a plugin is handed, as (kind, x).
+fn pointer_kinds(ui: &mut PluginUi) -> Vec<(PointerKind, f32)> {
+    ui.take_events()
+        .into_iter()
+        .filter_map(|(_, e)| match e {
+            UiEvent::Pointer { event, .. } => Some((event.kind, event.x)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn hover_canvas(ui: &mut PluginUi) -> u32 {
+    let map = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                accepts_pointer_input: true,
+                ..canvas("map")
+            },
+        )
+        .unwrap();
+    assert!(ui.listen_canvas("edwards.tank", map, true));
+    map
+}
+
+fn point(ui: &mut PluginUi, canvas: u32, kind: PointerKind, x: f32) {
+    ui.input(UiInput::Pointer {
+        canvas,
+        event: PointerEvent {
+            kind,
+            x,
+            y: 4.0,
+            button: u8::from(matches!(kind, PointerKind::Down | PointerKind::Up)),
+            modifiers: 0,
+            wheel_delta: 0,
+        },
+        place: None,
+    });
+}
+
+#[test]
+fn hovers_not_yet_handed_over_are_one_at_the_latest_place() {
+    let mut ui = PluginUi::new();
+    let map = hover_canvas(&mut ui);
+    let other = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                accepts_pointer_input: true,
+                ..canvas("other")
+            },
+        )
+        .unwrap();
+    assert!(ui.listen_canvas("edwards.tank", other, true));
+    point(&mut ui, map, PointerKind::Hover, 1.0);
+    point(&mut ui, other, PointerKind::Hover, 9.0);
+    point(&mut ui, map, PointerKind::Hover, 2.0);
+    point(&mut ui, map, PointerKind::Hover, 3.0);
+    assert_eq!(
+        pointer_kinds(&mut ui),
+        vec![(PointerKind::Hover, 9.0), (PointerKind::Hover, 3.0)]
+    );
+    // Once handed over, the next hover is its own; a press between two
+    // hovers keeps both, in order.
+    point(&mut ui, map, PointerKind::Hover, 4.0);
+    point(&mut ui, map, PointerKind::Down, 4.0);
+    point(&mut ui, map, PointerKind::Up, 4.0);
+    point(&mut ui, map, PointerKind::Hover, 5.0);
+    assert_eq!(
+        pointer_kinds(&mut ui),
+        vec![
+            (PointerKind::Hover, 4.0),
+            (PointerKind::Down, 4.0),
+            (PointerKind::Up, 4.0),
+            (PointerKind::Hover, 5.0),
+        ]
+    );
+}
+
+#[test]
+fn a_hover_is_owed_exactly_one_leave() {
+    let mut ui = PluginUi::new();
+    let map = hover_canvas(&mut ui);
+    // No hover, no leave.
+    point(&mut ui, map, PointerKind::Leave, 0.0);
+    assert!(pointer_kinds(&mut ui).is_empty());
+    point(&mut ui, map, PointerKind::Hover, 7.0);
+    // The plugin stops listening: the leave it is owed still comes, once.
+    assert!(ui.listen_canvas("edwards.tank", map, false));
+    point(&mut ui, map, PointerKind::Leave, 8.0);
+    point(&mut ui, map, PointerKind::Leave, 8.0);
+    assert_eq!(
+        pointer_kinds(&mut ui),
+        vec![(PointerKind::Hover, 7.0), (PointerKind::Leave, 8.0)]
+    );
+    // The window goes while the pointer hovers: the leave comes from the
+    // session, at the last hover's place; the window's own never comes.
+    assert!(ui.listen_canvas("edwards.tank", map, true));
+    ui.set_window_attached(true);
+    point(&mut ui, map, PointerKind::Hover, 6.0);
+    ui.set_window_attached(false);
+    assert_eq!(
+        pointer_kinds(&mut ui),
+        vec![(PointerKind::Hover, 6.0), (PointerKind::Leave, 6.0)]
+    );
+    // Removed while hovered: one leave, and none from the window after.
+    point(&mut ui, map, PointerKind::Hover, 5.0);
+    assert!(ui.remove_canvas("edwards.tank", map));
+    point(&mut ui, map, PointerKind::Leave, 0.0);
+    assert_eq!(
+        pointer_kinds(&mut ui),
+        vec![(PointerKind::Hover, 5.0), (PointerKind::Leave, 5.0)]
+    );
+    // A plugin that is unloaded while its canvas is hovered hears nothing.
+    let map = hover_canvas(&mut ui);
+    point(&mut ui, map, PointerKind::Hover, 5.0);
+    ui.take_events();
+    ui.release("edwards.tank");
+    assert!(pointer_kinds(&mut ui).is_empty());
+}
+
 #[test]
 fn a_held_pointer_is_measured_from_where_the_plugin_last_put_the_canvas() {
     let mut ui = PluginUi::new();

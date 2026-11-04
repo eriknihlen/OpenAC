@@ -800,11 +800,13 @@ pub fn event(event: ui::UiEvent) -> Event {
         ui::UiEvent::Pointer { canvas, event, .. } => abi::UiEvent::Pointer(PointerEvent {
             canvas,
             kind: match event.kind {
-                PointerKind::Down => 0,
-                PointerKind::Up => 1,
-                PointerKind::Move => 2,
-                PointerKind::Wheel => 3,
-                PointerKind::Cancelled => 4,
+                PointerKind::Down => PointerEvent::DOWN,
+                PointerKind::Up => PointerEvent::UP,
+                PointerKind::Move => PointerEvent::MOVE,
+                PointerKind::Wheel => PointerEvent::WHEEL,
+                PointerKind::Cancelled => PointerEvent::CANCELLED,
+                PointerKind::Hover => PointerEvent::HOVER,
+                PointerKind::Leave => PointerEvent::LEAVE,
             },
             x: event.x,
             y: event.y,

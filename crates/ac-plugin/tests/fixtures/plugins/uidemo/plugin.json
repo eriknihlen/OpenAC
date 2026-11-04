@@ -3,6 +3,6 @@
   "displayName": "UI Demo",
   "version": "0.1.0",
   "entry": "uidemo.wasm",
-  "apiVersion": "1.5",
+  "apiVersion": "1.6",
   "minHostVersion": "0.1.0"
 }

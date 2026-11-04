@@ -24,8 +24,8 @@
 
 use openac_plugin::ui::{
     ActionValue, Anchor, BindingKind, Canvas, CanvasSpec, ClientWindow, Image, MapPoint,
-    MarkerAnchor, MarkerLayer, Panel, PanelSpec, TriangleLayer, UiEvent, ground_ring, label, rgba,
-    triangle, world_icon,
+    MarkerAnchor, MarkerLayer, Panel, PanelSpec, PointerEvent, TriangleLayer, UiEvent, ground_ring,
+    label, rgba, triangle, world_icon,
 };
 use openac_plugin::ui::{Font, FontWeight, PluginKey, TypedBindingKind, TypedValue, chord};
 use openac_plugin::{Event, Host, Plugin, StartInfo};
@@ -446,21 +446,20 @@ impl Plugin for UiDemo {
                 host.info(&format!("uidemo action {action} {activation}"));
             }
             Event::Ui(UiEvent::Pointer(pointer)) => {
-                // 0 down, 1 up, 2 move, 3 wheel, 4 cancelled.
+                // Hover and leave (API 1.6) are logged and draw nothing.
                 match pointer.kind {
-                    0 => self.dragging = true,
-                    2 if self.dragging => {}
-                    1 | 4 => self.dragging = false,
+                    PointerEvent::DOWN => self.dragging = true,
+                    PointerEvent::UP | PointerEvent::CANCELLED => self.dragging = false,
                     _ => {}
                 }
-                if self.dragging || pointer.kind == 1 {
+                if self.dragging || pointer.kind == PointerEvent::UP {
                     self.marker = (
                         pointer.x.clamp(6.0, CANVAS.0 as f32 - 6.0),
                         pointer.y.clamp(32.0, CANVAS.1 as f32 - 6.0),
                     );
                     self.paint(host);
                 }
-                if pointer.kind != 2 {
+                if pointer.kind != PointerEvent::MOVE {
                     host.info(&format!(
                         "uidemo pointer kind={} at {:.0},{:.0} button={}",
                         pointer.kind, pointer.x, pointer.y, pointer.button

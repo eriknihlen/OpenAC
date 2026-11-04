@@ -813,6 +813,109 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
 }
 
 #[test]
+fn a_canvas_hears_the_pointer_hover_with_no_button_held_and_one_leave() {
+    // A buttonless move over a listening canvas is a hover; a move with
+    // the button held stays a move; the pointer going off it, the canvas
+    // hiding, and a press after the canvas moved from under the pointer
+    // each end the hover with one leave.
+    use crate::overlay::OverlayHost;
+    use ac_plugin_ui::{CanvasAnchor, CanvasDescriptor, PluginUiView, PointerKind};
+    let mut state = PluginUi::new();
+    let owner = UiOwner::new("test.canvas", "Canvas");
+    let id = state
+        .register_canvas(
+            &owner,
+            CanvasDescriptor {
+                canvas_id: "map".into(),
+                width: 100,
+                height: 50,
+                anchor: CanvasAnchor::TopLeft,
+                offset: (200.0, 100.0),
+                start_visible: true,
+                accepts_pointer_input: true,
+            },
+        )
+        .unwrap();
+    assert!(state.listen_canvas("test.canvas", id, true));
+    let mut view = PluginUiView::new();
+    view.apply_all(state.snapshot());
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let mut band = OverlayHost::mount(&mut host.root);
+    let mut layer = canvas::CanvasLayer::mount(&mut host.root, &mut band);
+    let outbox: PluginOutbox = Rc::new(RefCell::new(Vec::new()));
+    let mut no_image = |_: &str, _: u32| None;
+    let mut sync = |host: &mut UiHost, view: &PluginUiView| {
+        layer.sync(
+            &mut host.root,
+            &band,
+            view,
+            &mut no_image,
+            &mut |_| unreachable!("no fonts"),
+            None,
+            &outbox,
+        );
+    };
+    sync(&mut host, &view);
+    let heard = |outbox: &PluginOutbox| -> Vec<(PointerKind, f32, f32, u8)> {
+        outbox
+            .borrow_mut()
+            .drain(..)
+            .filter_map(|i| match i {
+                UiInput::Pointer { canvas, event, .. } if canvas == id => {
+                    Some((event.kind, event.x, event.y, event.button))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    host.mouse_move(210, 110);
+    host.mouse_move(220, 115);
+    host.mouse_down(MouseButton::Left, 220, 115, 0);
+    host.mouse_move(230, 120);
+    host.mouse_up(MouseButton::Left, 230, 120, 0);
+    host.mouse_move(240, 120);
+    host.mouse_move(400, 300);
+    host.mouse_move(500, 300);
+    assert_eq!(
+        heard(&outbox),
+        vec![
+            (PointerKind::Hover, 10.0, 10.0, 0),
+            (PointerKind::Hover, 20.0, 15.0, 0),
+            (PointerKind::Down, 20.0, 15.0, 1),
+            (PointerKind::Move, 30.0, 20.0, 1),
+            (PointerKind::Up, 30.0, 20.0, 1),
+            (PointerKind::Hover, 40.0, 20.0, 0),
+            (PointerKind::Leave, 200.0, 200.0, 0),
+        ]
+    );
+
+    // Hidden under the pointer: one leave.
+    host.mouse_move(210, 110);
+    assert!(state.place_canvas("test.canvas", id, Some(false), None, None));
+    view.apply_all(state.take_changes());
+    sync(&mut host, &view);
+    host.pump();
+    let kinds: Vec<PointerKind> = heard(&outbox).into_iter().map(|h| h.0).collect();
+    assert_eq!(kinds, vec![PointerKind::Hover, PointerKind::Leave]);
+
+    // Shown again and hovered, then moved from under a pointer that does
+    // not move: the press there ends the hover.
+    assert!(state.place_canvas("test.canvas", id, Some(true), None, None));
+    view.apply_all(state.take_changes());
+    sync(&mut host, &view);
+    host.mouse_move(211, 111);
+    assert!(state.place_canvas("test.canvas", id, None, None, Some((500.0, 400.0))));
+    view.apply_all(state.take_changes());
+    sync(&mut host, &view);
+    host.mouse_down(MouseButton::Left, 211, 111, 0);
+    host.mouse_up(MouseButton::Left, 211, 111, 0);
+    let kinds: Vec<PointerKind> = heard(&outbox).into_iter().map(|h| h.0).collect();
+    assert_eq!(kinds, vec![PointerKind::Hover, PointerKind::Leave]);
+}
+
+#[test]
 fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
     use crate::event::Modifiers;
     use crate::overlay::OverlayHost;
@@ -858,7 +961,8 @@ fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
     host.mouse_move(250, 130);
     host.set_modifiers(Modifiers::NONE);
     host.mouse_up(MouseButton::Left, 250, 130, 0);
-    // The wheel with Shift and Alt, and a plain click.
+    // The wheel with Shift and Alt (the move there is a hover), and a plain
+    // click.
     host.set_modifiers(Modifiers::SHIFT | Modifiers::ALT);
     host.mouse_move(210, 110);
     host.root.on_scroll(1);
@@ -881,6 +985,7 @@ fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
             (PointerKind::Down, 2),
             (PointerKind::Move, 2),
             (PointerKind::Up, 0),
+            (PointerKind::Hover, 5),
             (PointerKind::Wheel, 5),
             (PointerKind::Down, 0),
             (PointerKind::Up, 0),

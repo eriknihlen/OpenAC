@@ -4,7 +4,9 @@
 //! and, when it opted in and its plugin listens, taking the pointer inside
 //! its rectangle: a press holds the pointer until the button comes up, the
 //! moves and the release reach the plugin wherever they happen, and a press
-//! that ends otherwise is reported cancelled.
+//! that ends otherwise is reported cancelled. With no button held the
+//! pointer over it is a hover, and its going (off the canvas, or the canvas
+//! hiding or going) one leave.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -112,6 +114,9 @@ pub struct CanvasWidget {
     font: Option<Arc<UiFont>>,
     outbox: PluginOutbox,
     held: Option<u8>,
+    /// The last hover delivered (element-local place and modifiers), its
+    /// leave not yet.
+    hovering: Option<(i32, i32, u8)>,
     releases_seen: u32,
     place: CanvasPlace,
 }
@@ -180,6 +185,30 @@ impl CanvasWidget {
         );
         true
     }
+
+    /// The pointer is over it with no button held (`e` element-local). The
+    /// same place again (the UI checking the hover after a wheel turn) is
+    /// not news.
+    fn hover(&mut self, e: &UiEvent) -> bool {
+        if !self.canvas.takes_input() {
+            return false;
+        }
+        let at = (e.data1, e.data2, e.modifiers.0 & 7);
+        if self.hovering.replace(at) != Some(at) {
+            self.deliver(PointerKind::Hover, at.0 as f32, at.1 as f32, 0, at.2, 0);
+        }
+        true
+    }
+
+    /// The pointer is no longer over it: the leave its hovers are owed.
+    fn leave(&mut self, ui: &UiRoot, me: ElementId) {
+        if self.hovering.take().is_none() {
+            return;
+        }
+        let (mx, my) = ui.mouse();
+        let (sx, sy) = ui.screen_position(me);
+        self.deliver(PointerKind::Leave, mx as f32 - sx, my as f32 - sy, 0, 0, 0);
+    }
 }
 
 impl Widget for CanvasWidget {
@@ -189,6 +218,16 @@ impl Widget for CanvasWidget {
 
     fn handles_click(&self, _element: &Element) -> bool {
         self.canvas.takes_input()
+    }
+
+    fn receives_hover_mouse_move(&self) -> bool {
+        self.canvas.takes_input()
+    }
+
+    // The plugin draws what a hover shows; the pointer resting on the
+    // canvas does not end it.
+    fn hover_outlasts_tooltip(&self) -> bool {
+        true
     }
 
     fn on_event(&mut self, ui: &mut UiRoot, me: ElementId, e: &UiEvent) -> bool {
@@ -214,8 +253,13 @@ impl Widget for CanvasWidget {
                     );
                     true
                 }
-                None => false,
+                None => self.hover(e),
             },
+            kind::HOVER_ENTER => self.held.is_none() && self.hover(e),
+            kind::HOVER_LEAVE => {
+                self.leave(ui, me);
+                false
+            }
             kind::SCROLL if self.canvas.takes_input() => {
                 let (mx, my) = ui.mouse();
                 let (sx, sy) = ui.screen_position(me);
@@ -408,10 +452,13 @@ impl CanvasLayer {
             .collect();
         for id in gone {
             if let Some(el) = self.elements.remove(&id) {
-                if let Some(w) = ui.widget_mut::<CanvasWidget>(el)
-                    && let Some(button) = w.held.take()
-                {
-                    w.deliver(PointerKind::Cancelled, 0.0, 0.0, button, 0, 0);
+                if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
+                    if let Some(button) = w.held.take() {
+                        w.deliver(PointerKind::Cancelled, 0.0, 0.0, button, 0, 0);
+                    }
+                    if w.hovering.take().is_some() {
+                        w.deliver(PointerKind::Leave, 0.0, 0.0, 0, 0, 0);
+                    }
                 }
                 if ui.captured() == Some(el) {
                     ui.release_capture();
@@ -446,6 +493,7 @@ impl CanvasLayer {
                         font: font.cloned(),
                         outbox: std::rc::Rc::clone(outbox),
                         held: None,
+                        hovering: None,
                         releases_seen: canvas.release_count,
                         place,
                     },

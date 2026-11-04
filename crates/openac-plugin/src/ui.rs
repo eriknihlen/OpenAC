@@ -746,7 +746,13 @@ impl Canvas {
     }
 
     /// Starts or stops listening for its pointer (it takes input only when
-    /// it opted in and someone listens).
+    /// it opted in and someone listens). The pointer arrives as
+    /// [`UiEvent::Pointer`]; match its `kind` with [`PointerEvent::DOWN`],
+    /// [`PointerEvent::UP`], [`PointerEvent::MOVE`] (a button held),
+    /// [`PointerEvent::WHEEL`] and [`PointerEvent::CANCELLED`], and from API
+    /// 1.6 [`PointerEvent::HOVER`] (over it, no button held, at most one per
+    /// delivery at the latest place) and [`PointerEvent::LEAVE`] (one when
+    /// the hovering ends), say for a tooltip.
     pub fn listen_pointer(self, host: &mut Host<'_>, listening: bool) -> bool {
         self.set(host, CanvasChange::Listen(listening))
     }
