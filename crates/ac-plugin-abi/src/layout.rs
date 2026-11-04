@@ -208,6 +208,38 @@ mod tests {
     /// API 1.8 (the status board's change notices) again.
     const PUBLISHED: u64 = 0xce10_d6e2_b705_0b25;
 
+    /// The fingerprint API 1.7 was published with. A released version's
+    /// layout never changes: what a later version adds is marked `since`.
+    const PUBLISHED_1_7: u64 = 0x018f_6e7f_ded2_7246;
+
+    /// [`LAYOUT_FINGERPRINT`] as an SDK built for API `version` had it: its
+    /// core shape and its imports, each as that version knew it.
+    fn fingerprint_at(version: ApiVersion) -> u64 {
+        let imports = Import::ALL
+            .iter()
+            .filter(|import| import.since().is_at_most(version))
+            .fold(0u64, |sum, import| {
+                sum.wrapping_add(mix(import.shape_at(version)))
+            });
+        Shape::new("openac plugin api layout")
+            .of(core_shape(version))
+            .of(imports)
+            .finish()
+    }
+
+    /// API 1.7 is published: it keeps the fingerprint it was published
+    /// with, whatever later versions add.
+    #[test]
+    fn api_1_7_keeps_its_published_fingerprint() {
+        assert_eq!(fingerprint_at(API_CURRENT), LAYOUT_FINGERPRINT);
+        let v1_7 = fingerprint_at(ApiVersion::new(1, 7));
+        assert_eq!(
+            v1_7, PUBLISHED_1_7,
+            "API 1.7's layout changed (fingerprint {v1_7:016x}, published {PUBLISHED_1_7:016x}): \
+             mark what was added `since` the version that adds it"
+        );
+    }
+
     /// The core shape every plugin built for API 1.7 carries.
     const API_1_7_CORE: u64 = 0x22ad_a6ef_92b2_144c;
 
