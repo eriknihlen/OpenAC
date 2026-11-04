@@ -20,8 +20,8 @@ pub use catalog::{
     PluginBlock, PluginCatalog, PluginCatalogEntry, THIS_CLIENT,
 };
 pub use index::{
-    CURRENT_INDEX_SCHEMA_VERSION, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PluginIndex,
-    PluginIndexEntry,
+    CURRENT_INDEX_SCHEMA_VERSION, IndexReleaseUpdate, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG,
+    PluginIndex, PluginIndexEntry,
 };
 pub use installer::{
     AfterOldCodeSetAside, LocalPluginZipPreview, PACKAGED_FILES_REFUSAL,

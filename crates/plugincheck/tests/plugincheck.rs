@@ -761,6 +761,61 @@ fn pack_refuses_a_malformed_index_and_writes_nothing() {
     }
 }
 
+// A hotfix of an older line (1.0.0 packed after 1.2.0) is packed, but the
+// index keeps naming the higher version, and the command says so.
+#[test]
+fn pack_never_moves_the_index_back_to_a_lower_version() {
+    let root = Root::new("pack-index-hotfix");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    let previous = r#"{ "schemaVersion": 1, "plugins": [
+        { "id": "acme.hello", "stable": "wasm-acme.hello-v1.2.0" } ] }"#;
+    std::fs::write(&index, previous).unwrap();
+    let (code, output, error) = run_with(&[
+        "pack",
+        folder.to_str().unwrap(),
+        root.join("release").to_str().unwrap(),
+        "--index",
+        index.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{output}{error}");
+    assert!(
+        output.contains("the release tagged wasm-acme.hello-v1.0.0"),
+        "{output}"
+    );
+    assert!(
+        output.contains("still names wasm-acme.hello-v1.2.0, a higher version"),
+        "{output}"
+    );
+    assert!(!output.contains("Then upload"), "{output}");
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), previous);
+    assert!(root.join("release").join("acme.hello-1.0.0.zip").is_file());
+}
+
+// The index file is read strictly: bytes that are not UTF-8 are refused,
+// not replaced.
+#[test]
+fn pack_refuses_an_index_that_is_not_utf8() {
+    let root = Root::new("pack-index-utf8");
+    let folder = hello_folder(&root);
+    let index = root.join("plugins-index.json");
+    std::fs::write(
+        &index,
+        b"{ \"schemaVersion\": 1, \"plugins\": [ { \"id\": \"acme.\xFF\", \"stable\": \"wasm-v1.0.0\" } ] }",
+    )
+    .unwrap();
+    let (code, _, error) = run_with(&[
+        "pack",
+        folder.to_str().unwrap(),
+        root.join("out").to_str().unwrap(),
+        "--index",
+        index.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 1);
+    assert!(error.contains("it is not UTF-8"), "{error}");
+    assert!(!root.join("out").exists());
+}
+
 #[test]
 fn a_failed_index_write_leaves_the_previous_index_whole() {
     let root = Root::new("pack-index-write");

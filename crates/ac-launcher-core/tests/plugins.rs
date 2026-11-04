@@ -17,8 +17,8 @@ use std::time::SystemTime;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::plugins::{
-    ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, InstallRules, InstalledPluginInfo,
-    InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
+    ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, IndexReleaseUpdate, InstallRules,
+    InstalledPluginInfo, InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
     PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PLUGIN_INDEX_ASSET,
     PLUGIN_INDEX_TAG, PendingPluginInstall, Permission, PermissionDeclaration, PluginCatalog,
     PluginIndex, PluginInstallSource, PluginInstaller, PluginInventory, PluginManifest,
@@ -2267,14 +2267,33 @@ fn the_index_is_read_strictly() {
     ))
     .unwrap();
     assert_eq!(index.entry("a.b").unwrap().beta, None);
+    // The file's bytes: a byte order mark is skipped, bytes that are not
+    // UTF-8 are refused (never replaced and read on).
+    let bytes = entry(r#"{ "id": "a.b", "stable": "wasm-v1.0.0" }"#).into_bytes();
+    let with_mark = [b"\xEF\xBB\xBF".as_slice(), &bytes].concat();
+    assert_eq!(PluginIndex::parse_bytes(&with_mark).unwrap(), index);
+    let error = PluginIndex::parse_bytes(b"{ \"schemaVersion\": 1, \"plugins\": [ \xFF ] }")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("it is not UTF-8"), "{error}");
 }
 
 #[test]
 fn the_index_round_trips_and_an_entry_can_be_replaced() {
     let mut index = PluginIndex::parse(SUITE_INDEX).unwrap();
-    index
-        .set_release("aethrix.vision", "wasm-aethrix.vision-v1.2.1")
-        .unwrap();
+    assert_eq!(
+        index
+            .set_release("aethrix.vision", "wasm-aethrix.vision-v1.2.1")
+            .unwrap(),
+        IndexReleaseUpdate::Set
+    );
+    // A lower version never moves its channel back: a hotfix of an older line.
+    assert_eq!(
+        index
+            .set_release("aethrix.vision", "wasm-aethrix.vision-v1.1.9")
+            .unwrap(),
+        IndexReleaseUpdate::KeptNewer("wasm-aethrix.vision-v1.2.1".into())
+    );
     index
         .set_release("aethrix.macro", "wasm-aethrix.macro-v0.1.0")
         .unwrap();
@@ -2436,6 +2455,24 @@ fn a_malformed_index_is_ignored_with_a_warning() {
     assert_eq!(tag_of(&candidates.stable), "wasm-edwards.hello-v0.3.0");
     let warning = candidates.index_warning.unwrap();
     assert!(warning.contains("plugin index is invalid"), "{warning}");
+    // So is one that is not UTF-8.
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(
+        &index_uri(),
+        b"{ \"schemaVersion\": 1, \"plugins\": [ { \"id\": \"edwards.hello\", \
+          \"stable\": \"wasm-edwards.hello-v0.\xFF\" } ] }",
+    );
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&candidates.stable), "wasm-edwards.hello-v0.3.0");
+    let warning = candidates.index_warning.unwrap();
+    assert!(warning.contains("it is not UTF-8"), "{warning}");
     // A good index gives no warning.
     let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
     server.add(&index_uri(), SUITE_INDEX.as_bytes());

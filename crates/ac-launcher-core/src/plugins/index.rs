@@ -38,6 +38,15 @@ pub struct PluginIndexEntry {
     pub beta: Option<String>,
 }
 
+/// What [`PluginIndex::set_release`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexReleaseUpdate {
+    /// The entry now names the tag.
+    Set,
+    /// The entry already names this release of a higher version, kept.
+    KeptNewer(String),
+}
+
 /// A repository's plugin index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginIndex {
@@ -169,6 +178,15 @@ impl PluginIndex {
         })
     }
 
+    /// Reads an index file's bytes as [`Self::parse`] does, after a UTF-8
+    /// byte order mark if there is one; bytes that are not UTF-8 are
+    /// refused.
+    pub fn parse_bytes(bytes: &[u8]) -> Result<Self, UpdateError> {
+        let text = std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))
+            .map_err(|_| invalid("it is not UTF-8"))?;
+        Self::parse(text)
+    }
+
     /// Plugin `id`'s entry (ignoring case).
     pub fn entry(&self, id: &str) -> Option<&PluginIndexEntry> {
         self.plugins
@@ -190,8 +208,10 @@ impl PluginIndex {
 
     /// Names `tag` as plugin `id`'s latest stable release, or its latest
     /// beta when `tag` is a pre-release, keeping the other; an id not yet
-    /// listed is added at the end.
-    pub fn set_release(&mut self, id: &str, tag: &str) -> Result<(), UpdateError> {
+    /// listed is added at the end. A release of a higher version already
+    /// named there is kept (a hotfix of an older line never moves the index
+    /// back), and the result says so.
+    pub fn set_release(&mut self, id: &str, tag: &str) -> Result<IndexReleaseUpdate, UpdateError> {
         if !is_well_formed_id(id) {
             return Err(invalid(format!("'{id}' is not a plugin id")));
         }
@@ -213,12 +233,20 @@ impl PluginIndex {
             }
         };
         let entry = &mut self.plugins[index];
-        if release.version.is_pre_release() {
-            entry.beta = Some(tag.to_owned());
+        let listed_id = entry.id.clone();
+        let named = if release.version.is_pre_release() {
+            &mut entry.beta
         } else {
-            entry.stable = Some(tag.to_owned());
+            &mut entry.stable
+        };
+        if let Some(current) = named.as_deref()
+            && plugin_release(current, &listed_id)
+                .is_some_and(|current| current.version > release.version)
+        {
+            return Ok(IndexReleaseUpdate::KeptNewer(current.to_owned()));
         }
-        Ok(())
+        *named = Some(tag.to_owned());
+        Ok(IndexReleaseUpdate::Set)
     }
 
     /// The index as the file to publish, indented by two spaces.

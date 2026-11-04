@@ -108,7 +108,16 @@ fn run_pack(arguments: &[String], output: &mut dyn Write, error: &mut dyn Write)
                 "Publish them as the release tagged {} (not marked latest).",
                 packed.tag
             );
-            if let Some(index) = index {
+            if let (Some(index), Some(newer)) = (index, &packed.index_kept_newer) {
+                let _ = writeln!(
+                    output,
+                    "{} still names {newer}, a higher version, as {}'s latest release; it was \
+                     left as it was, and the copy on the {PLUGIN_INDEX_TAG} release needs no \
+                     upload.",
+                    index.display(),
+                    packed.id
+                );
+            } else if let Some(index) = index {
                 let _ = writeln!(
                     output,
                     "Then upload {} as {PLUGIN_INDEX_ASSET} to the release tagged \

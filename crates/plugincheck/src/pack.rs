@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use ac_launcher_core::fsutil;
 use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::plugins::{
-    ICON_FILE_NAME, InstallRules, PluginIndex, PluginManifest, plugin_release_tag, release_tag,
+    ICON_FILE_NAME, IndexReleaseUpdate, InstallRules, PluginIndex, PluginManifest,
+    plugin_release_tag, release_tag,
 };
 
 /// What `pack` wrote.
@@ -22,6 +23,9 @@ pub struct PackedRelease {
     pub zip: PathBuf,
     /// Every asset written, the zip included.
     pub files: Vec<PathBuf>,
+    /// When packed into an index that already names a higher version on the
+    /// same channel: that release's tag, kept (the index was not written).
+    pub index_kept_newer: Option<String>,
 }
 
 /// Why nothing was packed.
@@ -111,21 +115,26 @@ pub fn pack_into_index(
     index_file: &Path,
 ) -> Result<PackedRelease, PackError> {
     let mut index = match std::fs::read(index_file) {
-        Ok(bytes) => PluginIndex::parse(&String::from_utf8_lossy(
-            bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes),
-        ))
-        .map_err(|error| PackError::Refused(format!("{}: {error}", index_file.display())))?,
+        Ok(bytes) => PluginIndex::parse_bytes(&bytes)
+            .map_err(|error| PackError::Refused(format!("{}: {error}", index_file.display())))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => PluginIndex::new(),
         Err(error) => return Err(io(index_file, &error)),
     };
-    let packed = pack_as(folder, out, true)?;
-    index
+    let mut packed = pack_as(folder, out, true)?;
+    match index
         .set_release(&packed.id, &packed.tag)
-        .map_err(|error| PackError::Refused(error.to_string()))?;
-    // Through a temporary file and a rename: a write that fails leaves the
-    // previous index whole.
-    fsutil::write_via_tmp(index_file, index.to_json().as_bytes(), false)
-        .map_err(|e| io(index_file, &e))?;
+        .map_err(|error| PackError::Refused(error.to_string()))?
+    {
+        // A hotfix of an older line: the index keeps naming the newer one
+        // and is left as it was.
+        IndexReleaseUpdate::KeptNewer(tag) => packed.index_kept_newer = Some(tag),
+        // Through a temporary file and a rename: a write that fails leaves
+        // the previous index whole.
+        IndexReleaseUpdate::Set => {
+            fsutil::write_via_tmp(index_file, index.to_json().as_bytes(), false)
+                .map_err(|e| io(index_file, &e))?;
+        }
+    }
     Ok(packed)
 }
 
@@ -178,5 +187,6 @@ fn pack_as(folder: &Path, out: &Path, by_id: bool) -> Result<PackedRelease, Pack
         version: manifest.version,
         zip,
         files: written,
+        index_kept_newer: None,
     })
 }

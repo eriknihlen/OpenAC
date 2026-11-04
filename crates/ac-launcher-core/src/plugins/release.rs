@@ -814,16 +814,10 @@ impl PluginReleaseResolver {
                 )));
             }
         };
-        let content = document
-            .content
-            .strip_prefix(b"\xEF\xBB\xBF")
-            .unwrap_or(&document.content);
-        Ok(
-            match PluginIndex::parse(&String::from_utf8_lossy(content)) {
-                Ok(index) => IndexRead::Read(index),
-                Err(error) => IndexRead::Malformed(error.to_string()),
-            },
-        )
+        Ok(match PluginIndex::parse_bytes(&document.content) {
+            Ok(index) => IndexRead::Read(index),
+            Err(error) => IndexRead::Malformed(error.to_string()),
+        })
     }
 
     /// The highest stable release (or pre-release) of `releases` whose

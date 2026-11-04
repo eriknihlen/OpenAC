@@ -495,7 +495,8 @@ plugincheck pack <plugin folder> <out dir> --index plugins-index.json
   never offered in its place.
 - **The index**: `pack --index <file>` sets this plugin's entry in the local
   file (starting it if it does not exist) and keeps every other plugin's.
-  Upload it as `plugins-index.json` to a release tagged `wasm-index`, not
+  It never moves an entry back: packing a hotfix of an older line (1.1.1
+  after 1.2.0) leaves the index naming 1.2.0, and says so. Upload it as `plugins-index.json` to a release tagged `wasm-index`, not
   marked latest, replacing the copy there, every time you publish a plugin:
 
   ```json
