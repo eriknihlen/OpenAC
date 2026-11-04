@@ -907,6 +907,16 @@ fn a_plugin_built_for_api_1_6_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
+/// API 1.8 added the status board's change notices (an event and two
+/// imports, each marked `since`): `probe` as an API 1.7 SDK built it still
+/// loads.
+#[test]
+fn a_plugin_built_for_api_1_7_still_loads() {
+    let v1_7 = ApiVersion::new(1, 7);
+    let (loaded, error) = load_probe_built_for("probe-1-7", "1.7", &section_at(v1_7));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
 /// An object change reaches a plugin exactly as its API version encodes
 /// it, through a real module: `rawbytes` built for API 1.5 or 1.6 is
 /// handed the world object without the server's last position (byte for
@@ -3409,39 +3419,52 @@ fn a_service_that_fails_as_another_plugin_stops_is_reported() {
     assert!(plugins.loaded_ids().is_empty());
 }
 
-/// A module that says it was built for API 1.6 but imports a function
-/// API 1.7 added is refused at load, even with a layout section that
-/// matches: the plugin would never hear the 1.7 events that go with it.
+/// A module that says it was built for an older API version but imports a
+/// function a later one added is refused at load, even with a layout
+/// section that matches: the plugin would never hear the events that go
+/// with it. `suite` imports plugin services (API 1.7) and the status
+/// board's subscriptions (API 1.8).
 #[test]
 fn an_import_newer_than_the_plugins_api_version_is_refused() {
-    let root = Root::new("service-forged-1-6");
+    let error = forged_suite_error("service-forged-1-6", ApiVersion::new(1, 6));
+    assert!(
+        error.contains("(the plugin was built for API 1.6)"),
+        "{error}"
+    );
+    let error = forged_suite_error("status-forged-1-7", ApiVersion::new(1, 7));
+    assert!(
+        error.contains("which API 1.8 added (the plugin was built for API 1.7)"),
+        "{error}"
+    );
+}
+
+/// Why `suite` failed to load claiming API `version`, with that version's
+/// core and every import this client has at its `version` shape.
+fn forged_suite_error(tag: &str, version: ApiVersion) -> String {
+    let root = Root::new(tag);
     let folder = install(&root.0, "suite");
-    let v1_6 = ApiVersion::new(1, 6);
     edit_manifest(
         &folder,
         &format!(r#""apiVersion": "{API_CURRENT}""#),
-        r#""apiVersion": "1.6""#,
+        &format!(r#""apiVersion": "{version}""#),
     );
-    // The 1.6 core, and every import this client has at its 1.6 shape.
-    let mut forged = core_shape(v1_6).to_le_bytes().to_vec();
+    let mut forged = core_shape(version).to_le_bytes().to_vec();
     for import in Import::ALL {
         forged.extend_from_slice(&import_key(import.name()).to_le_bytes());
-        forged.extend_from_slice(&import.shape_at(v1_6).to_le_bytes());
+        forged.extend_from_slice(&import.shape_at(version).to_le_bytes());
     }
     let wasm = folder.join("suite.wasm");
     let built = std::fs::read(&wasm).unwrap();
-    let built = with_custom_section(&built, "openac.api", Some(b"1.6"));
+    let api_bytes = version.to_string();
+    let built = with_custom_section(&built, "openac.api", Some(api_bytes.as_bytes()));
     let built = with_custom_section(&built, LAYOUT_SECTION, Some(&forged));
     std::fs::write(&wasm, built).unwrap();
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     let error = failed(&plugins.take_reports(), "openac.suite").unwrap();
-    assert!(
-        error.contains("which API 1.7 added (the plugin was built for API 1.6)"),
-        "{error}"
-    );
     assert!(plugins.loaded_ids().is_empty());
+    error
 }
 
 /// A service that never answers is stopped at its plugin's own deadline,
