@@ -46,6 +46,10 @@
 //! - `offerer` offers the service `boom`.
 //! - `starter` calls `openac.offerer/boom` with `panic` twice, logging
 //!   `starter start: <first> <second>`.
+//!
+//! As it stops, by its verb:
+//! - `stopper` calls `openac.offerer/boom` with `panic`, logging `stopper
+//!   stop: <result>`.
 
 use openac_plugin::items::{LootAction, LootClassification, LootContext};
 use openac_plugin::services::MAX_PAYLOAD;
@@ -82,6 +86,13 @@ impl Plugin for Suite {
             _ => {}
         }
         Ok(())
+    }
+
+    fn disable(&mut self, host: &mut Host<'_>) {
+        if self.verb == "stopper" {
+            let result = call_service(host, "openac.offerer/boom", b"panic".to_vec());
+            host.info(&format!("stopper stop: {result}"));
+        }
     }
 
     fn on_event(&mut self, host: &mut Host<'_>, event: Event) {

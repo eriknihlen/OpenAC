@@ -3374,6 +3374,41 @@ fn a_service_that_fails_as_another_plugin_starts_goes_before_the_next_starts() {
     );
 }
 
+/// A plugin that fails answering while another stops (the session shuts
+/// down, and the last plugin's disable calls the first one's service) is
+/// reported and logged with what stopped it, as at any other time, rather
+/// than dropped silently.
+#[test]
+fn a_service_that_fails_as_another_plugin_stops_is_reported() {
+    let (_root, mut plugins, mut api) =
+        suite_session("service-fault-at-stop", engine(), &["offerer", "stopper"]);
+    assert_eq!(plugins.loaded_ids(), ["openac.offerer", "openac.stopper"]);
+    plugins.take_reports();
+    plugins.shutdown(&mut api);
+    assert_eq!(
+        api.messages("openac.stopper").last().map(String::as_str),
+        Some("stopper stop: Err(Faulted)")
+    );
+    let reports = plugins.take_reports();
+    let fault = failed(&reports, "openac.offerer").unwrap();
+    assert!(
+        fault.starts_with("plugin 'openac.offerer' stopped: panicked: ")
+            && fault.contains("suite's service panicked"),
+        "{fault}"
+    );
+    assert_eq!(failed(&reports, "openac.stopper"), None);
+    assert!(
+        api.logs
+            .iter()
+            .any(|(id, level, line)| id == "openac.offerer"
+                && *level == LogLevel::Error
+                && *line == fault),
+        "{:?}",
+        api.logs
+    );
+    assert!(plugins.loaded_ids().is_empty());
+}
+
 /// A module that says it was built for API 1.6 but imports a function
 /// API 1.7 added is refused at load, even with a layout section that
 /// matches: the plugin would never hear the 1.7 events that go with it.

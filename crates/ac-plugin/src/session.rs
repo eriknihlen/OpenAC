@@ -845,8 +845,19 @@ impl PluginSession {
     /// logged, and its registrations are released regardless.
     fn disable_at(&mut self, index: usize, api: &mut dyn SessionApi) {
         let id = self.plugins[index].manifest.id.clone();
-        // One that failed answering is not called to stop: it is gone.
-        if self.services.has_faulted(&id) {
+        // One that failed answering (another plugin asked it something as
+        // it stopped, say) is not called to stop: it is gone, reported
+        // with what stopped it.
+        if let Some(at) = self
+            .services
+            .faulted
+            .iter()
+            .position(|(faulted, _)| same_id(faulted, &id))
+        {
+            let (_, reason) = self.services.faulted.remove(at);
+            let error = format!("plugin '{id}' stopped: {reason}");
+            api.log(&id, LogLevel::Error, &error);
+            self.record_failure(&id, error);
             self.remove(index, api);
             return;
         }
