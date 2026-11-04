@@ -36,6 +36,16 @@
 //! - It logs every service that comes or goes, `<verb> heard service <id>
 //!   <owner> <available>`.
 //!
+//! Status board:
+//! - `/<verb> publish <key> <value>` publishes the value (`-` withdraws
+//!   it), and `/<verb> publish-many <key> <n>` publishes `1` to `<n>` in
+//!   turn under the key.
+//! - `/<verb> subscribe <id>` and `/<verb> unsubscribe <id>` log `<verb>
+//!   subscribe <id>: <result>` (and `unsubscribe`).
+//! - It logs every change it hears, `<verb> heard status <owner> <key>
+//!   <value>` (`-` for none), and answers a change of the key `ping` to a
+//!   number by publishing the next number under its own `ping`.
+//!
 //! Callbacks the client asks (they need the `chat` permission):
 //! - `/<verb> filter <scoped id>` installs a chat filter, and `/<verb>
 //!   intercept <scoped id>` an input interceptor, that call that service
@@ -105,6 +115,19 @@ impl Plugin for Suite {
                 ));
                 return;
             }
+            Event::StatusChanged(change) => {
+                let value = change.value.as_deref().unwrap_or("-");
+                host.info(&format!(
+                    "{} heard status {} {} {value}",
+                    self.verb, change.owner, change.key
+                ));
+                if change.key == "ping"
+                    && let Ok(n) = value.parse::<u32>()
+                {
+                    host.status_publish("ping", Some(&(n + 1).to_string()));
+                }
+                return;
+            }
             _ => return,
         };
         let words: Vec<&str> = call.arguments.split_whitespace().collect();
@@ -151,6 +174,23 @@ impl Plugin for Suite {
                     .map_or(0, |(_, h)| *h);
                 let withdrawn = host.unregister_service(handle);
                 host.info(&format!("{verb} withdraw {name}: {withdrawn}"));
+            }
+            ["publish", key, value] => {
+                let value = (*value != "-").then_some(*value);
+                host.status_publish(key, value);
+            }
+            ["publish-many", key, n] => {
+                for value in 1..=n.parse::<u32>().unwrap_or(0) {
+                    host.status_publish(key, Some(&value.to_string()));
+                }
+            }
+            ["subscribe", id] => {
+                let result = host.status_subscribe(id);
+                host.info(&format!("{verb} subscribe {id}: {result}"));
+            }
+            ["unsubscribe", id] => {
+                let result = host.status_unsubscribe(id);
+                host.info(&format!("{verb} unsubscribe {id}: {result}"));
             }
             ["list"] => {
                 let ids: Vec<String> = host

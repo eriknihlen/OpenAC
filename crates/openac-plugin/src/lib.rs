@@ -61,7 +61,7 @@ pub use ac_plugin_abi::{
     API_CURRENT, ApiVersion, Call, CharacterInfo, ChatLine, ChatLinkClicked, ChatPost, CommandCall,
     CommandCompletion, CommandDef, Event, Import, LogLevel, StartInfo, TICK_SECONDS, calls,
     character, combat, host as client, items, keys, magic, navigation, net, peers, projectile,
-    services, social, storage, trade, world,
+    services, social, status, storage, trade, world,
 };
 pub use game::KnownSpellCache;
 pub use game_navigation::WalkPause;

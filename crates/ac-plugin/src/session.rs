@@ -1114,6 +1114,7 @@ impl PluginSession {
     /// Hands out the queued events, then the ticks due after
     /// `delta_seconds` more of session time in run `generation`.
     pub fn pump(&mut self, delta_seconds: f64, generation: Option<u64>, api: &mut dyn SessionApi) {
+        self.queue_status_changes();
         self.deliver_ui(api);
         self.deliver_net(api);
         self.deliver(api);
@@ -1195,6 +1196,16 @@ impl PluginSession {
     fn queue_service_changes(&mut self) {
         for change in self.services.plugin_services.take_changes() {
             self.events.push_back(Event::ServiceChanged(change));
+        }
+    }
+
+    /// The status board's changes since the last pass reach their
+    /// subscribers with this pass's events: one per key, with its value
+    /// now. Taken once a pass, so a subscriber publishing as it hears one
+    /// is heard on the next pass, never within this one.
+    fn queue_status_changes(&mut self) {
+        for (subscriber, change) in self.services.status.take_changes() {
+            self.queue_event_for(&subscriber, Event::StatusChanged(change));
         }
     }
 

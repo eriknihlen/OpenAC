@@ -226,6 +226,8 @@ peers_import_command -
 status_publish -
 status_read -
 status_capture -
+status_subscribe -
+status_unsubscribe -
 service_register -
 service_unregister -
 services -

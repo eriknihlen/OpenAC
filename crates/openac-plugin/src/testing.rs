@@ -674,7 +674,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.7".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.8".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));

@@ -145,4 +145,22 @@ impl Host<'_> {
     pub fn status_capture(&mut self, plugin_id: &str) -> Vec<(String, String)> {
         self.call::<calls::StatusCapture>(&plugin_id.to_owned())
     }
+
+    /// Hear [`Event::StatusChanged`](crate::Event::StatusChanged) when a
+    /// value plugin `plugin_id` publishes changes: at most one per key per
+    /// pass, with its value at the pass's end (API 1.8). The plugin need not
+    /// be loaded yet. Subscribing tells nothing of the values already
+    /// there: read them with [`Self::status_capture`]. False for a blank
+    /// id, this plugin's own, or past
+    /// [`MAX_SUBSCRIPTIONS`](crate::status::MAX_SUBSCRIPTIONS)
+    /// plugins.
+    pub fn status_subscribe(&mut self, plugin_id: &str) -> bool {
+        self.call::<calls::StatusSubscribe>(&plugin_id.to_owned())
+    }
+
+    /// Stop hearing plugin `plugin_id`'s changes; false when not subscribed
+    /// to it. Subscriptions also end when this plugin stops.
+    pub fn status_unsubscribe(&mut self, plugin_id: &str) -> bool {
+        self.call::<calls::StatusUnsubscribe>(&plugin_id.to_owned())
+    }
 }

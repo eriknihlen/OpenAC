@@ -286,6 +286,11 @@ wire_union! {
         /// withdrawn, or gone with its plugin. A plugin just enabled first
         /// hears one for every service already offered (API 1.7).
         27 => ServiceChanged(crate::services::ServiceChange) since (1, 7),
+        /// One of the values of a plugin this one subscribed to on the
+        /// status board changed ([`crate::status`]): at most one per key
+        /// per pass of the plugins, with the value at its end (only to the
+        /// subscribers; API 1.8).
+        28 => StatusChanged(crate::status::StatusChange) since (1, 8),
         /// One of the plugin's panels or canvases was used ([`crate::ui`];
         /// the tag is `crate::ui::EVENT_TAG`).
         100 => Ui(crate::ui::UiEvent),

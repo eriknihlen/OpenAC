@@ -11,7 +11,7 @@ pub const API_SECTION_LEN: usize = 3;
 
 /// The API version custom section's bytes: [`ac_plugin_abi::API_CURRENT`]
 /// as `MAJOR.MINOR`.
-pub const API_SECTION_BYTES: [u8; API_SECTION_LEN] = *b"1.7";
+pub const API_SECTION_BYTES: [u8; API_SECTION_LEN] = *b"1.8";
 
 /// The length of the layout fingerprint custom section.
 pub const LAYOUT_SECTION_LEN: usize = ac_plugin_abi::layout::LAYOUT_SECTION_LEN;

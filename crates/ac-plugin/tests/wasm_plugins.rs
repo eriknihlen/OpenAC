@@ -446,7 +446,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.7 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.8 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +655,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.8""#);
+    edit_manifest(&folder, r#""apiVersion": "1.8""#, r#""apiVersion": "1.9""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.8, but this build supports 1.0..1.7"
+        "plugin 'openac.probe' declares apiVersion 1.9, but this build supports 1.0..1.8"
     );
 }
 
@@ -710,7 +710,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.8""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +824,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.7""#,
+        r#""apiVersion": "1.8""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -1405,7 +1405,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.7 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.8 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2670,7 +2670,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.7""#,
+            r#""apiVersion": "1.8""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),
@@ -3668,4 +3668,123 @@ fn a_damaged_cache_file_is_ignored_and_rebuilt() {
     let truncated = PluginEngine::with_module_cache(cache);
     truncated.module(&hello).unwrap();
     assert_eq!(truncated.module_cache_hits(), 0);
+}
+
+// --- The status board's change notices (API 1.8) ---
+
+/// What plugin `id` heard of the status board, in order.
+fn heard_status(api: &FakeSession, id: &str) -> Vec<String> {
+    api.messages(id)
+        .iter()
+        .filter(|m| m.contains(" heard status "))
+        .cloned()
+        .collect()
+}
+
+/// A subscriber hears another plugin's changes on the next pass, one per
+/// key with its last value however often it was published; nothing for a
+/// value set back as it was, nor once it unsubscribed. A plugin cannot
+/// subscribe to itself.
+#[test]
+fn a_subscriber_hears_each_changed_key_once_a_pass() {
+    let (_root, mut plugins, mut api) = suite_pair("status-subscribe", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    assert_eq!(
+        order(p, a, "asker", "subscribe OPENAC.SUITE"),
+        "asker subscribe OPENAC.SUITE: true"
+    );
+    assert_eq!(
+        order(p, a, "suite", "subscribe openac.suite"),
+        "suite subscribe openac.suite: false"
+    );
+    order(p, a, "suite", "publish-many count 50");
+    order(p, a, "suite", "publish mode hunting");
+    assert!(
+        heard_status(a, "openac.asker").is_empty(),
+        "not before the pass"
+    );
+    p.pump(0.0, None, a);
+    assert_eq!(
+        heard_status(a, "openac.asker"),
+        [
+            "asker heard status openac.suite count 50",
+            "asker heard status openac.suite mode hunting",
+        ]
+    );
+    order(p, a, "suite", "publish mode resting");
+    order(p, a, "suite", "publish mode hunting");
+    p.pump(0.0, None, a);
+    assert_eq!(
+        heard_status(a, "openac.asker").len(),
+        2,
+        "set back as it was"
+    );
+    order(p, a, "suite", "publish mode -");
+    p.pump(0.0, None, a);
+    assert_eq!(
+        heard_status(a, "openac.asker").last().unwrap(),
+        "asker heard status openac.suite mode -"
+    );
+    assert_eq!(
+        order(p, a, "asker", "unsubscribe openac.suite"),
+        "asker unsubscribe openac.suite: true"
+    );
+    order(p, a, "suite", "publish mode hunting");
+    p.pump(0.0, None, a);
+    assert_eq!(heard_status(a, "openac.asker").len(), 3);
+    assert!(heard_status(a, "openac.suite").is_empty());
+}
+
+/// A publisher that stops takes its values with it, and its subscribers
+/// hear each withdrawn; the subscription outlasts it, so the publisher
+/// started again is heard again.
+#[test]
+fn a_stopped_publishers_values_are_heard_withdrawn() {
+    let (_root, mut plugins, mut api) = suite_pair("status-withdrawn", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "asker", "subscribe openac.suite");
+    order(p, a, "suite", "publish mode hunting");
+    p.pump(0.0, None, a);
+    p.request_reload("openac.suite");
+    p.pump(0.0, None, a);
+    p.pump(0.0, None, a);
+    assert_eq!(
+        heard_status(a, "openac.asker"),
+        [
+            "asker heard status openac.suite mode hunting",
+            "asker heard status openac.suite mode -",
+        ]
+    );
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+    order(p, a, "suite", "publish mode resting");
+    p.pump(0.0, None, a);
+    assert_eq!(
+        heard_status(a, "openac.asker").last().unwrap(),
+        "asker heard status openac.suite mode resting"
+    );
+}
+
+/// Two plugins that answer each other's changes by publishing: a change
+/// goes one step a pass, so they cannot loop within one.
+#[test]
+fn plugins_answering_each_others_changes_go_one_step_a_pass() {
+    let (_root, mut plugins, mut api) = suite_pair("status-ping", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "asker", "subscribe openac.suite");
+    order(p, a, "suite", "subscribe openac.asker");
+    order(p, a, "suite", "publish ping 0");
+    for _ in 0..3 {
+        p.pump(0.0, None, a);
+    }
+    assert_eq!(
+        heard_status(a, "openac.asker"),
+        [
+            "asker heard status openac.suite ping 0",
+            "asker heard status openac.suite ping 2",
+        ]
+    );
+    assert_eq!(
+        heard_status(a, "openac.suite"),
+        ["suite heard status openac.asker ping 1"]
+    );
 }
