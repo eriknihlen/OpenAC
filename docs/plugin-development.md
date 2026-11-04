@@ -100,17 +100,28 @@ canvas pointer event, `PointerEvent::HOVER` (the pointer over a listening
 canvas with no button held, at most one per delivery at the latest place) and
 `PointerEvent::LEAVE` (one when the hovering ends: the pointer moved off, a
 press began elsewhere, or the canvas hid or went), for tooltips; a plugin built
-for an older version hears neither. API 1.7 added plugin services, through which plugins built to work together
-call each other ([Plugin services](#plugin-services)), with
-`Event::ServiceChanged` and `Callback::ServiceRequest`, which a plugin built
-for an older version never gets. It also added `server_position` at the end
-of `WorldObject` and `CombatTarget`: the last position the server sent for
-the object, beside `position` (and, for a target, `distance`), which give
-where the client has it now, a creature's simulated body. The two can stand
-apart while the body catches up to the server's place. Everything the client
-offers goes through `Host`: game state, items, chat, movement and navigation, trade
-and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
---open` shows the whole surface with its documentation.
+for an older version hears neither. API 1.7 added plugin services, through
+which plugins built to work together call each other
+([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
+`Callback::ServiceRequest`, which a plugin built for an older version never
+gets. It also added `server_position` at the end of `WorldObject` and
+`CombatTarget`: the last position the server sent for the object, beside
+`position` (and, for a target, `distance`), which give where the client has
+it now, a creature's simulated body. The two can stand apart while the body
+catches up to the server's place. Everything the client offers goes through
+`Host`: game state, items, chat, movement and navigation, trade and vendors,
+storage, network, peers, and UI. `cargo doc -p openac-plugin --open` shows
+the whole surface with its documentation.
+
+Three changes came with API 1.7 that a plugin built for an older version
+may notice. A chat filter and an input interceptor now run with no other
+plugin to ask, as every other callback does: a loot classifier or a
+command's completions asked from one gets no answer (`None`), and a service
+call is refused (`Nested`). `Callback` is non-exhaustive, as `Event` is, so
+a plugin that matched every callback kind without a catch-all arm needs one
+to build against this SDK. And a module that imports a client function
+newer than the `apiVersion` it declares is refused at load: it would never
+hear the events that go with it.
 
 **Controls show what the plugin stores.** A checkbox, colour swatch or other bound
 control does not change itself. A click sends the value it asks for to the
@@ -378,6 +389,16 @@ tick, event or command of the caller may wait on other plugins (services,
 loot classifiers, command completions) for at most one call deadline in
 all; past it, a service call answers `OutOfTime`, and a classifier or a
 completion is not asked (no answer), until the caller's next call.
+
+The caller's id in a `ServiceRequest` is set by the client, never by the
+caller, but it names a plugin id, not who made the plugin: any plugin
+installed under that id carries it. The service decides whom to trust with
+what. Permissions do not carry across a call: the answering plugin's own
+calls into the client are checked against its own `plugin.json`, and the
+caller's are not lent to it, so a service with the network permission uses
+it on its own say, whoever asked, and what it does for a caller is its own
+choice. Services are per session: a
+plugin running for another character in the same client sees none of them.
 
 For state that changes over time and that any plugin may read, such as
 what a plugin is doing now, the status board (`status_publish`,
