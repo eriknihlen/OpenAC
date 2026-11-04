@@ -30,6 +30,7 @@ pub mod peers;
 pub mod projectile;
 pub mod services;
 pub mod social;
+pub mod status;
 pub mod storage;
 mod table;
 pub mod trade;

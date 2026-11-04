@@ -33,7 +33,7 @@
 //! assert_eq!(host.posted[0].text, "hi Horan");
 //! ```
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ac_plugin_abi::callback::{Callback, CallbackAnswer};
 use ac_plugin_abi::host::Clock;
@@ -92,6 +92,10 @@ pub struct FakeHost {
     /// case: what they are, and what they answer.
     other_services: BTreeMap<String, (ServiceInfo, Result<Vec<u8>, ServiceError>)>,
     next_service: u32,
+    /// The plugins whose status board changes the plugin subscribed to, by
+    /// id in lower case. It hears none by itself: deliver
+    /// [`Event::StatusChanged`](crate::Event::StatusChanged) to test them.
+    pub status_subscriptions: BTreeSet<String>,
     /// Whether the plugin is answering a callback ([`Self::ask`]): it cannot
     /// call a service then, as in the client.
     answering: bool,
@@ -186,6 +190,22 @@ impl FakeHost {
             description: String::new(),
         };
         self.other_services.insert(id.to_lowercase(), (info, reply));
+    }
+
+    /// Subscribes to plugin `owner`'s changes as the client does: false for
+    /// a blank id, the plugin's own, or past the limit.
+    fn status_subscribe(&mut self, owner: &str) -> bool {
+        let owner = owner.trim().to_lowercase();
+        if owner.is_empty() || owner == self.plugin_id.to_lowercase() {
+            return false;
+        }
+        if !self.status_subscriptions.contains(&owner)
+            && self.status_subscriptions.len() >= ac_plugin_abi::status::MAX_SUBSCRIPTIONS
+        {
+            return false;
+        }
+        self.status_subscriptions.insert(owner);
+        true
     }
 
     /// Plugin `caller` calls the plugin's service `name` with `request`, as
@@ -575,6 +595,15 @@ impl Transport for FakeHost {
                 reply(&self.services.remove(&handle).is_some())
             }
             Import::Services => reply(&self.service_list()),
+            Import::StatusSubscribe => {
+                let owner: String = request(import, bytes);
+                reply(&self.status_subscribe(&owner))
+            }
+            Import::StatusUnsubscribe => {
+                let owner: String = request(import, bytes);
+                let owner = owner.trim().to_lowercase();
+                reply(&self.status_subscriptions.remove(&owner))
+            }
             Import::ServiceCall => {
                 let call: ServiceCall = request(import, bytes);
                 reply(&self.call_service(&call))
@@ -637,6 +666,32 @@ mod tests {
 
     use super::*;
 
+    // Subscribing answers as the client does: ids ignore case, not its
+    // own, not blank, at most the limit; unsubscribing says whether it was.
+    #[test]
+    fn status_subscriptions_answer_as_the_client_does() {
+        let mut fake = FakeHost::new("test.Me");
+        fake.with_host(|host| {
+            assert!(host.status_subscribe("Openac.Vision"));
+            assert!(host.status_subscribe("openac.vision"));
+            assert!(!host.status_subscribe("TEST.ME"));
+            assert!(!host.status_subscribe("  "));
+        });
+        assert_eq!(
+            fake.status_subscriptions.iter().collect::<Vec<_>>(),
+            ["openac.vision"]
+        );
+        fake.with_host(|host| {
+            for n in 1..ac_plugin_abi::status::MAX_SUBSCRIPTIONS {
+                assert!(host.status_subscribe(&format!("p{n}")));
+            }
+            assert!(!host.status_subscribe("one.more"));
+            assert!(host.status_unsubscribe("OPENAC.VISION"));
+            assert!(!host.status_unsubscribe("openac.vision"));
+            assert!(host.status_subscribe("one.more"));
+        });
+    }
+
     #[derive(Default)]
     struct Recorder {
         ticks: u32,
@@ -674,7 +729,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.7".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.8".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));

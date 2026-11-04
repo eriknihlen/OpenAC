@@ -75,7 +75,9 @@ openac_plugin::export_plugin!(Hello);
 The client constructs the plugin with `Default`, calls `enable` (register
 verbs and read settings there; an error refuses the load), then `tick` every
 15 ms of client time and `on_event` for everything that happens, until
-`disable`. It never calls a plugin re-entrantly. Match events with a
+`disable`. It never calls a plugin re-entrantly. A released API version
+never changes: a new function, event kind or record field comes with the
+next minor version, so a plugin built for one keeps loading as it was. Match events with a
 catch-all arm: a new API minor version adds event kinds, and the client sends
 a plugin only the kinds of the API version it was built for (API 1.1 added
 `Event::StatusTextReceived`, the text of each notice on the status line, such
@@ -111,7 +113,11 @@ it now, a creature's simulated body. The two can stand apart while the body
 catches up to the server's place; for the character it can lag where the
 player has moved it. A change to it alone raises no object change (an
 object is told moved when its cell changes), so a plugin that follows it
-asks again. Everything the client offers goes through
+asks again. API 1.8 added subscriptions to the status board
+([The status board](#the-status-board)), with `Event::StatusChanged`, which
+a plugin built for an older version never gets.
+
+Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
 storage, network, peers, and UI. `cargo doc -p openac-plugin --open` shows
 the whole surface with its documentation.
@@ -404,8 +410,51 @@ choice. Services are per session: a
 plugin running for another character in the same client sees none of them.
 
 For state that changes over time and that any plugin may read, such as
-what a plugin is doing now, the status board (`status_publish`,
-`status_read`) fits better than a service.
+what a plugin is doing now, the status board fits better than a service.
+
+## The status board
+
+A plugin publishes short text values under keys with
+`host.status_publish(key, Some(value))` (`None` withdraws one), and any
+plugin of the session reads them by the publisher's id:
+`host.status_read(id, key)` for one, `host.status_capture(id)` for all. A
+plugin's values go when it stops.
+
+Rather than read another plugin's values every tick, a plugin can subscribe
+to them (API 1.8): after `host.status_subscribe(id)` it hears
+`Event::StatusChanged` with the publisher, the key and the value now (`None`
+once withdrawn). Changes are gathered over a pass of the plugins and handed
+out on the next, one per key with its last value, so a publisher writing a
+key every tick, or many times in one, costs its subscribers one event a
+pass, and a key set and set back within a pass sends nothing. A plugin that
+publishes in answer to a change is heard on the following pass, so two
+plugins answering each other cannot loop.
+
+A subscription may name a plugin that has not started yet, and outlasts it
+stopping and starting again; when a publisher stops, its subscribers hear
+each of its values withdrawn. A publisher reloaded within one pass is heard
+as the difference: a value it published again unchanged is not told.
+Subscribing tells nothing of the values already there, nor of changes made
+earlier in the same pass, so read them with `status_capture` after
+subscribing. A
+plugin subscribes to at most 64 others (`status::MAX_SUBSCRIPTIONS`), never
+to itself, and `host.status_unsubscribe(id)` ends one; all end when it stops.
+
+```rust
+fn enable(&mut self, host: &mut Host<'_>, _info: &StartInfo) -> Result<(), String> {
+    host.status_subscribe("openac.vision");
+    self.target = host.status_read("openac.vision", "target");
+    Ok(())
+}
+
+fn on_event(&mut self, _host: &mut Host<'_>, event: Event) {
+    if let Event::StatusChanged(change) = event
+        && change.key == "target"
+    {
+        self.target = change.value;
+    }
+}
+```
 
 ## Testing natively
 
@@ -439,7 +488,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.7",
+  "apiVersion": "1.8",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -455,7 +504,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.7"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.8"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

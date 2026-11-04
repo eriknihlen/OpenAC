@@ -906,6 +906,16 @@ macro_rules! import_table {
             /// Everything one plugin published, by key.
             StatusCapture = status_capture(String) -> Vec<(String, String)>,
                 permission: None, window: false, since: (1, 0);
+            /// Hear [`crate::Event::StatusChanged`] when a value of the
+            /// plugin with this id changes ([`crate::status`]); false for a
+            /// blank id, the plugin's own, or past
+            /// [`crate::status::MAX_SUBSCRIPTIONS`] plugins.
+            StatusSubscribe = status_subscribe(String) -> bool,
+                permission: None, window: false, since: (1, 8);
+            /// Stop hearing one plugin's changes; false when not
+            /// subscribed to it.
+            StatusUnsubscribe = status_unsubscribe(String) -> bool,
+                permission: None, window: false, since: (1, 8);
 
             // ── P. Plugin services (`crate::services`) ──────────────────
             /// Offer a service other plugins can call (scoped as

@@ -442,6 +442,14 @@ pub(crate) fn handle_import(
             let owner = String::from_bytes_at(request, version).map_err(bad)?;
             services.status.capture(&owner).to_bytes_at(version)
         }
+        Import::StatusSubscribe => {
+            let owner = String::from_bytes_at(request, version).map_err(bad)?;
+            services.status.subscribe(id, &owner).to_bytes_at(version)
+        }
+        Import::StatusUnsubscribe => {
+            let owner = String::from_bytes_at(request, version).map_err(bad)?;
+            services.status.unsubscribe(id, &owner).to_bytes_at(version)
+        }
         // P. Plugin services.
         Import::ServiceRegister => {
             let registration = ServiceRegistration::from_bytes_at(request, version).map_err(bad)?;

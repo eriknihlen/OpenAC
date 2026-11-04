@@ -204,8 +204,65 @@ mod tests {
     /// which plugins must be rebuilt. API 1.6 (canvas hover and leave)
     /// published the same value as 1.5: it added two values of a pointer
     /// event's kind byte, not a shape. API 1.7 (plugin services, the
-    /// server's last position on the world-object records) changed it.
-    const PUBLISHED: u64 = 0x018f_6e7f_ded2_7246;
+    /// server's last position on the world-object records) changed it, and
+    /// API 1.8 (the status board's change notices) again.
+    const PUBLISHED: u64 = 0xce10_d6e2_b705_0b25;
+
+    /// The fingerprint API 1.7 was published with. A released version's
+    /// layout never changes: what a later version adds is marked `since`.
+    const PUBLISHED_1_7: u64 = 0x018f_6e7f_ded2_7246;
+
+    /// [`LAYOUT_FINGERPRINT`] as an SDK built for API `version` had it: its
+    /// core shape and its imports, each as that version knew it.
+    fn fingerprint_at(version: ApiVersion) -> u64 {
+        let imports = Import::ALL
+            .iter()
+            .filter(|import| import.since().is_at_most(version))
+            .fold(0u64, |sum, import| {
+                sum.wrapping_add(mix(import.shape_at(version)))
+            });
+        Shape::new("openac plugin api layout")
+            .of(core_shape(version))
+            .of(imports)
+            .finish()
+    }
+
+    /// API 1.7 is published: it keeps the fingerprint it was published
+    /// with, whatever later versions add.
+    #[test]
+    fn api_1_7_keeps_its_published_fingerprint() {
+        assert_eq!(fingerprint_at(API_CURRENT), LAYOUT_FINGERPRINT);
+        let v1_7 = fingerprint_at(ApiVersion::new(1, 7));
+        assert_eq!(
+            v1_7, PUBLISHED_1_7,
+            "API 1.7's layout changed (fingerprint {v1_7:016x}, published {PUBLISHED_1_7:016x}): \
+             mark what was added `since` the version that adds it"
+        );
+    }
+
+    /// The core shape every plugin built for API 1.7 carries.
+    const API_1_7_CORE: u64 = 0x22ad_a6ef_92b2_144c;
+
+    /// The imports API 1.8 added for the status board's change notices.
+    const API_1_8_STATUS: [Import; 2] = [Import::StatusSubscribe, Import::StatusUnsubscribe];
+
+    /// API 1.8 added the status board's change notices: an event and two
+    /// imports, each marked `since`. A plugin built for API 1.7 keeps its
+    /// core shape, has neither import, and every other import it has is
+    /// as it was.
+    #[test]
+    fn api_1_7_plugins_keep_their_core_and_import_shapes() {
+        let v1_7 = ApiVersion::new(1, 7);
+        assert_eq!(core_shape(v1_7), API_1_7_CORE);
+        assert_ne!(CORE_SHAPE, API_1_7_CORE);
+        let section = PluginLayout::parse(&section_at(v1_7)).unwrap();
+        for import in Import::ALL {
+            let new = API_1_8_STATUS.contains(import);
+            assert_eq!(import.since() == ApiVersion::new(1, 8), new, "{import:?}");
+            let expected = (!new).then(|| import.shape());
+            assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
+        }
+    }
 
     /// The core shape every plugin built for API 1.5 carries, and API 1.6's.
     const API_1_5_CORE: u64 = 0x8bc5_7806_eb44_8b6f;
