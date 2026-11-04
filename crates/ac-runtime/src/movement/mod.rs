@@ -20,6 +20,7 @@ mod entry;
 pub mod input;
 mod ordinary;
 pub mod outbound;
+pub mod position_log;
 mod projectile;
 mod readiness;
 mod remote;
@@ -321,6 +322,8 @@ pub struct Movement {
     /// The window went away during a modern mouse look: it ends at the
     /// next frame.
     end_modern_mouse_look: bool,
+    /// The position log (off unless `OPENAC_POSITION_LOG=1`).
+    position_log: position_log::PositionLog,
 }
 
 impl Default for Movement {
@@ -459,6 +462,16 @@ fn local_origin(p: &Position) -> Vec3 {
     Vec3::new(p.origin.x, p.origin.y, p.origin.z)
 }
 
+/// An object's name for the position log (empty when none is known).
+fn log_name(world: &World, guid: u32) -> String {
+    world
+        .item(guid)
+        .map(|i| i.name.clone())
+        .filter(|n| !n.is_empty())
+        .or_else(|| world.name(guid).map(str::to_owned))
+        .unwrap_or_default()
+}
+
 /// The heading the character turns to for one first-person rotate step,
 /// compass degrees in [0, 360) (OpenAC
 /// `RetailChaseCamera.FirstPersonTurnTargetHeading`).
@@ -504,7 +517,19 @@ impl Movement {
             approaches: approach::Approaches::default(),
             intent: None,
             end_modern_mouse_look: false,
+            position_log: position_log::PositionLog::default(),
         }
+    }
+
+    /// Turn the position log on (`OPENAC_POSITION_LOG=1`).
+    pub fn enable_position_log(&mut self) {
+        self.position_log.enable();
+    }
+
+    /// The position log's lines since the last call, oldest first (none
+    /// while it is off).
+    pub fn take_position_log_lines(&mut self) -> Vec<String> {
+        self.position_log.take_lines()
     }
 
     /// A portal arrival waits for the attached window: a body placed at the
@@ -1124,6 +1149,17 @@ impl Movement {
             self.begin_portal_space();
         }
         let changes: Vec<WorldChange> = world.changes_since(mark).to_vec();
+        if self.position_log.is_on()
+            && let Inbound::UpdatePosition(update) = message
+            && !changes.iter().any(|c| {
+                matches!(c, WorldChange::Moved { key, .. }
+                    if Self::guid_of(world, *key) == Some(update.guid))
+            })
+        {
+            // The world kept the object where it was: the update's counters
+            // were not newer, or its place was not a valid one.
+            self.log_unapplied_position(world, update, now);
+        }
         // House barriers read the objects the world knows: the table follows
         // objects arriving and leaving and item records changing.
         let restrictions_changed = changes.iter().any(|c| {
@@ -1457,6 +1493,11 @@ impl Movement {
         if self.pending_entry.is_some_and(|p| p.key == key) {
             self.pending_entry = None;
         }
+        if self.position_log.is_on()
+            && let Some(guid) = Self::guid_of(world, key)
+        {
+            self.position_log.forget(guid);
+        }
         let flew = self.projectiles.remove(&key.local_id).is_some()
             | self.ordinaries.remove(&key.local_id).is_some()
             | self.resting.remove(&key.local_id).is_some();
@@ -1579,6 +1620,9 @@ impl Movement {
                 return;
             }
             let data = update.movement.clone();
+            if self.position_log.is_on() {
+                self.log_server_order(world, &content, &data, now);
+            }
             let cell = self.player.as_ref().map_or(0, |p| p.controller.cell_id());
             let residency = &self.residency;
             // The thing named is followed through its simulated body, else
@@ -1927,7 +1971,33 @@ impl Movement {
             has_animations: object.has_animations(),
             physics_state: object.physics().state,
         });
+        // The position log follows server positions for objects near the
+        // character, other than the character and projectiles (its body's
+        // place before the update, when it has one).
+        let logged = match message {
+            Inbound::UpdatePosition(update)
+                if update.guid == guid
+                    && self.position_log.is_on()
+                    && !is_player
+                    && flying.is_none()
+                    && distance <= position_log::NEAR_METRES =>
+            {
+                Some((update, self.body_snapshot(key.local_id)))
+            }
+            _ => None,
+        };
         if !route.accepted() {
+            if let Some((update, before)) = logged {
+                let cell = before.map_or(0, |b| b.0);
+                let handling = position_log::classify(
+                    ac_physics::movement::RemotePositionOutcome::Nothing,
+                    route.disposition,
+                    true,
+                    false,
+                    (cell, cell),
+                );
+                self.log_position_update(world, key.local_id, update, handling, before, now);
+            }
             return;
         }
         if is_player {
@@ -1979,6 +2049,15 @@ impl Movement {
             }
         }
         if !self.remotes.contains_key(&key.local_id) {
+            if let Some((update, _)) = logged {
+                let handling =
+                    position_log::Handling::NoBody(if self.resting.contains_key(&key.local_id) {
+                        "resting where the server put it"
+                    } else {
+                        "entering the world"
+                    });
+                self.log_position_update(world, key.local_id, update, handling, None, now);
+            }
             if self.resting.contains_key(&key.local_id) {
                 // An object the runtime does not move stands where the
                 // server put it.
@@ -1997,6 +2076,10 @@ impl Movement {
             // server's position stands.
             self.remotes.remove(&key.local_id);
             world.clear_live_position(guid);
+            if let Some((update, before)) = logged {
+                let handling = position_log::Handling::NoBody("left the resident landblocks");
+                self.log_position_update(world, key.local_id, update, handling, before, now);
+            }
             return;
         }
         let Some(origin) = self.residency.origin_of(accepted.cell_id) else {
@@ -2005,6 +2088,8 @@ impl Movement {
         let Some(body) = self.remotes.get_mut(&key.local_id) else {
             return;
         };
+        let first_update = body.driver.last_server_pos_time <= 0.0;
+        let advanced = distance < route::MAX_PHYSICS_DISTANCE;
         let outcome = body.apply_position(
             &accepted,
             origin,
@@ -2012,11 +2097,299 @@ impl Movement {
             route.teleport_hook_phase,
             velocity,
             grounded,
-            distance < route::MAX_PHYSICS_DISTANCE,
+            advanced,
             now.as_secs_f64(),
         );
         if outcome == ac_physics::movement::RemotePositionOutcome::PlacementRequired {
             self.place_remote(world, guid, key, &accepted, route.set_position_flags.0, now);
+        }
+        if let Some((update, before)) = logged {
+            let cell_before = before.map_or(0, |b| b.0);
+            let cell_after = self.body_snapshot(key.local_id).map_or(0, |b| b.0);
+            let handling = position_log::classify(
+                outcome,
+                route.disposition,
+                advanced,
+                first_update,
+                (cell_before, cell_after),
+            );
+            self.log_position_update(world, key.local_id, update, handling, before, now);
+        }
+    }
+
+    // ── the position log ───────────────────────────────────────────────
+
+    /// A simulated body's cell and place in the engine's frame.
+    fn body_snapshot(&self, local_id: u32) -> Option<(u32, Vec3)> {
+        self.remotes
+            .get(&local_id)
+            .map(|b| (b.driver.obj.cell_id, b.driver.obj.body.position()))
+    }
+
+    /// A place in the engine's frame as a cell and its landblock offset.
+    fn log_place(&self, cell: u32, at: Vec3) -> Option<position_log::Place> {
+        let origin = self.residency.origin_of(cell)?;
+        Some(position_log::Place {
+            cell,
+            local: (at - origin).to_array(),
+        })
+    }
+
+    /// Where a wire position is in the engine's frame.
+    fn wire_world(&self, p: &Position) -> Option<Vec3> {
+        self.residency
+            .origin_of(p.cell_id)
+            .map(|o| o + local_origin(p))
+    }
+
+    /// Log one server position for an object: `before` is its body's cell
+    /// and place before the update; its place after is read now.
+    fn log_position_update(
+        &mut self,
+        world: &World,
+        local_id: u32,
+        update: &ac_proto::UpdatePosition,
+        handling: position_log::Handling,
+        before: Option<(u32, Vec3)>,
+        now: Duration,
+    ) {
+        let server = self.wire_world(&update.position);
+        let after = self.body_snapshot(local_id);
+        let gap = |body: Option<(u32, Vec3)>| Some(body?.1.distance(server?));
+        let player = self.player.as_ref().map(|p| p.controller.position());
+        let line = position_log::UpdateLine {
+            guid: update.guid,
+            name: log_name(world, update.guid),
+            sequences: [
+                update.instance_sequence,
+                update.position_sequence,
+                update.teleport_sequence,
+                update.force_position_sequence,
+            ],
+            grounded: update.is_grounded(),
+            handling,
+            server: position_log::Place::of(&update.position),
+            body_before: before.and_then(|(cell, at)| self.log_place(cell, at)),
+            body_after: after.and_then(|(cell, at)| self.log_place(cell, at)),
+            gap_before: gap(before),
+            gap_after: gap(after),
+            from_player: match (player, server) {
+                (Some(a), Some(b)) => a.distance(b),
+                _ => f32::INFINITY,
+            },
+        };
+        self.position_log.update(now, &line);
+    }
+
+    /// Log a server position the world did not apply (its counters were
+    /// not newer, or it named no valid place), for an object near the
+    /// character.
+    fn log_unapplied_position(
+        &mut self,
+        world: &World,
+        update: &ac_proto::UpdatePosition,
+        now: Duration,
+    ) {
+        if world.player_guid() == Some(update.guid) {
+            return;
+        }
+        let near = match (
+            self.player.as_ref().map(|p| p.controller.position()),
+            self.wire_world(&update.position),
+        ) {
+            (Some(a), Some(b)) => a.distance(b) <= position_log::NEAR_METRES,
+            _ => false,
+        };
+        if !near {
+            return;
+        }
+        let Some(object) = world.object(update.guid) else {
+            return;
+        };
+        let handling =
+            position_log::Handling::Rejected(if route::valid_position(&update.position) {
+                "sequence"
+            } else {
+                "bad position"
+            });
+        let before = self.body_snapshot(object.key().local_id);
+        self.log_position_update(world, object.key().local_id, update, handling, before, now);
+    }
+
+    /// Log a movement the server ordered for the character: what it steers
+    /// to, chosen as [`server_move::resolve`] chooses it.
+    fn log_server_order(
+        &mut self,
+        world: &World,
+        content: &WorldContent,
+        data: &ac_proto::MovementData,
+        now: Duration,
+    ) {
+        use ac_proto::Movement as Order;
+        use position_log::{Place, Steer};
+        let path_place = |path: &ac_proto::MoveToPath| Place {
+            cell: path.origin_cell_id,
+            local: [path.origin.x, path.origin.y, path.origin.z],
+        };
+        let path_fields = |path: &ac_proto::MoveToPath| {
+            vec![
+                ("distance", path.distance_to_object),
+                ("min", path.min_distance),
+                ("fail", path.fail_distance),
+                ("speed", path.speed),
+                ("walk_run", path.walk_run_threshold),
+                ("run_rate", path.run_rate),
+            ]
+        };
+        let turn_fields = |params: &ac_proto::TurnToParams| {
+            vec![("speed", params.speed), ("heading", params.desired_heading)]
+        };
+        let (kind, target, steer, fields) = match &data.movement {
+            Order::MoveToObject { target, path } => (
+                "MoveToObject",
+                *target,
+                self.order_steer(world, content, *target)
+                    .unwrap_or_else(|why| Steer::OrderPlace {
+                        place: path_place(path),
+                        why,
+                    }),
+                path_fields(path),
+            ),
+            Order::MoveToPosition { path } => (
+                "MoveToPosition",
+                0,
+                Steer::OrderPlace {
+                    place: path_place(path),
+                    why: "a place order",
+                },
+                path_fields(path),
+            ),
+            Order::TurnToObject {
+                target,
+                wire_heading,
+                params,
+            } => (
+                "TurnToObject",
+                *target,
+                self.order_steer(world, content, *target)
+                    .unwrap_or_else(|why| Steer::OrderHeading {
+                        heading: *wire_heading,
+                        why,
+                    }),
+                turn_fields(params),
+            ),
+            Order::TurnToHeading { params } => (
+                "TurnToHeading",
+                0,
+                Steer::Heading(params.desired_heading),
+                turn_fields(params),
+            ),
+            _ => return,
+        };
+        let line = position_log::OrderLine {
+            kind,
+            target,
+            name: if target == 0 {
+                String::new()
+            } else {
+                log_name(world, target)
+            },
+            steer,
+            fields,
+        };
+        self.position_log.order(now, &line);
+    }
+
+    /// What an order naming `target` steers the character to, chosen as
+    /// [`server_move::resolve`] chooses it: its simulated body, else a
+    /// stand-in where it stands; `Err` says why the order's own place or
+    /// heading is used instead.
+    fn order_steer(
+        &self,
+        world: &World,
+        content: &WorldContent,
+        target: u32,
+    ) -> Result<position_log::Steer, &'static str> {
+        if let Some(body) = self.remotes.values().find(|r| r.guid == target) {
+            if body_shape_of(world, content, target).is_none() {
+                return Err("its body has no shape");
+            }
+            let at = body.driver.obj.body.position();
+            let gap = world
+                .object(target)
+                .and_then(WorldObject::accepted_position)
+                .and_then(|p| self.wire_world(p))
+                .map(|server| server.distance(at));
+            return Ok(position_log::Steer::Body {
+                place: self.log_place(body.driver.obj.cell_id, at),
+                gap,
+            });
+        }
+        if let Some(p) = self.stand_in_place(world, target) {
+            return Ok(position_log::Steer::StandIn(
+                self.log_place(p.obj_cell_id, p.frame.origin),
+            ));
+        }
+        let Some(object) = world.object(target) else {
+            return Err("no object here");
+        };
+        Err(
+            if object.physics().state & PhysicsState::HIDDEN.bits() != 0 {
+                "hidden"
+            } else if object.parent().is_some() {
+                "held"
+            } else if object.position().is_none() {
+                "contained"
+            } else if world.player_guid() == Some(target) {
+                "the character itself"
+            } else {
+                "outside the loaded landblocks"
+            },
+        )
+    }
+
+    /// Log each object near the character whose body stands more than
+    /// [`position_log::APART_METRES`] from the server's last place for it,
+    /// at most every [`position_log::APART_EVERY`] each.
+    fn log_apart_bodies(&mut self, world: &World, now: Duration) {
+        let Some(player) = self.player.as_ref().map(|p| p.controller.position()) else {
+            return;
+        };
+        let mut lines = Vec::new();
+        for body in self.remotes.values() {
+            let at = body.driver.obj.body.position();
+            let from_player = at.distance(player);
+            if from_player > position_log::NEAR_METRES
+                || !self.position_log.apart_due(body.guid, now)
+            {
+                continue;
+            }
+            let Some(accepted) = world.object(body.guid).and_then(|o| o.accepted_position()) else {
+                continue;
+            };
+            let Some(server_at) = self.wire_world(accepted) else {
+                continue;
+            };
+            let gap = at.distance(server_at);
+            if gap <= position_log::APART_METRES {
+                continue;
+            }
+            let Some(place) = self.log_place(body.driver.obj.cell_id, at) else {
+                continue;
+            };
+            lines.push(position_log::ApartLine {
+                guid: body.guid,
+                name: log_name(world, body.guid),
+                gap,
+                server: position_log::Place::of(accepted),
+                body: place,
+                since_update: None,
+                since_moved: None,
+                from_player,
+            });
+        }
+        for line in lines {
+            self.position_log.apart(now, line);
         }
     }
 
@@ -2920,6 +3293,9 @@ impl Movement {
             world.set_live_motion(guid, motion);
         }
         self.deliver_target_messages();
+        if self.position_log.is_on() {
+            self.log_apart_bodies(world, now);
+        }
     }
 
     /// After the network pass: the autonomous position when its gate opens.

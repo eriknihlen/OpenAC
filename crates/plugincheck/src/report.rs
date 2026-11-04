@@ -142,7 +142,8 @@ impl CheckReport {
         out.push('\n');
         out.push_str(
             "This checks the plugin package and its module only. It cannot check the GitHub \
-             release from a local path: publish it as a release tagged wasm-v<version>, not \
+             release from a local path: publish it as a release tagged wasm-v<version> (or \
+             wasm-<id>-v<version> in a repository publishing several plugins), not \
              marked latest, with plugin.json, <id>-<version>.zip, its .sha256 and the optional \
              icon.png as assets.\n",
         );

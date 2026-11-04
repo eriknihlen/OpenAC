@@ -202,6 +202,9 @@ pub(super) fn project_object(world: &World, object_id: u32) -> Option<abi::World
             .map(|i| i.properties.get_int(PropertyInt::MAX_LEVEL.0, 0))
             .filter(|&level| level > 0),
         hook_item_types: item.map_or(0, |i| i.hook_item_types),
+        server_position: record
+            .and_then(crate::world::WorldObject::accepted_position)
+            .map(position_of),
     })
 }
 

@@ -44,6 +44,7 @@ mod game_social;
 mod game_storage;
 mod game_trade;
 mod host;
+mod plugin_services;
 #[cfg(target_arch = "wasm32")]
 mod sys;
 #[cfg(target_arch = "wasm32")]
@@ -60,7 +61,7 @@ pub use ac_plugin_abi::{
     API_CURRENT, ApiVersion, Call, CharacterInfo, ChatLine, ChatLinkClicked, ChatPost, CommandCall,
     CommandCompletion, CommandDef, Event, Import, LogLevel, StartInfo, TICK_SECONDS, calls,
     character, combat, host as client, items, keys, magic, navigation, net, peers, projectile,
-    social, storage, trade, world,
+    services, social, storage, trade, world,
 };
 pub use game::KnownSpellCache;
 pub use game_navigation::WalkPause;
@@ -68,6 +69,8 @@ pub use game_storage::StorageLock;
 pub use host::Host;
 #[cfg(not(target_arch = "wasm32"))]
 pub use host::Transport;
+#[cfg(feature = "json")]
+pub use plugin_services::{CallError, Service};
 
 /// A client function a plugin can call through [`Host::call`]: every marker
 /// type in [`calls`].
@@ -112,7 +115,7 @@ pub trait Plugin: Default + 'static {
     }
 
     /// The client asks something the plugin registered to answer (a chat
-    /// filter or input interceptor, a loot classifier). Answer
+    /// filter or input interceptor, a loot classifier, a service). Answer
     /// [`CallbackAnswer::Nothing`] for anything not registered.
     fn callback(&mut self, host: &mut Host<'_>, callback: Callback) -> CallbackAnswer {
         let _ = (host, callback);

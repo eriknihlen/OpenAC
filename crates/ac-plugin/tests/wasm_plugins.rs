@@ -446,7 +446,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.6 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.7 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +655,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.7""#);
+    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.8""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.7, but this build supports 1.0..1.6"
+        "plugin 'openac.probe' declares apiVersion 1.8, but this build supports 1.0..1.7"
     );
 }
 
@@ -710,7 +710,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.7""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +824,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.6""#,
+        r#""apiVersion": "1.7""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -887,13 +887,71 @@ fn a_plugin_built_for_api_1_4_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
-/// API 1.6 added only pointer kinds (hover, leave), no shape: `probe` as an
-/// API 1.5 SDK built it still loads.
+/// API 1.6 added only pointer kinds (hover, leave), no shape, and API 1.7
+/// the server's last position at the end of the world-object records:
+/// `probe` as an API 1.5 SDK built it still loads.
 #[test]
 fn a_plugin_built_for_api_1_5_still_loads() {
     let v1_5 = ApiVersion::new(1, 5);
     let (loaded, error) = load_probe_built_for("probe-1-5", "1.5", &section_at(v1_5));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.7 gave the world-object and hostile-target records the server's
+/// last position at their end, and added plugin services: `probe` (which
+/// reads world objects) as an API 1.6 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_6_still_loads() {
+    let v1_6 = ApiVersion::new(1, 6);
+    let (loaded, error) = load_probe_built_for("probe-1-6", "1.6", &section_at(v1_6));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// An object change reaches a plugin exactly as its API version encodes
+/// it, through a real module: `rawbytes` built for API 1.5 or 1.6 is
+/// handed the world object without the server's last position (byte for
+/// byte that version's encoding); built for this API it gets it.
+#[test]
+fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_7() {
+    use ac_plugin::abi::world::{ObjectChange, Position, WorldObject};
+    let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
+    let event = Event::ObjectChanged(ObjectChange {
+        object_id: 0x8012_D57D,
+        revision: 4,
+        current: Some(WorldObject {
+            object_id: 0x8012_D57D,
+            name: "Drift-Touched Tusker Bull".into(),
+            position: Some(Position::from_cell(0x0032_01DE, [92.7, -19.0, 18.0], 0.0)),
+            server_position: Some(server.clone()),
+            ..WorldObject::default()
+        }),
+        ..ObjectChange::default()
+    });
+    for version in [ApiVersion::new(1, 5), ApiVersion::new(1, 6), API_CURRENT] {
+        let root = Root::new(&format!("raw-server-position-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        assert_eq!(handed, [event.to_bytes_at(version)], "{version}");
+        let Ok(Event::ObjectChanged(read)) = Event::from_bytes_at(&handed[0], version) else {
+            panic!("{version}: an object change");
+        };
+        let read = read.current.unwrap();
+        assert_eq!(read.name, "Drift-Touched Tusker Bull", "{version}");
+        if version == API_CURRENT {
+            assert_eq!(handed[0], event.to_bytes());
+            assert_eq!(read.server_position, Some(server.clone()));
+        } else {
+            assert!(handed[0].len() < event.to_bytes().len(), "{version}");
+            assert_eq!(read.server_position, None, "{version}");
+        }
+    }
 }
 
 /// A path preview's plan reaches a plugin exactly as its API version
@@ -1347,7 +1405,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.6 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.7 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2235,15 +2293,16 @@ fn the_session_hands_a_held_pointer_over_measured_from_the_canvass_latest_place(
     );
 }
 
-/// API 1.6 added hover and leave on a canvas. `uidemo` built for this API
-/// hears a hover (two moves before its pump are one hover, at the later
-/// place) and the leave; built for API 1.5 it hears neither, only the
-/// press it heard before: an older plugin may read an unknown kind as a
-/// drag.
+/// API 1.6 added hover and leave on a canvas. `uidemo` built for API 1.6
+/// or this API hears a hover (two moves before its pump are one hover, at
+/// the later place) and the leave; built for API 1.5 it hears neither,
+/// only the press it heard before: an older plugin may read an unknown
+/// kind as a drag.
 #[test]
 fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
     use ac_plugin_ui::{PointerEvent, PointerKind, UiInput};
-    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+    let v1_6 = ApiVersion::new(1, 6);
+    for version in [ApiVersion::new(1, 5), v1_6, API_CURRENT] {
         let root = Root::new(&format!("uidemo-hover-{version}"));
         install_built_for(&root.0, "uidemo", version);
         let mut api = FakeSession::default();
@@ -2280,7 +2339,7 @@ fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
             "uidemo pointer kind=0 at 30,50 button=1".to_owned(),
             "uidemo pointer kind=1 at 30,50 button=1".to_owned(),
         ];
-        if version == API_CURRENT {
+        if v1_6.is_at_most(version) {
             expected.insert(0, "uidemo pointer kind=5 at 30,50 button=0".to_owned());
             expected.push("uidemo pointer kind=6 at 30,50 button=0".to_owned());
         }
@@ -2611,7 +2670,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.6""#,
+            r#""apiVersion": "1.7""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),
@@ -2946,6 +3005,578 @@ fn a_slow_call_warns_and_goes_on() {
     assert_eq!(warnings(&api).len(), 2);
     assert_eq!(slow_posts(&api).len(), 1);
     assert_eq!(plugins.loaded_ids(), ["openac.misbehave"]);
+}
+
+// --- Whose time an answer is: the plugin's that gave it ---
+
+/// Two plugins of the suite on `engine`: `openac.suite` answers, and
+/// `openac.asker` (the same module under another id) asks; the client's
+/// clock runs (the suite works by it).
+fn suite_pair(tag: &str, engine: Arc<PluginEngine>) -> (Root, PluginSession, FakeSession) {
+    let (root, mut plugins, api) = suite_session(tag, engine, &["suite", "asker"]);
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+    plugins.take_reports();
+    (root, plugins, api)
+}
+
+/// The suite installed once per verb, as `openac.<verb>` (the same module
+/// under each id), and started in that order on `engine`; the client's
+/// clock runs (the suite works by it).
+fn suite_session(
+    tag: &str,
+    engine: Arc<PluginEngine>,
+    verbs: &[&str],
+) -> (Root, PluginSession, FakeSession) {
+    let root = Root::new(tag);
+    let suite = install(&root.0, "suite");
+    for verb in verbs.iter().filter(|v| **v != "suite") {
+        let copy = root.0.join(verb);
+        std::fs::create_dir_all(&copy).unwrap();
+        for file in ["plugin.json", "suite.wasm"] {
+            std::fs::copy(suite.join(file), copy.join(file)).unwrap();
+        }
+        edit_manifest(&copy, "\"openac.suite\"", &format!("\"openac.{verb}\""));
+        edit_manifest(&copy, "\"Suite\"", &format!("\"{verb}\""));
+    }
+    if !verbs.contains(&"suite") {
+        std::fs::remove_dir_all(&suite).unwrap();
+    }
+    let ids: Vec<String> = verbs.iter().map(|v| format!("openac.{v}")).collect();
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut plugins = PluginSession::new(engine, options(&[&root.0], Some(&ids)));
+    let mut api = FakeSession {
+        clock: true,
+        ..FakeSession::default()
+    };
+    plugins.start(&mut api);
+    (root, plugins, api)
+}
+
+/// A slow answer warns the plugin that gave it, in its callback, and
+/// never the plugin that asked: the asking call's clock stops while the
+/// other plugin answers.
+#[test]
+fn a_slow_answer_warns_the_plugin_that_gave_it_not_the_one_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("slow-answer", engine());
+    assert!(plugins.handle_line("/asker ask openac.suite/rules work:150", &mut api));
+    assert_eq!(
+        api.messages("openac.asker").last().unwrap(),
+        "asker ask: Keep"
+    );
+    let asked = plugins.last_call_time("openac.asker").unwrap();
+    assert!(asked < ac_plugin::SLOW_CALL, "{asked:?}");
+    let answered = plugins.last_call_time("openac.suite").unwrap();
+    assert!(answered > ac_plugin::SLOW_CALL, "{answered:?}");
+    let warned: Vec<&str> = api
+        .logs
+        .iter()
+        .filter(|(_, level, _)| *level == LogLevel::Warn)
+        .map(|(id, _, _)| id.as_str())
+        .collect();
+    assert_eq!(warned, ["openac.suite"]);
+    assert!(
+        api.messages("openac.suite")
+            .last()
+            .unwrap()
+            .starts_with("plugin 'openac.suite' was slow in callback loot classify: "),
+        "{:?}",
+        api.logs
+    );
+    let slow: Vec<&String> = api
+        .posts
+        .iter()
+        .filter(|p| p.contains("was slow"))
+        .collect();
+    assert_eq!(slow.len(), 1, "{slow:?}");
+    assert!(
+        slow[0].starts_with("[plugin] Suite was slow (callback loot classify, "),
+        "{slow:?}"
+    );
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A stuck answer is stopped at the answering plugin's own deadline and
+/// unloads that plugin; the plugin that asked hears no answer and runs on.
+#[test]
+fn a_stuck_answer_stops_the_plugin_that_gave_it_not_the_one_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("stuck-answer", short_engine());
+    assert!(plugins.handle_line("/asker ask openac.suite/rules loop", &mut api));
+    assert_eq!(
+        api.messages("openac.asker").last().unwrap(),
+        "asker ask: none"
+    );
+    let reports = plugins.take_reports();
+    assert_eq!(
+        failed(&reports, "openac.suite").as_deref(),
+        Some(
+            "plugin 'openac.suite' stopped: ran for more than 1 s in one call (it looks stuck) \
+             in callback loot classify; last imports: none"
+        )
+    );
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(plugins.loaded_ids(), ["openac.asker"]);
+}
+
+/// The time another plugin takes to answer is left out of the asking
+/// call's deadline: the asker works 600 ms of its own around an answer
+/// that takes 700 ms, longer together than the 1 s deadline, and neither
+/// is stopped.
+#[test]
+fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
+    let (_root, mut plugins, mut api) = suite_pair("lent-time", short_engine());
+    let started = std::time::Instant::now();
+    assert!(plugins.handle_line("/asker ask openac.suite/rules work:700 300", &mut api));
+    assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
+    assert!(
+        api.messages("openac.asker")
+            .contains(&"asker ask: Keep".to_owned())
+    );
+    assert!(
+        plugins
+            .take_reports()
+            .iter()
+            .all(|r| !matches!(r, PluginReport::Failed { .. }))
+    );
+    assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
+    let asked = plugins.last_call_time("openac.asker").unwrap();
+    assert!(
+        asked >= std::time::Duration::from_millis(600) && asked < TEST_DEADLINE,
+        "{asked:?}"
+    );
+}
+
+// --- Plugin services: one plugin calls another and waits for its reply ---
+
+/// Gives plugin `openac.<verb>` the order `/<verb> <order>`; the last line
+/// it logged.
+fn order(plugins: &mut PluginSession, api: &mut FakeSession, verb: &str, order: &str) -> String {
+    assert!(plugins.handle_line(&format!("/{verb} {order}"), api));
+    api.messages(&format!("openac.{verb}"))
+        .last()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// How many times plugin `id` logged `line`.
+fn logged(api: &FakeSession, id: &str, line: &str) -> usize {
+    api.messages(id).iter().filter(|m| *m == line).count()
+}
+
+/// A service offered by one plugin is listed, called by another by its
+/// scoped id (ignoring case) with the reply coming back, and heard of by
+/// every plugin, its owner too; once withdrawn it is gone and heard gone.
+#[test]
+fn a_plugin_calls_another_plugins_service_and_gets_its_reply() {
+    let (_root, mut plugins, mut api) = suite_pair("service-call", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Ok(1)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "list"),
+        "asker list: openac.suite/echo (openac.suite, suite's echo)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "call OPENAC.SUITE/echo hi"),
+        "asker call: Ok(suite heard openac.asker: hi)"
+    );
+    p.deliver(a);
+    let offered = "heard service openac.suite/echo openac.suite true";
+    assert_eq!(logged(a, "openac.asker", &format!("asker {offered}")), 1);
+    assert_eq!(logged(a, "openac.suite", &format!("suite {offered}")), 1);
+
+    assert_eq!(
+        order(p, a, "suite", "withdraw echo"),
+        "suite withdraw echo: true"
+    );
+    assert_eq!(
+        order(p, a, "suite", "withdraw echo"),
+        "suite withdraw echo: false"
+    );
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
+    assert_eq!(order(p, a, "asker", "list"), "asker list: ");
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+}
+
+/// Every way a call goes unanswered says why, and every plugin keeps
+/// running: no such service, the caller's own, the service refusing or
+/// giving no answer, a request or reply over the limit, a call made while
+/// answering one; and an offer under a bad or taken name is refused.
+#[test]
+fn a_service_call_says_why_it_got_no_reply() {
+    let (_root, mut plugins, mut api) = suite_pair("service-errors", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Ok(1)"
+    );
+    assert_eq!(
+        order(p, a, "asker", "offer mine"),
+        "asker offer mine: Ok(2)"
+    );
+    for (call, expected) in [
+        ("call openac.suite/nope x", "Err(NotFound)"),
+        ("call openac.asker/mine x", "Err(SelfCall)"),
+        ("call openac.suite/echo refuse", "Err(Refused(\"not now\"))"),
+        (
+            "call openac.suite/echo nothing",
+            "Err(Refused(\"the service gave no answer\"))",
+        ),
+        ("call openac.suite/echo big", "Err(TooLarge(65536))"),
+        ("call openac.suite/echo refuse-big", "Err(TooLarge(65536))"),
+        ("call-big openac.suite/echo", "Err(TooLarge(65536))"),
+        (
+            "call openac.suite/echo nest:openac.asker/mine",
+            "Ok(Err(Nested))",
+        ),
+    ] {
+        assert_eq!(
+            order(p, a, "asker", call),
+            format!("asker call: {expected}"),
+            "{call}"
+        );
+    }
+    assert_eq!(
+        order(p, a, "suite", "offer Echo"),
+        "suite offer Echo: Err(InvalidName)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer echo"),
+        "suite offer echo: Err(AlreadyRegistered)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer-long long 1024"),
+        "suite offer long: Ok(3)"
+    );
+    assert_eq!(
+        order(p, a, "suite", "offer-long longer 1025"),
+        "suite offer longer: Err(DescriptionTooLarge(1024))"
+    );
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A service whose plugin panics while answering: the caller hears it
+/// faulted and runs on; the owner is unloaded, and its service is gone
+/// and heard gone.
+#[test]
+fn a_service_that_fails_while_answering_stops_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-fault", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    // A chat line arrives while the asker's command runs, as the asker's own
+    // chat posts do live: every plugin that hears chat, the failed owner
+    // too, would hear it before the command's round ends.
+    a.unheard.push(ChatLine {
+        kind: 4,
+        text: "a line".to_owned(),
+        ..ChatLine::default()
+    });
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo panic"),
+        "asker call: Err(Faulted)"
+    );
+    // Neither that line nor its own services' withdrawal reaches the
+    // failed owner: the report names what stopped it, once.
+    p.deliver(a);
+    let reports = p.take_reports();
+    let faults: Vec<&PluginReport> = reports
+        .iter()
+        .filter(|r| matches!(r, PluginReport::Failed { .. }))
+        .collect();
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    let fault = failed(&reports, "openac.suite").unwrap();
+    assert!(fault.contains("suite's service panicked"), "{fault}");
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(p.loaded_ids(), ["openac.asker"]);
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+}
+
+/// A plugin answering a callback the client asked, a chat filter or an
+/// input interceptor, cannot call a service, as when answering another
+/// plugin: the call is `Nested`, and both plugins keep running.
+#[test]
+fn a_chat_filter_or_interceptor_cannot_call_a_service() {
+    let (_root, mut plugins, mut api) = suite_pair("service-in-callback", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "filter openac.suite/echo"),
+        "asker filter on: 1"
+    );
+    assert_eq!(
+        order(p, a, "asker", "intercept openac.suite/echo"),
+        "asker intercept on: Ok(1)"
+    );
+    let line = ChatLine {
+        kind: 4,
+        text: "a line".to_owned(),
+        ..ChatLine::default()
+    };
+    assert!(!p.filter_chat(&line, a));
+    assert_eq!(logged(a, "openac.asker", "asker filter: Err(Nested)"), 1);
+    assert_eq!(
+        p.intercept("hello", a),
+        ac_plugin::abi::callback::InterceptDecision::Pass
+    );
+    assert_eq!(logged(a, "openac.asker", "asker intercept: Err(Nested)"), 1);
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A plugin that fails answering is stopped at once: a second call in the
+/// same entry finds no such service rather than reaching it again. When
+/// that happens as a plugin starts, the failed plugin is unloaded before
+/// the next one starts, which then finds none of its services.
+#[test]
+fn a_service_that_fails_as_another_plugin_starts_goes_before_the_next_starts() {
+    let (_root, mut plugins, mut api) = suite_session(
+        "service-fault-at-start",
+        engine(),
+        &["offerer", "starter", "suite"],
+    );
+    assert_eq!(
+        api.messages("openac.starter").first().map(String::as_str),
+        Some("starter start: Err(Faulted) Err(NotFound)")
+    );
+    let reports = plugins.take_reports();
+    let fault = failed(&reports, "openac.offerer").unwrap();
+    assert!(fault.contains("suite's service panicked"), "{fault}");
+    assert_eq!(failed(&reports, "openac.starter"), None);
+    assert_eq!(plugins.loaded_ids(), ["openac.starter", "openac.suite"]);
+    assert_eq!(
+        order(&mut plugins, &mut api, "suite", "list"),
+        "suite list: "
+    );
+}
+
+/// A plugin that fails answering while another stops (the session shuts
+/// down, and the last plugin's disable calls the first one's service) is
+/// reported and logged with what stopped it, as at any other time, rather
+/// than dropped silently.
+#[test]
+fn a_service_that_fails_as_another_plugin_stops_is_reported() {
+    let (_root, mut plugins, mut api) =
+        suite_session("service-fault-at-stop", engine(), &["offerer", "stopper"]);
+    assert_eq!(plugins.loaded_ids(), ["openac.offerer", "openac.stopper"]);
+    plugins.take_reports();
+    plugins.shutdown(&mut api);
+    assert_eq!(
+        api.messages("openac.stopper").last().map(String::as_str),
+        Some("stopper stop: Err(Faulted)")
+    );
+    let reports = plugins.take_reports();
+    let fault = failed(&reports, "openac.offerer").unwrap();
+    assert!(
+        fault.starts_with("plugin 'openac.offerer' stopped: panicked: ")
+            && fault.contains("suite's service panicked"),
+        "{fault}"
+    );
+    assert_eq!(failed(&reports, "openac.stopper"), None);
+    assert!(
+        api.logs
+            .iter()
+            .any(|(id, level, line)| id == "openac.offerer"
+                && *level == LogLevel::Error
+                && *line == fault),
+        "{:?}",
+        api.logs
+    );
+    assert!(plugins.loaded_ids().is_empty());
+}
+
+/// A module that says it was built for API 1.6 but imports a function
+/// API 1.7 added is refused at load, even with a layout section that
+/// matches: the plugin would never hear the 1.7 events that go with it.
+#[test]
+fn an_import_newer_than_the_plugins_api_version_is_refused() {
+    let root = Root::new("service-forged-1-6");
+    let folder = install(&root.0, "suite");
+    let v1_6 = ApiVersion::new(1, 6);
+    edit_manifest(
+        &folder,
+        &format!(r#""apiVersion": "{API_CURRENT}""#),
+        r#""apiVersion": "1.6""#,
+    );
+    // The 1.6 core, and every import this client has at its 1.6 shape.
+    let mut forged = core_shape(v1_6).to_le_bytes().to_vec();
+    for import in Import::ALL {
+        forged.extend_from_slice(&import_key(import.name()).to_le_bytes());
+        forged.extend_from_slice(&import.shape_at(v1_6).to_le_bytes());
+    }
+    let wasm = folder.join("suite.wasm");
+    let built = std::fs::read(&wasm).unwrap();
+    let built = with_custom_section(&built, "openac.api", Some(b"1.6"));
+    let built = with_custom_section(&built, LAYOUT_SECTION, Some(&forged));
+    std::fs::write(&wasm, built).unwrap();
+    let mut api = FakeSession::default();
+    let mut plugins = session(&[&root.0], None);
+    plugins.start(&mut api);
+    let error = failed(&plugins.take_reports(), "openac.suite").unwrap();
+    assert!(
+        error.contains("which API 1.7 added (the plugin was built for API 1.6)"),
+        "{error}"
+    );
+    assert!(plugins.loaded_ids().is_empty());
+}
+
+/// A service that never answers is stopped at its plugin's own deadline,
+/// in its callback; the caller hears it timed out and runs on.
+#[test]
+fn a_stuck_service_stops_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-stuck", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo loop"),
+        "asker call: Err(TimedOut)"
+    );
+    let reports = p.take_reports();
+    assert_eq!(
+        failed(&reports, "openac.suite").as_deref(),
+        Some(
+            "plugin 'openac.suite' stopped: ran for more than 1 s in one call (it looks stuck) \
+             in callback service request; last imports: none"
+        )
+    );
+    assert_eq!(failed(&reports, "openac.asker"), None);
+    assert_eq!(p.loaded_ids(), ["openac.asker"]);
+}
+
+/// A slow service warns the plugin that offers it, in its callback, never
+/// the caller, whose own time leaves the answer out.
+#[test]
+fn a_slow_service_warns_its_plugin_not_the_caller() {
+    let (_root, mut plugins, mut api) = suite_pair("service-slow", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo work:150"),
+        "asker call: Ok(done)"
+    );
+    let asked = p.last_call_time("openac.asker").unwrap();
+    assert!(asked < ac_plugin::SLOW_CALL, "{asked:?}");
+    let warned: Vec<(&str, &str)> = a
+        .logs
+        .iter()
+        .filter(|(_, level, _)| *level == LogLevel::Warn)
+        .map(|(id, _, m)| (id.as_str(), m.as_str()))
+        .collect();
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert_eq!(warned[0].0, "openac.suite");
+    assert!(
+        warned[0]
+            .1
+            .starts_with("plugin 'openac.suite' was slow in callback service request: "),
+        "{warned:?}"
+    );
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// A service's time is left out of the caller's deadline: the caller
+/// works 600 ms of its own around a 700 ms answer, longer together than
+/// the 1 s deadline, and neither is stopped.
+#[test]
+fn a_services_time_does_not_count_against_the_callers_deadline() {
+    let (_root, mut plugins, mut api) = suite_pair("service-lent", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    let started = std::time::Instant::now();
+    order(p, a, "asker", "call openac.suite/echo work:700 300");
+    assert!(started.elapsed() > TEST_DEADLINE, "{:?}", started.elapsed());
+    assert_eq!(logged(a, "openac.asker", "asker call: Ok(done)"), 1);
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+}
+
+/// One entry call lends other plugins at most one call deadline in all:
+/// a caller calling a fast service in a loop (10 ms an answer, each under
+/// every limit) is answered `OutOfTime` once its answers add up to the 1 s
+/// deadline, without the service being asked again, so the loop ends and the
+/// session goes on. Neither plugin is stopped, and the next entry call may
+/// call again.
+#[test]
+fn a_call_lends_other_plugins_at_most_one_deadline_in_all() {
+    let (_root, mut plugins, mut api) = suite_pair("service-ceiling", short_engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    let started = std::time::Instant::now();
+    let line = order(p, a, "asker", "call-until openac.suite/echo work:10 300");
+    let elapsed = started.elapsed();
+    let calls: u32 = line
+        .strip_prefix("asker call-until: ")
+        .and_then(|rest| rest.strip_suffix(" calls, Err(OutOfTime)"))
+        .and_then(|calls| calls.parse().ok())
+        .unwrap_or_else(|| panic!("{line}"));
+    // At 10 ms an answer the deadline holds about a hundred.
+    assert!(calls > 1 && calls < 300, "{calls}");
+    assert!(elapsed < 3 * TEST_DEADLINE, "{elapsed:?}");
+    assert!(p.take_reports().is_empty());
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo work:10"),
+        "asker call: Ok(done)"
+    );
+}
+
+/// A plugin that starts hears every service already offered, once: a
+/// reloaded caller hears the offer again as it starts, and nothing more
+/// with the next events. A reloaded owner's service goes with the old
+/// copy.
+#[test]
+fn a_plugin_that_starts_hears_every_service_already_offered() {
+    let (_root, mut plugins, mut api) = suite_pair("service-replay", engine());
+    let (p, a) = (&mut plugins, &mut api);
+    order(p, a, "suite", "offer echo");
+    p.deliver(a);
+    let offered = "asker heard service openac.suite/echo openac.suite true";
+    assert_eq!(logged(a, "openac.asker", offered), 1);
+    p.request_reload("openac.asker");
+    p.pump(0.0, None, a);
+    assert_eq!(p.loaded_ids(), ["openac.suite", "openac.asker"]);
+    assert_eq!(logged(a, "openac.asker", offered), 2);
+    p.deliver(a);
+    assert_eq!(logged(a, "openac.asker", offered), 2);
+
+    p.request_reload("openac.suite");
+    p.pump(0.0, None, a);
+    p.deliver(a);
+    assert_eq!(
+        logged(
+            a,
+            "openac.asker",
+            "asker heard service openac.suite/echo openac.suite false"
+        ),
+        1
+    );
+    assert_eq!(
+        order(p, a, "asker", "call openac.suite/echo hi"),
+        "asker call: Err(NotFound)"
+    );
 }
 
 // --- The compile cache (`ac_plugin::ModuleCache`) ---

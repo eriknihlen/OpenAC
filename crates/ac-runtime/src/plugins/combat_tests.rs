@@ -168,3 +168,37 @@ fn hostile_targets_name_their_species() {
         );
     });
 }
+
+// API 1.7: a creature's world object and hostile-target entry carry the
+// server's last position beside the place the client has it now. Its
+// simulated body standing 3 m east of the server's place, the distance is
+// measured to the body and the server's place is the accepted one.
+#[test]
+fn a_creature_carries_the_servers_last_position_beside_its_body() {
+    let mut state = arena();
+    let accepted = *state
+        .world
+        .object(MONSTER)
+        .and_then(crate::world::WorldObject::accepted_position)
+        .expect("placed");
+    let mut body = accepted;
+    body.origin.x += 3.0;
+    state.world.set_live_position(MONSTER, body);
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let targets = call::<calls::CombatHostileTargets>(b, &50.0);
+        let target = targets.iter().find(|t| t.object_id == MONSTER).unwrap();
+        let server = super::world::position_of(&accepted);
+        assert_eq!(target.server_position.as_ref(), Some(&server));
+        assert!((target.distance - 3.0).abs() < 1e-3, "{}", target.distance);
+        let object = call::<calls::WorldObject>(b, &MONSTER).unwrap();
+        assert_eq!(object.server_position, Some(server));
+        assert_eq!(object.position, Some(super::world::position_of(&body)));
+        let other = targets.iter().find(|t| t.object_id == OTHER).unwrap();
+        assert!(
+            other.distance < 1e-3,
+            "no body: both are the server's place"
+        );
+        assert!(other.server_position.is_some());
+    });
+}

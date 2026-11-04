@@ -100,10 +100,31 @@ canvas pointer event, `PointerEvent::HOVER` (the pointer over a listening
 canvas with no button held, at most one per delivery at the latest place) and
 `PointerEvent::LEAVE` (one when the hovering ends: the pointer moved off, a
 press began elsewhere, or the canvas hid or went), for tooltips; a plugin built
-for an older version hears neither. Everything the client offers
-goes through `Host`: game state, items, chat, movement and navigation, trade
-and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
---open` shows the whole surface with its documentation.
+for an older version hears neither. API 1.7 added plugin services, through
+which plugins built to work together call each other
+([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
+`Callback::ServiceRequest`, which a plugin built for an older version never
+gets. It also added `server_position` at the end of `WorldObject` and
+`CombatTarget`: the last position the server sent for the object, beside
+`position` (and, for a target, `distance`), which give where the client has
+it now, a creature's simulated body. The two can stand apart while the body
+catches up to the server's place; for the character it can lag where the
+player has moved it. A change to it alone raises no object change (an
+object is told moved when its cell changes), so a plugin that follows it
+asks again. Everything the client offers goes through
+`Host`: game state, items, chat, movement and navigation, trade and vendors,
+storage, network, peers, and UI. `cargo doc -p openac-plugin --open` shows
+the whole surface with its documentation.
+
+Three changes came with API 1.7 that a plugin built for an older version
+may notice. A chat filter and an input interceptor now run with no other
+plugin to ask, as every other callback does: a loot classifier or a
+command's completions asked from one gets no answer (`None`), and a service
+call is refused (`Nested`). `Callback` is non-exhaustive, as `Event` is, so
+a plugin that matched every callback kind without a catch-all arm needs one
+to build against this SDK. And a module that imports a client function
+newer than the `apiVersion` it declares is refused at load: it would never
+hear the events that go with it.
 
 **Controls show what the plugin stores.** A checkbox, colour swatch or other bound
 control does not change itself. A click sends the value it asks for to the
@@ -319,6 +340,73 @@ and keep it. A texture that does not decode gives its type an `rgb` of 0.
 Neither call needs a permission; both are empty without the
 game files.
 
+## Plugin services
+
+Plugins built to work together, a suite, call each other through services
+(API 1.7). One plugin offers a service by name and answers it; another calls
+it and waits for the reply. The request and the reply are bytes the two
+plugins agree on; the client never reads them.
+
+The plugin offering it registers the service, `host.register_service_raw("distance",
+"Metres to an object")`, which is then known to every plugin as
+`<plugin id>/distance`. The returned handle comes back in each
+`Callback::ServiceRequest`, which carries the caller's id and the request.
+The plugin answers in `Plugin::callback` with
+`CallbackAnswer::Service(Ok(reply))`, or with `Err(reason)` to refuse. A name
+is 1 to 64 bytes of `a-z`, `0-9` and `-`, a description at most 1 KiB
+(`DescriptionTooLarge`), and a plugin offers at most 32. The service goes
+when the plugin calls `unregister_service` or stops; a plugin that fails
+while answering is stopped, and its services go at once.
+
+The calling plugin uses `host.call_service_raw("example.navigation/distance",
+&request)`, matching the id ignoring case, and gets the reply's bytes, or a
+`ServiceError` saying why there is none: no such service (`NotFound`), its
+own (`SelfCall`: a plugin calls its own code directly), a call made while
+answering any callback, a service request, a chat filter or an input
+interceptor (`Nested`), a request, reply or refusal over 64 KiB
+(`TooLarge`), the service refusing (`Refused`), the service's plugin
+stopping while it answered (`TimedOut`, `Faulted`), or the calling plugin's
+tick, event or command having already waited on other plugins' answers as
+long as one call may take (`OutOfTime`; the service is not asked). What the
+service says about a request, such as "no such object", belongs in its reply.
+`host.services()` lists what is on offer. Every plugin hears
+`Event::ServiceChanged` when a service comes or goes, and a plugin that
+starts first hears one for every service already offered.
+
+With the SDK's `json` feature (`openac-plugin = { ..., features = ["json"] }`,
+off by default so a plugin without services builds no serde), the request
+and reply are types the two plugins share, deriving serde's `Serialize` and
+`Deserialize`, sent as JSON. `host.register_service::<DistanceTo,
+Distance>("distance", "Metres to an object")` gives a `Service`, and in
+`Plugin::callback`, `service.answer(&request, |asked| Ok(Distance { .. }))`
+answers a request for it (`None` for another service), refusing one that
+does not decode. The caller uses `host.call_service::<DistanceTo,
+Distance>("example.navigation/distance", &DistanceTo { object })`, which
+gives the reply or a `CallError`: the `ServiceError`, or a reply that does
+not decode.
+
+An answer runs as the offering plugin's own callback, under its own limits
+([Limits](#limits)): a slow answer warns, and a stuck one stops, the plugin
+that offers the service. The caller's clock stops while it waits, but one
+tick, event or command of the caller may wait on other plugins (services,
+loot classifiers, command completions) for at most one call deadline in
+all; past it, a service call answers `OutOfTime`, and a classifier or a
+completion is not asked (no answer), until the caller's next call.
+
+The caller's id in a `ServiceRequest` is set by the client, never by the
+caller, but it names a plugin id, not who made the plugin: any plugin
+installed under that id carries it. The service decides whom to trust with
+what. Permissions do not carry across a call: the answering plugin's own
+calls into the client are checked against its own `plugin.json`, and the
+caller's are not lent to it, so a service with the network permission uses
+it on its own say, whoever asked, and what it does for a caller is its own
+choice. Services are per session: a
+plugin running for another character in the same client sees none of them.
+
+For state that changes over time and that any plugin may read, such as
+what a plugin is doing now, the status board (`status_publish`,
+`status_read`) fits better than a service.
+
 ## Testing natively
 
 On a native target the SDK has `testing::FakeHost`, which answers every
@@ -336,7 +424,10 @@ assert_eq!(host.posted[0].text, "Hello, world!");
 ```
 
 `FakeHost::set_reply` sets what a client function answers; anything not set
-gets the inert answer (nothing found, unavailable).
+gets the inert answer (nothing found, unavailable). For services,
+`FakeHost::set_service` stands in for another plugin's service, and
+`FakeHost::request_service` calls one of the plugin's own as another plugin
+would.
 
 ## plugin.json
 
@@ -348,7 +439,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.6",
+  "apiVersion": "1.7",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -364,7 +455,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.6"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.7"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |
@@ -391,7 +482,11 @@ basics (game state, commands, UI, its own storage) need none.
 Each call into a plugin runs under a deadline: a tick, event, command or
 callback slower than 100 ms is reported (a warning in the log and one chat
 line), and one still running after 10 s is taken for stuck, stopped, and the
-plugin unloaded. Starting and stopping get 30 s. Memory is capped by
+plugin unloaded. Starting and stopping get 30 s. When a call asks another
+plugin something (a loot classifier, a command's completions), the answer
+runs as that plugin's own callback under these limits, and the asking
+call's clock stops meanwhile: a slow or stuck answer counts against the
+plugin that gave it, never the one that asked. Memory is capped by
 `limits.memoryMiB`. What a plugin saves through storage lands in
 `plugins/<id>/files/` inside its own folder, which installs, updates and
 removal of its code never touch.
@@ -478,6 +573,62 @@ Publish those files as the assets of a release in a public repository:
 Players install it with the launcher's **Add from URL**
 (`https://github.com/<owner>/<repo>`), and the launcher checks the
 repository's releases for updates.
+
+### Several plugins in one repository
+
+A repository can publish several plugins (a suite built to work together,
+say). Tag each plugin's releases with its id, and keep a plugin index:
+
+```bash
+plugincheck pack <plugin folder> <out dir> --index plugins-index.json
+```
+
+- **Tag `wasm-<plugin id>-v<version>`**, for example
+  `wasm-acme.vision-v1.2.0`. `pack --index` prints it. The launcher matches
+  the exact `wasm-<id>-v` prefix for the plugin it wants and checks that the
+  release's `plugin.json` names that id, so another plugin's release is
+  never offered in its place.
+- **The index**: `pack --index <file>` sets this plugin's entry in the local
+  file (starting it if it does not exist) and keeps every other plugin's.
+  It never moves an entry back: packing a hotfix of an older line (1.1.1
+  after 1.2.0) leaves the index naming 1.2.0, and says so. Upload it as `plugins-index.json` to a release tagged `wasm-index`, not
+  marked latest, replacing the copy there, every time you publish a plugin:
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "plugins": [
+      { "id": "acme.vision", "stable": "wasm-acme.vision-v1.2.0",
+        "beta": "wasm-acme.vision-v1.3.0-beta.1" },
+      { "id": "acme.navigation", "stable": "wasm-acme.navigation-v0.4.0" }
+    ]
+  }
+  ```
+
+  GitHub's releases feed, which the launcher reads, lists only a
+  repository's latest ten releases, so one plugin's releases can push
+  another's off it; the index keeps every plugin findable. It only points
+  at tags: the launcher still reads each tag's `plugin.json`, takes the
+  highest version from the feed and the index together, and ignores an
+  index it cannot read (noting why in its log), so a stale index at worst
+  offers an older release. A repository publishing one plugin under
+  `wasm-v` tags needs no index. The launcher reads the index when the feed
+  shows a `wasm-<id>-v` tag or the `wasm-index` release, and otherwise
+  only when none of the feed's releases is the plugin's: there is none for
+  this client, each names another plugin, or (on the stable channel) all
+  are pre-releases. A missing index is then simply not found.
+- **Moving an existing plugin over**: its `wasm-v` releases keep counting
+  for it (their `plugin.json` names it), so it can switch to its own tags
+  at its next release. A new plugin in a repository whose older plugin used
+  `wasm-v` tags needs its own tags from the start.
+- **Older launchers**: launchers 0.1.10 and earlier read only `wasm-v`
+  tags. A plugin published only under `wasm-<id>-v` tags shows there as
+  having no release, and one that switches stops getting updates there.
+
+**Add from URL** on such a repository lists the plugins not yet installed
+and asks which one to add, then asks again for the rest until the player
+cancels; each one added is its own entry on the plugin list, all naming
+the same repository.
 
 ## Getting listed
 

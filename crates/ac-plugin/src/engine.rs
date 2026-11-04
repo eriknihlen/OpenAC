@@ -30,7 +30,7 @@ use wasmtime::wasmparser::{Parser, Payload};
 use wasmtime::{Config, Engine, ExternType, FuncType, ImportType, ValType};
 
 use crate::manifest::PluginManifest;
-use crate::watchdog::{Ticker, TimeLimits};
+use crate::watchdog::{EpochCount, Ticker, TimeLimits};
 
 /// The engine and the modules it has compiled, shared by every session of
 /// the process (each session gets its own instance and memory).
@@ -49,6 +49,10 @@ pub struct PluginEngine {
     /// (a process that runs none has no such thread); ended when the
     /// engine is dropped.
     ticker: OnceLock<Result<Ticker, String>>,
+    /// The epochs the ticker has counted, which the engine does not show:
+    /// a call measures in it the time it lent another plugin, as its
+    /// deadline counts it ([`crate::watchdog::EpochCount`]).
+    epochs: EpochCount,
 }
 
 #[derive(Debug)]
@@ -154,6 +158,7 @@ impl PluginEngine {
             disk_hits: AtomicU64::new(0),
             limits: TimeLimits::default(),
             ticker: OnceLock::new(),
+            epochs: EpochCount::default(),
         }
     }
 
@@ -182,10 +187,15 @@ impl PluginEngine {
     /// stuck one would hold its session forever).
     pub(crate) fn start_watchdog(&self) -> Result<(), String> {
         self.ticker
-            .get_or_init(|| Ticker::start(&self.engine))
+            .get_or_init(|| Ticker::start(&self.engine, self.epochs.clone()))
             .as_ref()
             .map(|_| ())
             .map_err(Clone::clone)
+    }
+
+    /// The epochs the watchdog has counted so far.
+    pub(crate) fn epochs(&self) -> EpochCount {
+        self.epochs.clone()
     }
 
     /// [`Self::new`], keeping compiled modules in `directory` (the client's
@@ -561,6 +571,13 @@ pub fn check_module(
                  (the plugin was built for API {api_version})"
             ));
         };
+        if !known.since().is_at_most(api_version) {
+            return Err(format!(
+                "imports {MODULE}.{name}, which API {} added (the plugin was built for API \
+                 {api_version})",
+                known.since()
+            ));
+        }
         let ExternType::Func(ty) = import.ty() else {
             return Err(format!(
                 "imports {MODULE}.{name} as something other than a function"

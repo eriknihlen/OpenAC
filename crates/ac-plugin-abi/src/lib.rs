@@ -28,6 +28,7 @@ pub mod navigation;
 pub mod net;
 pub mod peers;
 pub mod projectile;
+pub mod services;
 pub mod social;
 pub mod storage;
 mod table;

@@ -3,15 +3,22 @@
 //! everything about the game through [`SessionApi::call`].
 //!
 //! A call that asks another plugin something it registered (a loot
-//! classifier) calls that plugin's callback export directly: the other
+//! classifier, a service) calls that plugin's callback export directly: the other
 //! plugin is idle (only the caller is inside a call), and the callback's
 //! own imports are served like any other, except that they cannot ask a
 //! third plugin. A plugin that faults while answering is unloaded once the
-//! caller's call returns ([`Services::faulted`]).
+//! caller's call returns ([`Services::faulted`]). The answer's time is the
+//! answering plugin's ([`Context::lent`]), not the caller's, up to one call
+//! deadline per entry call of the caller ([`Context::lend_ceiling`]).
+
+use std::time::{Duration, Instant};
 
 use ac_plugin_abi::callback::{Callback, CallbackAnswer, LootQuestion};
 use ac_plugin_abi::items::{
     ClassifierRegistration, ClassifyRequest, LootClassification, LootedNotice, RemovedNotice,
+};
+use ac_plugin_abi::services::{
+    MAX_PAYLOAD, ServiceCall, ServiceError, ServiceRegistration, ServiceRequest,
 };
 use ac_plugin_abi::storage::{StorageKey, StoragePlace, StorageWrite};
 use ac_plugin_abi::{
@@ -21,8 +28,10 @@ use ac_plugin_abi::{
 use crate::api::{Caller, SessionApi};
 use crate::classifiers::ClassifierRegistry;
 use crate::commands::CommandRegistry;
+use crate::instance::Handled;
 use crate::interceptors::{FilterRegistry, InterceptorRegistry};
 use crate::manifest::PluginManifest;
+use crate::services::ServiceRegistry;
 use crate::session::Loaded;
 use crate::settings::PluginSessionSettings;
 use crate::status::StatusBoard;
@@ -46,6 +55,8 @@ pub(crate) struct Services {
     pub(crate) storage: StorageService,
     /// The session's status board.
     pub(crate) status: StatusBoard,
+    /// The services plugins offer one another.
+    pub(crate) plugin_services: ServiceRegistry,
     /// The plugins' network.
     pub(crate) net: ac_plugin_net::NetService,
     /// Hosts the player approved this session: (plugin id, host).
@@ -127,7 +138,27 @@ impl Services {
         self.filters.release(id);
         self.storage.release(id);
         self.status.release(id);
+        self.plugin_services.release(id);
         self.net.release(id);
+    }
+
+    /// Plugin `id` failed answering another plugin's question: it is
+    /// unloaded once the asking call returns, and until then its services
+    /// are gone and nothing asks it anything again. Noted once.
+    fn fault(&mut self, id: &str, reason: String) {
+        if self.has_faulted(id) {
+            return;
+        }
+        self.plugin_services.release(id);
+        self.faulted.push((id.to_owned(), reason));
+    }
+
+    /// Whether plugin `id` failed answering a question and waits to be
+    /// unloaded.
+    pub(crate) fn has_faulted(&self, id: &str) -> bool {
+        self.faulted
+            .iter()
+            .any(|(faulted, _)| faulted.eq_ignore_ascii_case(id))
     }
 }
 
@@ -157,15 +188,41 @@ pub(crate) struct Context<'a> {
     pub(crate) services: &'a mut Services,
     pub(crate) settings: &'a PluginSessionSettings,
     pub(crate) storage_roots: &'a StorageRoots,
+    /// How long other plugins took to answer the questions the import being
+    /// carried out asked them: their time, left out of the caller's
+    /// ([`crate::instance::Handled::lent`]).
+    pub(crate) lent: Duration,
+    /// The same, in the watchdog's epochs
+    /// ([`crate::instance::Handled::lent_epochs`]).
+    pub(crate) lent_epochs: u64,
+    /// The epochs the whole entry call (a tick, an event, a command) lent
+    /// other plugins so far, over all its imports.
+    pub(crate) lent_in_call: u64,
+    /// The most an entry call may lend other plugins, epochs: one call
+    /// deadline. Each answer has its own deadline, and the caller's clock
+    /// stops while it waits, so without it a caller asking in a loop would
+    /// hold the session for as long as it kept asking.
+    pub(crate) lend_ceiling: u64,
 }
 
-/// Carries out one import for the plugin `manifest`. `others` is none
-/// inside a callback (a plugin answering a question cannot ask a third).
+impl Context<'_> {
+    /// Whether the entry call already lent other plugins as much time as
+    /// it may: it asks no plugin anything more.
+    fn lent_enough(&self) -> bool {
+        self.lent_in_call >= self.lend_ceiling
+    }
+}
+
+/// Carries out one import for the plugin `manifest`, which can answer
+/// callbacks when `answers` (it exports `openac_callback`). `others` is
+/// none inside a callback (a plugin answering a question cannot ask a
+/// third).
 pub(crate) fn handle_import(
     import: Import,
     request: &[u8],
     manifest: &PluginManifest,
     directory: &std::path::Path,
+    answers: bool,
     cx: &mut Context<'_>,
     others: Option<&mut Others<'_>>,
 ) -> Result<Vec<u8>, String> {
@@ -385,6 +442,28 @@ pub(crate) fn handle_import(
             let owner = String::from_bytes_at(request, version).map_err(bad)?;
             services.status.capture(&owner).to_bytes_at(version)
         }
+        // P. Plugin services.
+        Import::ServiceRegister => {
+            let registration = ServiceRegistration::from_bytes_at(request, version).map_err(bad)?;
+            if answers {
+                services.plugin_services.register(id, &registration)
+            } else {
+                Err(ServiceError::NoCallback)
+            }
+            .to_bytes_at(version)
+        }
+        Import::ServiceUnregister => {
+            let handle = u32::from_bytes_at(request, version).map_err(bad)?;
+            services
+                .plugin_services
+                .unregister(id, handle)
+                .to_bytes_at(version)
+        }
+        Import::Services => services.plugin_services.available().to_bytes_at(version),
+        Import::ServiceCall => {
+            let call = ServiceCall::from_bytes_at(request, version).map_err(bad)?;
+            call_service(id, call, others, cx).to_bytes_at(version)
+        }
         // N. Storage.
         Import::StorageRead => {
             let key = StorageKey::from_bytes_at(request, version).map_err(bad)?;
@@ -535,7 +614,8 @@ fn ask_classifier(
 
 /// Asks plugin `owner` `callback`; `None` when it does not answer (it is
 /// the caller, has no callback export, the call is inside another
-/// callback, or it faults, which unloads it after the call).
+/// callback, the caller's entry call already lent other plugins all the
+/// time it may, or it faults, which unloads it after the call).
 fn ask_plugin(
     caller: &str,
     owner: &str,
@@ -546,7 +626,83 @@ fn ask_plugin(
     if owner.eq_ignore_ascii_case(caller) {
         return None;
     }
-    let target = others?.find(owner)?;
+    if cx.services.has_faulted(owner) || cx.lent_enough() {
+        return None;
+    }
+    match put(others?.find(owner)?, cx, callback) {
+        Asked::Answered(answer) => answer,
+        Asked::Faulted { .. } => None,
+    }
+}
+
+/// Calls service `call` of another plugin for plugin `caller`: the owner
+/// answers through its callback export, under its own deadline, unless
+/// the caller's entry call already lent other plugins all the time it may
+/// ([`Context::lend_ceiling`]).
+fn call_service(
+    caller: &str,
+    call: ServiceCall,
+    others: Option<&mut Others<'_>>,
+    cx: &mut Context<'_>,
+) -> Result<Vec<u8>, ServiceError> {
+    let too_large = || ServiceError::TooLarge(u32::try_from(MAX_PAYLOAD).unwrap_or(u32::MAX));
+    if call.payload.len() > MAX_PAYLOAD {
+        return Err(too_large());
+    }
+    let others = others.ok_or(ServiceError::Nested)?;
+    let (owner, handle) = cx
+        .services
+        .plugin_services
+        .find(&call.service_id)
+        .ok_or(ServiceError::NotFound)?;
+    if owner.eq_ignore_ascii_case(caller) {
+        return Err(ServiceError::SelfCall);
+    }
+    let target = others.find(&owner).ok_or(ServiceError::NotFound)?;
+    if cx.lent_enough() {
+        return Err(ServiceError::OutOfTime);
+    }
+    let request = Callback::ServiceRequest(ServiceRequest {
+        handle,
+        caller_id: caller.to_owned(),
+        payload: call.payload,
+    });
+    match put(target, cx, &request) {
+        Asked::Answered(Some(CallbackAnswer::Service(Ok(reply)))) => {
+            if reply.len() > MAX_PAYLOAD {
+                Err(too_large())
+            } else {
+                Ok(reply)
+            }
+        }
+        Asked::Answered(Some(CallbackAnswer::Service(Err(reason)))) => {
+            if reason.len() > MAX_PAYLOAD {
+                Err(too_large())
+            } else {
+                Err(ServiceError::Refused(reason))
+            }
+        }
+        Asked::Answered(_) => Err(ServiceError::Refused(
+            "the service gave no answer".to_owned(),
+        )),
+        Asked::Faulted { stuck: true } => Err(ServiceError::TimedOut),
+        Asked::Faulted { stuck: false } => Err(ServiceError::Faulted),
+    }
+}
+
+/// What came of asking a plugin a question.
+enum Asked {
+    /// Its answer; none from a plugin without a callback export, or one
+    /// that does not decode.
+    Answered(Option<CallbackAnswer>),
+    /// It faulted (`stuck`: it ran past its deadline); it is unloaded once
+    /// the caller's call returns.
+    Faulted { stuck: bool },
+}
+
+/// Asks plugin `target` `callback` through its callback export, as a call
+/// of its own: its time is its own ([`Context::lent`]).
+fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked {
     // The question as the plugin it goes to reads it: a record field a later
     // API version added is left out for a plugin built before it.
     let version = target.manifest.api_version;
@@ -558,9 +714,13 @@ fn ask_plugin(
     } = target;
     let manifest: &PluginManifest = manifest;
     let directory: &std::path::Path = directory;
+    let answers = instance.answers_callbacks();
+    let started = Instant::now();
+    let started_epoch = instance.epochs_now();
     let result = {
         let mut handler = |import: Import, request: &[u8]| {
-            handle_import(import, request, manifest, directory, cx, None)
+            handle_import(import, request, manifest, directory, answers, cx, None)
+                .map(Handled::from)
         };
         instance.callback(
             &bytes,
@@ -568,12 +728,19 @@ fn ask_plugin(
             &mut handler,
         )
     };
+    cx.lent += started.elapsed();
+    let lent = instance.epochs_now().saturating_sub(started_epoch);
+    cx.lent_epochs = cx.lent_epochs.saturating_add(lent);
+    cx.lent_in_call = cx.lent_in_call.saturating_add(lent);
     match result {
-        Ok(Some(answer)) => CallbackAnswer::from_bytes_at(&answer, version).ok(),
-        Ok(None) => None,
+        Ok(answer) => {
+            Asked::Answered(answer.and_then(|a| CallbackAnswer::from_bytes_at(&a, version).ok()))
+        }
         Err(fault) => {
-            cx.services.faulted.push((manifest.id.clone(), fault));
-            None
+            cx.services.fault(&manifest.id, fault);
+            Asked::Faulted {
+                stuck: instance.was_stuck(),
+            }
         }
     }
 }

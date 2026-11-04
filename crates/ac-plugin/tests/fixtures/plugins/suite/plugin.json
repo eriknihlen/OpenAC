@@ -1,0 +1,11 @@
+{
+  "id": "openac.suite",
+  "displayName": "Suite",
+  "version": "0.1.0",
+  "entry": "suite.wasm",
+  "apiVersion": "1.7",
+  "permissionsVersion": 1,
+  "permissions": [
+    { "name": "chat", "note": "Its chat filter and input interceptor." }
+  ]
+}

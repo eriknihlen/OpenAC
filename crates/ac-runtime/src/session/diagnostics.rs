@@ -47,6 +47,11 @@ pub struct NetDiagnostics {
     /// container is asked for, opens, is refused or closes, when the open
     /// one leaves the world, and for each plugin close with its answer.
     pub probe_external_container: bool,
+    /// `OPENAC_POSITION_LOG=1`: `[position]` lines for objects within
+    /// 30 m of the character (each server position and how it was handled,
+    /// and a body that stays more than 4 m from the server's place), and
+    /// for each movement the server orders for the character.
+    pub position_log: bool,
 }
 
 impl NetDiagnostics {
@@ -60,6 +65,7 @@ impl NetDiagnostics {
             probe_net: one("OPENAC_PROBE_NET"),
             motion_log: one(MOTION_LOG_VAR),
             probe_external_container: one("OPENAC_PROBE_EXTERNAL_CONTAINER"),
+            position_log: one("OPENAC_POSITION_LOG"),
         }
     }
 
@@ -566,6 +572,7 @@ mod tests {
                 ("OPENAC_PROBE_NET", "1"),
                 ("OPENAC_MOTION_LOG", "1"),
                 ("OPENAC_PROBE_EXTERNAL_CONTAINER", "1"),
+                ("OPENAC_POSITION_LOG", "1"),
             ])),
             NetDiagnostics {
                 dump_opcodes: true,
@@ -573,6 +580,7 @@ mod tests {
                 probe_net: true,
                 motion_log: true,
                 probe_external_container: true,
+                position_log: true,
             }
         );
     }

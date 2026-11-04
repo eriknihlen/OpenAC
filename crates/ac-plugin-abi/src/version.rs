@@ -52,7 +52,7 @@ impl fmt::Display for ApiVersion {
 }
 
 /// The API version this build of the ABI provides.
-pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 6);
+pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 7);
 
 /// The oldest API version a client built on this ABI still loads.
 pub const API_MINIMUM: ApiVersion = ApiVersion::new(1, 0);
@@ -90,7 +90,7 @@ mod tests {
             API_CURRENT.minor + 1
         )));
         assert!(!is_supported(ApiVersion::new(0, 9)));
-        assert_eq!(API_CURRENT.to_string(), "1.6");
+        assert_eq!(API_CURRENT.to_string(), "1.7");
         assert_eq!(API_MINIMUM.to_string(), "1.0");
     }
 

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ac_host::PathSet;
 use ac_launcher_core::cancel::{CancelToken, Cancelled};
 use ac_launcher_core::installation::LauncherInstallRecord;
+use ac_launcher_core::launcher_log::LauncherLog;
 use ac_launcher_core::net::{HttpError, HttpRequest, HttpResponse, HttpTransport};
 use ac_launcher_core::orchestration::{
     AccountCapabilities, LauncherAccountSnapshot, LauncherActivityKind, LauncherActivityState,
@@ -1602,6 +1603,7 @@ impl ChecklistFixture {
             &self.paths,
             WebUrl::parse("https://example.test/plugins.json").unwrap(),
             Arc::new(NoNetwork),
+            LauncherLog::open(&self.paths),
         )));
         let mut window = LauncherWindow::new(parts);
         window.initialize();
@@ -2502,20 +2504,32 @@ impl PanelFixture {
     }
 
     fn add_record(&self, id: &str, version: &str) {
+        self.add_records(&[(id, version)]);
+    }
+
+    /// Records each `(id, version)` as installed from the test repository.
+    fn add_records(&self, plugins: &[(&str, &str)]) {
         let path = self
             .paths()
             .data_directory
             .join("app")
             .join("plugins-installed.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let records = plugins
+            .iter()
+            .map(|(id, version)| {
+                format!(
+                    r#"{{ "id": "{id}", "repo": "{HELLO_REPO}",
+                      "source": "listed", "version": "{version}", "tag": "wasm-v{version}",
+                      "zipSha256": "{}", "installedAt": "2026-01-01T00:00:00Z", "pending": null }}"#,
+                    "a".repeat(64)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         std::fs::write(
             &path,
-            format!(
-                r#"{{ "schemaVersion": 1, "plugins": [{{ "id": "{id}", "repo": "{HELLO_REPO}",
-                  "source": "listed", "version": "{version}", "tag": "wasm-v{version}",
-                  "zipSha256": "{}", "installedAt": "2026-01-01T00:00:00Z", "pending": null }}] }}"#,
-                "a".repeat(64)
-            ),
+            format!(r#"{{ "schemaVersion": 1, "plugins": [{records}] }}"#),
         )
         .unwrap();
     }
@@ -2562,6 +2576,67 @@ impl PanelFixture {
             .add(&tagged, manifest_json(id, version).as_bytes());
     }
 
+    /// Publishes each `(tag, id, version)` on the repository's releases feed,
+    /// the tag serving `id`'s manifest at `version`.
+    fn releases(&self, releases: &[(&str, &str, &str)]) {
+        let links: String = releases
+            .iter()
+            .map(|(tag, ..)| {
+                format!(
+                    r#"<entry><link rel="alternate" href="https://github.com/{HELLO_REPO}/releases/tag/{tag}"/></entry>"#
+                )
+            })
+            .collect();
+        let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+            .unwrap()
+            .to_string();
+        self.server.add(
+            &feed,
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">{links}</feed>"#
+            )
+            .as_bytes(),
+        );
+        for (tag, id, version) in releases {
+            let tagged =
+                ac_launcher_core::plugins::github::tagged_asset(HELLO_REPO, tag, "plugin.json")
+                    .unwrap()
+                    .to_string();
+            self.server
+                .add(&tagged, manifest_json(id, version).as_bytes());
+        }
+    }
+
+    /// Publishes the zip and its checksum for `id` at `version` under `tag`,
+    /// so an install of that release goes through.
+    fn release_zip(&self, tag: &str, id: &str, version: &str) {
+        let zip_name = format!("{id}-{version}.zip");
+        let wasm = format!("{id}.wasm");
+        let manifest = manifest_json(id, version);
+        let zip_bytes = common::fixtures::create_zip(
+            &[
+                ("plugin.json", manifest.as_bytes(), None),
+                (wasm.as_str(), b"binary".as_slice(), None),
+            ],
+            common::fixtures::Compression::Stored,
+        );
+        let asset = |name: &str| {
+            ac_launcher_core::plugins::github::tagged_asset(HELLO_REPO, tag, name)
+                .unwrap()
+                .to_string()
+        };
+        self.server.add(
+            &asset(&format!("{zip_name}.sha256")),
+            format!(
+                "{}  {zip_name}",
+                ac_launcher_core::integrity::sha256_hex(&zip_bytes)
+            )
+            .as_bytes(),
+        );
+        self.server.add(&asset(&zip_name), &zip_bytes);
+    }
+
     fn window(&self) -> LauncherWindow {
         self.window_with(Arc::new(Fake::default()))
     }
@@ -2572,6 +2647,7 @@ impl PanelFixture {
             &self.paths(),
             WebUrl::parse(LIST_URI).unwrap(),
             self.server.transport(),
+            LauncherLog::open(&self.paths()),
         )));
         let mut window = LauncherWindow::new(parts);
         window.initialize();
@@ -2786,6 +2862,177 @@ fn update_is_offered_only_for_launcher_managed_plugins_but_remove_is_offered_for
     assert_eq!(direct.source_badge, "Direct install");
 }
 
+// A repository publishing several plugins: each is checked against its own
+// releases, never another plugin's newer one.
+#[test]
+fn the_update_check_offers_only_the_installed_plugins_own_release() {
+    let withheld = |releases: &[(&str, &str, &str)]| {
+        let fixture = PanelFixture::new();
+        fixture.write_manifest("edwards.managed", "0.1.0");
+        fixture.add_record("edwards.managed", "0.1.0");
+        fixture.list(&[], "");
+        fixture.releases(releases);
+        let mut window = fixture.window();
+        check(&mut window);
+        window
+            .plugins
+            .installed
+            .iter()
+            .find(|row| row.info.id == "edwards.managed")
+            .unwrap()
+            .update_withheld_reason
+            .clone()
+    };
+    // Another plugin's newer release, in either tag form, is no update.
+    assert_eq!(withheld(&[("wasm-v0.2.0", "edwards.other", "0.2.0")]), None);
+    assert_eq!(
+        withheld(&[("wasm-edwards.other-v0.2.0", "edwards.other", "0.2.0")]),
+        None
+    );
+    // Its own is found (and withheld only for want of a client).
+    assert_eq!(
+        withheld(&[
+            ("wasm-edwards.other-v0.3.0", "edwards.other", "0.3.0"),
+            ("wasm-edwards.managed-v0.2.0", "edwards.managed", "0.2.0"),
+        ])
+        .as_deref(),
+        Some("client not installed")
+    );
+}
+
+#[test]
+fn discover_offers_each_plugin_of_one_repository_reading_its_feed_once() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.vision", "edwards.navigation"], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.select_plugins_tab();
+    window.poll();
+    let view = window.plugins.discover_view();
+    let mut offered: Vec<(String, Option<String>)> = view
+        .iter()
+        .map(|&row| {
+            let row = &window.plugins.discover[row];
+            (
+                row.entry.id.clone(),
+                row.latest_version().map(str::to_owned),
+            )
+        })
+        .collect();
+    offered.sort();
+    assert_eq!(
+        offered,
+        [
+            ("edwards.navigation".to_owned(), Some("0.4.0".to_owned())),
+            ("edwards.vision".to_owned(), Some("1.2.0".to_owned())),
+        ]
+    );
+    let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+        .unwrap()
+        .to_string();
+    assert_eq!(fixture.server.count(&feed), 1);
+}
+
+// A broken index is a publisher's mistake: the player still gets the feed's
+// releases, and the launcher log says why the index was ignored.
+#[test]
+fn a_malformed_plugin_index_is_logged_and_the_feed_still_offers() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.vision"], "");
+    fixture.releases(&[("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0")]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    check(&mut window);
+    window.select_plugins_tab();
+    window.poll();
+    assert_eq!(window.plugins.discover_view().len(), 1);
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Plugin index of {HELLO_REPO} ignored: The plugin index is invalid"
+        )),
+        "{log}"
+    );
+}
+
+// Two installed plugins of one repository share its index: a broken one is
+// logged once a check, not once for each of them.
+#[test]
+fn a_malformed_plugin_index_is_logged_once_a_check_for_a_repository() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.write_manifest("edwards.vision", "1.0.0");
+    fixture.write_manifest("edwards.navigation", "0.3.0");
+    fixture.add_records(&[("edwards.vision", "1.0.0"), ("edwards.navigation", "0.3.0")]);
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    check(&mut window);
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert_eq!(
+        log.matches(&format!("Plugin index of {HELLO_REPO} ignored"))
+            .count(),
+        1,
+        "{log}"
+    );
+}
+
+// The backend writes to the launcher's own log, never a second instance on
+// the same file that would roll it over on its own count.
+#[test]
+fn the_plugin_backend_writes_to_the_log_it_is_given() {
+    let fixture = PanelFixture::new();
+    let given = fixture.paths().root_directory().join("given.log");
+    let composition = PluginComposition::new(
+        &fixture.paths(),
+        WebUrl::parse(LIST_URI).unwrap(),
+        fixture.server.transport(),
+        LauncherLog::at(
+            &given,
+            1024 * 1024,
+            ac_host::local_time::LocalZone::fixed(0),
+        ),
+    );
+    composition.log_index_warning_text(HELLO_REPO, Some("a test warning"));
+    let log = std::fs::read_to_string(&given).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Plugin index of {HELLO_REPO} ignored: a test warning"
+        )),
+        "{log}"
+    );
+    assert!(!fixture.paths().launcher_log_file().exists());
+}
+
 // OpenAC LauncherWindowViewModelTests.DiscoverHidesABlockedListedPluginAndMakesNoDetailRequestForIt.
 #[test]
 fn discover_hides_a_blocked_listed_plugin_and_makes_no_detail_request_for_it() {
@@ -2988,14 +3235,36 @@ fn without_an_installed_version_the_client_beside_the_launcher_is_used() {
 // --- Add from URL, Remove, Show beta plugins ----------------------------------------------
 
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnAlreadyInstalledRepoShowsAMessageWithNoExtraRequest
-// and AddFromUrlMatchesAnAlreadyInstalledRepoCaseInsensitively.
+// and AddFromUrlMatchesAnAlreadyInstalledRepoCaseInsensitively. A repository
+// can publish several plugins, so it is read before "already installed" is
+// said: one of its other plugins may not be.
 #[test]
-fn add_from_url_for_an_already_installed_repo_shows_a_message_with_no_extra_request() {
+fn add_from_url_for_an_already_installed_plugin_shows_a_message() {
     let fixture = PanelFixture::new();
     fixture.write_manifest("edwards.hello", "0.1.0");
     fixture.add_record("edwards.hello", "0.1.0");
+    // GitHub answers a repository in any case; the record matches ignoring it.
+    let typed = "ShaneEdwards/OpenAC-Plugin-Hello";
+    let feed = ac_launcher_core::plugins::github::releases_feed(typed)
+        .unwrap()
+        .to_string();
+    fixture.server.add(
+        &feed,
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><entry><link rel="alternate" href="https://github.com/{HELLO_REPO}/releases/tag/wasm-v0.2.0"/></entry></feed>"#
+        )
+        .as_bytes(),
+    );
+    let tagged =
+        ac_launcher_core::plugins::github::tagged_asset(typed, "wasm-v0.2.0", "plugin.json")
+            .unwrap()
+            .to_string();
+    fixture
+        .server
+        .add(&tagged, manifest_json("edwards.hello", "0.2.0").as_bytes());
     let mut window = fixture.window();
-    window.plugins.add_from_url_text = "https://github.com/ShaneEdwards/OpenAC-Plugin-Hello".into();
+    window.plugins.add_from_url_text = format!("https://github.com/{typed}");
     window.add_from_url();
     window.poll();
     assert_eq!(
@@ -3003,7 +3272,199 @@ fn add_from_url_for_an_already_installed_repo_shows_a_message_with_no_extra_requ
         Some("edwards.hello is already installed.")
     );
     assert!(window.plugins.add_from_url_text.is_empty());
-    assert!(fixture.server.requests().is_empty());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
+#[test]
+fn add_from_url_asks_which_plugin_when_a_repository_publishes_several() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(!window.plugins.install_dialog.is_open);
+    let choices: Vec<(String, String)> = window
+        .plugins
+        .add_from_url_choices
+        .iter()
+        .map(|choice| (choice.display_name.clone(), choice.version.clone()))
+        .collect();
+    assert_eq!(
+        choices,
+        [
+            ("edwards.navigation".to_owned(), "0.4.0".to_owned()),
+            ("edwards.vision".to_owned(), "1.2.0".to_owned()),
+        ]
+    );
+    window.choose_add_from_url(1);
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    let dialog = &window.plugins.install_dialog;
+    assert!(dialog.is_open);
+    assert_eq!(dialog.display_name(), "edwards.vision");
+    assert_eq!(
+        dialog.request.as_ref().unwrap().pinned_tag.as_deref(),
+        Some("wasm-edwards.vision-v1.2.0")
+    );
+    // Cancelling the picker offers nothing.
+    window.close_install_dialog();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.add_from_url_choices.len(), 2);
+    window.cancel_add_from_url_choice();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
+/// A window whose Add from URL found three plugins of the test repository,
+/// none installed, each release installable.
+fn add_from_url_with_three_plugins(fixture: &PanelFixture) -> LauncherWindow {
+    fixture.list(&[], "");
+    let releases = [
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+        ("wasm-edwards.macro-v2.0.0", "edwards.macro", "2.0.0"),
+    ];
+    fixture.releases(&releases);
+    for (tag, id, version) in releases {
+        fixture.release_zip(tag, id, version);
+    }
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    window
+}
+
+fn choice_names(window: &LauncherWindow) -> Vec<String> {
+    window
+        .plugins
+        .add_from_url_choices
+        .iter()
+        .map(|choice| choice.display_name.clone())
+        .collect()
+}
+
+// Adding one plugin of several brings the pick back with the rest, so the
+// player never types the address again.
+#[test]
+fn add_from_url_asks_again_for_the_rest_after_an_install() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(1);
+    assert!(window.plugins.install_dialog.is_open);
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    window.confirm_install();
+    window.poll();
+    assert!(
+        !window.plugins.install_dialog.is_open,
+        "{:?}",
+        window.plugins.install_dialog.error
+    );
+    assert!(
+        fixture
+            .paths()
+            .plugins_directory()
+            .join("edwards.navigation")
+            .join("plugin.json")
+            .is_file()
+    );
+    assert_eq!(choice_names(&window), ["edwards.macro", "edwards.vision"]);
+    // The last one left is still asked about, and Cancel ends it.
+    window.choose_add_from_url(0);
+    window.confirm_install();
+    window.poll();
+    assert_eq!(choice_names(&window), ["edwards.vision"]);
+    window.cancel_add_from_url_choice();
+    assert!(!window.is_modal_open());
+}
+
+// Cancelling the install of one goes back to the pick with every plugin
+// still not installed, that one included.
+#[test]
+fn add_from_url_asks_again_after_an_install_is_cancelled() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    window.choose_add_from_url(2);
+    window.close_install_dialog();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.close_active_modal();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.is_modal_open());
+}
+
+// The pick is a dialog: it holds the window, and Escape cancels it.
+#[test]
+fn add_from_url_asks_in_a_dialog_that_escape_cancels() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.add_from_url_choices.len(), 2);
+    assert!(window.is_modal_open());
+    window.close_active_modal();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert!(!window.is_modal_open());
+    assert!(!window.plugins.install_dialog.is_open);
+}
+
+#[test]
+fn add_from_url_offers_the_one_plugin_of_a_repository_not_yet_installed() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.vision", "1.2.0");
+    fixture.add_record("edwards.vision", "1.2.0");
+    fixture.list(&[], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    let dialog = &window.plugins.install_dialog;
+    assert!(dialog.is_open);
+    assert_eq!(dialog.display_name(), "edwards.navigation");
 }
 
 // OpenAC LauncherPluginsViewModel.AddFromUrlAsync (a URL that is not a repository).
@@ -3039,6 +3500,188 @@ fn add_from_url_refuses_a_plugin_blocked_for_all_versions() {
         Some("'edwards.blocked' is blocked: Sends chat spam.")
     );
     assert!(!window.plugins.install_dialog.is_open);
+}
+
+// A blocked plugin of a repository publishing several is never one of the
+// choices, not at first and not when the pick comes back.
+#[test]
+fn add_from_url_never_offers_a_blocked_plugin_among_several() {
+    let fixture = PanelFixture::new();
+    let releases = [
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+        ("wasm-edwards.macro-v2.0.0", "edwards.macro", "2.0.0"),
+    ];
+    fixture.releases(&releases);
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(0);
+    window.close_install_dialog();
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+    window.cancel_add_from_url_choice();
+    // With one plugin left that is not blocked, it is offered at once.
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." },
+           { "id": "edwards.vision", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert!(window.plugins.add_from_url_choices.is_empty());
+    assert_eq!(
+        window.plugins.install_dialog.display_name(),
+        "edwards.navigation"
+    );
+}
+
+// A plugin blocked after the pick was shown is refused when chosen, and the
+// pick comes back without it.
+#[test]
+fn add_from_url_drops_a_choice_refused_as_blocked() {
+    let fixture = PanelFixture::new();
+    let mut window = add_from_url_with_three_plugins(&fixture);
+    fixture.list(
+        &[],
+        r#"{ "id": "edwards.macro", "versions": ["*"], "reason": "Sends chat spam." }"#,
+    );
+    check(&mut window);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.macro", "edwards.navigation", "edwards.vision"]
+    );
+    window.choose_add_from_url(0);
+    assert_eq!(
+        window.plugins.error.as_deref(),
+        Some("'edwards.macro' is blocked: Sends chat spam.")
+    );
+    assert!(!window.plugins.install_dialog.is_open);
+    assert_eq!(
+        choice_names(&window),
+        ["edwards.navigation", "edwards.vision"]
+    );
+}
+
+// The list names plugins, not repositories: another plugin of a listed
+// plugin's repository is still unlisted.
+#[test]
+fn add_from_url_marks_an_unlisted_plugin_of_a_listed_repository_unlisted() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.vision", "1.2.0");
+    fixture.add_record("edwards.vision", "1.2.0");
+    fixture.list(&["edwards.vision"], "");
+    fixture.releases(&[
+        ("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0"),
+        (
+            "wasm-edwards.navigation-v0.4.0",
+            "edwards.navigation",
+            "0.4.0",
+        ),
+    ]);
+    let mut window = fixture.window();
+    check(&mut window);
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    let dialog = &window.plugins.install_dialog;
+    assert_eq!(dialog.display_name(), "edwards.navigation");
+    assert!(
+        dialog
+            .warning_text()
+            .contains("This plugin is not on the OpenAC plugin list."),
+        "{}",
+        dialog.warning_text()
+    );
+}
+
+#[test]
+fn add_from_url_logs_a_malformed_plugin_index() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[("wasm-edwards.vision-v1.2.0", "edwards.vision", "1.2.0")]);
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(&index, b"{ not json");
+    let mut window = fixture.window();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(
+        window.plugins.install_dialog.display_name(),
+        "edwards.vision"
+    );
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert_eq!(
+        log.matches(&format!("Plugin index of {HELLO_REPO} ignored:"))
+            .count(),
+        1,
+        "{log}"
+    );
+}
+
+// A repository naming more plugins than one Add from URL searches: the
+// launcher log says how many were left out.
+#[test]
+fn add_from_url_logs_the_plugins_past_the_search_limit() {
+    let fixture = PanelFixture::new();
+    fixture.list(&[], "");
+    fixture.releases(&[("wasm-edwards.p00-v1.0.0", "edwards.p00", "1.0.0")]);
+    let entries: Vec<String> = (0..18)
+        .map(|n| {
+            format!(r#"{{ "id": "edwards.p{n:02}", "stable": "wasm-edwards.p{n:02}-v1.0.0" }}"#)
+        })
+        .collect();
+    let index = ac_launcher_core::plugins::github::tagged_asset(
+        HELLO_REPO,
+        ac_launcher_core::plugins::PLUGIN_INDEX_TAG,
+        ac_launcher_core::plugins::PLUGIN_INDEX_ASSET,
+    )
+    .unwrap()
+    .to_string();
+    fixture.server.add(
+        &index,
+        format!(
+            r#"{{ "schemaVersion": 1, "plugins": [{}] }}"#,
+            entries.join(",")
+        )
+        .as_bytes(),
+    );
+    let mut window = fixture.window();
+    window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
+    window.add_from_url();
+    window.poll();
+    assert_eq!(window.plugins.install_dialog.display_name(), "edwards.p00");
+    let log = std::fs::read_to_string(fixture.paths().launcher_log_file()).unwrap();
+    assert!(
+        log.contains(&format!(
+            "Add from URL: {HELLO_REPO} names 2 more plugin(s) than the 16 searched"
+        )),
+        "{log}"
+    );
 }
 
 // OpenAC LauncherWindowViewModelTests.AddFromUrlForAnUnlistedRepoOpensTheInstallDialog (the

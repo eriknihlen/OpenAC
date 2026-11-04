@@ -11,12 +11,13 @@ use std::time::SystemTime;
 use ac_host::PathSet;
 
 use crate::cancel::CancelToken;
+use crate::launcher_log::LauncherLog;
 use crate::net::HttpTransport;
 use crate::plugins::{
     InstalledPluginInfo, InstalledPluginRecord, InstalledPluginRecordStore, MAXIMUM_DOCUMENT_BYTES,
-    PermissionDeclaration, PluginCatalog, PluginInstaller, PluginInventory, PluginReleaseClient,
-    PluginReleaseFetchResult, PluginReleaseResolveResult, PluginReleaseResolver, describe,
-    version_only_reason,
+    MAXIMUM_REPOSITORY_PLUGINS, PermissionDeclaration, PluginCatalog, PluginInstaller,
+    PluginInventory, PluginReleaseCandidates, PluginReleaseClient, PluginReleaseFetchResult,
+    PluginReleaseResolveResult, PluginReleaseResolver, describe, version_only_reason,
 };
 use crate::updates::{ClientVersionResolution, LauncherVersion};
 use crate::url::WebUrl;
@@ -97,6 +98,7 @@ pub struct PluginComposition {
     pub inventory: PluginInventory,
     records: Arc<Mutex<InstalledPluginRecordStore>>,
     current_catalog: Mutex<Option<PluginCatalog>>,
+    log: LauncherLog,
 }
 
 impl std::fmt::Debug for PluginComposition {
@@ -108,10 +110,17 @@ impl std::fmt::Debug for PluginComposition {
 }
 
 impl PluginComposition {
-    /// Builds the backend for `paths` over `transport`. A record file that
-    /// cannot be read only costs the launcher its memory of which plugins it
-    /// manages; it never keeps the window from opening.
-    pub fn new(paths: &PathSet, list_uri: WebUrl, transport: Arc<dyn HttpTransport>) -> Self {
+    /// Builds the backend for `paths` over `transport`, writing what only a
+    /// publisher needs to `log` (the launcher's own, so one instance rolls
+    /// the file over). A record file that cannot be read only costs the
+    /// launcher its memory of which plugins it manages; it never keeps the
+    /// window from opening.
+    pub fn new(
+        paths: &PathSet,
+        list_uri: WebUrl,
+        transport: Arc<dyn HttpTransport>,
+        log: LauncherLog,
+    ) -> Self {
         let mut store = InstalledPluginRecordStore::for_paths(paths);
         if store.load().is_err() {
             store.records.clear();
@@ -128,6 +137,33 @@ impl PluginComposition {
             inventory: PluginInventory::new(paths),
             records,
             current_catalog: Mutex::new(None),
+            log,
+        }
+    }
+
+    /// Keeps a repository's index warning in the launcher log: a publisher's
+    /// mistake the player never sees.
+    pub fn log_index_warning(&self, repo: &str, candidates: &PluginReleaseCandidates) {
+        self.log_index_warning_text(repo, candidates.index_warning.as_deref());
+    }
+
+    /// As [`Self::log_index_warning`], from the warning itself.
+    pub fn log_index_warning_text(&self, repo: &str, warning: Option<&str>) {
+        if let Some(warning) = warning {
+            self.log
+                .line(&format!("Plugin index of {repo} ignored: {warning}"));
+        }
+    }
+
+    /// Notes in the launcher log that a repository names more plugins than
+    /// one Add from URL searches, so the publisher learns why some are
+    /// never offered.
+    pub fn log_plugins_not_searched(&self, repo: &str, not_searched: usize) {
+        if not_searched > 0 {
+            self.log.line(&format!(
+                "Add from URL: {repo} names {not_searched} more plugin(s) than the \
+                 {MAXIMUM_REPOSITORY_PLUGINS} searched; those were not offered."
+            ));
         }
     }
 
@@ -227,6 +263,8 @@ impl PluginComposition {
         let mut updates_available = HashMap::new();
         let mut update_withheld_reasons = HashMap::new();
         if !rate_limited {
+            let resolver = self.release_resolver.pass();
+            let mut warned = HashSet::new();
             for info in &installed {
                 let Some(record) = self.find_record(&info.id) else {
                     continue;
@@ -234,7 +272,14 @@ impl PluginComposition {
                 if record.pending.is_some() {
                     continue;
                 }
-                let check = self.evaluate_update(&record, catalog.as_ref(), client, cancel);
+                let check = self.evaluate_update(
+                    &resolver,
+                    &record,
+                    catalog.as_ref(),
+                    client,
+                    &mut warned,
+                    cancel,
+                );
                 if let Some(available) = check.available {
                     updates_available.insert(info.id.to_lowercase(), available);
                 } else if let Some(reason) = check.withheld_reason {
@@ -296,17 +341,27 @@ impl PluginComposition {
             return PluginSingleCheckResult::default();
         }
         let catalog = self.current_catalog();
-        self.evaluate_update(&record, catalog.as_ref(), client, cancel)
+        self.evaluate_update(
+            &self.release_resolver,
+            &record,
+            catalog.as_ref(),
+            client,
+            &mut HashSet::new(),
+            cancel,
+        )
     }
 
     /// An advisory badge, not an enforcement decision (the installer refuses
     /// the update itself). Names a reason only when a newer release exists
-    /// but is not offered; already current stays silent.
+    /// but is not offered; already current stays silent. A repository's
+    /// index warning is logged once for the repositories in `warned`.
     fn evaluate_update(
         &self,
+        resolver: &PluginReleaseResolver,
         record: &InstalledPluginRecord,
         catalog: Option<&PluginCatalog>,
         client: Option<&ClientVersionResolution>,
+        warned: &mut HashSet<String>,
         cancel: &CancelToken,
     ) -> PluginSingleCheckResult {
         let Some(current) = record
@@ -316,9 +371,16 @@ impl PluginComposition {
         else {
             return PluginSingleCheckResult::default();
         };
-        let Ok(PluginReleaseResolveResult::Success(resolution)) =
-            self.release_resolver
-                .resolve(&record.repo, record.channel, cancel)
+        let Ok(candidates) =
+            resolver.resolve_plugin_candidates(&record.repo, &record.id, record.channel, cancel)
+        else {
+            return PluginSingleCheckResult::default();
+        };
+        if candidates.index_warning.is_some() && warned.insert(record.repo.to_lowercase()) {
+            self.log_index_warning(&record.repo, &candidates);
+        }
+        let PluginReleaseResolveResult::Success(resolution) =
+            candidates.for_channel(record.channel)
         else {
             // Rate limited, unavailable, invalid (a newer permission vocabulary included: the
             // client's parser refuses it) and a pre-release latest are all silent: none is a
@@ -326,6 +388,11 @@ impl PluginComposition {
             return PluginSingleCheckResult::default();
         };
         let manifest = &resolution.manifest;
+        // Resolving by id already skips another plugin's release; this keeps
+        // an update from ever replacing one plugin with another.
+        if !manifest.id.eq_ignore_ascii_case(&record.id) {
+            return PluginSingleCheckResult::default();
+        }
         let Some(remote) = LauncherVersion::try_parse(&manifest.version) else {
             return PluginSingleCheckResult::default();
         };

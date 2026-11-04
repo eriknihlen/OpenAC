@@ -185,6 +185,7 @@ impl PluginBinding<'_> {
                 seconds_since_health_update: f64::INFINITY,
                 height_difference: delta.z,
                 is_dead: deaths.is_dead_incarnation(guid, incarnation),
+                server_position: object.accepted_position().map(super::world::position_of),
             });
         }
         targets.sort_by_key(|t| t.object_id);

@@ -3,10 +3,10 @@
 //! [`FakeHost`] answers every import the way the client does (the same
 //! encoded requests and replies the wasm build exchanges), records what the
 //! plugin did, and drives the plugin's lifecycle. The host services (log,
-//! settings, verbs, chat lines, the character) are answered from its
-//! fields; every other client function answers what a test set with
-//! [`FakeHost::set_reply`], else its inert reply (nothing found,
-//! unavailable):
+//! settings, verbs, chat lines, the character, plugin services) are
+//! answered from its fields; every other client function answers what a
+//! test set with [`FakeHost::set_reply`], else its inert reply (nothing
+//! found, unavailable):
 //!
 //! ```
 //! use openac_plugin::testing::FakeHost;
@@ -37,6 +37,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use ac_plugin_abi::callback::{Callback, CallbackAnswer};
 use ac_plugin_abi::host::Clock;
+use ac_plugin_abi::services::{
+    MAX_DESCRIPTION, MAX_PAYLOAD, MAX_SERVICES, ServiceCall, ServiceError, ServiceInfo,
+    ServiceRegistration, ServiceRequest, is_valid_name,
+};
 use ac_plugin_abi::verbs::{already_registered, normalize_verb, split_command_line};
 use ac_plugin_abi::{
     API_CURRENT, Call, CharacterInfo, ChatPost, CommandCall, CommandDef, Event, Import, LogLevel,
@@ -82,6 +86,15 @@ pub struct FakeHost {
     pub spell_icons: BTreeMap<u32, u32>,
     /// Objects the fake client knows, with their icons.
     pub object_icons: BTreeMap<u32, u32>,
+    /// The services the plugin offers, by handle.
+    pub services: BTreeMap<u32, ServiceRegistration>,
+    /// Other plugins' services ([`Self::set_service`]), by id in lower
+    /// case: what they are, and what they answer.
+    other_services: BTreeMap<String, (ServiceInfo, Result<Vec<u8>, ServiceError>)>,
+    next_service: u32,
+    /// Whether the plugin is answering a callback ([`Self::ask`]): it cannot
+    /// call a service then, as in the client.
+    answering: bool,
 }
 
 impl FakeHost {
@@ -156,8 +169,118 @@ impl FakeHost {
     /// always does).
     pub fn ask<P: Plugin>(&mut self, plugin: &mut P, callback: &Callback) -> CallbackAnswer {
         let bytes = callback.to_bytes();
+        let was_answering = std::mem::replace(&mut self.answering, true);
         let answer = crate::__export::answer(plugin, &mut Host::with_transport(self), &bytes);
+        self.answering = was_answering;
         CallbackAnswer::from_bytes(&answer).expect("an encoded answer")
+    }
+
+    /// Another plugin offers service `id` (`<plugin id>/<name>`) and answers
+    /// every call of it with `reply`, as the client hands it back
+    /// (an error for no reply). The plugin hears no event for it.
+    pub fn set_service(&mut self, id: &str, reply: Result<Vec<u8>, ServiceError>) {
+        let owner = id.split_once('/').map_or(id, |(owner, _)| owner);
+        let info = ServiceInfo {
+            id: id.to_owned(),
+            owner: owner.to_owned(),
+            description: String::new(),
+        };
+        self.other_services.insert(id.to_lowercase(), (info, reply));
+    }
+
+    /// Plugin `caller` calls the plugin's service `name` with `request`, as
+    /// the client does: through the plugin's callback, its answer read
+    /// back as the caller gets it.
+    pub fn request_service<P: Plugin>(
+        &mut self,
+        plugin: &mut P,
+        name: &str,
+        caller: &str,
+        request: &[u8],
+    ) -> Result<Vec<u8>, ServiceError> {
+        if request.len() > MAX_PAYLOAD {
+            return Err(too_large());
+        }
+        let handle = self
+            .services
+            .iter()
+            .find(|(_, s)| s.name == name)
+            .map(|(handle, _)| *handle)
+            .ok_or(ServiceError::NotFound)?;
+        let callback = Callback::ServiceRequest(ServiceRequest {
+            handle,
+            caller_id: caller.to_owned(),
+            payload: request.to_vec(),
+        });
+        match self.ask(plugin, &callback) {
+            CallbackAnswer::Service(Ok(reply)) if reply.len() > MAX_PAYLOAD => Err(too_large()),
+            CallbackAnswer::Service(Ok(reply)) => Ok(reply),
+            CallbackAnswer::Service(Err(reason)) if reason.len() > MAX_PAYLOAD => Err(too_large()),
+            CallbackAnswer::Service(Err(reason)) => Err(ServiceError::Refused(reason)),
+            _ => Err(ServiceError::Refused(
+                "the service gave no answer".to_owned(),
+            )),
+        }
+    }
+
+    /// The services on offer, the plugin's own and the others', by id.
+    fn service_list(&self) -> Vec<ServiceInfo> {
+        let own = self.services.values().map(|s| ServiceInfo {
+            id: format!("{}/{}", self.plugin_id, s.name),
+            owner: self.plugin_id.clone(),
+            description: s.description.clone(),
+        });
+        let mut list: Vec<ServiceInfo> = own
+            .chain(self.other_services.values().map(|(info, _)| info.clone()))
+            .collect();
+        list.sort_by_key(|info| info.id.to_lowercase());
+        list
+    }
+
+    fn register_service(&mut self, offer: ServiceRegistration) -> Result<u32, ServiceError> {
+        if !is_valid_name(&offer.name) {
+            return Err(ServiceError::InvalidName);
+        }
+        if offer.description.len() > MAX_DESCRIPTION {
+            return Err(ServiceError::DescriptionTooLarge(
+                u32::try_from(MAX_DESCRIPTION).unwrap_or(u32::MAX),
+            ));
+        }
+        if self.services.values().any(|s| s.name == offer.name) {
+            return Err(ServiceError::AlreadyRegistered);
+        }
+        if self.services.len() >= MAX_SERVICES {
+            return Err(ServiceError::TooMany(
+                u32::try_from(MAX_SERVICES).unwrap_or(u32::MAX),
+            ));
+        }
+        self.next_service += 1;
+        self.services.insert(self.next_service, offer);
+        Ok(self.next_service)
+    }
+
+    fn call_service(&self, call: &ServiceCall) -> Result<Vec<u8>, ServiceError> {
+        if call.payload.len() > MAX_PAYLOAD {
+            return Err(too_large());
+        }
+        if self.answering {
+            return Err(ServiceError::Nested);
+        }
+        let id = call.service_id.trim().to_lowercase();
+        let own = format!("{}/", self.plugin_id.to_lowercase());
+        if let Some(name) = id.strip_prefix(&own)
+            && self.services.values().any(|s| s.name == name)
+        {
+            return Err(ServiceError::SelfCall);
+        }
+        match self.other_services.get(&id) {
+            Some((_, Ok(reply))) if reply.len() > MAX_PAYLOAD => Err(too_large()),
+            Some((_, Err(ServiceError::Refused(reason)))) if reason.len() > MAX_PAYLOAD => {
+                Err(too_large())
+            }
+            Some((_, reply)) => reply.clone(),
+            None => Err(ServiceError::NotFound),
+        }
     }
 
     /// The player typed `line`: when it names one of the plugin's verbs (or
@@ -373,6 +496,10 @@ impl FakeHost {
     }
 }
 
+fn too_large() -> ServiceError {
+    ServiceError::TooLarge(u32::try_from(MAX_PAYLOAD).unwrap_or(u32::MAX))
+}
+
 fn reply<T: Wire>(value: &T) -> Vec<u8> {
     value.to_bytes()
 }
@@ -439,6 +566,19 @@ impl Transport for FakeHost {
                 Vec::new()
             }
             Import::CharacterInfo => reply(&self.character),
+            Import::ServiceRegister => {
+                let offer: ServiceRegistration = request(import, bytes);
+                reply(&self.register_service(offer))
+            }
+            Import::ServiceUnregister => {
+                let handle: u32 = request(import, bytes);
+                reply(&self.services.remove(&handle).is_some())
+            }
+            Import::Services => reply(&self.service_list()),
+            Import::ServiceCall => {
+                let call: ServiceCall = request(import, bytes);
+                reply(&self.call_service(&call))
+            }
             Import::UiPanelRegister
             | Import::UiPanelRemove
             | Import::UiPanelSet
@@ -534,7 +674,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.6".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.7".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));
@@ -812,6 +952,35 @@ mod tests {
         assert_eq!(essence.shared_cooldown_id, 213);
         assert!((essence.cooldown_seconds - 45.0).abs() < f64::EPSILON);
         assert!(essence.is_pet_device());
+    }
+
+    // API 1.7: a hostile target and a world object carry the server's last
+    // position beside the client's own place, through the encoding.
+    #[test]
+    fn a_hostile_target_carries_the_servers_last_position() {
+        use ac_plugin_abi::combat::CombatTarget;
+        use ac_plugin_abi::world::{Position, WorldObject};
+
+        let mut fake = FakeHost::new("test.targets");
+        let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
+        fake.set_reply::<calls::CombatHostileTargets>(&vec![CombatTarget {
+            object_id: 0x8012_D57D,
+            distance: 2.38,
+            server_position: Some(server.clone()),
+            ..CombatTarget::default()
+        }]);
+        fake.set_reply::<calls::WorldObject>(&Some(WorldObject {
+            object_id: 0x8012_D57D,
+            position: Some(Position::from_cell(0x0032_01DE, [92.0, -19.0, 18.0], 0.0)),
+            server_position: Some(server.clone()),
+            ..WorldObject::default()
+        }));
+        let mut host = Host::with_transport(&mut fake);
+        let targets = host.hostile_targets(5.0);
+        assert_eq!(targets[0].server_position.as_ref(), Some(&server));
+        let object = host.object(0x8012_D57D).unwrap();
+        assert_eq!(object.server_position, Some(server));
+        assert_ne!(object.position, object.server_position);
     }
 
     // OpenAC `NavigationAutomation.cs`: `INavigationAutomation.CheckRoomAhead`

@@ -297,7 +297,7 @@ fn reporting(physics_state: u32) -> bool {
     physics_state & HIDDEN == 0
 }
 
-fn valid_position(p: &Position) -> bool {
+pub(crate) fn valid_position(p: &Position) -> bool {
     let o = p.origin;
     let q = p.orientation;
     [o.x, o.y, o.z, q.w, q.x, q.y, q.z]

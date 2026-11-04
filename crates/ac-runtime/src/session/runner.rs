@@ -815,6 +815,9 @@ fn run(
     if config.diagnostics.probe_external_container {
         state.inventory.enable_external_container_probe();
     }
+    if config.diagnostics.position_log {
+        state.movement.enable_position_log();
+    }
     let chargen = config
         .tables
         .as_ref()
@@ -1664,6 +1667,11 @@ impl Drive<'_> {
             if gone {
                 // The window went away without detaching.
                 self.attached = None;
+            }
+        }
+        if self.config.diagnostics.position_log {
+            for line in self.state.movement.take_position_log_lines() {
+                eprintln!("{line}");
             }
         }
         let motions: Vec<_> = self.state.world.drain_applied_motions().collect();

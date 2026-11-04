@@ -202,6 +202,9 @@ wire_union! {
     /// new API minor versions (marked `since`), so a plugin matches with a
     /// catch-all arm; the client sends a plugin only the kinds of the API
     /// version it was built for.
+    // An object change carries a whole world object, so it is the largest
+    // kind by far; boxing it would change the type every plugin matches on.
+    #[allow(clippy::large_enum_variant)]
     #[non_exhaustive]
     pub enum Event: "event" {
         /// A window attached to (`true`) or left (`false`) the session.
@@ -279,6 +282,10 @@ wire_union! {
         /// A reach search the plugin asked for ended (only to that plugin;
         /// API 1.5).
         26 => NavigationReach(crate::navigation::NavigationReach) since (1, 5),
+        /// A plugin service came or went ([`crate::services`]): offered,
+        /// withdrawn, or gone with its plugin. A plugin just enabled first
+        /// hears one for every service already offered (API 1.7).
+        27 => ServiceChanged(crate::services::ServiceChange) since (1, 7),
         /// One of the plugin's panels or canvases was used ([`crate::ui`];
         /// the tag is `crate::ui::EVENT_TAG`).
         100 => Ui(crate::ui::UiEvent),

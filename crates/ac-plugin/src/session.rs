@@ -34,7 +34,7 @@ use crate::discovery::{self, Discovered};
 use crate::engine::CheckedModule;
 use crate::engine::{PluginEngine, check_api_version, check_module};
 use crate::host_calls::{Context, Others, Services, handle_import};
-use crate::instance::{ImportHandler, Instance, SlowCall};
+use crate::instance::{Handled, ImportHandler, Instance, SlowCall};
 use crate::manifest::PluginManifest;
 use crate::reload::FolderWatch;
 use crate::settings::PluginSessionSettings;
@@ -193,6 +193,16 @@ pub struct PluginSession {
     watch: FolderWatch,
 }
 
+/// Whom a call into a plugin may ask things of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asking {
+    /// The other plugins (their loot classifiers, command completions,
+    /// services): a call the plugin started itself.
+    Others,
+    /// No one: the plugin is answering a callback.
+    NoOne,
+}
+
 fn same_id(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
@@ -341,6 +351,9 @@ impl PluginSession {
                 |index| found.remove(index),
             );
             self.load_one(&id, item, None, api);
+            // A plugin its enable asked something and that failed answering
+            // goes now, before the next plugin starts and hears of it.
+            self.unload_faulted(api);
         }
         for loaded in &self.plugins {
             self.watch.watch(&loaded.directory, &loaded.manifest.id);
@@ -527,7 +540,8 @@ impl PluginSession {
 
     /// Instantiates and enables a prepared plugin at `position` in the load
     /// order (the end when `None`); it then hears every object already in
-    /// the world. On failure nothing of it stays registered.
+    /// the world and every service the plugins were told is on offer. On
+    /// failure nothing of it stays registered.
     fn enable_prepared(
         &mut self,
         prepared: Prepared,
@@ -580,9 +594,23 @@ impl PluginSession {
                 // world, once (OpenAC `RuntimeWorldEntityProjection.Subscribe`).
                 let entities = api.entities();
                 let ids: Vec<u32> = entities.iter().map(|e| e.id).collect();
-                for entity in entities {
-                    let (entry, bytes) =
-                        encode(&Event::EntitySpawned(entity), self.version_of(index));
+                // Then every service the others were told is on offer; the
+                // offers and withdrawals not yet told reach it with theirs.
+                let services = self
+                    .services
+                    .plugin_services
+                    .told()
+                    .iter()
+                    .cloned()
+                    .map(Event::ServiceChanged)
+                    .filter(|event| hears(&self.plugins[index].manifest, event));
+                let replay: Vec<Event> = entities
+                    .into_iter()
+                    .map(Event::EntitySpawned)
+                    .chain(services.collect::<Vec<_>>())
+                    .collect();
+                for event in replay {
+                    let (entry, bytes) = encode(&event, self.version_of(index));
                     if let Err(fault) = self.invoke(index, api, |instance, handler| {
                         instance.event(&bytes, entry, handler)
                     }) {
@@ -636,6 +664,19 @@ impl PluginSession {
         api: &mut dyn SessionApi,
         call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<T, String>,
     ) -> Result<T, String> {
+        self.invoke_as(index, api, Asking::Others, call)
+    }
+
+    /// [`Self::invoke`], for a call that may ask other plugins things (a
+    /// tick, an event, a command) or not (a callback the client asked: a
+    /// plugin answering a question cannot ask a third, whoever asked it).
+    fn invoke_as<T>(
+        &mut self,
+        index: usize,
+        api: &mut dyn SessionApi,
+        asking: Asking,
+        call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
         let Self {
             plugins,
             services,
@@ -662,16 +703,34 @@ impl PluginSession {
             services,
             settings: &options.settings,
             storage_roots: &options.storage,
+            lent: std::time::Duration::ZERO,
+            lent_epochs: 0,
+            // Kept over all the call's imports: the call may lend other
+            // plugins one call deadline in all.
+            lent_in_call: 0,
+            lend_ceiling: instance.lend_ceiling(),
         };
+        let answers = instance.answers_callbacks();
         let mut handler = |import: Import, request: &[u8]| {
-            handle_import(
+            cx.lent = std::time::Duration::ZERO;
+            cx.lent_epochs = 0;
+            let reply = handle_import(
                 import,
                 request,
                 manifest,
                 directory,
+                answers,
                 &mut cx,
-                Some(&mut others),
-            )
+                match asking {
+                    Asking::Others => Some(&mut others),
+                    Asking::NoOne => None,
+                },
+            )?;
+            Ok(Handled {
+                reply,
+                lent: cx.lent,
+                lent_epochs: cx.lent_epochs,
+            })
         };
         let result = call(instance, &mut handler);
         // The slow calls: this one, and those of the plugins it asked
@@ -728,7 +787,25 @@ impl PluginSession {
         api: &mut dyn SessionApi,
         call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<(), String>,
     ) -> bool {
-        match self.invoke(index, api, call) {
+        self.call_as(index, api, Asking::Others, call)
+    }
+
+    /// [`Self::call`] as [`Self::invoke_as`].
+    fn call_as(
+        &mut self,
+        index: usize,
+        api: &mut dyn SessionApi,
+        asking: Asking,
+        call: impl FnOnce(&mut Instance, &mut ImportHandler<'_>) -> Result<(), String>,
+    ) -> bool {
+        // A plugin that failed answering another earlier in this pass is
+        // not called again (its state is whatever the failure left): it
+        // goes now, reported with what stopped it.
+        if self.services.has_faulted(&self.plugins[index].manifest.id) {
+            self.unload_faulted(api);
+            return false;
+        }
+        match self.invoke_as(index, api, asking, call) {
             Ok(()) => true,
             Err(reason) => {
                 let id = self.plugins[index].manifest.id.clone();
@@ -768,6 +845,22 @@ impl PluginSession {
     /// logged, and its registrations are released regardless.
     fn disable_at(&mut self, index: usize, api: &mut dyn SessionApi) {
         let id = self.plugins[index].manifest.id.clone();
+        // One that failed answering (another plugin asked it something as
+        // it stopped, say) is not called to stop: it is gone, reported
+        // with what stopped it.
+        if let Some(at) = self
+            .services
+            .faulted
+            .iter()
+            .position(|(faulted, _)| same_id(faulted, &id))
+        {
+            let (_, reason) = self.services.faulted.remove(at);
+            let error = format!("plugin '{id}' stopped: {reason}");
+            api.log(&id, LogLevel::Error, &error);
+            self.record_failure(&id, error);
+            self.remove(index, api);
+            return;
+        }
         if let Err(reason) = self.invoke(index, api, Instance::disable) {
             api.log(
                 &id,
@@ -830,8 +923,8 @@ impl PluginSession {
         }
         for id in ids {
             self.reload(&id, api);
+            self.unload_faulted(api);
         }
-        self.unload_faulted(api);
     }
 
     /// Replaces a running plugin with the copy now on disk, or starts one
@@ -1046,9 +1139,17 @@ impl PluginSession {
     /// announcing something that cannot wait for its next pass, such as
     /// the character leaving the world before the session is torn down).
     pub fn deliver(&mut self, api: &mut dyn SessionApi) {
-        while let Some(event) = self.events.pop_front() {
+        loop {
+            self.queue_service_changes();
+            let Some(event) = self.events.pop_front() else {
+                break;
+            };
             let spawned = match &event {
                 Event::EntitySpawned(entity) => Some(entity.id),
+                Event::ServiceChanged(change) => {
+                    self.services.plugin_services.told_of(change);
+                    None
+                }
                 _ => None,
             };
             let entry = Entry::of_event(&event);
@@ -1085,6 +1186,16 @@ impl PluginSession {
         }
         self.replayed.clear();
         self.unload_faulted(api);
+    }
+
+    /// The services offered and withdrawn since the last look join the
+    /// events, in the order they happened: every plugin built for API 1.7
+    /// or later hears each (a plugin's own too). Queued even with no plugin
+    /// loaded, so what the plugins were told stays true.
+    fn queue_service_changes(&mut self) {
+        for change in self.services.plugin_services.take_changes() {
+            self.events.push_back(Event::ServiceChanged(change));
+        }
     }
 
     /// The loaded plugins' ids in load order (`chat`: only those allowed
@@ -1177,7 +1288,7 @@ impl PluginSession {
             let version = self.version_of(index);
             let (entry, bytes) = (Entry::of_callback(&callback), callback.to_bytes_at(version));
             let mut answer = None;
-            self.call(index, api, |instance, handler| {
+            self.call_as(index, api, Asking::NoOne, |instance, handler| {
                 answer = instance.callback(&bytes, entry, handler)?;
                 Ok(())
             });
@@ -1219,7 +1330,7 @@ impl PluginSession {
             let version = self.version_of(index);
             let (entry, bytes) = (Entry::of_callback(&callback), callback.to_bytes_at(version));
             let mut answer = None;
-            self.call(index, api, |instance, handler| {
+            self.call_as(index, api, Asking::NoOne, |instance, handler| {
                 answer = instance.callback(&bytes, entry, handler)?;
                 Ok(())
             });
@@ -1554,7 +1665,9 @@ mod tests {
         let mut encodings = Encodings::new(&event);
         assert_eq!(encodings.at(API_CURRENT), event.to_bytes().as_slice());
         let older = encodings.at(v1_1).to_vec();
-        assert_eq!(older.len() + 4, event.to_bytes().len());
+        // The hook's item types (4 bytes) and, since API 1.7, the server's
+        // position (none: 1 byte) are left out.
+        assert_eq!(older.len() + 5, event.to_bytes().len());
         assert_eq!(encodings.at(v1_1), older.as_slice());
         assert_eq!(encodings.made.len(), 2);
         let Ok(Event::ObjectChanged(read)) = Event::from_bytes_at(&older, v1_1) else {
