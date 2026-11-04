@@ -10,9 +10,11 @@
 //! notice, and a key set and set back within a pass sends none. A
 //! subscription may name a plugin that is not loaded yet; it lasts until
 //! the subscriber withdraws it (`status_unsubscribe`) or stops. When a
-//! publisher stops, its values go, and a subscriber hears each withdrawn.
-//! Subscribing tells nothing of the values already there: read them with
-//! `status_capture`.
+//! publisher stops, its values go, and a subscriber hears each withdrawn;
+//! one stopped and started again within a pass is heard as the difference
+//! (a value it published again unchanged is not told). Subscribing tells
+//! nothing of the values already there, nor of changes made earlier in the
+//! pass: read them with `status_capture`.
 
 use crate::wire_record;
 

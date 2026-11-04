@@ -24,6 +24,11 @@ pub struct StatusBoard {
     before: BTreeMap<Slot, Option<String>>,
     /// Subscriber id to the publishers it hears, both in lower case.
     subscriptions: BTreeMap<String, BTreeSet<String>>,
+    /// For a subscription made since the changes were last taken: each
+    /// key of its publisher already changed then, by (subscriber,
+    /// publisher, key), with its value at the subscription, so a change
+    /// made before it is not told.
+    started: BTreeMap<(String, String, String), Option<String>>,
 }
 
 impl StatusBoard {
@@ -38,7 +43,11 @@ impl StatusBoard {
             Some(value) => self.values.insert(slot.clone(), value),
             None => self.values.remove(&slot),
         };
-        self.before.entry(slot).or_insert(was);
+        // Held only while it differs from the value at the pass's start.
+        let start = self.before.entry(slot.clone()).or_insert(was);
+        if self.values.get(&slot) == start.as_ref() {
+            self.before.remove(&slot);
+        }
         true
     }
 
@@ -69,11 +78,19 @@ impl StatusBoard {
         if owner.is_empty() || owner == subscriber {
             return false;
         }
-        let owners = self.subscriptions.entry(subscriber).or_default();
-        if owners.len() >= MAX_SUBSCRIPTIONS && !owners.contains(&owner) {
+        let owners = self.subscriptions.entry(subscriber.clone()).or_default();
+        if owners.contains(&owner) {
+            return true;
+        }
+        if owners.len() >= MAX_SUBSCRIPTIONS {
             return false;
         }
-        owners.insert(owner);
+        owners.insert(owner.clone());
+        for (o, key) in self.before.keys().filter(|(o, _)| *o == owner) {
+            let now = self.values.get(&(o.clone(), key.clone())).cloned();
+            self.started
+                .insert((subscriber.clone(), o.clone(), key.clone()), now);
+        }
         true
     }
 
@@ -93,9 +110,11 @@ impl StatusBoard {
 
     /// The changes since the last take, for each subscriber of their
     /// publisher (by subscriber, then publisher and key): one per key, with
-    /// its value now, and none for a key that is as it was.
+    /// its value now, and none for a key that is as it was at the take
+    /// before, or at the subscription when that came later.
     pub fn take_changes(&mut self) -> Vec<(String, StatusChange)> {
         let before = std::mem::take(&mut self.before);
+        let started = std::mem::take(&mut self.started);
         let mut told = Vec::new();
         for (subscriber, owners) in &self.subscriptions {
             for ((owner, key), was) in &before {
@@ -103,6 +122,9 @@ impl StatusBoard {
                     continue;
                 }
                 let value = self.values.get(&(owner.clone(), key.clone()));
+                let was = started
+                    .get(&(subscriber.clone(), owner.clone(), key.clone()))
+                    .unwrap_or(was);
                 if value == was.as_ref() {
                     continue;
                 }
@@ -131,6 +153,8 @@ impl StatusBoard {
             self.before.entry(slot).or_insert(Some(value));
         }
         self.subscriptions.remove(&id);
+        self.started
+            .retain(|(subscriber, _, _), _| *subscriber != id);
     }
 }
 
@@ -242,6 +266,53 @@ mod tests {
         board.publish("pub", "kept", Some("3".into()));
         assert!(board.take_changes().is_empty());
         assert!(!board.unsubscribe("sub", "pub"));
+    }
+
+    // A subscription starts where it is made: a change made earlier in the
+    // pass is not told, a later one is, and so is a subscription made
+    // again after withdrawing it in the same pass.
+    #[test]
+    fn a_subscription_hears_only_changes_made_after_it() {
+        let mut board = StatusBoard::default();
+        board.publish("pub", "early", Some("1".into()));
+        board.publish("pub", "both", Some("1".into()));
+        board.subscribe("sub", "pub");
+        board.publish("pub", "both", Some("2".into()));
+        board.publish("pub", "late", Some("3".into()));
+        assert_eq!(
+            board.take_changes(),
+            [
+                told("sub", "pub", "both", Some("2")),
+                told("sub", "pub", "late", Some("3"))
+            ]
+        );
+        board.publish("pub", "early", Some("4".into()));
+        board.unsubscribe("sub", "pub");
+        board.subscribe("sub", "pub");
+        board.publish("pub", "late", Some("5".into()));
+        assert_eq!(
+            board.take_changes(),
+            [told("sub", "pub", "late", Some("5"))]
+        );
+        board.publish("pub", "both", Some("6".into()));
+        assert_eq!(
+            board.take_changes(),
+            [told("sub", "pub", "both", Some("6"))]
+        );
+    }
+
+    // Nothing is held for a change that changed nothing: a withdrawal of a
+    // key never published, or a key set back as it was.
+    #[test]
+    fn a_change_that_changes_nothing_is_not_held() {
+        let mut board = StatusBoard::default();
+        for n in 0..1000 {
+            board.publish("pub", &format!("k{n}"), None);
+            board.publish("pub", &format!("j{n}"), Some("x".into()));
+            board.publish("pub", &format!("j{n}"), None);
+        }
+        assert!(board.before.is_empty());
+        assert!(board.started.is_empty());
     }
 
     fn told(

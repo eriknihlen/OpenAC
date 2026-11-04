@@ -428,8 +428,11 @@ plugins answering each other cannot loop.
 
 A subscription may name a plugin that has not started yet, and outlasts it
 stopping and starting again; when a publisher stops, its subscribers hear
-each of its values withdrawn. Subscribing tells nothing of the values
-already there, so read them with `status_capture` after subscribing. A
+each of its values withdrawn. A publisher reloaded within one pass is heard
+as the difference: a value it published again unchanged is not told.
+Subscribing tells nothing of the values already there, nor of changes made
+earlier in the same pass, so read them with `status_capture` after
+subscribing. A
 plugin subscribes to at most 64 others (`status::MAX_SUBSCRIPTIONS`), never
 to itself, and `host.status_unsubscribe(id)` ends one; all end when it stops.
 
