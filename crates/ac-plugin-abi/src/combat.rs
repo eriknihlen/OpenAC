@@ -70,7 +70,8 @@ wire_record! {
         /// The last position the server sent for it. `distance`, the angle
         /// and the height difference are measured to where the client has
         /// it now (its simulated body), which can stand apart from this.
-        /// Added in API 1.7.
+        /// A change to it alone raises no object change, so a plugin that
+        /// follows it asks again. Added in API 1.7.
         since (1, 7) pub server_position: Option<crate::world::Position>,
     }
 }

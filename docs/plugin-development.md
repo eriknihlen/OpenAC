@@ -108,7 +108,10 @@ gets. It also added `server_position` at the end of `WorldObject` and
 `CombatTarget`: the last position the server sent for the object, beside
 `position` (and, for a target, `distance`), which give where the client has
 it now, a creature's simulated body. The two can stand apart while the body
-catches up to the server's place. Everything the client offers goes through
+catches up to the server's place; for the character it can lag where the
+player has moved it. A change to it alone raises no object change (an
+object is told moved when its cell changes), so a plugin that follows it
+asks again. Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
 storage, network, peers, and UI. `cargo doc -p openac-plugin --open` shows
 the whole surface with its documentation.

@@ -344,7 +344,11 @@ wire_record! {
         /// The last position the server sent for it, when it is placed in
         /// the world. [`Self::position`] is where the client has it now: a
         /// creature's simulated body, which moves between the server's
-        /// positions and can stand apart from the last one. Added in API
+        /// positions and can stand apart from the last one. For the
+        /// character it is likewise the last position the server sent, which
+        /// can lag where the player has moved it. A change to it alone raises no
+        /// [`ObjectChange`] (an object is told moved only when its cell
+        /// changes), so a plugin that follows it asks again. Added in API
         /// 1.7.
         since (1, 7) pub server_position: Option<Position>,
     }
