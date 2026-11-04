@@ -17,16 +17,17 @@ use std::time::SystemTime;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::plugins::{
-    ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, InstallRules, InstalledPluginInfo,
-    InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
-    PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PendingPluginInstall, Permission,
-    PermissionDeclaration, PluginCatalog, PluginInstallSource, PluginInstaller, PluginInventory,
-    PluginManifest, PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseClient,
-    PluginReleaseFetchResult, PluginReleaseResolution, PluginReleaseResolveResult,
-    PluginReleaseResolver, PluginSha256File, SESSION_LEASE_REFUSAL, THIS_CLIENT, describe,
-    direct_install_refusal, evaluate_version_compatibility, find_block_reason, github,
-    highest_prerelease, highest_stable, is_built_for_csharp, release_tag, validate_icon,
-    validate_plugin_content, version_only_reason, without_client_version,
+    ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, IndexReleaseUpdate, InstallRules,
+    InstalledPluginInfo, InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
+    PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PLUGIN_INDEX_ASSET,
+    PLUGIN_INDEX_TAG, PendingPluginInstall, Permission, PermissionDeclaration, PluginCatalog,
+    PluginIndex, PluginInstallSource, PluginInstaller, PluginInventory, PluginManifest,
+    PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseClient, PluginReleaseFetchResult,
+    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver, PluginSha256File,
+    SESSION_LEASE_REFUSAL, THIS_CLIENT, describe, direct_install_refusal,
+    evaluate_version_compatibility, find_block_reason, github, highest_prerelease, highest_stable,
+    is_built_for_csharp, plugin_release_tag, release_tag, validate_icon, validate_plugin_content,
+    version_only_reason, without_client_version,
 };
 use ac_launcher_core::updates::{
     ClientVersionResolution, ClientVersionState, ExtractedFileRecord, LauncherVersion, UpdateError,
@@ -184,6 +185,22 @@ fn matches_tag_requires_a_wasm_v_leading_version() {
     assert!(!manifest.matches_tag("wasm-v0.1.1"));
     assert!(!manifest.matches_tag("v0.1.0"));
     assert!(!manifest.matches_tag("0.1.0"));
+}
+
+// A repository that publishes several plugins tags each one
+// `wasm-<plugin id>-v<version>`; the old `wasm-v` form still matches.
+#[test]
+fn matches_tag_accepts_the_plugin_id_form_for_its_own_id_only() {
+    let manifest = parse(VALID_JSON);
+    assert_eq!(
+        plugin_release_tag("edwards.hello", "0.1.0"),
+        "wasm-edwards.hello-v0.1.0"
+    );
+    assert!(manifest.matches_tag("wasm-edwards.hello-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hello-v0.1.1"));
+    assert!(!manifest.matches_tag("wasm-edwards.other-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hell-v0.1.0"));
+    assert!(!manifest.matches_tag("wasm-edwards.hello-0.1.0"));
 }
 
 // OpenAC LauncherPluginManifestTests.AbsentCapabilitiesParseToEmpty.
@@ -1889,6 +1906,7 @@ fn candidates_choose_by_channel_and_precedence() {
     let only_stable = PluginReleaseCandidates {
         stable: stable.clone(),
         beta: None,
+        index_warning: None,
     };
     assert_eq!(only_stable.for_channel(PluginReleaseChannel::Beta), &stable);
 
@@ -1897,6 +1915,7 @@ fn candidates_choose_by_channel_and_precedence() {
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.4.0-beta.1",
         ))),
+        index_warning: None,
     };
     assert_eq!(
         tag_of(failed_stable.for_channel(PluginReleaseChannel::Beta)),
@@ -1909,12 +1928,14 @@ fn candidates_choose_by_channel_and_precedence() {
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.4.0-beta.1",
         ))),
+        index_warning: None,
     };
     let lower = PluginReleaseCandidates {
         stable,
         beta: Some(PluginReleaseResolveResult::Success(resolution(
             "1.3.0-beta.2",
         ))),
+        index_warning: None,
     };
     assert_eq!(
         tag_of(higher.for_channel(PluginReleaseChannel::Beta)),
@@ -1945,6 +1966,829 @@ fn only_the_beta_channel_fetches_the_pre_release_manifest() {
     assert!(candidates.beta.is_some());
     assert_eq!(server.count(&feed_uri()), 2);
     assert_eq!(server.count(&beta_manifest), 1);
+}
+
+// --- Several plugins in one repository ---------------------------------------------------------
+
+fn plugin_manifest(id: &str, version: &str) -> Vec<u8> {
+    format!(
+        r#"{{ "id": "{id}", "displayName": "P", "version": "{version}", "entry": "p.wasm",
+              "apiVersion": "1.0" }}"#
+    )
+    .into_bytes()
+}
+
+/// A repository whose feed lists each `(tag, id, version)` in order, the
+/// tag serving a manifest naming `id` and `version`.
+fn suite_server(releases: &[(&str, &str, &str)]) -> FakeServer {
+    let server = FakeServer::new();
+    let entries: String = releases.iter().map(|(tag, ..)| entry(&link(tag))).collect();
+    server.add(&feed_uri(), &feed(&entries));
+    for (tag, id, version) in releases {
+        server.add(
+            &tagged(HELLO_REPO, tag, "plugin.json"),
+            &plugin_manifest(id, version),
+        );
+    }
+    server
+}
+
+fn resolve_plugin(
+    server: &FakeServer,
+    id: &str,
+    channel: PluginReleaseChannel,
+) -> PluginReleaseResolveResult {
+    resolver(server)
+        .resolve_plugin(HELLO_REPO, id, channel, &none())
+        .unwrap()
+}
+
+#[test]
+fn a_plugin_resolves_from_its_own_tags_beside_another_plugins() {
+    let server = suite_server(&[
+        ("wasm-edwards.other-v2.0.0", "edwards.other", "2.0.0"),
+        ("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0"),
+        ("wasm-edwards.hello-v0.2.0", "edwards.hello", "0.2.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.3.0");
+    let result = resolve_plugin(&server, "edwards.other", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.other-v2.0.0");
+    // Another plugin's tag is never fetched.
+    assert_eq!(
+        server.count(&tagged(
+            HELLO_REPO,
+            "wasm-edwards.hello-v0.2.0",
+            "plugin.json"
+        )),
+        0
+    );
+    // The id-less resolution reads only `wasm-v` tags, as before.
+    assert_eq!(
+        resolver(&server)
+            .resolve(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+            .unwrap(),
+        PluginReleaseResolveResult::Unavailable
+    );
+}
+
+#[test]
+fn old_wasm_v_tags_count_only_for_the_plugin_their_manifest_names() {
+    // A new plugin in a repository whose older plugin used `wasm-v` tags.
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "edwards.other", "0.9.0"),
+        ("wasm-edwards.hello-v0.1.0", "edwards.hello", "0.1.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0");
+    let result = resolve_plugin(&server, "edwards.other", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.0");
+    // A plugin moving from `wasm-v` to its own tags keeps both.
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "edwards.hello", "0.9.0"),
+        ("wasm-edwards.hello-v0.8.0", "edwards.hello", "0.8.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.0");
+}
+
+#[test]
+fn a_tag_another_id_parses_as_is_skipped_for_the_next_highest() {
+    // `edwards.hello-v1.0.0` is a valid id, so its tag reads as a
+    // pre-release of `edwards.hello`.
+    let server = suite_server(&[
+        (
+            "wasm-edwards.hello-v1.0.0-v2.0.0",
+            "edwards.hello-v1.0.0",
+            "2.0.0",
+        ),
+        (
+            "wasm-edwards.hello-v0.5.0-beta.1",
+            "edwards.hello",
+            "0.5.0-beta.1",
+        ),
+        ("wasm-edwards.hello-v0.4.0", "edwards.hello", "0.4.0"),
+    ]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.5.0-beta.1");
+}
+
+/// `count` `wasm-v` releases of `edwards.other`, 0.9.0 downwards.
+fn other_plugins_wasm_v_tags(count: usize) -> Vec<(String, String)> {
+    (0..count)
+        .map(|index| {
+            let version = format!("0.{}.0", 9 - index);
+            (format!("wasm-v{version}"), version)
+        })
+        .collect()
+}
+
+// A new plugin in a repository whose older plugin used `wasm-v` tags: the
+// old plugin's tags are refused on their own budget, never the new one's.
+#[test]
+fn another_plugins_wasm_v_tags_never_hide_a_plugins_own_tag() {
+    for count in [2, 3, 5] {
+        let others = other_plugins_wasm_v_tags(count);
+        let mut releases: Vec<(&str, &str, &str)> = others
+            .iter()
+            .map(|(tag, version)| (tag.as_str(), "edwards.other", version.as_str()))
+            .collect();
+        releases.push(("wasm-edwards.hello-v0.1.0", "edwards.hello", "0.1.0"));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+        assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.1.0", "{count}");
+        // The old plugin's tags above it are still read (one may be this
+        // plugin's, moved over), at most three of them.
+        let read: usize = others
+            .iter()
+            .map(|(tag, _)| server.count(&tagged(HELLO_REPO, tag, "plugin.json")))
+            .sum();
+        assert_eq!(read, count.min(3), "{count}");
+    }
+}
+
+// The cap still stops a run of refusals within one tag form: three
+// `wasm-v` releases of another plugin hide a fourth that is this one's...
+#[test]
+fn skipping_stops_after_three_refused_candidates_of_one_form() {
+    for (count, found) in [(2, true), (3, false)] {
+        let others = other_plugins_wasm_v_tags(count);
+        let mut releases: Vec<(&str, &str, &str)> = others
+            .iter()
+            .map(|(tag, version)| (tag.as_str(), "edwards.other", version.as_str()))
+            .collect();
+        releases.push(("wasm-v0.1.0", "edwards.hello", "0.1.0"));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+        if found {
+            assert_eq!(tag_of(&result), "wasm-v0.1.0");
+        } else {
+            assert_eq!(result, PluginReleaseResolveResult::Unavailable, "{count}");
+            assert_eq!(
+                server.count(&tagged(HELLO_REPO, "wasm-v0.1.0", "plugin.json")),
+                0
+            );
+        }
+    }
+    // ...and three lookalike ids' pre-releases under the plugin's own prefix
+    // hide its real beta.
+    for (count, found) in [(2, true), (3, false)] {
+        let lookalikes: Vec<(String, String)> = (0..count)
+            .map(|index| {
+                (
+                    format!("wasm-edwards.hello-v1.0.{index}-v2.0.0"),
+                    format!("edwards.hello-v1.0.{index}"),
+                )
+            })
+            .collect();
+        let mut releases: Vec<(&str, &str, &str)> = lookalikes
+            .iter()
+            .map(|(tag, id)| (tag.as_str(), id.as_str(), "2.0.0"))
+            .collect();
+        releases.push((
+            "wasm-edwards.hello-v0.5.0-beta.1",
+            "edwards.hello",
+            "0.5.0-beta.1",
+        ));
+        let server = suite_server(&releases);
+        let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+        if found {
+            assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.5.0-beta.1");
+        } else {
+            assert!(result.resolution().is_none(), "{result:?}");
+            assert_eq!(
+                server.count(&tagged(
+                    HELLO_REPO,
+                    "wasm-edwards.hello-v0.5.0-beta.1",
+                    "plugin.json"
+                )),
+                0
+            );
+        }
+    }
+}
+
+#[test]
+fn a_tag_naming_the_wrong_version_is_still_invalid() {
+    let server = suite_server(&[("wasm-edwards.hello-v0.2.0", "edwards.hello", "0.3.0")]);
+    assert!(matches!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Invalid(_)
+    ));
+}
+
+// --- The plugin index ------------------------------------------------------------------------------
+
+const SUITE_INDEX: &str = r#"{
+  "schemaVersion": 1,
+  "plugins": [
+    { "id": "aethrix.vision", "stable": "wasm-aethrix.vision-v1.2.0",
+      "beta": "wasm-aethrix.vision-v1.3.0-beta.1" },
+    { "id": "aethrix.navigation", "stable": "wasm-aethrix.navigation-v0.4.0" },
+    { "id": "aethrix.macro", "beta": "wasm-v0.1.0-beta.2" }
+  ]
+}"#;
+
+#[test]
+fn the_index_names_each_plugins_releases() {
+    let index = PluginIndex::parse(SUITE_INDEX).unwrap();
+    assert_eq!(index.plugins.len(), 3);
+    let vision = index.entry("aethrix.vision").unwrap();
+    assert_eq!(vision.stable.as_deref(), Some("wasm-aethrix.vision-v1.2.0"));
+    assert_eq!(
+        vision.beta.as_deref(),
+        Some("wasm-aethrix.vision-v1.3.0-beta.1")
+    );
+    let releases = index.releases_for("aethrix.vision");
+    let tags: Vec<&str> = releases
+        .iter()
+        .map(|release| release.tag.as_str())
+        .collect();
+    assert_eq!(
+        tags,
+        [
+            "wasm-aethrix.vision-v1.2.0",
+            "wasm-aethrix.vision-v1.3.0-beta.1"
+        ]
+    );
+    assert_eq!(releases[1].version.value(), "1.3.0-beta.1");
+    assert_eq!(
+        index.releases_for("aethrix.macro")[0].tag,
+        "wasm-v0.1.0-beta.2"
+    );
+    assert!(index.entry("AETHRIX.Navigation").is_some());
+    assert!(index.entry("aethrix.other").is_none());
+    assert!(index.releases_for("aethrix.other").is_empty());
+    assert_eq!(PLUGIN_INDEX_TAG, "wasm-index");
+    assert_eq!(PLUGIN_INDEX_ASSET, "plugins-index.json");
+    // The index is read only for this repository's own plugins: an empty one
+    // is a repository that has published none yet.
+    assert!(
+        PluginIndex::parse(r#"{ "schemaVersion": 1, "plugins": [] }"#)
+            .unwrap()
+            .plugins
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_index_is_read_strictly() {
+    let entry = |body: &str| format!(r#"{{ "schemaVersion": 1, "plugins": [ {body} ] }}"#);
+    for text in [
+        String::new(),
+        "null".into(),
+        "[]".into(),
+        r#"{ "plugins": [] }"#.into(),
+        r#"{ "schemaVersion": 2, "plugins": [] }"#.into(),
+        r#"{ "schemaVersion": 1 }"#.into(),
+        r#"{ "schemaVersion": 1, "plugins": [], "extra": 1 }"#.into(),
+        r#"{ "schemaVersion": 1, "SchemaVersion": 1, "plugins": [] }"#.into(),
+        entry(r#"{ "stable": "wasm-v1.0.0" }"#),
+        entry(r#"{ "id": "nodot", "stable": "wasm-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-v1.0.0", "notes": "x" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.c-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0.0+build.1" }"#),
+        entry(r#"{ "id": "a.b", "stable": "wasm-a.b-v1.0.0-beta.1" }"#),
+        entry(r#"{ "id": "a.b", "beta": "wasm-a.b-v1.0.0" }"#),
+        entry(r#"{ "id": "a.b", "stable": "" }"#),
+        entry(r#"{ "id": "a.b", "stable": 1 }"#),
+        entry(
+            r#"{ "id": "a.b", "stable": "wasm-v1.0.0" }, { "id": "A.B", "stable": "wasm-v1.1.0" }"#,
+        ),
+    ] {
+        assert!(PluginIndex::parse(&text).is_err(), "{text}");
+    }
+    // A missing `beta` and an explicit null are the same.
+    let index = PluginIndex::parse(&entry(
+        r#"{ "id": "a.b", "stable": "wasm-v1.0.0", "beta": null }"#,
+    ))
+    .unwrap();
+    assert_eq!(index.entry("a.b").unwrap().beta, None);
+    // The file's bytes: a byte order mark is skipped, bytes that are not
+    // UTF-8 are refused (never replaced and read on).
+    let bytes = entry(r#"{ "id": "a.b", "stable": "wasm-v1.0.0" }"#).into_bytes();
+    let with_mark = [b"\xEF\xBB\xBF".as_slice(), &bytes].concat();
+    assert_eq!(PluginIndex::parse_bytes(&with_mark).unwrap(), index);
+    let error = PluginIndex::parse_bytes(b"{ \"schemaVersion\": 1, \"plugins\": [ \xFF ] }")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("it is not UTF-8"), "{error}");
+}
+
+#[test]
+fn the_index_round_trips_and_an_entry_can_be_replaced() {
+    let mut index = PluginIndex::parse(SUITE_INDEX).unwrap();
+    assert_eq!(
+        index
+            .set_release("aethrix.vision", "wasm-aethrix.vision-v1.2.1")
+            .unwrap(),
+        IndexReleaseUpdate::Set
+    );
+    // A lower version never moves its channel back: a hotfix of an older line.
+    assert_eq!(
+        index
+            .set_release("aethrix.vision", "wasm-aethrix.vision-v1.1.9")
+            .unwrap(),
+        IndexReleaseUpdate::KeptNewer("wasm-aethrix.vision-v1.2.1".into())
+    );
+    index
+        .set_release("aethrix.macro", "wasm-aethrix.macro-v0.1.0")
+        .unwrap();
+    index
+        .set_release("aethrix.new", "wasm-aethrix.new-v0.1.0-beta.1")
+        .unwrap();
+    assert!(
+        index
+            .set_release("aethrix.new", "wasm-aethrix.other-v0.2.0")
+            .is_err()
+    );
+    assert!(index.set_release("bad", "wasm-v1.0.0").is_err());
+    let again = PluginIndex::parse(&index.to_json()).unwrap();
+    assert_eq!(again, index);
+    let vision = again.entry("aethrix.vision").unwrap();
+    assert_eq!(vision.stable.as_deref(), Some("wasm-aethrix.vision-v1.2.1"));
+    assert_eq!(
+        vision.beta.as_deref(),
+        Some("wasm-aethrix.vision-v1.3.0-beta.1")
+    );
+    let macro_entry = again.entry("aethrix.macro").unwrap();
+    assert_eq!(
+        macro_entry.stable.as_deref(),
+        Some("wasm-aethrix.macro-v0.1.0")
+    );
+    assert_eq!(macro_entry.beta.as_deref(), Some("wasm-v0.1.0-beta.2"));
+    assert_eq!(
+        again.entry("aethrix.new").unwrap().beta.as_deref(),
+        Some("wasm-aethrix.new-v0.1.0-beta.1")
+    );
+    assert_eq!(
+        PluginIndex::new().to_json(),
+        "{\n  \"schemaVersion\": 1,\n  \"plugins\": []\n}\n"
+    );
+}
+
+// --- Resolving from the feed and the index together -----------------------------------------------
+
+fn index_uri() -> String {
+    tagged(HELLO_REPO, PLUGIN_INDEX_TAG, PLUGIN_INDEX_ASSET)
+}
+
+fn serve_manifest(server: &FakeServer, tag: &str, id: &str, version: &str) {
+    server.add(
+        &tagged(HELLO_REPO, tag, "plugin.json"),
+        &plugin_manifest(id, version),
+    );
+}
+
+#[test]
+fn a_plugin_pushed_off_the_feed_is_found_through_the_index() {
+    let vision: Vec<(String, String)> = (0..10)
+        .map(|patch| {
+            let version = format!("1.0.{patch}");
+            (format!("wasm-aethrix.vision-v{version}"), version)
+        })
+        .collect();
+    let releases: Vec<(&str, &str, &str)> = vision
+        .iter()
+        .map(|(tag, version)| (tag.as_str(), "aethrix.vision", version.as_str()))
+        .collect();
+    let server = suite_server(&releases);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.4.0");
+    assert_eq!(server.count(&index_uri()), 1);
+    // A plugin still on the feed takes the highest of both: the index's 1.2.0
+    // over the feed's 1.0.9.
+    serve_manifest(
+        &server,
+        "wasm-aethrix.vision-v1.2.0",
+        "aethrix.vision",
+        "1.2.0",
+    );
+    let result = resolve_plugin(&server, "aethrix.vision", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.vision-v1.2.0");
+}
+
+#[test]
+fn a_stale_index_never_hides_a_newer_release_on_the_feed() {
+    let server = suite_server(&[(
+        "wasm-aethrix.navigation-v0.5.0",
+        "aethrix.navigation",
+        "0.5.0",
+    )]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.5.0");
+}
+
+#[test]
+fn a_single_plugin_repository_never_fetches_the_index() {
+    let server = release_server(&["v0.9.0", "wasm-v0.2.0", "wasm-v0.1.0"]);
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Beta);
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+    resolver(&server)
+        .resolve(HELLO_REPO, PluginReleaseChannel::Beta, &none())
+        .unwrap();
+    assert_eq!(server.count(&index_uri()), 0);
+}
+
+#[test]
+fn the_index_is_fetched_when_the_feed_has_nothing_for_the_plugin() {
+    // Only C# releases: one request for an index that is not there.
+    let server = release_server(&["v0.5.1"]);
+    assert_eq!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Unavailable
+    );
+    assert_eq!(server.count(&index_uri()), 1);
+    // The id-less resolution never reads it.
+    resolver(&server)
+        .resolve(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+        .unwrap();
+    assert_eq!(server.count(&index_uri()), 1);
+}
+
+#[test]
+fn a_rate_limited_index_is_reported_only_when_the_feed_had_nothing() {
+    let server = release_server(&["v0.5.1"]);
+    server.add_route(&index_uri(), Route::Status(429));
+    assert_eq!(
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::RateLimited
+    );
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add_route(&index_uri(), Route::Status(429));
+    let result = resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-edwards.hello-v0.3.0");
+}
+
+#[test]
+fn a_malformed_index_is_ignored_with_a_warning() {
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(
+        &index_uri(),
+        br#"{ "schemaVersion": 1, "plugins": [ { "id": "x" } ] }"#,
+    );
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&candidates.stable), "wasm-edwards.hello-v0.3.0");
+    let warning = candidates.index_warning.unwrap();
+    assert!(warning.contains("plugin index is invalid"), "{warning}");
+    // So is one that is not UTF-8.
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(
+        &index_uri(),
+        b"{ \"schemaVersion\": 1, \"plugins\": [ { \"id\": \"edwards.hello\", \
+          \"stable\": \"wasm-edwards.hello-v0.\xFF\" } ] }",
+    );
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&candidates.stable), "wasm-edwards.hello-v0.3.0");
+    let warning = candidates.index_warning.unwrap();
+    assert!(warning.contains("it is not UTF-8"), "{warning}");
+    // A good index gives no warning.
+    let server = suite_server(&[("wasm-edwards.hello-v0.3.0", "edwards.hello", "0.3.0")]);
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let candidates = resolver(&server)
+        .resolve_plugin_candidates(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(candidates.index_warning, None);
+}
+
+#[test]
+fn one_pass_reads_a_repositorys_feed_index_and_manifests_once() {
+    let server = suite_server(&[
+        ("wasm-aethrix.vision-v1.2.0", "aethrix.vision", "1.2.0"),
+        ("wasm-v0.0.9", "aethrix.vision", "0.0.9"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let pass = resolver(&server).pass();
+    for _ in 0..2 {
+        for id in ["aethrix.vision", "aethrix.navigation", "aethrix.macro"] {
+            pass.resolve_plugin(HELLO_REPO, id, PluginReleaseChannel::Beta, &none())
+                .unwrap();
+        }
+    }
+    assert_eq!(server.count(&feed_uri()), 1);
+    assert_eq!(server.count(&index_uri()), 1);
+    // `aethrix.macro` tries the `wasm-v` tag (`aethrix.vision`'s) in both rounds.
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.0.9", "plugin.json")),
+        1
+    );
+    // The same repository spelled in another case is the same repository.
+    pass.resolve_plugin(
+        &HELLO_REPO.to_uppercase(),
+        "aethrix.vision",
+        PluginReleaseChannel::Stable,
+        &none(),
+    )
+    .unwrap();
+    assert_eq!(server.count(&feed_uri()), 1);
+    // A new pass reads afresh.
+    let fresh = resolver(&server).pass();
+    fresh
+        .resolve_plugin(
+            HELLO_REPO,
+            "aethrix.vision",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(server.count(&feed_uri()), 2);
+}
+
+#[test]
+fn a_pass_keeps_no_rate_limited_fetch() {
+    let server = FakeServer::new();
+    server.add_route(&feed_uri(), Route::Status(429));
+    let pass = resolver(&server).pass();
+    assert_eq!(
+        pass.resolve_plugin(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none()
+        )
+        .unwrap(),
+        PluginReleaseResolveResult::RateLimited
+    );
+    server.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    server.add(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        &resolver_manifest("0.2.0"),
+    );
+    let result = pass
+        .resolve_plugin(
+            HELLO_REPO,
+            "edwards.hello",
+            PluginReleaseChannel::Stable,
+            &none(),
+        )
+        .unwrap();
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+}
+
+// A new plugin in a repository whose older plugin used `wasm-v` tags, the
+// new one's releases pushed off the feed: the old plugin's three tags are
+// refused once, and never spend the budget of the tags the index names.
+#[test]
+fn a_feed_of_another_plugins_wasm_v_tags_still_reads_the_index() {
+    let server = suite_server(&[
+        ("wasm-v0.9.2", "aethrix.vision", "0.9.2"),
+        ("wasm-v0.9.1", "aethrix.vision", "0.9.1"),
+        ("wasm-v0.9.0", "aethrix.vision", "0.9.0"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let result = resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-aethrix.navigation-v0.4.0");
+    assert_eq!(server.count(&index_uri()), 1);
+    // Each refused manifest was read once, not again after the index.
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.9.2", "plugin.json")),
+        1
+    );
+    // The plugin those tags are is still found without the index.
+    let server = suite_server(&[("wasm-v0.9.2", "aethrix.vision", "0.9.2")]);
+    let result = resolve_plugin(&server, "aethrix.vision", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.9.2");
+    assert_eq!(server.count(&index_uri()), 0);
+}
+
+// The stable channel never reads a pre-release's `plugin.json`: it says the
+// plugin has only pre-releases from the feed, naming its own tag's version
+// before a `wasm-v` one (which may be another plugin's; only its
+// `plugin.json` could tell).
+#[test]
+fn the_pre_release_message_prefers_this_plugins_own_pre_release() {
+    let server = suite_server(&[
+        ("wasm-v1.0.0-beta.1", "aethrix.vision", "1.0.0-beta.1"),
+        (
+            "wasm-aethrix.navigation-v0.5.0-beta.1",
+            "aethrix.navigation",
+            "0.5.0-beta.1",
+        ),
+    ]);
+    let PluginReleaseResolveResult::Prerelease(message) =
+        resolve_plugin(&server, "aethrix.navigation", PluginReleaseChannel::Stable)
+    else {
+        panic!("expected a pre-release");
+    };
+    assert!(message.contains("0.5.0-beta.1"), "{message}");
+    for tag in [
+        "wasm-v1.0.0-beta.1",
+        "wasm-aethrix.navigation-v0.5.0-beta.1",
+    ] {
+        assert_eq!(server.count(&tagged(HELLO_REPO, tag, "plugin.json")), 0);
+    }
+}
+
+// As before several plugins: a single-plugin repository with only a
+// pre-release says so on stable, even when that pre-release is broken.
+#[test]
+fn the_stable_channel_says_pre_release_without_reading_it() {
+    let server = release_server(&[]);
+    server.add(&feed_uri(), &feed(&entry(&link("wasm-v1.3.0-beta.1"))));
+    let PluginReleaseResolveResult::Prerelease(message) =
+        resolve_plugin(&server, "edwards.hello", PluginReleaseChannel::Stable)
+    else {
+        panic!("expected a pre-release");
+    };
+    assert!(message.contains("1.3.0-beta.1"), "{message}");
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v1.3.0-beta.1", "plugin.json")),
+        0
+    );
+}
+
+// A repository whose feed shows only `wasm-v` releases reads its index only
+// when none of them is the plugin's: a broken or rate-limited release of the
+// plugin, or a `wasm-v` tag that is not strict SemVer, never asks for it.
+#[test]
+fn a_wasm_v_repository_reads_the_index_only_when_no_release_is_the_plugins() {
+    let broken = release_server(&[]);
+    broken.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    broken.add(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        b"{ not json",
+    );
+    assert!(matches!(
+        resolve_plugin(&broken, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::Invalid(_)
+    ));
+    assert_eq!(broken.count(&index_uri()), 0);
+
+    let limited = release_server(&[]);
+    limited.add(&feed_uri(), &feed(&entry(&link("wasm-v0.2.0"))));
+    limited.add_route(
+        &tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json"),
+        Route::Status(429),
+    );
+    assert_eq!(
+        resolve_plugin(&limited, "edwards.hello", PluginReleaseChannel::Stable),
+        PluginReleaseResolveResult::RateLimited
+    );
+    assert_eq!(limited.count(&index_uri()), 0);
+
+    let loose = release_server(&["wasm-v0.3", "wasm-v0.2.1+build.5", "wasm-v0.2.0"]);
+    let result = resolve_plugin(&loose, "edwards.hello", PluginReleaseChannel::Stable);
+    assert_eq!(tag_of(&result), "wasm-v0.2.0");
+    assert_eq!(
+        repository_ids(&loose),
+        [("edwards.hello".to_owned(), "wasm-v0.2.0".to_owned())]
+    );
+    assert_eq!(loose.count(&index_uri()), 0);
+}
+
+// --- Every plugin a repository publishes (Add from URL) ---------------------------------------
+
+fn repository_ids(server: &FakeServer) -> Vec<(String, String)> {
+    let found = resolver(server)
+        .resolve_repository(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+        .unwrap();
+    found
+        .plugins
+        .iter()
+        .map(|plugin| (plugin.manifest.id.clone(), plugin.tag.clone()))
+        .collect()
+}
+
+#[test]
+fn a_repository_lists_every_plugin_from_its_tags_and_index() {
+    let server = suite_server(&[
+        ("wasm-v0.9.0", "aethrix.vision", "0.9.0"),
+        ("wasm-aethrix.vision-v1.2.0", "aethrix.vision", "1.2.0"),
+        ("wasm-aethrix.macro-v0.2.0", "aethrix.macro", "0.2.0"),
+    ]);
+    serve_manifest(
+        &server,
+        "wasm-aethrix.navigation-v0.4.0",
+        "aethrix.navigation",
+        "0.4.0",
+    );
+    server.add(&index_uri(), SUITE_INDEX.as_bytes());
+    let mut found = repository_ids(&server);
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            (
+                "aethrix.macro".to_owned(),
+                "wasm-aethrix.macro-v0.2.0".to_owned()
+            ),
+            (
+                "aethrix.navigation".to_owned(),
+                "wasm-aethrix.navigation-v0.4.0".to_owned()
+            ),
+            // Its newest, not the old `wasm-v` release.
+            (
+                "aethrix.vision".to_owned(),
+                "wasm-aethrix.vision-v1.2.0".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(server.count(&feed_uri()), 1);
+    assert_eq!(server.count(&index_uri()), 1);
+}
+
+#[test]
+fn a_single_plugin_repository_lists_its_one_plugin_without_the_index() {
+    let server = release_server(&["v0.9.0", "wasm-v0.2.0", "wasm-v0.1.0"]);
+    assert_eq!(
+        repository_ids(&server),
+        [("edwards.hello".to_owned(), "wasm-v0.2.0".to_owned())]
+    );
+    assert_eq!(server.count(&index_uri()), 0);
+    assert_eq!(
+        server.count(&tagged(HELLO_REPO, "wasm-v0.2.0", "plugin.json")),
+        1
+    );
+}
+
+#[test]
+fn a_tag_split_two_ways_lists_only_the_plugin_its_manifest_names() {
+    // `wasm-edwards.hello-v1.0.0-v2.0.0` reads as `edwards.hello` 1.0.0-v2.0.0
+    // or `edwards.hello-v1.0.0` 2.0.0; its manifest says which.
+    let server = suite_server(&[(
+        "wasm-edwards.hello-v1.0.0-v2.0.0",
+        "edwards.hello-v1.0.0",
+        "2.0.0",
+    )]);
+    assert_eq!(
+        repository_ids(&server),
+        [(
+            "edwards.hello-v1.0.0".to_owned(),
+            "wasm-edwards.hello-v1.0.0-v2.0.0".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_repository_with_nothing_for_this_client_says_why() {
+    let found = |server: &FakeServer| {
+        resolver(server)
+            .resolve_repository(HELLO_REPO, PluginReleaseChannel::Stable, &none())
+            .unwrap()
+    };
+    let server = release_server(&["v0.5.1"]);
+    let result = found(&server);
+    assert!(result.plugins.is_empty());
+    assert_eq!(result.failure, PluginReleaseResolveResult::Unavailable);
+    let server = release_server(&["wasm-v1.3.0-beta.1"]);
+    assert!(matches!(
+        found(&server).failure,
+        PluginReleaseResolveResult::Prerelease(_)
+    ));
+    let server = FakeServer::new();
+    server.add_route(&feed_uri(), Route::Status(429));
+    assert_eq!(
+        found(&server).failure,
+        PluginReleaseResolveResult::RateLimited
+    );
 }
 
 // --- PluginInstallerTests ---------------------------------------------------------------------

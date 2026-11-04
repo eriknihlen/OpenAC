@@ -21,7 +21,9 @@ use super::first_run::FirstRunSetup;
 use super::icon::{PluginIcon, decode_icon};
 use super::install_dialog::{InstallDialogRequest, PluginCharacterOption};
 use super::plugins::{PluginCheckOutcome, PluginComposition, PluginSingleCheckResult};
-use super::plugins_panel::{DiscoverChannelOption, DiscoverDetails, PluginsPanel};
+use super::plugins_panel::{
+    AddFromUrlChoice, DiscoverChannelOption, DiscoverDetails, PluginsPanel,
+};
 use super::profile_editor::ProfileTextEditor;
 use super::sessions::SessionRow;
 use super::update_prompt::UpdatePrompt;
@@ -38,8 +40,9 @@ use crate::orchestration::{
 use crate::plugins::{
     ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
     PermissionDeclaration, PluginInstallResult, PluginManifest, PluginReleaseCandidates,
-    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolveResult, describe, github,
-    is_built_for_csharp, is_well_formed_id,
+    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolution,
+    PluginReleaseResolveResult, PluginReleaseResolver, PluginRepositoryResolution, describe,
+    github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
     LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherTextEditorKind,
@@ -227,7 +230,7 @@ enum Message {
         result: Result<Vec<PermissionDeclaration>, String>,
     },
     InstallFinished(Result<PluginInstallResult, String>),
-    AddFromUrlResolved(Result<PluginReleaseResolveResult, String>),
+    AddFromUrlResolved(Result<PluginRepositoryResolution, String>),
     BetaToggled {
         id: String,
         is_beta: bool,
@@ -381,6 +384,16 @@ fn read_manifest(directory: &Path) -> Option<PluginManifest> {
     std::fs::read_to_string(directory.join("plugin.json"))
         .ok()
         .and_then(|text| PluginManifest::parse(&text).ok())
+}
+
+/// Why the list in effect blocks this release, if it does.
+fn block_reason(backend: &PluginComposition, manifest: &PluginManifest) -> Option<String> {
+    let version = LauncherVersion::try_parse(&manifest.version);
+    backend.current_catalog().and_then(|catalog| {
+        catalog
+            .block_reason(&manifest.id, version.as_ref())
+            .map(str::to_owned)
+    })
 }
 
 /// `0.1.0` from `0.1.0+abc`.
@@ -1604,6 +1617,7 @@ impl LauncherWindow {
             || self.is_settings_open
             || self.plugins.install_dialog.is_open
             || self.plugins.is_remove_dialog_open
+            || !self.plugins.add_from_url_choices.is_empty()
             || self.remove_character_target.is_some()
             || self.profile_migration_notice.is_some()
             || self.close_prompt.is_some()
@@ -2861,6 +2875,8 @@ impl LauncherWindow {
             self.close_install_dialog();
         } else if self.plugins.is_remove_dialog_open && !self.plugins.is_busy {
             self.plugins.is_remove_dialog_open = false;
+        } else if !self.plugins.add_from_url_choices.is_empty() {
+            self.cancel_add_from_url_choice();
         }
     }
 
@@ -3209,8 +3225,9 @@ impl LauncherWindow {
             let mut saw_rate_limited = false;
             let mut saw_transport_failure = false;
             let catalog = backend.current_catalog();
+            let resolver = backend.release_resolver.pass();
             for (id, repo) in pending {
-                let fetch = fetch_plugin_manifest(&backend, &repo, channel);
+                let fetch = fetch_plugin_manifest(&backend, &resolver, &repo, &id, channel);
                 match &fetch {
                     ManifestFetch::RateLimited => saw_rate_limited = true,
                     ManifestFetch::Failed => saw_transport_failure = true,
@@ -3294,14 +3311,16 @@ impl LauncherWindow {
             .collect()
     }
 
-    fn is_listed(&self, repo: &str) -> bool {
+    /// Whether plugin `id` of `repo` is on the list: the list names plugins,
+    /// and a repository can publish several, listed or not.
+    fn is_listed(&self, repo: &str, id: &str) -> bool {
         self.plugin_backend
             .as_ref()
             .and_then(|backend| backend.current_catalog())
             .is_some_and(|catalog| {
-                catalog
-                    .entries_for_this_client()
-                    .any(|entry| entry.repo == repo)
+                catalog.entries_for_this_client().any(|entry| {
+                    entry.repo.eq_ignore_ascii_case(repo) && entry.id.eq_ignore_ascii_case(id)
+                })
             })
     }
 
@@ -3326,7 +3345,7 @@ impl LauncherWindow {
             repo: row.entry.repo.clone(),
             plugin_id: row.entry.id.clone(),
             display_name: row.entry.name.clone(),
-            is_listed: self.is_listed(&row.entry.repo),
+            is_listed: self.is_listed(&row.entry.repo, &row.entry.id),
             is_update: false,
             offered_version: Some(option.version.clone()),
             pinned_tag: Some(option.tag.clone()),
@@ -3358,7 +3377,7 @@ impl LauncherWindow {
         };
         let affected = self.characters_with_plugin_enabled(&row.info.id);
         let request = InstallDialogRequest {
-            is_listed: self.is_listed(&repo),
+            is_listed: self.is_listed(&repo, &row.info.id),
             repo,
             plugin_id: row.info.id.clone(),
             display_name: row.info.display_name.clone(),
@@ -3518,11 +3537,18 @@ impl LauncherWindow {
     fn open_install_dialog(&mut self, request: InstallDialogRequest) {
         let needs_permissions = request.permissions.is_none();
         let repo = request.repo.clone();
+        let id = request.plugin_id.clone();
         let channel = request.channel.unwrap_or(PluginReleaseChannel::Stable);
         let generation = self.plugins.install_dialog.open(request);
         if needs_permissions && let Some(backend) = self.plugin_backend.clone() {
             self.run(move |sender, wake| {
-                let result = match fetch_plugin_manifest(&backend, &repo, channel) {
+                let result = match fetch_plugin_manifest(
+                    &backend,
+                    &backend.release_resolver,
+                    &repo,
+                    &id,
+                    channel,
+                ) {
                     ManifestFetch::Found(found) => Ok(found.manifest.permissions),
                     ManifestFetch::RateLimited => Err("GitHub is rate limiting; try later.".into()),
                     ManifestFetch::Message(message) => Err(message),
@@ -3542,6 +3568,7 @@ impl LauncherWindow {
             cancel.cancel();
         }
         self.plugins.install_dialog.close();
+        self.ask_again_for_add_from_url();
     }
 
     /// The install dialog's Install / Update.
@@ -3592,6 +3619,7 @@ impl LauncherWindow {
                     None => resolve_latest_tag(
                         &backend,
                         &request.repo,
+                        &request.plugin_id,
                         request.channel.unwrap_or(PluginReleaseChannel::Stable),
                         &cancel,
                     )?,
@@ -3643,6 +3671,7 @@ impl LauncherWindow {
                     self.strip_from_every_character(&installed.id);
                 }
                 self.plugins_check_now();
+                self.ask_again_for_add_from_url();
             }
             Err(error) => self.plugins.install_dialog.error = Some(error),
         }
@@ -3827,7 +3856,9 @@ impl LauncherWindow {
             && !self.plugins.add_from_url_text.trim().is_empty()
     }
 
-    /// Add from URL (`https://github.com/owner/name`).
+    /// Add from URL (`https://github.com/owner/name`). The repository is
+    /// read before anything is said: it may publish several plugins, some
+    /// installed and some not.
     pub fn add_from_url(&mut self) {
         let Some(backend) = self.plugin_backend.clone() else {
             return;
@@ -3839,116 +3870,178 @@ impl LauncherWindow {
             self.plugins.error = Some("Enter a URL like https://github.com/owner/name.".into());
             return;
         };
-        let installed_by_repo = backend
-            .records()
-            .records
-            .iter()
-            .find(|record| record.repo.eq_ignore_ascii_case(&repo))
-            .map(|record| record.id.clone());
-        if let Some(id) = installed_by_repo {
-            self.plugins.add_from_url_text.clear();
-            let name = backend
-                .find_installed(&id, (self.client_version)().as_ref(), None)
-                .map_or(id, |info| info.display_name);
-            self.plugins.status_text = Some(format!("{name} is already installed."));
-            return;
-        }
         self.plugins.is_busy = true;
         self.plugins.error = None;
         self.plugins.status_text = None;
+        self.plugins.add_from_url_choices.clear();
+        self.plugins.add_from_url_offered.clear();
         let channel = self.plugins.discover_channel();
         let pending_repo = repo.clone();
         self.plugins.add_from_url_text = repo;
         self.run(move |sender, wake| {
             let result = backend
                 .release_resolver
-                .resolve(&pending_repo, channel, &CancelToken::new())
+                .resolve_repository(&pending_repo, channel, &CancelToken::new())
                 .map_err(|error| error.to_string());
             let _ = sender.send(Message::AddFromUrlResolved(result));
             wake();
         });
     }
 
-    fn apply_add_from_url(&mut self, result: Result<PluginReleaseResolveResult, String>) {
+    fn apply_add_from_url(&mut self, result: Result<PluginRepositoryResolution, String>) {
         self.plugins.is_busy = false;
         let repo = self.plugins.add_from_url_text.clone();
         let Some(backend) = self.plugin_backend.clone() else {
             return;
         };
-        match result {
-            Ok(PluginReleaseResolveResult::Success(resolution)) => {
-                let manifest = resolution.manifest.clone();
-                self.plugins.add_from_url_text.clear();
-                let installed_by_id = backend.find_record(&manifest.id);
-                if let Some(record) = &installed_by_id {
-                    if record.repo.eq_ignore_ascii_case(&repo) {
-                        self.plugins.status_text =
-                            Some(format!("{} is already installed.", manifest.display_name));
-                    } else {
-                        self.plugins.error = Some(format!(
-                            "'{}' is already installed from '{}'.",
-                            manifest.id, record.repo
-                        ));
-                    }
-                    return;
-                }
-                let version = LauncherVersion::try_parse(&manifest.version);
-                if let Some(reason) = backend.current_catalog().and_then(|catalog| {
-                    catalog
-                        .block_reason(&manifest.id, version.as_ref())
-                        .map(str::to_owned)
-                }) {
-                    self.plugins.error = Some(format!("'{}' is blocked: {reason}", manifest.id));
-                    return;
-                }
-                let request = InstallDialogRequest {
-                    is_listed: self.is_listed(&repo),
-                    repo,
-                    plugin_id: manifest.id.clone(),
-                    display_name: manifest.display_name.clone(),
-                    is_update: false,
-                    offered_version: Some(manifest.version.clone()),
-                    pinned_tag: Some(resolution.tag.clone()),
-                    channel: None,
-                    characters: self.character_options(),
-                    permissions: Some(manifest.permissions.clone()),
-                    installed_permissions: None,
-                    affected_characters: Vec::new(),
-                    local_zip: None,
-                };
-                self.open_install_dialog(request);
-            }
-            Ok(PluginReleaseResolveResult::RateLimited) => {
-                self.plugins.error = Some("GitHub is rate limiting; try later.".into());
-            }
-            Ok(PluginReleaseResolveResult::Invalid(reason)) => {
-                self.plugins.error = Some(
-                    if is_built_for_csharp(&crate::plugins::ManifestError(reason)) {
-                        "That repository's release is built for OpenAC (C#), not this client."
-                            .into()
-                    } else {
-                        "That repository's plugin.json could not be read.".into()
-                    },
-                );
-            }
-            Ok(PluginReleaseResolveResult::Prerelease(message)) => {
-                self.plugins.error = Some(message);
-            }
-            Ok(PluginReleaseResolveResult::Unavailable) => {
-                self.plugins.error = Some(
-                    "No release for this client was found for that repository (its releases \
-                     must be tagged wasm-v<version>)."
-                        .into(),
-                );
-            }
+        let found = match result {
+            Ok(found) => found,
             Err(error) => {
                 self.plugins.error = Some(if error.trim().is_empty() {
                     "Could not add that plugin.".into()
                 } else {
                     error
                 });
+                return;
+            }
+        };
+        backend.log_index_warning_text(&repo, found.index_warning.as_deref());
+        backend.log_plugins_not_searched(&repo, found.not_searched);
+        if found.plugins.is_empty() {
+            self.report_add_from_url_failure(found.failure);
+            return;
+        }
+        self.plugins.add_from_url_text.clear();
+        let (installed, fresh): (Vec<_>, Vec<_>) = found
+            .plugins
+            .into_iter()
+            .partition(|plugin| backend.find_record(&plugin.manifest.id).is_some());
+        // A blocked plugin is never one of the choices; it is said only when
+        // nothing else could be added.
+        let (mut blocked, mut fresh): (Vec<_>, Vec<_>) = fresh
+            .into_iter()
+            .partition(|plugin| block_reason(&backend, &plugin.manifest).is_some());
+        match fresh.len() {
+            0 if !blocked.is_empty() => self.offer_add_from_url(repo, blocked.remove(0)),
+            0 => {
+                let [only] = installed.as_slice() else {
+                    self.plugins.status_text =
+                        Some("Every plugin of that repository is already installed.".into());
+                    return;
+                };
+                let manifest = &only.manifest;
+                match backend.find_record(&manifest.id) {
+                    Some(record) if !record.repo.eq_ignore_ascii_case(&repo) => {
+                        self.plugins.error = Some(format!(
+                            "'{}' is already installed from '{}'.",
+                            manifest.id, record.repo
+                        ));
+                    }
+                    _ => {
+                        self.plugins.status_text =
+                            Some(format!("{} is already installed.", manifest.display_name));
+                    }
+                }
+            }
+            1 => self.offer_add_from_url(repo, fresh.remove(0)),
+            _ => {
+                let mut choices: Vec<AddFromUrlChoice> = fresh
+                    .into_iter()
+                    .map(|resolution| AddFromUrlChoice {
+                        repo: repo.clone(),
+                        display_name: resolution.manifest.display_name.clone(),
+                        version: resolution.manifest.version.clone(),
+                        resolution: Box::new(resolution),
+                    })
+                    .collect();
+                choices.sort_by_key(|choice| choice.display_name.to_lowercase());
+                self.plugins.add_from_url_choices = choices;
             }
         }
+    }
+
+    /// Picks one plugin of a repository publishing several.
+    pub fn choose_add_from_url(&mut self, index: usize) {
+        let Some(choice) = self.plugins.add_from_url_choices.get(index).cloned() else {
+            return;
+        };
+        self.plugins.add_from_url_offered = std::mem::take(&mut self.plugins.add_from_url_choices);
+        self.offer_add_from_url(choice.repo, *choice.resolution);
+        if !self.plugins.install_dialog.is_open {
+            self.ask_again_for_add_from_url();
+        }
+    }
+
+    /// Closes the pick of one plugin without offering any.
+    pub fn cancel_add_from_url_choice(&mut self) {
+        self.plugins.add_from_url_choices.clear();
+        self.plugins.add_from_url_offered.clear();
+    }
+
+    /// Brings the pick back, once the install dialog it opened has closed (or
+    /// the choice was refused), with the plugins it offered that are still
+    /// not installed and not blocked.
+    fn ask_again_for_add_from_url(&mut self) {
+        let offered = std::mem::take(&mut self.plugins.add_from_url_offered);
+        let Some(backend) = self.plugin_backend.clone() else {
+            return;
+        };
+        self.plugins.add_from_url_choices = offered
+            .into_iter()
+            .filter(|choice| {
+                let manifest = &choice.resolution.manifest;
+                backend.find_record(&manifest.id).is_none()
+                    && block_reason(&backend, manifest).is_none()
+            })
+            .collect();
+    }
+
+    /// Opens the install dialog for a plugin Add from URL found, unless it is
+    /// blocked.
+    fn offer_add_from_url(&mut self, repo: String, resolution: PluginReleaseResolution) {
+        let Some(backend) = self.plugin_backend.clone() else {
+            return;
+        };
+        let manifest = resolution.manifest;
+        if let Some(reason) = block_reason(&backend, &manifest) {
+            self.plugins.error = Some(format!("'{}' is blocked: {reason}", manifest.id));
+            return;
+        }
+        let request = InstallDialogRequest {
+            is_listed: self.is_listed(&repo, &manifest.id),
+            repo,
+            plugin_id: manifest.id.clone(),
+            display_name: manifest.display_name.clone(),
+            is_update: false,
+            offered_version: Some(manifest.version.clone()),
+            pinned_tag: Some(resolution.tag),
+            channel: None,
+            characters: self.character_options(),
+            permissions: Some(manifest.permissions.clone()),
+            installed_permissions: None,
+            affected_characters: Vec::new(),
+            local_zip: None,
+        };
+        self.open_install_dialog(request);
+    }
+
+    fn report_add_from_url_failure(&mut self, failure: PluginReleaseResolveResult) {
+        self.plugins.error = Some(match failure {
+            PluginReleaseResolveResult::RateLimited => "GitHub is rate limiting; try later.".into(),
+            PluginReleaseResolveResult::Invalid(reason) => {
+                if is_built_for_csharp(&crate::plugins::ManifestError(reason)) {
+                    "That repository's release is built for OpenAC (C#), not this client.".into()
+                } else {
+                    "That repository's plugin.json could not be read.".into()
+                }
+            }
+            PluginReleaseResolveResult::Prerelease(message) => message,
+            PluginReleaseResolveResult::Success(_) | PluginReleaseResolveResult::Unavailable => {
+                "No release for this client was found for that repository (its releases must \
+                 be tagged wasm-v<version>, or wasm-<plugin id>-v<version>)."
+                    .into()
+            }
+        });
     }
 
     /// A managed plugin's Beta updates toggle: sets the channel, then
@@ -4074,19 +4167,20 @@ enum ManifestFetch {
     Failed,
 }
 
-/// Resolves `repo` on `channel`, as the update check and Discover do.
+/// Resolves plugin `id` of `repo` on `channel`, as the update check and
+/// Discover do.
 fn fetch_plugin_manifest(
     backend: &PluginComposition,
+    resolver: &PluginReleaseResolver,
     repo: &str,
+    id: &str,
     channel: PluginReleaseChannel,
 ) -> ManifestFetch {
-    let Ok(candidates) =
-        backend
-            .release_resolver
-            .resolve_candidates(repo, channel, &CancelToken::new())
+    let Ok(candidates) = resolver.resolve_plugin_candidates(repo, id, channel, &CancelToken::new())
     else {
         return ManifestFetch::Failed;
     };
+    backend.log_index_warning(repo, &candidates);
     match candidates.for_channel(channel).clone() {
         PluginReleaseResolveResult::Success(resolution) => {
             ManifestFetch::Found(Box::new(FoundManifest {
@@ -4195,12 +4289,13 @@ fn discover_icon(
 fn resolve_latest_tag(
     backend: &PluginComposition,
     repo: &str,
+    id: &str,
     channel: PluginReleaseChannel,
     cancel: &CancelToken,
 ) -> Result<String, String> {
     match backend
         .release_resolver
-        .resolve(repo, channel, cancel)
+        .resolve_plugin(repo, id, channel, cancel)
         .map_err(|error| error.to_string())?
     {
         PluginReleaseResolveResult::Success(resolution) => Ok(resolution.tag),
