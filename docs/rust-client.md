@@ -34,7 +34,13 @@ keeps loading and receives exactly what it did before:
 | 1.2 | 0.1.6 | a house hook's accepted item types on items and world objects |
 | 1.3 | 0.1.9 | drawing in the world: markers, lines, triangles, icons and ground shapes |
 | 1.4 | 0.1.10 | five more themes, the bundled and a plugin's own fonts, light and dark colours and image files in markup, a dock icon per window |
-| 1.5 | 0.1.10 | every reachable cell of a dungeon with its route's length, a preview's grid reuse and time, cells' doorways, seen cells, bounds and floor height |
+| 1.5 | 0.1.10 | every reachable cell of a dungeon with its route's length, a preview's grid reuse and time, cells' doorways, seen cells, bounds and floor height; in 0.1.11 also putting items into the open chest and the landscape's terrain and map colours |
+| 1.6 | 0.1.11 | a canvas hears the pointer hover and leave |
+| 1.7 | 0.1.11 | plugin services (plugins call each other) and the server's last position of objects |
+| 1.8 | 0.1.11 | status board subscriptions: a plugin hears another's status changes |
+
+From 1.6 on, a released version never changes: a new function, event or
+field comes with the next minor version.
 
 To use a newer version, move the plugin's SDK to that release and set
 `"apiVersion"` in its `plugin.json`.
