@@ -40,7 +40,8 @@ impl ServiceRegistry {
     /// # Errors
     /// The name is not a service name, the description is longer than
     /// [`MAX_DESCRIPTION`], `owner` already offers one by that name, or it
-    /// offers [`MAX_SERVICES`] already.
+    /// offers [`MAX_SERVICES`] already, or the session has given out every
+    /// handle there is (as many as it may: [`ServiceError::TooMany`]).
     pub fn register(
         &mut self,
         owner: &str,
@@ -58,6 +59,7 @@ impl ServiceRegistry {
         if self.find_entry(&id).is_some() {
             return Err(ServiceError::AlreadyRegistered);
         }
+        let too_many = || ServiceError::TooMany(u32::try_from(MAX_SERVICES).unwrap_or(u32::MAX));
         if self
             .entries
             .iter()
@@ -65,11 +67,11 @@ impl ServiceRegistry {
             .count()
             >= MAX_SERVICES
         {
-            return Err(ServiceError::TooMany(
-                u32::try_from(MAX_SERVICES).unwrap_or(u32::MAX),
-            ));
+            return Err(too_many());
         }
-        self.next_handle += 1;
+        // A handle is never given out twice, so past the last one the
+        // session has offered as many services as it may.
+        self.next_handle = self.next_handle.checked_add(1).ok_or_else(too_many)?;
         let info = ServiceInfo {
             id,
             owner: owner.to_owned(),
@@ -219,6 +221,32 @@ mod tests {
         );
         // The limit is per plugin.
         assert!(registry.register("q", &offer("one-more")).is_ok());
+    }
+
+    /// Handles are never given out twice: once the session has given out
+    /// the last one, an offer is refused as one too many, and nothing of it
+    /// is listed or told.
+    #[test]
+    fn the_last_handle_is_given_out_once() {
+        let mut registry = ServiceRegistry {
+            next_handle: u32::MAX - 1,
+            ..ServiceRegistry::default()
+        };
+        assert_eq!(
+            registry.register("openac.nav", &offer("path")),
+            Ok(u32::MAX)
+        );
+        registry.take_changes();
+        assert_eq!(
+            registry.register("openac.nav", &offer("route")),
+            Err(ServiceError::TooMany(32))
+        );
+        assert_eq!(registry.find("openac.nav/route"), None);
+        assert!(registry.take_changes().is_empty());
+        assert_eq!(
+            registry.find("openac.nav/path"),
+            Some(("openac.nav".to_owned(), u32::MAX))
+        );
     }
 
     #[test]

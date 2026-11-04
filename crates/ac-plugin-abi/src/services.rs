@@ -107,6 +107,10 @@ wire_union! {
     /// Why a service could not be offered or did not answer. What the
     /// service itself says about a request (not found, not now) belongs in
     /// its reply.
+    ///
+    /// New kinds may come in later API minor versions, so a plugin matches
+    /// with a catch-all arm.
+    #[non_exhaustive]
     pub enum ServiceError: "service error" {
         /// No such service.
         0 => NotFound,
