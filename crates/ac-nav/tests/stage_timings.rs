@@ -2,15 +2,18 @@
 //! for a body with an ordinary jump skill and one with a test character's
 //! very high one, over the ground the client loads (its trees and rocks
 //! with it): the stage east of Eastham whose far landblocks the client had
-//! not loaded yet, and a stage a wall no walk or leap crosses. A
-//! diagnostic: it prints its timings and runs only when asked for.
+//! not loaded yet, and a stage a wall no walk or leap crosses; and walks
+//! planned over one region: toward a goal behind such a wall, onto a raised
+//! spot (a rock, a roof) near the start, and the reach of every spot a
+//! route of 60 m gets to. A diagnostic: it prints its timings and runs only
+//! when asked for.
 
 mod support;
 
 use std::time::Instant;
 
 use ac_nav::grid::DEFAULT_CELL_SIZE;
-use ac_nav::walk::{REGION_MARGIN, choose_stage_region};
+use ac_nav::walk::{REGION_MARGIN, choose_stage_region, try_choose_region};
 use ac_nav::{
     NavGrid, NavLeapAbility, NavLeapFinder, NavLeapPhysics, NavRouteRequest, NavTriangle, geometry,
     route,
@@ -133,6 +136,30 @@ fn stages_with_leaps_are_timed() {
         })
         .min_by(|a, b| a.distance(arrival).total_cmp(&b.distance(arrival)))
         .expect("a raised spot near the arrival");
+    // One region's walk toward a goal behind a wall 30 m high across the
+    // whole region halfway there, 80 m and 250 m away: no walk arrives, so
+    // the route is planned again with leaps, and none crosses.
+    for meters in [80.0, 250.0] {
+        let goal = arrival + (toward * meters).extend(0.0);
+        let goal = ground(&loaded, goal.x, goal.y);
+        let (x, y, size) = try_choose_region(arrival, goal).expect("one region holds both");
+        let mut captured = geometry::capture(&loaded, x, y, size, None).expect("resident");
+        let middle = arrival.truncate() + toward * (meters * 0.5);
+        let (a, b) = (middle - across, middle + across);
+        captured.object_triangles.extend([
+            NavTriangle::new(corner(a, low), corner(b, low), corner(b, high)),
+            NavTriangle::new(corner(a, low), corner(b, high), corner(a, high)),
+        ]);
+        let walled = NavGrid::build(&captured, body, DEFAULT_CELL_SIZE).expect("the grid builds");
+        time_find(
+            &format!("one {size} m region, goal {meters} m behind a wall"),
+            &walled,
+            arrival,
+            goal,
+            false,
+        );
+    }
+
     for skill in [443.0, 15000.0] {
         let finder = NavLeapFinder::new(&grid, leaper(skill));
         let clock = Instant::now();
@@ -140,6 +167,56 @@ fn stages_with_leaps_are_timed() {
         eprintln!(
             "onward leap onto {raised}, jump skill {skill}: {}, {:.0} ms",
             if aimed.is_some() { "aimed" } else { "none" },
+            clock.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+
+    // One region's walk onto that raised spot, as a follow onto its floor
+    // and as a plain walk to it.
+    let (x, y, size) = try_choose_region(arrival, raised).expect("one region holds both");
+    let captured = geometry::capture(&loaded, x, y, size, None).expect("resident");
+    let near = NavGrid::build(&captured, body, DEFAULT_CELL_SIZE).expect("the grid builds");
+    let name = format!("one {size} m region, onto the raised spot");
+    time_find(&format!("{name}, its floor"), &near, arrival, raised, true);
+    time_find(&name, &near, arrival, raised, false);
+
+    // Every spot a route of at most 60 m gets to, leaping, over the stage's
+    // grid (in the client only a sealed dungeon's reach is searched).
+    for skill in [443.0, 15000.0] {
+        let clock = Instant::now();
+        let flood = route::flood(&grid, arrival, 60.0, &[], Some(leaper(skill)))
+            .expect("the arrival stands on the grid");
+        eprintln!(
+            "reach within 60 m, jump skill {skill}: {} expansions{}, {:.0} ms",
+            flood.expansions,
+            if flood.gave_up { " (gave up)" } else { "" },
+            clock.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
+/// Plans one region's walk at jump skills 443 and 15000 and prints what it
+/// took.
+fn time_find(name: &str, grid: &NavGrid, from: Vec3, to: Vec3, on_goal_floor: bool) {
+    for skill in [443.0, 15000.0] {
+        let clock = Instant::now();
+        let found = route::find(
+            grid,
+            from,
+            to,
+            1.0,
+            &NavRouteRequest {
+                leaps: Some(leaper(skill)),
+                arrive_on_goal_floor: on_goal_floor,
+                ..NavRouteRequest::default()
+            },
+        );
+        eprintln!(
+            "{name}, jump skill {skill}: {:?}, '{}', {} leaps, {} expansions, {:.0} ms",
+            found.outcome,
+            found.reason,
+            found.leaps.len(),
+            found.expansions,
             clock.elapsed().as_secs_f64() * 1000.0
         );
     }
