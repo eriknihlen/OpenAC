@@ -75,7 +75,9 @@ openac_plugin::export_plugin!(Hello);
 The client constructs the plugin with `Default`, calls `enable` (register
 verbs and read settings there; an error refuses the load), then `tick` every
 15 ms of client time and `on_event` for everything that happens, until
-`disable`. It never calls a plugin re-entrantly. Match events with a
+`disable`. It never calls a plugin re-entrantly. A released API version
+never changes: a new function, event kind or record field comes with the
+next minor version, so a plugin built for one keeps loading as it was. Match events with a
 catch-all arm: a new API minor version adds event kinds, and the client sends
 a plugin only the kinds of the API version it was built for (API 1.1 added
 `Event::StatusTextReceived`, the text of each notice on the status line, such
@@ -113,7 +115,9 @@ player has moved it. A change to it alone raises no object change (an
 object is told moved when its cell changes), so a plugin that follows it
 asks again. API 1.8 added subscriptions to the status board
 ([The status board](#the-status-board)), with `Event::StatusChanged`, which
-a plugin built for an older version never gets. Everything the client offers goes through
+a plugin built for an older version never gets.
+
+Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
 storage, network, peers, and UI. `cargo doc -p openac-plugin --open` shows
 the whole surface with its documentation.

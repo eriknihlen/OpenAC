@@ -6,7 +6,8 @@
 //! A plugin may subscribe to another's values (API 1.8): the changes are
 //! gathered over a pass of the plugins and taken once at its end
 //! ([`StatusBoard::take_changes`]), one per key with the value as it then
-//! stands, so a plugin publishing in a loop cannot flood its subscribers.
+//! stands, so a key published in a loop costs each subscriber one notice
+//! a pass (a publisher still sends one per key it changed).
 
 use std::collections::{BTreeMap, BTreeSet};
 
