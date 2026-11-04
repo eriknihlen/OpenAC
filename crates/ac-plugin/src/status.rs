@@ -275,6 +275,29 @@ mod tests {
         assert!(!board.unsubscribe("sub", "pub"));
     }
 
+    // A publisher stopped and started again within a pass is heard as the
+    // difference: a value it published again unchanged is not told, one
+    // it changed is, and one it did not publish again is told withdrawn.
+    #[test]
+    fn a_publisher_restarted_within_a_pass_is_heard_as_the_difference() {
+        let mut board = StatusBoard::default();
+        board.subscribe("sub", "pub");
+        board.publish("pub", "same", Some("1".into()));
+        board.publish("pub", "changed", Some("1".into()));
+        board.publish("pub", "dropped", Some("1".into()));
+        board.take_changes();
+        board.release("pub");
+        board.publish("pub", "same", Some("1".into()));
+        board.publish("pub", "changed", Some("2".into()));
+        assert_eq!(
+            board.take_changes(),
+            [
+                told("sub", "pub", "changed", Some("2")),
+                told("sub", "pub", "dropped", None),
+            ]
+        );
+    }
+
     // A subscription starts where it is made: a change made earlier in the
     // pass is not told, a later one is, and so is a subscription made
     // again after withdrawing it in the same pass.
