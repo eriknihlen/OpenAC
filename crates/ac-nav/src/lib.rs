@@ -39,5 +39,7 @@ pub mod walk;
 
 pub use geometry::{NavBody, NavCylinder, NavGeometry, NavSurfaces, NavTerrain, NavTriangle};
 pub use grid::{NavGrid, NavGridBuildReport};
-pub use leaps::{NavLeap, NavLeapAbility, NavLeapAim, NavLeapFinder, NavLeapPhysics, NavRouteLeap};
+pub use leaps::{
+    NavLeap, NavLeapAbility, NavLeapAim, NavLeapFinder, NavLeapLimits, NavLeapPhysics, NavRouteLeap,
+};
 pub use route::{NavAvoidance, NavRoute, NavRouteOutcome, NavRouteRequest};

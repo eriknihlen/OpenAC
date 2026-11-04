@@ -337,6 +337,12 @@ fn turned(heading: Vec2, degrees: f32) -> Vec2 {
 /// before it is back down at the height it left from.
 #[must_use]
 pub fn aim_reach_of(ability: &NavLeapAbility) -> f32 {
+    reach_down_to(ability, 0.0)
+}
+
+/// How far, measured flat, a body carries at a run on a full-power jump
+/// before it is down `drop` metres below the height it left from.
+fn reach_down_to(ability: &NavLeapAbility, drop: f32) -> f32 {
     let speed = ability.run_speed.max(ability.walk_speed);
     if !(speed > 0.0) {
         return LEAST_AIM_REACH;
@@ -345,7 +351,7 @@ pub fn aim_reach_of(ability: &NavLeapAbility) -> f32 {
     let mut seconds = 0.0f32;
     loop {
         seconds += 0.01;
-        if !(ability.physics.height(launch_speed, seconds) > 0.0 && seconds < 10.0) {
+        if !(ability.physics.height(launch_speed, seconds) > -drop && seconds < 10.0) {
             break;
         }
     }
@@ -391,6 +397,24 @@ struct Line {
     takeoffs: Vec<(i32, f32)>,
 }
 
+/// Where a finder's leaps may go: taking off within `takeoff_radius`
+/// metres, across, of `takeoff_near`, and coming to rest within
+/// `landing_within` metres, across, of `toward`. A search toward a goal
+/// it cannot walk to looks for the leaps that cross what stopped its walk:
+/// they take off near where the walk came nearest the goal and come down
+/// nearer it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NavLeapLimits {
+    /// Where takeoffs gather.
+    pub takeoff_near: Vec3,
+    /// How far from it a leap may take off, metres.
+    pub takeoff_radius: f32,
+    /// What landings come nearer.
+    pub toward: Vec3,
+    /// How near it a leap must come to rest, metres.
+    pub landing_within: f32,
+}
+
 /// Finds the leaps a body can take between pieces of floor no walk joins,
 /// such as platforms, ledges, and the floor beyond a gap or below a drop.
 /// See the module documentation.
@@ -399,9 +423,10 @@ pub struct NavLeapFinder<G: Deref<Target = NavGrid>> {
     grid: G,
     ability: NavLeapAbility,
     aim_reach: f32,
+    limits: Option<NavLeapLimits>,
     by_piece: Mutex<HashMap<i32, Arc<ByTakeoff>>>,
     standing: Mutex<HashMap<i32, Arc<[NavLeap]>>>,
-    onward: Mutex<HashMap<i32, Arc<[NavLeap]>>>,
+    onward: Mutex<OnwardLeaps>,
 }
 
 impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
@@ -412,9 +437,19 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
             grid,
             ability,
             aim_reach: aim_reach_of(&ability),
+            limits: None,
             by_piece: Mutex::new(HashMap::new()),
             standing: Mutex::new(HashMap::new()),
             onward: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// A finder whose leaps keep within limits: see [`NavLeapLimits`].
+    #[must_use]
+    pub fn limited(grid: G, ability: NavLeapAbility, limits: NavLeapLimits) -> Self {
+        Self {
+            limits: Some(limits),
+            ..Self::new(grid, ability)
         }
     }
 
@@ -438,7 +473,7 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
         if let Some(found) = self.by_piece.lock().expect("a leap cache").get(&piece) {
             return Arc::clone(found);
         }
-        let found = Arc::new(self.find_from(piece));
+        let found = Arc::new(self.find_from(piece, &self.limit_bounds()));
         self.by_piece
             .lock()
             .expect("a leap cache")
@@ -672,16 +707,31 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
             .onward
             .lock()
             .expect("a leap cache")
-            .get(&from)
+            .get(&(from, target))
             .cloned();
         let onward = match cached {
             Some(found) => found,
             None => {
-                let leaps = standing_leaps(&self.by_piece(piece), from);
+                // Only leaps onto the target that the body can make from
+                // where it stands are aimed again below: those come down
+                // within its reach (and a slide), and take off within that
+                // of it. Its whole piece's leaps, which for open ground
+                // aim at every rock and roof of the grid, are not needed.
+                // A leap down carries farther than one back to its own height:
+                // as far as the deepest drop allowed, then a slide as long
+                // again as the level reach.
+                let down = reach_down_to(&self.ability, self.ability.maximum_drop);
+                let landing = down + self.aim_reach;
+                let bounds = Bounds {
+                    takeoff: Some((flat(standing), landing + down)),
+                    landing: Some((flat(standing), landing)),
+                    onto: Some(target),
+                };
+                let leaps = standing_leaps(&self.find_from(piece, &bounds), from);
                 self.onward
                     .lock()
                     .expect("a leap cache")
-                    .insert(from, Arc::clone(&leaps));
+                    .insert((from, target), Arc::clone(&leaps));
                 leaps
             }
         };
@@ -709,7 +759,7 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
 
     /// The leaps from anywhere on a piece of floor to the spots of every
     /// other piece in reach, by takeoff.
-    fn find_from(&self, piece: i32) -> ByTakeoff {
+    fn find_from(&self, piece: i32, bounds: &Bounds) -> ByTakeoff {
         let surfaces = self.surfaces();
         let side = surfaces.tile_side;
         let reach = self.tiles_within(self.aim_reach);
@@ -717,7 +767,7 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
         let mut holds = vec![false; tiles];
         let mut near = vec![false; tiles];
         for (tile, held) in holds.iter_mut().enumerate() {
-            if !surfaces.tile_holds(tile, piece) {
+            if !surfaces.tile_holds(tile, piece) || !self.takes_off_in(tile, bounds) {
                 continue;
             }
             *held = true;
@@ -740,7 +790,7 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
             }
             for index in surfaces.tile_start[tile]..surfaces.tile_start[tile + 1] {
                 let spot = surfaces.spots[index as usize];
-                if surfaces.piece_of[spot as usize] != piece {
+                if surfaces.piece_of[spot as usize] != piece && self.lands_within(spot, bounds) {
                     self.aim_at(
                         piece,
                         &holds,
@@ -1897,6 +1947,57 @@ impl<G: Deref<Target = NavGrid>> NavLeapFinder<G> {
     fn tiles_within(&self, meters: f32) -> i32 {
         (meters / (TILE_COLUMNS as f32 * self.grid.cell_size())).ceil() as i32
     }
+
+    /// The bounds the finder's own limits set on the leaps it finds for a
+    /// piece.
+    fn limit_bounds(&self) -> Bounds {
+        self.limits.map_or_else(Bounds::default, |limits| Bounds {
+            takeoff: Some((flat(limits.takeoff_near), limits.takeoff_radius)),
+            landing: Some((flat(limits.toward), limits.landing_within)),
+            onto: None,
+        })
+    }
+
+    /// Whether a leap may take off in a tile: any part of it lies within
+    /// the bounds' takeoff radius, or they set none.
+    fn takes_off_in(&self, tile: usize, bounds: &Bounds) -> bool {
+        let Some((centre, radius)) = bounds.takeoff else {
+            return true;
+        };
+        let side = self.surfaces().tile_side;
+        let width = TILE_COLUMNS as f32 * self.grid.cell_size();
+        let low = Vec2::new(
+            self.grid.origin_x() + (tile as i32 % side) as f32 * width,
+            self.grid.origin_y() + (tile as i32 / side) as f32 * width,
+        );
+        let nearest = centre.clamp(low, low + Vec2::splat(width));
+        nearest.distance(centre) <= radius
+    }
+
+    /// Whether a leap may come down on a spot: on the bounds' piece, if
+    /// they name one, and within their landing reach, if they set one.
+    fn lands_within(&self, spot: i32, bounds: &Bounds) -> bool {
+        bounds
+            .onto
+            .is_none_or(|piece| self.surfaces().piece_of[spot as usize] == piece)
+            && bounds.landing.is_none_or(|(centre, radius)| {
+                flat(self.grid.position(spot)).distance(centre) < radius
+            })
+    }
+}
+
+/// The leaps aimed onward from a takeoff node onto a target piece, by the
+/// two.
+type OnwardLeaps = HashMap<(i32, i32), Arc<[NavLeap]>>;
+
+/// Where the leaps found for one piece of floor may take off (within a
+/// radius of a point, across), come down (likewise), and onto which piece:
+/// anywhere, onto any, where unset.
+#[derive(Debug, Clone, Copy, Default)]
+struct Bounds {
+    takeoff: Option<(Vec2, f32)>,
+    landing: Option<(Vec2, f32)>,
+    onto: Option<i32>,
 }
 
 /// The leaps found so far, by takeoff, in the order takeoffs were first

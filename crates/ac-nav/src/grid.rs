@@ -163,6 +163,7 @@ pub struct NavGrid {
     cell_size: f32,
     side: i32,
     landblock_ids: Vec<u32>,
+    ground_corners: Vec<Vec2>,
     object_fingerprint: u64,
     object_ids: std::sync::Arc<std::collections::HashSet<u32>>,
     body: NavBody,
@@ -216,6 +217,45 @@ impl NavGrid {
     #[must_use]
     pub fn landblock_ids(&self) -> &[u32] {
         &self.landblock_ids
+    }
+
+    /// How far a point lies, across, outside the grid's square region,
+    /// metres; zero inside it.
+    #[must_use]
+    pub fn distance_beyond_region(&self, point: Vec3) -> f32 {
+        let low = Vec2::new(self.origin_x, self.origin_y);
+        let high = low + Vec2::splat(self.size());
+        let x = 0f32.max((low.x - point.x).max(point.x - high.x));
+        let y = 0f32.max((low.y - point.y).max(point.y - high.y));
+        Vec2::new(x, y).length()
+    }
+
+    /// How far a point lies, across, outside the grid's loaded ground,
+    /// metres: the part of its region over the landblocks whose ground it
+    /// was built from, which leaves out a landblock the client has not
+    /// loaded yet. A region built from no landblock ground (a dungeon's)
+    /// counts whole.
+    #[must_use]
+    pub fn distance_beyond_ground(&self, point: Vec3) -> f32 {
+        let low = Vec2::new(self.origin_x, self.origin_y);
+        let high = low + Vec2::splat(self.size());
+        let beyond = |from: Vec2, to: Vec2| {
+            let x = 0f32.max((from.x - point.x).max(point.x - to.x));
+            let y = 0f32.max((from.y - point.y).max(point.y - to.y));
+            Vec2::new(x, y).length()
+        };
+        self.ground_corners
+            .iter()
+            .map(|corner| {
+                (
+                    corner.max(low),
+                    (*corner + Vec2::splat(LANDBLOCK_SIZE)).min(high),
+                )
+            })
+            .filter(|(from, to)| from.x < to.x && from.y < to.y)
+            .map(|(from, to)| beyond(from, to))
+            .reduce(f32::min)
+            .unwrap_or_else(|| beyond(low, high))
     }
 
     /// What the objects the server placed in the region came to when it was
@@ -899,6 +939,11 @@ impl NavGrid {
             cell_size,
             side,
             landblock_ids: geometry.landblock_ids.clone(),
+            ground_corners: geometry
+                .terrains
+                .iter()
+                .map(|terrain| Vec2::new(terrain.origin_x, terrain.origin_y))
+                .collect(),
             object_fingerprint: geometry.object_fingerprint,
             object_ids: std::sync::Arc::new(geometry.object_ids.clone()),
             body,

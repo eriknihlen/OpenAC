@@ -10,7 +10,7 @@ use glam::{Vec2, Vec3};
 
 use crate::geometry::{NavCylinder, NavSurfaces, NavTriangle};
 use crate::grid::{DIRECTION_COUNT, NavGrid};
-use crate::leaps::{NavLeap, NavLeapAbility, NavLeapFinder, NavRouteLeap};
+use crate::leaps::{NavLeap, NavLeapAbility, NavLeapFinder, NavLeapLimits, NavRouteLeap};
 use crate::order::{
     InsertionSet, QuaternaryHeap, at_most_one_decimal, compare_f32, fixed, intro_sort,
 };
@@ -143,6 +143,10 @@ const LEAP_RISK_COST: f32 = 6.0;
 /// A route toward a goal beyond the grid found with leaps is taken only when
 /// it ends this much nearer the goal, metres.
 const LEAP_WORTH_METERS: f32 = 1.0;
+/// How far from where a walk toward a goal beyond the grid came nearest it
+/// the leaps sought after it may take off, metres: those that cross what
+/// stopped the walk there.
+pub const TOWARD_LEAP_TAKEOFF_METERS: f32 = 48.0;
 
 /// A route may pass through the spots creatures and players stand in, since
 /// they move aside when bumped, but it pays to. Stepping onto a node inside
@@ -572,10 +576,29 @@ fn plan(
 /// long for one grid to hold: to the first reachable node within `band` of
 /// the nearest the grid comes to the goal, or, when none is reachable, to
 /// the reachable node nearest the goal. When no walked route reaches the
-/// grid's edge toward the goal and the request says what the body can leap,
-/// it is found again with leaps, and taken when it ends nearer the goal.
+/// grid's edge toward the goal (the edge of its loaded ground) and the
+/// request says what the body can leap, it is found again with leaps, and
+/// taken when it ends nearer the goal. Those leaps take off within
+/// [`TOWARD_LEAP_TAKEOFF_METERS`] of where the walk came nearest the goal
+/// and come down nearer it, so a body that jumps far does not aim at every
+/// rock and roof of the grid.
 #[must_use]
 pub fn find_toward(
+    grid: &NavGrid,
+    from: Vec3,
+    goal: Vec3,
+    band: f32,
+    request: &NavRouteRequest<'_>,
+) -> NavRoute {
+    let clock = Instant::now();
+    let mut route = find_toward_passes(grid, from, goal, band, request);
+    // The whole search, its leaps' pass with it.
+    route.milliseconds = elapsed(clock);
+    route
+}
+
+/// [`find_toward`]'s walked pass and, where it falls short, its leaps'.
+fn find_toward_passes(
     grid: &NavGrid,
     from: Vec3,
     goal: Vec3,
@@ -602,7 +625,21 @@ pub fn find_toward(
     if walked.reason.starts_with(REACHED_EDGE_REASON) {
         return walked;
     }
-    let finder = NavLeapFinder::new(grid, ability);
+    let frontier = if walked.outcome == NavRouteOutcome::Routed {
+        last(&walked.legs)
+    } else {
+        from
+    };
+    let finder = NavLeapFinder::limited(
+        grid,
+        ability,
+        NavLeapLimits {
+            takeoff_near: frontier,
+            takeoff_radius: TOWARD_LEAP_TAKEOFF_METERS,
+            toward: goal,
+            landing_within: away(frontier, goal),
+        },
+    );
     let leapt = find_toward_with(
         grid,
         from,
@@ -649,7 +686,10 @@ fn find_toward_with(
         return no_start(clock);
     }
 
-    let enough = distance_beyond(grid, goal) + band.max(grid.cell_size());
+    // The edge toward the goal is that of the ground the grid was built
+    // over: a landblock the client has not loaded yet offers no floor to
+    // reach.
+    let enough = grid.distance_beyond_ground(goal) + band.max(grid.cell_size());
     let mut nearest = start;
     let mut nearest_away = away(grid.position(start), goal);
     let crowd_priced: &[NavAvoidance] = if price_crowd { crowd } else { &[] };
@@ -1199,14 +1239,6 @@ fn search_gave_up(search: &Search<'_, '_>, clock: Instant) -> NavRoute {
 
 fn away(point: Vec3, goal: Vec3) -> f32 {
     point.truncate().distance(goal.truncate())
-}
-
-/// How far a point lies outside a grid's square, measured flat; zero inside
-/// it.
-fn distance_beyond(grid: &NavGrid, point: Vec3) -> f32 {
-    let dx = 0f32.max((grid.origin_x() - point.x).max(point.x - (grid.origin_x() + grid.size())));
-    let dy = 0f32.max((grid.origin_y() - point.y).max(point.y - (grid.origin_y() + grid.size())));
-    (dx * dx + dy * dy).sqrt()
 }
 
 /// Every node a body reaches from one start, each by its cheapest route:

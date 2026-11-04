@@ -442,6 +442,11 @@ pub const MAXIMUM_REGION: f32 = 320.0;
 pub const VIEW_REGION: f32 = 128.0;
 /// A stage must bring the character at least this much nearer.
 pub const MINIMUM_STAGE_PROGRESS: f32 = 16.0;
+/// How long a stage that ends at the edge of the loaded ground waits for
+/// the landblocks beyond it to load, seconds, as just after a portal.
+pub const GROUND_WAIT_SECONDS: f64 = 10.0;
+/// The waiting stage's word.
+const WAITING_FOR_GROUND: &str = "waiting for the ground toward the goal to load";
 /// A walk has at most this many stages.
 pub const MAXIMUM_STAGES: i32 = 12;
 /// The largest region a grid covering a whole sealed dungeon may have.
@@ -619,6 +624,10 @@ struct Request {
     stages: i32,
     avoid: Vec<NavAvoidance>,
     stuck_spots: Vec<NavAvoidance>,
+    /// Since when a stage that ended at the edge of the loaded ground has
+    /// waited for the ground beyond it, and whether it still does.
+    ground_wait_since: Option<f64>,
+    awaits_ground: bool,
     avoided_object: Option<NavBlocker>,
     planned_avoid: Vec<NavAvoidance>,
     planned_obstacles: Vec<NavAvoidance>,
@@ -695,6 +704,8 @@ impl Request {
             stages: 0,
             avoid: Vec::new(),
             stuck_spots: Vec::new(),
+            ground_wait_since: None,
+            awaits_ground: false,
             avoided_object: None,
             planned_avoid: Vec::new(),
             planned_obstacles: Vec::new(),
@@ -1638,6 +1649,22 @@ impl WalkController {
             active.rebuild_why =
                 Some("the goal stands on something the grid has none of".to_owned());
             usable = None;
+        }
+        // A stage that waits for the ground beyond the loaded edge holds
+        // while the grid still stands for the landblocks loaded, until it
+        // has waited long enough to plan again and end.
+        if active.awaits_ground {
+            let waited = active
+                .ground_wait_since
+                .map_or(0.0, |since| self.seconds - since);
+            if usable.is_some() && waited < GROUND_WAIT_SECONDS {
+                return;
+            }
+            if usable.is_none() {
+                // More ground has loaded: a new plan over it.
+                active.builds = 0;
+            }
+            active.awaits_ground = false;
         }
         let mut staged = false;
         if !usable
@@ -3428,6 +3455,8 @@ fn flown(approach: &LeapApproach) -> f32 {
 /// Starts a follow's next plan afresh.
 fn restart_follow(request: &mut Request) {
     request.settled = false;
+    request.ground_wait_since = None;
+    request.awaits_ground = false;
     request.builds = 0;
     request.replans = 0;
     request.stages = 0;
@@ -3646,6 +3675,23 @@ impl WalkController {
                 horizontal_distance(here.position, requester.goal)
             });
             if before - left < MINIMUM_STAGE_PROGRESS {
+                // The stage ended at the edge of the loaded ground short of
+                // its region's: the landblocks beyond are still loading, as
+                // just after a portal. Plan again once they have.
+                if let Some(grid) = &self.grid
+                    && grid.distance_beyond_ground(requester.goal)
+                        > grid.distance_beyond_region(requester.goal) + grid.cell_size()
+                {
+                    let since = *requester.ground_wait_since.get_or_insert(self.seconds);
+                    if self.seconds - since < GROUND_WAIT_SECONDS {
+                        if !requester.awaits_ground {
+                            self.say(&format!("{who} {}: {WAITING_FOR_GROUND}", label(requester)));
+                        }
+                        requester.awaits_ground = true;
+                        self.publish(requester, WalkState::Planning, WAITING_FOR_GROUND, f32::NAN);
+                        return;
+                    }
+                }
                 let why = format!(
                     "no way on toward the goal was found; it is {} m away",
                     fixed(before, 0)
@@ -3653,6 +3699,8 @@ impl WalkController {
                 self.end(cx, requester, WalkState::NoRoute, &why);
                 return;
             }
+            requester.ground_wait_since = None;
+            requester.awaits_ground = false;
             if !requester.walk {
                 let why = format!(
                     "a route was found for the first {} m; the rest is planned on the way",

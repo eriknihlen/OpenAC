@@ -1283,6 +1283,45 @@ fn a_goal_too_far_away_for_one_region_is_walked_to_in_stages() {
     assert_eq!(report.replans, 0);
 }
 
+/// The character stands 12 m from the edge of the only landblock loaded,
+/// the goal 300 m beyond it, as just after a portal before the landblocks
+/// ahead have loaded: the walk waits for them, then walks on.
+#[test]
+fn a_stage_at_the_edge_of_the_loaded_ground_waits_for_the_ground_ahead() {
+    let mut h = Harness::new(
+        flat_world(1),
+        SimBody::at(v(40.0, 180.0, 0.0)),
+        goals_with(&[(TARGET, v(40.0, 480.0, 0.0))]),
+    );
+
+    h.walk.walk_to(TARGET, DEFAULT_ARRIVAL_METERS);
+    h.run(3.0);
+
+    assert_eq!(
+        h.report().state,
+        WalkState::Planning,
+        "{}",
+        h.report().reason
+    );
+    assert_eq!(
+        h.report().reason,
+        "waiting for the ground toward the goal to load"
+    );
+    for index in 1..3 {
+        h.physics.add_landblock(
+            0xA9B4_FFFF + (index << 16),
+            TerrainSurface::new(&[0; 81], &[0.0; 256], 0, 0, None),
+            Vec::new(),
+            Vec::new(),
+            0.0,
+            index as f32 * 192.0,
+        );
+    }
+    let report = h.run_until_settled(300.0);
+
+    assert_eq!(report.state, WalkState::Arrived, "{}", report.reason);
+}
+
 #[test]
 fn a_walk_toward_a_goal_beyond_the_loaded_world_ends_where_it_can_get_no_nearer() {
     let mut h = harness(&[(TARGET, v(40.0, 900.0, 0.0))]);

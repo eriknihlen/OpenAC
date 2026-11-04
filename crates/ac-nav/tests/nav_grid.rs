@@ -8,8 +8,8 @@ use ac_nav::grid::DEFAULT_CELL_SIZE;
 use ac_nav::route::{self, START_HEIGHT_TOLERANCE, START_RADIUS};
 use ac_nav::{
     NavAvoidance, NavBody, NavCylinder, NavGeometry, NavGrid, NavLeapAbility, NavLeapFinder,
-    NavLeapPhysics, NavRoute, NavRouteOutcome, NavRouteRequest, NavSurfaces, NavTerrain,
-    NavTriangle,
+    NavLeapLimits, NavLeapPhysics, NavRoute, NavRouteOutcome, NavRouteRequest, NavSurfaces,
+    NavTerrain, NavTriangle,
 };
 use ac_physics::{
     CellSurface, PhysicsBody, PhysicsEngine, PhysicsState, Quat, ShadowCollisionType, ShadowEntry,
@@ -1297,6 +1297,165 @@ fn a_goal_beyond_a_wall_across_the_grid_is_routed_to_the_reachable_spot_nearest_
         "{}",
         route.reason
     );
+}
+
+/// A region half over a landblock whose ground is loaded and half over one
+/// that is not yet: a stage toward a goal beyond the unloaded half ends at
+/// the edge of the loaded ground, as at the edge of the grid.
+#[test]
+fn a_goal_beyond_the_loaded_ground_is_routed_to_its_edge_toward_it() {
+    let grid = build_geometry(
+        &NavGeometry::new(
+            96.0,
+            0.0,
+            LANDBLOCK_SIZE,
+            vec![NavTerrain::new(flat_terrain(), 0.0, 0.0)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+
+    let route = route::find_toward(
+        &grid,
+        v(120.0, 96.0, 0.0),
+        v(1000.0, 96.0, 0.0),
+        4.0,
+        &leaping(LEAPER),
+    );
+
+    assert_eq!(route.outcome, NavRouteOutcome::Routed);
+    in_range(route.legs.last().unwrap().x, 186.0, 192.0);
+    assert!(
+        route.reason.contains("its edge toward the goal"),
+        "{}",
+        route.reason
+    );
+    assert!(route.leaps.is_empty());
+}
+
+/// Two floors 3 m apart, the goal far beyond the second: a stage's walk
+/// stops at the gap and its leap crosses it there.
+#[test]
+fn a_stage_leaps_the_gap_its_walk_stops_at() {
+    let grid = build_with(
+        join(&[
+            floor(0.0, 0.0, 30.0, 64.0, 0.0),
+            floor(33.0, 0.0, 64.0, 64.0, 0.0),
+        ]),
+        Vec::new(),
+        64.0,
+        Vec::new(),
+    );
+
+    let walked = route::find_toward(
+        &grid,
+        v(5.0, 32.0, 0.0),
+        v(500.0, 32.0, 0.0),
+        4.0,
+        &NavRouteRequest::default(),
+    );
+    let leapt = route::find_toward(
+        &grid,
+        v(5.0, 32.0, 0.0),
+        v(500.0, 32.0, 0.0),
+        4.0,
+        &leaping(LEAPER),
+    );
+
+    assert!(walked.reason.contains("the reachable spot nearest it"));
+    assert!(
+        leapt.reason.contains("its edge toward the goal") && !leapt.leaps.is_empty(),
+        "{}",
+        described(&leapt)
+    );
+}
+
+/// The gap is 20 m wide where the walk comes nearest the goal and 3 m wide
+/// 90 m north of there: a stage's leaps take off only near where its walk
+/// came nearest, so it keeps the walk.
+#[test]
+fn a_stage_takes_no_leap_far_from_where_its_walk_came_nearest() {
+    let grid = build_with(
+        join(&[
+            floor(0.0, 0.0, 30.0, 128.0, 0.0),
+            floor(50.0, 0.0, 128.0, 90.0, 0.0),
+            floor(33.0, 95.0, 128.0, 128.0, 0.0),
+        ]),
+        Vec::new(),
+        128.0,
+        Vec::new(),
+    );
+
+    let route = route::find_toward(
+        &grid,
+        v(5.0, 5.0, 0.0),
+        v(500.0, 5.0, 0.0),
+        4.0,
+        &leaping(LEAPER),
+    );
+
+    assert!(
+        route.reason.contains("the reachable spot nearest it") && route.leaps.is_empty(),
+        "{}",
+        described(&route)
+    );
+    in_range(route.legs.last().unwrap().x, 26.0, 30.0);
+    in_range(route.legs.last().unwrap().y, 0.0, 10.0);
+}
+
+/// A floor with a platform east and one west of the middle: a finder
+/// limited to landings nearer a goal far east than the middle leaps onto the
+/// east platform only, where an unlimited one leaps onto both.
+#[test]
+fn a_limited_finder_leaps_only_onto_floor_nearer_the_goal() {
+    let grid = build(join(&[
+        floor(0.0, 0.0, 32.0, 32.0, 0.0),
+        box_top(22.0, 14.0, 26.0, 18.0, 1.0),
+        box_top(6.0, 14.0, 10.0, 18.0, 1.0),
+    ]));
+    let landings = |finder: &NavLeapFinder<&NavGrid>| {
+        let mut east = false;
+        let mut west = false;
+        for node in 0..grid.node_count() {
+            for leap in finder.from(node).iter() {
+                let at = grid.position(leap.to);
+                if at.z > 0.5 {
+                    east |= at.x > 16.0;
+                    west |= at.x < 16.0;
+                }
+            }
+        }
+        (east, west)
+    };
+
+    let unlimited = NavLeapFinder::new(&grid, LEAPER);
+    let limited = NavLeapFinder::limited(
+        &grid,
+        LEAPER,
+        NavLeapLimits {
+            takeoff_near: v(16.0, 16.0, 0.0),
+            takeoff_radius: 48.0,
+            toward: v(500.0, 16.0, 0.0),
+            landing_within: 484.0,
+        },
+    );
+
+    assert_eq!(landings(&unlimited), (true, true));
+    assert_eq!(landings(&limited), (true, false));
+}
+
+/// The top and sides of a box standing on the floor.
+fn box_top(x0: f32, y0: f32, x1: f32, y1: f32, height: f32) -> Vec<NavTriangle> {
+    join(&[
+        floor(x0, y0, x1, y1, height),
+        wall(x0, y0, x1, y0, 0.0, height),
+        wall(x1, y0, x1, y1, 0.0, height),
+        wall(x1, y1, x0, y1, 0.0, height),
+        wall(x0, y1, x0, y0, 0.0, height),
+    ])
 }
 
 fn square_cell(id: u32, corners: [Vec3; 4]) -> CellSurface {
