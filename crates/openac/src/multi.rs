@@ -259,7 +259,7 @@ pub fn run(
                 .as_ref()
                 .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory),
             marks: answers.marks,
-            asked: answers.session(&id),
+            answers: answers.session(&id),
         };
         let notes = window_notes.remove(&id);
         let liveness = Liveness::requested(host_handle.clone());
@@ -408,8 +408,8 @@ pub(crate) struct ChatPrinter {
     /// The launcher asked for every line a player would see to carry the
     /// mark of its kind (see `ac_host::console_kind`).
     pub(crate) marks: bool,
-    /// The views the session's typed commands wait for.
-    pub(crate) asked: Arc<console::AskedViews>,
+    /// When a command typed on the session's console waits for answers.
+    pub(crate) answers: Arc<console::AnswerWindow>,
 }
 
 impl ChatPrinter {
@@ -473,10 +473,9 @@ impl ChatPrinter {
         console::marked(kind, line, self.marks)
     }
 
-    /// The kind of the lines for `event` (an answer a typed command waited
-    /// for is used up).
+    /// The kind of the lines for `event`, now.
     fn kind_of(&self, event: &HostEvent) -> Option<ConsoleLineKind> {
-        console::event_kind(event, &self.asked)
+        console::event_kind(event, &self.answers, std::time::Instant::now())
     }
 
     /// Colour when standard output is a terminal (as OpenAC's console).
@@ -874,12 +873,11 @@ impl HeartbeatGate {
 }
 
 /// What the console needs to mark the lines a player would see: whether the
-/// launcher asked for marks, and each session's views its typed commands
-/// wait for.
+/// launcher asked for marks, and each session's answer window.
 #[derive(Debug, Default)]
 pub(crate) struct ConsoleAnswers {
     pub(crate) marks: bool,
-    asked: BTreeMap<String, Arc<console::AskedViews>>,
+    windows: BTreeMap<String, Arc<console::AnswerWindow>>,
 }
 
 impl ConsoleAnswers {
@@ -887,13 +885,20 @@ impl ConsoleAnswers {
     pub(crate) fn requested() -> Self {
         Self {
             marks: ac_host::console_kind::console_kinds_requested(|name| std::env::var(name).ok()),
-            asked: BTreeMap::new(),
+            windows: BTreeMap::new(),
         }
     }
 
-    /// The views session `id`'s typed commands wait for.
-    pub(crate) fn session(&mut self, id: &str) -> Arc<console::AskedViews> {
-        Arc::clone(self.asked.entry(id.to_owned()).or_default())
+    /// Session `id`'s answer window.
+    pub(crate) fn session(&mut self, id: &str) -> Arc<console::AnswerWindow> {
+        Arc::clone(self.windows.entry(id.to_owned()).or_default())
+    }
+
+    /// A command was typed for session `id`: its answers are shown for a while.
+    fn typed(&self, id: &str) {
+        if let Some(window) = self.windows.get(id) {
+            window.open(std::time::Instant::now());
+        }
     }
 
     /// `line` marked as `kind` when the launcher asked for marks.
@@ -980,17 +985,16 @@ pub(crate) fn spawn_console(
                     ConsoleInput::Usage(usage) => say(usage, None),
                     ConsoleInput::Command { session, command } => match pick(session) {
                         Some((id, s)) => {
-                            if let (Some(view), Some(asked)) =
-                                (command.asked_view(), answers.asked.get(&id))
-                            {
-                                asked.ask(view);
-                            }
+                            answers.typed(&id);
                             let _ = s.send(command.into_session_command());
                         }
                         None => say(&format!("no session is called {default}"), None),
                     },
                     ConsoleInput::Chat { session, line } => match pick(session) {
-                        Some((_, s)) => {
+                        Some((id, s)) => {
+                            // A client command typed into the chat box (`/nav`,
+                            // `/plugin`) is answered too.
+                            answers.typed(&id);
                             let _ = s.send(console::typed_line(Some(line)));
                         }
                         None => say(&format!("no session is called {default}"), None),
@@ -1006,7 +1010,8 @@ pub(crate) fn spawn_console(
                             _ => SessionCommand::ShowJournal,
                         };
                         match pick(session) {
-                            Some((_, s)) => {
+                            Some((id, s)) => {
+                                answers.typed(&id);
                                 let _ = s.send(command);
                             }
                             None => say(console::HELP, None),

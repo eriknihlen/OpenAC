@@ -2431,6 +2431,7 @@ dependencies = [
  "ac-launcher-core",
  "ac-net",
  "ac-plugin",
+ "ac-proto",
  "ac-render",
  "ac-runtime",
  "ac-ui",

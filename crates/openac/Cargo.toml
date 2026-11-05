@@ -24,6 +24,8 @@ ac-plugin.workspace = true
 ac-launcher-core.workspace = true
 # The console-stop test speaks the wire to its loopback stand-in servers.
 ac-bits.workspace = true
+# The console tests build an appraisal answer.
+ac-proto.workspace = true
 
 # The console-stop test sends SIGTERM and SIGHUP to the client on Unix.
 [target.'cfg(unix)'.dev-dependencies]

@@ -222,30 +222,42 @@ pub fn marked(kind: Option<ConsoleLineKind>, line: &str, marks: bool) -> Cow<'_,
     }
 }
 
-/// Whether the console's lines for `event` are an answer to a typed command
-/// or a question for the player, whatever else happened: events that only
-/// come when asked for, refusals, and the client's questions.
+/// How long after a command typed on a session's console that session's
+/// answers are shown as answers: the replies a typed command gets come
+/// within a round trip to the server, and the same events caused by a
+/// plugin or a bot policy at any other time are the client's log.
+pub const ANSWER_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether `event` is the kind of event that answers a command (a list, a
+/// view, a refusal, a move's end). It is shown as an answer only while a
+/// command typed on its session's console waits for one (see
+/// [`AnswerWindow`]); a plugin's or a policy's requests make the same
+/// events. An appraisal answers only the player's own question (a plugin's
+/// quiet identify does not open the examination window).
 #[must_use]
-pub fn answers_command(event: &HostEvent) -> bool {
+pub fn answer_kind(event: &HostEvent) -> bool {
     use ac_runtime::movement::MovementEvent;
     match event {
+        HostEvent::Appraisal(view) => view.opens_window,
         HostEvent::Objects(_)
         | HostEvent::GameTime(_)
         | HostEvent::Contracts(_)
         | HostEvent::Journal { .. }
         | HostEvent::Inventory(_)
-        | HostEvent::Appraisal(_)
         | HostEvent::Vendor(_)
         | HostEvent::Trade(_)
         | HostEvent::ItemMana(_)
         | HostEvent::OpenSalvage(_)
         | HostEvent::BeginGame(_)
         | HostEvent::LinkStatus(_)
-        | HostEvent::Confirmation(_)
         | HostEvent::Corpses(_)
         | HostEvent::CharacterOptions(_)
         | HostEvent::CommandRefused(_)
-        | HostEvent::Movement(MovementEvent::Status(_) | MovementEvent::Refused(_)) => true,
+        | HostEvent::CharacterSelection(_)
+        | HostEvent::CharacterCreation(_)
+        | HostEvent::Movement(
+            MovementEvent::Status(_) | MovementEvent::Refused(_) | MovementEvent::MoveEnded { .. },
+        ) => true,
         HostEvent::Gameplay(event) => matches!(
             event.as_ref(),
             GameplayEvent::Spellbook(_)
@@ -253,107 +265,61 @@ pub fn answers_command(event: &HostEvent) -> bool {
                 | GameplayEvent::Character(_)
                 | GameplayEvent::Combat(_)
                 | GameplayEvent::Refused(_)
+                | GameplayEvent::Selection { .. }
+                | GameplayEvent::CombatMode(_)
+                | GameplayEvent::Vitae(_)
+                | GameplayEvent::Book(_)
+                | GameplayEvent::Fellowship(_)
+                | GameplayEvent::Allegiance(_)
+                | GameplayEvent::House(_)
+                | GameplayEvent::Titles(_)
         ),
         _ => false,
     }
 }
 
-/// A view a typed command asks for whose event also comes unasked, often
-/// (a fellow's vitals, a selection a plugin made, every login's character
-/// list): the first such event after the command is its answer, and the
-/// others are the client's log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AskedView {
-    /// The selection.
-    Selection,
-    /// The combat mode.
-    CombatMode,
-    /// The vitae penalty.
-    Vitae,
-    /// The open book.
-    Book,
-    /// The fellowship.
-    Fellowship,
-    /// The allegiance.
-    Allegiance,
-    /// The house.
-    House,
-    /// The titles.
-    Titles,
-    /// The character-selection screen.
-    CharacterSelection,
-    /// Character creation.
-    CharacterCreation,
-    /// A scripted move's end.
-    Move,
-}
-
-impl AskedView {
-    /// The view `event` shows, if it is one of these.
-    #[must_use]
-    pub fn of_event(event: &HostEvent) -> Option<Self> {
-        use ac_runtime::movement::MovementEvent;
-        Some(match event {
-            HostEvent::CharacterSelection(_) => Self::CharacterSelection,
-            HostEvent::CharacterCreation(_) => Self::CharacterCreation,
-            HostEvent::Movement(MovementEvent::MoveEnded { .. }) => Self::Move,
-            HostEvent::Gameplay(event) => match event.as_ref() {
-                GameplayEvent::Selection { .. } => Self::Selection,
-                GameplayEvent::CombatMode(_) => Self::CombatMode,
-                GameplayEvent::Vitae(_) => Self::Vitae,
-                GameplayEvent::Book(_) => Self::Book,
-                GameplayEvent::Fellowship(_) => Self::Fellowship,
-                GameplayEvent::Allegiance(_) => Self::Allegiance,
-                GameplayEvent::House(_) => Self::House,
-                GameplayEvent::Titles(_) => Self::Titles,
-                _ => return None,
-            },
-            _ => return None,
-        })
-    }
-}
-
-/// The views typed commands asked for and no event has answered yet, for
-/// one session: the console thread adds one per command, the session's
-/// monitor takes one per answer.
+/// One session's answer window: open for [`ANSWER_WINDOW`] after the last
+/// command typed on its console. The console thread opens it, the session's
+/// monitor reads it; a new command moves the end on, so repeated commands
+/// keep one window, never a queue.
 #[derive(Debug, Default)]
-pub struct AskedViews(std::sync::Mutex<Vec<AskedView>>);
+pub struct AnswerWindow(std::sync::Mutex<Option<std::time::Instant>>);
 
-impl AskedViews {
-    /// A typed command asked for `view`.
-    pub fn ask(&self, view: AskedView) {
-        if let Ok(mut asked) = self.0.lock() {
-            asked.push(view);
+impl AnswerWindow {
+    /// A command was typed at `now`.
+    pub fn open(&self, now: std::time::Instant) {
+        if let Ok(mut until) = self.0.lock() {
+            *until = Some(now + ANSWER_WINDOW);
         }
     }
 
-    /// Whether `view` was asked for; the ask is used up.
-    pub fn answer(&self, view: AskedView) -> bool {
-        let Ok(mut asked) = self.0.lock() else {
-            return false;
-        };
-        match asked.iter().position(|v| *v == view) {
-            Some(at) => {
-                asked.remove(at);
-                true
-            }
-            None => false,
-        }
+    /// Whether a typed command still waits for answers at `now`.
+    pub fn is_open(&self, now: std::time::Instant) -> bool {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|until| *until)
+            .is_some_and(|until| now < until)
     }
 }
 
-/// The kind of the console's lines for `event`: chat the main chat window
-/// shows, the status box's text, an answer to a typed command (one that
-/// `asked` waits for is used up), or `None` for the client's log.
+/// The kind of the console's lines for `event` at `now`: chat the main chat
+/// window shows, the status box's text, an answer to a command typed within
+/// the session's answer window or a question for the player, or `None` for
+/// the client's log.
 #[must_use]
-pub fn event_kind(event: &HostEvent, asked: &AskedViews) -> Option<ConsoleLineKind> {
+pub fn event_kind(
+    event: &HostEvent,
+    answers: &AnswerWindow,
+    now: std::time::Instant,
+) -> Option<ConsoleLineKind> {
     match event {
         HostEvent::Chat(_) => Some(ConsoleLineKind::Chat),
         HostEvent::InterfaceText(_) => Some(ConsoleLineKind::Status),
-        event if answers_command(event) => Some(ConsoleLineKind::Reply),
-        event => AskedView::of_event(event)
-            .filter(|view| asked.answer(*view))
-            .map(|_| ConsoleLineKind::Reply),
+        // The client asks the player something: shown whatever asked it.
+        HostEvent::Confirmation(_) => Some(ConsoleLineKind::Reply),
+        event if answer_kind(event) && answers.is_open(now) => Some(ConsoleLineKind::Reply),
+        _ => None,
     }
 }
 
@@ -547,47 +513,6 @@ pub enum ConsoleCommand {
 }
 
 impl ConsoleCommand {
-    /// The view whose next event answers this command, when that event
-    /// also comes unasked (see [`AskedView`]); `None` when the command's
-    /// answer is always shown, or it has none.
-    #[must_use]
-    pub fn asked_view(&self) -> Option<AskedView> {
-        use GameplayCommand as G;
-        use ac_runtime::movement::MovementCommand as M;
-        match self {
-            Self::Gameplay(command) => match command {
-                G::Select(_)
-                | G::ClearSelection
-                | G::SelectPrevious
-                | G::SelectNearestMonster
-                | G::CycleSelection { .. }
-                | G::SelectSelf
-                | G::SelectLastAttacker
-                | G::CycleFellow { .. } => Some(AskedView::Selection),
-                G::ToggleCombat | G::SetCombatMode(_) => Some(AskedView::CombatMode),
-                G::ShowVitae => Some(AskedView::Vitae),
-                G::Book(_) => Some(AskedView::Book),
-                G::Fellowship(_) => Some(AskedView::Fellowship),
-                G::Allegiance(_) => Some(AskedView::Allegiance),
-                G::ShowHouse | G::QueryHouse => Some(AskedView::House),
-                G::ShowTitles | G::SetTitle(_) => Some(AskedView::Titles),
-                _ => None,
-            },
-            Self::Lifecycle(LifecycleCommand::Create(_)) => Some(AskedView::CharacterCreation),
-            Self::Lifecycle(
-                LifecycleCommand::ShowSelection
-                | LifecycleCommand::Highlight(_)
-                | LifecycleCommand::RequestDelete(_)
-                | LifecycleCommand::ConfirmDelete
-                | LifecycleCommand::Restore(_)
-                | LifecycleCommand::Cancel
-                | LifecycleCommand::SetNextLogin(_),
-            ) => Some(AskedView::CharacterSelection),
-            Self::Movement(M::Move(_) | M::TurnToHeading(_)) => Some(AskedView::Move),
-            _ => None,
-        }
-    }
-
     /// The session command it stands for.
     #[must_use]
     pub fn into_session_command(self) -> SessionCommand {
@@ -2253,10 +2178,48 @@ mod tests {
         assert_eq!(marked(None, "-- portal: reveal", true), "-- portal: reveal");
     }
 
+    fn gameplay(event: GameplayEvent) -> HostEvent {
+        HostEvent::Gameplay(Box::new(event))
+    }
+
+    /// An appraisal answer; `asked` when it answers the player's own
+    /// question (the examination window opens on it).
+    fn appraisal(asked: bool) -> HostEvent {
+        HostEvent::Appraisal(Box::new(ac_runtime::inventory::AppraisalView {
+            name: Some("Sword".into()),
+            response: ac_proto::appraise::IdentifyObjectResponse {
+                guid: 7,
+                success: true,
+                ..Default::default()
+            },
+            present_in_ui: asked,
+            opens_window: asked,
+        }))
+    }
+
+    /// The events a typed command, a plugin or a bot policy can cause alike.
+    fn answers() -> Vec<HostEvent> {
+        use ac_runtime::movement::MovementEvent;
+        vec![
+            HostEvent::GameTime(None),
+            HostEvent::Objects(Vec::new()),
+            HostEvent::Corpses(Vec::new()),
+            HostEvent::CommandRefused("no such object".into()),
+            gameplay(GameplayEvent::Refused("no spell".into())),
+            HostEvent::Movement(MovementEvent::Status(None)),
+            HostEvent::Movement(MovementEvent::Refused("not placed".into())),
+            gameplay(GameplayEvent::Selection {
+                selected: Some(7),
+                name: None,
+            }),
+            appraisal(true),
+        ]
+    }
+
     #[test]
-    fn chat_the_status_box_and_answers_are_what_a_player_sees() {
-        let asked = AskedViews::default();
-        let gameplay = |event: GameplayEvent| HostEvent::Gameplay(Box::new(event));
+    fn chat_and_the_status_box_are_always_what_a_player_sees() {
+        let window = AnswerWindow::default();
+        let now = std::time::Instant::now();
         let chat = ChatLine {
             sequence: 1,
             kind: ChatKind::LocalSpeech,
@@ -2273,27 +2236,15 @@ mod tests {
             spans: None,
         };
         assert_eq!(
-            event_kind(&HostEvent::Chat(chat), &asked),
+            event_kind(&HostEvent::Chat(chat), &window, now),
             Some(ConsoleLineKind::Chat)
         );
         assert_eq!(
-            event_kind(&HostEvent::InterfaceText("You fail".into()), &asked),
+            event_kind(&HostEvent::InterfaceText("You fail".into()), &window, now),
             Some(ConsoleLineKind::Status)
         );
-        for answer in [
-            HostEvent::GameTime(None),
-            HostEvent::Objects(Vec::new()),
-            HostEvent::Corpses(Vec::new()),
-            HostEvent::CommandRefused("no such object".into()),
-            gameplay(GameplayEvent::Refused("no spell".into())),
-        ] {
-            assert_eq!(
-                event_kind(&answer, &asked),
-                Some(ConsoleLineKind::Reply),
-                "{answer:?}"
-            );
-        }
-        // What only the client's log keeps.
+        // What only the client's log keeps, even right after a command.
+        window.open(now);
         for log in [
             HostEvent::Logout(ac_runtime::world::transit::LogoutStage::Requested),
             gameplay(GameplayEvent::Health {
@@ -2302,51 +2253,47 @@ mod tests {
             }),
             gameplay(GameplayEvent::CreatureDied(1)),
         ] {
-            assert_eq!(event_kind(&log, &asked), None, "{log:?}");
+            assert_eq!(event_kind(&log, &window, now), None, "{log:?}");
         }
     }
 
     #[test]
-    fn a_view_that_also_changes_unasked_is_an_answer_once_after_its_command() {
-        let asked = AskedViews::default();
-        let selection = || {
-            HostEvent::Gameplay(Box::new(GameplayEvent::Selection {
-                selected: Some(7),
-                name: None,
-            }))
-        };
-        // A plugin's selection is the client's log.
-        assert_eq!(event_kind(&selection(), &asked), None);
-        let ConsoleInput::Command { command, .. } = parse("/select 0x7", &[]) else {
-            panic!("/select is a command");
-        };
-        let view = command
-            .asked_view()
-            .expect("/select asks for the selection");
-        asked.ask(view);
-        assert_eq!(
-            event_kind(&selection(), &asked),
-            Some(ConsoleLineKind::Reply)
-        );
-        // The ask is used up.
-        assert_eq!(event_kind(&selection(), &asked), None);
-        // A command whose answer is always shown waits for nothing.
-        let ConsoleInput::Command { command, .. } = parse("/inv", &[]) else {
-            panic!("/inv is a command");
-        };
-        assert_eq!(command.asked_view(), None);
-        for (typed, view) in [
-            ("/fship", AskedView::Fellowship),
-            ("/vitae", AskedView::Vitae),
-            ("/combat melee", AskedView::CombatMode),
-            ("/chars", AskedView::CharacterSelection),
-            ("/walk 2", AskedView::Move),
-        ] {
-            let ConsoleInput::Command { command, .. } = parse(typed, &[]) else {
-                panic!("{typed} is a command");
-            };
-            assert_eq!(command.asked_view(), Some(view), "{typed}");
+    fn answers_a_plugin_or_a_policy_caused_are_the_clients_log() {
+        // No command was typed on this console: a looting bot's identify,
+        // a plugin's refused command, a policy's movement status.
+        let window = AnswerWindow::default();
+        let now = std::time::Instant::now();
+        for event in answers() {
+            assert_eq!(event_kind(&event, &window, now), None, "{event:?}");
         }
+    }
+
+    #[test]
+    fn a_typed_commands_answers_are_shown_until_the_window_closes() {
+        let window = AnswerWindow::default();
+        let typed = std::time::Instant::now();
+        window.open(typed);
+        let soon = typed + ANSWER_WINDOW / 2;
+        for event in answers() {
+            assert_eq!(
+                event_kind(&event, &window, soon),
+                Some(ConsoleLineKind::Reply),
+                "{event:?}"
+            );
+        }
+        // A plugin's quiet identify is not the player's question.
+        assert_eq!(event_kind(&appraisal(false), &window, soon), None);
+        let late = typed + ANSWER_WINDOW;
+        for event in answers() {
+            assert_eq!(event_kind(&event, &window, late), None, "{event:?}");
+        }
+        // Another command opens one window again, from its own time; many
+        // commands keep one window, not a queue.
+        for _ in 0..3 {
+            window.open(late);
+        }
+        assert!(window.is_open(late + ANSWER_WINDOW / 2));
+        assert!(!window.is_open(late + ANSWER_WINDOW));
     }
 
     #[test]
