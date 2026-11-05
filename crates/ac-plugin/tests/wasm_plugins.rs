@@ -3149,8 +3149,12 @@ fn an_answer_does_not_count_against_the_deadline_of_the_call_that_asked() {
     );
     assert_eq!(plugins.loaded_ids(), ["openac.suite", "openac.asker"]);
     let asked = plugins.last_call_time("openac.asker").unwrap();
+    // The plugin times its 600 ms on the wall clock it reads from the
+    // client, the host its call on the monotonic one; the two can differ by
+    // a fraction of a millisecond (599.9 ms on a loaded runner), so a few
+    // milliseconds of margin. The answer's 700 ms is still left out.
     assert!(
-        asked >= std::time::Duration::from_millis(600) && asked < TEST_DEADLINE,
+        asked >= std::time::Duration::from_millis(590) && asked < TEST_DEADLINE,
         "{asked:?}"
     );
 }
