@@ -50,6 +50,8 @@ fn every_child_is_told_the_root_and_each_member() {
     assert_eq!(value("OPENAC_CACHE_DIR"), Some(root.join("cache")));
     // An addition: the client writes heartbeats only when asked.
     assert_eq!(value("OPENAC_STATUS_HEARTBEAT"), Some(PathBuf::from("1")));
+    // And its console lines marked with their kind, for the console's Verbose.
+    assert_eq!(value("OPENAC_CONSOLE_KINDS"), Some(PathBuf::from("1")));
 }
 
 // --- SessionConfigComposerTests -------------------------------------------------

@@ -5,7 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::time::SystemTime;
 
 use super::Orchestration;
-use crate::launching::{SessionConsoleRun, parse_line};
+use crate::launching::{SessionConsoleRun, read_line};
 
 /// How much of the end of the log is shown.
 pub const TAIL_BYTES: u64 = 256 * 1024;
@@ -83,18 +83,25 @@ impl SessionConsole {
         true
     }
 
-    /// The newest lines, split into coloured runs.
-    pub fn lines(&self) -> Vec<Vec<SessionConsoleRun>> {
-        let lines: Vec<&str> = self.output.split('\n').collect();
-        let first = lines.len().saturating_sub(MOST_LINES_SHOWN);
-        let mut out = Vec::new();
-        for (index, line) in lines.iter().enumerate().skip(first) {
-            let line = line.trim_end_matches('\r');
-            if index == lines.len() - 1 && line.is_empty() {
-                break;
-            }
-            out.push(parse_line(line));
+    /// The newest lines, split into coloured runs: with `verbose` every
+    /// line the session wrote, otherwise only what a player would see (the
+    /// lines the session marked: chat, the status box, what was typed and
+    /// the console's answers).
+    pub fn lines(&self, verbose: bool) -> Vec<Vec<SessionConsoleRun>> {
+        let mut lines: Vec<&str> = self.output.split('\n').collect();
+        // Nothing follows the line break that ends the log.
+        if lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
         }
+        let mut out: Vec<Vec<SessionConsoleRun>> = lines
+            .iter()
+            .rev()
+            .map(|line| read_line(line.trim_end_matches('\r')))
+            .filter(|line| verbose || line.kind.is_some())
+            .take(MOST_LINES_SHOWN)
+            .map(|line| line.runs)
+            .collect();
+        out.reverse();
         out
     }
 
@@ -115,5 +122,79 @@ impl SessionConsole {
         } else {
             self.notice = "Not sent: the session is not running.".into();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a client asked for marks writes: its log unmarked, the lines a
+    /// player would see behind their kind's mark.
+    const OUTPUT: &str = "-- lifecycle: generation 1 InWorld\n\
+        \u{1e}c[say] Bob says, \"hi\"\n\
+        \u{1e}c[system] Welcome to the server\n\
+        \u{1e}c  powered by ACEmulator\n\
+        [s1] SessionEvent(EnteredWorld)\n\
+        \u{1e}s[client] You are too fatigued to attack!\n\
+        -- plugin acdream.mosstank: loaded\n\
+        \u{1e}t/objects\n\
+        \u{1e}r[s1] 12 objects known\n\
+        \u{1e}r-- quitting (graceful logout)\n\
+        window: opened\r\n";
+
+    fn texts(console: &SessionConsole, verbose: bool) -> Vec<String> {
+        console
+            .lines(verbose)
+            .iter()
+            .map(|runs| runs.iter().map(|run| run.text.as_str()).collect())
+            .collect()
+    }
+
+    fn console() -> SessionConsole {
+        let mut console = SessionConsole::new("s1", "Console");
+        console.output = OUTPUT.into();
+        console
+    }
+
+    #[test]
+    fn by_default_the_console_shows_chat_the_status_box_and_what_was_typed_and_answered() {
+        assert_eq!(
+            texts(&console(), false),
+            [
+                "[say] Bob says, \"hi\"",
+                "[system] Welcome to the server",
+                "  powered by ACEmulator",
+                "[client] You are too fatigued to attack!",
+                "> /objects",
+                "[s1] 12 objects known",
+                "-- quitting (graceful logout)",
+            ]
+        );
+    }
+
+    #[test]
+    fn verbose_shows_every_line_without_its_mark() {
+        let shown = texts(&console(), true);
+        assert_eq!(shown.len(), 11);
+        assert_eq!(shown[0], "-- lifecycle: generation 1 InWorld");
+        assert_eq!(shown[1], "[say] Bob says, \"hi\"");
+        assert_eq!(shown[10], "window: opened");
+        assert!(shown.iter().all(|text| !text.contains('\u{1e}')));
+    }
+
+    #[test]
+    fn the_newest_shown_lines_are_kept_when_there_are_too_many() {
+        let mut console = SessionConsole::new("s1", "Console");
+        console.output = (0..MOST_LINES_SHOWN + 10)
+            .map(|n| format!("\u{1e}c[say] line {n}\nlog line {n}\n"))
+            .collect();
+        let shown = texts(&console, false);
+        assert_eq!(shown.len(), MOST_LINES_SHOWN);
+        assert_eq!(shown[0], "[say] line 10");
+        assert_eq!(
+            shown.last().map(String::as_str),
+            Some(format!("[say] line {}", MOST_LINES_SHOWN + 9).as_str())
+        );
     }
 }

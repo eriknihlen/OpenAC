@@ -1,7 +1,11 @@
 //! Turning what a windowless session writes into coloured runs for the
 //! session console: a line coloured with terminal escapes keeps exactly
 //! those colours; an uncoloured line takes the colour the game shows its
-//! tag's kind of line in.
+//! tag's kind of line in. A line the client marked with its kind (see
+//! `ac_host_core::console_kind`) is shown without the mark; the console
+//! shows only marked lines unless its Verbose is on.
+
+use ac_host_core::console_kind::{ConsoleLineKind, read_mark};
 
 /// One stretch of console text in one colour.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +19,34 @@ pub struct SessionConsoleRun {
 }
 
 const ESCAPE: char = '\u{1b}';
+
+/// What a typed line is shown behind.
+pub const TYPED_PREFIX: &str = "> ";
+
+/// One console line: whether a player would see it, and its runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionConsoleLine {
+    /// The kind the client marked it with; `None` for the client's log.
+    pub kind: Option<ConsoleLineKind>,
+    /// The text in its colours, without the mark.
+    pub runs: Vec<SessionConsoleRun>,
+}
+
+/// Reads one line the session wrote: its mark, then its runs. A line the
+/// player typed is shown behind [`TYPED_PREFIX`].
+pub fn read_line(line: &str) -> SessionConsoleLine {
+    let (kind, text) = read_mark(line);
+    let runs = if kind == Some(ConsoleLineKind::Typed) {
+        vec![SessionConsoleRun {
+            text: format!("{TYPED_PREFIX}{text}"),
+            color: None,
+            dim: false,
+        }]
+    } else {
+        parse_line(text)
+    };
+    SessionConsoleLine { kind, runs }
+}
 
 /// Splits one line into its runs.
 pub fn parse_line(line: &str) -> Vec<SessionConsoleRun> {
@@ -186,5 +218,33 @@ mod tests {
         let joined: String = runs.iter().take(2).map(|run| run.text.as_str()).collect();
         assert_eq!(joined, "beforeafter");
         assert!(runs.iter().all(|run| !run.text.contains(ESCAPE)));
+    }
+
+    #[test]
+    fn a_marked_line_is_shown_without_its_mark_and_in_its_tags_colour() {
+        let line = read_line("\u{1e}c[tell] Bob tells you, \"hi\"");
+        assert_eq!(line.kind, Some(ConsoleLineKind::Chat));
+        assert_eq!(
+            line.runs,
+            [SessionConsoleRun {
+                text: "[tell] Bob tells you, \"hi\"".into(),
+                color: Some(0xFF_FF3F),
+                dim: false
+            }]
+        );
+    }
+
+    #[test]
+    fn a_typed_line_is_shown_behind_the_prompt() {
+        let line = read_line("\u{1e}t/objects");
+        assert_eq!(line.kind, Some(ConsoleLineKind::Typed));
+        assert_eq!(line.runs[0].text, "> /objects");
+    }
+
+    #[test]
+    fn an_unmarked_line_is_the_log() {
+        let line = read_line("-- lifecycle: generation 1 InWorld");
+        assert_eq!(line.kind, None);
+        assert!(line.runs[0].dim);
     }
 }

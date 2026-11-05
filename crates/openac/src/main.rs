@@ -472,7 +472,7 @@ fn spawn_console(
                 let Ok(line) = line else { break };
                 // Window-only commands (/fly, /vsync) go to the window host first.
                 if let Some(host) = &window
-                    && graphics::window_command(host, &line, &mut prefs)
+                    && graphics::window_command(host, &line, &mut prefs, &|usage| errln!("{usage}"))
                 {
                     continue;
                 }

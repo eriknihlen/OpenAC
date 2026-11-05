@@ -510,6 +510,7 @@ fn parts(fake: Arc<dyn Orchestration>, spawner: Arc<dyn Spawner>) -> LauncherWin
         install_folder: None,
         checked_accounts: None,
         relaunch_settings: None,
+        console_settings: None,
         relaunch_clock: None,
         known_servers: None,
         classic_migration: None,
@@ -2189,6 +2190,13 @@ impl CheckedFixture {
                 &self.relaunch_file_path(),
             ),
         );
+        parts.console_settings = Some(
+            ac_launcher_core::profiles::LauncherConsoleSettingsStore::new(
+                &self
+                    .root
+                    .join(ac_launcher_core::profiles::CONSOLE_SETTINGS_FILE_NAME),
+            ),
+        );
         let mut window = LauncherWindow::new(parts);
         window.initialize();
         window.start_background_initialization();
@@ -2215,6 +2223,23 @@ fn keeping_clients_running_and_the_delay_are_remembered() {
     let window = selection.started_window(&batch());
     assert!(window.relaunch_checked_clients_automatically());
     assert_eq!(window.relaunch_delay_seconds_text(), "45");
+}
+
+#[test]
+fn the_consoles_verbose_is_remembered() {
+    let selection = CheckedFixture::new();
+    {
+        let mut window = selection.started_window(&batch());
+        // By default a console shows only what a player would see.
+        assert!(!window.console_verbose());
+        window.set_console_verbose(true);
+        assert_eq!(window.last_error, None);
+    }
+    let mut window = selection.started_window(&batch());
+    assert!(window.console_verbose());
+    window.set_console_verbose(false);
+    let window = selection.started_window(&batch());
+    assert!(!window.console_verbose());
 }
 
 #[test]

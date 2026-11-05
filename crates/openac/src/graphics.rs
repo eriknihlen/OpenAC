@@ -273,8 +273,13 @@ impl DisplayPrefs {
 /// `/mute` (as Ctrl+M), `/mixer` (the sound mixer, as in the chat box) and
 /// `/vsync on|off` (the host saves it to the settings file), `/uitype <line>` (type into
 /// the chat entry), `/uitext <text>` (type into the focused field). True
-/// when `line` was one.
-pub fn window_command(host: &ac_render::HostHandle, line: &str, prefs: &mut DisplayPrefs) -> bool {
+/// when `line` was one; `usage` says how to use one used wrongly.
+pub fn window_command(
+    host: &ac_render::HostHandle,
+    line: &str,
+    prefs: &mut DisplayPrefs,
+    usage: &dyn Fn(&str),
+) -> bool {
     // `/uitype <line>`: type a line into the window's chat entry through
     // the UI's own key routing (a diagnostic for unattended live checks).
     if let Some(typed) = line.strip_prefix("/uitype ") {
@@ -296,7 +301,7 @@ pub fn window_command(host: &ac_render::HostHandle, line: &str, prefs: &mut Disp
             Ok(step) => {
                 let _ = host.script_ui(step);
             }
-            Err(usage) => errln!("usage: {usage}"),
+            Err(text) => usage(&format!("usage: {text}")),
         }
         return true;
     }
@@ -328,7 +333,7 @@ pub fn window_command(host: &ac_render::HostHandle, line: &str, prefs: &mut Disp
             true
         }
         (Some("/vsync"), _) => {
-            errln!("usage: /vsync on|off");
+            usage("usage: /vsync on|off");
             true
         }
         _ => false,

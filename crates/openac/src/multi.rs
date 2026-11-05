@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use ac_host::console_kind::ConsoleLineKind;
 use ac_host::{
     CharacterSelector as HostSelector, ConsoleStream, CredentialResolver, ExitCode as HostExit,
     RosterEntry, RosterReport, SessionMode, Startup, StatusWriter, SystemPlatform,
@@ -150,6 +151,7 @@ pub fn run(
     // sessions every line says which session it came from.
     let chat_stream = plan.console.then_some(plan.console_stream);
     let several = logins.len() > 1;
+    let mut answers = ConsoleAnswers::requested();
     // Which session the window is on, told to each session's status file.
     let (window_tracker, mut window_notes) =
         WindowTracker::new(logins.iter().map(|login| login.session.id.as_str()));
@@ -256,6 +258,8 @@ pub fn run(
             plugin_logs: session_folder
                 .as_ref()
                 .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory),
+            marks: answers.marks,
+            asked: answers.session(&id),
         };
         let notes = window_notes.remove(&id);
         let liveness = Liveness::requested(host_handle.clone());
@@ -289,6 +293,7 @@ pub fn run(
             host_handle.clone(),
             prefs,
             window_tracker.clone(),
+            answers,
         );
     }
 
@@ -400,10 +405,21 @@ pub(crate) struct ChatPrinter {
     /// logs is appended to `<plugin id>.log` there, and its debug lines go
     /// only there. `None` for a client started by hand.
     pub(crate) plugin_logs: Option<std::path::PathBuf>,
+    /// The launcher asked for every line a player would see to carry the
+    /// mark of its kind (see `ac_host::console_kind`).
+    pub(crate) marks: bool,
+    /// The views the session's typed commands wait for.
+    pub(crate) asked: Arc<console::AskedViews>,
 }
 
 impl ChatPrinter {
+    /// A line of the client's log.
     fn print(&self, line: &str) {
+        self.print_as(None, line);
+    }
+
+    /// A line of `kind` (`None`: the client's log).
+    fn print_as(&self, kind: Option<ConsoleLineKind>, line: &str) {
         // The console's own lines are dimmed on a terminal, so they never
         // read as chat.
         let dimmed;
@@ -413,6 +429,7 @@ impl ChatPrinter {
         } else {
             line
         };
+        let line = self.mark(kind, line);
         match self.stream {
             Some(ConsoleStream::Stdout) => outln!("{line}"),
             Some(ConsoleStream::Stderr) => errln!("{line}"),
@@ -436,8 +453,8 @@ impl ChatPrinter {
     /// space, which explain a character left stuck): printed as the console
     /// prints, and on standard error too when the console does not write
     /// there.
-    fn print_logged(&self, line: &str) {
-        self.print(line);
+    fn print_logged(&self, kind: Option<ConsoleLineKind>, line: &str) {
+        self.print_as(kind, line);
         if self.client_log_unseen() {
             errln!("{line}");
         }
@@ -447,8 +464,19 @@ impl ChatPrinter {
     fn print_chat(&self, line: &ac_runtime::communication::ChatLine) {
         if let Some(text) = console::console_chat_line(line, self.session.as_deref(), Self::color())
         {
-            self.print(&text);
+            self.print_as(Some(ConsoleLineKind::Chat), &text);
         }
+    }
+
+    /// `line` marked as `kind` when the launcher asked for marks.
+    fn mark<'a>(&self, kind: Option<ConsoleLineKind>, line: &'a str) -> std::borrow::Cow<'a, str> {
+        console::marked(kind, line, self.marks)
+    }
+
+    /// The kind of the lines for `event` (an answer a typed command waited
+    /// for is used up).
+    fn kind_of(&self, event: &HostEvent) -> Option<ConsoleLineKind> {
+        console::event_kind(event, &self.asked)
     }
 
     /// Colour when standard output is a terminal (as OpenAC's console).
@@ -546,13 +574,15 @@ pub(crate) fn monitor(
                 let _ = commands.send(SessionCommand::Shutdown);
             }
         }
+        // What a player would see of the event, when the launcher marks lines.
+        let kind = event.as_ref().and_then(|event| printer.kind_of(event));
         match event {
             Some(HostEvent::Lifecycle(lifecycle)) => {
                 if lifecycle.state == session::LifecycleState::Stopped {
                     reported_connection = false;
                 }
                 for line in console::event_lines(&HostEvent::Lifecycle(lifecycle), tag) {
-                    printer.print_logged(&line);
+                    printer.print_logged(kind, &line);
                 }
             }
             Some(
@@ -562,7 +592,7 @@ pub(crate) fn monitor(
                 | HostEvent::CharacterCreation(_)),
             ) => {
                 for line in console::event_lines(&event, tag) {
-                    printer.print_logged(&line);
+                    printer.print_logged(kind, &line);
                 }
             }
             Some(HostEvent::Session(event)) => {
@@ -599,17 +629,26 @@ pub(crate) fn monitor(
                 outln!("[{id}] {event:?}");
             }
             Some(HostEvent::Objects(objects)) => {
-                outln!("[{id}] {} objects known", objects.len());
+                outln!(
+                    "{}",
+                    printer.mark(kind, &format!("[{id}] {} objects known", objects.len()))
+                );
                 for o in objects.iter().take(40) {
-                    outln!(
+                    let line = format!(
                         "[{id}]   0x{:08X} {:<32} {}",
                         o.guid,
                         o.name.as_deref().unwrap_or("?"),
                         o.distance.map_or_else(String::new, |d| format!("{d:.1} m"))
                     );
+                    outln!("{}", printer.mark(kind, &line));
                 }
             }
-            Some(HostEvent::GameTime(date)) => outln!("[{id}] game time: {date:?}"),
+            Some(HostEvent::GameTime(date)) => {
+                outln!(
+                    "{}",
+                    printer.mark(kind, &format!("[{id}] game time: {date:?}"))
+                );
+            }
             Some(HostEvent::LoginCommandFailed(failure)) => {
                 // Reported, never fatal (OpenAC's loginCommandFailed).
                 status.login_command_failed(
@@ -666,11 +705,14 @@ pub(crate) fn monitor(
                 printer.print_chat(&line);
             }
             Some(HostEvent::InterfaceText(text)) => {
-                printer.print(&console::interface_text(&text, printer.session.as_deref()));
+                printer.print_as(
+                    kind,
+                    &console::interface_text(&text, printer.session.as_deref()),
+                );
             }
             Some(HostEvent::Contracts(contracts)) => {
                 for line in console::contract_lines(&contracts, tag) {
-                    printer.print(&line);
+                    printer.print_as(kind, &line);
                 }
             }
             Some(HostEvent::Journal {
@@ -678,7 +720,7 @@ pub(crate) fn monitor(
                 current_page,
             }) => {
                 for line in console::journal_lines(&pages, current_page, tag) {
-                    printer.print(&line);
+                    printer.print_as(kind, &line);
                 }
             }
             Some(HostEvent::Relogin(relogin)) => {
@@ -711,7 +753,7 @@ pub(crate) fn monitor(
             }
             Some(other) => {
                 for line in console::event_lines(&other, tag) {
-                    printer.print(&line);
+                    printer.print_as(kind, &line);
                 }
             }
             None => {}
@@ -831,6 +873,35 @@ impl HeartbeatGate {
     }
 }
 
+/// What the console needs to mark the lines a player would see: whether the
+/// launcher asked for marks, and each session's views its typed commands
+/// wait for.
+#[derive(Debug, Default)]
+pub(crate) struct ConsoleAnswers {
+    pub(crate) marks: bool,
+    asked: BTreeMap<String, Arc<console::AskedViews>>,
+}
+
+impl ConsoleAnswers {
+    /// Marks when the launcher asked for them (its environment variable).
+    pub(crate) fn requested() -> Self {
+        Self {
+            marks: ac_host::console_kind::console_kinds_requested(|name| std::env::var(name).ok()),
+            asked: BTreeMap::new(),
+        }
+    }
+
+    /// The views session `id`'s typed commands wait for.
+    pub(crate) fn session(&mut self, id: &str) -> Arc<console::AskedViews> {
+        Arc::clone(self.asked.entry(id.to_owned()).or_default())
+    }
+
+    /// `line` marked as `kind` when the launcher asked for marks.
+    fn mark<'a>(&self, kind: ConsoleLineKind, line: &'a str) -> std::borrow::Cow<'a, str> {
+        console::marked(Some(kind), line, self.marks)
+    }
+}
+
 /// Console: `/sessions`, `/session <id>` (where unaddressed lines go),
 /// `@<id> <line>` (one line to one session), `/window [id]` (opens or moves
 /// the window to that session, else to the current one), `/close`,
@@ -842,6 +913,7 @@ pub(crate) fn spawn_console(
     window: Option<ac_render::HostHandle>,
     mut prefs: crate::graphics::DisplayPrefs,
     tracker: WindowTracker,
+    answers: ConsoleAnswers,
 ) {
     let spawned = std::thread::Builder::new()
         .name("console".into())
@@ -850,14 +922,24 @@ pub(crate) fn spawn_console(
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             let several = ids.len() > 1;
             let mut default = ids.first().cloned().unwrap_or_default();
+            // The console's answers are shown with or without the launcher's
+            // Verbose.
             let say = |text: &str, session: Option<&str>| {
-                errln!("{}", console::notice(text, session.filter(|_| several)));
+                let line = console::notice(text, session.filter(|_| several));
+                errln!("{}", answers.mark(ConsoleLineKind::Reply, &line));
             };
             for line in std::io::stdin().lines() {
                 let Ok(line) = line else { break };
+                // The launcher's console shows what was typed; a terminal
+                // already does.
+                if answers.marks && !line.trim().is_empty() {
+                    errln!("{}", answers.mark(ConsoleLineKind::Typed, line.trim()));
+                }
                 // Window-only commands (/fly, /vsync) go to the window host first.
                 if let Some(host) = &window
-                    && crate::graphics::window_command(host, &line, &mut prefs)
+                    && crate::graphics::window_command(host, &line, &mut prefs, &|usage| {
+                        errln!("{}", answers.mark(ConsoleLineKind::Reply, usage));
+                    })
                 {
                     continue;
                 }
@@ -897,7 +979,12 @@ pub(crate) fn spawn_console(
                     }
                     ConsoleInput::Usage(usage) => say(usage, None),
                     ConsoleInput::Command { session, command } => match pick(session) {
-                        Some((_, s)) => {
+                        Some((id, s)) => {
+                            if let (Some(view), Some(asked)) =
+                                (command.asked_view(), answers.asked.get(&id))
+                            {
+                                asked.ask(view);
+                            }
                             let _ = s.send(command.into_session_command());
                         }
                         None => say(&format!("no session is called {default}"), None),

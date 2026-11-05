@@ -28,7 +28,8 @@ pub mod process_stats;
 pub mod settings;
 
 pub use ac_host_core::{
-    character_options, config, exit, install_lease, json, layout, local_time, paths, status,
+    character_options, config, console_kind, exit, install_lease, json, layout, local_time, paths,
+    status,
 };
 
 pub use character_options::CharacterOption;

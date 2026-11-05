@@ -11,6 +11,7 @@
 //! - [`local_time::LocalZone`]: the player's local time zone, for the times
 //!   the client and the launcher show.
 //! - [`ExitCode`]: the client's exit codes.
+//! - [`console_kind`]: the kind marks on console lines a launcher asks for.
 //! - [`InstallSessionLease`]: the lock that keeps an update from replacing
 //!   files a running session uses.
 //!
@@ -19,6 +20,7 @@
 
 pub mod character_options;
 pub mod config;
+pub mod console_kind;
 pub mod exit;
 pub mod install_lease;
 pub mod json;

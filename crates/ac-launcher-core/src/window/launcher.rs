@@ -48,8 +48,9 @@ use crate::plugins::{
     github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
-    LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherRelaunchSettings,
-    LauncherRelaunchSettingsStore, LauncherTextEditorKind, find_account, same_account,
+    LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherConsoleSettings,
+    LauncherConsoleSettingsStore, LauncherRelaunchSettings, LauncherRelaunchSettingsStore,
+    LauncherTextEditorKind, find_account, same_account,
 };
 use crate::status::{KnownServerCatalog, KnownServerList};
 use crate::updates::{
@@ -151,6 +152,9 @@ pub struct LauncherWindowParts {
     /// Whether checked clients are kept running and the relaunch delay,
     /// remembered across restarts; `None` keeps them for this run only.
     pub relaunch_settings: Option<LauncherRelaunchSettingsStore>,
+    /// Whether session consoles show every line (Verbose), remembered across
+    /// restarts; `None` keeps it for this run only.
+    pub console_settings: Option<LauncherConsoleSettingsStore>,
     /// The clock automatic relaunch times its delay on; `None`: the
     /// system's monotonic clock.
     pub relaunch_clock: Option<MonotonicClock>,
@@ -328,6 +332,8 @@ pub struct LauncherWindow {
     checked_accounts: Option<LauncherCheckedAccountStore>,
     checked_accounts_loaded: bool,
     relaunch_settings: Option<LauncherRelaunchSettingsStore>,
+    console_settings: Option<LauncherConsoleSettingsStore>,
+    console_verbose: bool,
     /// The session log dialog is open.
     pub is_session_log_open: bool,
     /// The settings dialog is open.
@@ -624,6 +630,8 @@ impl LauncherWindow {
             checked_accounts: parts.checked_accounts,
             checked_accounts_loaded: false,
             relaunch_settings: parts.relaunch_settings,
+            console_settings: parts.console_settings,
+            console_verbose: false,
             is_session_log_open: false,
             is_settings_open: false,
             install_folder: parts
@@ -716,6 +724,7 @@ impl LauncherWindow {
                 }
                 // After the clear: a settings file that cannot be read says so.
                 self.restore_relaunch_settings();
+                self.restore_console_settings();
             }
             Err(error) => self.last_error = Some(error_text(&error)),
         }
@@ -2616,6 +2625,37 @@ impl LauncherWindow {
         let orchestrator = Arc::clone(&self.orchestrator);
         for console in &mut self.consoles {
             console.refresh(orchestrator.as_ref());
+        }
+    }
+
+    /// Whether the consoles show every line the client writes (Verbose) or
+    /// only what a player would see: chat, the status box, typed lines and
+    /// their answers.
+    pub fn console_verbose(&self) -> bool {
+        self.console_verbose
+    }
+
+    /// Turns the consoles' Verbose on or off, and remembers it.
+    pub fn set_console_verbose(&mut self, verbose: bool) {
+        if self.console_verbose == verbose {
+            return;
+        }
+        self.console_verbose = verbose;
+        if let Some(store) = &self.console_settings
+            && let Err(error) = store.save(LauncherConsoleSettings { verbose })
+        {
+            self.last_error = Some(error.0);
+        }
+    }
+
+    /// Takes the remembered console settings (at start-up).
+    fn restore_console_settings(&mut self) {
+        let Some(store) = &self.console_settings else {
+            return;
+        };
+        match store.load() {
+            Ok(settings) => self.console_verbose = settings.verbose,
+            Err(error) => self.last_error = Some(error.0),
         }
     }
 
