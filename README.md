@@ -9,6 +9,11 @@
   <strong>The original game's behavior, in a codebase built to be worked on.</strong>
 </p>
 
+> [!IMPORTANT]
+> **OpenAC (C#) is retired.** The Rust client, OpenAC for Rust, replaces it:
+> download it from <https://eriknihlen.github.io/OpenAC/docs/rust-client.html>.
+> Version 0.1.33 is the last C# release; its launcher gets no more updates.
+
 <p align="center">
   <a href="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/eriknihlen/OpenAC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/eriknihlen/OpenAC?display_name=tag"></a>

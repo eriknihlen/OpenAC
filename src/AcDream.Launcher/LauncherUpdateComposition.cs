@@ -93,7 +93,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
             return new LauncherUpdateComposition(
                 versions,
                 LauncherExecutableSet.FromCurrentVersionStore(versions),
-                updater,
+                new RetiredLauncherUpdater(updater),
                 manifestUri,
                 artifactClient,
                 manifestClient,
@@ -117,7 +117,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
             return new LauncherUpdateComposition(
                 versions,
                 LauncherExecutableSet.Unavailable(status),
-                new UnavailableLauncherUpdater(status, resolution),
+                new RetiredLauncherUpdater(new UnavailableLauncherUpdater(status, resolution)),
                 manifestUri,
                 artifactClient: null,
                 manifestClient: null,

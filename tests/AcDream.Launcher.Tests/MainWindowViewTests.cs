@@ -42,6 +42,8 @@ public sealed class MainWindowViewTests
         ("OwnServerNameTextBox", typeof(TextBox)),
         ("MigrationNoticeCloseButton", typeof(Button)),
         ("ClosePromptCancelButton", typeof(Button)),
+        ("GetRustClientButton", typeof(HyperlinkButton)),
+        ("RetirementNoticeText", typeof(SelectableTextBlock)),
     ];
 
     [AvaloniaFact]
@@ -63,6 +65,7 @@ public sealed class MainWindowViewTests
         ARefusedStartShowsItsReason();
         TheAddServerDialogListsKnownServersAndFocusesItsNameField();
         TheOptionsMenuActsOnItsOwnRow();
+        TheRetirementBannerShowsAndLinksToTheRustClientPage();
     }
 
     private static void TheOptionsMenuActsOnItsOwnRow()
@@ -324,6 +327,31 @@ public sealed class MainWindowViewTests
     /// for copying, with a way to close it. Mutation: leaving the reason out
     /// of the window fails this.
     /// </summary>
+    private static void TheRetirementBannerShowsAndLinksToTheRustClientPage()
+    {
+        using LauncherWindowViewModel viewModel = CreateViewModel();
+        var window = new MainWindow { DataContext = viewModel };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            HyperlinkButton link = window.FindControl<HyperlinkButton>("GetRustClientButton")!;
+            Assert.True(link.IsEffectivelyVisible);
+            Assert.Equal("Get the Rust client", link.Content);
+            Assert.Equal(LauncherRetirement.RustClientPage, link.NavigateUri);
+            SelectableTextBlock notice = window.FindControl<SelectableTextBlock>("RetirementNoticeText")!;
+            Assert.True(notice.IsEffectivelyVisible);
+            Assert.Equal(
+                [LauncherRetirement.NoticeTitle, " ", LauncherRetirement.NoticeText],
+                notice.Inlines!.OfType<Avalonia.Controls.Documents.Run>().Select(run => run.Text));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static void ARefusedStartShowsItsReason()
     {
         const string reason = "The folder holds files from an earlier OpenAC version (pak).";
@@ -453,7 +481,7 @@ public sealed class MainWindowViewTests
         {
             window.Show();
             Assert.True(window.CanResize);
-            foreach (var size in new[] { new Avalonia.Size(760, 460), new Avalonia.Size(1120, 740), new Avalonia.Size(1600, 1000) })
+            foreach (var size in new[] { new Avalonia.Size(760, 500), new Avalonia.Size(1120, 740), new Avalonia.Size(1600, 1000) })
             {
                 window.Width = size.Width;
                 window.Height = size.Height;
@@ -495,7 +523,7 @@ public sealed class MainWindowViewTests
     private static void ProfileEditorsExposeTwoFieldsAndMaskPasswords()
     {
         using var model = CreateViewModel();
-        var window = new MainWindow { DataContext = model, Width = 760, Height = 460 };
+        var window = new MainWindow { DataContext = model, Width = 760, Height = 500 };
         try
         {
             window.Show();

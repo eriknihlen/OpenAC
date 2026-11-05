@@ -2,6 +2,7 @@ using System.Text.Json;
 using AcDream.Launcher.Core.Orchestration;
 using AcDream.Launcher.Core.Profiles;
 using AcDream.Launcher.Core.Updates;
+using AcDream.Launcher.ViewModels;
 using AcDream.Platform;
 
 namespace AcDream.Launcher.Tests;
@@ -59,7 +60,44 @@ public sealed class LauncherUpdateCompositionTests : IDisposable
         Assert.Contains(exception.Message, capability.Reason, StringComparison.Ordinal);
         LauncherUpdateException updateError = await Assert.ThrowsAsync<LauncherUpdateException>(
             () => composition.Updater.CheckAsync(TestContext.Current.CancellationToken));
-        Assert.Contains(exception.Message, updateError.Message, StringComparison.Ordinal);
+        Assert.Equal(LauncherRetirement.NoUpdatesStatus, updateError.Message);
+    }
+
+    [Fact]
+    public async Task TheComposedUpdaterIsRetiredAndRefusesEveryFeedOperation()
+    {
+        Directory.CreateDirectory(_root);
+        var paths = new ApplicationPathSet(
+            Path.Combine(_root, "config"),
+            Path.Combine(_root, "data"),
+            Path.Combine(_root, "cache"));
+
+        using LauncherUpdateComposition composition = LauncherUpdateComposition.Create(
+            paths,
+            LauncherRuntimeIdentity.DetectRid(),
+            LauncherVersion.Parse("1.0.0"),
+            _root,
+            () => false,
+            initialize: (_, _) => new ClientVersionResolution(
+                ClientVersionState.Missing,
+                "No client version is installed.",
+                null,
+                null,
+                null,
+                null));
+
+        Assert.Equal(ReleaseManifestClient.ProductionManifestUri, composition.UpdateManifestUri);
+        Assert.IsType<RetiredLauncherUpdater>(composition.Updater);
+        CancellationToken token = TestContext.Current.CancellationToken;
+        LauncherUpdateException check = await Assert.ThrowsAsync<LauncherUpdateException>(
+            () => composition.Updater.CheckAsync(token));
+        Assert.Equal(LauncherRetirement.NoUpdatesStatus, check.Message);
+        LauncherUpdateException install = await Assert.ThrowsAsync<LauncherUpdateException>(
+            () => composition.Updater.InstallClientAsync(null!, cancellationToken: token));
+        Assert.Equal(LauncherRetirement.NoUpdatesStatus, install.Message);
+        LauncherUpdateException stage = await Assert.ThrowsAsync<LauncherUpdateException>(
+            () => composition.Updater.StageLauncherAsync(null!, cancellationToken: token));
+        Assert.Equal(LauncherRetirement.NoUpdatesStatus, stage.Message);
     }
 
     [Theory]

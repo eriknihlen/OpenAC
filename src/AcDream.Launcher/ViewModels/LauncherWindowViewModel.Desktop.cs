@@ -32,6 +32,17 @@ public sealed partial class LauncherWindowViewModel
     public RelayCommand CloseDesktopDialogCommand { get; private set; } = null!;
     public RelayCommand SaveRowOptionsCommand { get; private set; } = null!;
     public bool ShowUpdateBanner => UpdatePrompt.IsClientUpdateAvailable || UpdatePrompt.IsLauncherUpdateAvailable;
+
+    /// <summary>The retirement banner, always shown: this client is retired and the Rust client
+    /// replaces it.</summary>
+    public string RetirementNoticeTitle => LauncherRetirement.NoticeTitle;
+
+    public string RetirementNoticeText => LauncherRetirement.NoticeText;
+
+    public string GetRustClientLabel => LauncherRetirement.GetRustClientLabel;
+
+    /// <summary>Where "Get the Rust client" goes: the documentation site's Rust client page.</summary>
+    public Uri RustClientPage => LauncherRetirement.RustClientPage;
     public bool HasActiveSessions => Sessions.Any(session => session.IsActive);
     public bool IsCharacterOptionsOpen
     {
@@ -171,7 +182,7 @@ public sealed partial class LauncherWindowViewModel
         _ = CheckForUpdatesAsync(openPrompt: false, now);
     }
 
-    /// <summary>The client and launcher from the release feed, and the installed plugins. A
+    /// <summary>The client and launcher from the release feed (none for a retired launcher), and the installed plugins. A
     /// background check only raises the banner; the button also opens what it found.</summary>
     private async Task CheckForUpdatesAsync(bool openPrompt, DateTimeOffset? now = null)
     {
