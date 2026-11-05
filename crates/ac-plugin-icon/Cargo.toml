@@ -1,0 +1,18 @@
+[package]
+name = "ac-plugin-icon"
+description = "A plugin's icon.png: the rules the file must meet and a PNG decoder to RGBA. Shared by the plugin UI, the client and the launcher."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+# MIT like the plugin SDK, whose native tests link it through ac-plugin-ui.
+license = "MIT"
+
+[dependencies]
+# Inflates the image data.
+miniz_oxide.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

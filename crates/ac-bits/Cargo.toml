@@ -1,0 +1,15 @@
+[package]
+name = "ac-bits"
+description = "Little-endian binary reading and writing shared by the dat and wire formats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

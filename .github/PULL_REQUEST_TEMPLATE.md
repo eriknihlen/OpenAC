@@ -2,11 +2,13 @@
 
 ## Original behavior
 If this changes what the client does in the world: what does the original
-client do, and how do you know?
+client (or OpenAC) do, and how do you know?
 
 ## Checklist
-- [ ] `dotnet build AcDream.slnx -c Release` is green
-- [ ] The portable test filter passes locally (see CONTRIBUTING.md)
+- [ ] `scripts/check.sh` (or `scripts/check.ps1`) passes: fmt, clippy with `-D warnings`, the WebAssembly build, tests
+- [ ] Ran the real-data tests (`--include-ignored`) if this touches data files, rendering or the interface
 - [ ] One topic per PR
-- [ ] No code copied from ACEmulator, ACViewer, or holtburger
+- [ ] If `ac-plugin-abi` changed: the layout fingerprint is updated and the PR says plugins must be rebuilt
+- [ ] New options are documented in `docs/launch-options.md`
+- [ ] No code copied from ACEmulator, ACViewer, or holtburger (AGPL/GPL)
 - [ ] No comments describing the original client's internals

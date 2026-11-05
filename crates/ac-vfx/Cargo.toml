@@ -1,0 +1,19 @@
+[package]
+name = "ac-vfx"
+description = "Visual effects logic: particle emitters, physics scripts and what triggers them. Pure logic; it produces particle instance lists a renderer draws."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-bits.workspace = true
+ac-core.workspace = true
+ac-dat.workspace = true
+glam.workspace = true
+rustc-hash.workspace = true
+
+[lints]
+workspace = true

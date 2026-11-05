@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openac-rust third-party licenses</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 60rem; padding: 1rem; line-height: 1.4; }
+  h1 { margin-top: 0; }
+  ul.used-by { columns: 3 12rem; }
+  pre { white-space: pre-wrap; background: #f4f4f4; padding: 1rem; overflow-x: auto; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1b1b1b; color: #ddd; }
+    a { color: #8ab4f8; }
+    pre { background: #262626; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>Third-party licenses</h1>
+<p>openac-rust is under the MIT license (see <code>LICENSE</code>; attributions
+are in <code>NOTICE.md</code> and the font licenses in <code>licenses/</code>).
+The programs in this package also contain the following Rust crates, each
+listed under the license it is used under.</p>
+
+<h2>Overview</h2>
+<ul>
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+
+<h2>License texts</h2>
+{{#each licenses}}
+<section>
+  <h3 id="{{id}}">{{name}}</h3>
+  <p>Used by:</p>
+  <ul class="used-by">
+  {{#each used_by}}
+    <li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>
+  {{/each}}
+  </ul>
+  <pre>{{text}}</pre>
+</section>
+{{/each}}
+</main>
+</body>
+</html>

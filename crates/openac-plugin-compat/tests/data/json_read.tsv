@@ -1,0 +1,49 @@
+# .NET 10: document (escaped), JsonDocument.Parse (default options), JToken.Parse
+1	stj=ok	newtonsoft=ok
+ {"a":1} 	stj=ok	newtonsoft=ok
+	stj=fail	newtonsoft=fail
+{	stj=fail	newtonsoft=fail
+[1,]	stj=fail	newtonsoft=ok
+{"a":1,}	stj=fail	newtonsoft=ok
+// c\n1	stj=fail	newtonsoft=ok
+/* c */ 1	stj=fail	newtonsoft=ok
+'a'	stj=fail	newtonsoft=ok
+{a:1}	stj=fail	newtonsoft=ok
+NaN	stj=fail	newtonsoft=ok
+Infinity	stj=fail	newtonsoft=ok
+01	stj=fail	newtonsoft=ok
+1.	stj=fail	newtonsoft=ok
+.5	stj=fail	newtonsoft=ok
+1e	stj=fail	newtonsoft=fail
+-	stj=fail	newtonsoft=fail
+"\t"	stj=fail	newtonsoft=ok
+"\\x"	stj=fail	newtonsoft=fail
+"\\u12"	stj=fail	newtonsoft=fail
+[1] 2	stj=fail	newtonsoft=fail
+tru	stj=fail	newtonsoft=fail
+true	stj=ok	newtonsoft=ok
+null	stj=ok	newtonsoft=ok
+"a\\/b"	stj=ok	newtonsoft=ok
+[1 2]	stj=fail	newtonsoft=fail
+{"a" 1}	stj=fail	newtonsoft=fail
+{"a":1 "b":2}	stj=fail	newtonsoft=fail
+\u00a01	stj=fail	newtonsoft=ok
+\u000c1	stj=fail	newtonsoft=ok
+\u000b1	stj=fail	newtonsoft=ok
+1\n	stj=ok	newtonsoft=ok
+\r\n\t 1	stj=ok	newtonsoft=ok
+-0	stj=ok	newtonsoft=ok
+1E400	stj=ok	newtonsoft=ok
+["\\ud800"]	stj=ok	newtonsoft=ok
+{"a":1,"a":2}	stj=ok	newtonsoft=ok
+undefined	stj=fail	newtonsoft=ok
+[,1]	stj=fail	newtonsoft=ok
+{,}	stj=fail	newtonsoft=fail
++1	stj=fail	newtonsoft=fail
+0x10	stj=fail	newtonsoft=ok
+1.5e+3	stj=ok	newtonsoft=ok
+"\u0001"	stj=fail	newtonsoft=ok
+[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]	stj=ok	newtonsoft=ok
+[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]	stj=fail	newtonsoft=fail
+{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}	stj=ok	newtonsoft=ok
+{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}	stj=fail	newtonsoft=fail

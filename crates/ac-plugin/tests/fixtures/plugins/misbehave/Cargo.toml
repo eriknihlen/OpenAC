@@ -1,0 +1,12 @@
+[package]
+name = "misbehave"
+description = "Traps on request (panic, endless loop, memory exhaustion) so the host's containment can be tested."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

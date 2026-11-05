@@ -1,248 +1,206 @@
 <p align="center">
-  <img src="assets/icons/acdream-client-128.png" alt="OpenAC" width="96" height="96">
+  <img src="assets/icons/launcher-256.png" alt="openac-rust" width="96" height="96">
 </p>
 
-<h1 align="center">OpenAC</h1>
+<h1 align="center">openac-rust</h1>
 
 <p align="center">
-  An open-source Asheron's Call client for .NET 10.<br>
+  An open-source Asheron's Call client in Rust.<br>
   <strong>The original game's behavior, in a codebase built to be worked on.</strong>
 </p>
 
-> [!IMPORTANT]
-> **OpenAC (C#) is retired.** The Rust client, OpenAC for Rust, replaces it:
-> download it from <https://eriknihlen.github.io/OpenAC/docs/rust-client.html>.
-> Version 0.1.33 is the last C# release; its launcher gets no more updates.
-
 <p align="center">
-  <a href="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/eriknihlen/OpenAC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/eriknihlen/OpenAC?display_name=tag"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/eriknihlen/OpenAC"></a>
-  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10.0-512BD4">
-  <a href="https://github.com/eriknihlen/OpenAC/discussions"><img alt="Discussions" src="https://img.shields.io/github/discussions/eriknihlen/OpenAC"></a>
-  <a href="https://discord.gg/mBWtvgmuF"><img alt="Join Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://github.com/eriknihlen/openac-rust/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eriknihlen/openac-rust/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/eriknihlen/openac-rust/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/eriknihlen/openac-rust?display_name=tag"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/eriknihlen/openac-rust"></a>
+  <img alt="Rust 1.95" src="https://img.shields.io/badge/Rust-1.95-DEA584?logo=rust">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue">
 </p>
 
-<p align="center">
-  <a href="https://github.com/eriknihlen/OpenAC/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/eriknihlen/OpenAC/total"></a>
-  <a href="https://github.com/eriknihlen/OpenAC/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/eriknihlen/OpenAC"></a>
-  <a href="https://github.com/eriknihlen/OpenAC/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/eriknihlen/OpenAC"></a>
-  <a href="https://github.com/eriknihlen/OpenAC/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/eriknihlen/OpenAC"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue">
-</p>
+## What is openac-rust
 
-## What is OpenAC
+openac-rust is the Rust port of [OpenAC](https://github.com/eriknihlen/OpenAC),
+the open-source C# client for Asheron's Call. It aims at full feature parity
+with OpenAC and is maintained alongside it: the same behavior as the original
+game, in modern Rust.
 
-OpenAC is a from-scratch client for Asheron's Call that reproduces the
-observable behavior of the original client in a C# codebase built to be read,
-tested, and changed. It
-renders with Vulkan through Silk.NET, talks to
-[ACEmulator](https://github.com/ACEmulator/ACE) servers over the game's wire
-protocol, and exposes a plugin API the original never had.
+- **One program, many sessions.** `openac` runs any number of game sessions
+  in one process, with zero or more windows. A window can open onto any
+  running session and close again without the session noticing; a session
+  without a window keeps playing headless.
+- **Renders** with [wgpu](https://wgpu.rs) (Direct3D 12, Vulkan or Metal) in a
+  [winit](https://github.com/rust-windowing/winit) window, with the original
+  game's own interface rebuilt from its data files.
+- **Talks** to [ACEmulator](https://github.com/ACEmulator/ACE) servers over
+  the game's wire protocol.
+- **Plugins are WebAssembly.** A plugin is an ordinary Rust crate built for
+  `wasm32-unknown-unknown`; the same plugin runs with or without a window,
+  sandboxed, with the permissions it declares.
+- **A launcher** (`openac-launcher`) keeps your accounts and servers, starts
+  sessions graphical or headless, and installs plugins.
 
-OpenAC does not ship any game data. You supply your own data files.
+openac-rust does not ship any game data. You supply your own data files.
 
 ## Status
 
-OpenAC is in **beta**: it is fully playable against an ACEmulator server, and
-it is under active development. Expect bugs, plenty of them; the perfect is
-the enemy of the good, and this is out so people can play it and report what
-breaks. Today it does the following:
+openac-rust is **under active development**. It ports OpenAC subsystem by
+subsystem and covers nearly all of it: login and character selection, the
+streamed world with its terrain, buildings and dungeons, movement and
+collision, combat and magic, inventory, vendors and trade, chat, the original
+interface, audio, the WebAssembly plugin host, and the launcher. Expect bugs;
+reports are welcome.
 
-- Log in, create and select characters, enter the world, and log out cleanly.
-- Stream the outdoor world, towns, buildings, cellars, and dungeons with the
-  original terrain, scenery, lighting, sky, weather, and day/night cycle.
-- Move, jump, and collide the way the original client did, including slopes,
-  stairs, doorways, and portal travel.
-- Melee, bows, crossbows, and the complete late-era spell catalog with
-  components, enchantments, projectiles, and effects.
-- Inventory, equipment, containers, corpse looting, vendors, secure trade, item use,
-  assessment, and the familiar quick bars.
-- Chat with the original channels, colors, and the slash commands.
-- The original UI: vitals, options, character, spellbook, fellowship and
-  allegiance panels, radar, dialogs, and floating windows.
-- A headless host that runs the same game runtime without a window, for bots
-  and automated testing, on Windows and Linux.
-- Plugins, installed from the launcher, with a plugin manager that finds and
-  updates them.
+**Platforms.** Windows 10 and 11 (64-bit) is where it is played most. Linux
+(64-bit, X11 or Wayland) builds and runs, with less time in front of players.
+macOS (macOS 14 or later, Apple silicon or Intel) builds and runs on Metal;
+it is the newest platform.
 
-**Found a bug or missing feature?** Please report it in
-[Discord](https://discord.gg/mBWtvgmuF) or open a
-[GitHub issue](https://github.com/eriknihlen/OpenAC/issues). Include your OpenAC
-version, what you did, what happened, and a screenshot if you can. Reports from
-players help us decide what to fix next.
-
-**Platforms.** Windows and Linux, 64-bit, and macOS on Apple silicon, for the
-launcher, graphical client, and headless host. Windows is where most of the
-play-testing happens; the Linux and macOS clients are newer and have had less
-time in front of players, so reports from those desktops are especially
-welcome.
-
-## Roadmap
-
-- **Linux in CI.** The Linux graphical client builds, installs through the
-  launcher, and plays, but CI runs its rendering tests on Windows hardware
-  only. A Linux rendering lane is next.
-- **macOS distribution.** Add Developer ID signing and notarization to the
-  Apple-silicon launcher packages.
-- **Performance tuning.** Improve frame times, world streaming, memory use,
-  and responsiveness.
-- **Housing.**
-- **A documented plugin API.**
+**Found a bug?** Open a
+[GitHub issue](https://github.com/eriknihlen/openac-rust/issues) with the
+version, what you did, what happened, and a screenshot if you can.
 
 ## Download
 
-**New players: get the Rust client**, OpenAC for Rust, from
-<https://eriknihlen.github.io/OpenAC/docs/rust-client.html>. This C# client is
-retired.
-
-If you still want the C# client, its last release is
-[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33). Grab the
-launcher for your platform there, unzip it anywhere, and run it:
+Grab the build for your platform from the
+[latest release](https://github.com/eriknihlen/openac-rust/releases/latest),
+unzip it anywhere, and run the launcher:
 
 | Platform | Download | Run |
 |---|---|---|
-| Windows | `launcher-win-x64.zip` | `acdream-launcher.exe` |
-| Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
-| macOS (Apple silicon) | `launcher-osx-arm64.zip` | Drag `OpenAC.app` to `~/Applications`, then open it in Finder. |
+| Windows | `openac-win-x64.zip` | `openac-launcher.exe` |
+| Linux | `openac-linux-x64.zip` | `./openac-launcher` |
+| macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | `OpenAC.app` |
+| macOS (Intel) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
 
-The launcher installs the 0.1.33 client, prepares your data files, and stores
-your server and character profiles. It gets no more updates; plugins keep
-installing and updating.
+The zip holds both programs; the launcher starts the `openac` beside it. On
+macOS they are inside `OpenAC.app`; move it to Applications and open it. The
+app is signed ad hoc, not with an Apple Developer ID, so macOS blocks the
+first start of a downloaded copy: allow it under System Settings, Privacy &
+Security ("Open Anyway").
 
 You will need:
 
-- **Windows 10 or 11**, or a **64-bit Linux desktop** (X11 or Wayland), with a
-  **Vulkan 1.3** capable GPU and driver.
+- A GPU and driver with **Direct3D 12** (Windows) or **Vulkan** (Windows or
+  Linux); on macOS, **Metal** (every Mac that runs macOS 14).
 - **Your own Asheron's Call data files** (`client_portal.dat`,
   `client_cell_1.dat`, `client_highres.dat`, `client_local_English.dat`).
-- **A server to connect to.** OpenAC speaks ACEmulator's protocol; a local
-  ACE server works well for trying it out.
+  The launcher asks for their folder on first run; `openac` looks in
+  `Documents\Asheron's Call` under your user profile unless `--dat-dir` or
+  `OPENAC_DAT_DIR` names another.
+- **A server to connect to.** openac-rust speaks ACEmulator's protocol; a
+  local ACE server works well for trying it out.
 
 ## Build from source
 
-Requires the .NET 10 SDK (the exact band is pinned in `global.json`).
+Install Rust with [rustup](https://rustup.rs). The repository's
+`rust-toolchain.toml` pins Rust 1.95.0 with `rustfmt`, `clippy` and the
+`wasm32-unknown-unknown` target, and rustup installs them on the first build.
+
+A C compiler is needed too (the plugin engine compiles two small C files):
+on Windows the Visual Studio Build Tools ("Desktop development with C++"),
+on Linux your distribution's compiler, on macOS the Xcode command-line tools
+(`xcode-select --install`). Linux also needs the OpenSSL and ALSA
+development headers and `pkg-config`; on Debian or Ubuntu:
 
 ```bash
-git clone https://github.com/eriknihlen/OpenAC.git
-cd OpenAC
-dotnet build AcDream.slnx -c Release
-dotnet test AcDream.slnx -c Release --no-build --filter "Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure"
+sudo apt install build-essential pkg-config libssl-dev libasound2-dev
 ```
 
-Then see [docs/building-and-running.md](docs/building-and-running.md) for
-preparing your data files and launching the client or the headless host
-against a server.
+Then:
+
+```bash
+git clone https://github.com/eriknihlen/openac-rust.git
+cd openac-rust
+cargo build --release
+```
+
+The programs land in `target/release/`: `openac` (the client),
+`openac-launcher` (the launcher), `actool` (a data-file inspector) and
+`plugincheck` (the plugin validator); on macOS, `scripts/bundle-macos.sh`
+builds the launcher and the client into `OpenAC.app`. Run the launcher, or the
+client on its own:
+
+```bash
+# The password comes only from the environment.
+export OPENAC_PASSWORD='...'
+./target/release/openac --server 127.0.0.1:9000 --account myaccount --character "My Character"
+```
+
+Type `/window` in its console to open a game window on the session and
+`/close` to close it again; `--headless` runs without any window support.
+`openac run --config <file>` runs several sessions from one configuration
+document. [docs/building-and-running.md](docs/building-and-running.md) walks
+through it, and [docs/launch-options.md](docs/launch-options.md) lists every
+option and environment variable.
+
+Before sending a change, run the same check CI runs:
+
+```bash
+scripts/check.sh                               # Linux, macOS
+pwsh -NoProfile -File scripts/check.ps1        # Windows
+```
+
+It runs `cargo fmt --check`, `cargo clippy -D warnings`, a WebAssembly build
+of the plugin crates, and the tests. Tests that read the real game data
+files run too when the files are found.
 
 ## Plugins
 
-Plugins are .NET assemblies that target `AcDream.Plugin.Abstractions`, a
-small BCL-only contract: game state, events, commands, and a markup-based UI
-panel system that renders in the game's own look.
+Plugins are WebAssembly modules. You write one as a Rust crate against the
+`openac-plugin` SDK (`crates/openac-plugin`, MIT), build it for
+`wasm32-unknown-unknown`, and test its logic natively with the SDK's fake
+host. A plugin declares what it needs beyond the basics (chat, network,
+listening sockets, the shared profiles folder, the clipboard) in its
+`plugin.json`, and the client enforces it: a plugin can call only what its
+permissions allow, within a memory cap and a time limit per call.
 
-Start with [docs/plugin-development.md](docs/plugin-development.md): project
-setup, the manifest, where plugins install, and what the API promises.
-[docs/plugin-api.md](docs/plugin-api.md) describes every surface (game
-state, items, chat, trade, vendor, hotkeys, window, headless) and
-[docs/plugin-ui-markup.md](docs/plugin-ui-markup.md) the in-game panels.
-Every public member of the contract carries a summary that your IDE shows,
-and the same summaries make up the [API reference site](https://eriknihlen.github.io/OpenAC/).
-
-Plugins live in their own repositories and install into the client's plugins
-folder; [OpenAC-MagTools](https://github.com/eriknihlen/OpenAC-MagTools) and
-[openac-mosstank](https://github.com/eriknihlen/openac-mosstank) are external
-plugins built that way. The same plugin runs unchanged in the headless host
-for bots and tests.
-
-Shipping one to other players goes through the launcher: publish a GitHub
-release it can install, check it first with the bundled validator so you know
-it meets the current rules, and ask for a listing so it shows up in the
-launcher's Discover panel. [docs/plugin-development.md](docs/plugin-development.md)
-walks the whole path and [docs/plugin-manifest.md](docs/plugin-manifest.md)
-is the field-by-field contract, including the icon rules, the size caps, beta
-releases, and the capabilities a plugin declares before a player installs it.
-
-**MossTank** is a re-implementation of VirindiTank, the automation plugin
-most Asheron's Call players ran for years. It reads VirindiTank's own profile
-and navigation files so existing setups carry over, and it aims at the same
-tabs, the same behavior, and the same vocabulary. Full credit to Virindi for
-the original; MossTank exists because that design was right. It lives in
-[its own repository](https://github.com/eriknihlen/openac-mosstank) and
-installs from the launcher's plugin manager like any other plugin.
-
-**Custom shader packs** are an experiment. The render packs under `samples/`
-are plugins that swap in their own shader stages (an atmospheric tier, a
-shadows-only tier, a no-op pack), and they exist so people can play with the
-rendering pipeline without touching the client. Try them, break them, and
-say what you found. They can be enabled in game under the graphics settings.
+`plugincheck` tells you whether the launcher would install your plugin, using
+the launcher's own rules, and `plugincheck pack` writes its release assets.
+Plugins are published as GitHub releases tagged `wasm-v<version>` and can be
+listed in the launcher's Discover panel.
+[docs/plugin-development.md](docs/plugin-development.md) walks the whole path.
 
 ## AI-assisted development
 
-This is a heavily AI-assisted project, and it says so openly. Most of the code
-was written by AI tools working under the maintainer's direction and supervision.
-Not every line has been read by a human. What every change has to pass instead is
-the same gate: it builds with warnings as errors, it passes the test suite (about
-18,000 tests in CI), it survives an independent AI review pass, and it behaves
-like the original game when the maintainer plays it. The AI is a tool here, not
-the author of record; the person who merges a change answers for it.
+Like OpenAC, this is a heavily AI-assisted project, and it says so openly.
+Most of the code was written by AI tools working under the maintainer's
+direction and supervision. What every change has to pass is the same gate: it
+is formatted, it passes clippy with warnings as errors, it passes the test
+suite, and it behaves like the original game when the maintainer plays it.
+The person who merges a change answers for it.
 
-The project welcomes AI-assisted contributions on exactly those terms. Use whatever
-tools you like; submit changes you understand, that build, that pass the tests,
-and that you can explain in the pull request.
-
-## Image and data dependencies
-
-Image loading uses StbImageSharp; screenshots and PNG exports use
-StbImageWriteSharp. Both are managed C# libraries and require no native image
-library or build-time license key. Texture block decoding uses BCnEncoder.Net
-directly. CLI image tools retain cropping, nearest-neighbor zoom, bicubic
-scaling, alpha compositing, and pixel comparisons.
-
-Chorizite.DatReaderWriter remains the DAT reader. Mesh bounds and texture-format
-values are owned by OpenAC, retaining the existing PAK binary format; existing
-prepared content does not need rebaking for this dependency change.
-Chorizite.Core, ImageSharp, and the BCnEncoder ImageSharp adapter are no longer
-required. See [third-party notices](NOTICE.md) for dependencies and attribution,
-and [image pipeline checks](docs/image-pipeline-testing.md) for verification.
+AI-assisted contributions are welcome on exactly those terms: submit changes
+you understand, that pass the check, and that you can explain in the pull
+request.
 
 ## Contributing
 
-OpenAC is meant to be built by the community, not by one person. The code is
-shared so that anyone who cares about Asheron's Call can read it, run it,
-change it, and ship it. Contributions of every size are wanted: a typo, a bug
-report with a screenshot, a plugin, a port to a new platform, or a whole
-subsystem. If you have played the game and something feels wrong, that
-observation alone is useful.
-
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the ground rules and how to get
-  a build running.
-- Join [Discord](https://discord.gg/mBWtvgmuF) to report bugs, share screenshots,
-  and discuss what you find while playing. You do not need a GitHub account to
-  help us improve the client.
-- Ask questions and float ideas in
-  [Discussions](https://github.com/eriknihlen/OpenAC/discussions).
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the ground rules.
 - File bugs and feature requests in
-  [Issues](https://github.com/eriknihlen/OpenAC/issues).
+  [Issues](https://github.com/eriknihlen/openac-rust/issues).
 - Fork it. The MIT license means you never need permission.
 
 ## Acknowledgements
 
-OpenAC stands on the work of the Asheron's Call preservation community:
+openac-rust is a port of [OpenAC](https://github.com/eriknihlen/OpenAC) and
+stands on the same work of the Asheron's Call preservation community:
 [ACEmulator](https://github.com/ACEmulator/ACE) for the server and protocol,
+[DatReaderWriter](https://github.com/Chorizite/DatReaderWriter),
 [WorldBuilder](https://github.com/Chorizite/WorldBuilder) and
 [Chorizite](https://github.com/Chorizite) for the data-file and rendering
-foundation this project extracted and adapted,
-[ACViewer](https://github.com/ACEmulator/ACViewer) for the viewer that
-answered many rendering questions, and
-[holtburger](https://github.com/merklejerk/holtburger) for a working
-reference of client behavior, and Virindi, whose VirindiTank defined what an
-Asheron's Call automation plugin should be. Rendering, windowing, and audio go
-through [Silk.NET](https://github.com/dotnet/Silk.NET).
+foundation, [ACViewer](https://github.com/ACEmulator/ACViewer) for the viewer
+that answered many rendering questions,
+[holtburger](https://github.com/merklejerk/holtburger) for a working reference
+of client behavior, and Virindi, whose VirindiTank defined what an Asheron's
+Call automation plugin should be. Rendering goes through
+[wgpu](https://wgpu.rs), windowing through
+[winit](https://github.com/rust-windowing/winit), and plugins run on
+[Wasmtime](https://wasmtime.dev).
 
 ## License
 
-OpenAC is released under the [MIT License](LICENSE). Third-party notices are
-in [NOTICE.md](NOTICE.md).
+openac-rust is released under the [MIT License](LICENSE). Third-party notices
+are in [NOTICE.md](NOTICE.md).
 
 Asheron's Call and all associated names, art, and data files are the property
 of their respective owners. This project distributes no game assets and is not

@@ -1,0 +1,25 @@
+[package]
+name = "ac-plugin-abi"
+description = "The calling convention between the openAC client and its WebAssembly plugins: API versions, the import table, and the byte encoding of every request, reply and event. Shared by the host and the plugin SDK."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+# The SDK side of the plugin API is MIT so plugins
+# under any licence (LGPL, closed) can use it.
+license = "MIT"
+
+[features]
+# The plugin UI imports carried out on a session's plugin UI state: the
+# client's plugin host, and the SDK's fake host in plugin tests. Off for a
+# plugin's own wasm build.
+ui-host = ["dep:ac-plugin-ui"]
+
+[dependencies]
+# The API version rules and the permission vocabulary (re-exported).
+ac-plugin-version.workspace = true
+ac-plugin-ui = { workspace = true, optional = true }
+
+[lints]
+workspace = true

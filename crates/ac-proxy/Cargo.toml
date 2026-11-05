@@ -1,0 +1,23 @@
+[package]
+name = "ac-proxy"
+description = "The system proxy, as .NET's HttpClient.DefaultProxy finds it, shared by the launcher's HTTP and the plugins' network: where a request goes, the tunnel through the proxy (CONNECT or SOCKS), and the proxy's authentication (Basic, Digest, NTLM, Negotiate)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# SHA-256 for Digest authentication (RFC 7616); pure Rust, already the launcher's.
+sha2.workspace = true
+
+# The user's proxy settings through WinHTTP, NTLM and Negotiate through SSPI,
+# the proxy's canonical name through GetAddrInfoW, this machine's addresses
+# through GetAdaptersAddresses and random bytes through BCryptGenRandom
+# (bindings only, linked through windows-link; no C).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinHttp","Win32_Networking_WinSock", "Win32_Security_Authentication_Identity", "Win32_Security_Credentials", "Win32_Security_Cryptography"] }
+
+[lints]
+workspace = true

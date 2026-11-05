@@ -1,0 +1,8 @@
+{
+  "id": "openac.uidemo",
+  "displayName": "UI Demo",
+  "version": "0.1.0",
+  "entry": "uidemo.wasm",
+  "apiVersion": "1.8",
+  "minHostVersion": "0.1.0"
+}

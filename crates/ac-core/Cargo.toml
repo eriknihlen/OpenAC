@@ -1,0 +1,17 @@
+[package]
+name = "ac-core"
+description = "Pure game logic shared by the runtime: physics rules, items, spells, ... No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-bits.workspace = true
+glam.workspace = true
+openac-plugin-compat.workspace = true
+
+[lints]
+workspace = true

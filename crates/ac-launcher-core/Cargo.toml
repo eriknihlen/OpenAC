@@ -1,0 +1,48 @@
+[package]
+name = "ac-launcher-core"
+description = "The launcher's logic: profiles, session-config composition, supervised client processes, status files, installation and update checks, plugin management. No window and no network stack: downloads go through a transport the host supplies."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+# The session-config document, paths, layout, status file and JSON reader the
+# client uses too (not the client itself).
+ac-host-core.workspace = true
+# The client's own plugin.json parser, version rules, permissions and icon rules
+# (one reader for the launcher and the session). The launcher never links the
+# plugin host and never loads or runs a module.
+ac-plugin-manifest.workspace = true
+ac-plugin-version.workspace = true
+ac-plugin-icon.workspace = true
+sha2.workspace = true
+miniz_oxide.workspace = true
+roxmltree.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+ctrlc.workspace = true
+
+# The FIFO test makes its FIFO with a call, not a child process.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+# The self-update process tests copy their own test program into a launcher
+# folder and run it as the launcher; it takes the launcher's internal
+# arguments, which the standard test harness would refuse, so the binary has
+# a main of its own.
+[[test]]
+name = "self_update_process"
+harness = false
+
+[lints]
+workspace = true

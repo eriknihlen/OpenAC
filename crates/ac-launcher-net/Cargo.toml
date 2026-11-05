@@ -1,0 +1,22 @@
+[package]
+name = "ac-launcher-net"
+description = "The launcher's network: an HTTP/1.1 GET over the operating system's TLS stack (the launcher core's HttpTransport) and the UDP server reachability probe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-launcher-core.workspace = true
+native-tls.workspace = true
+# The system proxy, shared with the plugins' network.
+ac-proxy.workspace = true
+
+[dev-dependencies]
+ac-host-core.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

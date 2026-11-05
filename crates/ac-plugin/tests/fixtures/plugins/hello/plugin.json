@@ -1,0 +1,12 @@
+{
+  "id": "openac.hello",
+  "displayName": "Hello",
+  "version": "0.1.0",
+  "entry": "hello.wasm",
+  "apiVersion": "1.8",
+  "minHostVersion": "0.1.0",
+  "permissionsVersion": 1,
+  "permissions": [
+    { "name": "chat", "note": "Answers /hello and lines that say ping hello." }
+  ]
+}

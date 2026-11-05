@@ -1,0 +1,12 @@
+[package]
+name = "hello"
+description = "The smallest real plugin: a chat verb, chat in and out, the tick and the window-attached event."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

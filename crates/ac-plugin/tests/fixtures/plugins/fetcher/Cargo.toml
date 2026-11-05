@@ -1,0 +1,12 @@
+[package]
+name = "fetcher"
+description = "A network test plugin: an HTTP GET on a chat verb, the reply posted back."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

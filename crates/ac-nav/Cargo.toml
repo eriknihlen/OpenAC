@@ -1,0 +1,18 @@
+[package]
+name = "ac-nav"
+description = "Navigation: a walkability grid sampled from the collision world, route search with leaps, and the route driver and walk arbitration a session runs per quantum. Pure logic, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-core.workspace = true
+ac-dat.workspace = true
+ac-physics.workspace = true
+glam.workspace = true
+
+[lints]
+workspace = true

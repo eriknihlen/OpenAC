@@ -1,0 +1,22 @@
+[package]
+name = "ac-dat"
+description = "Reads the game's dat files: container, directory and typed objects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-bits.workspace = true
+thiserror.workspace = true
+memmap2.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# The sky and light conformance tests feed real dat objects to ac-core's rules.
+ac-core.workspace = true
+glam.workspace = true

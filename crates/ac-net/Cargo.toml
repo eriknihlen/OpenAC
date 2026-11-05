@@ -1,0 +1,16 @@
+[package]
+name = "ac-net"
+description = "The game's UDP transport: packets, ISAAC checksums, fragments, reliable delivery. Sans-I/O core plus a thin std::net driver."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-bits.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

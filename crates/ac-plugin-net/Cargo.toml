@@ -1,0 +1,24 @@
+[package]
+name = "ac-plugin-net"
+description = "The network plugins may use: HTTP/1.1 requests and TCP sockets (TLS over the operating system's stack), each on its own worker thread, completions handed back to the session."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-plugin-abi.workspace = true
+# The same OS TLS the launcher uses.
+native-tls.workspace = true
+# The system proxy, shared with the launcher (OpenAC's plugins followed .NET's DefaultProxy).
+ac-proxy.workspace = true
+
+# The local peer hub's named pipe on Windows (bindings only, linked through
+# windows-link; src/local/windows.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

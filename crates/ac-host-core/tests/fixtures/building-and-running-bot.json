@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "process": {
+    "content": {
+      "datDirectory": "/opt/ac",
+      "preparedAssetPath": "/opt/ac/acdream.pak"
+    }
+  },
+  "sessions": [
+    {
+      "id": "bot-1",
+      "endpoint": { "host": "127.0.0.1", "port": 9000 },
+      "account": "youraccount",
+      "character": { "index": 0 },
+      "policy": { "id": "idle" },
+      "credential": {
+        "provider": "environment",
+        "reference": "ACDREAM_BOT_PASSWORD"
+      }
+    }
+  ]
+}

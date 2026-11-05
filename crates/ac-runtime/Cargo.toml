@@ -1,0 +1,41 @@
+[package]
+name = "ac-runtime"
+description = "The one owner of game and session state; headless and graphical hosts drive it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-core.workspace = true
+ac-dat.workspace = true
+ac-motion.workspace = true
+ac-nav.workspace = true
+ac-plugin.workspace = true
+# The coordinate matcher chat lines are linked by, shared with the SDK.
+ac-plugin-abi.workspace = true
+# The strict JSON reader and string escaping for the peer notes.
+ac-host.workspace = true
+# The session's plugin UI state (panels, canvases, images, labels, lines).
+ac-plugin-ui.workspace = true
+# The peer hub's local endpoint (named pipe or Unix socket; peer_transport, peer_hub).
+ac-plugin-net.workspace = true
+# The peer hub's endpoint name from the peer folder and user (OpenAC PeerHubEndpoint).
+sha2.workspace = true
+ac-physics.workspace = true
+glam.workspace = true
+ac-net.workspace = true
+ac-proto.workspace = true
+thiserror.workspace = true
+
+# The local time zone for chat timestamps comes from the OS on Windows; the
+# crate is already in the graph (through winit/wgpu) and is pure bindings.
+[lints]
+workspace = true
+
+[dev-dependencies]
+ac-bits.workspace = true
+# The test plugins, built to wasm, for the session-level plugin tests.
+ac-plugin = { workspace = true, features = ["test-fixtures"] }

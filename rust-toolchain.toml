@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+# Plugins are built for wasm32-unknown-unknown (a toolchain target, not a
+# library); the plugin host's tests build the test plugins with it.
+targets = ["wasm32-unknown-unknown"]

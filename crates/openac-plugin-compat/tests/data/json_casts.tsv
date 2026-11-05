@@ -1,0 +1,22 @@
+# Newtonsoft 13 casts of JToken.Parse(text): (int?), (double?) as bits, (string?); ERR = exception, NULL = null
+1	int=1	double=3FF0000000000000	string=1
+1.5	int=2	double=3FF8000000000000	string=1.5
+2.5	int=2	double=4004000000000000	string=2.5
+-3.5	int=-4	double=C00C000000000000	string=-3.5
+-0	int=0	double=0000000000000000	string=0
+"12"	int=12	double=4028000000000000	string=12
+" 12 "	int=12	double=4028000000000000	string= 12 
+"1.5"	int=ERR	double=3FF8000000000000	string=1.5
+"1,000.5"	int=ERR	double=408F440000000000	string=1,000.5
+true	int=1	double=3FF0000000000000	string=True
+false	int=0	double=0000000000000000	string=False
+null	int=NULL	double=NULL	string=NULL
+1e2	int=100	double=4059000000000000	string=100
+12345678901	int=ERR	double=4206FEE0E1A80000	string=12345678901
+99999999999999999999	int=ERR	double=4415AF1D78B58C3F	string=99999999999999999999
+2147483647.5	int=ERR	double=41DFFFFFFFE00000	string=2147483647.5
+"abc"	int=ERR	double=ERR	string=abc
+0.1	int=0	double=3FB999999999999A	string=0.1
+1E+300	int=ERR	double=7E37E43C8800759C	string=1E+300
+[]	int=ERR	double=ERR	string=ERR
+{}	int=ERR	double=ERR	string=ERR

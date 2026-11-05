@@ -1,6 +1,0 @@
-{
-  "configProperties": {
-    "System.GC.ConserveMemory": 7,
-    "System.GC.Gen0MaxBudget": 8388608
-  }
-}

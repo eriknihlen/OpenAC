@@ -1,0 +1,25 @@
+[package]
+name = "openac-launcher"
+description = "The launcher window: accounts, servers, plugins and settings, and starting game sessions. A thin egui layer over ac-launcher-core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+ac-launcher-core.workspace = true
+ac-launcher-net.workspace = true
+ac-host-core.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+arboard.workspace = true
+miniz_oxide.workspace = true
+
+[lints]
+workspace = true

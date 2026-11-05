@@ -1,0 +1,12 @@
+[package]
+name = "uidemo"
+description = "The plugin UI end to end: a markup window with bindings and handlers, a canvas with pointer input and its own image, a world label; the same with or without a window."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

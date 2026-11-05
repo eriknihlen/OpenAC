@@ -1,0 +1,30 @@
+[package]
+name = "plugincheck"
+description = "Checks a WebAssembly plugin package against the launcher's own install rules (manifest, zip layout and caps, icon, SHA-256 sidecar) and loads its module without running it to check the imports against the declared permissions and API version; packs a plugin folder into its release assets."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "plugincheck"
+path = "src/main.rs"
+
+[dependencies]
+# The install rules, zip extraction, icon and .sha256 rules: the launcher's own code.
+ac-launcher-core.workspace = true
+# The client's plugin host, for loading a module without running it.
+ac-plugin.workspace = true
+# The JSON report's string escaping.
+ac-host.workspace = true
+# Deflate for the packed release zip.
+miniz_oxide.workspace = true
+
+[dev-dependencies]
+# The test plugins (`hello`), built to wasm.
+ac-plugin = { workspace = true, features = ["test-fixtures"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+{
+  "id": "openac.fetcher",
+  "displayName": "Fetcher",
+  "version": "0.1.0",
+  "entry": "fetcher.wasm",
+  "apiVersion": "1.8",
+  "minHostVersion": "0.1.0",
+  "permissionsVersion": 1,
+  "permissions": [
+    { "name": "chat", "note": "Posts what it fetched." },
+    { "name": "network", "note": "Fetches an address on /fetch.", "hosts": ["127.0.0.1"] }
+  ]
+}

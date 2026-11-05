@@ -1,0 +1,20 @@
+[package]
+name = "ac-audio"
+description = "Presentation audio: wave decoding, sound tables, ambient sounds, the voice pool and a CPU mixer on the default output device."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+ac-dat.workspace = true
+glam.workspace = true
+symphonia-core.workspace = true
+symphonia-bundle-mp3.workspace = true
+cpal.workspace = true
+
+[lints]
+workspace = true

@@ -7,17 +7,23 @@ assignees: ''
 ---
 
 **Version**
-The version shown in the launcher, or the tag you built from.
+The version shown in the launcher, or the commit or tag you built from.
+
+**Platform**
+Windows or Linux (with X11 or Wayland), and your GPU.
 
 **What you did**
 Steps, in order.
 
 **What you expected**
-What the original client does here, if you know.
+What the original client (or OpenAC) does here, if you know.
 
 **What happened**
-Include the client log from `logs/` if there is one, and a screenshot if it is
-visual.
+Include the log if there is one (the launcher's Log view, or the `logs/`
+folder of the install), and a screenshot if it is visual.
 
 **Server**
 ACEmulator version or host, if relevant.
+
+**Plugins**
+Which plugins were enabled, if any.

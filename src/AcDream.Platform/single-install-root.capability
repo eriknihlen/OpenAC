@@ -1,3 +1,0 @@
-This client keeps settings, plugins, logs and game content in one OpenAC
-install folder, and follows ACDREAM_ROOT_DIR and the root.json pointer.
-The launcher starts only clients that ship this file.

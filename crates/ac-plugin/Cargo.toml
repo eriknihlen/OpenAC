@@ -1,0 +1,48 @@
+[package]
+name = "ac-plugin"
+description = "The plugin host: finds, checks, loads and runs a session's WebAssembly plugins on the session's thread, with enforced permissions, memory caps and a stuck-call deadline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Builds the test plugins to wasm and installs them into plugin roots
+# (other crates' tests turn it on as a dev-dependency feature).
+test-fixtures = []
+
+[dependencies]
+ac-plugin-abi = { workspace = true, features = ["ui-host"] }
+# The session's plugin UI state the UI imports act on (owned by the runtime).
+ac-plugin-ui.workspace = true
+# The strict JSON reader for the settings file, and the install paths.
+ac-host.workspace = true
+# The plugin.json parser and version rules, shared with the launcher.
+ac-plugin-manifest.workspace = true
+# The network plugins may use (HTTP, TCP, TLS through the OS) on worker threads.
+ac-plugin-net.workspace = true
+# Decodes a plugin's own JPEG art with the dat texture decoder (image_codec).
+ac-dat.workspace = true
+# .NET's `StringComparer.OrdinalIgnoreCase`, the order storage listings are sorted in.
+openac-plugin-compat.workspace = true
+thiserror.workspace = true
+wasmtime.workspace = true
+# Names and checks the compiled modules kept on disk (engine.rs, ModuleCache).
+sha2.workspace = true
+
+[dev-dependencies]
+ac-plugin = { workspace = true, features = ["test-fixtures"] }
+# Writes the icon.png a test plugin is installed with.
+ac-bits.workspace = true
+
+# The wall time of plugin calls and of the deadline:
+# `cargo bench -p ac-plugin --bench call_time`, in release. Not a test.
+[[bench]]
+name = "call_time"
+harness = false
+test = false
+
+[lints]
+workspace = true

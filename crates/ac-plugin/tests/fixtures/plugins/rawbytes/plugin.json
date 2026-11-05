@@ -1,0 +1,7 @@
+{
+  "id": "openac.rawbytes",
+  "displayName": "Raw Bytes",
+  "version": "0.1.0",
+  "entry": "rawbytes.wasm",
+  "apiVersion": "1.8"
+}

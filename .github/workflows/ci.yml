@@ -2,546 +2,84 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
-    tags: ['v*']
-    # Prose-only changes do not need the build and test gates. GitHub ignores
-    # path filters for tag pushes, so a release always runs everything. Keep
-    # the two lists identical.
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
       - 'LICENSE'
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
-    branches: [main, dev]
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
       - 'LICENSE'
       - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental builds only cost cache space on a fresh runner.
+  CARGO_INCREMENTAL: 0
+
 jobs:
-  windows-gate:
-    # Pull requests (which may come from forks) run on GitHub-hosted runners;
-    # pushes to main, dev and tags run on the maintainer's machine. The label is a
-    # plain string on both paths so runs-on needs no array juggling.
-    runs-on: ${{ github.event_name == 'pull_request' && 'windows-latest' || 'openac-windows' }}
-    timeout-minutes: 60
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is an Apple-silicon (arm64) image.
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Install the pinned .NET SDK (hosted runners only)
-        if: github.event_name == 'pull_request'
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Build
-        shell: pwsh
-        run: dotnet build AcDream.slnx -c Release --nologo
-
-      # Not tools/run-release-gate.ps1: that script redirects child output to
-      # log files, which leaves the step silent for minutes. Running the test
-      # projects directly keeps output streaming. The script stays the canonical
-      # LOCAL gate; the filter below is copied from its default and a contract
-      # test (GitHubWorkflowFilterContractTests) fails if the two ever differ.
-      - name: Test (lane-filtered, streaming)
-        shell: pwsh
+      # The C compiler (wasmtime's two C files, openssl-sys's header step) is
+      # already on the image; OpenSSL and ALSA headers and pkg-config are not.
+      # winit, wgpu and arboard load the display libraries at run time and
+      # need nothing to compile.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
-          $ErrorActionPreference = 'Stop'
-          $filter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=MacOS&Lane!=Unix&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
-          $failed = @()
-          foreach ($proj in Get-ChildItem tests -Directory | Sort-Object Name) {
-            $csproj = Join-Path $proj.FullName "$($proj.Name).csproj"
-            if (-not (Test-Path $csproj)) { continue }
-            Write-Host "::group::$($proj.Name)"
-            dotnet test $csproj -c Release --no-build --nologo --filter $filter
-            if ($LASTEXITCODE -ne 0) { $failed += $proj.Name }
-            Write-Host "::endgroup::"
-          }
-          if ($failed.Count) { throw "Failed test projects: $($failed -join ', ')" }
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libasound2-dev
 
-  linux-portable:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'openac-linux' }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install the pinned .NET SDK (hosted runners only)
-        if: github.event_name == 'pull_request'
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Portable closure (Linux lanes run here, not on Windows)
-        run: |
-          set -e
-          dotnet --version
-          # Core.Net runs single-threaded here: its sessions do real socket
-          # work on background threads and the assembly fails under default
-          # parallelism on a small container while passing in ten seconds with
-          # one thread. Windows has the cores and regressed when serialized.
-          echo '::group::AcDream.Core.Net.Tests (single-threaded)'
-          dotnet test tests/AcDream.Core.Net.Tests/AcDream.Core.Net.Tests.csproj \
-            -c Release --nologo \
-            --filter 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=MacOS&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure' \
-            -- xUnit.MaxParallelThreads=1
-          echo '::endgroup::'
-
-          for p in \
-            tests/AcDream.Platform.Tests \
-            tests/AcDream.Core.Tests \
-            tests/AcDream.Content.Tests \
-            tests/AcDream.Runtime.Tests \
-            tests/AcDream.Headless.Tests \
-            tests/AcDream.Launcher.Core.Tests \
-            tests/AcDream.UI.Abstractions.Tests ; do
-            echo "::group::$p"
-            dotnet test "$p" -c Release --nologo \
-              --filter 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=MacOS&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
-            echo "::endgroup::"
-          done
-
-  macos-portable:
-    # GitHub documents macos-15 as an Apple-silicon hosted image. Keep this
-    # hosted for pushes as well as PRs: the repository has no self-hosted Mac.
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install the pinned .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Install pinned Apple-silicon Vulkan dependencies
+      # rust-toolchain.toml pins the version, components and the
+      # wasm32-unknown-unknown target; this installs exactly that.
+      - name: Install the pinned Rust toolchain
         shell: bash
         run: |
-          set -euo pipefail
-          brew install molten-vk vulkan-loader
-          test "$(brew info --json=v2 molten-vk | jq -r '.formulae[0].installed[] | select(.version == "1.4.2") | .version')" = 1.4.2
-          test "$(brew info --json=v2 vulkan-loader | jq -r '.formulae[0].installed[] | select(.version == "1.4.363.0") | .version')" = 1.4.363.0
+          rustup toolchain install
+          rustup show
 
-      - name: Build the macOS native test and launcher closures
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          dotnet build src/AcDream.Launcher/AcDream.Launcher.csproj -c Release --nologo
-          dotnet build tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --nologo
-          dotnet build tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --nologo
-          dotnet build tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --nologo
-
-      - name: Test the macOS launcher and native seams
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $filter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
-          dotnet test tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --no-build --nologo --filter $filter
-          dotnet test tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj -c Release --nologo --filter $filter
-          dotnet test tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --no-build --nologo --filter $filter
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~MacMonotonicFramePacingWaiterTests'
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~AppCredentialResolverTests&Lane=MacOS'
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~GraphicalVulkanLoaderTests'
-
-      - name: Test local peer communication on macOS
-        shell: pwsh
-        run: |
-          dotnet test tests/AcDream.Runtime.Tests/AcDream.Runtime.Tests.csproj -c Release --nologo --filter 'FullyQualifiedName~PeerHubTests'
-          if ($LASTEXITCODE -ne 0) { throw 'Local peer communication tests failed.' }
-
-      - name: Build and verify the Apple-silicon release payloads
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./tools/publish-bin.ps1 -MacOnly
-          $expanded = Join-Path $env:RUNNER_TEMP 'openac-macos-launcher'
-          $clientExpanded = Join-Path $env:RUNNER_TEMP 'openac-macos-client'
-          & /usr/bin/ditto -x -k bin/launcher-osx-arm64.zip $expanded
-          if ($LASTEXITCODE -ne 0) { throw 'Could not expand launcher-osx-arm64.zip.' }
-          & /usr/bin/ditto -x -k bin/client-osx-arm64.zip $clientExpanded
-          if ($LASTEXITCODE -ne 0) { throw 'Could not expand client-osx-arm64.zip.' }
-          & /usr/bin/plutil -lint "$expanded/OpenAC.app/Contents/Info.plist"
-          if ($LASTEXITCODE -ne 0) { throw 'OpenAC.app Info.plist is invalid.' }
-          foreach ($path in @(
-            "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher",
-            "$expanded/OpenAC.app/Contents/MacOS/acdream-bake",
-            "$expanded/OpenAC.app/Contents/Resources/OpenAC.icns",
-            "$expanded/OpenAC.app/Contents/Resources/PrivacyInfo.xcprivacy")) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged path '$path'." }
-          }
-          & /bin/test -x "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher"
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not executable.' }
-          foreach ($path in @(
-            "$clientExpanded/acdream-client",
-            "$clientExpanded/Frameworks/libvulkan.1.dylib",
-            "$clientExpanded/Frameworks/libMoltenVK.dylib",
-            "$clientExpanded/Resources/vulkan/icd.d/MoltenVK_icd.json",
-            "$clientExpanded/Resources/PrivacyInfo.xcprivacy",
-            "$clientExpanded/single-install-root.capability")) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
-          }
-          & /bin/test -x "$clientExpanded/acdream-client"
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged client is not executable.' }
-          foreach ($signed in @(
-            "$expanded/OpenAC.app",
-            "$clientExpanded/acdream-client",
-            "$clientExpanded/acdream-headless",
-            "$clientExpanded/Frameworks/libvulkan.1.dylib",
-            "$clientExpanded/Frameworks/libMoltenVK.dylib")) {
-            & /usr/bin/codesign --verify --deep --strict $signed
-            if ($LASTEXITCODE -ne 0) { throw "Invalid ad-hoc signature '$signed'." }
-          }
-          $env:DOTNET_ROOT = '/definitely-not-installed'
-          $env:DOTNET_ROOT_ARM64 = '/definitely-not-installed'
-          $env:DOTNET_MULTILEVEL_LOOKUP = '0'
-          & "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher" --verify-publish
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not self-contained.' }
-
-      - name: Upload macOS release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: macos-release-assets
-          if-no-files-found: error
-          path: |
-            bin/client-osx-arm64.zip
-            bin/launcher-osx-arm64.zip
+          # The test plugins (their own workspace) build into
+          # target/plugin-fixtures, inside the cached target directory.
+          cache-on-failure: true
 
-  macos-intel:
-    # osx-x64: GitHub's last x86_64 macOS image; a failure here never blocks the release (see release's `if`).
-    runs-on: macos-15-intel
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install the pinned .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      # osx-x64: keys the cache off the build script, which holds the pins.
-      - name: Restore the pinned x86_64 Vulkan runtime
-        uses: actions/cache@v4
-        with:
-          path: artifacts/macos-x64-vulkan
-          key: macos-x64-vulkan-${{ hashFiles('tools/build-macos-x64-vulkan.ps1') }}
-
-      - name: Build the pinned x86_64 Vulkan runtime
-        shell: pwsh
-        run: ./tools/build-macos-x64-vulkan.ps1 -OutputDirectory artifacts/macos-x64-vulkan
-
-      - name: Build the macOS native test and launcher closures
+      - name: Check (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          dotnet build src/AcDream.Launcher/AcDream.Launcher.csproj -c Release --nologo
-          dotnet build tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --nologo
-          dotnet build tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --nologo
-          dotnet build tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --nologo
+          & ./scripts/check.ps1
+          exit $LASTEXITCODE
 
-      - name: Test the macOS launcher and native seams
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $filter = 'Lane!=InstalledDat&Lane!=PreparedPackage&Lane!=Live&Lane!=Manual&Lane!=Timing&Lane!=Windows&Lane!=Linux&Lane!=Vulkan&Lane!=SystemFont&Purpose!=Diagnostic&Status!=KnownFailure'
-          dotnet test tests/AcDream.Launcher.Core.Tests/AcDream.Launcher.Core.Tests.csproj -c Release --no-build --nologo --filter $filter
-          dotnet test tests/AcDream.Launcher.Tests/AcDream.Launcher.Tests.csproj -c Release --nologo --filter $filter
-          dotnet test tests/AcDream.Platform.Tests/AcDream.Platform.Tests.csproj -c Release --no-build --nologo --filter $filter
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~MacMonotonicFramePacingWaiterTests'
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~AppCredentialResolverTests&Lane=MacOS'
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter 'FullyQualifiedName~GraphicalVulkanLoaderTests'
+      - name: Check (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sh scripts/check.sh
 
-      - name: Test local peer communication on macOS
-        shell: pwsh
-        run: |
-          dotnet test tests/AcDream.Runtime.Tests/AcDream.Runtime.Tests.csproj -c Release --nologo --filter 'FullyQualifiedName~PeerHubTests'
-          if ($LASTEXITCODE -ne 0) { throw 'Local peer communication tests failed.' }
-
-      - name: Build and verify the Intel release payloads
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./tools/publish-bin.ps1 -MacOnly -MacRid osx-x64
-          $expanded = Join-Path $env:RUNNER_TEMP 'openac-macos-launcher'
-          $clientExpanded = Join-Path $env:RUNNER_TEMP 'openac-macos-client'
-          & /usr/bin/ditto -x -k bin/launcher-osx-x64.zip $expanded
-          if ($LASTEXITCODE -ne 0) { throw 'Could not expand launcher-osx-x64.zip.' }
-          & /usr/bin/ditto -x -k bin/client-osx-x64.zip $clientExpanded
-          if ($LASTEXITCODE -ne 0) { throw 'Could not expand client-osx-x64.zip.' }
-          & /usr/bin/plutil -lint "$expanded/OpenAC.app/Contents/Info.plist"
-          if ($LASTEXITCODE -ne 0) { throw 'OpenAC.app Info.plist is invalid.' }
-          foreach ($path in @(
-            "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher",
-            "$expanded/OpenAC.app/Contents/MacOS/acdream-bake",
-            "$expanded/OpenAC.app/Contents/Resources/OpenAC.icns",
-            "$expanded/OpenAC.app/Contents/Resources/PrivacyInfo.xcprivacy")) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged path '$path'." }
-          }
-          & /bin/test -x "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher"
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not executable.' }
-          foreach ($path in @(
-            "$clientExpanded/acdream-client",
-            "$clientExpanded/Frameworks/libvulkan.1.dylib",
-            "$clientExpanded/Frameworks/libMoltenVK.dylib",
-            "$clientExpanded/Resources/vulkan/icd.d/MoltenVK_icd.json",
-            "$clientExpanded/Resources/PrivacyInfo.xcprivacy",
-            "$clientExpanded/single-install-root.capability")) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing packaged client path '$path'." }
-          }
-          & /bin/test -x "$clientExpanded/acdream-client"
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged client is not executable.' }
-          foreach ($signed in @(
-            "$expanded/OpenAC.app",
-            "$clientExpanded/acdream-client",
-            "$clientExpanded/acdream-headless",
-            "$clientExpanded/Frameworks/libvulkan.1.dylib",
-            "$clientExpanded/Frameworks/libMoltenVK.dylib")) {
-            & /usr/bin/codesign --verify --deep --strict $signed
-            if ($LASTEXITCODE -ne 0) { throw "Invalid ad-hoc signature '$signed'." }
-          }
-          $env:DOTNET_ROOT = '/definitely-not-installed'
-          $env:DOTNET_ROOT_X64 = '/definitely-not-installed'
-          $env:DOTNET_MULTILEVEL_LOOKUP = '0'
-          & "$expanded/OpenAC.app/Contents/MacOS/acdream-launcher" --verify-publish
-          if ($LASTEXITCODE -ne 0) { throw 'The packaged launcher is not self-contained.' }
-
-      - name: Upload macOS Intel release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-intel-release-assets
-          if-no-files-found: error
-          path: |
-            bin/client-osx-x64.zip
-            bin/launcher-osx-x64.zip
-
-  vulkan-hardware:
-    # Real-GPU lane. Only on pushes (never for fork PRs) and only on the
-    # NVIDIA runner, which runs in an interactive session so a device opens.
-    if: github.event_name == 'push'
-    needs: [windows-gate]
-    runs-on: openac-windows
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build the App test assembly
-        shell: pwsh
-        run: dotnet build tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --nologo
-
-      - name: Test the Vulkan hardware lane
-        shell: pwsh
-        run: |
-          dotnet test tests/AcDream.App.Tests/AcDream.App.Tests.csproj -c Release --no-build --nologo --filter "Lane=Vulkan"
-
-  release:
-    # Tag pushes only, and only after every gate is green: `needs` guarantees a
-    # red gate cannot publish. macos-intel (osx-x64) is best effort and is not
-    # one of those gates: `!cancelled()` lets this job run even if it failed.
-    if: >-
-      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
-      needs.windows-gate.result == 'success' &&
-      needs.linux-portable.result == 'success' &&
-      needs.macos-portable.result == 'success' &&
-      needs.vulkan-hardware.result == 'success'
-    needs: [windows-gate, linux-portable, macos-portable, vulkan-hardware, macos-intel]
-    runs-on: openac-windows
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.train.outputs.version }}
-      prerelease: ${{ steps.train.outputs.prerelease }}
-    steps:
-      # Full history: the branch guard below has to see whether the tagged
-      # commit is on dev or on main.
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      # The one place a release's train is decided, so the publish steps below
-      # only read the answer. A tag whose version carries a SemVer pre-release
-      # part (v0.1.13-dev.1) is a test build: it publishes as a pre-release and
-      # is never marked latest, which is what keeps it away from players, since
-      # the launcher polls /releases/latest/download/ and that route skips
-      # pre-releases. A plain vX.Y.Z tag is the release everyone receives.
-      # Each train has one source branch, and a tag from the other one fails
-      # here instead of publishing to the wrong audience.
-      - name: Decide the release train
-        id: train
-        shell: pwsh
-        env:
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = $env:TAG_NAME
-          $shape = '^v(?<version>(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' +
-            '(?<pre>-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
-          $parsed = [regex]::Match($tag, $shape)
-          if (-not $parsed.Success) {
-            throw "Tag '$tag' is not 'vMAJOR.MINOR.PATCH' with an optional SemVer pre-release part."
-          }
-          $version = $parsed.Groups['version'].Value
-          $isPreRelease = $parsed.Groups['pre'].Success
-          $branch = if ($isPreRelease) { 'dev' } else { 'main' }
-
-          & git fetch --no-tags --quiet origin "+refs/heads/${branch}:refs/remotes/origin/$branch"
-          if ($LASTEXITCODE) {
-            throw "Could not read branch '$branch' to check where tag '$tag' came from."
-          }
-          $commit = (& git rev-parse 'HEAD^{commit}').Trim()
-          if ($LASTEXITCODE) { throw "Could not resolve the commit tag '$tag' points at." }
-          & git merge-base --is-ancestor $commit "refs/remotes/origin/$branch"
-          if ($LASTEXITCODE) {
-            $trains = 'A pre-release is cut from dev and a stable release from main.'
-            throw "Tag '$tag' points at $commit, which is not on '$branch'. $trains"
-          }
-
-          $notice = if ($isPreRelease) {
-            'This is a test build from the development branch. No launcher is offered it: only a launcher pointed at this release by hand will install it.'
-          } else {
-            ''
-          }
-          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value @(
-            "version=$version",
-            "prerelease=$(if ($isPreRelease) { 'true' } else { 'false' })",
-            "make_latest=$(if ($isPreRelease) { 'false' } else { 'true' })",
-            "notice=$notice")
-          $train = if ($isPreRelease) { 'pre-release from dev' } else { 'stable from main' }
-          Write-Host "train: $train, version $version, commit $commit"
-
-      - name: Download macOS release assets
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-release-assets
-          path: artifacts/macos-release-assets
-
-      # osx-x64: downloaded into the same directory publish-bin.ps1 reads.
-      - name: Download macOS Intel release assets
-        if: needs.macos-intel.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-intel-release-assets
-          path: artifacts/macos-release-assets
-
-      - name: Build payloads with release-asset URLs
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = '${{ steps.train.outputs.version }}'
-          ./tools/publish-bin.ps1 -Version $version -IncludeLinux -MacArtifactsDirectory artifacts/macos-release-assets -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-
-      # The plugin contract as a package, attached to every release on both
-      # trains: a plugin kept in its own repository can then build against a
-      # released contract instead of against a checkout of the client. Symbols
-      # are left out so the asset is one file plus its checksum.
-      - name: Pack the plugin API package
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = '${{ steps.train.outputs.version }}'
-          $output = Join-Path (Get-Location) 'bin/package'
-          if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
-          dotnet pack src/AcDream.Plugin.Abstractions/AcDream.Plugin.Abstractions.csproj `
-            -c Release -o $output --nologo `
-            "-p:Version=$version" -p:IncludeSymbols=false `
-            -p:IncludeSourceRevisionInInformationalVersion=false
-          if ($LASTEXITCODE) { throw 'Packing the plugin API package failed.' }
-          $packages = @(Get-ChildItem -LiteralPath $output -Filter '*.nupkg' -File)
-          if ($packages.Count -ne 1) {
-            throw "Expected exactly one package in '$output', found $($packages.Count)."
-          }
-          $package = $packages[0]
-          $hash = (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          # The digest, two spaces, the file name: what 'shasum -a 256' writes,
-          # and the format every other .sha256 in this project uses.
-          [IO.File]::WriteAllText(
-            "$($package.FullName).sha256",
-            "$hash  $($package.Name)`n",
-            [Text.UTF8Encoding]::new($false))
-          Write-Host "packed $($package.Name) ($hash)"
-
-      - name: Publish the GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: OpenAC ${{ github.ref_name }}
-          body: |
-            **Windows:** download `launcher-win-x64.zip`, unzip it anywhere, and run `acdream-launcher.exe`.
-            **Linux:** download `launcher-linux-x64.zip`, unzip it anywhere, and run `./acdream-launcher`.
-            **macOS (Apple silicon):** download `launcher-osx-arm64.zip`, unzip it, drag `OpenAC.app` to `~/Applications`, then open it in Finder.
-            The launcher installs the client and prepares your data files. OpenAC (C#) is retired: this launcher gets no more updates, and plugins keep working.
-            New players: get the Rust client, OpenAC for Rust, from https://eriknihlen.github.io/OpenAC/docs/rust-client.html
-
-            The `client-*.zip` files are the bare client and headless host for people who do not want the launcher.
-
-            `AcDream.Plugin.Abstractions.*.nupkg` is the plugin API package for plugin authors.
-
-            ${{ steps.train.outputs.notice }}
-          files: |
-            bin/client-win-x64.zip
-            bin/launcher-win-x64.zip
-            bin/client-linux-x64.zip
-            bin/launcher-linux-x64.zip
-            bin/client-osx-arm64.zip
-            bin/launcher-osx-arm64.zip
-            bin/manifest.json
-            bin/launcher-fingerprint.json
-            bin/package/*.nupkg
-            bin/package/*.nupkg.sha256
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-          # Both flags come from "Decide the release train" and nowhere else. A
-          # stable release is the latest release, which is the one the launcher
-          # polls; a pre-release is neither, so an ordinary launcher never sees
-          # it. Every step that touches a release has to pass the same pair, or
-          # it would quietly promote a test build.
-          prerelease: ${{ steps.train.outputs.prerelease }}
-          make_latest: ${{ steps.train.outputs.make_latest }}
-
-      # osx-x64: attached only when macos-intel succeeds.
-      - name: Attach the Intel macOS assets
-        if: needs.macos-intel.result == 'success'
-        continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          append_body: true
-          body: |
-            **macOS (Intel):** download `launcher-osx-x64.zip`, unzip it, drag `OpenAC.app` to `~/Applications`, then open it in Finder.
-          files: |
-            bin/client-osx-x64.zip
-            bin/launcher-osx-x64.zip
-          fail_on_unmatched_files: true
-          prerelease: ${{ steps.train.outputs.prerelease }}
-          make_latest: ${{ steps.train.outputs.make_latest }}
-
-  prune-pre-releases:
-    # Retention for the pre-release train only. Every -dev pre-release past the
-    # newest five is deleted together with its tag, so the development train
-    # does not accumulate builds nobody installs any more. Stable releases are
-    # never candidates: the script matches the -dev tag shape and also reads
-    # only releases GitHub reports as pre-releases.
-    # Hosted, not self-hosted: this makes repository API calls and builds
-    # nothing, so it has no reason to occupy the maintainer's machine.
-    if: needs.release.result == 'success' && needs.release.outputs.prerelease == 'true'
-    needs: [release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Prune superseded pre-releases
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: ./tools/prune-dev-prereleases.ps1 -Keep 5
+      # Nothing to install: the image's Xcode command-line tools give the C
+      # compiler (wasmtime's helper file), TLS is the system Security
+      # framework, audio CoreAudio and graphics Metal, all linked from the OS.
+      # The GPU tests use the image's Metal device if it has one; a test that
+      # finds no adapter (or needs Vulkan) skips itself, as on the Linux image.
+      - name: Check (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: sh scripts/check.sh

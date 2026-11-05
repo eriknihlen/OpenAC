@@ -1,0 +1,178 @@
+[workspace]
+members = ["crates/*"]
+# Patched copies of third-party crates (see `[patch.crates-io]` below), not ours to lint.
+exclude = ["vendor"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.12"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+license = "MIT"
+repository = "https://github.com/eriknihlen/openac-rust"
+
+[workspace.dependencies]
+# Internal crates.
+ac-bits = { path = "crates/ac-bits" }
+ac-proto = { path = "crates/ac-proto" }
+ac-runtime = { path = "crates/ac-runtime" }
+ac-dat = { path = "crates/ac-dat" }
+ac-core = { path = "crates/ac-core" }
+ac-net = { path = "crates/ac-net" }
+ac-render = { path = "crates/ac-render" }
+ac-host-core = { path = "crates/ac-host-core" }
+ac-host = { path = "crates/ac-host" }
+ac-launcher-core = { path = "crates/ac-launcher-core" }
+ac-launcher-net = { path = "crates/ac-launcher-net" }
+ac-proxy = { path = "crates/ac-proxy" }
+ac-physics = { path = "crates/ac-physics" }
+ac-motion = { path = "crates/ac-motion" }
+ac-audio = { path = "crates/ac-audio" }
+ac-ui = { path = "crates/ac-ui" }
+ac-vfx = { path = "crates/ac-vfx" }
+ac-nav = { path = "crates/ac-nav" }
+ac-plugin-version = { path = "crates/ac-plugin-version" }
+ac-plugin-abi = { path = "crates/ac-plugin-abi" }
+ac-plugin-icon = { path = "crates/ac-plugin-icon" }
+ac-plugin-manifest = { path = "crates/ac-plugin-manifest" }
+ac-plugin = { path = "crates/ac-plugin" }
+openac-plugin = { path = "crates/openac-plugin" }
+openac-plugin-compat = { path = "crates/openac-plugin-compat" }
+ac-plugin-ui = { path = "crates/ac-plugin-ui" }
+ac-plugin-net = { path = "crates/ac-plugin-net" }
+
+# Third-party crates: pure Rust only, each justified in the commit that adds it.
+thiserror = "2.0"
+# Ctrl+C and Ctrl+Break on Windows; on Unix SIGINT and, with `termination`,
+# SIGTERM and SIGHUP: each logs every session off, so a stopped client never leaves its
+# character in the world. The feature changes nothing on Windows.
+ctrlc = { version = "3.5", features = ["termination"] }
+# Vector and quaternion math (plain f32 types), the choice for motion, physics and
+# rendering. Pure Rust, no build script.
+glam = { version = "0.34.1", default-features = false, features = ["std"] }
+# Windowing and GPU (ac-render). Features are chosen so nothing in the graph compiles C or C++;
+# keep it that way when changing them. On a Wayland desktop that leaves the title bar to the
+# program (GNOME), `wayland-csd-adwaita` draws it with the title's text, rasterised by the
+# pure-Rust `ab_glyph` in the desktop's font (found by running `fc-match`; nothing is linked) or
+# in the Cantarell font the decorations bundle (SIL OFL 1.1, see NOTICE.md).
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+# Keeping the screen awake while fullscreen on Linux (ac-render): the Wayland idle-inhibit protocol
+# on the window's own connection, and the X11 screen saver through the Xlib loader. All three are
+# winit's own crates, already in the graph with these features; nothing is linked (libwayland and
+# libX11 are opened at run time).
+wayland-client = { version = "0.31.15", features = ["system", "dlopen"] }
+wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "unstable"] }
+x11-dl = "2.21.0"
+# `metal` is macOS's native backend (objc2 bindings, compiles nothing); it is target-gated, so
+# Windows and Linux builds do not change.
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "vulkan", "metal", "wgsl"] }
+# Plain-data casts for GPU uploads (ac-render), pure Rust; already in the graph through wgpu.
+bytemuck = { version = "1.25", features = ["derive"] }
+# Read-only memory maps of the dat files (ac-dat), pure Rust; already in the lock file through
+# winit (Wayland).
+memmap2 = "0.9.11"
+# A fast hash for the per-frame draw maps keyed by model and mesh ids (ac-render), pure Rust;
+# already in the graph through wasmtime.
+rustc-hash = "2.1"
+# MPEG audio decoding for the one MP3 wave in the portal dat (ac-audio). Pure Rust, no build
+# scripts; only the layer-3 decoder is enabled.
+symphonia-core = { version = "0.6.1", default-features = false }
+symphonia-bundle-mp3 = { version = "0.6.1", default-features = false, features = ["mp3"] }
+# Audio output (ac-audio): WASAPI on Windows through the `windows` crate wgpu already uses, ALSA
+# on Linux. Default features only (no ASIO, JACK, PipeWire or PulseAudio backends: those build
+# or link C).
+cpal = { version = "0.18.2", default-features = false }
+# Launcher core (ac-launcher-core). SHA-256 of downloads and installed files; pure Rust, no
+# assembly (0.11 has no asm feature).
+sha2 = { version = "0.11.0", default-features = false }
+# DEFLATE for release zips and plugin icons; pure Rust.
+miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
+# The plugin releases Atom feed; pure Rust, refuses DTDs by default.
+roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
+# SIGINT to a supervised child on Unix (already in the graph through ctrlc).
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+# Console control events to a supervised child on Windows (already in the graph); bindings
+# only, linked through windows-link.
+windows-sys = { version = "0.61.2", default-features = false }
+# The launcher's HTTPS (ac-launcher-net) and plugins' HTTPS and sockets (ac-plugin-net) over the
+# operating system's TLS: SChannel on Windows
+# (`schannel`, bindings over windows-sys), the Security framework on macOS
+# (`security-framework`), the system OpenSSL on Linux (`openssl-sys`, linked dynamically; its
+# build script runs the C preprocessor over the system headers, compiles nothing). The
+# platform's own TLS keeps certificates and updates with the system. `vendored` must stay off.
+native-tls = { version = "0.2.18", default-features = false }
+# The system clipboard for the UI's text fields (ac-render): text only. Pure Rust, no build
+# script compiles C: `clipboard-win` (its own bindings to user32/kernel32) on Windows, `x11rb`
+# on Linux (X11, or XWayland under Wayland: the Wayland data-control backend stays off), objc2
+# on macOS. `image-data` stays off (it pulls the `image` crate).
+arboard = { version = "3.6.1", default-features = false }
+# The launcher window (openac-launcher): egui drawn with wgpu in a winit window, the simplest
+# fit for the stack ac-render already uses. 0.36.2 is the release built on wgpu 30 and winit 0.30.13,
+# the versions ac-render uses. Pure Rust. Default features stay off: no accessibility bridge, no
+# web-browser opener, and no egui-winit clipboard (its arboard asks for `image-data`, which pulls
+# the `image` crate); the launcher wires text copy and paste to the workspace's arboard itself.
+egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
+egui-wgpu = { version = "0.36.2", default-features = false }
+egui-winit = { version = "0.36.2", default-features = false, features = ["x11", "wayland"] }
+# JSON for typed plugin service requests and replies (openac-plugin's `json` feature, off by
+# default, so a plugin that does not use it builds neither). Pure Rust; their build scripts only
+# read the compiler's version. serde is already in the graph through wasmtime.
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
+# The WebAssembly engine for plugins (ac-plugin): wasmtime with its Cranelift compiler, about ten
+# times faster than the wasmi interpreter it replaced. It is the one dependency that compiles
+# C: two small files, built by `cc`: `helpers.c` on Linux and macOS (a weak-symbol probe) and
+# `wasmtime-fiber`'s `windows.c` on Windows (`async`: how an import waits for the session while
+# the plugin is parked). `parallel-compilation` compiles a module on all cores (rayon);
+# `reexport-wasmparser` reads the plugin's custom sections. No `cache` (zstd), `profiling`
+# (ittapi), `debug-builtins`, component model, GC or `wat`. wasmtime 49 and up need Rust 1.96.
+wasmtime = { version = "=48.0.5", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation", "reexport-wasmparser"] }
+# Regular expressions with look-around and back-references for the plugin compatibility kit
+# (openac-plugin-compat), which translates .NET patterns to its syntax. Pure Rust (regex-automata,
+# regex-syntax, bit-set, and memchr/aho-corasick through `perf`), no build scripts, builds for
+# wasm32-unknown-unknown. Its backtracking step limit stands in for .NET's match timeout.
+# These are its default features, spelled out.
+fancy-regex = { version = "0.19.2", default-features = false, features = ["std", "unicode", "perf", "variable-lookbehinds"] }
+# The bundled Noto Sans of the modern plugin themes (ac-ui) and plugin canvas fonts (ac-plugin-ui): fontdue turns the glyph outlines
+# into coverage pixels (OpenAC uses StbTrueTypeSharp). Pure
+# Rust, no build script. Default features off: no `simd` (x86 intrinsics) and no `hashbrown`.
+# ttf-parser is fontdue's own parser, named here so the atlas reads the font's metrics as
+# stb_truetype does (the glyf header boxes, hhea), and `opentype-layout` reads kerning from GPOS.
+fontdue = { version = "0.9.4", default-features = false }
+ttf-parser = { version = "0.25.1", default-features = false, features = ["opentype-layout"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# The dat crate decodes hundreds of megabytes of textures in its real-dat
+# tests; optimise it in dev builds too (overflow checks stay on).
+[profile.dev.package.ac-dat]
+opt-level = 2
+
+# Not a workaround for our code: an LLVM bug. At opt-level 0, LLVM's x86 fast
+# instruction selector turns a load through `inttoptr(bitcast double)` into a
+# load addressed by the XMM register (encoded as the general register with
+# the same number), so the read goes to a wrong address. wasmi 2.0 kept its
+# instance pointer in an f64 on x86-64, so at opt-level 0 every plugin import
+# crashed. With wasmtime nothing here depends on it any more; the override and
+# its guard test (`opt_level_guard`) can be removed together.
+[profile.dev.package.ac-plugin]
+opt-level = 2
+
+# wasmtime's fiber crate with one fix: on Windows a new fiber's start function
+# moved its closure out of the box but freed the box only at its end, which a
+# fiber start function never reaches. Every call into a plugin runs on a new
+# fiber, so each call leaked 24 to 40 bytes: about 40 MB an hour for a bot with
+# two plugins. The copy is 48.0.5 with that one change in `src/windows.rs`
+# (the box is freed as the closure is moved out); drop the patch once a
+# wasmtime release carries the fix. `plugin_call_heap` in ac-plugin guards it.
+[patch.crates-io]
+wasmtime-internal-fiber = { path = "vendor/wasmtime-internal-fiber" }

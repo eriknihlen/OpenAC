@@ -1,0 +1,23 @@
+[package]
+name = "ac-physics"
+description = "Collision and movement: spheres against polygons, BSP trees, terrain and cell surfaces, the movement sweep, object shadows and the physics body. Pure logic, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-core.workspace = true
+ac-dat.workspace = true
+ac-motion.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The strict JSON reader, for the captured fixtures the replay tests load.
+ac-host.workspace = true
+
+[lints]
+workspace = true

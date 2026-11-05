@@ -1,0 +1,44 @@
+[package]
+name = "ac-render"
+description = "Presentation: the window host and the GPU renderer. Holds only what it can rebuild from the runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+ac-bits.workspace = true
+ac-audio.workspace = true
+ac-core.workspace = true
+ac-dat.workspace = true
+ac-proto.workspace = true
+ac-runtime.workspace = true
+ac-physics.workspace = true
+ac-motion.workspace = true
+ac-vfx.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+rustc-hash.workspace = true
+ac-ui.workspace = true
+# The window's copy of the session's plugin UI (data only; the plugin host
+# stays out of the window's graph).
+ac-plugin-ui.workspace = true
+ac-host.workspace = true
+arboard.workspace = true
+
+# The screen kept awake while fullscreen (Wayland idle inhibitor, X11 screen saver).
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+x11-dl.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
+
+[lints]
+workspace = true

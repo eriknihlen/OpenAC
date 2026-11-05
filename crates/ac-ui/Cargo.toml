@@ -1,0 +1,26 @@
+[package]
+name = "ac-ui"
+description = "The retained retail UI: LayoutDesc import, element tree, input routing, text layout. Produces draw lists; no GPU, no window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ac-core.workspace = true
+ac-dat.workspace = true
+ac-host.workspace = true
+ac-proto.workspace = true
+ac-runtime.workspace = true
+# Plugin windows, canvases and the dock draw the session's plugin UI copy.
+ac-plugin-ui.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+# The bundled sans font's atlas (modern plugin themes).
+fontdue.workspace = true
+ttf-parser.workspace = true
+
+[lints]
+workspace = true

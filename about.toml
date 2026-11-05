@@ -1,0 +1,56 @@
+# cargo-about configuration: the third-party license bundle
+# (THIRD-PARTY-LICENSES.html) that the release workflow puts in every zip.
+#
+#   cargo about generate --workspace --locked --fail -c about.toml about.hbs \
+#     -o THIRD-PARTY-LICENSES.html
+#
+# The licenses below are every license the dependency graph uses
+# (`cargo metadata` lists them), in order of preference: for a crate offered
+# under several licenses, the first accepted one is used. GPL and LGPL options
+# are never accepted; every crate that offers one also offers a permissive
+# license. With `--fail`, a crate under a license not listed here stops the
+# release, so a new license is reviewed before it ships.
+
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "Unlicense",
+    "CC0-1.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+# The platforms the releases are built for: platform-specific crates for
+# other systems are left out.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Only what is compiled into the programs.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The workspace's own crates (publish = false) are covered by LICENSE.
+private = { ignore = true }
+
+# cargo-about's built-in fixes for crates whose packaged license files do not
+# match their declared license expression.
+workarounds = [
+    "linux-raw-sys",
+    "rustix",
+    "unicode-ident",
+    "wasmtime",
+]

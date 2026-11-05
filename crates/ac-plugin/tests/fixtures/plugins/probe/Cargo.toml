@@ -1,0 +1,12 @@
+[package]
+name = "probe"
+description = "Reads runtime facts and logs a transcript the parity harness compares between a session with and without a window. Declares no permissions."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

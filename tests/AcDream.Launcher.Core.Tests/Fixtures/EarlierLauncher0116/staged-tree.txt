@@ -1,4 +1,0 @@
-app/.update-session.lock
-launcher-update/pending.json
-launcher-update/transactions/{{TRANSACTION}}/payload/acdream-launcher.exe
-launcher-update/transactions/{{TRANSACTION}}/payload/support.dat

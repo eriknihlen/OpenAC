@@ -1,0 +1,12 @@
+[package]
+name = "suite"
+description = "One of a suite of plugins that ask each other things, installed twice under two ids, so the host's plugin-to-plugin calls can be tested."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }

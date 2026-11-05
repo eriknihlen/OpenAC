@@ -1,0 +1,16 @@
+{
+  "id": "openac.parity",
+  "displayName": "Parity",
+  "version": "0.1.0",
+  "entry": "parity.wasm",
+  "apiVersion": "1.8",
+  "minHostVersion": "0.1.0",
+  "permissionsVersion": 1,
+  "permissions": [
+    { "name": "chat", "note": "Relays the harness's chat calls and hears chat." },
+    { "name": "network", "note": "Links every client function; the harness calls none of these." },
+    { "name": "listen", "note": "Links every client function; the harness calls none of these." },
+    { "name": "profiles", "note": "Links every client function; the harness calls none of these." },
+    { "name": "clipboard", "note": "Links every client function; the harness calls none of these." }
+  ]
+}

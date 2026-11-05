@@ -1,0 +1,7 @@
+{
+  "id": "openac.probe",
+  "displayName": "Probe",
+  "version": "0.1.0",
+  "entry": "probe.wasm",
+  "apiVersion": "1.8"
+}

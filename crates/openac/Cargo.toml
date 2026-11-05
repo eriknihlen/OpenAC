@@ -1,0 +1,35 @@
+[package]
+name = "openac"
+description = "The openAC client: runs game sessions headless or with a window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+ac-net.workspace = true
+ac-runtime.workspace = true
+ctrlc.workspace = true
+ac-render.workspace = true
+ac-host.workspace = true
+ac-core.workspace = true
+ac-ui.workspace = true
+ac-plugin.workspace = true
+
+[dev-dependencies]
+# The launcher end-to-end test drives this binary through the launcher core.
+ac-launcher-core.workspace = true
+# The console-stop test speaks the wire to its loopback stand-in servers.
+ac-bits.workspace = true
+# The console tests build an appraisal answer.
+ac-proto.workspace = true
+
+# The console-stop test sends SIGTERM and SIGHUP to the client on Unix.
+[target.'cfg(unix)'.dev-dependencies]
+nix.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,55 @@
+[] rest: 0x9e02047b89af8fb8
+[] field: 0x9d75d76c0f9f38df
+[] tab 0: 0x9e02047b89af8fb8
+[] tab 1: 0x1ede617b7cd0b5e1
+[] tab 2: 0x5e7d2046ba0ffe5c
+[] tab 3: 0xf8ca7d2a361d08ac
+[] tab 4: 0xaa91a0fd922ef25f
+[] tab 5: 0x72b4e7b681f6e9ae
+[] tab 6: 0xc81acddd1f412518
+[] tab 7: 0x3fd6724014f80a92
+[] tab 8: 0xbb77de263119ed96
+[] tab 9: 0xeb9f7e6d7997a34e
+[] tab 10: 0x1d6b79763f287596
+[] tab 11: 0x302c9a813e007a86
+[] tab 12: 0xcd97604d69f3c1ce
+[] tab 13: 0x3b55c36a1ab442e1
+[] tab 14: 0x1ec41b35a292aecf
+[] tab 15: 0xcfbd7f53a9cefdcc
+[] tab 16: 0x8e54def83aad8078
+[] tab 17: 0x22a3f995eb461784
+[] hover: 0x9e02047b89af8fb8
+[] press: 0x9e02047b89af8fb8
+[] context menu: 0x8f3ae83972b67bf5
+[] context menu item: 0xbaf40dc7f22c1ade
+[] menu: 0x805750bbe0af082
+[] colour: 0xcae7678c1cc7e39a
+[] disabled: 0x168ad0127c59335
+[titlebar="true"] rest: 0xda6c0aa08cc78c1a
+[titlebar="true"] field: 0xe0e22a8f57ddac61
+[titlebar="true"] tab 0: 0xda6c0aa08cc78c1a
+[titlebar="true"] tab 1: 0x143d0b2b24a23842
+[titlebar="true"] tab 2: 0xc20cce0bf22289aa
+[titlebar="true"] tab 3: 0x1f1cb15eac9a3aa4
+[titlebar="true"] tab 4: 0x5a4296e1cf73bc61
+[titlebar="true"] tab 5: 0xf5b713564fa59e1d
+[titlebar="true"] tab 6: 0xd0fe5f023db6301d
+[titlebar="true"] tab 7: 0x78d2c6056f11f188
+[titlebar="true"] tab 8: 0xe19198ee801482c4
+[titlebar="true"] tab 9: 0xd8eadda0ec21fd7d
+[titlebar="true"] tab 10: 0xda144165e22efd64
+[titlebar="true"] tab 11: 0x8bab44246f916f53
+[titlebar="true"] tab 12: 0xc623005eccd0cfb5
+[titlebar="true"] tab 13: 0x5597546fd5c2ab25
+[titlebar="true"] tab 14: 0x6438cbf998262657
+[titlebar="true"] tab 15: 0x200751548e867e61
+[titlebar="true"] tab 16: 0x7d402f99e9b0548a
+[titlebar="true"] tab 17: 0x6b1988bb69a21fb1
+[titlebar="true"] hover: 0xda6c0aa08cc78c1a
+[titlebar="true"] press: 0xda6c0aa08cc78c1a
+[titlebar="true"] context menu: 0xbe37e0be53c20806
+[titlebar="true"] context menu item: 0xb1ef5c7719d8b559
+[titlebar="true"] menu: 0xe72486f53390dc3d
+[titlebar="true"] colour: 0x492da895c287803a
+[titlebar="true"] disabled: 0xf43a68f76cff01c9
+dialog: 0x949cd0dd5f0573dd

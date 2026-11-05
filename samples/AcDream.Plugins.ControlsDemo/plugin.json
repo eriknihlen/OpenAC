@@ -1,9 +1,0 @@
-{
-  "id": "sample.controls-demo",
-  "displayName": "Markup Controls Sample",
-  "version": "1.0.0",
-  "entryDll": "AcDream.Plugins.ControlsDemo.dll",
-  "apiVersion": 1,
-  "kinds": ["gameplay"],
-  "hosts": ["graphical"]
-}

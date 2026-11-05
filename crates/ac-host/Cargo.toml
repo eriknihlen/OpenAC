@@ -1,0 +1,22 @@
+[package]
+name = "ac-host"
+description = "Host configuration: command grammar, the session-config document, credentials, paths, exit codes and the status file. Pure; I/O only where named."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+# The document, paths, status file, JSON reader, local time zone, exit codes
+# and install lease, shared with the launcher (re-exported under the old names).
+ac-host-core.workspace = true
+
+# The process's own numbers (`K32GetProcessMemoryInfo`, `GetProcessTimes`); no C.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

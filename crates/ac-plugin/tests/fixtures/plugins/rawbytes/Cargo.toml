@@ -1,0 +1,13 @@
+[package]
+name = "rawbytes"
+description = "A test plugin that logs the bytes of every event and callback it is handed, undecoded."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openac-plugin = { path = "../../../../../openac-plugin" }
+ac-plugin-abi = { path = "../../../../../ac-plugin-abi" }

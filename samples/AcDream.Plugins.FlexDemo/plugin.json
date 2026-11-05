@@ -1,9 +1,0 @@
-{
-  "id": "sample.flex-demo",
-  "displayName": "Flex Layout Sample",
-  "version": "1.0.0",
-  "entryDll": "AcDream.Plugins.FlexDemo.dll",
-  "apiVersion": 1,
-  "kinds": ["gameplay"],
-  "hosts": ["graphical"]
-}

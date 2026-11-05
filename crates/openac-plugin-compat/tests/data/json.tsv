@@ -1,0 +1,39 @@
+# .NET 10 JSON writers: case name, output (\\ \t \n \r and \u{X} escaped)
+newtonsoft.strings	{"s":"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f !\\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u{7F}\\u0085\u{A0}\u{E9}\\u2028\\u2029\u{20AC}\u{1F600}\u{FEFF}\u{FF}\u{100}"}
+newtonsoft.doubles	[0.0,-0.0,1.0,-12.0,0.1,42.5,1000000000000000.0,10000000000000000.0,1E+17,1E-05,123.456,0.30000000000000004,33.650001525878906,-0.06666667014360428,1.7976931348623157E+308,5E-324,1E+21,75.0]
+newtonsoft.non_finite	["NaN","Infinity","-Infinity"]
+newtonsoft.floats	[0.0,-0.0,1.0,3.0,0.1,2.7115397,1.0000001,100000000.0,1E+09,16777216.0,3.4028235E+38]
+newtonsoft.integers	{"i":-2147483648,"j":2147483647,"l":-9223372036854775808,"m":9223372036854775807,"u":4294967295,"ul":18446744073709551615,"b":255,"sh":-5}
+newtonsoft.nested	{"type":"x","n":null,"t":true,"f":false,"empty_list":[],"empty_obj":{},"dict":{"1":1.5,"2":-0.0,"-3":1000000000000000.0},"list":[1,"a\\"b",null,{"k":2,"inner":[1.0,2.5]}],"nullable":null,"f32":0.1}
+newtonsoft.nested_indented	{\r\n  "type": "x",\r\n  "n": null,\r\n  "t": true,\r\n  "f": false,\r\n  "empty_list": [],\r\n  "empty_obj": {},\r\n  "dict": {\r\n    "1": 1.5,\r\n    "2": -0.0,\r\n    "-3": 1000000000000000.0\r\n  },\r\n  "list": [\r\n    1,\r\n    "a\\"b",\r\n    null,\r\n    {\r\n      "k": 2,\r\n      "inner": [\r\n        1.0,\r\n        2.5\r\n      ]\r\n    }\r\n  ],\r\n  "nullable": null,\r\n  "f32": 0.1\r\n}
+newtonsoft.convert_indented	{\r\n  "type": "x",\r\n  "n": null,\r\n  "t": true,\r\n  "f": false,\r\n  "empty_list": [],\r\n  "empty_obj": {},\r\n  "dict": {\r\n    "1": 1.5,\r\n    "2": -0.0,\r\n    "-3": 1000000000000000.0\r\n  },\r\n  "list": [\r\n    1,\r\n    "a\\"b",\r\n    null,\r\n    {\r\n      "k": 2,\r\n      "inner": [\r\n        1.0,\r\n        2.5\r\n      ]\r\n    }\r\n  ],\r\n  "nullable": null,\r\n  "f32": 0.1\r\n}
+framework.doubles	[0.0,0.0,1.0,-12.0,0.1,42.5,1E+15,1E+16,1E+17,1E-05,123.456,0.30000000000000004,33.650001525878906,-0.066666670143604279,1.7976931348623157E+308,4.94065645841247E-324,1E+21,75.0]
+framework.non_finite	["NaN","Infinity","-Infinity"]
+framework.floats	[0.0,0.0,1.0,3.0,0.1,2.71153975,1.00000012,1E+08,1E+09,16777216.0,3.40282347E+38]
+framework.nested	{"type":"x","n":null,"t":true,"f":false,"empty_list":[],"empty_obj":{},"dict":{"1":1.5,"2":0.0,"-3":1E+15},"list":[1,"a\\"b",null,{"k":2,"inner":[1.0,2.5]}],"nullable":null,"f32":0.1}
+stj.strings	{"s":"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000B\\f\\r\\u000E\\u000F\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001A\\u001B\\u001C\\u001D\\u001E\\u001F !\\u0022#$%\\u0026\\u0027()*\\u002B,-./0123456789:;\\u003C=\\u003E?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\\\]^_\\u0060abcdefghijklmnopqrstuvwxyz{|}~\\u007F\\u0085\\u00A0\\u00E9\\u2028\\u2029\\u20AC\\uD83D\\uDE00\\uFEFF\\u00FF\\u0100"}
+stj.doubles	[0,-0,1,-12,0.1,42.5,1000000000000000,10000000000000000,1E+17,1E-05,123.456,0.30000000000000004,33.650001525878906,-0.06666667014360428,1.7976931348623157E+308,5E-324,1E+21,75]
+stj.non_finite_named	["NaN","Infinity","-Infinity"]
+stj.floats	[0,-0,1,3,0.1,2.7115397,1.0000001,100000000,1E+09,16777216,3.4028235E+38]
+stj.integers	{"i":-2147483648,"j":2147483647,"l":-9223372036854775808,"m":9223372036854775807,"u":4294967295,"ul":18446744073709551615,"b":255,"sh":-5}
+stj.nested	{"type":"x","n":null,"t":true,"empty_list":[],"empty_obj":{},"dict":{"k\\u00E9y\\u003C":"v\\u0026\\u0027\\u002B\\u0060","b":""},"list":[1,"a\\u0022b",null,{"k":2,"inner":[1,2.5]}],"nested_empty":{"a":[]}}
+stj.nested_indented	{\r\n  "type": "x",\r\n  "n": null,\r\n  "t": true,\r\n  "empty_list": [],\r\n  "empty_obj": {},\r\n  "dict": {\r\n    "k\\u00E9y\\u003C": "v\\u0026\\u0027\\u002B\\u0060",\r\n    "b": ""\r\n  },\r\n  "list": [\r\n    1,\r\n    "a\\u0022b",\r\n    null,\r\n    {\r\n      "k": 2,\r\n      "inner": [\r\n        1,\r\n        2.5\r\n      ]\r\n    }\r\n  ],\r\n  "nested_empty": {\r\n    "a": []\r\n  }\r\n}
+stj.non_finite_refused	ArgumentException
+camel.Id	id
+camel.ID	id
+camel.URLValue	urlValue
+camel.ObjectId	objectId
+camel.HTMLParser	htmlParser
+camel.A	a
+camel.ABC	abc
+camel.aB	aB
+camel.XMLHttp2	xmlHttp2
+camel._X	_X
+camel.Name1A	name1A
+camel.IOStream	ioStream
+camel.	
+camel.X Y	x Y
+camel.ÉCOLE	\u{E9}cole
+camel.ABc	aBc
+camel.AB_CD	aB_CD
+camel.a	a

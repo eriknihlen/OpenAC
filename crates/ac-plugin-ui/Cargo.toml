@@ -1,0 +1,27 @@
+[package]
+name = "ac-plugin-ui"
+description = "Plugin UI as data: the panel markup (parsed and checked against a plugin's bindings), panels and their bound values, canvases and their paint lists, images, world labels and lines, held by the session and copied to an attached window. No plugin host, no window, no GPU."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+# MIT like the plugin SDK, which checks a plugin's markup with this crate in
+# the plugin's own native tests.
+license = "MIT"
+
+[dependencies]
+# The panel markup is XML; the same reader the launcher uses for its feed
+# (pure Rust, refuses DTDs).
+roxmltree.workspace = true
+# A plugin's canvas fonts are baked here, so the client and the SDK's fake host
+# answer alike.
+fontdue.workspace = true
+ttf-parser.workspace = true
+# A plugin's icon.png rules and decoder (re-exported as `icon`), shared with
+# the launcher, which checks and shows the same file.
+ac-plugin-icon.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
