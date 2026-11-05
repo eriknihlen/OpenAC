@@ -22,8 +22,10 @@
 > [v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33), and
 > its code is kept on the
 > [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
-> The Rust client below replaces it, and is released from here since 0.2.0
-> (before that, from `eriknihlen/openac-rust`).
+> The Rust client below replaces it. Its releases move here from 0.2.0 on;
+> until 0.2.0 is published, the current release is
+> [0.1.12 at `eriknihlen/openac-rust`](https://github.com/eriknihlen/openac-rust/releases/latest)
+> (archived, read only). A launcher from 0.1.12 on follows the move by itself.
 
 ## What is OpenAC
 
@@ -42,8 +44,11 @@ client: the same behavior as the original game, in modern Rust.
 - **Plugins are WebAssembly.** A plugin is an ordinary Rust crate built for
   `wasm32-unknown-unknown`; the same plugin runs with or without a window,
   sandboxed, with the permissions it declares.
-- **A launcher** (`openac-launcher`) keeps your accounts and servers, starts
-  sessions graphical or headless, and installs plugins.
+- **A launcher** (`openac-launcher`) keeps your accounts, characters and
+  servers (and imports them from the Thwarg launcher), starts sessions
+  graphical or headless, keeps checked clients running (it starts them when
+  it opens and after a crash), runs each character's logon commands, and
+  installs and updates plugins.
 
 OpenAC does not ship any game data. You supply your own data files.
 
@@ -58,8 +63,9 @@ reports are welcome.
 
 **Platforms.** Windows 10 and 11 (64-bit) is where it is played most. Linux
 (64-bit, X11 or Wayland) builds and runs, with less time in front of players.
-macOS (macOS 14 or later, Apple silicon or Intel) builds and runs on Metal;
-it is the newest platform.
+macOS (macOS 14 or later) runs on Metal on Apple silicon; it is the newest
+platform. Intel Macs get a build from 0.2.0 on, so far tested only by the
+release checks.
 
 **Found a bug?** Open a
 [GitHub issue](https://github.com/eriknihlen/OpenAC/issues) with the
@@ -71,7 +77,9 @@ The [documentation site](https://eriknihlen.github.io/OpenAC/) has the
 player guide, the plugin guide and the release notes.
 
 Grab the build for your platform from the
-[latest release](https://github.com/eriknihlen/OpenAC/releases/latest),
+[latest release](https://github.com/eriknihlen/OpenAC/releases/latest)
+(until 0.2.0 is out, that link shows the retired C# client: take
+[0.1.12](https://github.com/eriknihlen/openac-rust/releases/latest) instead),
 unzip it anywhere, and run the launcher:
 
 | Platform | Download | Run |
@@ -79,7 +87,7 @@ unzip it anywhere, and run the launcher:
 | Windows | `openac-win-x64.zip` | `openac-launcher.exe` |
 | Linux | `openac-linux-x64.zip` | `./openac-launcher` |
 | macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | `OpenAC.app` |
-| macOS (Intel) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
+| macOS (Intel, from 0.2.0) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
 
 The zip holds both programs; the launcher starts the `openac` beside it. On
 macOS they are inside `OpenAC.app`; move it to Applications and open it. The
