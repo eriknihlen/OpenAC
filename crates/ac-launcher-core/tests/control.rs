@@ -194,6 +194,13 @@ impl Orchestration for OwnerSpy {
     fn add_server(&self, _name: &str, _host: &str, _port: i32) -> Result<(), OrchestratorError> {
         unexpected("add_server")
     }
+    fn import_thwarg(
+        &self,
+        _files: &ac_launcher_core::profiles::thwarg::ThwargFiles,
+        _apply: bool,
+    ) -> Result<ac_launcher_core::profiles::thwarg::ThwargImportReport, OrchestratorError> {
+        unexpected("import_thwarg")
+    }
     fn take_profile_migration_notice(&self) -> Result<Option<String>, OrchestratorError> {
         unexpected("take_profile_migration_notice")
     }

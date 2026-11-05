@@ -18,6 +18,7 @@
 //! - [`install_folder`]: the install folder section of the settings.
 //! - [`closing`]: closing the launcher over running clients.
 //! - [`classic_migration`]: the classic VirindiTank and UtilityBelt import.
+//! - [`thwarg_import`]: the import from the Thwarg launcher.
 //!
 //! Every slow step (a launch, a stop, an HTTP request, hashing) runs on a
 //! worker through a [`Spawner`] and reports back as a message the window
@@ -39,6 +40,7 @@ pub mod plugins_panel;
 pub mod profile_editor;
 pub mod sessions;
 pub mod startup;
+pub mod thwarg_import;
 pub mod update_prompt;
 
 use std::path::PathBuf;
@@ -57,6 +59,7 @@ use crate::orchestration::{
     LauncherStateSnapshot, OrchestratorError, StateChangedListener,
 };
 use crate::plugins::PluginCatalog;
+use crate::profiles::thwarg::{ThwargFiles, ThwargImportReport};
 use crate::profiles::{LaunchMode, LauncherTextEditorKind};
 use crate::status::{ServerHealthService, ServerHealthSnapshot};
 
@@ -173,6 +176,13 @@ pub trait Orchestration: Send + Sync {
         character_name: &str,
     ) -> Result<(), OrchestratorError>;
     fn add_server(&self, name: &str, host: &str, port: i32) -> Result<(), OrchestratorError>;
+    /// Imports the Thwarg launcher's files (`apply`), or reports what that
+    /// would do.
+    fn import_thwarg(
+        &self,
+        files: &ThwargFiles,
+        apply: bool,
+    ) -> Result<ThwargImportReport, OrchestratorError>;
     fn take_profile_migration_notice(&self) -> Result<Option<String>, OrchestratorError>;
     fn update_account_selection(
         &self,
@@ -305,6 +315,13 @@ impl Orchestration for LauncherOrchestrator {
     }
     fn add_server(&self, name: &str, host: &str, port: i32) -> Result<(), OrchestratorError> {
         LauncherOrchestrator::add_server(self, name, host, port)
+    }
+    fn import_thwarg(
+        &self,
+        files: &ThwargFiles,
+        apply: bool,
+    ) -> Result<ThwargImportReport, OrchestratorError> {
+        LauncherOrchestrator::import_thwarg(self, files, apply)
     }
     fn take_profile_migration_notice(&self) -> Result<Option<String>, OrchestratorError> {
         LauncherOrchestrator::take_profile_migration_notice(self)

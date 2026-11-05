@@ -16,6 +16,7 @@ mod migration;
 mod relaunch_settings;
 mod store;
 mod text;
+pub mod thwarg;
 
 pub use account_name::{find_account, same_account};
 pub use checked_accounts::{

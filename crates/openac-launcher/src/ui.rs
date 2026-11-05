@@ -1444,6 +1444,16 @@ fn bottom_bar(app: &mut LauncherApp, root: &mut Ui) {
                     if button(ui, "Logon commands", interact) {
                         window.open_text_editor(LauncherTextEditorKind::LogonCommands);
                     }
+                    if ui
+                        .add_enabled(interact, egui::Button::new("Import from Thwarg launcher…"))
+                        .on_hover_text(
+                            "Add the servers, accounts, characters, profiles and logon commands \
+                             of a Thwarg launcher install",
+                        )
+                        .clicked()
+                    {
+                        window.open_thwarg_import();
+                    }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if window.has_cancelable_operation()
@@ -1527,6 +1537,9 @@ fn dialogs(app: &mut LauncherApp, ctx: &egui::Context) {
     }
     if window.add_server.is_open {
         modal(ctx, "add-server", 900.0, |ui| add_server(window, ui));
+    }
+    if window.thwarg_import.is_open {
+        modal(ctx, "thwarg-import", 900.0, |ui| thwarg_import(window, ui));
     }
     if window
         .classic_migration
@@ -1745,6 +1758,68 @@ fn add_server(window: &mut Window, ui: &mut Ui) {
             window.add_server.close();
         }
     });
+}
+
+/// The Import from Thwarg launcher dialog: the Thwarg data folder (typed;
+/// there is no folder picker), the outcome, the report, then Close,
+/// Preview and Import. Import is offered once a preview found something.
+fn thwarg_import(window: &mut Window, ui: &mut Ui) {
+    let mut run = None;
+    let dialog = &mut window.thwarg_import;
+    dialog_title(ui, "Import from Thwarg launcher");
+    ui.add(
+        egui::Label::new(muted(
+            "Adds the servers, accounts (with their passwords), characters, profiles and logon \
+             commands the Thwarg launcher has saved. Accounts already here are not overwritten; \
+             the Thwarg files are only read. Preview shows what will change.",
+        ))
+        .wrap(),
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_sized([100.0, 18.0], egui::Label::new("Thwarg folder"));
+        ui.add(
+            egui::TextEdit::singleline(&mut dialog.folder)
+                .hint_text(r"%APPDATA%\ThwargLauncher")
+                .desired_width(ui.available_width()),
+        );
+    });
+    if dialog.has_error() {
+        ui.label(error_text(dialog.error.clone().unwrap_or_default()));
+    } else if let Some(status) = &dialog.status {
+        ui.add(egui::Label::new(RichText::new(status).color(hex("#8FD18F"))).wrap());
+    }
+    let height = (ui.ctx().content_rect().height() - 380.0).clamp(160.0, 640.0);
+    well(ui, |ui| {
+        egui::ScrollArea::both()
+            .id_salt("thwarg-import-lines")
+            .max_height(height)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for line in &dialog.lines {
+                    ui.add(
+                        egui::Label::new(RichText::new(line).monospace().size(12.0))
+                            .selectable(true)
+                            .extend(),
+                    );
+                }
+            });
+    });
+    let (can_preview, can_import) = (dialog.can_preview(), dialog.can_import());
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if primary(ui, "Import", true, can_import) {
+            run = Some(true);
+        }
+        if button(ui, "Preview", can_preview) {
+            run = Some(false);
+        }
+        if button(ui, "Close", dialog.can_close()) {
+            dialog.close();
+        }
+    });
+    if let Some(apply) = run {
+        window.run_thwarg_import(apply);
+    }
 }
 
 /// OpenAC's Import VirindiTank & UtilityBelt dialog: the two classic

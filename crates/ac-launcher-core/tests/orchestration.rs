@@ -712,6 +712,79 @@ fn set_show_beta_plugins_persists_to_disk_for_a_fresh_orchestrator_instance() {
     assert!(reloaded.snapshot().unwrap().show_beta_plugins);
 }
 
+fn thwarg_files() -> ac_launcher_core::profiles::thwarg::ThwargFiles {
+    use ac_launcher_core::profiles::thwarg::{ThwargFile, ThwargFiles};
+    ThwargFiles {
+        accounts: Some("Name=testaccount,Password=other\nName=Newcomer,Password=np\n".into()),
+        user_servers: Some(
+            "<ArrayOfServerItem><ServerItem><name>Local ACE</name>\
+             <connect_string>127.0.0.1:9000</connect_string></ServerItem></ArrayOfServerItem>"
+                .into(),
+        ),
+        characters: vec![
+            ThwargFile::new(
+                "characters_Local ACE_Newcomer.txt",
+                r#"{"Local ACE-Newcomer": {"ZoneId": "newcomer", "CharacterList": [{"Id": 1342177290, "Name": "Fresh Face"}]}}"#,
+            ),
+            ThwargFile::new(
+                "characters_Local ACE_testaccount.txt",
+                r#"{"Local ACE-testaccount": {"ZoneId": "testaccount", "CharacterList": [{"Id": 1342177291, "Name": "Second"}]}}"#,
+            ),
+        ],
+        ..ThwargFiles::default()
+    }
+}
+
+#[test]
+fn the_thwarg_import_saves_through_the_profile_store_and_its_preview_does_not() {
+    let root = TempDir::new("orchestrator");
+    let orchestrator = create_orchestrator(&root, Setup::default());
+    let paths = root.path_set();
+    let saved = || std::fs::read_to_string(profile_path(&paths));
+    let before = saved().unwrap();
+
+    let preview = orchestrator.import_thwarg(&thwarg_files(), false).unwrap();
+    assert_eq!(
+        preview.accounts_added,
+        ["Newcomer on Local ACE: 1 character"]
+    );
+    assert_eq!(saved().unwrap(), before, "a preview writes nothing");
+
+    let report = orchestrator.import_thwarg(&thwarg_files(), true).unwrap();
+    assert_eq!(report, preview);
+    let reloaded = LauncherOrchestrator::new(
+        LauncherProfileStore::new(profile_path(&paths), None).unwrap(),
+        paths.clone(),
+        test_executables(),
+        Some(install()),
+    );
+    reloaded.load_profiles().unwrap();
+    let server = reloaded.snapshot().unwrap().servers.remove(0);
+    let accounts: Vec<(String, Vec<String>)> = server
+        .accounts
+        .iter()
+        .map(|account| {
+            (
+                account.account_name.clone(),
+                account.characters.iter().map(|c| c.name.clone()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        accounts,
+        [
+            (
+                "testaccount".into(),
+                vec!["+Acdream".into(), "Second".into()]
+            ),
+            ("Newcomer".into(), vec!["Fresh Face".into()]),
+        ]
+    );
+    // The account already here keeps its password.
+    let text = saved().unwrap();
+    assert!(text.contains(PASSWORD) && !text.contains("\"other\""));
+}
+
 #[test]
 fn the_exit_diagnosis_finds_its_line_after_a_lot_of_standard_output() {
     let root = TempDir::new("orchestrator");
