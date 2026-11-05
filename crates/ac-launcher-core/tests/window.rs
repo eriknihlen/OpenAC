@@ -85,6 +85,9 @@ struct Fake {
     window_switches: Mutex<Vec<(String, bool)>>,
     /// Refuses the next window switch with this message.
     window_switch_refusal: Mutex<Option<String>>,
+    /// What the Thwarg import works on, and each call's `apply`.
+    thwarg_document: Mutex<ac_launcher_core::profiles::LauncherProfileDocument>,
+    thwarg_imports: Mutex<Vec<bool>>,
 }
 
 fn character(
@@ -361,6 +364,20 @@ impl Orchestration for Fake {
     }
     fn take_profile_migration_notice(&self) -> Result<Option<String>, OrchestratorError> {
         Ok(None)
+    }
+    fn import_thwarg(
+        &self,
+        files: &ac_launcher_core::profiles::thwarg::ThwargFiles,
+        apply: bool,
+    ) -> Result<ac_launcher_core::profiles::thwarg::ThwargImportReport, OrchestratorError> {
+        use ac_launcher_core::profiles::thwarg;
+        self.thwarg_imports.lock().unwrap().push(apply);
+        let mut document = self.thwarg_document.lock().unwrap();
+        Ok(if apply {
+            thwarg::import(files, &mut document)
+        } else {
+            thwarg::preview(files, &document)
+        })
     }
     fn add_server(&self, name: &str, host: &str, port: i32) -> Result<(), OrchestratorError> {
         let mut servers = self.servers.lock().unwrap();
@@ -5307,4 +5324,106 @@ fn the_session_log_says_the_server_may_hold_the_account_only_when_it_may() {
         describe_status(&ended),
         "The server is currently full. Please try again later."
     );
+}
+
+// The Thwarg import: the folder found on open, Preview before Import, the
+// report kept after importing, all through the window's worker.
+#[test]
+fn the_window_previews_then_imports_from_the_thwarg_folder() {
+    use ac_launcher_core::window::thwarg_import::ThwargImportDialog;
+    let folder = std::env::temp_dir()
+        .join("openac-window-thwarg-import")
+        .join(format!("{}", std::process::id()));
+    std::fs::create_dir_all(folder.join("characters")).unwrap();
+    std::fs::write(folder.join("Accounts.txt"), "Name=Wanderer,Password=pw\n").unwrap();
+    std::fs::create_dir_all(folder.join("Servers")).unwrap();
+    std::fs::write(
+        folder.join("Servers").join("UserServerList.xml"),
+        "\u{feff}<ArrayOfServerItem><ServerItem><name>Homestead</name>\
+         <connect_string>home.example.test:9000</connect_string></ServerItem></ArrayOfServerItem>",
+    )
+    .unwrap();
+    std::fs::write(
+        folder.join("characters").join("characters_Homestead_Wanderer.txt"),
+        r#"{"Homestead-Wanderer": {"ZoneId": "wanderer", "CharacterList": [{"Id": 1, "Name": "Roamer"}]}}"#,
+    )
+    .unwrap();
+
+    let fake = Arc::new(Fake::default());
+    let spawner = Arc::new(QueueSpawner::default());
+    let mut window = LauncherWindow::new(parts(fake.clone(), spawner.clone()));
+    window.initialize();
+    let found = folder.clone();
+    window.thwarg_import = ThwargImportDialog::with_finder(Arc::new(move || Some(found.clone())));
+
+    window.open_thwarg_import();
+    assert!(window.is_modal_open());
+    assert_eq!(window.thwarg_import.folder, folder.display().to_string());
+    assert!(
+        !window.thwarg_import.can_import(),
+        "Import waits for a preview"
+    );
+
+    window.run_thwarg_import(false);
+    assert!(window.thwarg_import.is_busy());
+    spawner.run_all();
+    window.poll();
+    let dialog = &window.thwarg_import;
+    assert_eq!(
+        dialog.status.as_deref(),
+        Some(
+            "Ready to import: 1 new server, 1 new account, 0 already here, 0 skipped. Press \
+             Import to add them."
+        )
+    );
+    assert!(
+        dialog
+            .lines
+            .contains(&"  Wanderer on Homestead: 1 character".to_owned())
+    );
+    assert!(dialog.can_import());
+
+    window.run_thwarg_import(true);
+    spawner.run_all();
+    window.poll();
+    let _ = std::fs::remove_dir_all(&folder);
+    assert_eq!(*fake.thwarg_imports.lock().unwrap(), [false, true]);
+    let dialog = &window.thwarg_import;
+    assert!(dialog.is_open, "the report stays shown");
+    assert!(
+        dialog
+            .status
+            .as_deref()
+            .unwrap()
+            .starts_with("Imported: 1 new server")
+    );
+    assert!(dialog.lines.contains(&"Accounts added".to_owned()));
+    assert!(!dialog.can_import(), "the import does not run twice");
+    assert_eq!(
+        fake.thwarg_document.lock().unwrap().servers[0].accounts[0].account,
+        "Wanderer"
+    );
+
+    window.close_active_modal();
+    assert!(!window.is_modal_open());
+}
+
+#[test]
+fn the_thwarg_import_reports_a_missing_folder() {
+    use ac_launcher_core::window::thwarg_import::ThwargImportDialog;
+    let fake = Arc::new(Fake::default());
+    let mut window = LauncherWindow::new(parts(fake.clone(), Arc::new(InlineSpawner)));
+    window.initialize();
+    window.thwarg_import = ThwargImportDialog::with_finder(Arc::new(|| None));
+    window.open_thwarg_import();
+    assert!(window.thwarg_import.folder.is_empty());
+    assert!(!window.thwarg_import.can_preview());
+    window.thwarg_import.folder = std::env::temp_dir()
+        .join("openac-no-such-thwarg-folder")
+        .display()
+        .to_string();
+    window.run_thwarg_import(false);
+    window.poll();
+    assert!(window.thwarg_import.has_error());
+    assert!(fake.thwarg_imports.lock().unwrap().is_empty());
 }

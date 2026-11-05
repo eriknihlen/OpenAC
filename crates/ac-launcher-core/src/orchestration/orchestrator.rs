@@ -34,6 +34,7 @@ use crate::profiles::{
     AccountProfile, CharacterProfile, CharacterRosterEntry, LaunchMode, LauncherProfileStore,
     LauncherTextEditorKind, ProfileError, ServerProfile, apply_text, describe_account_removals,
     read_text, same_account,
+    thwarg::{self, ThwargFiles, ThwargImportReport},
 };
 use crate::status::{
     StatusEvent, StatusEventKind, StatusEventSource, StatusEventSourceFactory,
@@ -931,6 +932,30 @@ impl LauncherOrchestrator {
     /// Adds a server.
     pub fn add_server(&self, name: &str, host: &str, port: i32) -> Result<(), OrchestratorError> {
         self.mutate_profiles(|store, _| Ok(store.add_server(name, host, port)?))
+    }
+
+    /// Imports the Thwarg launcher's `files` into the profiles (`apply`),
+    /// or only reports what that would do. The import only adds, so it may
+    /// run while sessions do; it is saved as one transaction.
+    pub fn import_thwarg(
+        &self,
+        files: &ThwargFiles,
+        apply: bool,
+    ) -> Result<ThwargImportReport, OrchestratorError> {
+        if !apply {
+            let state = self.inner.state()?;
+            return Ok(thwarg::preview(files, state.store.document()));
+        }
+        let report = {
+            let mut state = self.inner.state()?;
+            state
+                .store
+                .execute_transaction(|store| -> Result<_, ProfileError> {
+                    Ok(thwarg::import(files, store.document_mut()))
+                })?
+        };
+        self.inner.raise_state_changed();
+        Ok(report)
     }
 
     /// Edits an idle server.

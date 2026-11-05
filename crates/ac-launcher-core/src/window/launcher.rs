@@ -26,6 +26,7 @@ use super::plugins_panel::{
 };
 use super::profile_editor::ProfileTextEditor;
 use super::sessions::SessionRow;
+use super::thwarg_import::ThwargImportDialog;
 use super::update_prompt::UpdatePrompt;
 use super::{Orchestration, ServerHealth, Spawner, Wake, safe_display_error};
 use crate::cancel::CancelToken;
@@ -242,6 +243,10 @@ enum Message {
         apply: bool,
         result: Result<Vec<crate::classic_migration::ClassicMigrationItem>, String>,
     },
+    ThwargImportFinished {
+        apply: bool,
+        result: Result<crate::profiles::thwarg::ThwargImportReport, String>,
+    },
 }
 
 /// The window's state.
@@ -357,6 +362,8 @@ pub struct LauncherWindow {
     /// launcher was built without it.
     pub classic_migration: Option<ClassicMigrationDialog>,
     known_servers: Option<Arc<KnownServerCatalog>>,
+    /// The import from the Thwarg launcher.
+    pub thwarg_import: ThwargImportDialog,
     time_zone: LocalZone,
     /// A check has verified the installed client.
     client_verified: bool,
@@ -621,6 +628,7 @@ impl LauncherWindow {
             character_select_availability: AccountCapabilities::new(),
             add_server: AddServerDialog::default(),
             classic_migration: parts.classic_migration,
+            thwarg_import: ThwargImportDialog::default(),
             known_servers: parts.known_servers,
             time_zone: LocalZone::system(),
             client_verified: false,
@@ -1036,6 +1044,14 @@ impl LauncherWindow {
                     dialog.finish(apply, result);
                 }
             }
+            Message::ThwargImportFinished { apply, result } => {
+                let imported = apply && result.as_ref().is_ok_and(|report| report.has_changes());
+                self.thwarg_import.finish(apply, result);
+                if imported {
+                    // New accounts show at once, not only the checked ones.
+                    self.on_server_added();
+                }
+            }
         }
     }
 
@@ -1070,6 +1086,30 @@ impl LauncherWindow {
         self.run(move |sender, wake| {
             let result = run.run();
             let _ = sender.send(Message::ClassicMigrationFinished {
+                apply: run.apply,
+                result,
+            });
+            wake();
+        });
+    }
+
+    /// Opens the Import from Thwarg launcher dialog.
+    pub fn open_thwarg_import(&mut self) {
+        if self.can_interact() {
+            self.thwarg_import.open();
+        }
+    }
+
+    /// The Thwarg import's Preview (`apply` false) or Import, off the
+    /// window's thread.
+    pub fn run_thwarg_import(&mut self, apply: bool) {
+        let Some(run) = self.thwarg_import.begin_run(apply) else {
+            return;
+        };
+        let orchestrator = Arc::clone(&self.orchestrator);
+        self.run(move |sender, wake| {
+            let result = run.run(orchestrator.as_ref());
+            let _ = sender.send(Message::ThwargImportFinished {
                 apply: run.apply,
                 result,
             });
@@ -1606,6 +1646,7 @@ impl LauncherWindow {
     pub fn is_modal_open(&self) -> bool {
         self.text_editor.is_open
             || self.add_server.is_open
+            || self.thwarg_import.is_open
             || self
                 .classic_migration
                 .as_ref()
@@ -2865,6 +2906,8 @@ impl LauncherWindow {
             self.text_editor.close();
         } else if self.add_server.is_open {
             self.add_server.close();
+        } else if self.thwarg_import.is_open {
+            self.thwarg_import.close();
         } else if let Some(dialog) = self.classic_migration.as_mut().filter(|d| d.is_open) {
             dialog.close();
         } else if self.first_run.is_open {
