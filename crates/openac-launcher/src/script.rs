@@ -343,6 +343,7 @@ impl Script {
                 "edit-servers" => window.open_text_editor(LauncherTextEditorKind::Servers),
                 "logon-commands" => window.open_text_editor(LauncherTextEditorKind::LogonCommands),
                 "add-server" => window.open_add_server(),
+                "profiles" => window.open_profiles(),
                 "row-options" => window.open_account_plugins(&arg(2)?, &arg(3)?),
                 "character-plugins" => window.open_character_plugins(&arg(2)?, &arg(3)?),
                 "install" => window.open_discover_install(&arg(2)?),
