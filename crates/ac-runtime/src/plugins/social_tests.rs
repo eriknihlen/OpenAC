@@ -401,3 +401,102 @@ fn a_fellowships_terms_and_levels_reach_a_plugin() {
         assert!(terms.splits_experience_evenly);
     });
 }
+
+// The roster names every fellow the server lists, whether or not the
+// client can see them: one out of range (not in the world), one hidden and
+// one not drawn read back at an infinite distance. The other fellows the
+// client can see stay as they were: only the one in sight.
+#[test]
+fn the_roster_keeps_fellows_the_client_cannot_see() {
+    use ac_proto::fellowship::{FellowMember, FellowshipFullUpdate};
+
+    use super::events_tests::described;
+    use super::tests::PLAYER;
+
+    const NEAR: u32 = 0x5000_0011;
+    const AWAY: u32 = 0x5000_0012;
+    const HIDDEN: u32 = 0x5000_0013;
+    const UNDRAWN: u32 = 0x5000_0014;
+    const CELL: u32 = 0xA9B4_0031;
+    let member = |guid: u32, name: &str| FellowMember {
+        guid,
+        cp_cache: 0,
+        lum_cache: 0,
+        level: 10,
+        max_health: 100,
+        max_stamina: 100,
+        max_mana: 100,
+        current_health: 100,
+        current_stamina: 100,
+        current_mana: 100,
+        share_loot: 0,
+        name: name.into(),
+    };
+
+    let mut state = in_world();
+    for (guid, name) in [
+        (PLAYER, "+Horan"),
+        (NEAR, "Near"),
+        (HIDDEN, "Hidden"),
+        (UNDRAWN, "Undrawn"),
+    ] {
+        state
+            .world
+            .apply(&described(guid, 1, name, 0x10, 0x8 | 0x10, Some(CELL)));
+    }
+    for (guid, bits) in [
+        (HIDDEN, ac_core::physics::PhysicsState::HIDDEN.bits()),
+        (UNDRAWN, ac_core::physics::PhysicsState::NO_DRAW.bits()),
+    ] {
+        state
+            .world
+            .apply(&ac_proto::Inbound::SetState(ac_proto::SetState {
+                guid,
+                physics_state: bits,
+                instance_sequence: 1,
+                state_sequence: 2,
+            }));
+    }
+    state.world.drain_changes().for_each(drop);
+    state
+        .gameplay
+        .fellowship_mut()
+        .apply_full_update(&FellowshipFullUpdate {
+            members: vec![
+                member(PLAYER, "+Horan"),
+                member(NEAR, "Near"),
+                member(AWAY, "Away"),
+                member(HIDDEN, "Hidden"),
+                member(UNDRAWN, "Undrawn"),
+            ],
+            name: "Parity Fellows".into(),
+            leader_guid: PLAYER,
+            share_xp: true,
+            even_xp_split: true,
+            open_fellow: false,
+            locked: false,
+            departed: Vec::new(),
+        });
+
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let mut roster: Vec<(u32, f32)> = call::<calls::FellowshipRoster>(b, &())
+            .iter()
+            .map(|m| (m.object_id, m.distance))
+            .collect();
+        roster.sort_by_key(|(id, _)| *id);
+        let ids: Vec<u32> = roster.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, [PLAYER, NEAR, AWAY, HIDDEN, UNDRAWN]);
+        assert_eq!(roster[0].1, 0.0);
+        assert!(roster[1].1.is_finite(), "{roster:?}");
+        for (id, distance) in &roster[2..] {
+            assert_eq!(*distance, f32::INFINITY, "{id:08X}");
+        }
+
+        let others: Vec<u32> = call::<calls::FellowshipMembers>(b, &())
+            .iter()
+            .map(|m| m.object_id)
+            .collect();
+        assert_eq!(others, [NEAR]);
+    });
+}

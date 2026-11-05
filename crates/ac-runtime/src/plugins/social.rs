@@ -140,8 +140,11 @@ impl PluginBinding<'_> {
         }
     }
 
-    /// The fellows the client can see (OpenAC `CaptureFellowshipMembers`):
-    /// the character only when `include_self`, at distance 0.
+    /// The fellowship's members (OpenAC `CaptureFellowshipMembers`), the
+    /// character at distance 0. With `include_self` it is the whole roster:
+    /// a fellow the client cannot see (not in the world, hidden or not
+    /// drawn) stays, at an infinite distance. Without it, only the other
+    /// fellows the client can see, as before.
     pub(super) fn fellowship_members(&self, include_self: bool) -> Vec<FellowMember> {
         if !self.in_world() {
             return Vec::new();
@@ -165,7 +168,11 @@ impl PluginBinding<'_> {
                     }
                     0.0
                 } else {
-                    distance_to(world, member.guid)?
+                    match distance_to(world, member.guid) {
+                        Some(distance) => distance,
+                        None if include_self => f32::INFINITY,
+                        None => return None,
+                    }
                 };
                 Some(FellowMember {
                     object_id: member.guid,

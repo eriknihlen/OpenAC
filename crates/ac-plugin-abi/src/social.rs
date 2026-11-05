@@ -23,7 +23,8 @@ wire_record! {
         pub current_mana: u32,
         /// Mana at most.
         pub max_mana: u32,
-        /// How far from the character, metres (0 for the character).
+        /// How far from the character, metres (0 for the character;
+        /// infinite on the roster for a fellow the client cannot see).
         pub distance: f32,
         /// They share loot.
         pub share_loot: bool,

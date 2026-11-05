@@ -23,8 +23,9 @@ impl Host<'_> {
         self.call::<calls::FellowshipMembers>(&())
     }
 
-    /// The fellows the client can see, the character included, each with
-    /// vitals and level.
+    /// Every fellow in the fellowship, the character included, each with
+    /// vitals and level. A fellow the client cannot see (not loaded, or
+    /// hidden) is listed too, with `distance` set to `f32::INFINITY`.
     pub fn fellowship_roster(&mut self) -> Vec<FellowMember> {
         self.call::<calls::FellowshipRoster>(&())
     }
