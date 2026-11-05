@@ -9,7 +9,7 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
-## openac-rust 0.2.0 (2026-11-05)
+## OpenAC (Rust) 0.2.0 (2026-11-05)
 
 The Rust client is now released from this repository, the
 [OpenAC repository](https://github.com/eriknihlen/OpenAC), and is simply

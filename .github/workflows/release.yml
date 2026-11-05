@@ -497,6 +497,24 @@ jobs:
           cp dist/openac-manifest.json dist/manifest.json
           cp dist/openac-launcher-fingerprint.json dist/launcher-fingerprint.json
 
+      # The retired C# client's launchers up to 0.1.32 read `manifest.json`
+      # from this repository's latest release. Each release here carries the
+      # C# client's last feed (v0.1.33's own files, unchanged: their download
+      # addresses point at v0.1.33), so those launchers still update to the
+      # retired build and show its notice. This client never reads these
+      # names here; it reads openac-manifest.json.
+      - name: Carry the retired C# client's last feed
+        if: github.repository == 'eriknihlen/OpenAC'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release download v0.1.33 -p manifest.json -p launcher-fingerprint.json -D dist
+          grep -q '"version": "0.1.33"' dist/manifest.json
+          cat dist/manifest.json
+
       - name: Write SHA256SUMS.txt
         shell: bash
         run: |

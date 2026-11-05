@@ -2,7 +2,7 @@
 
 ## Original behavior
 If this changes what the client does in the world: what does the original
-client (or OpenAC) do, and how do you know?
+client (or the retired C# client) do, and how do you know?
 
 ## Checklist
 - [ ] `scripts/check.sh` (or `scripts/check.ps1`) passes: fmt, clippy with `-D warnings`, the WebAssembly build, tests
