@@ -13,6 +13,7 @@ mod account_name;
 mod checked_accounts;
 mod document;
 mod migration;
+mod relaunch_settings;
 mod store;
 mod text;
 
@@ -23,6 +24,10 @@ pub use checked_accounts::{
 };
 pub use document::{
     AccountProfile, CharacterProfile, LaunchMode, LauncherProfileDocument, ServerProfile,
+};
+pub use relaunch_settings::{
+    LauncherRelaunchSettings, LauncherRelaunchSettingsStore, RELAUNCH_SETTINGS_FILE_NAME,
+    RelaunchSettingsError,
 };
 pub use store::{
     CURRENT_PROFILE_VERSION, CharacterRosterEntry, LauncherProfileStore, OLDER_PROFILE_FILE_NAME,

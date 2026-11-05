@@ -472,6 +472,9 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
             if button(ui, "Check servers", window.can_check_servers()) {
                 window.check_servers();
             }
+            if button(ui, "Stop all", window.can_stop_all()) {
+                window.stop_all();
+            }
         });
     });
     if window.has_profile_filters() {
@@ -484,6 +487,18 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
         });
     }
     ui.horizontal_wrapped(|ui| {
+        let mut search = window.account_search().to_owned();
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut search)
+                    .hint_text("Search accounts and characters")
+                    .desired_width(220.0),
+            )
+            .changed()
+        {
+            window.set_account_search(&search);
+        }
+        ui.add_space(12.0);
         let mut only_checked = window.show_only_checked_accounts();
         if ui
             .checkbox(&mut only_checked, "Show only checked accounts")
@@ -494,7 +509,7 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
         ui.add_space(12.0);
         let mut relaunch = window.relaunch_checked_clients_automatically();
         if ui
-            .checkbox(&mut relaunch, "Relaunch checked clients automatically")
+            .checkbox(&mut relaunch, "Keep checked clients running")
             .changed()
         {
             window.set_relaunch_checked_clients_automatically(relaunch);
@@ -511,8 +526,9 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
     });
     ui.label(
         RichText::new(
-            "When enabled, checked clients relaunch after a crash or Stop. Uncheck a client or \
-             turn this off to keep it stopped. These controls last for this launcher session.",
+            "When enabled, checked accounts with a character chosen start when the launcher \
+             opens, and a client that crashes or exits starts again after the delay. Stop keeps \
+             a client down until you press Play.",
         )
         .color(theme::MUTED)
         .size(11.0),
@@ -526,6 +542,14 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
             .color(hex("#F17474"))
             .size(11.0),
         );
+    }
+    let hidden = window.checked_rows_hidden_by_search();
+    if hidden > 0 {
+        ui.label(muted(format!(
+            "The search hides {hidden} checked {}; Play selected still starts {}.",
+            if hidden == 1 { "account" } else { "accounts" },
+            if hidden == 1 { "it" } else { "them" }
+        )));
     }
     ui.add_space(4.0);
     let has_logs = window
@@ -640,7 +664,7 @@ fn account_list(
                 ui.add_space(16.0);
                 ui.label(muted("Add your users and servers with the editors below."));
             }
-            for group in groups.iter().filter(|group| group.is_visible) {
+            for group in groups.iter().filter(|group| group.is_shown()) {
                 Frame::new()
                     .fill(theme::GROUP)
                     .stroke(Stroke::new(GROUP_BORDER, theme::BORDER))
@@ -650,7 +674,7 @@ fn account_list(
                         ui.spacing_mut().item_spacing.y = 0.0;
                         group_header(ui, group, interact, &mut actions, layout);
                         if group.is_expanded {
-                            for row in group.servers.iter().filter(|row| row.is_visible) {
+                            for row in group.servers.iter().filter(|row| row.is_shown()) {
                                 let cells =
                                     account_row(ui, &columns, row, states(row), &mut actions);
                                 layout.rows.push(cells);

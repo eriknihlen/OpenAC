@@ -1,6 +1,12 @@
-//! Relaunching checked accounts' clients automatically: after a crash or a
-//! Stop, once the process and its start-up work have ended and the delay
-//! has passed, the account is launched again with its current choice.
+//! Keeping checked accounts' clients running: after a crash or an exit,
+//! once the process and its start-up work have ended and the delay has
+//! passed, the account is launched again with its current choice. A Stop
+//! keeps the client down until it is launched again by hand.
+//!
+//! A checked account with a character chosen and no client is started at
+//! once: when the launcher opens, when it is checked, and when keeping
+//! clients running is turned on. One whose last client was stopped stays
+//! down.
 //!
 //! The controller owns no process and runs no launch itself: [`poll`]
 //! hands out at most one due attempt, the caller runs the ordinary launch,
@@ -21,14 +27,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::capabilities::LauncherCapability;
 use super::orchestrator::OrchestratorError;
-use super::snapshot::{
-    LauncherActivityKind, LauncherSessionSnapshot, LauncherSessionStop, LauncherStateSnapshot,
-};
+use super::snapshot::{LauncherActivityKind, LauncherSessionSnapshot, LauncherStateSnapshot};
 use crate::cancel::CancelToken;
 use crate::profiles::{LaunchMode, same_account};
 
 /// The default delay before a relaunch, in seconds.
-pub const DEFAULT_RELAUNCH_DELAY_SECONDS: u32 = 180;
+pub const DEFAULT_RELAUNCH_DELAY_SECONDS: u32 = 30;
 /// The shortest delay allowed, in seconds.
 pub const MINIMUM_RELAUNCH_DELAY_SECONDS: u32 = 5;
 /// The longest delay allowed, in seconds.
@@ -99,6 +103,29 @@ struct Entry {
     /// logged on: the next attempt waits only for the server's hold, not the
     /// full delay.
     retry_after_hold: bool,
+    /// The account has no client and none was stopped: it starts without
+    /// waiting the delay, once a character is chosen.
+    start_now: bool,
+}
+
+impl Entry {
+    /// The client ended; it is relaunched after the delay unless it was
+    /// stopped.
+    fn ended(&mut self, now: Duration) {
+        if self.terminal_since.is_none() {
+            self.terminal_since = Some(now);
+            // An end waits the full delay unless it shows a refusal.
+            self.retry_after_hold = false;
+        }
+    }
+
+    /// The client was stopped: it stays down.
+    fn stopped(&mut self) {
+        self.tracked_session = None;
+        self.terminal_since = None;
+        self.retry_after_hold = false;
+        self.start_now = false;
+    }
 }
 
 /// Schedules ordinary launches for the play sessions of checked accounts.
@@ -250,6 +277,7 @@ impl LauncherRelaunchController {
                         entry.seen_created_at = Some(latest.created_at);
                         entry.tracked_session = Some(latest.session_id.clone());
                         entry.terminal_since = None;
+                        entry.start_now = false;
                         // A session someone else started waits the full
                         // delay after it ends. One that appears while an
                         // attempt runs is the attempt's own (its launch
@@ -264,6 +292,10 @@ impl LauncherRelaunchController {
                 None => {
                     let id = self.next_entry;
                     self.next_entry += 1;
+                    let running = latest.filter(|session| session.is_process_or_start_active());
+                    // No client: start one now, unless the last was stopped.
+                    let start_now =
+                        running.is_none() && latest.is_none_or(|session| session.stop.is_none());
                     self.entries.push((
                         key,
                         Entry {
@@ -271,12 +303,11 @@ impl LauncherRelaunchController {
                             selection: choice,
                             seen_session: latest.map(|session| session.session_id.clone()),
                             seen_created_at: latest.map(|session| session.created_at),
-                            tracked_session: latest
-                                .filter(|session| session.is_process_or_start_active())
-                                .map(|session| session.session_id.clone()),
-                            terminal_since: None,
+                            tracked_session: running.map(|session| session.session_id.clone()),
+                            terminal_since: start_now.then_some(now),
                             cancellation: None,
                             retry_after_hold: false,
+                            start_now,
                         },
                     ));
                     self.entries.len() - 1
@@ -291,20 +322,13 @@ impl LauncherRelaunchController {
                 Some(session) if session.is_process_or_start_active() => {
                     entry.terminal_since = None;
                 }
-                Some(session) if session.stop == Some(LauncherSessionStop::Forced) => {
-                    // A Stop that had to kill the client is still the
-                    // player's stop, not a crash: it is not relaunched.
-                    entry.tracked_session = None;
-                    entry.terminal_since = None;
-                    entry.retry_after_hold = false;
+                Some(session) if session.stop.is_some() => {
+                    // The player's Stop, graceful or one that had to kill
+                    // the client: it stays down until launched again.
+                    entry.stopped();
                 }
                 ended => {
-                    if entry.terminal_since.is_none() {
-                        entry.terminal_since = Some(now);
-                        // An end waits the full delay unless it shows a
-                        // refusal.
-                        entry.retry_after_hold = false;
-                    }
+                    entry.ended(now);
                     // The client's exit report, which says the server still
                     // held the account, is often read after the end itself
                     // was seen: whenever it shows, the next try waits only
@@ -338,12 +362,16 @@ impl LauncherRelaunchController {
                 continue;
             };
             // After a refusal the server's hold, checked through `capability`,
-            // is the only wait.
-            if !entry.retry_after_hold && now.saturating_sub(since) < delay {
+            // is the only wait; an account with no client does not wait.
+            if !entry.retry_after_hold && !entry.start_now && now.saturating_sub(since) < delay {
                 continue;
             }
             let choice = &entry.selection;
             if choice.mode == LaunchMode::Headless && choice.character.is_none() {
+                continue;
+            }
+            // Started without a client to replace: only with a character.
+            if entry.start_now && choice.character.is_none() {
                 continue;
             }
             if !capability(choice)?.is_available {
@@ -351,6 +379,8 @@ impl LauncherRelaunchController {
             }
             let cancel = CancelToken::new();
             entry.cancellation = Some(cancel.clone());
+            // A failed start waits the full delay like any other.
+            entry.start_now = false;
             self.launching = true;
             return Ok(Some(RelaunchAttempt {
                 selection: choice.clone(),

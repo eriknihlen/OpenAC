@@ -492,6 +492,7 @@ fn parts(fake: Arc<dyn Orchestration>, spawner: Arc<dyn Spawner>) -> LauncherWin
         apply_launcher_update: None,
         install_folder: None,
         checked_accounts: None,
+        relaunch_settings: None,
         relaunch_clock: None,
         known_servers: None,
         classic_migration: None,
@@ -2150,6 +2151,94 @@ fn restoring_and_refreshing_checks_does_not_rewrite_the_selection_file() {
     window.poll();
     assert_eq!(std::fs::read(selection.file_path()).unwrap(), original);
     assert!(fake.saved_row_selection.lock().unwrap().is_none());
+}
+
+// --- Keeping checked clients running, remembered -----------------------------------------
+// Not OpenAC tests: its launcher keeps these settings for one run and never
+// starts a client just because its account is checked.
+
+impl CheckedFixture {
+    fn relaunch_file_path(&self) -> PathBuf {
+        self.root
+            .join(ac_launcher_core::profiles::RELAUNCH_SETTINGS_FILE_NAME)
+    }
+
+    /// A window with both remembered files, started as the launcher starts.
+    fn started_window(&self, fake: &Arc<Fake>) -> LauncherWindow {
+        let mut parts = parts(fake.clone(), Arc::new(InlineSpawner));
+        parts.checked_accounts = Some(LauncherCheckedAccountStore::new(&self.file_path()));
+        parts.relaunch_settings = Some(
+            ac_launcher_core::profiles::LauncherRelaunchSettingsStore::new(
+                &self.relaunch_file_path(),
+            ),
+        );
+        let mut window = LauncherWindow::new(parts);
+        window.initialize();
+        window.start_background_initialization();
+        window.poll();
+        window.close_active_modal();
+        window.poll();
+        window
+    }
+}
+
+#[test]
+fn keeping_clients_running_and_the_delay_are_remembered() {
+    let selection = CheckedFixture::new();
+    {
+        let mut window = selection.started_window(&batch());
+        assert!(!window.relaunch_checked_clients_automatically());
+        assert_eq!(window.relaunch_delay_seconds_text(), "30");
+        window.set_relaunch_checked_clients_automatically(true);
+        window.set_relaunch_delay_seconds_text("45");
+        // A box that is not a delay keeps the last valid one.
+        window.set_relaunch_delay_seconds_text("4");
+        assert_eq!(window.last_error, None);
+    }
+    let window = selection.started_window(&batch());
+    assert!(window.relaunch_checked_clients_automatically());
+    assert_eq!(window.relaunch_delay_seconds_text(), "45");
+}
+
+#[test]
+fn opening_the_launcher_starts_the_checked_accounts_when_clients_are_kept_running() {
+    for enabled in [false, true] {
+        let selection = CheckedFixture::new();
+        ac_launcher_core::profiles::LauncherRelaunchSettingsStore::new(
+            &selection.relaunch_file_path(),
+        )
+        .save(ac_launcher_core::profiles::LauncherRelaunchSettings {
+            enabled,
+            delay_seconds: 30,
+        })
+        .unwrap();
+        LauncherCheckedAccountStore::new(&selection.file_path())
+            .save([ac_launcher_core::profiles::LauncherCheckedAccount::new(
+                "One", "Alice",
+            )])
+            .unwrap();
+        let fake = batch();
+        for server in fake.servers.lock().unwrap().iter_mut() {
+            for account in &mut server.accounts {
+                account.selected_character = Some("A character".into());
+            }
+        }
+        let mut window = selection.started_window(&fake);
+        window.poll();
+        let launched: Vec<(String, String)> = fake
+            .launch_requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| (request.0.clone(), request.1.clone()))
+            .collect();
+        let expected = if enabled {
+            vec![("One".to_owned(), "Alice".to_owned())]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(launched, expected, "enabled: {enabled}");
+    }
 }
 
 // OpenAC LauncherWindowViewModelTests.ACheckedAccountMatchesItsRowWhateverTheCaseOfItsName.
@@ -4229,7 +4318,7 @@ fn checked_filter_combines_with_profiles_and_keeps_selections_while_active_can_b
     let mut window = create_initialized(&fake);
     assert!(!window.show_only_checked_accounts());
     assert!(!window.relaunch_checked_clients_automatically());
-    assert_eq!(window.relaunch_delay_seconds_text(), "180");
+    assert_eq!(window.relaunch_delay_seconds_text(), "30");
     // The running row's selection cannot be edited, but its check can change.
     let row = window.row("Alice", "One").unwrap();
     assert!(row.is_active());
@@ -4328,6 +4417,70 @@ fn can_stop_second_client_while_first_stop_is_still_awaiting_exit() {
     window.poll();
     assert_eq!(*fake.stopped.lock().unwrap(), ["session-1", "second"]);
     assert_eq!(window.operation_status, "Stop requested.");
+}
+
+// Not an OpenAC test: Stop all stops every running client at once, and is
+// offered only while one runs.
+#[test]
+fn stop_all_stops_every_running_client() {
+    let fake = batch();
+    let mut exited = live_session("third", "Two", "Alice");
+    exited.state = LauncherActivityState::Exited;
+    exited.has_live_process = Some(false);
+    *fake.sessions_override.lock().unwrap() = Some(vec![
+        live_session("session-1", "One", "Alice"),
+        live_session("second", "One", "Bob"),
+        exited,
+    ]);
+    let (mut window, spawner) = create_started_queued(&fake);
+    assert!(window.can_stop_all());
+    window.stop_all();
+    assert_eq!(window.operation_status, "Logging out 2 clients…");
+    // Each stop is under way: nothing is left for Stop all.
+    assert!(!window.can_stop_all());
+    spawner.run_all();
+    window.poll();
+    assert_eq!(*fake.stopped.lock().unwrap(), ["session-1", "second"]);
+
+    let idle = batch();
+    *idle.sessions_override.lock().unwrap() = Some(Vec::new());
+    let (window, _) = create_started_queued(&idle);
+    assert!(!window.can_stop_all());
+}
+
+// Not an OpenAC test: the search shows the accounts whose name or one of
+// whose characters' names holds the text, ignoring case; it only hides rows.
+#[test]
+fn the_search_hides_rows_but_play_selected_still_starts_them() {
+    let fake = batch();
+    let mut window = create_started(&fake);
+    window.set_row_checked("Alice", "One", true);
+    let shown = |window: &LauncherWindow| -> Vec<(String, String)> {
+        window
+            .accounts
+            .iter()
+            .filter(|group| group.is_shown())
+            .flat_map(|group| group.servers.iter())
+            .filter(|row| row.is_shown())
+            .map(|row| (row.account_name.clone(), row.server_name.clone()))
+            .collect()
+    };
+    window.set_account_search("  BO ");
+    assert_eq!(shown(&window), [("Bob".to_owned(), "One".to_owned())]);
+    assert_eq!(window.checked_rows_hidden_by_search(), 1);
+    assert!(
+        window.play_checked_text().contains('1'),
+        "{}",
+        window.play_checked_text()
+    );
+    // A character's name finds its account.
+    window.set_account_search("a CHARACTER");
+    assert_eq!(shown(&window).len(), 3);
+    window.set_account_search("nobody");
+    assert!(shown(&window).is_empty());
+    window.set_account_search("");
+    assert_eq!(shown(&window).len(), 3);
+    assert_eq!(window.checked_rows_hidden_by_search(), 0);
 }
 
 // OpenAC LauncherWindowViewModelTests.StopAndPlayOnDifferentAccountsDoNotBlockEachOtherOrSettings.

@@ -64,6 +64,9 @@ pub struct AccountGroup {
     pub is_expanded: bool,
     /// False while the profile filter hides this account.
     pub is_visible: bool,
+    /// False while the search hides this account. The search only hides:
+    /// Play selected still starts what the profile filter shows.
+    pub matches_search: bool,
     /// The account's profile tags.
     pub profiles: Vec<String>,
     /// The account's plugins by name, such as "Combat · Stats", or "none".
@@ -82,11 +85,17 @@ impl AccountGroup {
             server_name: String::new(),
             is_expanded: true,
             is_visible: true,
+            matches_search: true,
             profiles: Vec::new(),
             plugins_summary: "none".into(),
             subtitle: String::new(),
             servers: Vec::new(),
         }
+    }
+
+    /// Drawn: the profile filter and the search both show it.
+    pub fn is_shown(&self) -> bool {
+        self.is_visible && self.matches_search
     }
 
     /// The account is on one server only.
@@ -187,6 +196,8 @@ pub struct AccountServerRow {
     pub hold_text: Option<String>,
     /// False while the profile filter hides this row.
     pub is_visible: bool,
+    /// False while the search hides this row.
+    pub matches_search: bool,
     /// The account's profile tags on this server.
     pub profiles: Vec<String>,
     active_session_id: Option<String>,
@@ -215,11 +226,30 @@ impl AccountServerRow {
             disabled_reason: String::new(),
             hold_text: None,
             is_visible: true,
+            matches_search: true,
             profiles: Vec::new(),
             active_session_id: None,
             active_window: None,
             selection_loaded: false,
         }
+    }
+
+    /// Drawn: the profile filter and the search both show it.
+    pub fn is_shown(&self) -> bool {
+        self.is_visible && self.matches_search
+    }
+
+    /// Whether `query` (already lowercase, not empty) is part of the
+    /// account's name or one of its characters' names, ignoring case.
+    pub fn matches(&self, query: &str) -> bool {
+        let contains = |text: &str| text.to_lowercase().contains(query);
+        contains(&self.account_name)
+            || self
+                .character_choices
+                .iter()
+                .filter(|choice| choice.as_str() != CHARACTER_SELECT)
+                .any(|choice| contains(choice))
+            || self.active_character_name.as_deref().is_some_and(contains)
     }
 
     /// What a launch from this row asks for: headless, the character

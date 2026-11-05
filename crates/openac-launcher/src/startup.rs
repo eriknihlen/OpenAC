@@ -413,6 +413,9 @@ impl Prepared {
             client_version: self.client_version,
             apply_launcher_update: self.apply_launcher_update,
             install_folder: self.install_folder,
+            relaunch_settings: Some(
+                ac_launcher_core::profiles::LauncherRelaunchSettingsStore::for_paths(&paths),
+            ),
             checked_accounts: Some(
                 ac_launcher_core::profiles::LauncherCheckedAccountStore::for_paths(&paths),
             ),

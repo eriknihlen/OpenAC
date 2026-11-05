@@ -31,11 +31,11 @@ use super::{Orchestration, ServerHealth, Spawner, Wake, safe_display_error};
 use crate::cancel::CancelToken;
 use crate::installation::{InstallRecordVerification, LauncherInstallRecord, RetailContentStore};
 use crate::orchestration::{
-    AccountCapabilities, LauncherAccountSnapshot, LauncherActivityState, LauncherCapability,
-    LauncherCharacterSnapshot, LauncherRelaunchController, LauncherRelaunchSelection,
-    LauncherSessionSnapshot, LauncherStateSnapshot, LauncherStopGate,
-    MAXIMUM_RELAUNCH_DELAY_SECONDS, MINIMUM_RELAUNCH_DELAY_SECONDS, MonotonicClock,
-    OrchestratorError, RelaunchAttempt,
+    AccountCapabilities, DEFAULT_RELAUNCH_DELAY_SECONDS, LauncherAccountSnapshot,
+    LauncherActivityKind, LauncherActivityState, LauncherCapability, LauncherCharacterSnapshot,
+    LauncherRelaunchController, LauncherRelaunchSelection, LauncherSessionSnapshot,
+    LauncherStateSnapshot, LauncherStopGate, MAXIMUM_RELAUNCH_DELAY_SECONDS,
+    MINIMUM_RELAUNCH_DELAY_SECONDS, MonotonicClock, OrchestratorError, RelaunchAttempt,
 };
 use crate::plugins::{
     ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
@@ -45,8 +45,8 @@ use crate::plugins::{
     github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
-    LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherTextEditorKind,
-    find_account, same_account,
+    LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherRelaunchSettings,
+    LauncherRelaunchSettingsStore, LauncherTextEditorKind, find_account, same_account,
 };
 use crate::status::{KnownServerCatalog, KnownServerList};
 use crate::updates::{
@@ -145,6 +145,9 @@ pub struct LauncherWindowParts {
     /// Which account rows were ticked, remembered across restarts; `None`
     /// keeps them for this run only.
     pub checked_accounts: Option<LauncherCheckedAccountStore>,
+    /// Whether checked clients are kept running and the relaunch delay,
+    /// remembered across restarts; `None` keeps them for this run only.
+    pub relaunch_settings: Option<LauncherRelaunchSettingsStore>,
     /// The clock automatic relaunch times its delay on; `None`: the
     /// system's monotonic clock.
     pub relaunch_clock: Option<MonotonicClock>,
@@ -315,6 +318,7 @@ pub struct LauncherWindow {
     pub profile_filters: Vec<ProfileFilterChip>,
     checked_accounts: Option<LauncherCheckedAccountStore>,
     checked_accounts_loaded: bool,
+    relaunch_settings: Option<LauncherRelaunchSettingsStore>,
     /// The session log dialog is open.
     pub is_session_log_open: bool,
     /// The settings dialog is open.
@@ -341,6 +345,7 @@ pub struct LauncherWindow {
     automatic_relaunch: LauncherRelaunchController,
     relaunch_attempt_running: bool,
     show_only_checked_accounts: bool,
+    account_search: String,
     relaunch_checked_clients_automatically: bool,
     relaunch_delay_seconds_text: String,
     /// (server, account) rows whose start runs: only those are locked.
@@ -591,6 +596,7 @@ impl LauncherWindow {
             profile_filters: Vec::new(),
             checked_accounts: parts.checked_accounts,
             checked_accounts_loaded: false,
+            relaunch_settings: parts.relaunch_settings,
             is_session_log_open: false,
             is_settings_open: false,
             install_folder: parts
@@ -611,8 +617,9 @@ impl LauncherWindow {
                 .unwrap_or_default(),
             relaunch_attempt_running: false,
             show_only_checked_accounts: false,
+            account_search: String::new(),
             relaunch_checked_clients_automatically: false,
-            relaunch_delay_seconds_text: "180".into(),
+            relaunch_delay_seconds_text: DEFAULT_RELAUNCH_DELAY_SECONDS.to_string(),
             starting_rows: HashSet::new(),
             row_launches: Vec::new(),
             next_row_launch: 0,
@@ -671,6 +678,7 @@ impl LauncherWindow {
                     .flatten();
                 // The plugin panel read the unloaded store's default; take the saved value.
                 self.restore_show_beta_plugins_from_profile();
+                self.restore_relaunch_settings();
                 if self.checked_accounts_loaded {
                     self.last_error = None;
                 }
@@ -1272,12 +1280,48 @@ impl LauncherWindow {
         self.relaunch_checked_clients_automatically
     }
 
-    /// Turns automatic relaunch on or off; off cancels every pending
-    /// relaunch.
+    /// Turns keeping checked clients running on or off, and remembers it.
+    /// On starts every checked account with a character and no client; off
+    /// cancels every pending relaunch.
     pub fn set_relaunch_checked_clients_automatically(&mut self, value: bool) {
         if self.relaunch_checked_clients_automatically != value {
             self.relaunch_checked_clients_automatically = value;
+            self.save_relaunch_settings();
             self.observe_current_session_controls();
+        }
+    }
+
+    /// Takes the remembered relaunch settings (at start-up, before the
+    /// first observation).
+    fn restore_relaunch_settings(&mut self) {
+        let Some(store) = &self.relaunch_settings else {
+            return;
+        };
+        match store.load() {
+            Ok(settings) => {
+                self.relaunch_checked_clients_automatically = settings.enabled;
+                self.relaunch_delay_seconds_text = settings.delay_seconds.to_string();
+                // In range by construction.
+                let _ = self
+                    .automatic_relaunch
+                    .set_delay_seconds(settings.delay_seconds);
+            }
+            Err(error) => self.last_error = Some(error.0),
+        }
+    }
+
+    /// Remembers the relaunch settings; a delay box that is not a valid
+    /// delay keeps the last valid one.
+    fn save_relaunch_settings(&mut self) {
+        let Some(store) = &self.relaunch_settings else {
+            return;
+        };
+        let settings = LauncherRelaunchSettings {
+            enabled: self.relaunch_checked_clients_automatically,
+            delay_seconds: self.automatic_relaunch.delay_seconds(),
+        };
+        if let Err(error) = store.save(settings) {
+            self.last_error = Some(error.0);
         }
     }
 
@@ -1296,6 +1340,7 @@ impl LauncherWindow {
         if let Some(seconds) = parse_relaunch_delay(text) {
             // In range by construction.
             let _ = self.automatic_relaunch.set_delay_seconds(seconds);
+            self.save_relaunch_settings();
         }
     }
 
@@ -1441,15 +1486,39 @@ impl LauncherWindow {
             chip.is_selected = matches(&chip.profile);
         }
         let only_checked = self.show_only_checked_accounts;
+        let query = self.account_search.trim().to_lowercase();
         for group in &mut self.accounts {
             for row in &mut group.servers {
                 row.is_visible = filter
                     .as_deref()
                     .is_none_or(|filter| row.has_profile(filter))
                     && (!only_checked || row.is_checked);
+                row.matches_search = query.is_empty() || row.matches(&query);
             }
             group.is_visible = group.servers.iter().any(|row| row.is_visible);
+            group.matches_search = group.servers.iter().any(AccountServerRow::is_shown);
         }
+    }
+
+    /// The search box's text.
+    pub fn account_search(&self) -> &str {
+        &self.account_search
+    }
+
+    /// Shows only the accounts whose name, or one of whose characters'
+    /// names, holds `text` (ignoring case); empty shows all. It only hides
+    /// rows: Play selected still starts every checked row the profile filter
+    /// shows.
+    pub fn set_account_search(&mut self, text: &str) {
+        if self.account_search != text {
+            text.clone_into(&mut self.account_search);
+            self.apply_profile_filter();
+        }
+    }
+
+    /// Checked rows that Play selected starts but the search hides.
+    pub fn checked_rows_hidden_by_search(&self) -> usize {
+        self.checked_rows().filter(|row| !row.is_shown()).count()
     }
 
     /// Filters the accounts by a profile tag (`None`: all accounts).
@@ -2332,6 +2401,42 @@ impl LauncherWindow {
             let _ = sender.send(Message::StopFinished(result));
             wake();
         });
+    }
+
+    /// The clients Stop all would stop: every play session whose process or
+    /// start-up runs and whose Stop may run.
+    fn stoppable_sessions(&self) -> Vec<String> {
+        self.snapshot
+            .iter()
+            .flat_map(|snapshot| &snapshot.sessions)
+            .filter(|session| {
+                session.kind == LauncherActivityKind::Play
+                    && session.is_process_or_start_active()
+                    && self.can_stop_session(&session.session_id)
+            })
+            .map(|session| session.session_id.clone())
+            .collect()
+    }
+
+    /// Stop all may run: some client is running or starting.
+    pub fn can_stop_all(&self) -> bool {
+        !self.stoppable_sessions().is_empty()
+    }
+
+    /// Stops every running client at once, each as its row's Stop does: a
+    /// graceful logout, then a kill after 30 s. Stopped clients stay down
+    /// until they are launched again.
+    pub fn stop_all(&mut self) {
+        let sessions = self.stoppable_sessions();
+        for id in &sessions {
+            self.stop_session(id);
+        }
+        if !sessions.is_empty() {
+            self.operation_status = match sessions.len() {
+                1 => "Logging out 1 client…".into(),
+                count => format!("Logging out {count} clients…"),
+            };
+        }
     }
 
     /// The bottom bar's Cancel: the running operation and every pending
