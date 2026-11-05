@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use ac_host::{CharacterSelector, ConfigReader, PathSet, SessionMode, load_config};
+use ac_host_core::{CharacterSelector, ConfigReader, PathSet, SessionMode, load_config};
 use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{
     BoundedProcessOutputCapture, ChildProcess, ChildProcessFactory, ComposeError,
@@ -33,7 +33,7 @@ use common::{TempDir, fixture_args, fixture_command};
 #[test]
 fn every_child_is_told_the_root_and_each_member() {
     let root = std::env::temp_dir().join("openac-child-env");
-    let mut paths = PathSet::for_root(&root, ac_host::RootSource::Explicit);
+    let mut paths = PathSet::for_root(&root, ac_host_core::RootSource::Explicit);
     paths.config_directory = root.join("elsewhere");
 
     let environment = ac_launcher_core::launching::child_environment(&paths);
@@ -107,17 +107,17 @@ fn compose_simple(
 }
 
 /// The single session's members as (name, value) from the written JSON.
-fn session_members(composed: &ComposedSessionConfig) -> Vec<(String, ac_host::json::Value)> {
+fn session_members(composed: &ComposedSessionConfig) -> Vec<(String, ac_host_core::json::Value)> {
     let json = serialize(&composed.document);
-    let root = ac_host::json::parse(json.as_bytes()).unwrap();
-    let members = ac_host::json::object_members(&root).unwrap();
+    let root = ac_host_core::json::parse(json.as_bytes()).unwrap();
+    let members = ac_host_core::json::object_members(&root).unwrap();
     let sessions = members
         .iter()
         .find(|member| member.name == "sessions")
         .unwrap();
-    let items = ac_host::json::array_items(&sessions.value).unwrap();
+    let items = ac_host_core::json::array_items(&sessions.value).unwrap();
     assert_eq!(items.len(), 1);
-    ac_host::json::object_members(&items[0])
+    ac_host_core::json::object_members(&items[0])
         .unwrap()
         .iter()
         .map(|member| (member.name.clone(), member.value.value.clone()))
@@ -139,7 +139,7 @@ fn sorted(items: &[&str]) -> Vec<String> {
     items
 }
 
-fn session(composed: &ComposedSessionConfig) -> &ac_host::SessionDescriptor {
+fn session(composed: &ComposedSessionConfig) -> &ac_host_core::SessionDescriptor {
     &composed.document.sessions[0]
 }
 
@@ -221,7 +221,7 @@ fn gui_mode_includes_character_selector_and_omits_policy() {
     );
     let name = folder.file_name().unwrap().to_string_lossy();
     assert!(
-        ac_host::layout::parse_session_folder_name(&name).is_some(),
+        ac_host_core::layout::parse_session_folder_name(&name).is_some(),
         "{name}"
     );
     assert_eq!(composed.config_file_path, folder.join("session.json"));
@@ -1611,7 +1611,7 @@ fn wait_for_ready(path: &Path, child: &RecordingChild) {
     }
     // The file is written in one call; wait until it parses.
     let deadline = Instant::now() + Duration::from_secs(5);
-    while ac_host::json::parse(&std::fs::read(path).unwrap_or_default()).is_err() {
+    while ac_host_core::json::parse(&std::fs::read(path).unwrap_or_default()).is_err() {
         assert!(Instant::now() < deadline, "ready file never completed");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1668,20 +1668,23 @@ fn a_console_stop_ends_only_the_target_process_group_without_a_kill() {
     wait_for_ready(&target_ready, &target_factory.last());
     wait_for_ready(&sibling_ready, &sibling_factory.last());
 
-    let ready = ac_host::json::parse(&std::fs::read(&target_ready).unwrap()).unwrap();
-    let members = ac_host::json::object_members(&ready).unwrap();
+    let ready = ac_host_core::json::parse(&std::fs::read(&target_ready).unwrap()).unwrap();
+    let members = ac_host_core::json::object_members(&ready).unwrap();
     let member = |name: &str| &members.iter().find(|m| m.name == name).unwrap().value;
-    let observed: Vec<String> = ac_host::json::array_items(member("arguments"))
+    let observed: Vec<String> = ac_host_core::json::array_items(member("arguments"))
         .unwrap()
         .iter()
-        .map(|item| ac_host::json::string_or_null(item).unwrap().unwrap())
+        .map(|item| ac_host_core::json::string_or_null(item).unwrap().unwrap())
         .collect();
     assert_eq!(observed, exact);
     assert_eq!(
-        ac_host::json::int32(member("stdinLength")).unwrap(),
+        ac_host_core::json::int32(member("stdinLength")).unwrap(),
         "fixture-input\n".len() as i32
     );
-    assert_eq!(ac_host::json::int32(member("stdinLineCount")).unwrap(), 1);
+    assert_eq!(
+        ac_host_core::json::int32(member("stdinLineCount")).unwrap(),
+        1
+    );
 
     target.stop(Duration::from_secs(10)).unwrap();
     assert!(wait_for_exited(&target, Duration::from_secs(10)));

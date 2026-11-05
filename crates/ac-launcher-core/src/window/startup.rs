@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 
 use crate::plugins::PluginCatalog;
 use crate::updates::ReleaseManifestClient;
@@ -161,7 +161,7 @@ impl LauncherStartupOptions {
                 PathSet::from_members(config_directory, data_directory, cache_directory)
             }
             (None, None, None) => match root {
-                Some(root) => PathSet::for_root(&root, ac_host::RootSource::Explicit),
+                Some(root) => PathSet::for_root(&root, ac_host_core::RootSource::Explicit),
                 None => resolve_default_paths().map_err(StartupOptionsError)?,
             },
             _ => {
@@ -220,7 +220,7 @@ fn set_directory_once(
         )));
     }
     // Absolute already, so the base is never used.
-    *destination = Some(ac_host::paths::full_path(path, path));
+    *destination = Some(ac_host_core::paths::full_path(path, path));
     Ok(())
 }
 
@@ -248,7 +248,10 @@ mod tests {
         .unwrap();
         assert_eq!(options.paths.root_directory(), root);
         assert_eq!(options.paths.config_directory, root.join("settings"));
-        assert_eq!(options.paths.root_source, ac_host::RootSource::Explicit);
+        assert_eq!(
+            options.paths.root_source,
+            ac_host_core::RootSource::Explicit
+        );
         assert!(
             LauncherStartupOptions::parse(&strings(&["--root-dir", "relative"]), untouched)
                 .is_err()

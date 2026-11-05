@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ac_host::PathSet;
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::PathSet;
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::UpdateError;
 use super::barrier::{ExclusiveLease, UpdateSessionBarrier};

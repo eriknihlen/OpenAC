@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use ac_host::PathSet;
-use ac_host::local_time::LocalZone;
+use ac_host_core::PathSet;
+use ac_host_core::local_time::LocalZone;
 
 use crate::orchestration::{LauncherSessionSnapshot, LauncherStateSnapshot};
 
@@ -115,14 +115,14 @@ fn old_path(path: &Path) -> PathBuf {
 
 fn write_line(state: &mut State, line: &[u8]) -> std::io::Result<()> {
     if state.file.is_none() {
-        let file = ac_host::layout::open_append(&state.path)?;
+        let file = ac_host_core::layout::open_append(&state.path)?;
         state.written = file.metadata()?.len();
         state.file = Some(file);
     }
     if state.written > 0 && state.written + line.len() as u64 > state.roll_at {
         state.file = None;
         std::fs::rename(&state.path, old_path(&state.path))?;
-        state.file = Some(ac_host::layout::open_append(&state.path)?);
+        state.file = Some(ac_host_core::layout::open_append(&state.path)?);
         state.written = 0;
     }
     if let Some(file) = state.file.as_mut() {
@@ -138,7 +138,7 @@ fn local_time_text(at: SystemTime, zone: &LocalZone) -> String {
         i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
     });
     let local_ms = utc_ms + i64::from(zone.utc_offset_seconds(utc_ms)) * 1000;
-    let name = ac_host::layout::session_folder_name(local_ms);
+    let name = ac_host_core::layout::session_folder_name(local_ms);
     // The folder name's `HH-mm-ss` read as a time of day.
     let (date, time) = name.split_at(10);
     format!("{date} {}", time.trim_start().replace('-', ":"))

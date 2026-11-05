@@ -1,0 +1,19 @@
+[package]
+name = "ac-plugin-manifest"
+description = "A plugin's plugin.json: the strict parser and the client-version rules. One reader for the client's plugin host and the launcher, which never loads or runs a module."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The strict JSON reader the client's documents use.
+ac-host-core.workspace = true
+# The API versions and permissions a manifest declares.
+ac-plugin-version.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

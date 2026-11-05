@@ -1,7 +1,7 @@
 //! The profile document's types and its JSON form (version 2: plugins and
 //! logon commands per account, accounts per server).
 
-use ac_host::json::{self as host_json, JsonError, Node, ObjectReader};
+use ac_host_core::json::{self as host_json, JsonError, Node, ObjectReader};
 
 use super::store::{CURRENT_PROFILE_VERSION, ProfileError};
 use crate::json::{self, ObjectBuilder, Out};

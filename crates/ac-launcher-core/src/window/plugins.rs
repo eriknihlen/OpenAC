@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 
 use crate::cancel::CancelToken;
 use crate::launcher_log::LauncherLog;

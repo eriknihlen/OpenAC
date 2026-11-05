@@ -4,7 +4,7 @@
 //! commands on the account (a character may still have its own plugin
 //! list) and accounts per server.
 
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::account_name::find_account;
 use super::document::{

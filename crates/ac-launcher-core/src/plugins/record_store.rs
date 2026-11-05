@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ac_host::PathSet;
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::PathSet;
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::manifest::has_valid_install_id;
 use crate::fsutil;

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::UpdateError;
 use super::payload::is_valid_rid;

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 use ac_launcher_core::cancel::{CancelToken, Cancelled};
 use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launcher_log::LauncherLog;
@@ -3293,7 +3293,7 @@ fn the_plugin_backend_writes_to_the_log_it_is_given() {
         LauncherLog::at(
             &given,
             1024 * 1024,
-            ac_host::local_time::LocalZone::fixed(0),
+            ac_host_core::local_time::LocalZone::fixed(0),
         ),
     );
     composition.log_index_warning_text(HELLO_REPO, Some("a test warning"));
@@ -4911,7 +4911,7 @@ mod add_server {
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
-    use ac_host::local_time::LocalZone;
+    use ac_host_core::local_time::LocalZone;
     use ac_launcher_core::orchestration::{LauncherExecutableSet, LauncherOrchestrator};
     use ac_launcher_core::profiles::LauncherProfileStore;
     use ac_launcher_core::status::{

@@ -20,7 +20,7 @@ mod windows_pipe;
 
 use std::sync::Arc;
 
-use ac_host::json::{self, Member, Node, Value};
+use ac_host_core::json::{self, Member, Node, Value};
 
 use crate::cancel::CancelToken;
 use crate::orchestration::{LauncherSessionSnapshot, LauncherStateSnapshot};

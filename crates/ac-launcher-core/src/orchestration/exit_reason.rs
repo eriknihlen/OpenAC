@@ -3,7 +3,7 @@
 //! refusal from the server ended the session. The exit code stays as a
 //! small suffix for whoever reads the session log.
 
-use ac_host::ExitCode;
+use ac_host_core::ExitCode;
 
 /// What the launcher knows about how a client ended.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

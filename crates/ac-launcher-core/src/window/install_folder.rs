@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 
 use crate::installation::{InstallRootMoveResult, InstallRootMover, MOVE_SESSION_REFUSAL};
 
@@ -193,7 +193,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use ac_host::RootSource;
+    use ac_host_core::RootSource;
 
     struct Fixture {
         scratch: PathBuf,

@@ -10,8 +10,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use ac_host::paths::{full_path, root_pointer};
-use ac_host::{ConfigError, Os, PathOverrides, PathSet, Platform, RootSource, SystemPlatform};
+use ac_host_core::paths::{full_path, root_pointer};
+use ac_host_core::{ConfigError, Os, PathOverrides, PathSet, Platform, RootSource, SystemPlatform};
 use common::{FixturePlatform, TempDir};
 
 fn base(name: &str) -> PathBuf {
@@ -38,7 +38,7 @@ fn pointer_path(platform: &FixturePlatform) -> PathBuf {
 
 fn pointer_text(root: &Path) -> String {
     let mut text = String::from("{ \"version\": 1, \"root\": ");
-    ac_host::json::write_string(&mut text, &root.to_string_lossy());
+    ac_host_core::json::write_string(&mut text, &root.to_string_lossy());
     text.push_str(" }");
     text
 }
@@ -385,7 +385,7 @@ fn a_pointer_write_round_trips_and_pointing_at_the_default_removes_it() {
 fn the_pointer_parse_rejects_anything_but_version_one_with_an_absolute_root() {
     let absolute = std::env::temp_dir().join("x");
     let mut versioned = String::from("{ \"version\": 2, \"root\": ");
-    ac_host::json::write_string(&mut versioned, &absolute.to_string_lossy());
+    ac_host_core::json::write_string(&mut versioned, &absolute.to_string_lossy());
     versioned.push_str(" }");
     for text in [
         versioned.as_str(),

@@ -144,11 +144,3 @@ pub fn session(id: &str, credential_reference: &str, extra: Option<&str>) -> Str
          {{\"provider\":\"environment\",\"reference\":\"{credential_reference}\"}}{suffix}}}"
     )
 }
-
-/// The fixtures folder.
-pub fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join(name)
-}

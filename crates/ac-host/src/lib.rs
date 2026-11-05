@@ -16,20 +16,20 @@
 //!
 //! [`start`] strings the first steps together the way a host's `main` does.
 //! Nothing here opens a socket; file reads happen only where named.
+//!
+//! The document, the paths, the status file, the JSON reader, the local time
+//! zone, the exit codes and the install lease live in `ac-host-core`, which
+//! the launcher links without the rest of the client; they are re-exported
+//! here under their old names, one implementation for both.
 
-pub mod character_options;
 pub mod command;
-pub mod config;
 pub mod credentials;
-pub mod exit;
-pub mod install_lease;
-pub mod json;
-pub mod layout;
-pub mod local_time;
-pub mod paths;
 pub mod process_stats;
 pub mod settings;
-pub mod status;
+
+pub use ac_host_core::{
+    character_options, config, exit, install_lease, json, layout, local_time, paths, status,
+};
 
 pub use character_options::CharacterOption;
 pub use command::{Command, CommandLine, ConsoleStream, HELP, UsageError, parse_command_line};

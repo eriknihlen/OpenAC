@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 use ac_launcher_core::ids::unique_hex32;
 
 /// A directory removed with its contents when dropped.

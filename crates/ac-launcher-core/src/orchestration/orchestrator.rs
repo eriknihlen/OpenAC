@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, SystemTime};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 
 use super::capabilities::{LauncherCapability, LauncherPlatformCapabilities};
 use super::executables::LauncherExecutableSet;

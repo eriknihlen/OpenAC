@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ac_host::PathSet;
-use ac_host::json::{self as host_json, ObjectReader, Value};
+use ac_host_core::PathSet;
+use ac_host_core::json::{self as host_json, ObjectReader, Value};
 
 use super::dat_locator::DatDirectoryLocator;
 use super::migration::{ContentMigrationPlan, resolve_content_migration};

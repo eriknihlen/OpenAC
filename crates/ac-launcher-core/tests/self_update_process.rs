@@ -21,7 +21,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::integrity::{compute_sha256_hex, sha256_hex};
 use ac_launcher_core::net::{HttpError, HttpRequest, HttpResponse, HttpTransport};

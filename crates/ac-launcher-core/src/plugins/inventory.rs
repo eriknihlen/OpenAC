@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 
 use super::catalog::PluginCatalog;
 use super::installer::contract_limits;
@@ -452,7 +452,7 @@ fn walk(directory: &Path, manifest: &PluginManifest) -> Result<Option<String>, W
             // any install limit.
             if relative_directory.is_empty()
                 && entry.file_type().is_ok_and(|kind| kind.is_dir())
-                && ac_host::paths::is_player_folder(&name)
+                && ac_host_core::paths::is_player_folder(&name)
             {
                 continue;
             }

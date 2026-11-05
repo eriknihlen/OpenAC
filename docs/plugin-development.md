@@ -8,7 +8,8 @@ it only what its `plugin.json` declares. The same plugin runs in a session
 with a game window and in one without.
 
 The SDK (`crates/openac-plugin`) and the calling convention under it
-(`crates/ac-plugin-abi`) are MIT-licensed, so a plugin may use any license.
+(`crates/ac-plugin-abi`, with its version rules in `crates/ac-plugin-version`)
+are MIT-licensed, so a plugin may use any license.
 
 Plugins written for OpenAC (the C# client) are .NET assemblies and do not
 load here; the client says so when it finds one.

@@ -10,10 +10,15 @@ publish.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-ac-host.workspace = true
-# The client's own plugin.json parser and version rules (one reader for the
-# launcher and the session). The launcher never loads or runs a module.
-ac-plugin.workspace = true
+# The session-config document, paths, layout, status file and JSON reader the
+# client uses too (not the client itself).
+ac-host-core.workspace = true
+# The client's own plugin.json parser, version rules, permissions and icon rules
+# (one reader for the launcher and the session). The launcher never links the
+# plugin host and never loads or runs a module.
+ac-plugin-manifest.workspace = true
+ac-plugin-version.workspace = true
+ac-plugin-icon.workspace = true
 sha2.workspace = true
 miniz_oxide.workspace = true
 roxmltree.workspace = true

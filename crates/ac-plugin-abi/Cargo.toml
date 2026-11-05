@@ -17,6 +17,8 @@ license = "MIT"
 ui-host = ["dep:ac-plugin-ui"]
 
 [dependencies]
+# The API version rules and the permission vocabulary (re-exported).
+ac-plugin-version.workspace = true
 ac-plugin-ui = { workspace = true, optional = true }
 
 [lints]

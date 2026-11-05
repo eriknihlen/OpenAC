@@ -55,8 +55,9 @@ The workspace is split into crates under `crates/`:
 | `ac-core`, `ac-motion`, `ac-physics`, `ac-nav`, `ac-vfx` | pure game logic: rules, animation, collision and movement, navigation, effects |
 | `ac-runtime` | the one owner of game and session state; headless and graphical alike |
 | `ac-render`, `ac-ui`, `ac-audio` | presentation: the window and GPU renderer, the original interface, sound |
-| `ac-host` | configuration, paths, the session-config document |
+| `ac-host-core`, `ac-host` | configuration, paths, the session-config document (`ac-host-core`: the part the launcher shares) |
 | `ac-plugin-abi`, `ac-plugin`, `ac-plugin-ui`, `ac-plugin-net` | the WebAssembly plugin host and its calling convention |
+| `ac-plugin-version`, `ac-plugin-manifest`, `ac-plugin-icon` | the API version rules and permissions, the `plugin.json` parser, the icon rules: shared by the client and the launcher |
 | `openac-plugin`, `openac-plugin-compat` | the plugin SDK and its compatibility kit (MIT) |
 | `ac-launcher-core`, `ac-launcher-net`, `ac-proxy` | the launcher's logic, its HTTPS, the system proxy |
 | `openac`, `openac-launcher`, `actool`, `plugincheck` | the programs |
@@ -105,10 +106,11 @@ layouts differ. So:
 - **Versioned additions keep older plugins loading.** A new event kind, or a
   new field at the end of a record, added in a new API minor version is
   marked with that version (`since (MAJOR, MINOR)` in `wire_union!` and
-  `wire_record!`) and `API_CURRENT` moves to it. A plugin built for an older
-  version is compared with that version's shapes, is never sent the new
-  event, and is sent the record without the new field, so it keeps loading
-  unrebuilt; pin the older version's shapes in the layout tests.
+  `wire_record!`) and `API_CURRENT` (in `ac-plugin-version`) moves to it. A
+  plugin built for an older version is compared with that version's shapes,
+  is never sent the new event, and is sent the record without the new field,
+  so it keeps loading unrebuilt; pin the older version's shapes in the layout
+  tests.
 - **Additive where possible.** A new capability is a new import or event
   with an inert answer when the client has nothing to say, so plugins that do
   not use it are unaffected.

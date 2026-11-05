@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use ac_host::json::{self as host_json, Member, Node, Value};
+use ac_host_core::json::{self as host_json, Member, Node, Value};
 
 use super::health::POPULATION_URI;
 use crate::cancel::{CancelToken, Cancelled};

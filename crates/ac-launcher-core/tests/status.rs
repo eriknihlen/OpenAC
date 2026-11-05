@@ -320,18 +320,18 @@ fn known_e_value_with_a_field_of_the_wrong_json_kind_surfaces_as_malformed_event
 
 #[test]
 fn every_line_the_host_writer_produces_parses_back() {
-    // Cross-check against this project's own writer (ac-host StatusWriter).
+    // Cross-check against this project's own writer (ac-host-core StatusWriter).
     let root = TempDir::new("status-writer");
     let path = root.join("status.jsonl");
-    let mut writer = ac_host::StatusWriter::for_file(Some(&path));
+    let mut writer = ac_host_core::StatusWriter::for_file(Some(&path));
     writer.started("s1");
     writer.connected("s1");
     writer.character_list(
         "s1",
-        &ac_host::RosterReport {
+        &ac_host_core::RosterReport {
             account_name: "testaccount".into(),
             slot_count: 6,
-            entries: vec![ac_host::RosterEntry {
+            entries: vec![ac_host_core::RosterEntry {
                 id: 0x5000_000A,
                 name: "+Acdream".into(),
                 seconds_greyed_out: 0,
