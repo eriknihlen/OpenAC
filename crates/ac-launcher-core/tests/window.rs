@@ -2918,7 +2918,7 @@ fn the_plugin_release_watch_survives_an_unreadable_feed_and_a_failed_check() {
     check(&mut window);
     let start = Instant::now();
     let at = |seconds: u64| start + Duration::from_secs(seconds);
-    let mut tick = |window: &mut LauncherWindow, seconds: u64| {
+    let tick = |window: &mut LauncherWindow, seconds: u64| {
         window.poll_plugin_release_watch(at(seconds));
         window.poll_plugin_release_watch(at(seconds + 30));
         window.poll();
