@@ -15,7 +15,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/eriknihlen/OpenAC"></a>
   <img alt="Rust 1.95" src="https://img.shields.io/badge/Rust-1.95-DEA584?logo=rust">
   <a href="https://github.com/eriknihlen/OpenAC/discussions"><img alt="Discussions" src="https://img.shields.io/github/discussions/eriknihlen/OpenAC"></a>
-  <a href="https://discord.gg/mBWtvgmuF"><img alt="Join Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://discord.gg/S4hKV3WTEK"><img alt="Join Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
 <p align="center">
