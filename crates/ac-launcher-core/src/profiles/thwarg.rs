@@ -10,12 +10,13 @@
 //! The mapping:
 //! - an account is added to every server it is used with (a character list,
 //!   a logon command file, or a profile that has it active or picks a
-//!   character for it there); a server comes from Thwarg's own server list
-//!   or its published one (the own list wins) and is matched to a launcher
-//!   server by name or by host and port, or added;
+//!   character for it there); a launcher server of that name is used, else
+//!   one from Thwarg's own server list or its published one (the own list
+//!   wins), matched to a launcher server by host and port, or added;
 //! - an account already on that server is not overwritten: it only gains
 //!   the characters it lacks, and logon commands when it has none;
-//! - each Thwarg profile becomes a profile tag on the accounts active in it;
+//! - each Thwarg profile becomes a profile tag on the accounts it ticks
+//!   (the account itself, and its setting for that server);
 //! - the row's character comes from the profile activated last;
 //! - Thwarg keeps logon commands per character, this launcher per account:
 //!   an account takes the list of its one character that has any; when
@@ -27,7 +28,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use ac_host_core::json::{self as host_json, Node, Value};
@@ -122,10 +123,29 @@ impl fmt::Debug for ThwargFiles {
     }
 }
 
+/// The most an import reads: per file, and files per folder.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    file_bytes: u64,
+    files_per_folder: usize,
+}
+
+/// 4 MiB per file and 10,000 files per folder: far above any real Thwarg
+/// install, low enough that a wrong folder cannot fill memory.
+const LIMITS: Limits = Limits {
+    file_bytes: 4 * 1024 * 1024,
+    files_per_folder: 10_000,
+};
+
 /// Reads the files an import needs from the Thwarg launcher's data folder.
 /// Only a missing folder is an error; a missing file is left out, and a
-/// file that cannot be read is listed in [`ThwargFiles::unreadable`].
+/// file that cannot be read (or is too large, or one past the per-folder
+/// limit) is listed in [`ThwargFiles::unreadable`].
 pub fn read_folder(folder: &Path) -> io::Result<ThwargFiles> {
+    read_folder_within(folder, LIMITS)
+}
+
+fn read_folder_within(folder: &Path, limits: Limits) -> io::Result<ThwargFiles> {
     if !folder.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -134,19 +154,18 @@ pub fn read_folder(folder: &Path) -> io::Result<ThwargFiles> {
     }
     let mut files = ThwargFiles::default();
     let mut unreadable = Vec::new();
-    files.accounts = read_one(
-        &folder.join("Accounts.txt"),
-        "Accounts.txt",
-        &mut unreadable,
-    );
+    let one = |path: PathBuf, shown: &str, unreadable: &mut Vec<String>| {
+        read_one(&path, shown, limits, unreadable)
+    };
+    files.accounts = one(folder.join("Accounts.txt"), "Accounts.txt", &mut unreadable);
     let servers = folder.join("Servers");
-    files.user_servers = read_one(
-        &servers.join("UserServerList.xml"),
+    files.user_servers = one(
+        servers.join("UserServerList.xml"),
         r"Servers\UserServerList.xml",
         &mut unreadable,
     );
-    files.published_servers = read_one(
-        &servers.join("PublishedWildWestServerList.xml"),
+    files.published_servers = one(
+        servers.join("PublishedWildWestServerList.xml"),
         r"Servers\PublishedWildWestServerList.xml",
         &mut unreadable,
     );
@@ -154,26 +173,43 @@ pub fn read_folder(folder: &Path) -> io::Result<ThwargFiles> {
         &folder.join("characters"),
         "characters",
         |name| name.starts_with("characters_"),
+        limits,
         &mut unreadable,
     );
     files.profiles = read_all(
         &folder.join("Profiles"),
         "Profiles",
         |_| true,
+        limits,
         &mut unreadable,
     );
     files.login_commands = read_all(
         &folder.join("LoginCommands"),
         "LoginCommands",
         |name| name.starts_with("logincommands"),
+        limits,
         &mut unreadable,
     );
     files.unreadable = unreadable;
     Ok(files)
 }
 
-fn read_one(path: &Path, shown: &str, unreadable: &mut Vec<String>) -> Option<String> {
-    match std::fs::read(path) {
+fn read_one(
+    path: &Path,
+    shown: &str,
+    limits: Limits,
+    unreadable: &mut Vec<String>,
+) -> Option<String> {
+    let read = std::fs::File::open(path).and_then(|file| {
+        let mut bytes = Vec::new();
+        file.take(limits.file_bytes + 1).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    });
+    match read {
+        Ok(bytes) if bytes.len() as u64 > limits.file_bytes => {
+            unreadable.push(format!("{shown}: larger than {} bytes", limits.file_bytes));
+            None
+        }
         Ok(bytes) => decode(bytes, shown, unreadable),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => {
@@ -183,12 +219,13 @@ fn read_one(path: &Path, shown: &str, unreadable: &mut Vec<String>) -> Option<St
     }
 }
 
-/// Every `.txt` file of `directory` whose lowercase name `wanted` accepts,
-/// by name.
+/// The `.txt` files of `directory` whose lowercase name `wanted` accepts,
+/// by name, at most `limits.files_per_folder` of them.
 fn read_all(
     directory: &Path,
     shown: &str,
     wanted: impl Fn(&str) -> bool,
+    limits: Limits,
     unreadable: &mut Vec<String>,
 ) -> Vec<ThwargFile> {
     let entries = match std::fs::read_dir(directory) {
@@ -199,22 +236,33 @@ fn read_all(
             return Vec::new();
         }
     };
-    let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let lower = name.to_lowercase();
-        if !lower.ends_with(".txt") || !wanted(&lower) || !entry.path().is_file() {
-            continue;
-        }
-        let shown_name = format!(r"{shown}\{name}");
-        if let Some(text) = read_one(&entry.path(), &shown_name, unreadable) {
-            files.push(ThwargFile { name, text });
-        }
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| {
+            let lower = name.to_lowercase();
+            lower.ends_with(".txt") && wanted(&lower)
+        })
+        .collect();
+    names.sort();
+    if names.len() > limits.files_per_folder {
+        let skipped = names.split_off(limits.files_per_folder);
+        unreadable.push(format!(
+            "{shown}: more than {} files; {} from {} on",
+            limits.files_per_folder,
+            skipped.len(),
+            skipped[0]
+        ));
     }
-    files.sort_by(|a, b| a.name.cmp(&b.name));
-    files
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let shown_name = format!(r"{shown}\{name}");
+            let text = read_one(&directory.join(&name), &shown_name, limits, unreadable)?;
+            Some(ThwargFile { name, text })
+        })
+        .collect()
 }
 
 fn decode(bytes: Vec<u8>, shown: &str, unreadable: &mut Vec<String>) -> Option<String> {
@@ -275,6 +323,15 @@ fn parse_accounts(text: &str, report: &mut Vec<String>) -> Vec<ThwargAccount> {
             ));
             continue;
         };
+        // A malformed line can leave the password inside the name; such a
+        // name is never shown.
+        if name.contains(['=', ';']) {
+            report.push(format!(
+                "Accounts.txt line {}: the account name is not readable; the line was skipped.",
+                index + 1
+            ));
+            continue;
+        }
         if accounts
             .iter()
             .any(|account| same_account(&account.name, name))
@@ -489,17 +546,20 @@ impl ThwargProfile {
         })
     }
 
-    /// Whether the account is active on `server` in this profile: its
-    /// setting for that server, else its account state.
+    /// Whether the account is in this profile on `server`: its account
+    /// state is ticked and so is its setting for that server. Thwarg keeps
+    /// the setting ticked for most accounts in every profile, so the
+    /// account state is what says the account belongs to the profile; no
+    /// setting for a server means not on that server.
     fn is_active(&self, account: &str, server: &str) -> bool {
-        self.setting(account, server).map_or_else(
-            || {
-                self.account_states
-                    .iter()
-                    .any(|(name, active)| *active && same_account(name, account))
-            },
-            |setting| setting.active,
-        )
+        let ticked = self
+            .account_states
+            .iter()
+            .any(|(name, active)| *active && same_account(name, account));
+        ticked
+            && self
+                .setting(account, server)
+                .is_some_and(|setting| setting.active)
     }
 }
 
@@ -577,7 +637,11 @@ fn parse_json_date(text: &str) -> Option<i64> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ThwargCommands {
     file_name: String,
+    /// What follows `LoginCommands-`: `<account>-<server>-<character>`;
     /// `None` for the global file.
+    owner_text: Option<String>,
+    /// The account, server and character, once [`split_owner`] told them
+    /// apart.
     owner: Option<(String, String, String)>,
     wait_ms: Option<u32>,
     commands: Vec<String>,
@@ -592,35 +656,26 @@ impl ThwargCommands {
     }
 }
 
-/// `LoginCommands-<account>-<server>-<character>.txt` (the character may
-/// hold `-`) or `LoginCommandsGlobal.txt`, with lines `WaitMilliseconds:N`,
-/// `CommandCount:N` and `Command0:` to `Command<N-1>:`.
+/// `LoginCommands-<account>-<server>-<character>.txt` or
+/// `LoginCommandsGlobal.txt`, with lines `WaitMilliseconds:N`,
+/// `CommandCount:N` and `Command0:` to `Command<N-1>:`. Any of the three
+/// names may hold `-`, so the name is split later, against the accounts
+/// and servers the files know ([`split_owner`]).
 fn parse_commands(file: &ThwargFile, report: &mut Vec<String>) -> Option<ThwargCommands> {
+    const PREFIX: &str = "LoginCommands-";
     let stem = file
         .name
         .get(file.name.len().saturating_sub(4)..)
         .filter(|extension| extension.eq_ignore_ascii_case(".txt"))
         .map_or(file.name.as_str(), |_| &file.name[..file.name.len() - 4]);
-    let owner = if stem.eq_ignore_ascii_case("LoginCommandsGlobal") {
+    let owner_text = if stem.eq_ignore_ascii_case("LoginCommandsGlobal") {
         None
     } else {
-        let parts = stem
-            .get("LoginCommands-".len()..)
-            .filter(|_| {
-                stem.get(.."LoginCommands-".len())
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("LoginCommands-"))
-            })
-            .and_then(|rest| {
-                let (account, rest) = rest.split_once('-')?;
-                let (server, character) = rest.split_once('-')?;
-                Some((account.to_owned(), server.to_owned(), character.to_owned()))
-            })
-            .filter(|(account, server, character)| {
-                !account.trim().is_empty()
-                    && !server.trim().is_empty()
-                    && !character.trim().is_empty()
-            });
-        let Some(parts) = parts else {
+        let rest = stem
+            .get(..PREFIX.len())
+            .filter(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
+            .map(|_| &stem[PREFIX.len()..]);
+        let Some(rest) = rest else {
             report.push(format!(
                 "LoginCommands\\{}: the name does not say its account, server and character; \
                  skipped.",
@@ -628,7 +683,7 @@ fn parse_commands(file: &ThwargFile, report: &mut Vec<String>) -> Option<ThwargC
             ));
             return None;
         };
-        Some(parts)
+        Some(rest.to_owned())
     };
     let mut wait_ms = None;
     let mut count = None;
@@ -659,10 +714,53 @@ fn parse_commands(file: &ThwargFile, report: &mut Vec<String>) -> Option<ThwargC
         .collect();
     Some(ThwargCommands {
         file_name: file.name.clone(),
-        owner,
+        owner_text,
+        owner: None,
         wait_ms,
         commands,
     })
+}
+
+/// Tells apart `<account>-<server>-<character>` when any of the three may
+/// hold `-`: of every way to split it at two dashes, the one whose account
+/// is in Accounts.txt and whose server is a server the files know (both
+/// without regard to case). The account's index and the three parts; an
+/// error when no split fits or more than one does.
+fn split_owner(
+    text: &str,
+    accounts: &[ThwargAccount],
+    known_servers: &BTreeSet<String>,
+) -> Result<(usize, (String, String, String)), &'static str> {
+    let dashes: Vec<usize> = text.match_indices('-').map(|(at, _)| at).collect();
+    let mut fits = Vec::new();
+    for (position, &first) in dashes.iter().enumerate() {
+        for &second in &dashes[position + 1..] {
+            let (account, server, character) = (
+                &text[..first],
+                &text[first + 1..second],
+                &text[second + 1..],
+            );
+            if [account, server, character]
+                .iter()
+                .any(|part| part.trim().is_empty())
+                || !known_servers.contains(&server.to_lowercase())
+            {
+                continue;
+            }
+            if let Some(index) = accounts
+                .iter()
+                .position(|known| same_account(&known.name, account))
+            {
+                let parts = (account.to_owned(), server.to_owned(), character.to_owned());
+                fits.push((index, parts));
+            }
+        }
+    }
+    match fits.len() {
+        1 => Ok(fits.remove(0)),
+        0 => Err("its name holds no account from Accounts.txt and known server"),
+        _ => Err("its name can be read as more than one account and server"),
+    }
 }
 
 fn member_node<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
@@ -862,33 +960,61 @@ pub fn import(files: &ThwargFiles, document: &mut LauncherProfileDocument) -> Th
         }
         found
     };
-    for file in &files.characters {
-        for list in parse_characters(file, &mut report.skipped) {
-            let Some(account) = find(&list.account, &mut unknown_accounts) else {
-                continue;
-            };
-            let entry = use_of(&mut references, &list.server, account);
-            for (name, id) in list.characters {
-                let duplicate = entry
-                    .characters
-                    .iter()
-                    .any(|(known, known_id)| *known == name || (id.is_some() && *known_id == id));
-                if !duplicate {
-                    entry.characters.push((name, id));
-                }
+    let character_lists: Vec<ThwargCharacters> = files
+        .characters
+        .iter()
+        .flat_map(|file| parse_characters(file, &mut report.skipped))
+        .collect();
+    // Every server name the files know, to tell the parts of a logon
+    // command file's name apart.
+    let known_servers: BTreeSet<String> = servers
+        .iter()
+        .map(|server| server.name.to_lowercase())
+        .chain(
+            character_lists
+                .iter()
+                .map(|list| list.server.to_lowercase()),
+        )
+        .chain(
+            profiles
+                .iter()
+                .flat_map(|profile| &profile.settings)
+                .map(|setting| setting.server.to_lowercase()),
+        )
+        .collect();
+    for list in character_lists {
+        let Some(account) = find(&list.account, &mut unknown_accounts) else {
+            continue;
+        };
+        let entry = use_of(&mut references, &list.server, account);
+        for (name, id) in list.characters {
+            let duplicate = entry
+                .characters
+                .iter()
+                .any(|(known, known_id)| *known == name || (id.is_some() && *known_id == id));
+            if !duplicate {
+                entry.characters.push((name, id));
             }
         }
     }
     let mut global = Vec::new();
-    for commands in command_files {
-        let Some((account, server, _)) = commands.owner.clone() else {
+    for mut commands in command_files {
+        let Some(owner_text) = commands.owner_text.clone() else {
             global.push(commands);
             continue;
         };
-        if let Some(account) = find(&account, &mut unknown_accounts) {
-            use_of(&mut references, &server, account)
-                .commands
-                .push(commands);
+        match split_owner(&owner_text, &accounts, &known_servers) {
+            Ok((account, owner)) => {
+                let server = owner.1.clone();
+                commands.owner = Some(owner);
+                use_of(&mut references, &server, account)
+                    .commands
+                    .push(commands);
+            }
+            Err(why) => report.skipped.push(format!(
+                "LoginCommands\\{}: {why}; skipped.",
+                commands.file_name
+            )),
         }
     }
     for profile in &profiles {
@@ -989,14 +1115,23 @@ fn use_of<'a>(
     entry
 }
 
-/// The launcher server for the Thwarg server `name`: one with its name or
-/// its host and port, else a new one; or why its accounts are skipped.
+/// The launcher server for the Thwarg server `name`: one with its name;
+/// else, from Thwarg's server lists, one with its host and port, or a new
+/// one; or why its accounts are skipped.
 fn resolve_server(
     name: &str,
     servers: &[ThwargServer],
     document: &mut LauncherProfileDocument,
     report: &mut ThwargImportReport,
 ) -> Result<usize, String> {
+    let same_name = |known: &ServerProfile| known.name.to_uppercase() == name.to_uppercase();
+    if let Some(index) = document.servers.iter().position(same_name) {
+        let known = &document.servers[index];
+        report
+            .servers_matched
+            .push(format!("{} ({}:{})", known.name, known.host, known.port));
+        return Ok(index);
+    }
     let server = servers
         .iter()
         .find(|server| server.name.eq_ignore_ascii_case(name))
@@ -1008,23 +1143,13 @@ fn resolve_server(
     let existing = document
         .servers
         .iter()
-        .position(|known| known.name.to_uppercase() == server.name.to_uppercase())
-        .or_else(|| {
-            document
-                .servers
-                .iter()
-                .position(|known| known.host.eq_ignore_ascii_case(&host) && known.port == port)
-        });
+        .position(|known| known.host.eq_ignore_ascii_case(&host) && known.port == port);
     if let Some(index) = existing {
         let known = &document.servers[index];
-        report.servers_matched.push(if known.name == server.name {
-            format!("{} ({}:{})", known.name, known.host, known.port)
-        } else {
-            format!(
-                "{} is {} here ({}:{})",
-                server.name, known.name, known.host, known.port
-            )
-        });
+        report.servers_matched.push(format!(
+            "{} is {} here ({}:{})",
+            server.name, known.name, known.host, known.port
+        ));
         return Ok(index);
     }
     // Only the imported accounts go on it, not every saved login.
@@ -1402,7 +1527,10 @@ mod tests {
                     "Bots",
                     "\\/Date(1600000000000+0100)\\/",
                     &[("Quillon", true)],
-                    &[("Fernwick", false, "Ash Vale-Runner", "Hearthfall")],
+                    &[
+                        ("Fernwick", false, "Ash Vale-Runner", "Hearthfall"),
+                        ("Quillon", true, "None", "Hearthfall"),
+                    ],
                 ),
             ],
             login_commands: vec![
@@ -1519,6 +1647,23 @@ mod tests {
     }
 
     #[test]
+    fn a_name_that_may_hold_the_password_is_skipped_by_line_number() {
+        let mut report = Vec::new();
+        let accounts = parse_accounts(
+            "Name=Ok,Password=fine\nName=bob;Password=leaky1\nName=eve=x,Password=leaky2\n",
+            &mut report,
+        );
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(
+            report,
+            [
+                "Accounts.txt line 2: the account name is not readable; the line was skipped.",
+                "Accounts.txt line 3: the account name is not readable; the line was skipped.",
+            ]
+        );
+    }
+
+    #[test]
     fn server_lists_read_with_a_byte_order_mark_and_two_emu_elements() {
         let mut report = Vec::new();
         let servers = parse_server_list(
@@ -1607,10 +1752,13 @@ mod tests {
             profile.setting("Quillon", "Hearthfall").unwrap().chosen,
             None
         );
-        assert!(profile.is_active("Quillon", "Hearthfall"));
+        // Account state and setting both ticked.
+        assert!(profile.is_active("Fernwick", "Hearthfall"));
+        // The setting is ticked but the account is not in the profile.
+        assert!(!profile.is_active("Quillon", "Hearthfall"));
         assert!(!profile.is_active("Idlewood", "Hearthfall"));
-        // No setting on that server: the account state decides.
-        assert!(profile.is_active("Fernwick", "Elsewhere"));
+        // In the profile, but no setting on that server.
+        assert!(!profile.is_active("Fernwick", "Elsewhere"));
         assert!(report.is_empty());
         assert_eq!(
             parse_json_date("/Date(1600000000000+0100)/"),
@@ -1626,12 +1774,8 @@ mod tests {
         let file = commands_file("Fernwick", "Hearthfall", "Ash Vale-Runner", &["/a", "/b:c"]);
         let commands = parse_commands(&file, &mut report).unwrap();
         assert_eq!(
-            commands.owner,
-            Some((
-                "Fernwick".into(),
-                "Hearthfall".into(),
-                "Ash Vale-Runner".into()
-            ))
+            commands.owner_text.as_deref(),
+            Some("Fernwick-Hearthfall-Ash Vale-Runner")
         );
         assert_eq!(commands.commands, ["/a", "/b:c"]);
         assert_eq!(commands.wait_ms, Some(9999));
@@ -1645,15 +1789,100 @@ mod tests {
             ["/kept"]
         );
         let global = ThwargFile::new("LoginCommandsGlobal.txt", commands_text(&["/g"]));
-        assert_eq!(parse_commands(&global, &mut report).unwrap().owner, None);
-        let bad = ThwargFile::new("LoginCommands-nodash.txt", commands_text(&["/x"]));
+        assert_eq!(
+            parse_commands(&global, &mut report).unwrap().owner_text,
+            None
+        );
+        let bad = ThwargFile::new("LoginCommandsOther.txt", commands_text(&["/x"]));
         assert!(parse_commands(&bad, &mut report).is_none());
         assert_eq!(
             report,
             [
-                r"LoginCommands\LoginCommands-nodash.txt: the name does not say its account, server and character; skipped."
+                r"LoginCommands\LoginCommandsOther.txt: the name does not say its account, server and character; skipped."
             ]
         );
+    }
+
+    fn accounts_named(names: &[&str]) -> Vec<ThwargAccount> {
+        names
+            .iter()
+            .map(|name| ThwargAccount {
+                name: (*name).to_owned(),
+                password: String::new(),
+            })
+            .collect()
+    }
+
+    fn servers_named(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| name.to_lowercase()).collect()
+    }
+
+    fn owner(account: &str, server: &str, character: &str) -> (String, String, String) {
+        (account.into(), server.into(), character.into())
+    }
+
+    #[test]
+    fn a_command_file_name_is_split_where_a_known_account_and_server_fit() {
+        let accounts = accounts_named(&["bot", "dash-bot"]);
+        // A server name with a dash.
+        assert_eq!(
+            split_owner(
+                "bot-Reef-Cull-Ann",
+                &accounts,
+                &servers_named(&["Reef-Cull"])
+            ),
+            Ok((0, owner("bot", "Reef-Cull", "Ann")))
+        );
+        // An account name with a dash, matched without regard to case.
+        assert_eq!(
+            split_owner(
+                "DASH-bot-Reef-Old-Ann",
+                &accounts,
+                &servers_named(&["reef"])
+            ),
+            Ok((1, owner("DASH-bot", "Reef", "Old-Ann")))
+        );
+        // Two readings fit: skipped.
+        assert_eq!(
+            split_owner(
+                "bot-Reef-Cull-Ann",
+                &accounts,
+                &servers_named(&["Reef", "Reef-Cull"])
+            ),
+            Err("its name can be read as more than one account and server")
+        );
+        // None fits.
+        assert_eq!(
+            split_owner("ghost-Reef-Ann", &accounts, &servers_named(&["Reef"])),
+            Err("its name holds no account from Accounts.txt and known server")
+        );
+        assert!(split_owner("nodash", &accounts, &servers_named(&["Reef"])).is_err());
+    }
+
+    #[test]
+    fn the_import_files_commands_under_a_server_whose_name_has_a_dash() {
+        let mut files = files();
+        files.user_servers = Some(server_list(&[
+            ("Hearthfall", "hearth.example.test:9000"),
+            ("Reef-Cull", "reef.example.test:9000"),
+        ]));
+        files.login_commands = vec![
+            commands_file("Fernwick", "Reef-Cull", "Ann", &["/reef"]),
+            ThwargFile::new(
+                "LoginCommands-Nobody-Reef-Cull-Ann.txt",
+                commands_text(&["/x"]),
+            ),
+        ];
+        let mut document = existing();
+        let report = import(&files, &mut document);
+        assert_eq!(
+            account(&document, "Reef-Cull", "Fernwick").login_commands,
+            ["/reef"]
+        );
+        assert!(report.skipped.contains(
+            &r"LoginCommands\LoginCommands-Nobody-Reef-Cull-Ann.txt: its name holds no account from Accounts.txt and known server; skipped."
+                .to_owned()
+        ));
     }
 
     // --- The mapping ---
@@ -1698,7 +1927,8 @@ mod tests {
 
         let quillon = account(&document, "Hearthfall", "Quillon");
         assert!(quillon.characters.is_empty());
-        assert_eq!(quillon.profiles, ["Bots", "Main"]);
+        // Main ticks Quillon's setting but not its account: Bots only.
+        assert_eq!(quillon.profiles, ["Bots"]);
         assert_eq!(quillon.selected_character, None);
         assert_eq!(quillon.selected_launch_mode, Some(LaunchMode::GuiSelect));
 
@@ -1836,6 +2066,24 @@ mod tests {
     }
 
     #[test]
+    fn a_launcher_server_of_that_name_is_used_without_a_thwarg_list_entry() {
+        let mut document = existing();
+        let mut lostshore = ServerProfile::new("LOSTSHORE", "lost.example.test", 9000);
+        lostshore.account_list_initialized = true;
+        document.servers.push(lostshore);
+        let report = import(&files(), &mut document);
+        let farshore = account(&document, "LOSTSHORE", "Farshore");
+        assert_eq!(farshore.password, "fpass");
+        assert_eq!(character_names(farshore), ["Drift"]);
+        assert!(
+            report
+                .servers_matched
+                .contains(&"LOSTSHORE (lost.example.test:9000)".to_owned())
+        );
+        assert!(!report.skipped.iter().any(|line| line.contains("Lostshore")));
+    }
+
+    #[test]
     fn a_second_import_adds_nothing() {
         let mut document = existing();
         import(&files(), &mut document);
@@ -1913,5 +2161,37 @@ mod tests {
         assert_eq!(names(&files.login_commands), ["LoginCommandsGlobal.txt"]);
         assert_eq!(files.unreadable, [r"Profiles\bad.txt: not UTF-8 text"]);
         assert!(read_folder(&root).is_err());
+    }
+
+    #[test]
+    fn read_folder_skips_files_past_the_size_and_count_limits() {
+        let root = std::env::temp_dir()
+            .join("openac-thwarg-import-tests")
+            .join(crate::ids::unique_hex32());
+        std::fs::create_dir_all(root.join("Profiles")).unwrap();
+        std::fs::write(root.join("Accounts.txt"), "Name=A,Password=12345").unwrap();
+        for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+            std::fs::write(root.join("Profiles").join(name), "{}").unwrap();
+        }
+        let limits = Limits {
+            file_bytes: 10,
+            files_per_folder: 2,
+        };
+        let files = read_folder_within(&root, limits).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(files.accounts, None);
+        let names: Vec<&str> = files
+            .profiles
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect();
+        assert_eq!(names, ["a.txt", "b.txt"]);
+        assert_eq!(
+            files.unreadable,
+            [
+                "Accounts.txt: larger than 10 bytes",
+                r"Profiles: more than 2 files; 2 from c.txt on",
+            ]
+        );
     }
 }
