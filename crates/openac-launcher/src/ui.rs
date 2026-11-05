@@ -190,7 +190,7 @@ fn header(app: &mut LauncherApp, root: &mut Ui) {
                         )
                         .on_hover_text(
                             "Checks the client, the launcher and your plugins now; the launcher \
-                             also checks every 20 minutes",
+                             also checks every 20 minutes, and watches for new plugin releases \n                             every 30 seconds",
                         )
                         .clicked()
                     {

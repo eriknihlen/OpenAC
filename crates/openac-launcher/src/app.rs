@@ -103,6 +103,7 @@ impl LauncherUi for LauncherApp {
         self.window.poll();
         self.window.poll_server_health(window_active, now);
         self.window.poll_update_check(now);
+        self.window.poll_plugin_release_watch(now);
         self.window.refresh_consoles();
         if let Some(script) = self.script.as_mut() {
             match script.tick(&mut self.window, now) {

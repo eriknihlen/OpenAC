@@ -2798,6 +2798,94 @@ fn offline_with_no_cache_shows_an_error() {
     );
 }
 
+// Not an OpenAC test: an open launcher reads the installed plugins' release
+// feeds every 30 seconds and runs the plugin check when one changes, so a
+// new release shows without Refresh list.
+#[test]
+fn a_new_plugin_release_shows_within_half_a_minute() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.hello", "0.1.0");
+    fixture.add_record("edwards.hello", "0.1.0");
+    fixture.list(&["edwards.hello"], "");
+    fixture.release("edwards.hello", "0.1.0");
+    let mut window = fixture.window();
+    startup_check(&mut window);
+    check(&mut window);
+    let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+        .unwrap()
+        .to_string();
+    let reads = || fixture.server.count(&feed);
+    // Offered, or withheld for a reason (this fixture has no client installed):
+    // either way the check found the newer release.
+    let has_update = |window: &LauncherWindow| {
+        let row = &window.plugins.installed[0];
+        row.update.is_some() || row.update_withheld_reason.is_some()
+    };
+    assert!(!has_update(&window));
+    let before = reads();
+    let start = Instant::now();
+    let at = |seconds: u64| start + Duration::from_secs(seconds);
+
+    window.poll_plugin_release_watch(at(0));
+    window.poll_plugin_release_watch(at(29));
+    window.poll();
+    assert_eq!(reads(), before);
+    // The first read only remembers what the feed lists.
+    window.poll_plugin_release_watch(at(30));
+    window.poll();
+    assert_eq!(reads(), before + 1);
+    let checks = fixture.server.count(LIST_URI);
+
+    // Nothing new: no check.
+    window.poll_plugin_release_watch(at(30));
+    window.poll_plugin_release_watch(at(60));
+    window.poll();
+    assert_eq!(reads(), before + 2);
+    assert_eq!(fixture.server.count(LIST_URI), checks);
+    assert!(!has_update(&window));
+
+    // A release is published: the next read sees it and the check runs.
+    fixture.release("edwards.hello", "0.2.0");
+    window.poll_plugin_release_watch(at(60));
+    window.poll_plugin_release_watch(at(90));
+    window.poll();
+    assert_eq!(fixture.server.count(LIST_URI), checks + 1);
+    assert!(has_update(&window));
+}
+
+// Not an OpenAC test: when GitHub asks to slow down, the watch waits ten
+// minutes.
+#[test]
+fn the_plugin_release_watch_backs_off_when_rate_limited() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.hello", "0.1.0");
+    fixture.add_record("edwards.hello", "0.1.0");
+    fixture.list(&["edwards.hello"], "");
+    let feed = ac_launcher_core::plugins::github::releases_feed(HELLO_REPO)
+        .unwrap()
+        .to_string();
+    fixture
+        .server
+        .add_route(&feed, common::fixtures::Route::Status(429));
+    let mut window = fixture.window();
+    startup_check(&mut window);
+    let before = fixture.server.count(&feed);
+    let start = Instant::now();
+    let at = |seconds: u64| start + Duration::from_secs(seconds);
+    window.poll_plugin_release_watch(at(0));
+    window.poll_plugin_release_watch(at(30));
+    window.poll();
+    assert_eq!(fixture.server.count(&feed), before + 1);
+    window.poll_plugin_release_watch(at(30));
+    window.poll_plugin_release_watch(at(60));
+    window.poll_plugin_release_watch(at(629));
+    window.poll();
+    assert_eq!(fixture.server.count(&feed), before + 1);
+    window.poll_plugin_release_watch(at(630));
+    window.poll();
+    assert_eq!(fixture.server.count(&feed), before + 2);
+}
+
 fn classic_migration_dialog(profiles: PathBuf) -> ClassicMigrationDialog {
     ClassicMigrationDialog::with_finders(profiles, Arc::new(|| None), Arc::new(|| None))
 }

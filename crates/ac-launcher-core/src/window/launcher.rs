@@ -4,7 +4,7 @@
 //! worker's result arrives as a message that [`LauncherWindow::poll`]
 //! applies.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -20,7 +20,9 @@ use super::console::SessionConsole;
 use super::first_run::FirstRunSetup;
 use super::icon::{PluginIcon, decode_icon};
 use super::install_dialog::{InstallDialogRequest, PluginCharacterOption};
-use super::plugins::{PluginCheckOutcome, PluginComposition, PluginSingleCheckResult};
+use super::plugins::{
+    PluginCheckOutcome, PluginComposition, PluginFeedState, PluginSingleCheckResult,
+};
 use super::plugins_panel::{
     AddFromUrlChoice, DiscoverChannelOption, DiscoverDetails, PluginsPanel,
 };
@@ -203,6 +205,8 @@ enum Message {
         verified: bool,
     },
     PluginUpdatesChecked(Box<PluginCheckOutcome>),
+    /// The installed plugins' release feeds were read.
+    PluginFeedsWatched(Box<PluginFeedState>),
     KnownServersLoaded(Result<Option<KnownServerList>, String>),
     LocalZipInspected {
         path: PathBuf,
@@ -368,6 +372,11 @@ pub struct LauncherWindow {
     /// The startup content and update checks have finished.
     startup_initialization_complete: bool,
     next_update_check: Option<Instant>,
+    next_plugin_watch: Option<Instant>,
+    plugin_watch_running: bool,
+    plugin_watch_backoff: bool,
+    /// What the release feeds listed when last read.
+    plugin_feeds_seen: Option<BTreeMap<String, Vec<String>>>,
 }
 
 impl std::fmt::Debug for LauncherWindow {
@@ -408,6 +417,13 @@ fn short_version(version: &str) -> String {
 
 /// How often an open launcher checks for updates.
 pub const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(20 * 60);
+
+/// How often an open launcher reads the installed plugins' release feeds,
+/// so a new release shows within half a minute without the full check.
+pub const PLUGIN_RELEASE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long the release watch waits after GitHub asks to slow down.
+pub const PLUGIN_RELEASE_WATCH_BACKOFF: Duration = Duration::from_secs(10 * 60);
 
 /// Whether `rows` (server, account pairs) hold `account` on `server`: the
 /// server exactly, the account in any case.
@@ -633,6 +649,10 @@ impl LauncherWindow {
             client_verified: false,
             startup_initialization_complete: false,
             next_update_check: None,
+            next_plugin_watch: None,
+            plugin_watch_running: false,
+            plugin_watch_backoff: false,
+            plugin_feeds_seen: None,
         }
     }
 
@@ -848,6 +868,7 @@ impl LauncherWindow {
                 startup,
             } => self.apply_content_verification(*verification, startup),
             Message::PluginUpdatesChecked(outcome) => self.apply_installed_plugin_updates(*outcome),
+            Message::PluginFeedsWatched(state) => self.apply_plugin_feeds(*state),
             Message::LocalZipInspected { path, result } => self.apply_local_zip(&path, result),
             Message::KnownServersLoaded(result) => match result {
                 Ok(list) => {
@@ -1886,6 +1907,57 @@ impl LauncherWindow {
             return;
         }
         self.check_for_updates_at(false, now);
+    }
+
+    /// Reads the installed plugins' release feeds every 30 seconds while the
+    /// launcher is open (10 minutes after GitHub asks to slow down), and
+    /// runs the plugin part of the update check when one changed. Call it
+    /// every frame.
+    pub fn poll_plugin_release_watch(&mut self, now: Instant) {
+        if self.disposed || !self.startup_initialization_complete || self.plugin_watch_running {
+            return;
+        }
+        let Some(backend) = self.plugin_backend.clone() else {
+            return;
+        };
+        let wait = if std::mem::take(&mut self.plugin_watch_backoff) {
+            PLUGIN_RELEASE_WATCH_BACKOFF
+        } else {
+            PLUGIN_RELEASE_WATCH_INTERVAL
+        };
+        let next = *self.next_plugin_watch.get_or_insert(now + wait);
+        if now < next {
+            return;
+        }
+        self.next_plugin_watch = None;
+        self.plugin_watch_running = true;
+        self.run(move |sender, wake| {
+            let state = backend.release_feeds(&CancelToken::new());
+            let _ = sender.send(Message::PluginFeedsWatched(Box::new(state)));
+            wake();
+        });
+    }
+
+    fn apply_plugin_feeds(&mut self, state: PluginFeedState) {
+        self.plugin_watch_running = false;
+        match state {
+            PluginFeedState::Read(feeds) => {
+                if self
+                    .plugin_feeds_seen
+                    .as_ref()
+                    .is_some_and(|seen| *seen != feeds)
+                {
+                    if self.plugins.is_busy {
+                        // Another check runs: the next read sees the change again.
+                        return;
+                    }
+                    self.check_installed_plugin_updates();
+                }
+                self.plugin_feeds_seen = Some(feeds);
+            }
+            PluginFeedState::RateLimited => self.plugin_watch_backoff = true,
+            PluginFeedState::Unavailable => {}
+        }
     }
 
     /// The client and launcher from the release feed, and the installed
