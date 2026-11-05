@@ -1,18 +1,20 @@
 # Third-Party Notices
 
-This file lists the third-party work openac-rust is built from or ships
-with, along with its license terms and copyright notices. openac-rust itself
+This file lists the third-party work OpenAC is built from or ships
+with, along with its license terms and copyright notices. OpenAC itself
 is released under the [MIT License](LICENSE).
 
 ---
 
 ## OpenAC
 
-openac-rust is a port of [OpenAC](https://github.com/eriknihlen/OpenAC), the
-C# Asheron's Call client, to Rust. Its game logic, protocol handling,
-rendering rules, user interface, launcher and their tests are translated from
-OpenAC's source, which is released under the MIT License with the same
-copyright line as this repository's [LICENSE](LICENSE):
+OpenAC, this Rust client, is a port of the C# OpenAC client to Rust. The C#
+client is retired; its code is kept on the
+[`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated)
+of this repository. The game logic, protocol handling, rendering rules, user
+interface, launcher and their tests are translated from the C# client's
+source, which is released under the MIT License with the same copyright line
+as this repository's [LICENSE](LICENSE):
 
 Copyright (c) 2026 Erik Nihlén and OpenAC contributors
 
@@ -44,9 +46,9 @@ SOFTWARE.
 
 ## WorldBuilder
 
-Parts of OpenAC's terrain, scenery and texture code were adapted from
+Parts of the C# client's terrain, scenery and texture code were adapted from
 WorldBuilder (https://github.com/Chorizite/WorldBuilder), MIT-licensed. Where
-openac-rust ports those parts of OpenAC, WorldBuilder's notice applies too.
+the Rust client ports those parts, WorldBuilder's notice applies too.
 
 Copyright (c) Chorizite contributors
 
@@ -70,10 +72,10 @@ SOFTWARE.
 
 ## Texture decoders
 
-OpenAC decodes block-compressed (DXT) textures with BCnEncoder.Net
+The C# client decodes block-compressed (DXT) textures with BCnEncoder.Net
 (https://github.com/Nominom/BCnEncoder.NET, MIT OR Unlicense) and JPEG
 textures with StbImageSharp (https://github.com/StbSharp/StbImageSharp, a C#
-port of stb_image; MIT OR Unlicense / public domain). openac-rust has its own
+port of stb_image; MIT OR Unlicense / public domain). The Rust client has its own
 decoders (`crates/ac-dat/src/texture/`), written to produce the same pixels;
 their golden test values were taken from those libraries. Both are used here
 under their permissive terms (MIT).
@@ -158,7 +160,7 @@ Notes:
 
 ## System libraries
 
-openac-rust links the operating system's libraries and does not ship them:
+OpenAC links the operating system's libraries and does not ship them:
 the graphics drivers (Direct3D 12 or Vulkan), the audio stack (WASAPI on
 Windows, ALSA on Linux), and the TLS stack used by the launcher and by
 plugins' network access: SChannel on Windows and the system OpenSSL on Linux
@@ -166,12 +168,12 @@ plugins' network access: SChannel on Windows and the system OpenSSL on Linux
 
 ## Reference projects
 
-openac-rust's behavior was checked against, but does not include code from,
+OpenAC's behavior was checked against, but does not include code from,
 ACEmulator (AGPL-3.0), ACViewer (GPL-3.0), and holtburger (AGPL-3.0). See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Trademarks and game assets
 
 Asheron's Call and all associated names, art, and data files are the property
-of their respective owners. openac-rust distributes no game assets and is not
+of their respective owners. OpenAC distributes no game assets and is not
 affiliated with Microsoft, Turbine, or Warner Bros. Entertainment.

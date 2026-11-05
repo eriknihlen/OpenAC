@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 license = "MIT"
-repository = "https://github.com/eriknihlen/openac-rust"
+repository = "https://github.com/eriknihlen/OpenAC"
 
 [workspace.dependencies]
 # Internal crates.

@@ -1,6 +1,6 @@
 # Security policy
 
-openac-rust is a game client that talks to a game server over UDP, reads data
+OpenAC is a game client that talks to a game server over UDP, reads data
 files you supply, and runs WebAssembly plugins in a sandbox. If you find a way
 to make it execute code, read or write files it should not, let a plugin
 escape its sandbox or reach beyond the permissions it declared, or misbehave
@@ -10,7 +10,7 @@ privately.
 ## Reporting
 
 Open a private report at
-<https://github.com/eriknihlen/openac-rust/security/advisories/new>. Include
+<https://github.com/eriknihlen/OpenAC/security/advisories/new>. Include
 the version (from the launcher, or the tag you built from), the steps, and
 what you observed. You will get an acknowledgement within a week.
 

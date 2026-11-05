@@ -1,6 +1,6 @@
 # Writing a plugin
 
-openac-rust plugins are WebAssembly modules. You write one as an ordinary
+OpenAC plugins are WebAssembly modules. You write one as an ordinary
 Rust crate against the `openac-plugin` SDK, build it for
 `wasm32-unknown-unknown`, and drop it into the plugins folder. The client
 compiles it to machine code, runs it on the session's own thread, and gives
@@ -11,7 +11,7 @@ The SDK (`crates/openac-plugin`) and the calling convention under it
 (`crates/ac-plugin-abi`, with its version rules in `crates/ac-plugin-version`)
 are MIT-licensed, so a plugin may use any license.
 
-Plugins written for OpenAC (the C# client) are .NET assemblies and do not
+Plugins written for the retired C# client are .NET assemblies and do not
 load here; the client says so when it finds one.
 
 ## Project setup
@@ -29,7 +29,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openac-plugin = { git = "https://github.com/eriknihlen/openac-rust", tag = "v0.1.0" }
+openac-plugin = { git = "https://github.com/eriknihlen/OpenAC", tag = "v0.2.0" }
 
 [profile.release]
 # A panic stops the plugin; the client unloads it and says why.
@@ -38,6 +38,12 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 ```
+
+Until 0.2.0 the SDK lived at `https://github.com/eriknihlen/openac-rust`, and
+that address keeps working for revisions pinned there: a plugin that depends
+on a tag before `v0.2.0`, or on a commit from before the move, can keep its
+dependency as it is. Keep the old address for those tags; in this repository
+the tags before `v0.2.0` are the retired C# client's releases.
 
 Install the target once with `rustup target add wasm32-unknown-unknown`, then
 build:
@@ -578,7 +584,7 @@ Install it once from this repository (or run it from a checkout with
 `cargo run --release -p plugincheck --`):
 
 ```bash
-cargo install --locked --git https://github.com/eriknihlen/openac-rust plugincheck
+cargo install --locked --git https://github.com/eriknihlen/OpenAC plugincheck
 plugincheck <path> [--json]
 ```
 
@@ -697,6 +703,6 @@ An unlisted plugin installs just as well through **Add from URL**.
 
 If your plugin needs something the API does not offer, open an issue or a
 pull request here. Changes to `ac-plugin-abi` follow the rules in
-[CONTRIBUTING.md](../CONTRIBUTING.md#the-plugin-abi): a record never changes
+[CONTRIBUTING.md](https://github.com/eriknihlen/OpenAC/blob/main/CONTRIBUTING.md#the-plugin-abi): a record never changes
 shape silently, and a change to the layout fingerprint means plugins must be
 rebuilt.

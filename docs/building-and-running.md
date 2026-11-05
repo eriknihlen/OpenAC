@@ -25,15 +25,15 @@
 - **Your own Asheron's Call data files**: `client_portal.dat`,
   `client_cell_1.dat`, `client_highres.dat` and `client_local_English.dat`,
   in one folder. Nothing in this repository contains game data.
-- **A server.** openac-rust speaks the protocol of
+- **A server.** OpenAC speaks the protocol of
   [ACEmulator](https://github.com/ACEmulator/ACE) servers; a local ACE server
   is the easiest way to try it.
 
 ## Build and test
 
 ```bash
-git clone https://github.com/eriknihlen/openac-rust.git
-cd openac-rust
+git clone https://github.com/eriknihlen/OpenAC.git
+cd OpenAC
 cargo build --release
 ```
 

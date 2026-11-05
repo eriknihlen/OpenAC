@@ -1,8 +1,8 @@
-# Contributing to openac-rust
+# Contributing to OpenAC
 
-Thanks for your interest. openac-rust exists to be worked on together: pull
+Thanks for your interest. OpenAC exists to be worked on together: pull
 requests, bug reports, questions, plugins, and platform ports are all wanted,
-and nobody needs to ask before starting. openac-rust is MIT-licensed: you may
+and nobody needs to ask before starting. OpenAC is MIT-licensed: you may
 fork it, ship it, or build something else on it without asking either.
 
 ## Ground rules
@@ -12,10 +12,12 @@ fork it, ship it, or build something else on it without asking either.
 - **One topic per pull request.** A fix and an unrelated refactor are two PRs.
 - **Green check.** `scripts/check.sh` (or `scripts/check.ps1` on Windows)
   passes before you open the pull request; CI runs the same script.
-- **The behavior is the original game's.** openac-rust is the Rust port of
-  [OpenAC](https://github.com/eriknihlen/OpenAC) and reproduces what the
-  original client observably did. If you change how the client behaves in the
-  world, say in the PR what the original client does and how you know.
+- **The behavior is the original game's.** OpenAC is the Rust port of
+  the retired C# client (on the
+  [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated))
+  and reproduces what the original client observably did. If you change how
+  the client behaves in the world, say in the PR what the original client
+  does and how you know.
 
 ## Getting set up
 
@@ -26,8 +28,8 @@ toolchain (Rust 1.95.0 with `rustfmt`, `clippy` and the
 platform prerequisites. Short version:
 
 ```bash
-git clone https://github.com/eriknihlen/openac-rust.git
-cd openac-rust
+git clone https://github.com/eriknihlen/OpenAC.git
+cd OpenAC
 scripts/check.sh                          # or: pwsh -NoProfile -File scripts/check.ps1
 ```
 
@@ -79,11 +81,11 @@ A few rules keep the design honest:
 ## Faithfulness and provenance
 
 Game-specific behavior (physics, movement, animation, the wire protocol, UI
-layout) reproduces what the original client observably did. OpenAC is the
-reference for this port: when behavior is in question, compare with OpenAC
-and with the original client. A contributor who cannot verify a change
-against the original client should describe the observed behavior instead
-and mark the PR as needing verification. Do not add comments that describe
+layout) reproduces what the original client observably did. The retired C#
+client (the `deprecated` branch) is the reference for this port: when behavior
+is in question, compare with it and with the original client. A contributor
+who cannot verify a change against the original client should describe the
+observed behavior instead and mark the PR as needing verification. Do not add comments that describe
 the original client's internals; describe what the code does and why.
 
 Do not paste code from other Asheron's Call projects. ACEmulator and
@@ -133,7 +135,7 @@ original client doing it right is gold.
 
 ## Writing a plugin instead
 
-Most people who want to extend openac-rust do not need to change the client
+Most people who want to extend OpenAC do not need to change the client
 at all. A plugin is a Rust crate in its own repository, built against the
 `openac-plugin` SDK, and it installs through the launcher.
 **[docs/plugin-development.md](docs/plugin-development.md)** is the full

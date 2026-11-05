@@ -10,13 +10,14 @@ assignees: ''
 The version shown in the launcher, or the commit or tag you built from.
 
 **Platform**
-Windows or Linux (with X11 or Wayland), and your GPU.
+Windows, Linux (with X11 or Wayland) or macOS (Apple silicon or Intel), and
+your GPU.
 
 **What you did**
 Steps, in order.
 
 **What you expected**
-What the original client (or OpenAC) does here, if you know.
+What the original client (or the retired C# client) does here, if you know.
 
 **What happened**
 Include the log if there is one (the launcher's Log view, or the `logs/`
