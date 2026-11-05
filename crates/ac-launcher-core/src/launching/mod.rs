@@ -9,7 +9,9 @@ mod supervisor;
 #[cfg(windows)]
 mod windows_console;
 
-pub use console_text::{SessionConsoleRun, color_for_tag, parse_line};
+pub use console_text::{
+    SessionConsoleLine, SessionConsoleRun, TYPED_PREFIX, color_for_tag, parse_line, read_line,
+};
 pub use document::{
     ComposeError, ComposedSessionConfig, LauncherSessionConfigService, STANDARD_INPUT_REFERENCE,
     SessionConfigService, compose, compose_probe, serialize, write,
@@ -31,7 +33,8 @@ pub use supervisor::{
 /// than guessing from a pointer file or whatever the shell exported: the
 /// root, and each member spelled out so none can drift. It also asks the client
 /// for `heartbeat` status lines, which this launcher reads to tell a client
-/// that stopped responding.
+/// that stopped responding, and for console lines marked with their kind, so
+/// a session's console can show only what a player would see.
 pub fn child_environment(paths: &ac_host_core::PathSet) -> Vec<(String, String)> {
     use ac_host_core::paths::{CACHE_DIR_VAR, CONFIG_DIR_VAR, DATA_DIR_VAR, ROOT_DIR_VAR};
     let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
@@ -41,5 +44,9 @@ pub fn child_environment(paths: &ac_host_core::PathSet) -> Vec<(String, String)>
         (DATA_DIR_VAR.to_owned(), text(&paths.data_directory)),
         (CACHE_DIR_VAR.to_owned(), text(&paths.cache_directory)),
         (ac_host_core::HEARTBEAT_VARIABLE.to_owned(), "1".to_owned()),
+        (
+            ac_host_core::console_kind::CONSOLE_KINDS_VARIABLE.to_owned(),
+            "1".to_owned(),
+        ),
     ]
 }

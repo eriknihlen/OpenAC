@@ -2755,6 +2755,9 @@ fn remove_dialog(window: &mut Window, ui: &mut Ui) {
 fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
     let window = &mut app.window;
     let mut send = None;
+    // One Verbose for every console: off, a console shows only chat, the
+    // status box, typed lines and their answers.
+    let mut verbose = window.console_verbose();
     for (index, console) in window.consoles.iter_mut().enumerate() {
         let mut open = console.is_open;
         egui::Window::new(console.title.clone())
@@ -2767,7 +2770,7 @@ fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
                     .auto_shrink([false, false])
                     .max_height(ui.available_height() - 36.0)
                     .show(ui, |ui| {
-                        for runs in console.lines() {
+                        for runs in console.lines(verbose) {
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 for run in runs {
@@ -2784,7 +2787,7 @@ fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut console.input)
-                            .desired_width(ui.available_width() - 70.0),
+                            .desired_width(ui.available_width() - 150.0),
                     );
                     let entered = response.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter));
@@ -2796,6 +2799,9 @@ fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
                     {
                         send = Some(index);
                     }
+                    ui.checkbox(&mut verbose, "Verbose").on_hover_text(
+                        "Show everything the client writes, not only chat and status",
+                    );
                 });
                 if !console.notice.is_empty() {
                     ui.label(error_text(console.notice.clone()));
@@ -2803,6 +2809,7 @@ fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
             });
         console.is_open = open;
     }
+    window.set_console_verbose(verbose);
     if let Some(index) = send {
         window.send_console_line(index);
     }

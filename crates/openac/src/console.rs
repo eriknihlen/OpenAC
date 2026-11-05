@@ -11,6 +11,9 @@
 //! commands; see [`HELP`] and `docs/launch-options.md`.
 
 use crate::stdio::errln;
+use std::borrow::Cow;
+
+use ac_host::console_kind::ConsoleLineKind;
 use ac_runtime::communication::{CLIENT_LOCAL_TAG, ChatLine, ContractSummary, JournalPage};
 use ac_runtime::gameplay::combat::{CombatAttackCommand, InputActivation};
 use ac_runtime::gameplay::{
@@ -207,6 +210,153 @@ fn split_word(text: &str) -> (&str, &str) {
 /// a line of chat.
 pub const NOTICE_PREFIX: &str = "-- ";
 
+/// `line` as the console writes it: when the launcher asked for marks
+/// (`marks`), every line of it behind the mark of its `kind`; a line of no
+/// kind (the client's log) and every line when marks were not asked for are
+/// written as they are.
+#[must_use]
+pub fn marked(kind: Option<ConsoleLineKind>, line: &str, marks: bool) -> Cow<'_, str> {
+    match kind.filter(|_| marks) {
+        Some(kind) => Cow::Owned(ac_host::console_kind::mark_lines(kind, line)),
+        None => Cow::Borrowed(line),
+    }
+}
+
+/// Whether the console's lines for `event` are an answer to a typed command
+/// or a question for the player, whatever else happened: events that only
+/// come when asked for, refusals, and the client's questions.
+#[must_use]
+pub fn answers_command(event: &HostEvent) -> bool {
+    use ac_runtime::movement::MovementEvent;
+    match event {
+        HostEvent::Objects(_)
+        | HostEvent::GameTime(_)
+        | HostEvent::Contracts(_)
+        | HostEvent::Journal { .. }
+        | HostEvent::Inventory(_)
+        | HostEvent::Appraisal(_)
+        | HostEvent::Vendor(_)
+        | HostEvent::Trade(_)
+        | HostEvent::ItemMana(_)
+        | HostEvent::OpenSalvage(_)
+        | HostEvent::BeginGame(_)
+        | HostEvent::LinkStatus(_)
+        | HostEvent::Confirmation(_)
+        | HostEvent::Corpses(_)
+        | HostEvent::CharacterOptions(_)
+        | HostEvent::CommandRefused(_)
+        | HostEvent::Movement(MovementEvent::Status(_) | MovementEvent::Refused(_)) => true,
+        HostEvent::Gameplay(event) => matches!(
+            event.as_ref(),
+            GameplayEvent::Spellbook(_)
+                | GameplayEvent::Enchantments(_)
+                | GameplayEvent::Character(_)
+                | GameplayEvent::Combat(_)
+                | GameplayEvent::Refused(_)
+        ),
+        _ => false,
+    }
+}
+
+/// A view a typed command asks for whose event also comes unasked, often
+/// (a fellow's vitals, a selection a plugin made, every login's character
+/// list): the first such event after the command is its answer, and the
+/// others are the client's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskedView {
+    /// The selection.
+    Selection,
+    /// The combat mode.
+    CombatMode,
+    /// The vitae penalty.
+    Vitae,
+    /// The open book.
+    Book,
+    /// The fellowship.
+    Fellowship,
+    /// The allegiance.
+    Allegiance,
+    /// The house.
+    House,
+    /// The titles.
+    Titles,
+    /// The character-selection screen.
+    CharacterSelection,
+    /// Character creation.
+    CharacterCreation,
+    /// A scripted move's end.
+    Move,
+}
+
+impl AskedView {
+    /// The view `event` shows, if it is one of these.
+    #[must_use]
+    pub fn of_event(event: &HostEvent) -> Option<Self> {
+        use ac_runtime::movement::MovementEvent;
+        Some(match event {
+            HostEvent::CharacterSelection(_) => Self::CharacterSelection,
+            HostEvent::CharacterCreation(_) => Self::CharacterCreation,
+            HostEvent::Movement(MovementEvent::MoveEnded { .. }) => Self::Move,
+            HostEvent::Gameplay(event) => match event.as_ref() {
+                GameplayEvent::Selection { .. } => Self::Selection,
+                GameplayEvent::CombatMode(_) => Self::CombatMode,
+                GameplayEvent::Vitae(_) => Self::Vitae,
+                GameplayEvent::Book(_) => Self::Book,
+                GameplayEvent::Fellowship(_) => Self::Fellowship,
+                GameplayEvent::Allegiance(_) => Self::Allegiance,
+                GameplayEvent::House(_) => Self::House,
+                GameplayEvent::Titles(_) => Self::Titles,
+                _ => return None,
+            },
+            _ => return None,
+        })
+    }
+}
+
+/// The views typed commands asked for and no event has answered yet, for
+/// one session: the console thread adds one per command, the session's
+/// monitor takes one per answer.
+#[derive(Debug, Default)]
+pub struct AskedViews(std::sync::Mutex<Vec<AskedView>>);
+
+impl AskedViews {
+    /// A typed command asked for `view`.
+    pub fn ask(&self, view: AskedView) {
+        if let Ok(mut asked) = self.0.lock() {
+            asked.push(view);
+        }
+    }
+
+    /// Whether `view` was asked for; the ask is used up.
+    pub fn answer(&self, view: AskedView) -> bool {
+        let Ok(mut asked) = self.0.lock() else {
+            return false;
+        };
+        match asked.iter().position(|v| *v == view) {
+            Some(at) => {
+                asked.remove(at);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// The kind of the console's lines for `event`: chat the main chat window
+/// shows, the status box's text, an answer to a typed command (one that
+/// `asked` waits for is used up), or `None` for the client's log.
+#[must_use]
+pub fn event_kind(event: &HostEvent, asked: &AskedViews) -> Option<ConsoleLineKind> {
+    match event {
+        HostEvent::Chat(_) => Some(ConsoleLineKind::Chat),
+        HostEvent::InterfaceText(_) => Some(ConsoleLineKind::Status),
+        event if answers_command(event) => Some(ConsoleLineKind::Reply),
+        event => AskedView::of_event(event)
+            .filter(|view| asked.answer(*view))
+            .map(|_| ConsoleLineKind::Reply),
+    }
+}
+
 /// The game tables every session of the process shares, read once from
 /// `dat_dir` (else the usual install place). Without them spells have no
 /// names and skills no attribute term; the console says so.
@@ -397,6 +547,47 @@ pub enum ConsoleCommand {
 }
 
 impl ConsoleCommand {
+    /// The view whose next event answers this command, when that event
+    /// also comes unasked (see [`AskedView`]); `None` when the command's
+    /// answer is always shown, or it has none.
+    #[must_use]
+    pub fn asked_view(&self) -> Option<AskedView> {
+        use GameplayCommand as G;
+        use ac_runtime::movement::MovementCommand as M;
+        match self {
+            Self::Gameplay(command) => match command {
+                G::Select(_)
+                | G::ClearSelection
+                | G::SelectPrevious
+                | G::SelectNearestMonster
+                | G::CycleSelection { .. }
+                | G::SelectSelf
+                | G::SelectLastAttacker
+                | G::CycleFellow { .. } => Some(AskedView::Selection),
+                G::ToggleCombat | G::SetCombatMode(_) => Some(AskedView::CombatMode),
+                G::ShowVitae => Some(AskedView::Vitae),
+                G::Book(_) => Some(AskedView::Book),
+                G::Fellowship(_) => Some(AskedView::Fellowship),
+                G::Allegiance(_) => Some(AskedView::Allegiance),
+                G::ShowHouse | G::QueryHouse => Some(AskedView::House),
+                G::ShowTitles | G::SetTitle(_) => Some(AskedView::Titles),
+                _ => None,
+            },
+            Self::Lifecycle(LifecycleCommand::Create(_)) => Some(AskedView::CharacterCreation),
+            Self::Lifecycle(
+                LifecycleCommand::ShowSelection
+                | LifecycleCommand::Highlight(_)
+                | LifecycleCommand::RequestDelete(_)
+                | LifecycleCommand::ConfirmDelete
+                | LifecycleCommand::Restore(_)
+                | LifecycleCommand::Cancel
+                | LifecycleCommand::SetNextLogin(_),
+            ) => Some(AskedView::CharacterSelection),
+            Self::Movement(M::Move(_) | M::TurnToHeading(_)) => Some(AskedView::Move),
+            _ => None,
+        }
+    }
+
     /// The session command it stands for.
     #[must_use]
     pub fn into_session_command(self) -> SessionCommand {
@@ -2048,6 +2239,114 @@ mod tests {
             "[client] You can't jump while in the air"
         );
         assert_eq!(notice("entered world", Some("a")), "-- [a] entered world");
+    }
+
+    #[test]
+    fn a_line_is_marked_with_its_kind_only_when_the_launcher_asks() {
+        let line = "[system] Welcome\n  powered by ACEmulator";
+        assert_eq!(marked(Some(ConsoleLineKind::Chat), line, false), line);
+        assert_eq!(
+            marked(Some(ConsoleLineKind::Chat), line, true),
+            "\u{1e}c[system] Welcome\n\u{1e}c  powered by ACEmulator"
+        );
+        // The client's log is never marked.
+        assert_eq!(marked(None, "-- portal: reveal", true), "-- portal: reveal");
+    }
+
+    #[test]
+    fn chat_the_status_box_and_answers_are_what_a_player_sees() {
+        let asked = AskedViews::default();
+        let gameplay = |event: GameplayEvent| HostEvent::Gameplay(Box::new(event));
+        let chat = ChatLine {
+            sequence: 1,
+            kind: ChatKind::LocalSpeech,
+            log_text_type: 2,
+            combat_kind: None,
+            received_unix_ms: 0,
+            text: "Bob says, \"hi\"".into(),
+            channel_name: String::new(),
+            sender: "Bob".into(),
+            sender_guid: 0x5000_0002,
+            words: String::new(),
+            display_text: String::new(),
+            channel_id: 0,
+            spans: None,
+        };
+        assert_eq!(
+            event_kind(&HostEvent::Chat(chat), &asked),
+            Some(ConsoleLineKind::Chat)
+        );
+        assert_eq!(
+            event_kind(&HostEvent::InterfaceText("You fail".into()), &asked),
+            Some(ConsoleLineKind::Status)
+        );
+        for answer in [
+            HostEvent::GameTime(None),
+            HostEvent::Objects(Vec::new()),
+            HostEvent::Corpses(Vec::new()),
+            HostEvent::CommandRefused("no such object".into()),
+            gameplay(GameplayEvent::Refused("no spell".into())),
+        ] {
+            assert_eq!(
+                event_kind(&answer, &asked),
+                Some(ConsoleLineKind::Reply),
+                "{answer:?}"
+            );
+        }
+        // What only the client's log keeps.
+        for log in [
+            HostEvent::Logout(ac_runtime::world::transit::LogoutStage::Requested),
+            gameplay(GameplayEvent::Health {
+                guid: 1,
+                percent: 0.5,
+            }),
+            gameplay(GameplayEvent::CreatureDied(1)),
+        ] {
+            assert_eq!(event_kind(&log, &asked), None, "{log:?}");
+        }
+    }
+
+    #[test]
+    fn a_view_that_also_changes_unasked_is_an_answer_once_after_its_command() {
+        let asked = AskedViews::default();
+        let selection = || {
+            HostEvent::Gameplay(Box::new(GameplayEvent::Selection {
+                selected: Some(7),
+                name: None,
+            }))
+        };
+        // A plugin's selection is the client's log.
+        assert_eq!(event_kind(&selection(), &asked), None);
+        let ConsoleInput::Command { command, .. } = parse("/select 0x7", &[]) else {
+            panic!("/select is a command");
+        };
+        let view = command
+            .asked_view()
+            .expect("/select asks for the selection");
+        asked.ask(view);
+        assert_eq!(
+            event_kind(&selection(), &asked),
+            Some(ConsoleLineKind::Reply)
+        );
+        // The ask is used up.
+        assert_eq!(event_kind(&selection(), &asked), None);
+        // A command whose answer is always shown waits for nothing.
+        let ConsoleInput::Command { command, .. } = parse("/inv", &[]) else {
+            panic!("/inv is a command");
+        };
+        assert_eq!(command.asked_view(), None);
+        for (typed, view) in [
+            ("/fship", AskedView::Fellowship),
+            ("/vitae", AskedView::Vitae),
+            ("/combat melee", AskedView::CombatMode),
+            ("/chars", AskedView::CharacterSelection),
+            ("/walk 2", AskedView::Move),
+        ] {
+            let ConsoleInput::Command { command, .. } = parse(typed, &[]) else {
+                panic!("{typed} is a command");
+            };
+            assert_eq!(command.asked_view(), Some(view), "{typed}");
+        }
     }
 
     #[test]

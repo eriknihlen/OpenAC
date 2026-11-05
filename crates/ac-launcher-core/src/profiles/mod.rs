@@ -12,6 +12,7 @@
 
 mod account_name;
 mod checked_accounts;
+mod console_settings;
 mod document;
 mod migration;
 mod relaunch_settings;
@@ -23,6 +24,10 @@ pub use account_name::{find_account, same_account};
 pub use checked_accounts::{
     CHECKED_ACCOUNTS_FILE_NAME, CheckedAccountsError, LauncherCheckedAccount,
     LauncherCheckedAccountStore,
+};
+pub use console_settings::{
+    CONSOLE_SETTINGS_FILE_NAME, ConsoleSettingsError, LauncherConsoleSettings,
+    LauncherConsoleSettingsStore,
 };
 pub use document::{
     AccountProfile, CharacterProfile, LaunchMode, LauncherProfileDocument, ServerProfile,
