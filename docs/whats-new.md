@@ -5,6 +5,46 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## openac-rust 0.1.12 (2026-11-05)
+
+Logon commands now belong to characters. The first start moves each
+account's commands to the character it launches (the first character when it
+starts at the character screen) and says where each went; commands left on an
+account no longer run. The old profile file is kept as it was.
+
+**New**
+
+- **Keep checked clients running:** checked accounts with a character chosen
+  start when the launcher opens, and a client that crashes or exits starts
+  again after 30 seconds (was 3 minutes). The setting and the delay are
+  saved. A Stop keeps a client down until you press Play.
+- **Stop all** stops every running client at once.
+- **Search** the account list by account or character name.
+- **Import from the Thwarg launcher:** servers, accounts, characters, profiles
+  and each character's logon commands.
+- **Profiles for characters:** put a character in a profile from its options;
+  choosing the profile switches each account to its character. Create and
+  delete profiles with **Profiles…**.
+- **Logon commands per character** (`###character` in the logon commands
+  editor).
+- **A quieter console:** a headless client's console shows chat, the status
+  box and your own commands; tick **Verbose** for everything.
+- **Plugins:** a new release of an installed plugin shows within 30 seconds,
+  without Refresh list; installing a plugin turns it on for every account and
+  character.
+
+**Fixed**
+
+- The launcher no longer updates itself for a release that only changes the
+  client.
+- A plugin's fellowship roster now lists fellows out of sight (in another
+  area, still loading after a portal, hidden) too. *(bug by Johan Lundberg)*
+- MossTank 0.6.7: `vitae[]` and `/ub vitae` read the real vitae, and a death
+  no longer recasts every bane and item spell. *(Johan Lundberg)*
+
+This launcher also follows the client to its next home: when releases move to
+the OpenAC repository, it updates from there by itself.
+
 ## openac-rust 0.1.11 (2026-11-04)
 
 **New**
