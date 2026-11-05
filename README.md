@@ -52,8 +52,8 @@ reports are welcome.
 
 **Platforms.** Windows 10 and 11 (64-bit) is where it is played most. Linux
 (64-bit, X11 or Wayland) builds and runs, with less time in front of players.
-macOS on Apple silicon (macOS 14 or later) builds and runs on Metal; it is
-the newest platform.
+macOS (macOS 14 or later, Apple silicon or Intel) builds and runs on Metal;
+it is the newest platform.
 
 **Found a bug?** Open a
 [GitHub issue](https://github.com/eriknihlen/openac-rust/issues) with the
@@ -70,6 +70,7 @@ unzip it anywhere, and run the launcher:
 | Windows | `openac-win-x64.zip` | `openac-launcher.exe` |
 | Linux | `openac-linux-x64.zip` | `./openac-launcher` |
 | macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | `OpenAC.app` |
+| macOS (Intel) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
 
 The zip holds both programs; the launcher starts the `openac` beside it. On
 macOS they are inside `OpenAC.app`; move it to Applications and open it. The
@@ -80,7 +81,7 @@ Security ("Open Anyway").
 You will need:
 
 - A GPU and driver with **Direct3D 12** (Windows) or **Vulkan** (Windows or
-  Linux); on macOS, **Metal** (every Apple-silicon Mac).
+  Linux); on macOS, **Metal** (every Mac that runs macOS 14).
 - **Your own Asheron's Call data files** (`client_portal.dat`,
   `client_cell_1.dat`, `client_highres.dat`, `client_local_English.dat`).
   The launcher asks for their folder on first run; `openac` looks in

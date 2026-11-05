@@ -300,6 +300,48 @@ fn valid_json() -> String {
     )
 }
 
+// The shape the release workflow writes: one client and one launcher payload
+// for each of its four platforms. An Intel Mac picks the osx-x64 ones.
+#[test]
+fn reads_every_released_platform_and_an_intel_mac_gets_its_own_payloads() {
+    let rids = ["win-x64", "linux-x64", "osx-arm64", "osx-x64"];
+    let entries = |kind: &str, digit: char| {
+        rids.iter()
+            .enumerate()
+            .map(|(index, rid)| {
+                format!(
+                    r#""{rid}":{{"url":"https://example.test/{kind}-{rid}.zip","sha256":"{}","size":{}}}"#,
+                    digit.to_string().repeat(64),
+                    index + 1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let json = format!(
+        r#"{{"schemaVersion":1,"version":"2.0.0","minimumLauncherVersion":"2.0.0","clients":{{{}}},"launchers":{{{}}}}}"#,
+        entries("client", 'a'),
+        entries("launcher", 'b')
+    );
+    let manifest = ReleaseManifest::parse(json.as_bytes(), false).unwrap();
+    assert_eq!(manifest.clients.len(), 4);
+    assert_eq!(manifest.launchers.len(), 4);
+    let rid = ac_launcher_core::updates::detect_rid_for("macos", "x86_64").unwrap();
+    assert_eq!(rid, "osx-x64");
+    let client = manifest.require_client(&rid).unwrap();
+    assert_eq!(
+        client.url,
+        WebUrl::parse("https://example.test/client-osx-x64.zip").unwrap()
+    );
+    assert_eq!(client.size, 4);
+    let launcher = manifest.require_launcher(&rid).unwrap();
+    assert_eq!(
+        launcher.url,
+        WebUrl::parse("https://example.test/launcher-osx-x64.zip").unwrap()
+    );
+    assert_eq!(launcher.sha256, "b".repeat(64));
+}
+
 #[test]
 fn rejects_wrong_version_rid_hash_size_minimum_and_unknown_or_duplicate_fields() {
     let valid = valid_json();
@@ -782,16 +824,18 @@ fn windows_built_payload_still_marks_its_executables_on_a_unix_host() {
 
 #[test]
 fn mac_payload_requires_owner_execute_permission_for_every_required_host() {
-    let executable = [ExtractedFileRecord::new("openac", "a".repeat(64), 1, 0o755)];
-    validate_required_executables(&executable, "osx-arm64", false).unwrap();
-    let not_executable = [ExtractedFileRecord::new("openac", "a".repeat(64), 1, 0o644)];
-    let error = validate_required_executables(&not_executable, "osx-arm64", false)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("Unix release executable 'openac'"),
-        "{error}"
-    );
+    for rid in ["osx-arm64", "osx-x64"] {
+        let executable = [ExtractedFileRecord::new("openac", "a".repeat(64), 1, 0o755)];
+        validate_required_executables(&executable, rid, false).unwrap();
+        let not_executable = [ExtractedFileRecord::new("openac", "a".repeat(64), 1, 0o644)];
+        let error = validate_required_executables(&not_executable, rid, false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Unix release executable 'openac'"),
+            "{rid}: {error}"
+        );
+    }
 }
 
 #[cfg(unix)]

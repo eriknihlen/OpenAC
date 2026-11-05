@@ -307,6 +307,18 @@ fn stage_bundle_archive(
     Result<SelfUpdateStageResult, UpdateError>,
     LauncherSelfUpdateManager,
 ) {
+    stage_bundle_archive_for(archive, "osx-arm64")
+}
+
+fn stage_bundle_archive_for(
+    archive: &[u8],
+    rid: &str,
+) -> (
+    TempDir,
+    PathBuf,
+    Result<SelfUpdateStageResult, UpdateError>,
+    LauncherSelfUpdateManager,
+) {
     let root = TempDir::new("self-update-bundle-stage");
     let bundle = root.join("Applications").join("OpenAC.app");
     let launcher = bundle
@@ -320,9 +332,9 @@ fn stage_bundle_archive(
     let manager = LauncherSelfUpdateManager::new(&root.path_set(), server.transport());
     let result = manager.stage_artifact(
         &version("2.0.0"),
-        "osx-arm64",
+        rid,
         &artifact,
-        &LauncherInstallationLayout::mac_bundle(&bundle, "osx-arm64").unwrap(),
+        &LauncherInstallationLayout::mac_bundle(&bundle, rid).unwrap(),
         &mut |_| {},
         &none(),
     );
@@ -340,6 +352,21 @@ fn mac_bundle_stage_rejects_files_outside_openac_app() {
     assert!(result.is_err());
     assert_eq!(read(&launcher), "old-launcher");
     assert!(!manager.pending_plan_path().exists());
+}
+
+// The Intel Mac launcher (osx-x64) updates its bundle as the Apple-silicon one does.
+#[test]
+fn mac_bundle_stages_for_an_intel_mac() {
+    let archive = bundle_archive(&[
+        (MAC_LAUNCHER, b"new-launcher", 0x81ED),
+        ("OpenAC.app/Contents/Info.plist", b"<plist/>", 0x81A4),
+    ]);
+    let (_root, launcher, result, manager) = stage_bundle_archive_for(&archive, "osx-x64");
+    result.unwrap();
+    assert_eq!(read(&launcher), "old-launcher");
+    let plan = manager.load_pending().unwrap().unwrap();
+    assert_eq!(plan.rid, "osx-x64");
+    assert_eq!(plan.installation_kind, LauncherInstallationKind::MacBundle);
 }
 
 // OpenAC LauncherSelfUpdateManagerTests.MacBundleStageRequiresInfoPlist.

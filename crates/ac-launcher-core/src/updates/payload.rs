@@ -139,6 +139,7 @@ mod tests {
             ("win-x64", "openac.exe"),
             ("linux-x64", "openac"),
             ("osx-arm64", "openac"),
+            ("osx-x64", "openac"),
         ] {
             assert_eq!(required_for_payload(rid, false), [expected]);
         }
@@ -146,6 +147,9 @@ mod tests {
             required_for_payload("win-x64", true),
             ["openac-launcher.exe"]
         );
+        for rid in ["osx-arm64", "osx-x64"] {
+            assert_eq!(required_for_payload(rid, true), ["openac-launcher"]);
+        }
     }
 
     #[test]
@@ -168,6 +172,7 @@ mod tests {
     #[test]
     fn rids_are_checked() {
         assert!(is_valid_rid("win-x64"));
+        assert!(is_valid_rid("osx-x64"));
         assert!(!is_valid_rid("WIN_X64"));
         assert!(!is_valid_rid("1abc"));
         assert!(!is_valid_rid(""));
