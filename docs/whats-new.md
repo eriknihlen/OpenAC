@@ -24,6 +24,9 @@ OpenAC from here on.
 - **Launchers move over by themselves.** A launcher from 0.1.12 on finds this
   release in its new home and updates from there. An older launcher updates
   to 0.1.12 first, then moves over the same way.
+- **New players:** download the launcher for your platform; it fetches the
+  client. It can import your Thwarg launcher setup, and your VirindiTank and
+  UtilityBelt settings once MossTank is installed.
 - **Issues:** this repository's
   [issues](https://github.com/eriknihlen/OpenAC/issues) now track the Rust
   client.

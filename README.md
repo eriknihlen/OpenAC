@@ -82,17 +82,15 @@ player guide, the plugin guide and the release notes.
 
 **Download the launcher; it fetches the client.** Take the launcher for your
 platform from the
-[latest release](https://github.com/eriknihlen/OpenAC/releases/latest)
-(until 0.2.0 is published here, from
-[0.1.12](https://github.com/eriknihlen/openac-rust/releases/latest)), unzip it
-anywhere and run it:
+[latest release](https://github.com/eriknihlen/OpenAC/releases/latest), unzip
+it anywhere and run it:
 
 | Platform | Download | Run |
 |---|---|---|
 | Windows | `launcher-win-x64.zip` | `openac-launcher.exe` |
 | Linux | `launcher-linux-x64.zip` | `./openac-launcher` |
 | macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | `OpenAC.app` |
-| macOS (Intel, from 0.2.0) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
+| macOS (Intel) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
 
 On first start the launcher asks for your game data folder, then offers the
 game client ("A new version of the game is available": **Review update**) and
