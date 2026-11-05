@@ -1,6 +1,7 @@
 //! Launcher profiles: servers, the accounts on each (with their plugins,
-//! logon commands and profile tags), and the characters on each account,
-//! kept in one versioned document (`launcher-profiles.v2.json` in the
+//! shared logon commands and profile tags), the characters on each account
+//! (with their own profile tags and logon commands), and the list of
+//! profile names, kept in one versioned document (`launcher-profiles.v2.json` in the
 //! settings folder; an older launcher's `launcher-profiles.json` is read
 //! once and migrated, never written).
 //!
@@ -32,7 +33,7 @@ pub use relaunch_settings::{
 };
 pub use store::{
     CURRENT_PROFILE_VERSION, CharacterRosterEntry, LauncherProfileStore, OLDER_PROFILE_FILE_NAME,
-    PROFILE_FILE_NAME, PROFILE_VERSION_1, ProfileError,
+    PROFILE_FILE_NAME, PROFILE_VERSION_1, PROFILE_VERSION_2, ProfileError,
 };
 pub use text::{LauncherTextEditorKind, apply_text, describe_account_removals, read_text};
 

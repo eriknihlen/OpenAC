@@ -10,11 +10,16 @@
 //! Name=notan3,Password=secret,Profiles=Main;Bots
 //! ```
 //!
-//! Logon commands, grouped by server and account:
+//! Logon commands, grouped by server, account and character: the lines
+//! right under an account, before any character, are its shared commands
+//! (every character on it runs them, first); the lines under a character
+//! are its own:
 //!
 //! ```text
 //! #Coldeve
 //! ##notan3
+//! /fellowship quit
+//! ###Example Character
 //! /vt start
 //! ```
 //!
@@ -40,12 +45,13 @@ pub enum LauncherTextEditorKind {
     Accounts,
     /// One `name | host | port` line per server.
     Servers,
-    /// Logon commands by server and account.
+    /// Logon commands by server, account and character.
     LogonCommands,
 }
 
 const SERVER_PREFIX: &str = "#";
 const ACCOUNT_PREFIX: &str = "##";
+const CHARACTER_PREFIX: &str = "###";
 
 /// Starts a logon command line that is taken as written, without the
 /// backslash: how a command beginning with `#` or `\` is written.
@@ -154,7 +160,15 @@ pub fn describe_account_removals(document: &LauncherProfileDocument, text: &str)
             let parts: Vec<String> = [
                 count(account.characters.len(), "character"),
                 count(account.plugins.len(), "plugin"),
-                count(account.login_commands.len(), "logon command"),
+                count(
+                    account.login_commands.len()
+                        + account
+                            .characters
+                            .iter()
+                            .map(|character| character.login_commands.len())
+                            .sum::<usize>(),
+                    "logon command",
+                ),
             ]
             .into_iter()
             .flatten()
@@ -348,50 +362,128 @@ fn read_logon_commands(document: &LauncherProfileDocument) -> String {
             text.push_str(ACCOUNT_PREFIX);
             text.push_str(&encode_header(&account.account));
             text.push('\n');
-            for command in &account.login_commands {
-                // A command that would read as a # or ## line, or as an
-                // escape, gets a backslash.
-                if command.starts_with(SERVER_PREFIX) || command.starts_with(ESCAPE) {
-                    text.push(ESCAPE);
-                }
-                text.push_str(command);
+            push_commands(&mut text, &account.login_commands);
+            // Every character, so its header is there to type under.
+            for character in &account.characters {
+                text.push_str(CHARACTER_PREFIX);
+                text.push_str(&encode_header(&character.name));
                 text.push('\n');
+                push_commands(&mut text, &character.login_commands);
             }
         }
     }
     text
 }
 
-/// A server index with each listed account index and its commands.
-type ServerCommands = (usize, Vec<(usize, Vec<String>)>);
+fn push_commands(text: &mut String, commands: &[String]) {
+    for command in commands {
+        // A command that would read as a #, ## or ### line, or as an
+        // escape, gets a backslash.
+        if command.starts_with(SERVER_PREFIX) || command.starts_with(ESCAPE) {
+            text.push(ESCAPE);
+        }
+        text.push_str(command);
+        text.push('\n');
+    }
+}
+
+/// One listed account: its shared commands and each listed character's.
+struct AccountCommands {
+    account: usize,
+    shared: Vec<String>,
+    characters: Vec<(usize, Vec<String>)>,
+}
+
+/// A server index with each listed account.
+type ServerCommands = (usize, Vec<AccountCommands>);
+
+/// Where the lines under a header go: (change, account entry, character
+/// entry, or `None` for the account's shared commands).
+type Target = (usize, usize, Option<usize>);
+
+fn push_command(changes: &mut [ServerCommands], target: Target, command: String) {
+    let entry = &mut changes[target.0].1[target.1];
+    match target.2 {
+        None => entry.shared.push(command),
+        Some(character) => entry.characters[character].1.push(command),
+    }
+}
+
+fn needs_account(number: usize) -> String {
+    format!("Line {number}: a command needs an ##Account line above it.")
+}
 
 fn apply_logon_commands(
     document: &mut LauncherProfileDocument,
     text: &str,
 ) -> Result<(), ProfileError> {
     let mut errors = Vec::new();
-    // (server, [(account, commands)]) in the order they appear.
+    // (server, accounts) in the order they appear.
     let mut changes: Vec<ServerCommands> = Vec::new();
     let mut server: Option<usize> = None;
     let mut server_seen = false;
-    // True under a # or ## line that was wrong: its lines are skipped, the
+    // The ## entry a ### line belongs to, as (change, account entry);
+    // `None` under a wrong ## line or before any.
+    let mut account: Option<(usize, usize)> = None;
+    let mut account_seen = false;
+    // True under a header line that was wrong: its lines are skipped, the
     // error already reported.
     let mut skipping = false;
-    // Where commands go: (change index, account entry index).
-    let mut commands: Option<(usize, usize)> = None;
+    let mut target: Option<Target> = None;
     for (number, line) in lines(text) {
         if let Some(command) = line.strip_prefix(ESCAPE) {
-            if let Some((change, entry)) = commands {
-                changes[change].1[entry].1.push(command.to_owned());
+            if let Some(target) = target {
+                push_command(&mut changes, target, command.to_owned());
             } else if !skipping {
-                errors.push(format!(
-                    "Line {number}: a command needs an ##Account line above it."
-                ));
+                errors.push(needs_account(number));
             }
             continue;
         }
+        if let Some(header) = line.strip_prefix(CHARACTER_PREFIX) {
+            target = None;
+            skipping = true;
+            if !account_seen {
+                errors.push(format!(
+                    "Line {number}: put an ##Account line above ###Character."
+                ));
+                continue;
+            }
+            let Some((change, entry)) = account else {
+                continue;
+            };
+            let Some(name) = decode_header(header, number, &mut errors) else {
+                continue;
+            };
+            let server_profile = &document.servers[changes[change].0];
+            let saved = &server_profile.accounts[changes[change].1[entry].account];
+            let Some(character_index) = resolve_character(saved, &name) else {
+                errors.push(format!(
+                    "Line {number}: account '{}' on '{}' has no character '{name}'. Refresh its \
+                     characters, or add the character first.",
+                    saved.account, server_profile.name
+                ));
+                continue;
+            };
+            let characters = &mut changes[change].1[entry].characters;
+            if characters
+                .iter()
+                .any(|(index, _)| *index == character_index)
+            {
+                errors.push(format!(
+                    "Line {number}: character '{}' appears more than once under '{}'.",
+                    saved.characters[character_index].name, saved.account
+                ));
+                continue;
+            }
+            characters.push((character_index, Vec::new()));
+            target = Some((change, entry, Some(characters.len() - 1)));
+            skipping = false;
+            continue;
+        }
         if let Some(header) = line.strip_prefix(ACCOUNT_PREFIX) {
-            commands = None;
+            target = None;
+            account = None;
+            account_seen = true;
             skipping = true;
             if !server_seen {
                 errors.push(format!(
@@ -419,21 +511,28 @@ fn apply_logon_commands(
                 .position(|(index, _)| *index == server_index)
                 .unwrap_or_default();
             let accounts = &mut changes[change].1;
-            if accounts.iter().any(|(index, _)| *index == account_index) {
+            if accounts.iter().any(|entry| entry.account == account_index) {
                 errors.push(format!(
                     "Line {number}: account '{name}' appears more than once under '{}'.",
                     server_profile.name
                 ));
                 continue;
             }
-            accounts.push((account_index, Vec::new()));
-            commands = Some((change, accounts.len() - 1));
+            accounts.push(AccountCommands {
+                account: account_index,
+                shared: Vec::new(),
+                characters: Vec::new(),
+            });
+            account = Some((change, accounts.len() - 1));
+            target = Some((change, accounts.len() - 1, None));
             skipping = false;
             continue;
         }
         if let Some(header) = line.strip_prefix(SERVER_PREFIX) {
             server_seen = true;
-            commands = None;
+            target = None;
+            account = None;
+            account_seen = false;
             server = resolve_server(document, header, number, &mut errors);
             if let Some(index) = server {
                 if changes.iter().any(|(existing, _)| *existing == index) {
@@ -449,32 +548,63 @@ fn apply_logon_commands(
             skipping = server.is_none();
             continue;
         }
-        if let Some((change, entry)) = commands {
-            changes[change].1[entry].1.push(line.to_owned());
+        if let Some(target) = target {
+            push_command(&mut changes, target, line.to_owned());
         } else if skipping {
             // Belongs to a header line that was wrong and is already
             // reported.
         } else {
-            errors.push(format!(
-                "Line {number}: a command needs an ##Account line above it."
-            ));
+            errors.push(needs_account(number));
         }
     }
     throw_if_any(&errors)?;
+    // A listed server's section is the whole truth for it: an account or a
+    // character it leaves out has no commands.
     for (server_index, accounts) in changes {
         for (account_index, account) in document.servers[server_index]
             .accounts
             .iter_mut()
             .enumerate()
         {
-            account.login_commands = accounts
-                .iter()
-                .find(|(index, _)| *index == account_index)
-                .map(|(_, list)| list.clone())
-                .unwrap_or_default();
+            let listed = accounts.iter().find(|entry| entry.account == account_index);
+            account.login_commands = listed.map(|entry| entry.shared.clone()).unwrap_or_default();
+            for (character_index, character) in account.characters.iter_mut().enumerate() {
+                character.login_commands = listed
+                    .and_then(|entry| {
+                        entry
+                            .characters
+                            .iter()
+                            .find(|(index, _)| *index == character_index)
+                    })
+                    .map(|(_, list)| list.clone())
+                    .unwrap_or_default();
+            }
         }
     }
     Ok(())
+}
+
+/// A character named on a `###` line: its exact name, or failing that the
+/// one character whose name matches ignoring case.
+fn resolve_character(account: &AccountProfile, name: &str) -> Option<usize> {
+    if let Some(exact) = account
+        .characters
+        .iter()
+        .position(|character| character.name == name)
+    {
+        return Some(exact);
+    }
+    let matches: Vec<usize> = account
+        .characters
+        .iter()
+        .enumerate()
+        .filter(|(_, character)| character.name.to_lowercase() == name.to_lowercase())
+        .map(|(index, _)| index)
+        .collect();
+    match matches.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    }
 }
 
 // --- Servers ------------------------------------------------------------------

@@ -200,6 +200,8 @@ pub struct AccountServerRow {
     pub matches_search: bool,
     /// The account's profile tags on this server.
     pub profiles: Vec<String>,
+    /// Each character's profile tags, by character name.
+    pub character_profiles: Vec<(String, Vec<String>)>,
     active_session_id: Option<String>,
     /// The running play session's window, while it can be switched.
     active_window: Option<LauncherSessionWindow>,
@@ -228,6 +230,7 @@ impl AccountServerRow {
             is_visible: true,
             matches_search: true,
             profiles: Vec::new(),
+            character_profiles: Vec::new(),
             active_session_id: None,
             active_window: None,
             selection_loaded: false,
@@ -284,11 +287,22 @@ impl AccountServerRow {
         }
     }
 
-    /// Whether the account carries `profile` on this server, ignoring case.
+    /// Whether the account on this server, or one of its characters,
+    /// carries `profile`, ignoring case.
     pub fn has_profile(&self, profile: &str) -> bool {
         self.profiles
             .iter()
             .any(|known| known.eq_ignore_ascii_case(profile))
+            || self.character_in_profile(profile).is_some()
+    }
+
+    /// The account's character in `profile` (ignoring case): the one the
+    /// row switches to when that profile is chosen.
+    pub fn character_in_profile(&self, profile: &str) -> Option<&str> {
+        self.character_profiles
+            .iter()
+            .find(|(_, tags)| tags.iter().any(|tag| tag.eq_ignore_ascii_case(profile)))
+            .map(|(name, _)| name.as_str())
     }
 
     /// The Options button's name for a screen reader: which row it acts on.
@@ -421,6 +435,11 @@ impl AccountServerRow {
         session: Option<&LauncherSessionSnapshot>,
     ) {
         self.profiles.clone_from(&account.profiles);
+        self.character_profiles = account
+            .characters
+            .iter()
+            .map(|character| (character.name.clone(), character.profiles.clone()))
+            .collect();
         let endpoint = format!("{}:{}", server.host, server.port);
         if self.endpoint != endpoint {
             self.is_server_online = None;

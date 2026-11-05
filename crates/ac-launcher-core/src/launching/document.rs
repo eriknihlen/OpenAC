@@ -257,6 +257,10 @@ pub fn compose(
     });
     let (plugins, plugin_status_lines) =
         compose_plugin_allow_list(account.plugins_for(Some(character)), catalog, paths);
+    // The account's shared commands, then the character's own; at the
+    // character screen the client picks the character, so only the shared.
+    let login_commands = account
+        .login_commands_for((character.launch_mode != LaunchMode::GuiSelect).then_some(character));
     let session = SessionDescriptor {
         id: session_id.to_owned(),
         endpoint: endpoint(server)?,
@@ -270,8 +274,7 @@ pub fn compose(
         plugins: Some(plugins),
         plugin_tags: None,
         plugin_settings: None,
-        login_commands: (!account.login_commands.is_empty())
-            .then(|| account.login_commands.clone()),
+        login_commands: Some(login_commands).filter(|commands| !commands.is_empty()),
         login_command_delay_ms: login_command_delay_ms
             .unwrap_or(ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS),
         status_file: Some(status_file_path.clone()),

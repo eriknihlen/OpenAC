@@ -27,7 +27,7 @@ use ac_launcher_core::plugins::{
     PluginReleaseChannel,
 };
 use ac_launcher_core::profiles::{AccountProfile, CharacterProfile, LaunchMode, ServerProfile};
-use common::{TempDir, fixture_args, fixture_command};
+use common::{TempDir, fixture_args, fixture_command, strings};
 
 // OpenAC LauncherChildEnvironmentTests.EveryChildIsToldTheRootAndEachMember.
 #[test]
@@ -80,11 +80,63 @@ fn account() -> AccountProfile {
 
 fn character(mode: LaunchMode, id: Option<&str>) -> CharacterProfile {
     CharacterProfile {
-        name: "+Acdream".into(),
         id: id.map(str::to_owned),
         launch_mode: mode,
         plugins: Some(vec!["ExamplePlugin".into()]),
+        ..CharacterProfile::new("+Acdream")
     }
+}
+
+#[test]
+fn a_login_runs_the_accounts_shared_commands_then_the_characters_own() {
+    let mut own = character(LaunchMode::Gui, Some("0x5000000A"));
+    own.login_commands = strings(&["/vt start", "/mm ws enable"]);
+    let composed = compose_simple(&own, "session-own-commands", &paths(), None);
+    assert_eq!(
+        session(&composed).login_commands,
+        Some(strings(&[
+            "/tell someone, hi",
+            "/vt start",
+            "/mm ws enable"
+        ]))
+    );
+
+    // Headless enters the world as the character too.
+    own.launch_mode = LaunchMode::Headless;
+    let composed = compose_simple(&own, "session-own-headless", &paths(), None);
+    assert_eq!(
+        session(&composed).login_commands.as_ref().map(Vec::len),
+        Some(3)
+    );
+
+    // At the character screen the client picks the character: the shared
+    // commands only.
+    own.launch_mode = LaunchMode::GuiSelect;
+    let composed = compose_simple(&own, "session-own-select", &paths(), None);
+    assert_eq!(
+        session(&composed).login_commands,
+        Some(strings(&["/tell someone, hi"]))
+    );
+
+    // A character's own commands go even when the account shares none.
+    let mut quiet = account();
+    quiet.login_commands.clear();
+    own.launch_mode = LaunchMode::Gui;
+    let composed = compose(
+        &server(),
+        &quiet,
+        &own,
+        &install(),
+        &paths(),
+        "session-own-only",
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        session(&composed).login_commands,
+        Some(strings(&["/vt start", "/mm ws enable"]))
+    );
 }
 
 fn compose_simple(

@@ -583,10 +583,8 @@ fn clone_account_without_characters(source: &AccountProfile) -> AccountProfile {
 
 fn clone_character(source: &CharacterProfile, mode: LaunchMode) -> CharacterProfile {
     CharacterProfile {
-        name: source.name.clone(),
-        id: source.id.clone(),
         launch_mode: mode,
-        plugins: source.plugins.clone(),
+        ..source.clone()
     }
 }
 
@@ -698,6 +696,7 @@ impl LauncherOrchestrator {
             is_installation_ready: state.install_record.is_some(),
             installation_status: state.installation_status.clone(),
             show_beta_plugins: state.store.document().show_beta_plugins,
+            profiles: state.store.document().profiles.clone(),
         })
     }
 
@@ -1086,6 +1085,38 @@ impl LauncherOrchestrator {
             )?;
             Ok(store.set_character_plugins(server_name, account_name, character_name, plugins)?)
         })
+    }
+
+    /// The profiles a character is in; each is taken off the account's
+    /// other characters.
+    pub fn update_character_profiles(
+        &self,
+        server_name: &str,
+        account_name: &str,
+        character_name: &str,
+        profiles: &[String],
+    ) -> Result<(), OrchestratorError> {
+        self.mutate_profiles(|store, _| {
+            Ok(
+                store.set_character_profiles(
+                    server_name,
+                    account_name,
+                    character_name,
+                    profiles,
+                )?,
+            )
+        })
+    }
+
+    /// Adds an empty profile.
+    pub fn create_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        self.mutate_profiles(|store, _| Ok(store.create_profile(name)?))
+    }
+
+    /// Deletes a profile from the list and from every account and
+    /// character.
+    pub fn delete_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        self.mutate_profiles(|store, _| Ok(store.delete_profile(name)?))
     }
 
     /// The plugins every character on an account launches with unless it
@@ -1689,7 +1720,8 @@ fn account_snapshot(
                 id: character.id.clone(),
                 launch_mode: character.launch_mode,
                 plugins: account.plugins_for(Some(character)).to_vec(),
-                login_commands: account.login_commands.clone(),
+                login_commands: account.login_commands_for(Some(character)),
+                profiles: character.profiles.clone(),
                 has_running_session: running.is_some(),
                 session_status: running.map_or_else(
                     || "Not running".to_owned(),

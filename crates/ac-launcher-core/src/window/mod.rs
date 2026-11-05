@@ -9,7 +9,8 @@
 //! - [`accounts`]: the account groups and their per-server rows.
 //! - [`sessions`]: how a session reads in the session log.
 //! - [`profile_editor`]: the Edit accounts / Edit servers / Logon commands
-//!   editors.
+//!   editors; [`profiles_dialog`]: the Profiles dialog (create and delete
+//!   profiles).
 //! - [`plugins`] and [`plugins_panel`]: the plugin check pipeline and the
 //!   Plugins tab; [`install_dialog`]: the install and update dialog.
 //! - [`first_run`], [`update_prompt`], [`console`]: content setup, the
@@ -38,6 +39,7 @@ mod launcher;
 pub mod plugins;
 pub mod plugins_panel;
 pub mod profile_editor;
+pub mod profiles_dialog;
 pub mod sessions;
 pub mod startup;
 pub mod thwarg_import;
@@ -49,7 +51,7 @@ use std::time::Duration;
 
 pub use launcher::{
     ApplyLauncherUpdate, ClosePrompt, LauncherMainTab, LauncherWindow, LauncherWindowParts,
-    RowOptionsChoice,
+    RowOptionsChoice, RowOptionsProfile,
 };
 
 use crate::cancel::{CancelToken, Cancelled};
@@ -169,6 +171,19 @@ pub trait Orchestration: Send + Sync {
         account_name: &str,
         plugins: &[String],
     ) -> Result<(), OrchestratorError>;
+    /// The profiles a character is in; each is taken off the account's
+    /// other characters.
+    fn update_character_profiles(
+        &self,
+        server_name: &str,
+        account_name: &str,
+        character_name: &str,
+        profiles: &[String],
+    ) -> Result<(), OrchestratorError>;
+    /// Adds an empty profile.
+    fn create_profile(&self, name: &str) -> Result<(), OrchestratorError>;
+    /// Deletes a profile everywhere.
+    fn delete_profile(&self, name: &str) -> Result<(), OrchestratorError>;
     fn remove_character(
         &self,
         server_name: &str,
@@ -304,6 +319,27 @@ impl Orchestration for LauncherOrchestrator {
         plugins: &[String],
     ) -> Result<(), OrchestratorError> {
         LauncherOrchestrator::update_account_plugins(self, server_name, account_name, plugins)
+    }
+    fn update_character_profiles(
+        &self,
+        server_name: &str,
+        account_name: &str,
+        character_name: &str,
+        profiles: &[String],
+    ) -> Result<(), OrchestratorError> {
+        LauncherOrchestrator::update_character_profiles(
+            self,
+            server_name,
+            account_name,
+            character_name,
+            profiles,
+        )
+    }
+    fn create_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        LauncherOrchestrator::create_profile(self, name)
+    }
+    fn delete_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        LauncherOrchestrator::delete_profile(self, name)
     }
     fn remove_character(
         &self,

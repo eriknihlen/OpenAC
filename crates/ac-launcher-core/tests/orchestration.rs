@@ -991,6 +991,46 @@ fn snapshot_projects_the_full_hierarchy_without_the_credential() {
 }
 
 #[test]
+fn a_launch_runs_the_accounts_shared_commands_then_the_characters_own() {
+    let root = TempDir::new("orchestrator");
+    let config = Arc::new(RecordingConfigService::default());
+    let orchestrator = create_orchestrator(
+        &root,
+        Setup {
+            config: Some(config.clone()),
+            ..Setup::default()
+        },
+    );
+    let original = orchestrator
+        .read_profile_text(LauncherTextEditorKind::LogonCommands)
+        .unwrap();
+    orchestrator
+        .save_profile_text(
+            LauncherTextEditorKind::LogonCommands,
+            "#Local ACE\n##testaccount\n/vt start\n###+Acdream\n/mm ws enable\n",
+            &original,
+        )
+        .unwrap();
+    let snapshot = orchestrator.snapshot().unwrap();
+    let account = &snapshot.servers[0].accounts[0];
+    assert_eq!(account.login_commands, ["/vt start"]);
+    assert_eq!(
+        account.characters[0].login_commands,
+        ["/vt start", "/mm ws enable"]
+    );
+
+    launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
+
+    // The launch's copy of the character keeps its own commands.
+    assert_eq!(config.last_character().login_commands, ["/mm ws enable"]);
+    let composed = config.last_composed();
+    assert_eq!(
+        composed.document.sessions[0].login_commands.as_deref(),
+        Some(&["/vt start".to_owned(), "/mm ws enable".to_owned()][..])
+    );
+}
+
+#[test]
 fn launch_composes_the_selected_mode_and_spawns_through_the_injected_seam() {
     let root = TempDir::new("orchestrator");
     let config = Arc::new(RecordingConfigService::default());
@@ -2512,6 +2552,7 @@ mod relaunch {
                 is_installation_ready: true,
                 installation_status: "Ready".into(),
                 show_beta_plugins: false,
+                profiles: Vec::new(),
             }
         }
 

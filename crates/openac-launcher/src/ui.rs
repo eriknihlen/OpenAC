@@ -477,15 +477,23 @@ fn accounts_tab(app: &mut LauncherApp, ui: &mut Ui) {
             }
         });
     });
-    if window.has_profile_filters() {
-        ui.horizontal(|ui| {
+    ui.horizontal(|ui| {
+        if window.has_profile_filters() {
             for chip in window.profile_filters.clone() {
                 if ui.selectable_label(chip.is_selected, &chip.label).clicked() {
                     window.set_profile_filter(chip.profile.as_deref());
                 }
             }
-        });
-    }
+            ui.add_space(8.0);
+        }
+        if ui
+            .add_enabled(window.can_interact(), egui::Button::new("Profiles…"))
+            .on_hover_text("Create and delete profiles")
+            .clicked()
+        {
+            window.open_profiles();
+        }
+    });
     ui.horizontal_wrapped(|ui| {
         let mut search = window.account_search().to_owned();
         if ui
@@ -974,7 +982,7 @@ fn account_row(
                         );
                         item(
                             ui,
-                            "Plugins for this character…",
+                            "Options for this character…",
                             row.character_name().is_some(),
                             RowAction::CharacterPlugins,
                         );
@@ -1573,6 +1581,25 @@ fn dialogs(app: &mut LauncherApp, ctx: &egui::Context) {
     if !window.plugins.add_from_url_choices.is_empty() {
         modal(ctx, "add-from-url-choice", 520.0, |ui| {
             add_from_url_choice(window, ui);
+        });
+    }
+    if window.profiles_dialog.is_open {
+        modal(ctx, "profiles", 520.0, |ui| profiles_dialog(window, ui));
+    }
+    if window.profiles_dialog.delete_target.is_some() {
+        modal(ctx, "delete-profile", 440.0, |ui| {
+            dialog_title(ui, &window.profiles_dialog.delete_title());
+            ui.label(muted(window.profiles_dialog.delete_message()));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let delete =
+                    egui::Button::new(RichText::new("Delete").strong()).fill(theme::DANGER);
+                if ui.add(delete).clicked() {
+                    window.confirm_delete_profile();
+                }
+                if ui.button("Cancel").clicked() {
+                    window.cancel_delete_profile();
+                }
+            });
         });
     }
     if window.remove_character_target.is_some() {
@@ -2232,6 +2259,28 @@ fn row_options(window: &mut Window, ui: &mut Ui) {
                 }
             });
         });
+    if window.show_character_plugin_choice() {
+        ui.add_space(8.0);
+        ui.label(RichText::new("Profiles").strong());
+        if window.row_options_profiles.is_empty() {
+            ui.label(muted(
+                "No profiles yet. Create one with Profiles… above the accounts.",
+            ));
+        } else {
+            ui.label(muted(
+                "Choosing a profile picks this character on its account's row. A profile is on \
+                 one character per account.",
+            ));
+            egui::ScrollArea::vertical()
+                .id_salt("row-options-profiles")
+                .max_height(140.0)
+                .show(ui, |ui| {
+                    for profile in &mut window.row_options_profiles {
+                        ui.checkbox(&mut profile.is_checked, &profile.name);
+                    }
+                });
+        }
+    }
     if let Some(error) = &window.last_error {
         ui.label(error_text(error));
     }
@@ -2241,6 +2290,58 @@ fn row_options(window: &mut Window, ui: &mut Ui) {
         }
         if ui.button("Cancel").clicked() {
             window.close_desktop_dialogs();
+        }
+    });
+}
+
+/// Profiles…: every profile with what is in it, New profile and Delete.
+fn profiles_dialog(window: &mut Window, ui: &mut Ui) {
+    dialog_title(ui, "Profiles");
+    ui.label(muted(
+        "A profile groups accounts and characters; its chip above the accounts shows them. Put \
+         a character in a profile from its row's Options › Options for this character, an \
+         account with Edit accounts (Profiles=).",
+    ));
+    ui.add_space(4.0);
+    let entries = window.profiles_dialog.entries.clone();
+    egui::ScrollArea::vertical()
+        .id_salt("profiles-list")
+        .max_height(260.0)
+        .show(ui, |ui| {
+            if entries.is_empty() {
+                ui.label(muted("No profiles yet."));
+            }
+            for entry in &entries {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&entry.name).strong());
+                    ui.label(muted(&entry.members));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Delete").clicked() {
+                            window.request_delete_profile(&entry.name);
+                        }
+                    });
+                });
+            }
+        });
+    ui.separator();
+    ui.horizontal(|ui| {
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut window.profiles_dialog.new_name)
+                .hint_text("New profile name")
+                .desired_width(220.0),
+        );
+        let entered =
+            response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if ui.button("New profile").clicked() || entered {
+            window.create_profile();
+        }
+    });
+    if let Some(error) = &window.profiles_dialog.error {
+        ui.label(error_text(error));
+    }
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if ui.button("Close").clicked() {
+            window.close_profiles();
         }
     });
 }

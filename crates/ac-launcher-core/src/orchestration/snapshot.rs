@@ -21,8 +21,11 @@ pub struct LauncherCharacterSnapshot {
     pub launch_mode: LaunchMode,
     /// The plugins it launches with: its own list, or its account's.
     pub plugins: Vec<String>,
-    /// The commands run after it logs in: its account's.
+    /// The commands run after it logs in: its account's shared ones, then
+    /// its own.
     pub login_commands: Vec<String>,
+    /// The profiles it is in.
+    pub profiles: Vec<String>,
     /// Whether a play session for it is running.
     pub has_running_session: bool,
     /// That session's status, or `Not running`.
@@ -53,7 +56,8 @@ pub struct LauncherAccountSnapshot {
     pub plugins: Vec<String>,
     /// The account's profile tags.
     pub profiles: Vec<String>,
-    /// Commands run in order after any character on the account logs in.
+    /// The shared commands, run in order after any character on the
+    /// account logs in, before the character's own.
     pub login_commands: Vec<String>,
 }
 
@@ -231,4 +235,6 @@ pub struct LauncherStateSnapshot {
     pub installation_status: String,
     /// Whether beta plugins are offered.
     pub show_beta_plugins: bool,
+    /// Every profile name, in the order the filter shows them.
+    pub profiles: Vec<String>,
 }

@@ -1,8 +1,17 @@
-//! Turns a version 1 profile file into the current shape. Version 1 kept a
-//! plugin list and logon commands on every character and, optionally, one
-//! user list shared by every server; the current shape keeps plugins and
-//! commands on the account (a character may still have its own plugin
-//! list) and accounts per server.
+//! Turns an older profile file into the current shape.
+//!
+//! Version 1 kept a plugin list and logon commands on every character and,
+//! optionally, one user list shared by every server; the current shape
+//! keeps plugins on the account (a character may still have its own list),
+//! accounts per server, and logon commands on each character, so a version
+//! 1 character keeps its commands as they were.
+//!
+//! Version 2 kept logon commands on the account only; the current shape
+//! adds commands per character and keeps the account's as the shared ones
+//! every character runs first. Upgrading moves each account's commands to
+//! the character it is set to launch (the first character when it is set
+//! to the character screen); an account without characters keeps them as
+//! its shared commands.
 
 use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
@@ -47,11 +56,51 @@ struct Version1Document {
     show_beta_plugins: bool,
 }
 
-/// Reads a version 1 document and returns it in the current shape, with a
-/// notice for every logon command list that could not be kept as it was.
-pub(crate) fn from_version1(
-    bytes: &[u8],
-) -> Result<(LauncherProfileDocument, Vec<String>), ReadError> {
+/// Moves a version 2 document's logon commands into the current shape (see
+/// the module comment) and returns one line per account that had any:
+/// where its commands went.
+pub(crate) fn from_version2(document: &mut LauncherProfileDocument) -> Vec<String> {
+    document.version = CURRENT_PROFILE_VERSION;
+    let mut moves = Vec::new();
+    for server in &mut document.servers {
+        for account in &mut server.accounts {
+            if account.login_commands.is_empty() {
+                continue;
+            }
+            // The character the row launches; at the character screen (or
+            // set to a character no longer on the account), the first one.
+            let target = account
+                .selected_character
+                .as_deref()
+                .and_then(|name| {
+                    account
+                        .characters
+                        .iter()
+                        .position(|character| character.name == name)
+                })
+                .or_else(|| (!account.characters.is_empty()).then_some(0));
+            let Some(index) = target else {
+                moves.push(format!(
+                    "{} / {}: logon commands stay shared (the account has no characters)",
+                    server.name, account.account
+                ));
+                continue;
+            };
+            let character = &mut account.characters[index];
+            let mut commands = std::mem::take(&mut account.login_commands);
+            commands.append(&mut character.login_commands);
+            character.login_commands = commands;
+            moves.push(format!(
+                "{} / {}: logon commands moved to {}",
+                server.name, account.account, character.name
+            ));
+        }
+    }
+    moves
+}
+
+/// Reads a version 1 document and returns it in the current shape.
+pub(crate) fn from_version1(bytes: &[u8]) -> Result<LauncherProfileDocument, ReadError> {
     let root = host_json::parse(bytes)?;
     if host_json::is_null(&root) {
         return Err(invalid("The version 1 profile file is empty."));
@@ -60,9 +109,9 @@ pub(crate) fn from_version1(
     let Some(servers) = document.servers else {
         return Err(invalid("The servers collection cannot be null."));
     };
-    let mut notices = Vec::new();
     let mut result = LauncherProfileDocument {
         version: CURRENT_PROFILE_VERSION,
+        profiles: Vec::new(),
         servers: Vec::new(),
         show_beta_plugins: document.show_beta_plugins,
     };
@@ -111,7 +160,7 @@ pub(crate) fn from_version1(
         }
         let accounts = accounts
             .into_iter()
-            .map(|account| migrate_account(&server.name, account, &mut notices))
+            .map(|account| migrate_account(&server.name, account))
             .collect::<Result<Vec<_>, _>>()?;
         result.servers.push(ServerProfile {
             name: server.name,
@@ -121,7 +170,7 @@ pub(crate) fn from_version1(
             account_list_initialized: false,
         });
     }
-    Ok((result, notices))
+    Ok(result)
 }
 
 fn copy(character: &Version1Character) -> Version1Character {
@@ -137,7 +186,6 @@ fn copy(character: &Version1Character) -> Version1Character {
 fn migrate_account(
     server_name: &str,
     account: Option<Version1Account>,
-    notices: &mut Vec<String>,
 ) -> Result<AccountProfile, ReadError> {
     let Some(account) = account else {
         return Err(invalid(format!(
@@ -167,27 +215,12 @@ fn migrate_account(
         )));
     }
     let union = union_of_plugins(&present);
-    let commands: Vec<String> = present
-        .first()
-        .and_then(|character| character.login_commands.clone())
-        .unwrap_or_default();
-    for character in present.iter().skip(1) {
-        let own = character.login_commands.clone().unwrap_or_default();
-        if own != commands {
-            notices.push(describe_dropped_commands(
-                server_name,
-                &account.account,
-                &present[0].name,
-                &character.name,
-                &own,
-            ));
-        }
-    }
     Ok(AccountProfile {
         account: account.account,
         password: account.password,
         profiles: Vec::new(),
-        login_commands: commands,
+        // Every character keeps its own commands; none are shared.
+        login_commands: Vec::new(),
         selected_character: account.selected_character,
         selected_launch_mode: account.selected_launch_mode,
         characters: present
@@ -199,6 +232,8 @@ fn migrate_account(
                     id: character.id.clone(),
                     launch_mode: character.launch_mode,
                     plugins: (!same_plugins(&own, &union)).then_some(own),
+                    profiles: Vec::new(),
+                    login_commands: character.login_commands.clone().unwrap_or_default(),
                 }
             })
             .collect(),
@@ -237,30 +272,6 @@ fn same_plugins(own: &[String], union: &[String]) -> bool {
             .iter()
             .zip(union)
             .all(|(left, right)| left.eq_ignore_ascii_case(right))
-}
-
-fn describe_dropped_commands(
-    server_name: &str,
-    account_name: &str,
-    kept_character: &str,
-    character: &str,
-    commands: &[String],
-) -> String {
-    if commands.is_empty() {
-        return format!(
-            "{account_name} on {server_name}: {character} had no logon commands; it now runs \
-             {kept_character}'s."
-        );
-    }
-    let mut text = format!(
-        "{account_name} on {server_name}: {character}'s logon commands were not kept (the \
-         account now runs {kept_character}'s):"
-    );
-    for command in commands {
-        text.push_str("\n    ");
-        text.push_str(command);
-    }
-    text
 }
 
 fn read_document(node: &Node) -> Result<Version1Document, ReadError> {

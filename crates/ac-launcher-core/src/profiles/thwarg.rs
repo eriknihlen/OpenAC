@@ -14,15 +14,16 @@
 //!   one from Thwarg's own server list or its published one (the own list
 //!   wins), matched to a launcher server by host and port, or added;
 //! - an account already on that server is not overwritten: it only gains
-//!   the characters it lacks, and logon commands when it has none;
-//! - each Thwarg profile becomes a profile tag on the accounts it ticks
-//!   (the account itself, and its setting for that server);
+//!   the characters it lacks, and logon commands for characters with none
+//!   of their own; it is not put in any profile;
+//! - each Thwarg profile is a profile here (added to the profile list even
+//!   with nothing in it); on a new account it ticks (the account itself,
+//!   and its setting for that server) it goes on the character the profile
+//!   picks for that account, or on the account when the profile picks the
+//!   character screen;
 //! - the row's character comes from the profile activated last;
-//! - Thwarg keeps logon commands per character, this launcher per account:
-//!   an account takes the list of its one character that has any; when
-//!   characters have different lists, the last profile's chosen character's
-//!   list (else the first by file name) is kept and the others are listed in
-//!   the report.
+//! - each character keeps its own Thwarg logon commands; the account's
+//!   shared commands are not touched.
 //!
 //! Passwords are never part of the report or of any `Debug` output.
 
@@ -792,10 +793,10 @@ pub struct ThwargImportReport {
     pub accounts_added: Vec<String>,
     /// Accounts already on their server, with what they gained.
     pub accounts_present: Vec<String>,
+    /// Profile names added to the profile list.
+    pub profiles_added: Vec<String>,
     /// What was left out, and why.
     pub skipped: Vec<String>,
-    /// Logon command lists that could not all be kept.
-    pub conflicts: Vec<String>,
     /// What else the player should know.
     pub notes: Vec<String>,
     /// How many servers and accounts were added or gained something.
@@ -839,16 +840,14 @@ impl ThwargImportReport {
             ),
             ("Accounts added", "Accounts to add", &self.accounts_added),
             (
-                "Accounts already here (only missing characters and logon commands are added)",
-                "Accounts already here (only missing characters and logon commands are added)",
+                "Accounts already here (only missing characters, and logon commands for \
+                 characters without their own, are added)",
+                "Accounts already here (only missing characters, and logon commands for \
+                 characters without their own, are added)",
                 &self.accounts_present,
             ),
+            ("Profiles added", "Profiles to add", &self.profiles_added),
             ("Skipped", "Skipped", &self.skipped),
-            (
-                "Logon commands not kept",
-                "Logon commands not kept",
-                &self.conflicts,
-            ),
             ("Notes", "Notes", &self.notes),
         ];
         let mut lines = Vec::new();
@@ -1067,6 +1066,26 @@ pub fn import(files: &ThwargFiles, document: &mut LauncherProfileDocument) -> Th
         }
     }
 
+    // Every Thwarg profile is a profile here, even one with nothing in it.
+    for profile in &profiles {
+        if validate_profile_tags(std::slice::from_ref(&profile.name)).is_err() {
+            report.skipped.push(format!(
+                "Profiles\\{}: the Thwarg profile '{}' cannot be a profile name here (no , ; = \
+                 \" or #), so nothing was put in it.",
+                profile.file_name, profile.name
+            ));
+            continue;
+        }
+        let known = |list: &[String]| {
+            list.iter()
+                .any(|known| known.eq_ignore_ascii_case(&profile.name))
+        };
+        if !known(&document.profiles) {
+            document.profiles.push(profile.name.clone());
+            report.profiles_added.push(profile.name.clone());
+            report.changes += 1;
+        }
+    }
     if let Some(last) = last {
         report.notes.push(format!(
             "Character choices come from the Thwarg profile '{}', the one activated last.",
@@ -1176,7 +1195,6 @@ fn merge_account(
     let chosen = last
         .and_then(|profile| profile.setting(&account.name, thwarg_server))
         .map(|setting| setting.chosen.clone());
-    let chosen_name = chosen.as_ref().and_then(Option::as_deref);
     let existing = server
         .accounts
         .iter()
@@ -1184,28 +1202,17 @@ fn merge_account(
     let Some(index) = existing else {
         let mut profile = AccountProfile::new(account.name.clone(), account.password.clone());
         add_characters(&mut profile, &reference.characters);
-        let (commands, from) =
-            pick_commands(&server.name, &account.name, reference, chosen_name, report);
-        profile.login_commands = commands;
+        let commands = give_commands(&mut profile, reference);
         for thwarg in profiles {
-            if !thwarg.is_active(&account.name, thwarg_server) {
+            if !thwarg.is_active(&account.name, thwarg_server)
+                || validate_profile_tags(std::slice::from_ref(&thwarg.name)).is_err()
+            {
                 continue;
             }
-            let mut tags = profile.profiles.clone();
-            tags.push(thwarg.name.clone());
-            if validate_profile_tags(&tags).is_ok() {
-                profile.profiles = tags;
-            } else if !profile
-                .profiles
-                .iter()
-                .any(|tag| tag.eq_ignore_ascii_case(&thwarg.name))
-            {
-                report.skipped.push(format!(
-                    "{} on {}: the Thwarg profile '{}' cannot be a profile name here (no , ; = \
-                     \" or #), so the account was not tagged with it.",
-                    account.name, server.name, thwarg.name
-                ));
-            }
+            let picked = thwarg
+                .setting(&account.name, thwarg_server)
+                .and_then(|setting| setting.chosen.as_deref());
+            tag(&mut profile, &thwarg.name, picked, &server.name, report);
         }
         match chosen {
             Some(None) => {
@@ -1219,13 +1226,14 @@ fn merge_account(
         }
         report
             .accounts_added
-            .push(describe_added(&server.name, &profile, from.as_deref()));
+            .push(describe_added(&server.name, &profile, &commands.given));
         report.changes += 1;
         server.accounts.push(profile);
         return;
     };
     let profile = &mut server.accounts[index];
     let added = add_characters(profile, &reference.characters);
+    let commands = give_commands(profile, reference);
     let mut gained = Vec::new();
     if !added.is_empty() {
         gained.push(format!(
@@ -1235,25 +1243,14 @@ fn merge_account(
             added.join(", ")
         ));
     }
-    let has_commands = reference
-        .commands
-        .iter()
-        .any(|commands| !commands.commands.is_empty());
-    if has_commands && !profile.login_commands.is_empty() {
+    if !commands.given.is_empty() {
+        gained.push(describe_commands(&commands.given));
+    }
+    for character in &commands.kept {
         report.skipped.push(format!(
-            "{} on {}: keeps its own logon commands; Thwarg's were not imported.",
+            "{} on {}: {character} keeps its own logon commands; Thwarg's were not imported.",
             profile.account, server.name
         ));
-    } else if has_commands {
-        let (commands, from) = pick_commands(
-            &server.name,
-            &profile.account,
-            reference,
-            chosen_name,
-            report,
-        );
-        gained.push(describe_commands(commands.len(), from.as_deref()));
-        profile.login_commands = commands;
     }
     if gained.is_empty() {
         report.accounts_present.push(format!(
@@ -1268,6 +1265,50 @@ fn merge_account(
             server.name,
             gained.join(", ")
         ));
+    }
+}
+
+/// Puts a Thwarg profile on a new account: on the character it picks for
+/// the account, or on the account when it picks the character screen (or
+/// a character the account does not have, which the report says). Within
+/// an account a profile is on one character, and a name already there in
+/// another case is left as it is.
+fn tag(
+    profile: &mut AccountProfile,
+    name: &str,
+    picked: Option<&str>,
+    server_name: &str,
+    report: &mut ThwargImportReport,
+) {
+    let carried = profile
+        .profiles
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case(name))
+        || profile
+            .characters
+            .iter()
+            .any(|character| character.has_profile(name));
+    if carried {
+        return;
+    }
+    let character = picked.and_then(|picked| {
+        profile
+            .characters
+            .iter_mut()
+            .find(|character| character.name == picked)
+    });
+    match (character, picked) {
+        (Some(character), _) => character.profiles.push(name.to_owned()),
+        (None, picked) => {
+            if let Some(picked) = picked {
+                report.notes.push(format!(
+                    "{} on {server_name}: the Thwarg profile '{name}' picks {picked}, who is not \
+                     among the account's characters, so the account is in the profile instead.",
+                    profile.account
+                ));
+            }
+            profile.profiles.push(name.to_owned());
+        }
     }
 }
 
@@ -1293,76 +1334,77 @@ fn add_characters(
     added
 }
 
-/// The account's logon commands: the one list its characters have, or,
-/// when they differ, the chosen character's (else the first file's); every
-/// other list goes to the report. Also returns whose list it is.
-fn pick_commands(
-    server_name: &str,
-    account_name: &str,
-    reference: &Reference,
-    chosen: Option<&str>,
-    report: &mut ThwargImportReport,
-) -> (Vec<String>, Option<String>) {
+/// Which characters got Thwarg's logon commands, and which kept their own.
+#[derive(Default)]
+struct GivenCommands {
+    given: Vec<String>,
+    kept: Vec<String>,
+}
+
+/// Gives each character its own Thwarg logon commands, as Thwarg keeps
+/// them, when it has none of its own (a character named only by a command
+/// file is added); the account's shared commands are left alone.
+fn give_commands(profile: &mut AccountProfile, reference: &Reference) -> GivenCommands {
+    let mut result = GivenCommands::default();
     // `reference.commands` is in file name order.
-    let lists: Vec<&ThwargCommands> = reference
+    for commands in reference
         .commands
         .iter()
         .filter(|commands| !commands.commands.is_empty())
-        .collect();
-    let Some(&first) = lists.first() else {
-        return (Vec::new(), None);
-    };
-    let differ = lists.iter().any(|other| other.commands != first.commands);
-    let kept = if differ {
-        lists
+    {
+        let name = commands.character();
+        let index = profile
+            .characters
             .iter()
-            .copied()
-            .find(|commands| chosen.is_some_and(|chosen| commands.character() == chosen))
-            .unwrap_or(first)
-    } else {
-        first
-    };
-    for other in &lists {
-        if other.commands == kept.commands {
-            continue;
+            .position(|character| character.name == name)
+            .or_else(|| {
+                profile
+                    .characters
+                    .iter()
+                    .position(|character| character.name.eq_ignore_ascii_case(name))
+            })
+            .unwrap_or_else(|| {
+                profile.characters.push(CharacterProfile::new(name));
+                profile.characters.len() - 1
+            });
+        let character = &mut profile.characters[index];
+        if character.login_commands.is_empty() {
+            character.login_commands.clone_from(&commands.commands);
+            result.given.push(character.name.clone());
+        } else {
+            result.kept.push(character.name.clone());
         }
-        let mut text = format!(
-            "{account_name} on {server_name}: {}'s logon commands were not kept (the account \
-             now runs {}'s):",
-            other.character(),
-            kept.character()
-        );
-        for command in &other.commands {
-            text.push_str("\n    ");
-            text.push_str(command);
-        }
-        report.conflicts.push(text);
     }
-    (kept.commands.clone(), Some(kept.character().to_owned()))
+    result
 }
 
-fn describe_commands(count: usize, from: Option<&str>) -> String {
-    let what = format!(
-        "{count} {}",
-        plural(count, "logon command", "logon commands")
-    );
-    match from {
-        Some(character) if !character.is_empty() => format!("{what} from {character}"),
-        _ => what,
-    }
+/// "logon commands for Ann, Bea".
+fn describe_commands(characters: &[String]) -> String {
+    format!("logon commands for {}", characters.join(", "))
 }
 
-fn describe_added(server_name: &str, profile: &AccountProfile, from: Option<&str>) -> String {
+fn describe_added(server_name: &str, profile: &AccountProfile, commands: &[String]) -> String {
     let mut parts = vec![format!(
         "{} {}",
         profile.characters.len(),
         plural(profile.characters.len(), "character", "characters")
     )];
-    if !profile.login_commands.is_empty() {
-        parts.push(describe_commands(profile.login_commands.len(), from));
+    if !commands.is_empty() {
+        parts.push(describe_commands(commands));
     }
     if !profile.profiles.is_empty() {
         parts.push(format!("profiles {}", profile.profiles.join(", ")));
+    }
+    for character in profile
+        .characters
+        .iter()
+        .filter(|character| !character.profiles.is_empty())
+    {
+        parts.push(format!(
+            "{} in profiles {}",
+            character.name,
+            character.profiles.join(", ")
+        ));
     }
     match (&profile.selected_character, profile.selected_launch_mode) {
         (Some(character), _) => parts.push(format!("launches {character}")),
@@ -1550,9 +1592,10 @@ mod tests {
 
     fn existing() -> LauncherProfileDocument {
         let mut account = AccountProfile::new("brambleton", "keep");
-        account.login_commands = vec!["/own".into()];
+        account.login_commands = vec!["/shared".into()];
         let mut thorn = CharacterProfile::new("Old Thorn");
         thorn.id = Some("0x50000003".into());
+        thorn.login_commands = vec!["/own".into()];
         account.characters.push(thorn);
         let mut mistvale = ServerProfile::new("Mistvale", "mist.example.test", 9050);
         mistvale.accounts.push(account);
@@ -1875,10 +1918,13 @@ mod tests {
         ];
         let mut document = existing();
         let report = import(&files, &mut document);
-        assert_eq!(
-            account(&document, "Reef-Cull", "Fernwick").login_commands,
-            ["/reef"]
-        );
+        // The file's character is not in a character list: the import adds
+        // it with its commands (changed with commands per character; the
+        // account took them before).
+        let fernwick = account(&document, "Reef-Cull", "Fernwick");
+        assert!(fernwick.login_commands.is_empty());
+        assert_eq!(character_names(fernwick), ["Ann"]);
+        assert_eq!(fernwick.characters[0].login_commands, ["/reef"]);
         assert!(report.skipped.contains(
             &r"LoginCommands\LoginCommands-Nobody-Reef-Cull-Ann.txt: its name holds no account from Accounts.txt and known server; skipped."
                 .to_owned()
@@ -1921,16 +1967,24 @@ mod tests {
         assert_eq!(fernwick.password, "s3cret,x=1");
         assert_eq!(character_names(fernwick), ["Ash Vale-Runner", "Brindle"]);
         assert_eq!(fernwick.characters[0].id.as_deref(), Some("0x50000001"));
-        assert_eq!(fernwick.profiles, ["Main"]);
+        // Main picks Brindle for Fernwick, so the profile is on Brindle, not
+        // on the account (changed with profiles on characters).
+        assert!(fernwick.profiles.is_empty());
+        assert_eq!(fernwick.characters[1].profiles, ["Main"]);
+        assert!(fernwick.characters[0].profiles.is_empty());
         assert_eq!(fernwick.selected_character.as_deref(), Some("Brindle"));
         assert_eq!(fernwick.selected_launch_mode, Some(LaunchMode::Gui));
 
         let quillon = account(&document, "Hearthfall", "Quillon");
         assert!(quillon.characters.is_empty());
-        // Main ticks Quillon's setting but not its account: Bots only.
+        // Main ticks Quillon's setting but not its account: Bots only, which
+        // picks the character screen, so it is on the account.
         assert_eq!(quillon.profiles, ["Bots"]);
         assert_eq!(quillon.selected_character, None);
         assert_eq!(quillon.selected_launch_mode, Some(LaunchMode::GuiSelect));
+
+        assert_eq!(document.profiles, ["Bots", "Main"]);
+        assert_eq!(report.profiles_added, ["Bots", "Main"]);
 
         // Nothing lands on a server the Thwarg files do not use.
         let elsewhere = document
@@ -1939,8 +1993,15 @@ mod tests {
             .find(|server| server.name == "Elsewhere")
             .unwrap();
         assert!(elsewhere.accounts.is_empty());
-        assert_eq!(report.changes, 4);
+        // A server, two accounts, one account gaining a character, and the
+        // two profiles.
+        assert_eq!(report.changes, 6);
         assert!(report.has_changes());
+        assert_eq!(
+            report.accounts_added[0],
+            "Fernwick on Hearthfall: 2 characters, logon commands for Ash Vale-Runner, Brindle, \
+             Brindle in profiles Main, launches Brindle"
+        );
     }
 
     #[test]
@@ -1949,15 +2010,18 @@ mod tests {
         let report = import(&files(), &mut document);
         let brambleton = account(&document, "Mistvale", "brambleton");
         assert_eq!(brambleton.password, "keep");
-        assert_eq!(brambleton.login_commands, ["/own"]);
+        assert_eq!(brambleton.login_commands, ["/shared"]);
         assert_eq!(character_names(brambleton), ["Old Thorn", "New Thorn"]);
+        // Old Thorn has commands of its own, so Thwarg's are not imported.
+        assert_eq!(brambleton.characters[0].login_commands, ["/own"]);
         assert!(brambleton.profiles.is_empty());
         assert_eq!(
             report.accounts_present,
             ["brambleton on Mistvale: adds 1 character (New Thorn)"]
         );
         assert!(report.skipped.contains(
-            &"brambleton on Mistvale: keeps its own logon commands; Thwarg's were not imported."
+            &"brambleton on Mistvale: Old Thorn keeps its own logon commands; Thwarg's were not \
+              imported."
                 .to_owned()
         ));
         assert_eq!(
@@ -1968,58 +2032,113 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_account_without_commands_gets_thwargs() {
+    fn an_existing_character_without_commands_gets_thwargs_and_the_shared_ones_stay() {
         let mut document = existing();
-        document.servers[0].accounts[0].login_commands.clear();
-        import(&files(), &mut document);
-        assert_eq!(
-            account(&document, "Mistvale", "brambleton").login_commands,
-            ["/theirs"]
-        );
-    }
-
-    #[test]
-    fn different_commands_keep_the_last_profiles_choice_and_report_the_rest() {
-        let mut document = existing();
+        document.servers[0].accounts[0].characters[0]
+            .login_commands
+            .clear();
         let report = import(&files(), &mut document);
+        let brambleton = account(&document, "Mistvale", "brambleton");
+        assert_eq!(brambleton.characters[0].login_commands, ["/theirs"]);
+        assert_eq!(brambleton.login_commands, ["/shared"]);
         assert_eq!(
-            account(&document, "Hearthfall", "Fernwick").login_commands,
-            ["/wave"]
-        );
-        assert_eq!(
-            report.conflicts,
+            report.accounts_present,
             [
-                "Fernwick on Hearthfall: Ash Vale-Runner's logon commands were not kept (the \
-              account now runs Brindle's):\n    /say hello\n    /hop"
+                "brambleton on Mistvale: adds 1 character (New Thorn), logon commands for Old \
+                 Thorn"
             ]
         );
     }
 
     #[test]
-    fn different_commands_without_a_chosen_one_keep_the_first_file() {
+    fn each_character_keeps_its_own_commands() {
+        // Before commands per character, the account kept the chosen
+        // character's list and the report listed the others as not kept.
+        let mut document = existing();
+        let report = import(&files(), &mut document);
+        let fernwick = account(&document, "Hearthfall", "Fernwick");
+        assert!(fernwick.login_commands.is_empty());
+        assert_eq!(
+            fernwick.characters[0].login_commands,
+            ["/say hello", "/hop"]
+        );
+        assert_eq!(fernwick.characters[1].login_commands, ["/wave"]);
+        assert!(!report.lines(true).join("\n").contains("not kept"));
+    }
+
+    #[test]
+    fn without_profiles_the_characters_still_keep_their_commands() {
         let mut files = files();
         files.profiles.clear();
         let mut document = existing();
         let report = import(&files, &mut document);
         let fernwick = account(&document, "Hearthfall", "Fernwick");
-        assert_eq!(fernwick.login_commands, ["/say hello", "/hop"]);
+        assert_eq!(
+            fernwick.characters[0].login_commands,
+            ["/say hello", "/hop"]
+        );
+        assert_eq!(fernwick.characters[1].login_commands, ["/wave"]);
         assert_eq!(fernwick.selected_character, None);
         assert_eq!(fernwick.selected_launch_mode, None);
-        assert_eq!(report.conflicts.len(), 1);
-        assert!(report.conflicts[0].contains("Brindle's logon commands were not kept"));
+        assert!(document.profiles.is_empty());
+        assert!(report.profiles_added.is_empty());
     }
 
     #[test]
-    fn the_one_character_with_commands_gives_them_to_its_account() {
+    fn a_profile_picking_a_character_the_account_lacks_goes_on_the_account() {
         let mut files = files();
-        files.login_commands[0] = commands_file("Fernwick", "Hearthfall", "Ash Vale-Runner", &[]);
+        files.profiles[0] = profile_file(
+            "Main",
+            "\\/Date(1700000000000)\\/",
+            &[("Fernwick", true)],
+            &[("Fernwick", true, "Nobody Here", "Hearthfall")],
+        );
         let mut document = existing();
         let report = import(&files, &mut document);
-        assert_eq!(
-            account(&document, "Hearthfall", "Fernwick").login_commands,
-            ["/wave"]
+        let fernwick = account(&document, "Hearthfall", "Fernwick");
+        assert_eq!(fernwick.profiles, ["Main"]);
+        assert!(
+            fernwick
+                .characters
+                .iter()
+                .all(|character| character.profiles.is_empty())
         );
-        assert!(report.conflicts.is_empty());
+        assert!(report.notes.iter().any(|note| note.contains(
+            "the Thwarg profile 'Main' picks Nobody Here, who is not among the account's \
+             characters"
+        )));
+    }
+
+    #[test]
+    fn an_empty_profile_is_added_and_a_bad_name_is_skipped_once() {
+        let mut files = files();
+        files
+            .profiles
+            .push(profile_file("Spare", "\\/Date(1400000000000)\\/", &[], &[]));
+        files.profiles.push(profile_file(
+            "Bad,Name",
+            "\\/Date(1400000000000)\\/",
+            &[("Fernwick", true)],
+            &[("Fernwick", true, "Brindle", "Hearthfall")],
+        ));
+        let mut document = existing();
+        let report = import(&files, &mut document);
+        validate_and_normalize_document(&mut document).unwrap();
+        assert_eq!(document.profiles, ["Bots", "Main", "Spare"]);
+        let skipped: Vec<&String> = report
+            .skipped
+            .iter()
+            .filter(|line| line.contains("Bad,Name"))
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                "Profiles\\bad,name.txt: the Thwarg profile 'Bad,Name' cannot be a profile name \
+                 here (no , ; = \" or #), so nothing was put in it."
+            ]
+        );
+        let brindle = &account(&document, "Hearthfall", "Fernwick").characters[1];
+        assert_eq!(brindle.profiles, ["Main"]);
     }
 
     #[test]
