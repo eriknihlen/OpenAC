@@ -55,8 +55,12 @@ internal sealed class LauncherUpdateComposition : IDisposable
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(launcherVersion);
         ArgumentNullException.ThrowIfNull(hasRunningSessions);
-        Uri manifestUri = updateManifestUri
-            ?? ReleaseManifestClient.ProductionManifestUri;
+        // A retired launcher never follows the latest-release address: that will be the Rust
+        // client's. It reads the last release's own manifest instead.
+        Uri manifestUri = updateManifestUri is null
+            || updateManifestUri == ReleaseManifestClient.ProductionManifestUri
+                ? ReleaseManifestClient.RetiredManifestUri
+                : updateManifestUri;
         var versions = new ClientVersionStore(paths);
         HttpClient? artifactClient = null;
         ReleaseManifestClient? manifestClient = null;
@@ -93,7 +97,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
             return new LauncherUpdateComposition(
                 versions,
                 LauncherExecutableSet.FromCurrentVersionStore(versions),
-                updater,
+                new RetiredLauncherUpdater(updater),
                 manifestUri,
                 artifactClient,
                 manifestClient,
@@ -117,7 +121,7 @@ internal sealed class LauncherUpdateComposition : IDisposable
             return new LauncherUpdateComposition(
                 versions,
                 LauncherExecutableSet.Unavailable(status),
-                new UnavailableLauncherUpdater(status, resolution),
+                new RetiredLauncherUpdater(new UnavailableLauncherUpdater(status, resolution)),
                 manifestUri,
                 artifactClient: null,
                 manifestClient: null,
@@ -134,8 +138,8 @@ internal sealed class LauncherUpdateComposition : IDisposable
     private static ReleaseManifestClient CreateManifestClient(Uri manifestUri)
     {
         ArgumentNullException.ThrowIfNull(manifestUri);
-        return manifestUri == ReleaseManifestClient.ProductionManifestUri
-            ? new ReleaseManifestClient(TimeSpan.FromSeconds(15))
+        return manifestUri == ReleaseManifestClient.RetiredManifestUri
+            ? ReleaseManifestClient.ForRetiredRelease(TimeSpan.FromSeconds(15))
             : ReleaseManifestClient.CreateLocalUpdateFeedOverride(
                 manifestUri,
                 TimeSpan.FromSeconds(15));

@@ -9,6 +9,11 @@
   <strong>The original game's behavior, in a codebase built to be worked on.</strong>
 </p>
 
+> [!IMPORTANT]
+> **OpenAC (C#) is retired.** The Rust client, OpenAC for Rust, replaces it:
+> download it from <https://eriknihlen.github.io/OpenAC/docs/rust-client.html>.
+> Version 0.1.33 is the last C# release; its launcher gets no more updates.
+
 <p align="center">
   <a href="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eriknihlen/OpenAC/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/eriknihlen/OpenAC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/eriknihlen/OpenAC?display_name=tag"></a>
@@ -87,9 +92,13 @@ welcome.
 
 ## Download
 
-Grab the launcher for your platform from the
-[latest release](https://github.com/eriknihlen/OpenAC/releases/latest), unzip
-it anywhere, and run it:
+**New players: get the Rust client**, OpenAC for Rust, from
+<https://eriknihlen.github.io/OpenAC/docs/rust-client.html>. This C# client is
+retired.
+
+If you still want the C# client, its last release is
+[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33). Grab the
+launcher for your platform there, unzip it anywhere, and run it:
 
 | Platform | Download | Run |
 |---|---|---|
@@ -97,8 +106,9 @@ it anywhere, and run it:
 | Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
 | macOS (Apple silicon) | `launcher-osx-arm64.zip` | Drag `OpenAC.app` to `~/Applications`, then open it in Finder. |
 
-The launcher installs the client, prepares your data files, keeps itself and
-the client up to date, and stores your server and character profiles.
+The launcher installs the 0.1.33 client, prepares your data files, and stores
+your server and character profiles. It gets no more updates; plugins keep
+installing and updating.
 
 You will need:
 

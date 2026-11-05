@@ -5,6 +5,21 @@ full changelog, is on GitHub:
 [OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 
+## OpenAC (C#) 0.1.33 (2026-11-05)
+
+The last release of the C# client. **OpenAC (C#) is retired**: the Rust
+client, OpenAC for Rust, replaces it. Get it from the
+[Rust client page](rust-client.md).
+
+- The launcher shows the retirement notice at all times, with a **Get the
+  Rust client** button that opens
+  <https://eriknihlen.github.io/OpenAC/docs/rust-client.html>.
+- The launcher gets no more updates. A launcher updating from 0.1.32 still
+  installs the 0.1.33 client, and a new install gets it too; after that,
+  **Check for updates** says "This client is retired; it gets no more
+  updates."
+- Plugins keep working: they still install and update from the plugin list.
+
 ## openac-rust 0.1.12 (2026-11-05)
 
 Logon commands now belong to characters. The first start moves each

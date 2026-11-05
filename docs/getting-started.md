@@ -5,12 +5,12 @@ server to connect to.
 
 ## 1. Download a client
 
-Pick one. Both play the same game; OpenAC (C#) has had the most time in front
-of players and has downloads for every platform.
+Pick one. Both play the same game, but OpenAC (C#) is retired (0.1.33 is its
+last release); new players should take openac-rust (Rust).
 
 ### OpenAC (C#)
 
-From the [latest OpenAC release](https://github.com/eriknihlen/OpenAC/releases/latest):
+From the [OpenAC 0.1.33 release](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33):
 
 | Platform | Download | Then |
 |---|---|---|
@@ -19,9 +19,10 @@ From the [latest OpenAC release](https://github.com/eriknihlen/OpenAC/releases/l
 | macOS (Apple silicon) | `launcher-osx-arm64.zip` | Unzip it, drag `OpenAC.app` to `~/Applications`, then open it in Finder. |
 | macOS (Intel) | `launcher-osx-x64.zip` | The same as Apple silicon. |
 
-The launcher installs the client, prepares your data files, and keeps itself
-and the client up to date. The `client-*.zip` files are the bare client and
-headless host for people who do not want the launcher.
+The launcher installs the client and prepares your data files. OpenAC (C#) is
+retired: 0.1.33 is its last release and it gets no more updates, so new
+players should take the Rust client below. The `client-*.zip` files are the
+bare client and headless host for people who do not want the launcher.
 
 ### openac-rust (Rust)
 

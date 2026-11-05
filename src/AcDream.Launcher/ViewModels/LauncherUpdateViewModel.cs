@@ -166,7 +166,8 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
         if (!_disposed && HasSomethingToUpdate && _canOpen()) IsOpen = true;
     }
 
-    /// <summary>The first check: verifies the installed client, then reads the release feed.</summary>
+    /// <summary>The first check: verifies the installed client, then reads the release feed (for a
+    /// retired launcher, the last release's own manifest).</summary>
     public Task StartupCheckAsync() => CheckAsync(verifyInstalledClient: true);
 
     /// <summary>A later check, by the button or the timer: reads the release feed only. Verifying the
@@ -199,7 +200,9 @@ public sealed class LauncherUpdateViewModel : ObservableObject, IDisposable
 
             _check = await _updater.CheckAsync(cancellation.Token).ConfigureAwait(true);
             StartupCheckSucceeded = true;
-            Status = HasSomethingToUpdate ? "An update is available." : "OpenAC is up to date.";
+            Status = HasSomethingToUpdate ? "An update is available."
+                : _updater is RetiredLauncherUpdater ? LauncherRetirement.NoUpdatesStatus
+                : "OpenAC is up to date.";
             OnPropertyChanged(nameof(Body));
             OnPropertyChanged(nameof(IsClientUpdateAvailable));
             OnPropertyChanged(nameof(IsLauncherUpdateAvailable));

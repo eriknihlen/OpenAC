@@ -5,7 +5,7 @@
         x:DataType="vm:LauncherWindowViewModel"
         Title="OpenAC"
         Icon="avares://acdream-launcher/Assets/acdream-launcher.png"
-        Width="1120" Height="740" MinWidth="760" MinHeight="460"
+        Width="1120" Height="740" MinWidth="760" MinHeight="500"
         CanResize="True" Background="#10171C">
   <Window.Styles>
     <Style Selector="Border.card">
@@ -142,11 +142,23 @@
           </Panel>
         </Grid>
         <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" VerticalAlignment="Center" MinHeight="34"
-                ToolTip.Tip="Checks the client, the launcher and your plugins now; the launcher also checks every 20 minutes" />
+                ToolTip.Tip="Checks your plugins now; the launcher also checks every 20 minutes. This client is retired and gets no more updates" />
       </StackPanel>
       </Grid>
     </Border>
     <StackPanel Grid.Row="1" Spacing="4">
+      <!-- Always shown: one compact strip, so the account list keeps its room in a small window. -->
+      <Border Background="#3A2E17" BorderBrush="#DBB573" BorderThickness="0,0,0,1" Padding="14,4">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+          <SelectableTextBlock x:Name="RetirementNoticeText" TextWrapping="Wrap" VerticalAlignment="Center">
+            <Run Text="{Binding RetirementNoticeTitle}" FontWeight="SemiBold" Foreground="#DBB573" /><Run Text=" " /><Run Text="{Binding RetirementNoticeText}" />
+          </SelectableTextBlock>
+          <HyperlinkButton Grid.Column="1" x:Name="GetRustClientButton" Content="{Binding GetRustClientLabel}" NavigateUri="{Binding RustClientPage}"
+                           VerticalAlignment="Center" Padding="12,3" MinHeight="0" Background="#5B4D30" BorderBrush="#DBB573" BorderThickness="1" CornerRadius="4"
+                           Foreground="#F0E4CD" FontWeight="SemiBold" ToolTip.Tip="{Binding RustClientPage}"
+                           AutomationProperties.Name="{Binding GetRustClientLabel}" />
+        </Grid>
+      </Border>
       <Border Background="#292820" Padding="14,8" IsVisible="{Binding ShowInstallationBanner}">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
           <StackPanel><TextBlock Text="{Binding InstallationBannerTitle}" FontWeight="SemiBold" /><TextBlock Text="{Binding InstallationStatus}" TextWrapping="Wrap" Classes="muted" /></StackPanel>

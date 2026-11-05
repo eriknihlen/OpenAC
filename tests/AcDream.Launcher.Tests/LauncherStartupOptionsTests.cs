@@ -61,7 +61,7 @@ public sealed class LauncherStartupOptionsTests
 
         Assert.Same(expected, options.Paths);
         Assert.Equal(1, calls);
-        Assert.Equal(ReleaseManifestClient.ProductionManifestUri, options.UpdateManifestUri);
+        Assert.Equal(ReleaseManifestClient.RetiredManifestUri, options.UpdateManifestUri);
         Assert.Equal(PluginCatalog.ProductionListUri, options.PluginListUri);
     }
 

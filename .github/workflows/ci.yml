@@ -477,7 +477,8 @@ jobs:
             **Windows:** download `launcher-win-x64.zip`, unzip it anywhere, and run `acdream-launcher.exe`.
             **Linux:** download `launcher-linux-x64.zip`, unzip it anywhere, and run `./acdream-launcher`.
             **macOS (Apple silicon):** download `launcher-osx-arm64.zip`, unzip it, drag `OpenAC.app` to `~/Applications`, then open it in Finder.
-            The launcher installs the client, prepares your data files, and keeps itself and the client up to date.
+            The launcher installs the client and prepares your data files. OpenAC (C#) is retired: this launcher gets no more updates, and plugins keep working.
+            New players: get the Rust client, OpenAC for Rust, from https://eriknihlen.github.io/OpenAC/docs/rust-client.html
 
             The `client-*.zip` files are the bare client and headless host for people who do not want the launcher.
 

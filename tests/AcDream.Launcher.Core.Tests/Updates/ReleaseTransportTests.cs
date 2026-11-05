@@ -143,6 +143,30 @@ public sealed class ReleaseManifestClientTests
     }
 
     [Fact]
+    public async Task TheRetiredReleaseAddressIsTheFixedTagAndItsFingerprintSitsBesideIt()
+    {
+        Assert.Equal(
+            "https://github.com/eriknihlen/OpenAC/releases/download/v0.1.33/manifest.json",
+            ReleaseManifestClient.RetiredManifestUri.AbsoluteUri);
+        Assert.DoesNotContain("latest", ReleaseManifestClient.RetiredManifestUri.AbsoluteUri, StringComparison.Ordinal);
+
+        var handler = new SequenceHandler((request, _) => new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var source = ReleaseManifestClient.CreateForTransportTest(
+            ReleaseManifestClient.RetiredManifestUri,
+            allowLoopbackHttp: false,
+            handler);
+        _ = await Assert.ThrowsAnyAsync<Exception>(() => source.FetchAsync());
+        Assert.Null(await source.FetchLauncherFingerprintAsync());
+
+        Assert.Equal(
+            [
+                ReleaseManifestClient.RetiredManifestUri,
+                new Uri("https://github.com/eriknihlen/OpenAC/releases/download/v0.1.33/launcher-fingerprint.json"),
+            ],
+            handler.Requests);
+    }
+
+    [Fact]
     public async Task ProductionRedirectToLoopbackIsRejectedBeforePlaintextRequest()
     {
         var handler = new SequenceHandler((request, _) => Redirect(
