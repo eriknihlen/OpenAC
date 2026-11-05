@@ -3,6 +3,7 @@
 
 use ac_core::combat::{AttackHeight, CombatMode, is_hostile_monster, supports_targeted_attack};
 use ac_core::items::ItemType;
+use ac_core::physics::PhysicsState;
 use ac_core::properties::PropertyInt;
 use ac_plugin::abi::combat::{
     self as abi, AttackRequest, CombatResult, CombatSnapshot, CombatStatus, CombatTarget,
@@ -134,13 +135,16 @@ impl PluginBinding<'_> {
         let combat = self.state.gameplay.combat();
         let deaths = self.state.gameplay.deaths();
         let names = self.state.gameplay.tables().creature_names();
+        let unseen = PhysicsState::HIDDEN.bits() | PhysicsState::NO_DRAW.bits();
         let mut targets = Vec::new();
         for object in world.objects() {
             let guid = object.guid();
             let Some(position) = object.position() else {
                 continue;
             };
-            if !is_hostile(world, guid) {
+            // One hidden or not drawn (a golem under the sand) cannot be
+            // fought: every swing or spell at it would come back refused.
+            if object.physics().state & unseen != 0 || !is_hostile(world, guid) {
                 continue;
             }
             let there = global(position);

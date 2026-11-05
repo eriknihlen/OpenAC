@@ -1890,6 +1890,7 @@ fn description_bit_of(property: PropertyBool) -> Option<(PublicWeenieFlags, bool
     match property {
         PropertyBool::STUCK => Some((PublicWeenieFlags::STUCK, false)),
         PropertyBool::LOCKED => Some((PublicWeenieFlags::OPENABLE, true)),
+        PropertyBool::ATTACKABLE => Some((PublicWeenieFlags::ATTACKABLE, false)),
         PropertyBool::INSCRIBABLE => Some((PublicWeenieFlags::INSCRIBABLE, false)),
         PropertyBool::UI_HIDDEN => Some((PublicWeenieFlags::UI_HIDDEN, false)),
         PropertyBool::IGNORE_HOUSE_BARRIERS => {

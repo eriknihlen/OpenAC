@@ -202,3 +202,63 @@ fn a_creature_carries_the_servers_last_position_beside_its_body() {
         assert!(other.server_position.is_some());
     });
 }
+
+// A monster the server makes unattackable (a golem sinking into the sand)
+// is the Attackable bool going false: it leaves the hostile capture, and
+// comes back when the bool turns true again.
+#[test]
+fn a_monster_made_unattackable_leaves_the_hostile_targets() {
+    use ac_core::properties::PropertyBool;
+    let attackable = |value| {
+        ac_proto::Inbound::PublicUpdatePropertyBool(ac_proto::PublicUpdatePropertyBool {
+            sequence: 0,
+            guid: MONSTER,
+            property: PropertyBool::ATTACKABLE.0,
+            value,
+        })
+    };
+    let mut state = arena();
+    let ids = |state: &mut SessionState| {
+        let mut outbox = Outbox::new();
+        with_binding(state, &mut outbox, |b| {
+            call::<calls::CombatHostileTargets>(b, &50.0)
+                .iter()
+                .map(|t| t.object_id)
+                .collect::<Vec<u32>>()
+        })
+    };
+    state.world.apply(&attackable(false));
+    assert_eq!(ids(&mut state), [OTHER]);
+    state.world.apply(&attackable(true));
+    assert_eq!(ids(&mut state), [MONSTER, OTHER]);
+}
+
+// A monster the server hides or stops drawing (a golem under the sand) is
+// not offered as a target; drawn again, it is.
+#[test]
+fn a_hidden_monster_is_not_a_hostile_target() {
+    let state_of = |physics_state, state_sequence| {
+        ac_proto::Inbound::SetState(ac_proto::SetState {
+            guid: MONSTER,
+            physics_state,
+            instance_sequence: 1,
+            state_sequence,
+        })
+    };
+    let mut state = arena();
+    let ids = |state: &mut SessionState| {
+        let mut outbox = Outbox::new();
+        with_binding(state, &mut outbox, |b| {
+            call::<calls::CombatHostileTargets>(b, &50.0)
+                .iter()
+                .map(|t| t.object_id)
+                .collect::<Vec<u32>>()
+        })
+    };
+    state.world.apply(&state_of(0x0000_4000, 2));
+    assert_eq!(ids(&mut state), [OTHER]);
+    state.world.apply(&state_of(0x0000_0020, 3));
+    assert_eq!(ids(&mut state), [OTHER]);
+    state.world.apply(&state_of(0, 4));
+    assert_eq!(ids(&mut state), [MONSTER, OTHER]);
+}
