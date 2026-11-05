@@ -295,7 +295,7 @@ pub fn run(
         .ok();
     let mut answers = multi::ConsoleAnswers::requested();
     let marks = answers.marks;
-    let asked = answers.session(&descriptor.id);
+    let window_answers = answers.session(&descriptor.id);
     if console {
         let sessions = std::iter::once((descriptor.id.clone(), commands.clone())).collect();
         multi::spawn_console(sessions, Some(window.clone()), prefs, tracker, answers);
@@ -320,7 +320,7 @@ pub fn run(
                     session: None,
                     plugin_logs,
                     marks,
-                    asked,
+                    answers: window_answers,
                 };
                 // A window ignores the document's bot policy.
                 let liveness = multi::Liveness::requested(Some(window.clone()));

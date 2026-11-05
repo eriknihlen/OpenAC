@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use super::Orchestration;
 use crate::launching::{SessionConsoleRun, read_line};
+use ac_host_core::console_kind::{MARK, read_mark};
 
 /// How much of the end of the log is shown.
 pub const TAIL_BYTES: u64 = 256 * 1024;
@@ -86,23 +87,24 @@ impl SessionConsole {
     /// The newest lines, split into coloured runs: with `verbose` every
     /// line the session wrote, otherwise only what a player would see (the
     /// lines the session marked: chat, the status box, what was typed and
-    /// the console's answers).
+    /// the console's answers). A client that marks nothing (one from before
+    /// the marks) has every line shown. Only the lines shown are coloured.
     pub fn lines(&self, verbose: bool) -> Vec<Vec<SessionConsoleRun>> {
+        let everything = verbose || !self.output.contains(MARK);
         let mut lines: Vec<&str> = self.output.split('\n').collect();
         // Nothing follows the line break that ends the log.
         if lines.last().is_some_and(|line| line.is_empty()) {
             lines.pop();
         }
-        let mut out: Vec<Vec<SessionConsoleRun>> = lines
+        let mut shown: Vec<&str> = lines
             .iter()
             .rev()
-            .map(|line| read_line(line.trim_end_matches('\r')))
-            .filter(|line| verbose || line.kind.is_some())
+            .map(|line| line.trim_end_matches('\r'))
+            .filter(|line| everything || read_mark(line).0.is_some())
             .take(MOST_LINES_SHOWN)
-            .map(|line| line.runs)
             .collect();
-        out.reverse();
-        out
+        shown.reverse();
+        shown.into_iter().map(|line| read_line(line).runs).collect()
     }
 
     /// Whether Send may run.
@@ -195,6 +197,21 @@ mod tests {
         assert_eq!(
             shown.last().map(String::as_str),
             Some(format!("[say] line {}", MOST_LINES_SHOWN + 9).as_str())
+        );
+    }
+
+    #[test]
+    fn a_client_that_marks_nothing_has_every_line_shown() {
+        // A client from before the marks: hiding its unmarked lines would
+        // leave the console empty.
+        let mut console = SessionConsole::new("s1", "Console");
+        console.output = "-- lifecycle: generation 1 InWorld\n[say] Bob says, \"hi\"\n".into();
+        assert_eq!(
+            texts(&console, false),
+            [
+                "-- lifecycle: generation 1 InWorld",
+                "[say] Bob says, \"hi\""
+            ]
         );
     }
 }
