@@ -375,8 +375,12 @@ pub struct LauncherWindow {
     next_plugin_watch: Option<Instant>,
     plugin_watch_running: bool,
     plugin_watch_backoff: bool,
-    /// What the release feeds listed when last read.
+    /// What the release feeds listed when the installed plugins were last
+    /// checked against them.
     plugin_feeds_seen: Option<BTreeMap<String, Vec<String>>>,
+    /// What they listed when a change started the check now running: seen
+    /// once that check has read the plugin list.
+    plugin_feeds_pending: Option<BTreeMap<String, Vec<String>>>,
 }
 
 impl std::fmt::Debug for LauncherWindow {
@@ -653,6 +657,7 @@ impl LauncherWindow {
             plugin_watch_running: false,
             plugin_watch_backoff: false,
             plugin_feeds_seen: None,
+            plugin_feeds_pending: None,
         }
     }
 
@@ -698,10 +703,11 @@ impl LauncherWindow {
                     .flatten();
                 // The plugin panel read the unloaded store's default; take the saved value.
                 self.restore_show_beta_plugins_from_profile();
-                self.restore_relaunch_settings();
                 if self.checked_accounts_loaded {
                     self.last_error = None;
                 }
+                // After the clear: a settings file that cannot be read says so.
+                self.restore_relaunch_settings();
             }
             Err(error) => self.last_error = Some(error_text(&error)),
         }
@@ -1940,24 +1946,33 @@ impl LauncherWindow {
 
     fn apply_plugin_feeds(&mut self, state: PluginFeedState) {
         self.plugin_watch_running = false;
-        match state {
-            PluginFeedState::Read(feeds) => {
-                if self
-                    .plugin_feeds_seen
-                    .as_ref()
-                    .is_some_and(|seen| *seen != feeds)
-                {
-                    if self.plugins.is_busy {
-                        // Another check runs: the next read sees the change again.
-                        return;
-                    }
-                    self.check_installed_plugin_updates();
-                }
-                self.plugin_feeds_seen = Some(feeds);
-            }
-            PluginFeedState::RateLimited => self.plugin_watch_backoff = true,
-            PluginFeedState::Unavailable => {}
+        let PluginFeedState::Read(read) = state else {
+            self.plugin_watch_backoff = true;
+            return;
+        };
+        let Some(seen) = &self.plugin_feeds_seen else {
+            // The first read: the launcher's start-up check covered it.
+            self.plugin_feeds_seen = Some(
+                read.into_iter()
+                    .filter_map(|(repo, tags)| tags.map(|tags| (repo, tags)))
+                    .collect(),
+            );
+            return;
+        };
+        // A feed that could not be read this time keeps what it listed.
+        let feeds: BTreeMap<String, Vec<String>> = read
+            .into_iter()
+            .filter_map(|(repo, tags)| {
+                let tags = tags.or_else(|| seen.get(&repo).cloned())?;
+                Some((repo, tags))
+            })
+            .collect();
+        if feeds == *seen || self.plugins.is_busy {
+            // Unchanged, or another check runs and the next read sees the change again.
+            return;
         }
+        self.plugin_feeds_pending = Some(feeds);
+        self.check_installed_plugin_updates();
     }
 
     /// The client and launcher from the release feed, and the installed
@@ -1995,8 +2010,13 @@ impl LauncherWindow {
     fn apply_installed_plugin_updates(&mut self, outcome: PluginCheckOutcome) {
         self.plugin_cancellation = None;
         self.plugins.is_busy = false;
+        let pending = self.plugin_feeds_pending.take();
         if outcome.rate_limited || outcome.catalog.is_none() {
+            // Not checked: the release watch sees the change again.
             return;
+        }
+        if pending.is_some() {
+            self.plugin_feeds_seen = pending;
         }
         if let Err(error) = self
             .orchestrator
@@ -2490,15 +2510,23 @@ impl LauncherWindow {
             .collect()
     }
 
-    /// Stop all may run: some client is running or starting.
+    /// Stop all may run: some client is running or starting, or a start is
+    /// on its way (a Play selected row not reached yet, a relaunch).
     pub fn can_stop_all(&self) -> bool {
         !self.stoppable_sessions().is_empty()
+            || !self.row_launches.is_empty()
+            || self.automatic_relaunch.is_launching()
     }
 
     /// Stops every running client at once, each as its row's Stop does: a
-    /// graceful logout, then a kill after 30 s. Stopped clients stay down
-    /// until they are launched again.
+    /// graceful logout, then a kill after 30 s. Starts still on their way
+    /// are cancelled and pending relaunches dropped, so everything stays
+    /// down until it is launched again.
     pub fn stop_all(&mut self) {
+        for (_, cancel) in &self.row_launches {
+            cancel.cancel();
+        }
+        self.automatic_relaunch.stop_all();
         let sessions = self.stoppable_sessions();
         for id in &sessions {
             self.stop_session(id);

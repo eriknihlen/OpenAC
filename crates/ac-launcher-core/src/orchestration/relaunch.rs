@@ -436,6 +436,18 @@ impl LauncherRelaunchController {
         failure
     }
 
+    /// Every account is stopped (Stop all): pending relaunches and starts
+    /// are dropped and an attempt in flight is cancelled; each stays down
+    /// until it is launched again, as after its own Stop.
+    pub fn stop_all(&mut self) {
+        for (_, entry) in &mut self.entries {
+            if let Some(cancel) = &entry.cancellation {
+                cancel.cancel();
+            }
+            entry.stopped();
+        }
+    }
+
     /// Cancels every pending relaunch and stops scheduling.
     pub fn dispose(&mut self) {
         if self.disposed {

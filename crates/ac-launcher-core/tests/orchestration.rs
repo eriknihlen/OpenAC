@@ -2858,6 +2858,33 @@ mod relaunch {
         assert!(host.launches.is_empty());
     }
 
+    // Not an OpenAC test: Stop all drops a relaunch waiting out its delay
+    // and a start not made yet; each stays down until launched again.
+    #[test]
+    fn stop_all_drops_pending_relaunches_and_starts() {
+        let mut host = Host::new();
+        let clock = Clock::default();
+        let mut scheduler = clock.controller();
+        scheduler.set_delay_seconds(5).unwrap();
+        host.sessions = vec![session(1, true)];
+        host.observe(&mut scheduler, &[choice()]);
+        host.sessions = vec![session(1, false)];
+        host.observe(&mut scheduler, &[choice()]);
+        scheduler.stop_all();
+        clock.advance(600);
+        host.observe(&mut scheduler, &[choice()]);
+        host.poll(&mut scheduler, true);
+        assert!(host.launches.is_empty(), "crashed");
+
+        let mut fresh = clock.controller();
+        host.sessions = Vec::new();
+        host.observe(&mut fresh, &[choice()]);
+        fresh.stop_all();
+        host.observe(&mut fresh, &[choice()]);
+        host.poll(&mut fresh, true);
+        assert!(host.launches.is_empty(), "not started yet");
+    }
+
     #[test]
     fn delay_rejects_out_of_range() {
         for seconds in [4, 3601] {

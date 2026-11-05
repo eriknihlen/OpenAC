@@ -2201,6 +2201,16 @@ fn keeping_clients_running_and_the_delay_are_remembered() {
 }
 
 #[test]
+fn a_relaunch_settings_file_that_cannot_be_read_says_so() {
+    let selection = CheckedFixture::new();
+    std::fs::write(selection.relaunch_file_path(), "{ not json").unwrap();
+    let window = selection.started_window(&batch());
+    assert!(!window.relaunch_checked_clients_automatically());
+    let error = window.last_error.clone().unwrap_or_default();
+    assert!(error.contains("relaunch settings"), "{error}");
+}
+
+#[test]
 fn opening_the_launcher_starts_the_checked_accounts_when_clients_are_kept_running() {
     for enabled in [false, true] {
         let selection = CheckedFixture::new();
@@ -2851,6 +2861,76 @@ fn a_new_plugin_release_shows_within_half_a_minute() {
     window.poll();
     assert_eq!(fixture.server.count(LIST_URI), checks + 1);
     assert!(has_update(&window));
+}
+
+// Not an OpenAC test: a repository whose feed cannot be read (moved,
+// removed) does not stop the watch of the others, and a check that could
+// not read the plugin list is tried again at the next read.
+#[test]
+fn the_plugin_release_watch_survives_an_unreadable_feed_and_a_failed_check() {
+    let fixture = PanelFixture::new();
+    fixture.write_manifest("edwards.hello", "0.1.0");
+    fixture.write_manifest("someone.gone", "1.0.0");
+    let path = fixture
+        .paths()
+        .data_directory
+        .join("app")
+        .join("plugins-installed.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let record = |id: &str, repo: &str, version: &str| {
+        format!(
+            r#"{{ "id": "{id}", "repo": "{repo}", "source": "listed", "version": "{version}",
+              "tag": "wasm-v{version}", "zipSha256": "{}", "installedAt": "2026-01-01T00:00:00Z",
+              "pending": null }}"#,
+            "a".repeat(64)
+        )
+    };
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{ "schemaVersion": 1, "plugins": [{}, {}] }}"#,
+            record("edwards.hello", HELLO_REPO, "0.1.0"),
+            record("someone.gone", "someone/gone-plugin", "1.0.0")
+        ),
+    )
+    .unwrap();
+    fixture.list(&["edwards.hello"], "");
+    fixture.release("edwards.hello", "0.1.0");
+    let mut window = fixture.window();
+    startup_check(&mut window);
+    check(&mut window);
+    let start = Instant::now();
+    let at = |seconds: u64| start + Duration::from_secs(seconds);
+    let mut tick = |window: &mut LauncherWindow, seconds: u64| {
+        window.poll_plugin_release_watch(at(seconds));
+        window.poll_plugin_release_watch(at(seconds + 30));
+        window.poll();
+    };
+    tick(&mut window, 0);
+    let checks = || fixture.server.count(LIST_URI);
+    let before = checks();
+
+    // A release while the plugin list cannot be read: checked, not seen.
+    fixture.release("edwards.hello", "0.2.0");
+    fixture
+        .server
+        .add_route(LIST_URI, common::fixtures::Route::Status(429));
+    tick(&mut window, 30);
+    assert_eq!(checks(), before + 1);
+    // So the next read checks again, and this time the list answers.
+    fixture.list(&["edwards.hello"], "");
+    tick(&mut window, 60);
+    assert_eq!(checks(), before + 2);
+    let row = window
+        .plugins
+        .installed
+        .iter()
+        .find(|row| row.info.id == "edwards.hello")
+        .unwrap();
+    assert!(row.update.is_some() || row.update_withheld_reason.is_some());
+    // Seen: no more checks.
+    tick(&mut window, 90);
+    assert_eq!(checks(), before + 2);
 }
 
 // Not an OpenAC test: when GitHub asks to slow down, the watch waits ten
@@ -4532,7 +4612,15 @@ fn stop_all_stops_every_running_client() {
 
     let idle = batch();
     *idle.sessions_override.lock().unwrap() = Some(Vec::new());
-    let (window, _) = create_started_queued(&idle);
+    let (mut window, spawner) = create_started_queued(&idle);
+    assert!(!window.can_stop_all());
+    // A start not made yet is cancelled too.
+    window.launch_row("Bob", "One");
+    assert!(window.can_stop_all());
+    window.stop_all();
+    spawner.run_all();
+    window.poll();
+    assert!(idle.launch_requests.lock().unwrap().is_empty());
     assert!(!window.can_stop_all());
 }
 

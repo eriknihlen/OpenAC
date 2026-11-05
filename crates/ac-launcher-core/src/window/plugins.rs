@@ -27,12 +27,12 @@ use crate::url::WebUrl;
 /// release without the full check (one small request per repository).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginFeedState {
-    /// Each repository's release tags, by repository name in lowercase.
-    Read(BTreeMap<String, Vec<String>>),
+    /// Each repository's release tags, by repository name in lowercase;
+    /// `None` for one whose feed could not be read this time (moved,
+    /// removed, unreachable), so the others are still watched.
+    Read(BTreeMap<String, Option<Vec<String>>>),
     /// GitHub asked to slow down.
     RateLimited,
-    /// A feed could not be read this time.
-    Unavailable,
 }
 
 /// One listed plugin not yet installed, as Discover shows it.
@@ -245,23 +245,17 @@ impl PluginComposition {
             let Some(url) = github::releases_feed(&repo) else {
                 continue;
             };
-            match self
+            let tags = match self
                 .release_client
                 .fetch_document(&url, FEED_MAXIMUM_BYTES, cancel)
             {
                 Ok(PluginReleaseFetchResult::Success(document)) => {
-                    match feed_tags(&document.content, &repo) {
-                        Ok(tags) => {
-                            feeds.insert(key, tags);
-                        }
-                        Err(_) => return PluginFeedState::Unavailable,
-                    }
+                    feed_tags(&document.content, &repo).ok()
                 }
                 Ok(PluginReleaseFetchResult::RateLimited) => return PluginFeedState::RateLimited,
-                Ok(PluginReleaseFetchResult::Unavailable) | Err(_) => {
-                    return PluginFeedState::Unavailable;
-                }
-            }
+                Ok(PluginReleaseFetchResult::Unavailable) | Err(_) => None,
+            };
+            feeds.insert(key, tags);
         }
         PluginFeedState::Read(feeds)
     }
