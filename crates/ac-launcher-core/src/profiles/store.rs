@@ -470,10 +470,10 @@ impl LauncherProfileStore {
                     String::new()
                 };
                 format!(
-                    "Logon commands now belong to characters as well as accounts: an account's \
-                     commands run for every character on it, then the character's own. Each \
-                     account's commands moved to the character it launches (the first \
-                     character when it starts at the character screen):\n\n{}{kept}",
+                    "Logon commands now belong to characters: a character runs its own, and \
+                     commands left on an account do not run. Each account's commands moved to \
+                     the character it launches (the first character when it starts at the \
+                     character screen):\n\n{}{kept}",
                     moves.join("\n"),
                 )
             });

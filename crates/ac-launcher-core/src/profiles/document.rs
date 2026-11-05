@@ -138,15 +138,13 @@ impl AccountProfile {
             .unwrap_or(&self.plugins)
     }
 
-    /// The commands a login runs: the account's shared ones, then the
-    /// character's own; only the shared ones without a character (the
-    /// player picks one at the character screen).
+    /// The commands a login runs: the character's own, and none without a
+    /// character (the player picks one at the character screen). The
+    /// account's own list (`login_commands`) is kept but never run.
     pub fn login_commands_for(&self, character: Option<&CharacterProfile>) -> Vec<String> {
-        let mut commands = self.login_commands.clone();
-        if let Some(character) = character {
-            commands.extend(character.login_commands.iter().cloned());
-        }
-        commands
+        character
+            .map(|character| character.login_commands.clone())
+            .unwrap_or_default()
     }
 }
 

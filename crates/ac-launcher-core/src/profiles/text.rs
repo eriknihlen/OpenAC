@@ -11,9 +11,8 @@
 //! ```
 //!
 //! Logon commands, grouped by server, account and character: the lines
-//! right under an account, before any character, are its shared commands
-//! (every character on it runs them, first); the lines under a character
-//! are its own:
+//! under a character are the ones it runs; lines right under an account,
+//! before any character, are kept but never run:
 //!
 //! ```text
 //! #Coldeve

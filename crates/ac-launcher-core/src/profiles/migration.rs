@@ -81,7 +81,7 @@ pub(crate) fn from_version2(document: &mut LauncherProfileDocument) -> Vec<Strin
                 .or_else(|| (!account.characters.is_empty()).then_some(0));
             let Some(index) = target else {
                 moves.push(format!(
-                    "{} / {}: logon commands stay shared (the account has no characters)",
+                    "{} / {}: logon commands stay on the account, where they do not run; move them under a character (the account has no characters yet)",
                     server.name, account.account
                 ));
                 continue;

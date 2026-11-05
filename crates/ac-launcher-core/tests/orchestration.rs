@@ -991,7 +991,8 @@ fn snapshot_projects_the_full_hierarchy_without_the_credential() {
 }
 
 #[test]
-fn a_launch_runs_the_accounts_shared_commands_then_the_characters_own() {
+// The account's own list is kept but never run (the owner, 2026-11-05).
+fn a_launch_runs_only_the_characters_own_commands() {
     let root = TempDir::new("orchestrator");
     let config = Arc::new(RecordingConfigService::default());
     let orchestrator = create_orchestrator(
@@ -1014,10 +1015,7 @@ fn a_launch_runs_the_accounts_shared_commands_then_the_characters_own() {
     let snapshot = orchestrator.snapshot().unwrap();
     let account = &snapshot.servers[0].accounts[0];
     assert_eq!(account.login_commands, ["/vt start"]);
-    assert_eq!(
-        account.characters[0].login_commands,
-        ["/vt start", "/mm ws enable"]
-    );
+    assert_eq!(account.characters[0].login_commands, ["/mm ws enable"]);
 
     launch(&orchestrator, Some("+Acdream"), LaunchMode::Gui).unwrap();
 
@@ -1026,7 +1024,7 @@ fn a_launch_runs_the_accounts_shared_commands_then_the_characters_own() {
     let composed = config.last_composed();
     assert_eq!(
         composed.document.sessions[0].login_commands.as_deref(),
-        Some(&["/vt start".to_owned(), "/mm ws enable".to_owned()][..])
+        Some(&["/mm ws enable".to_owned()][..])
     );
 }
 

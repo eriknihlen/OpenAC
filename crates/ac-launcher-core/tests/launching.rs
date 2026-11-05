@@ -74,33 +74,36 @@ fn server() -> ServerProfile {
 
 const PASSWORD: &str = "S3cretPassw0rd!";
 
+/// The account's own list is kept but never run (the owner, 2026-11-05):
+/// only a character's commands run, so a launch never shows this one.
+const ACCOUNT_COMMAND: &str = "/tell nobody, never sent";
+
 fn account() -> AccountProfile {
     let mut account = AccountProfile::new("testaccount", PASSWORD);
-    account.login_commands = vec!["/tell someone, hi".into()];
+    account.login_commands = vec![ACCOUNT_COMMAND.into()];
     account
 }
 
+// Changed from OpenAC, whose logon commands are the account's: the
+// fixture's command is the character's own.
 fn character(mode: LaunchMode, id: Option<&str>) -> CharacterProfile {
     CharacterProfile {
         id: id.map(str::to_owned),
         launch_mode: mode,
         plugins: Some(vec!["ExamplePlugin".into()]),
+        login_commands: vec!["/tell someone, hi".into()],
         ..CharacterProfile::new("+Acdream")
     }
 }
 
 #[test]
-fn a_login_runs_the_accounts_shared_commands_then_the_characters_own() {
+fn a_login_runs_only_the_characters_own_commands() {
     let mut own = character(LaunchMode::Gui, Some("0x5000000A"));
     own.login_commands = strings(&["/vt start", "/mm ws enable"]);
     let composed = compose_simple(&own, "session-own-commands", &paths(), None);
     assert_eq!(
         session(&composed).login_commands,
-        Some(strings(&[
-            "/tell someone, hi",
-            "/vt start",
-            "/mm ws enable"
-        ]))
+        Some(strings(&["/vt start", "/mm ws enable"]))
     );
 
     // Headless enters the world as the character too.
@@ -108,17 +111,13 @@ fn a_login_runs_the_accounts_shared_commands_then_the_characters_own() {
     let composed = compose_simple(&own, "session-own-headless", &paths(), None);
     assert_eq!(
         session(&composed).login_commands.as_ref().map(Vec::len),
-        Some(3)
+        Some(2)
     );
 
-    // At the character screen the client picks the character: the shared
-    // commands only.
+    // At the character screen the client picks the character: none run.
     own.launch_mode = LaunchMode::GuiSelect;
     let composed = compose_simple(&own, "session-own-select", &paths(), None);
-    assert_eq!(
-        session(&composed).login_commands,
-        Some(strings(&["/tell someone, hi"]))
-    );
+    assert_eq!(session(&composed).login_commands, None);
 
     // A character's own commands go even when the account shares none.
     let mut quiet = account();
@@ -301,7 +300,6 @@ fn gui_select_mode_omits_character_field_entirely() {
             "account",
             "credential",
             "plugins",
-            "loginCommands",
             "statusFile"
         ])
     );
@@ -368,6 +366,7 @@ fn plugin_allow_list_rules() {
     let mut empty = character(LaunchMode::Gui, Some("0x5000000A"));
     // A blank list means none, not "every plugin loads".
     empty.plugins = Some(Vec::new());
+    empty.login_commands.clear();
     let mut no_commands = account();
     no_commands.login_commands.clear();
     let composed = compose(

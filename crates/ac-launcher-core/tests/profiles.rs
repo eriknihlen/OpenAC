@@ -2257,12 +2257,13 @@ fn the_upgrade_notice_lists_every_move_and_names_the_kept_version2_file() {
     assert_eq!(
         notice,
         format!(
-            "Logon commands now belong to characters as well as accounts: an account's commands \
-             run for every character on it, then the character's own. Each account's commands \
-             moved to the character it launches (the first character when it starts at the \
-             character screen):\n\nColdeve / picked: logon commands moved to Bea\nColdeve / \
-             select: logon commands moved to Cid\nColdeve / lonely: logon commands stay shared \
-             (the account has no characters)\n\nThe old file is kept at {}.",
+            "Logon commands now belong to characters: a character runs its own, and commands \
+             left on an account do not run. Each account's commands moved to the character it \
+             launches (the first character when it starts at the character screen):\n\nColdeve \
+             / picked: logon commands moved to Bea\nColdeve / select: logon commands moved to \
+             Cid\nColdeve / lonely: logon commands stay on the account, where they do not run; \
+             move them under a character (the account has no characters yet)\n\nThe old file is \
+             kept at {}.",
             migration.version2_file_path().display()
         )
     );

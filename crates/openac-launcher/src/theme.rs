@@ -44,6 +44,12 @@ pub const ERROR_BOX: Color32 = Color32::from_rgb(0x5B, 0x26, 0x30);
 /// Danger buttons (`#8A3A3A`).
 pub const DANGER: Color32 = Color32::from_rgb(0x8A, 0x3A, 0x3A);
 
+/// A profile tag's box, its edge and its text: a muted teal, apart from the
+/// gold of buttons and the selected filter.
+pub const TAG: Color32 = Color32::from_rgb(0x17, 0x2E, 0x33);
+pub const TAG_EDGE: Color32 = Color32::from_rgb(0x2E, 0x55, 0x5C);
+pub const TAG_TEXT: Color32 = Color32::from_rgb(0x8C, 0xC4, 0xC4);
+
 /// `#RRGGBB` (the row model's colours) to a colour.
 pub fn hex(text: &str) -> Color32 {
     let digits = text.trim_start_matches('#');

@@ -129,6 +129,21 @@ fn chip(ui: &mut Ui, text: &str, fill: Color32, color: Color32) {
         });
 }
 
+/// A profile tag beside an account: a small boxed label in its own colour,
+/// so it reads as a label and not as a button.
+fn profile_tag(ui: &mut Ui, text: &str) {
+    Frame::new()
+        .fill(theme::TAG)
+        .stroke(egui::Stroke::new(1.0, theme::TAG_EDGE))
+        .corner_radius(CornerRadius::same(3))
+        .inner_margin(Margin::symmetric(4, 0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(10.0).color(theme::TAG_TEXT));
+        })
+        .response
+        .on_hover_text(format!("Profile: {text}"));
+}
+
 /// The expander's triangle: pointing down when open, right when closed.
 fn expander_arrow(ui: &mut Ui, expanded: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
@@ -762,7 +777,7 @@ fn group_header(
                         }
                         ui.spacing_mut().item_spacing.x = 4.0;
                         for tag in &group.profiles {
-                            chip(ui, tag, theme::GOLD, theme::ON_GOLD);
+                            profile_tag(ui, tag);
                         }
                         ui.add_space(4.0);
                         cut(ui, muted(&group.subtitle));

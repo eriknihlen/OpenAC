@@ -23,7 +23,7 @@
 //!   character screen;
 //! - the row's character comes from the profile activated last;
 //! - each character keeps its own Thwarg logon commands; the account's
-//!   shared commands are not touched.
+//!   own list is not touched.
 //!
 //! Passwords are never part of the report or of any `Debug` output.
 
@@ -1233,23 +1233,9 @@ fn merge_account(
     };
     let profile = &mut server.accounts[index];
     let added = add_characters(profile, &reference.characters);
-    // An account with shared commands runs them for every character, so
-    // Thwarg's per-character commands would run on top of them.
-    let commands = if profile.login_commands.is_empty() {
-        give_commands(profile, reference)
-    } else {
-        if reference
-            .commands
-            .iter()
-            .any(|commands| !commands.commands.is_empty())
-        {
-            report.skipped.push(format!(
-                "{} on {}: keeps the account's shared logon commands; Thwarg's were not imported.",
-                profile.account, server.name
-            ));
-        }
-        GivenCommands::default()
-    };
+    // Only a character's own commands run, so each character takes
+    // Thwarg's whatever the account's list holds.
+    let commands = give_commands(profile, reference);
     let mut gained = Vec::new();
     if !added.is_empty() {
         gained.push(format!(
@@ -1359,7 +1345,7 @@ struct GivenCommands {
 
 /// Gives each character its own Thwarg logon commands, as Thwarg keeps
 /// them, when it has none of its own (a character named only by a command
-/// file is added); the account's shared commands are left alone.
+/// file is added); the account's own list is left alone.
 fn give_commands(profile: &mut AccountProfile, reference: &Reference) -> GivenCommands {
     let mut result = GivenCommands::default();
     // `reference.commands` is in file name order.
@@ -2066,11 +2052,13 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_account_with_shared_commands_gets_no_thwarg_commands() {
+    fn an_existing_accounts_own_list_is_left_and_its_characters_take_thwargs() {
         // Its shared commands run for every character, so Thwarg's would
         // run on top of them.
         let mut document = existing();
         let brambleton = &mut document.servers[0].accounts[0];
+        // An account's own list never runs (the owner, 2026-11-05), so it
+        // is left alone and the characters still take Thwarg's commands.
         brambleton.login_commands = vec!["/shared".into()];
         brambleton.characters[0].login_commands.clear();
         let report = import(&files(), &mut document);
@@ -2080,16 +2068,17 @@ mod tests {
             brambleton
                 .characters
                 .iter()
-                .all(|character| character.login_commands.is_empty())
+                .any(|character| !character.login_commands.is_empty())
         );
-        assert!(report.skipped.contains(
-            &"brambleton on Mistvale: keeps the account's shared logon commands; Thwarg's were \
-              not imported."
-                .to_owned()
-        ));
+        assert!(
+            !report
+                .skipped
+                .iter()
+                .any(|line| line.contains("shared logon commands"))
+        );
         assert_eq!(
             report.accounts_present,
-            ["brambleton on Mistvale: adds 1 character (New Thorn)"]
+            ["brambleton on Mistvale: adds 1 character (New Thorn), logon commands for Old Thorn"]
         );
     }
 
