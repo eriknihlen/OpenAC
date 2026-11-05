@@ -58,7 +58,7 @@ impl Harness {
         let content = content();
         let mut ui = UiRoot::new();
         ui.set_size(1280.0, 720.0);
-        let (screens, notices) = PreGameScreens::mount(&mut ui, &content, "openAC-rust test", None);
+        let (screens, notices) = PreGameScreens::mount(&mut ui, &content, "OpenAC test", None);
         assert!(notices.is_empty(), "{notices:?}");
         Self {
             content,

@@ -29,7 +29,7 @@ pub const PREGAME_SCREENS: &str = "pregame";
 /// The client version line the selection screen shows.
 #[must_use]
 pub fn version_line() -> String {
-    format!("openAC-rust {}", env!("CARGO_PKG_VERSION"))
+    format!("OpenAC {}", env!("CARGO_PKG_VERSION"))
 }
 
 impl WindowUi {
@@ -279,5 +279,19 @@ impl WindowUi {
                 lines.push(format!("ui-probe: entry {name} {dat:#010x} {}", rect(id)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_line;
+
+    // The client is released as OpenAC from 0.2.0 on.
+    #[test]
+    fn the_version_line_names_the_client_openac() {
+        assert_eq!(
+            version_line(),
+            format!("OpenAC {}", env!("CARGO_PKG_VERSION"))
+        );
     }
 }
