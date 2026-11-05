@@ -60,44 +60,50 @@ public sealed class LauncherUpdateCompositionTests : IDisposable
         Assert.Contains(exception.Message, capability.Reason, StringComparison.Ordinal);
         LauncherUpdateException updateError = await Assert.ThrowsAsync<LauncherUpdateException>(
             () => composition.Updater.CheckAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(LauncherRetirement.NoUpdatesStatus, updateError.Message);
+        Assert.Contains(exception.Message, updateError.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task TheComposedUpdaterIsRetiredAndRefusesEveryFeedOperation()
+    public async Task TheComposedUpdaterReadsOnlyTheLastReleaseAndNeverStagesALauncher()
     {
         Directory.CreateDirectory(_root);
         var paths = new ApplicationPathSet(
             Path.Combine(_root, "config"),
             Path.Combine(_root, "data"),
             Path.Combine(_root, "cache"));
+        static ClientVersionResolution Missing(ClientVersionStore _, string __) => new(
+            ClientVersionState.Missing,
+            "No client version is installed.",
+            null,
+            null,
+            null,
+            null);
 
-        using LauncherUpdateComposition composition = LauncherUpdateComposition.Create(
-            paths,
-            LauncherRuntimeIdentity.DetectRid(),
-            LauncherVersion.Parse("1.0.0"),
-            _root,
-            () => false,
-            initialize: (_, _) => new ClientVersionResolution(
-                ClientVersionState.Missing,
-                "No client version is installed.",
-                null,
-                null,
-                null,
-                null));
+        // No address given, or the latest-release one: both become the last release's own.
+        foreach (Uri? requested in new Uri?[] { null, ReleaseManifestClient.ProductionManifestUri })
+        {
+            using LauncherUpdateComposition composition = LauncherUpdateComposition.Create(
+                paths,
+                LauncherRuntimeIdentity.DetectRid(),
+                LauncherVersion.Parse("0.1.33"),
+                _root,
+                () => false,
+                initialize: Missing,
+                updateManifestUri: requested);
 
-        Assert.Equal(ReleaseManifestClient.ProductionManifestUri, composition.UpdateManifestUri);
-        Assert.IsType<RetiredLauncherUpdater>(composition.Updater);
-        CancellationToken token = TestContext.Current.CancellationToken;
-        LauncherUpdateException check = await Assert.ThrowsAsync<LauncherUpdateException>(
-            () => composition.Updater.CheckAsync(token));
-        Assert.Equal(LauncherRetirement.NoUpdatesStatus, check.Message);
-        LauncherUpdateException install = await Assert.ThrowsAsync<LauncherUpdateException>(
-            () => composition.Updater.InstallClientAsync(null!, cancellationToken: token));
-        Assert.Equal(LauncherRetirement.NoUpdatesStatus, install.Message);
-        LauncherUpdateException stage = await Assert.ThrowsAsync<LauncherUpdateException>(
-            () => composition.Updater.StageLauncherAsync(null!, cancellationToken: token));
-        Assert.Equal(LauncherRetirement.NoUpdatesStatus, stage.Message);
+            Assert.Equal(ReleaseManifestClient.RetiredManifestUri, composition.UpdateManifestUri);
+            Assert.IsType<RetiredLauncherUpdater>(composition.Updater);
+            LauncherUpdateException stage = await Assert.ThrowsAsync<LauncherUpdateException>(
+                () => composition.Updater.StageLauncherAsync(
+                    null!,
+                    cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Equal(LauncherRetirement.NoUpdatesStatus, stage.Message);
+        }
+
+        Assert.Contains(
+            $"/download/v{LauncherRetirement.LastRelease}/",
+            ReleaseManifestClient.RetiredManifestUri.AbsoluteUri,
+            StringComparison.Ordinal);
     }
 
     [Theory]

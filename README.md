@@ -92,9 +92,13 @@ welcome.
 
 ## Download
 
-Grab the launcher for your platform from the
-[latest release](https://github.com/eriknihlen/OpenAC/releases/latest), unzip
-it anywhere, and run it:
+**New players: get the Rust client**, OpenAC for Rust, from
+<https://eriknihlen.github.io/OpenAC/docs/rust-client.html>. This C# client is
+retired.
+
+If you still want the C# client, its last release is
+[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33). Grab the
+launcher for your platform there, unzip it anywhere, and run it:
 
 | Platform | Download | Run |
 |---|---|---|
@@ -102,8 +106,9 @@ it anywhere, and run it:
 | Linux | `launcher-linux-x64.zip` | `./acdream-launcher` |
 | macOS (Apple silicon) | `launcher-osx-arm64.zip` | Drag `OpenAC.app` to `~/Applications`, then open it in Finder. |
 
-The launcher installs the client, prepares your data files, keeps itself and
-the client up to date, and stores your server and character profiles.
+The launcher installs the 0.1.33 client, prepares your data files, and stores
+your server and character profiles. It gets no more updates; plugins keep
+installing and updating.
 
 You will need:
 

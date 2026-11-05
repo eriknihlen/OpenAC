@@ -24,7 +24,7 @@ public sealed partial class LauncherWindowViewModelTests
     }
 
     [Fact]
-    public async Task ARetiredLauncherNeverReadsTheReleaseFeedButStillChecksPlugins()
+    public async Task ARetiredLauncherWithTheLastClientSaysSoAndStillChecksPlugins()
     {
         using var fixture = new PluginPanelFixture();
         var handler = new RoutedHandler(request => request.RequestUri == PluginListUri
@@ -33,7 +33,7 @@ public sealed partial class LauncherWindowViewModelTests
         using LauncherPluginComposition composition = LauncherPluginComposition.CreateForTest(
             fixture.Paths, PluginListUri, handler);
         using var orchestrator = new FakeLauncherOrchestrator();
-        var feed = new StartupOrderUpdater { ClientUpdateAvailable = true };
+        var feed = new LastReleaseFeedFake { Installed = LauncherRetirement.LastRelease };
         using var viewModel = new LauncherWindowViewModel(
             orchestrator,
             new ImmediateUiDispatcher(),
@@ -45,12 +45,15 @@ public sealed partial class LauncherWindowViewModelTests
 
         // Startup, the twenty-minute timer and the button.
         await viewModel.StartBackgroundInitializationAsync();
-        viewModel.PollUpdateCheck(start.AddMinutes(30));
+        viewModel.PollUpdateCheck(start);
+        viewModel.PollUpdateCheck(start.AddMinutes(20));
         int listRequests = handler.Requests.Count(uri => uri == PluginListUri);
         await viewModel.CheckForUpdatesCommand.ExecuteAsync();
 
-        Assert.Equal(0, feed.CheckCalls);
+        Assert.Equal(3, feed.CheckCalls);
         Assert.Equal(1, feed.InitializeCalls);
+        Assert.Equal(0, feed.InstallCalls);
+        Assert.Equal(0, feed.StageCalls);
         Assert.True(viewModel.UpdatePrompt.StartupCheckSucceeded);
         Assert.Equal(LauncherRetirement.NoUpdatesStatus, viewModel.UpdatePrompt.Status);
         Assert.Equal("This client is retired; it gets no more updates.", viewModel.UpdatePrompt.Status);

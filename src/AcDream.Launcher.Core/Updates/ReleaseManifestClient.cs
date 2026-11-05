@@ -24,6 +24,11 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
     public static Uri ProductionManifestUri { get; } = new(
         "https://github.com/eriknihlen/OpenAC/releases/latest/download/manifest.json");
 
+    /// <summary>The last release's own manifest, at its fixed tag. Unlike the latest-release
+    /// address above, it never moves on to a later release, so a retired launcher reads only this.</summary>
+    public static Uri RetiredManifestUri { get; } = new(
+        "https://github.com/eriknihlen/OpenAC/releases/download/v0.1.33/manifest.json");
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -62,6 +67,13 @@ public sealed class ReleaseManifestClient : IReleaseManifestClient, IDisposable
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAC-launcher/1");
     }
+
+    /// <summary>The client for <see cref="RetiredManifestUri"/>, under the production transport rules.</summary>
+    public static ReleaseManifestClient ForRetiredRelease(TimeSpan? timeout = null) => new(
+        RetiredManifestUri,
+        allowLoopbackHttp: false,
+        CreateRedirectDisabledHandler(),
+        timeout);
 
     internal static ReleaseManifestClient CreateLoopbackFixture(
         Uri manifestUri,

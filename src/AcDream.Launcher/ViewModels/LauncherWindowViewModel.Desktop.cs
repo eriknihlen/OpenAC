@@ -182,7 +182,7 @@ public sealed partial class LauncherWindowViewModel
         _ = CheckForUpdatesAsync(openPrompt: false, now);
     }
 
-    /// <summary>The client and launcher from the release feed (none for a retired launcher), and the installed plugins. A
+    /// <summary>The client and launcher from the release feed (for a retired launcher, the last release's client only), and the installed plugins. A
     /// background check only raises the banner; the button also opens what it found.</summary>
     private async Task CheckForUpdatesAsync(bool openPrompt, DateTimeOffset? now = null)
     {
