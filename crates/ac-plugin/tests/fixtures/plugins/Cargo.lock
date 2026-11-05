@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ac-plugin-abi"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "ac-plugin-ui",
  "ac-plugin-version",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-icon"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "miniz_oxide",
  "thiserror",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-ui"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "ac-plugin-icon",
  "fontdue",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-version"
-version = "0.1.11"
+version = "0.1.12"
 
 [[package]]
 name = "adler2"
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
