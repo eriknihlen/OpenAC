@@ -28,8 +28,9 @@ pub use downloader::{
 pub use manifest::{
     CURRENT_FINGERPRINT_SCHEMA_VERSION, DEFAULT_FINGERPRINT_TIMEOUT,
     LAUNCHER_FINGERPRINT_FILE_NAME, LauncherFingerprintDocument, MAXIMUM_ARTIFACT_BYTES,
-    MAXIMUM_MANIFEST_BYTES, PRODUCTION_MANIFEST_URI, ReleaseArtifact, ReleaseManifest,
-    ReleaseManifestClient, ReleaseManifestSource, is_sha256,
+    MAXIMUM_MANIFEST_BYTES, PREVIOUS_MANIFEST_URI, PRODUCTION_MANIFEST_URI, ReleaseArtifact,
+    ReleaseManifest, ReleaseManifestClient, ReleaseManifestSource, is_sha256,
+    launcher_fingerprint_file_name,
 };
 pub use payload::{
     LAUNCHER, OPENAC, detect_rid, detect_rid_for, executables_for_payload, graphical_host_for_rid,

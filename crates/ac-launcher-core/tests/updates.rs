@@ -17,11 +17,11 @@ use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::updates::{
     ArtifactDownloadProgress, ClientVersionResolution, ClientVersionState, ClientVersionStore,
-    ExtractedFileRecord, LauncherUpdatePhase, LauncherUpdater, LauncherVersion,
-    PRODUCTION_MANIFEST_URI, ReleaseArtifact, ReleaseManifest, ReleaseManifestClient,
-    ReleaseManifestSource, SafeZipExtractionLimits, SafeZipExtractor, UpdateError,
-    UpdateSessionBarrier, VerifiedArtifactDownloader, detect_rid, executables_for_payload,
-    validate_required_executables,
+    ExtractedFileRecord, LAUNCHER_FINGERPRINT_FILE_NAME, LauncherUpdatePhase, LauncherUpdater,
+    LauncherVersion, PREVIOUS_MANIFEST_URI, PRODUCTION_MANIFEST_URI, ReleaseArtifact,
+    ReleaseManifest, ReleaseManifestClient, ReleaseManifestSource, SafeZipExtractionLimits,
+    SafeZipExtractor, UpdateError, UpdateSessionBarrier, VerifiedArtifactDownloader, detect_rid,
+    executables_for_payload, launcher_fingerprint_file_name, validate_required_executables,
 };
 use ac_launcher_core::url::WebUrl;
 use common::TempDir;
@@ -156,9 +156,140 @@ fn fetches_strict_manifest_from_loopback_and_pins_production_feed() {
     );
     assert_eq!(
         PRODUCTION_MANIFEST_URI,
-        "https://github.com/eriknihlen/openac-rust/releases/latest/download/manifest.json"
+        "https://github.com/eriknihlen/OpenAC/releases/latest/download/openac-manifest.json"
     );
     assert!(WebUrl::parse(PRODUCTION_MANIFEST_URI).unwrap().is_https());
+}
+
+// --- The feed's move: the new repository first, the old one while it has none
+
+const NEW_FEED: &str = "https://example.test/new/latest/openac-manifest.json";
+const OLD_FEED: &str = "https://example.test/old/latest/manifest.json";
+
+fn moving_client(server: &FakeServer) -> ReleaseManifestClient {
+    ReleaseManifestClient::for_transport_test(
+        server.transport(),
+        WebUrl::parse(NEW_FEED).unwrap(),
+        false,
+    )
+    .unwrap()
+    .with_fallback(WebUrl::parse(OLD_FEED).unwrap())
+}
+
+fn fingerprint_json(version: &str) -> String {
+    format!(
+        r#"{{"schemaVersion":1,"version":"{version}","fingerprint":"{}"}}"#,
+        "c".repeat(64)
+    )
+}
+
+#[test]
+fn production_reads_the_new_repository_and_falls_back_to_the_old_one() {
+    let client = ReleaseManifestClient::production(FakeServer::new().transport());
+    assert_eq!(client.manifest_uri().to_string(), PRODUCTION_MANIFEST_URI);
+    assert_eq!(
+        client.fallback_uri().map(ToString::to_string).as_deref(),
+        Some(PREVIOUS_MANIFEST_URI)
+    );
+    assert_eq!(
+        PREVIOUS_MANIFEST_URI,
+        "https://github.com/eriknihlen/openac-rust/releases/latest/download/manifest.json"
+    );
+    // An override names one feed and has no fallback.
+    assert!(loopback_client(&FakeServer::new()).fallback_uri().is_none());
+}
+
+#[test]
+fn the_fingerprint_is_named_after_its_manifest() {
+    let name = |uri: &str| launcher_fingerprint_file_name(&WebUrl::parse(uri).unwrap());
+    assert_eq!(
+        name(PRODUCTION_MANIFEST_URI),
+        "openac-launcher-fingerprint.json"
+    );
+    assert_eq!(name(PREVIOUS_MANIFEST_URI), LAUNCHER_FINGERPRINT_FILE_NAME);
+    assert_eq!(
+        name("https://example.test/feed.json"),
+        LAUNCHER_FINGERPRINT_FILE_NAME
+    );
+}
+
+#[test]
+fn a_feed_without_the_file_falls_back_and_reads_the_fingerprint_there() {
+    let server = FakeServer::new();
+    server.add(OLD_FEED, valid_json().as_bytes());
+    server.add(
+        "https://example.test/old/latest/launcher-fingerprint.json",
+        fingerprint_json("2.0.0").as_bytes(),
+    );
+    let client = moving_client(&server);
+
+    let manifest = client.fetch(&none()).unwrap();
+    assert_eq!(manifest.version.value(), "2.0.0");
+    assert_eq!(client.answered_uri().to_string(), OLD_FEED);
+    let fingerprint = client.fetch_launcher_fingerprint(&none()).unwrap();
+    assert_eq!(fingerprint.unwrap().fingerprint, "c".repeat(64));
+    assert_eq!(
+        server.requests(),
+        [
+            NEW_FEED,
+            OLD_FEED,
+            "https://example.test/old/latest/launcher-fingerprint.json"
+        ]
+    );
+}
+
+#[test]
+fn a_feed_with_the_file_is_read_alone_with_its_own_fingerprint_name() {
+    let server = FakeServer::new();
+    server.add(NEW_FEED, valid_json().as_bytes());
+    server.add(OLD_FEED, valid_json().replace("2.0.0", "9.0.0").as_bytes());
+    server.add(
+        "https://example.test/new/latest/openac-launcher-fingerprint.json",
+        fingerprint_json("2.0.0").as_bytes(),
+    );
+    let client = moving_client(&server);
+
+    assert_eq!(client.fetch(&none()).unwrap().version.value(), "2.0.0");
+    assert!(
+        client
+            .fetch_launcher_fingerprint(&none())
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        server.requests(),
+        [
+            NEW_FEED,
+            "https://example.test/new/latest/openac-launcher-fingerprint.json"
+        ]
+    );
+}
+
+#[test]
+fn a_failing_or_broken_feed_is_an_error_and_never_falls_back() {
+    for broken in [false, true] {
+        let server = FakeServer::new();
+        if broken {
+            server.add(NEW_FEED, b"{}");
+        } else {
+            server.add_route(NEW_FEED, Route::Status(500));
+        }
+        server.add(OLD_FEED, valid_json().as_bytes());
+        let client = moving_client(&server);
+        assert!(client.fetch(&none()).is_err());
+        assert_eq!(server.requests(), [NEW_FEED]);
+    }
+}
+
+#[test]
+fn a_feed_missing_everywhere_says_so() {
+    let server = FakeServer::new();
+    let error = moving_client(&server)
+        .fetch(&none())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("404"), "{error}");
+    assert_eq!(server.requests(), [NEW_FEED, OLD_FEED]);
 }
 
 fn valid_json() -> String {

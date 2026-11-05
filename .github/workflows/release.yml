@@ -2,15 +2,21 @@ name: Release
 
 # Push a tag `v<version>` whose version equals `[workspace.package] version`
 # in Cargo.toml. Each platform builds `openac` and `openac-launcher` in
-# release mode and packages them; the last job writes `manifest.json` (the
-# launcher's update feed, schema version 1) and publishes everything as one
-# GitHub release.
+# release mode and packages them; the last job writes `openac-manifest.json`
+# (the launcher's update feed, schema version 1) and publishes everything as
+# one GitHub release.
 #
 # The launcher carries a fingerprint, one SHA-256 over what it is built from
 # (the `fingerprint` job says what counts), and the release publishes it as
-# launcher-fingerprint.json beside manifest.json. A launcher whose
+# openac-launcher-fingerprint.json beside the manifest. A launcher whose
 # fingerprint matches the release's does not update itself; it only
 # installs the new client. The release version alone changes nothing.
+#
+# The feed's names are this client's own: eriknihlen/OpenAC also holds the
+# C# client's releases, whose launchers read `manifest.json` and
+# `launcher-fingerprint.json` there. Released from eriknihlen/openac-rust,
+# the old home, the release also publishes the feed under those old names,
+# which launchers from before the move read.
 #
 # Assets per platform (<rid> is win-x64, linux-x64 or osx-arm64):
 #   openac-<rid>.zip    both programs, for players to download and unzip
@@ -424,7 +430,7 @@ jobs:
       # minimum is the release itself: a launcher older than the release
       # updates itself before it installs the new client, unless its
       # fingerprint matches the release's (launcher-fingerprint.json).
-      - name: Write manifest.json
+      - name: Write openac-manifest.json
         shell: bash
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -448,13 +454,13 @@ jobs:
                 --argjson clients "$clients" \
                 --argjson launchers "$launchers" \
                 '{schemaVersion: 1, version: $version, minimumLauncherVersion: $version,
-                  clients: $clients, launchers: $launchers}' > dist/manifest.json
-          cat dist/manifest.json
+                  clients: $clients, launchers: $launchers}' > dist/openac-manifest.json
+          cat dist/openac-manifest.json
 
-      # Beside manifest.json, not in it: a launcher from before fingerprints
-      # reads manifest.json strictly and would refuse a member it does not
+      # Beside the manifest, not in it: a launcher from before fingerprints
+      # reads the manifest strictly and would refuse a member it does not
       # know. Read strictly too: these members only.
-      - name: Write launcher-fingerprint.json
+      - name: Write openac-launcher-fingerprint.json
         shell: bash
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -464,9 +470,25 @@ jobs:
           [[ "$FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
           jq -n --arg version "$VERSION" --arg fingerprint "$FINGERPRINT" \
                 '{schemaVersion: 1, version: $version, fingerprint: $fingerprint}' \
-                > dist/launcher-fingerprint.json
-          cat dist/launcher-fingerprint.json
-          (cd dist && sha256sum *.zip manifest.json launcher-fingerprint.json > SHA256SUMS.txt)
+                > dist/openac-launcher-fingerprint.json
+          cat dist/openac-launcher-fingerprint.json
+
+      # The old home's names, for launchers from before the move. Never in
+      # eriknihlen/OpenAC, where those names are the C# client's feed.
+      - name: Write the feed under its old names
+        if: github.repository == 'eriknihlen/openac-rust'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp dist/openac-manifest.json dist/manifest.json
+          cp dist/openac-launcher-fingerprint.json dist/launcher-fingerprint.json
+
+      - name: Write SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum *.zip *.json > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
 
       - name: Create the GitHub release
         if: github.ref_type == 'tag'
@@ -482,6 +504,6 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "$TAG" dist/* \
             --verify-tag \
-            --title "openac-rust $TAG" \
+            --title "OpenAC $TAG" \
             --generate-notes \
             "${flags[@]}"

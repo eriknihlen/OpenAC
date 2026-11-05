@@ -2,7 +2,7 @@
 //! per platform, with their size and SHA-256, read strictly.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use ac_host::json::{self as host_json, Node, ObjectReader};
@@ -20,8 +20,17 @@ pub const MAXIMUM_MANIFEST_BYTES: u64 = 1024 * 1024;
 /// Largest payload a manifest may name.
 pub const MAXIMUM_ARTIFACT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Where the launcher looks for releases by default.
+/// Where the launcher looks for releases by default. The repository also
+/// holds the earlier C# client's releases, which publish `manifest.json` and
+/// `launcher-fingerprint.json` of the same shape, so this client's files
+/// have names of their own and neither launcher can take the other's.
 pub const PRODUCTION_MANIFEST_URI: &str =
+    "https://github.com/eriknihlen/OpenAC/releases/latest/download/openac-manifest.json";
+
+/// The feed from before the client moved to that repository. It is read
+/// only while the production feed has no such file (no release of this
+/// client there yet), so a launcher follows the move whenever it happens.
+pub const PREVIOUS_MANIFEST_URI: &str =
     "https://github.com/eriknihlen/openac-rust/releases/latest/download/manifest.json";
 
 /// The schema version this reader understands.
@@ -29,6 +38,18 @@ pub const CURRENT_MANIFEST_SCHEMA_VERSION: i32 = 1;
 
 /// The launcher fingerprint's file, beside `manifest.json` in a release.
 pub const LAUNCHER_FINGERPRINT_FILE_NAME: &str = "launcher-fingerprint.json";
+
+/// The fingerprint's file name beside the manifest at `manifest`: the
+/// manifest's own name with `manifest.json` replaced by
+/// `launcher-fingerprint.json` (`openac-manifest.json` has
+/// `openac-launcher-fingerprint.json`), else [`LAUNCHER_FINGERPRINT_FILE_NAME`].
+pub fn launcher_fingerprint_file_name(manifest: &WebUrl) -> String {
+    let name = manifest.path().rsplit('/').next().unwrap_or_default();
+    match name.strip_suffix("manifest.json") {
+        Some(prefix) => format!("{prefix}{LAUNCHER_FINGERPRINT_FILE_NAME}"),
+        None => LAUNCHER_FINGERPRINT_FILE_NAME.to_owned(),
+    }
+}
 
 /// The fingerprint schema version this reader understands.
 pub const CURRENT_FINGERPRINT_SCHEMA_VERSION: i32 = 1;
@@ -306,6 +327,11 @@ pub trait ReleaseManifestSource: Send + Sync {
 pub struct ReleaseManifestClient {
     transport: Arc<dyn HttpTransport>,
     manifest_uri: WebUrl,
+    /// Read when `manifest_uri` answers that its file does not exist.
+    fallback_uri: Option<WebUrl>,
+    /// The feed that answered the last fetch: the fingerprint is read
+    /// beside it.
+    answered_uri: Mutex<WebUrl>,
     allow_loopback_http: bool,
     timeout: Duration,
     fingerprint_timeout: Duration,
@@ -315,6 +341,7 @@ impl std::fmt::Debug for ReleaseManifestClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReleaseManifestClient")
             .field("manifest_uri", &self.manifest_uri)
+            .field("fallback_uri", &self.fallback_uri)
             .field("allow_loopback_http", &self.allow_loopback_http)
             .finish_non_exhaustive()
     }
@@ -341,11 +368,20 @@ impl ReleaseManifestClient {
         }
     }
 
-    /// The production feed.
+    /// The feed read while the production feed has no release.
+    pub fn previous_manifest_uri() -> WebUrl {
+        WebUrl::parse(PREVIOUS_MANIFEST_URI)
+            .unwrap_or_else(|| unreachable!("the previous URI is valid"))
+    }
+
+    /// The production feed, falling back to the previous one while the
+    /// production feed has no release.
     pub fn production(transport: Arc<dyn HttpTransport>) -> Self {
         Self {
             transport,
             manifest_uri: Self::production_manifest_uri(),
+            fallback_uri: Some(Self::previous_manifest_uri()),
+            answered_uri: Mutex::new(Self::production_manifest_uri()),
             allow_loopback_http: false,
             timeout: Duration::from_secs(15),
             fingerprint_timeout: DEFAULT_FINGERPRINT_TIMEOUT,
@@ -374,7 +410,9 @@ impl ReleaseManifestClient {
         }
         Ok(Self {
             transport,
+            answered_uri: Mutex::new(uri.clone()),
             manifest_uri: uri,
+            fallback_uri: None,
             allow_loopback_http,
             timeout: Duration::from_secs(15),
             fingerprint_timeout: DEFAULT_FINGERPRINT_TIMEOUT,
@@ -391,7 +429,9 @@ impl ReleaseManifestClient {
         net::require_transport(&manifest_uri, "manifest", allow_loopback_http)?;
         Ok(Self {
             transport,
+            answered_uri: Mutex::new(manifest_uri.clone()),
             manifest_uri,
+            fallback_uri: None,
             allow_loopback_http,
             timeout: Duration::from_secs(15),
             fingerprint_timeout: DEFAULT_FINGERPRINT_TIMEOUT,
@@ -401,6 +441,28 @@ impl ReleaseManifestClient {
     /// The feed this client reads.
     pub fn manifest_uri(&self) -> &WebUrl {
         &self.manifest_uri
+    }
+
+    /// The feed read when this one has no release, if any.
+    pub fn fallback_uri(&self) -> Option<&WebUrl> {
+        self.fallback_uri.as_ref()
+    }
+
+    /// This client, reading `fallback` whenever its own feed answers that
+    /// the file does not exist (tests).
+    #[must_use]
+    pub fn with_fallback(mut self, fallback: WebUrl) -> Self {
+        self.fallback_uri = Some(fallback);
+        self
+    }
+
+    /// The feed that answered the last fetch (the client's own feed before
+    /// any fetch).
+    pub fn answered_uri(&self) -> WebUrl {
+        self.answered_uri
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Replaces how long the optional fingerprint may take (tests).
@@ -420,6 +482,19 @@ impl ReleaseManifestClient {
         budget: Option<Duration>,
         cancel: &CancelToken,
     ) -> Result<Vec<u8>, UpdateError> {
+        self.fetch_unless_missing(start, description, budget, cancel)?
+            .ok_or_else(|| unsuccessful(description, 404))
+    }
+
+    /// [`Self::fetch_bytes`], with `None` when the server answers that the
+    /// file does not exist (404).
+    fn fetch_unless_missing(
+        &self,
+        start: WebUrl,
+        description: &str,
+        budget: Option<Duration>,
+        cancel: &CancelToken,
+    ) -> Result<Option<Vec<u8>>, UpdateError> {
         let wrap = |error: UpdateError| match error {
             UpdateError::Transport(net::HttpError::Cancelled) => UpdateError::Cancelled,
             UpdateError::Transport(transport) => UpdateError::failed(format!(
@@ -482,12 +557,11 @@ impl ReleaseManifestClient {
                 redirects += 1;
                 continue;
             }
+            if response.status == 404 {
+                return Ok(None);
+            }
             if !(200..300).contains(&response.status) {
-                return Err(UpdateError::failed(format!(
-                    "The {description} could not be loaded: Response status code does not \
-                     indicate success: {}.",
-                    response.status
-                )));
+                return Err(unsuccessful(description, response.status));
             }
             return net::read_bounded(
                 &mut response,
@@ -495,15 +569,42 @@ impl ReleaseManifestClient {
                 &format!("The {description} is larger than {MAXIMUM_MANIFEST_BYTES} bytes."),
                 cancel,
             )
+            .map(Some)
             .map_err(wrap);
         }
     }
 }
 
+/// A response whose status is not a success.
+fn unsuccessful(description: &str, status: u16) -> UpdateError {
+    UpdateError::failed(format!(
+        "The {description} could not be loaded: Response status code does not indicate \
+         success: {status}."
+    ))
+}
+
 impl ReleaseManifestSource for ReleaseManifestClient {
     fn fetch(&self, cancel: &CancelToken) -> Result<ReleaseManifest, UpdateError> {
-        let bytes =
-            self.fetch_bytes(self.manifest_uri.clone(), "release manifest", None, cancel)?;
+        const DESCRIPTION: &str = "release manifest";
+        let primary = self.manifest_uri.clone();
+        let (answered, bytes) =
+            match self.fetch_unless_missing(primary.clone(), DESCRIPTION, None, cancel)? {
+                Some(bytes) => (primary, bytes),
+                // Only a missing file moves on to the fallback: a feed that
+                // fails, or answers with a broken manifest, is an error and
+                // never hidden behind an older feed.
+                None => match &self.fallback_uri {
+                    Some(fallback) => (
+                        fallback.clone(),
+                        self.fetch_bytes(fallback.clone(), DESCRIPTION, None, cancel)?,
+                    ),
+                    None => return Err(unsuccessful(DESCRIPTION, 404)),
+                },
+            };
+        *self
+            .answered_uri
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = answered;
         ReleaseManifest::parse(&bytes, self.allow_loopback_http)
     }
 
@@ -511,7 +612,8 @@ impl ReleaseManifestSource for ReleaseManifestClient {
         &self,
         cancel: &CancelToken,
     ) -> Result<Option<LauncherFingerprintDocument>, UpdateError> {
-        let Some(uri) = self.manifest_uri.join(LAUNCHER_FINGERPRINT_FILE_NAME) else {
+        let feed = self.answered_uri();
+        let Some(uri) = feed.join(&launcher_fingerprint_file_name(&feed)) else {
             return Ok(None);
         };
         let fetched = self.fetch_bytes(
