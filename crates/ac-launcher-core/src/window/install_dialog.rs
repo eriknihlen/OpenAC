@@ -188,6 +188,13 @@ impl PluginInstallDialog {
     /// fetch the caller must start when the permissions are not known.
     pub fn open(&mut self, request: InstallDialogRequest) -> u64 {
         self.generation += 1;
+        // A first install turns the plugin on for every account and
+        // character; an update keeps each one's choice.
+        let choice = if request.is_update {
+            PluginEnableChoice::None
+        } else {
+            PluginEnableChoice::All
+        };
         self.keep_enabled = false;
         self.characters = request
             .characters
@@ -211,7 +218,7 @@ impl PluginInstallDialog {
                 self.is_loading_permissions = true;
             }
         }
-        self.choice = PluginEnableChoice::None;
+        self.choice = choice;
         self.error = None;
         self.is_open = true;
         self.generation
@@ -289,9 +296,17 @@ impl PluginInstallDialog {
             .is_some_and(|request| request.is_update)
     }
 
-    /// The enable choice is offered on a first install only.
+    /// A first install, which turns the plugin on everywhere.
     pub fn show_enable_choice(&self) -> bool {
         !self.is_update()
+    }
+
+    /// What a first install does with the plugin, said in the dialog.
+    pub fn enable_note(&self) -> Option<&'static str> {
+        self.show_enable_choice().then_some(
+            "It is turned on for every account and character. To turn it off for one, \
+             open that character's or account's options.",
+        )
     }
 
     /// The offered release is a pre-release.

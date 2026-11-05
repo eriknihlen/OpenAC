@@ -3925,12 +3925,13 @@ impl LauncherWindow {
         }
     }
 
-    /// The install dialog's only profile write, for the characters chosen
-    /// there, through the same path the options dialog saves through.
     /// The install dialog's only profile write: the plugin joins the plugin
-    /// list of each account chosen there, which every character on it
-    /// without a list of its own launches with. Runs after the install
-    /// succeeded, so trouble is reported on the panel.
+    /// list of each account chosen there (every account, on a first
+    /// install), which every character on it without a list of its own
+    /// launches with, and the own list of each of its characters that has
+    /// one. Turning it off again is the character's or account's own
+    /// choice. Runs after the install succeeded, so trouble is reported on
+    /// the panel.
     fn enable_for_characters(&mut self, plugin_id: &str, accounts: &[PluginCharacterOption]) {
         let snapshots: Vec<LauncherAccountSnapshot> = self
             .orchestrator
@@ -3956,23 +3957,41 @@ impl LauncherWindow {
             .map(|index| on_server[index]) else {
                 continue;
             };
-            if account
-                .plugins
-                .iter()
-                .any(|id| id.eq_ignore_ascii_case(plugin_id))
-            {
-                continue;
+            let has =
+                |plugins: &[String]| plugins.iter().any(|id| id.eq_ignore_ascii_case(plugin_id));
+            let with = |plugins: &[String]| -> Vec<String> {
+                let mut plugins = plugins.to_vec();
+                plugins.push(plugin_id.to_owned());
+                plugins
+            };
+            let mut result = Ok(());
+            if !has(&account.plugins) {
+                result = self.orchestrator.update_account_plugins(
+                    &account.server_name,
+                    &account.account_name,
+                    &with(&account.plugins),
+                );
             }
-            let mut plugins = account.plugins.clone();
-            plugins.push(plugin_id.to_owned());
-            if let Err(error) = self.orchestrator.update_account_plugins(
-                &account.server_name,
-                &account.account_name,
-                &plugins,
-            ) {
+            for character in account
+                .characters
+                .iter()
+                .filter(|character| character.has_own_plugins && !has(&character.plugins))
+            {
+                if result.is_err() {
+                    break;
+                }
+                result = self.orchestrator.update_character_settings(
+                    &character.server_name,
+                    &character.account_name,
+                    &character.name,
+                    character.launch_mode,
+                    Some(&with(&character.plugins)),
+                );
+            }
+            if let Err(error) = result {
                 let text = error_text(&error);
                 self.plugins.error = Some(if text.trim().is_empty() {
-                    "The plugin installed, but could not be enabled for every chosen account."
+                    "The plugin installed, but could not be turned on for every account and character."
                         .into()
                 } else {
                     text

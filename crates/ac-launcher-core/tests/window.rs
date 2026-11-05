@@ -2407,9 +2407,19 @@ fn request() -> InstallDialogRequest {
 #[test]
 fn the_enable_choice_decides_which_characters_are_written() {
     let mut dialog = PluginInstallDialog::default();
+    // Changed from OpenAC (owner, 2026-11-05): a first install turns the
+    // plugin on everywhere; an update keeps each one's choice.
     dialog.open(request());
+    assert_eq!(dialog.choice, PluginEnableChoice::All);
+    assert!(dialog.enable_note().is_some());
+    dialog.open(InstallDialogRequest {
+        is_update: true,
+        ..request()
+    });
     assert_eq!(dialog.choice, PluginEnableChoice::None);
+    assert!(dialog.enable_note().is_none());
     assert!(dialog.chosen_characters().is_empty());
+    dialog.open(request());
     dialog.choice = PluginEnableChoice::All;
     assert_eq!(dialog.chosen_characters().len(), 2);
     dialog.choice = PluginEnableChoice::Choose;
@@ -2981,6 +2991,68 @@ fn the_plugin_release_watch_backs_off_when_rate_limited() {
     window.poll_plugin_release_watch(at(630));
     window.poll();
     assert_eq!(fixture.server.count(&feed), before + 2);
+}
+
+// Not an OpenAC test (owner, 2026-11-05): a first install turns the plugin
+// on for every account and for every character with a plugin list of its
+// own; a character that already has it is left alone.
+#[test]
+fn a_first_install_turns_the_plugin_on_for_every_account_and_character() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.hello"], "");
+    fixture.release("edwards.hello", "1.0.0");
+    fixture.release_zip(
+        &ac_launcher_core::plugins::release_tag("1.0.0"),
+        "edwards.hello",
+        "1.0.0",
+    );
+    let fake = batch();
+    for server in fake.servers.lock().unwrap().iter_mut() {
+        for account in &mut server.accounts {
+            if account.account_name == "Bob" {
+                account.characters[0].has_own_plugins = true;
+                account.characters[0].plugins = vec!["someone.other".into()];
+            }
+        }
+    }
+    let mut window = fixture.window_with(fake.clone());
+    check(&mut window);
+    window.refresh_discover_details();
+    window.poll();
+    window.open_discover_install("edwards.hello");
+    assert!(window.plugins.install_dialog.is_open);
+    window.poll();
+    window.confirm_install();
+    window.poll();
+    assert!(
+        !window.plugins.install_dialog.is_open,
+        "{:?}",
+        window.plugins.install_dialog.error
+    );
+    let mut accounts: Vec<(String, String)> = fake
+        .account_plugin_updates
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, _, plugins)| plugins.iter().any(|id| id == "edwards.hello"))
+        .map(|(server, account, _)| (server.clone(), account.clone()))
+        .collect();
+    accounts.sort();
+    assert_eq!(
+        accounts,
+        [
+            ("One".to_owned(), "Alice".to_owned()),
+            ("One".to_owned(), "Bob".to_owned()),
+            ("Two".to_owned(), "Alice".to_owned()),
+        ]
+    );
+    let characters = fake.settings_updates.lock().unwrap().clone();
+    assert_eq!(characters.len(), 1, "{characters:?}");
+    assert_eq!(characters[0].1, "Bob");
+    assert_eq!(
+        characters[0].4.as_deref(),
+        Some(&["someone.other".to_owned(), "edwards.hello".to_owned()][..])
+    );
 }
 
 fn classic_migration_dialog(profiles: PathBuf) -> ClassicMigrationDialog {

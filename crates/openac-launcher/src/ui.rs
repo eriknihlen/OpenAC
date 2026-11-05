@@ -8,7 +8,6 @@ use ac_launcher_core::plugins::PluginReleaseChannel;
 use ac_launcher_core::profiles::LauncherTextEditorKind;
 use ac_launcher_core::window::accounts::{AccountGroup, AccountServerRow, RowLaunchMode};
 use ac_launcher_core::window::closing::ClosingClientState;
-use ac_launcher_core::window::install_dialog::PluginEnableChoice;
 use ac_launcher_core::window::install_folder::InstallFolderRow;
 use ac_launcher_core::window::plugins_panel::{
     BETA_CHANNEL_LABEL, PluginDiscoverRow, PluginInstalledRow, STABLE_CHANNEL_LABEL,
@@ -2544,31 +2543,8 @@ fn install_dialog(window: &mut Window, ui: &mut Ui) {
     if let Some(text) = dialog.no_permissions_text() {
         ui.label(muted(text));
     }
-    if dialog.show_enable_choice() {
-        ui.label(RichText::new("Enable for").strong());
-        ui.radio_value(
-            &mut dialog.choice,
-            PluginEnableChoice::None,
-            "None (enable later)",
-        );
-        ui.radio_value(
-            &mut dialog.choice,
-            PluginEnableChoice::All,
-            "All characters",
-        );
-        ui.radio_value(
-            &mut dialog.choice,
-            PluginEnableChoice::Choose,
-            "Choose characters",
-        );
-        if dialog.choice == PluginEnableChoice::Choose {
-            for character in &mut dialog.characters {
-                ui.horizontal(|ui| {
-                    ui.add_space(20.0);
-                    ui.checkbox(&mut character.is_checked, &character.option.display_name);
-                });
-            }
-        }
+    if let Some(note) = dialog.enable_note() {
+        ui.label(muted(note));
     }
     if dialog.show_keep_enabled_choice() {
         ui.label(RichText::new("New permissions").strong());
