@@ -109,6 +109,7 @@ impl Orchestration for OwnerSpy {
             is_installation_ready: true,
             installation_status: "ready".into(),
             show_beta_plugins: false,
+            profiles: Vec::new(),
         })
     }
     fn launch_capability(
@@ -182,6 +183,21 @@ impl Orchestration for OwnerSpy {
         _plugins: &[String],
     ) -> Result<(), OrchestratorError> {
         unexpected("update_account_plugins")
+    }
+    fn update_character_profiles(
+        &self,
+        _server_name: &str,
+        _account_name: &str,
+        _character_name: &str,
+        _profiles: &[String],
+    ) -> Result<(), OrchestratorError> {
+        unexpected("update_character_profiles")
+    }
+    fn create_profile(&self, _name: &str) -> Result<(), OrchestratorError> {
+        unexpected("create_profile")
+    }
+    fn delete_profile(&self, _name: &str) -> Result<(), OrchestratorError> {
+        unexpected("delete_profile")
     }
     fn remove_character(
         &self,

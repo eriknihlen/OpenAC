@@ -27,6 +27,7 @@ use super::plugins_panel::{
     AddFromUrlChoice, DiscoverChannelOption, DiscoverDetails, PluginsPanel,
 };
 use super::profile_editor::ProfileTextEditor;
+use super::profiles_dialog::{ProfileListEntry, ProfilesDialog, describe_members};
 use super::sessions::SessionRow;
 use super::thwarg_import::ThwargImportDialog;
 use super::update_prompt::UpdatePrompt;
@@ -90,6 +91,15 @@ pub struct RowOptionsChoice {
     pub is_checked: bool,
     /// Saved but not offered.
     pub is_missing: bool,
+}
+
+/// One profile in a character's options: whether the character is in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowOptionsProfile {
+    /// The profile's name.
+    pub name: String,
+    /// The character is in it.
+    pub is_checked: bool,
 }
 
 /// The question asked when the launcher window is closed while clients it
@@ -310,6 +320,14 @@ pub struct LauncherWindow {
     row_options_character: Option<(String, String, String)>,
     /// The plugins dialog's checklist.
     pub row_options_choices: Vec<RowOptionsChoice>,
+    /// A character's options: one box per profile, ticked when the
+    /// character is in it. Empty for an account's plugins.
+    pub row_options_profiles: Vec<RowOptionsProfile>,
+    /// The profile list the boxes opened with: what is saved when the
+    /// boxes are left alone.
+    row_options_saved_profiles: Vec<String>,
+    /// The Profiles dialog: every profile, New profile and Delete.
+    pub profiles_dialog: ProfilesDialog,
     /// The character's launch mode in the dialog.
     pub character_launch_mode: LaunchMode,
     /// The character launches with its account's plugins; unticked, it
@@ -615,6 +633,9 @@ impl LauncherWindow {
             row_options_account: None,
             row_options_character: None,
             row_options_choices: Vec::new(),
+            row_options_profiles: Vec::new(),
+            row_options_saved_profiles: Vec::new(),
+            profiles_dialog: ProfilesDialog::default(),
             character_launch_mode: LaunchMode::GuiSelect,
             character_uses_account_plugins: false,
             remove_character_target: None,
@@ -1502,20 +1523,10 @@ impl LauncherWindow {
             .collect()
     }
 
-    /// Rebuilds the chips from the accounts' tags, keeping the chosen one
-    /// while it exists.
+    /// Rebuilds the chips from the profile list (an empty profile has its
+    /// chip too), keeping the chosen one while it exists.
     fn refresh_profile_filters(&mut self, snapshot: &LauncherStateSnapshot) {
-        let mut tags: Vec<String> = Vec::new();
-        for tag in snapshot
-            .servers
-            .iter()
-            .flat_map(|server| server.accounts.iter())
-            .flat_map(|account| account.profiles.iter())
-        {
-            if !tags.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
-                tags.push(tag.clone());
-            }
-        }
+        let tags = snapshot.profiles.clone();
         if let Some(filter) = &self.profile_filter
             && !tags.iter().any(|tag| tag.eq_ignore_ascii_case(filter))
         {
@@ -1588,9 +1599,33 @@ impl LauncherWindow {
         self.checked_rows().filter(|row| !row.is_shown()).count()
     }
 
-    /// Filters the accounts by a profile tag (`None`: all accounts).
+    /// Filters the accounts by a profile tag (`None`: all accounts): a row
+    /// shows when its account or one of its characters is in the profile.
+    /// Choosing a profile also sets each row whose account has a character
+    /// in it to that character (saved, as choosing it by hand), so Play
+    /// selected starts the profile's characters; a row shown for its
+    /// account's tag keeps its character, and "All" changes none.
     pub fn set_profile_filter(&mut self, profile: Option<&str>) {
         self.profile_filter = profile.map(str::to_owned);
+        if let Some(profile) = profile {
+            let switches: Vec<(String, String, String)> = self
+                .rows()
+                .filter_map(|row| {
+                    row.character_in_profile(profile)
+                        .filter(|character| *character != row.selected_character)
+                        .map(|character| {
+                            (
+                                row.account_name.clone(),
+                                row.server_name.clone(),
+                                character.to_owned(),
+                            )
+                        })
+                })
+                .collect();
+            for (account, server, character) in switches {
+                self.set_row_character(&account, &server, &character);
+            }
+        }
         self.apply_profile_filter();
     }
 
@@ -1756,6 +1791,7 @@ impl LauncherWindow {
             || self.plugins.is_remove_dialog_open
             || !self.plugins.add_from_url_choices.is_empty()
             || self.remove_character_target.is_some()
+            || self.profiles_dialog.is_open
             || self.profile_migration_notice.is_some()
             || self.close_prompt.is_some()
     }
@@ -2766,7 +2802,7 @@ impl LauncherWindow {
     pub fn row_options_title(&self) -> String {
         match (&self.row_options_account, &self.row_options_character) {
             (Some((_, account)), _) => format!("Plugins for {account}"),
-            (None, Some((_, _, character))) => format!("Plugins for {character}"),
+            (None, Some((_, _, character))) => format!("Options for {character}"),
             _ => "Select a profile".into(),
         }
     }
@@ -2849,13 +2885,15 @@ impl LauncherWindow {
         };
         self.row_options_account = Some((server.to_owned(), account.to_owned()));
         self.row_options_character = None;
+        self.row_options_profiles.clear();
+        self.row_options_saved_profiles.clear();
         self.load_plugin_choices(&snapshot.plugins);
         self.last_error = None;
         self.is_row_options_open = true;
     }
 
-    /// A row's Options › Plugins for this character: its account's list or
-    /// one of its own.
+    /// A row's Options › Options for this character: its account's plugin
+    /// list or one of its own, and the profiles it is in.
     pub fn open_character_plugins(&mut self, account: &str, server: &str) {
         if !self.can_interact_with_row(account, server) {
             return;
@@ -2873,6 +2911,23 @@ impl LauncherWindow {
         self.row_options_character = Some((server.to_owned(), account.to_owned(), name));
         self.character_uses_account_plugins = !snapshot.has_own_plugins;
         self.load_plugin_choices(&snapshot.plugins);
+        let names = self
+            .orchestrator
+            .snapshot()
+            .map(|state| state.profiles)
+            .unwrap_or_default();
+        self.row_options_profiles = names
+            .into_iter()
+            .map(|name| RowOptionsProfile {
+                is_checked: snapshot
+                    .profiles
+                    .iter()
+                    .any(|tag| tag.eq_ignore_ascii_case(&name)),
+                name,
+            })
+            .collect();
+        self.row_options_saved_profiles
+            .clone_from(&snapshot.profiles);
         self.character_launch_mode = mode;
         self.last_error = None;
         self.is_row_options_open = true;
@@ -2881,6 +2936,104 @@ impl LauncherWindow {
     /// A row's Options › Logon commands: every account's, in one text.
     pub fn open_logon_commands(&mut self) {
         self.open_text_editor(LauncherTextEditorKind::LogonCommands);
+    }
+
+    /// Profiles…: every profile, with New profile and Delete.
+    pub fn open_profiles(&mut self) {
+        if !self.can_interact() {
+            return;
+        }
+        self.profiles_dialog = ProfilesDialog {
+            is_open: true,
+            ..ProfilesDialog::default()
+        };
+        self.refresh_profiles_dialog();
+    }
+
+    /// Lists every profile with what is in it.
+    fn refresh_profiles_dialog(&mut self) {
+        let snapshot = match self.orchestrator.snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.profiles_dialog.error = Some(error_text(&error));
+                return;
+            }
+        };
+        let carries =
+            |tags: &[String], name: &str| tags.iter().any(|tag| tag.eq_ignore_ascii_case(name));
+        let accounts = || {
+            snapshot
+                .servers
+                .iter()
+                .flat_map(|server| server.accounts.iter())
+        };
+        self.profiles_dialog.entries = snapshot
+            .profiles
+            .iter()
+            .map(|name| ProfileListEntry {
+                name: name.clone(),
+                members: describe_members(
+                    accounts()
+                        .filter(|account| carries(&account.profiles, name))
+                        .count(),
+                    accounts()
+                        .flat_map(|account| account.characters.iter())
+                        .filter(|character| carries(&character.profiles, name))
+                        .count(),
+                ),
+            })
+            .collect();
+    }
+
+    /// The Profiles dialog's New profile: adds the typed name (trimmed) as
+    /// an empty profile; an empty name, one already used (in any case) or
+    /// one the tag rules refuse is refused with why.
+    pub fn create_profile(&mut self) {
+        let name = self.profiles_dialog.new_name.trim().to_owned();
+        match self.orchestrator.create_profile(&name) {
+            Ok(()) => {
+                self.profiles_dialog.new_name.clear();
+                self.profiles_dialog.error = None;
+                self.operation_status = format!("Added the profile {name}.");
+                self.refresh_from_core();
+                self.refresh_profiles_dialog();
+            }
+            Err(error) => self.profiles_dialog.error = Some(error_text(&error)),
+        }
+    }
+
+    /// The Profiles dialog's Delete: asks first.
+    pub fn request_delete_profile(&mut self, name: &str) {
+        if self.profiles_dialog.is_open {
+            self.profiles_dialog.delete_target = Some(name.to_owned());
+        }
+    }
+
+    /// Keeps the profile the question was about.
+    pub fn cancel_delete_profile(&mut self) {
+        self.profiles_dialog.delete_target = None;
+    }
+
+    /// Deletes the profile the question was about, from every account and
+    /// character; a filter on it goes back to All.
+    pub fn confirm_delete_profile(&mut self) {
+        let Some(name) = self.profiles_dialog.delete_target.take() else {
+            return;
+        };
+        match self.orchestrator.delete_profile(&name) {
+            Ok(()) => {
+                self.profiles_dialog.error = None;
+                self.operation_status = format!("Deleted the profile {name}.");
+                self.refresh_from_core();
+                self.refresh_profiles_dialog();
+            }
+            Err(error) => self.profiles_dialog.error = Some(error_text(&error)),
+        }
+    }
+
+    /// Closes the Profiles dialog.
+    pub fn close_profiles(&mut self) {
+        self.profiles_dialog = ProfilesDialog::default();
     }
 
     /// The checklist for `configured`: every usable installed plugin (every
@@ -2972,13 +3125,37 @@ impl LauncherWindow {
             return;
         };
         let plugins = (!self.character_uses_account_plugins).then(|| self.checked_plugin_ids());
-        match self.orchestrator.update_character_settings(
-            &server,
-            &account,
-            &name,
-            self.character_launch_mode,
-            plugins.as_deref(),
-        ) {
+        let profiles: Vec<String> = self
+            .row_options_profiles
+            .iter()
+            .filter(|profile| profile.is_checked)
+            .map(|profile| profile.name.clone())
+            .collect();
+        let same = |left: &[String], right: &[String]| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .all(|tag| right.iter().any(|other| other.eq_ignore_ascii_case(tag)))
+        };
+        let profiles_changed = !same(&profiles, &self.row_options_saved_profiles);
+        let saved = self
+            .orchestrator
+            .update_character_settings(
+                &server,
+                &account,
+                &name,
+                self.character_launch_mode,
+                plugins.as_deref(),
+            )
+            .and_then(|()| {
+                if profiles_changed {
+                    self.orchestrator
+                        .update_character_profiles(&server, &account, &name, &profiles)
+                } else {
+                    Ok(())
+                }
+            });
+        match saved {
             Ok(()) => {
                 self.last_error = None;
                 self.operation_status = format!("Saved launch settings for {name}.");
@@ -3107,7 +3284,11 @@ impl LauncherWindow {
             return;
         }
         self.close_desktop_dialogs();
-        if self.text_editor.is_open {
+        if self.profiles_dialog.delete_target.is_some() {
+            self.cancel_delete_profile();
+        } else if self.profiles_dialog.is_open {
+            self.close_profiles();
+        } else if self.text_editor.is_open {
             self.text_editor.close();
         } else if self.add_server.is_open {
             self.add_server.close();

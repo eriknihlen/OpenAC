@@ -53,6 +53,8 @@ type LaunchRequest = (String, String, Option<String>, LaunchMode);
 /// server, account, character, mode, its own plugins (`None`: the
 /// account's).
 type SettingsUpdate = (String, String, String, LaunchMode, Option<Vec<String>>);
+/// server, account, character, its profiles.
+type CharacterProfileUpdate = (String, String, String, Vec<String>);
 /// server, account, plugins.
 type AccountPluginUpdate = (String, String, Vec<String>);
 
@@ -88,6 +90,13 @@ struct Fake {
     /// What the Thwarg import works on, and each call's `apply`.
     thwarg_document: Mutex<ac_launcher_core::profiles::LauncherProfileDocument>,
     thwarg_imports: Mutex<Vec<bool>>,
+    /// Every row selection saved, in order: account, character, mode.
+    saved_row_selections: Mutex<Vec<(String, Option<String>, LaunchMode)>>,
+    /// The profile list; the snapshot adds the tags in use, as the store
+    /// does.
+    profiles: Mutex<Vec<String>>,
+    /// Each character profile edit: server, account, character, profiles.
+    character_profile_updates: Mutex<Vec<CharacterProfileUpdate>>,
 }
 
 fn character(
@@ -105,6 +114,7 @@ fn character(
         launch_mode: mode,
         plugins: plugins.iter().map(|id| (*id).to_owned()).collect(),
         login_commands: Vec::new(),
+        profiles: Vec::new(),
         has_running_session: false,
         session_status: "Ready".into(),
         // A character listed with plugins of its own.
@@ -236,13 +246,32 @@ impl Orchestration for Fake {
             Some(sessions) => sessions,
             None => self.session.lock().unwrap().clone().into_iter().collect(),
         };
+        let servers = self.servers.lock().unwrap().clone();
+        let mut profiles = self.profiles.lock().unwrap().clone();
+        for tag in servers
+            .iter()
+            .flat_map(|server| server.accounts.iter())
+            .flat_map(|account| {
+                account.profiles.iter().chain(
+                    account
+                        .characters
+                        .iter()
+                        .flat_map(|character| character.profiles.iter()),
+                )
+            })
+        {
+            if !profiles.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
+                profiles.push(tag.clone());
+            }
+        }
         Ok(LauncherStateSnapshot {
-            servers: self.servers.lock().unwrap().clone(),
+            servers,
             sessions,
             platform: Self::platform(),
             is_installation_ready: self.installed.lock().unwrap().is_some(),
             installation_status: "No installed client is configured.".into(),
             show_beta_plugins: *self.show_beta_plugins.lock().unwrap(),
+            profiles,
         })
     }
     fn launch_capability(&self, mode: LaunchMode) -> Result<LauncherCapability, OrchestratorError> {
@@ -352,6 +381,60 @@ impl Orchestration for Fake {
         ));
         Ok(())
     }
+    fn update_character_profiles(
+        &self,
+        server: &str,
+        account: &str,
+        character: &str,
+        profiles: &[String],
+    ) -> Result<(), OrchestratorError> {
+        self.character_profile_updates.lock().unwrap().push((
+            server.into(),
+            account.into(),
+            character.into(),
+            profiles.to_vec(),
+        ));
+        Ok(())
+    }
+    // The fake keeps the store's list rules: a real store sits behind the
+    // window tests that need them.
+    fn create_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        let mut profiles = self.profiles.lock().unwrap();
+        if name.trim().is_empty()
+            || profiles
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(name))
+        {
+            return Err(OrchestratorError::Operation(format!(
+                "'{name}' cannot be added."
+            )));
+        }
+        profiles.push(name.to_owned());
+        Ok(())
+    }
+    fn delete_profile(&self, name: &str) -> Result<(), OrchestratorError> {
+        self.profiles
+            .lock()
+            .unwrap()
+            .retain(|known| !known.eq_ignore_ascii_case(name));
+        for account in self
+            .servers
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .flat_map(|server| server.accounts.iter_mut())
+        {
+            account
+                .profiles
+                .retain(|tag| !tag.eq_ignore_ascii_case(name));
+            for character in &mut account.characters {
+                character
+                    .profiles
+                    .retain(|tag| !tag.eq_ignore_ascii_case(name));
+            }
+        }
+        Ok(())
+    }
     fn remove_character(
         &self,
         server: &str,
@@ -398,11 +481,16 @@ impl Orchestration for Fake {
     fn update_account_selection(
         &self,
         _server: &str,
-        _account: &str,
+        account: &str,
         character: Option<&str>,
         mode: LaunchMode,
     ) -> Result<(), OrchestratorError> {
         *self.saved_row_selection.lock().unwrap() = Some((character.map(str::to_owned), mode));
+        self.saved_row_selections.lock().unwrap().push((
+            account.to_owned(),
+            character.map(str::to_owned),
+            mode,
+        ));
         Ok(())
     }
     fn launch(
@@ -5755,4 +5843,265 @@ fn the_thwarg_import_reports_a_missing_folder() {
     window.poll();
     assert!(window.thwarg_import.has_error());
     assert!(fake.thwarg_imports.lock().unwrap().is_empty());
+}
+
+// --- Profiles on characters ---------------------------------------------------------------
+
+/// On "One": "alpha" with Ann and Bea (Bea in Main, the row on Ann);
+/// "beta" itself in Main, with Cid (the row on Cid); "gamma" in no profile.
+fn character_profiled() -> Arc<Fake> {
+    let named = |account: &str, name: &str, profiles: &[&str]| {
+        let mut character = character("One", account, name, LaunchMode::Gui, &[]);
+        character.profiles = profiles.iter().map(|tag| (*tag).to_owned()).collect();
+        character
+    };
+    let mut alpha = account(
+        "One",
+        "alpha",
+        vec![named("alpha", "Ann", &[]), named("alpha", "Bea", &["Main"])],
+    );
+    alpha.selected_character = Some("Ann".into());
+    let mut beta = account("One", "beta", vec![named("beta", "Cid", &[])]);
+    beta.profiles = vec!["Main".into()];
+    beta.selected_character = Some("Cid".into());
+    let gamma = account("One", "gamma", vec![named("gamma", "Dot", &["Bots"])]);
+    let fake = Fake::default();
+    *fake.servers.lock().unwrap() = vec![server("One", vec![alpha, beta, gamma])];
+    *fake.profiles.lock().unwrap() = vec!["Spare".into()];
+    *fake.session.lock().unwrap() = Some(session(LauncherActivityState::Exited));
+    Arc::new(fake)
+}
+
+#[test]
+fn a_profile_chip_shows_an_account_through_its_character_and_switches_the_row_to_it() {
+    let fake = character_profiled();
+    let mut window = create_started(&fake);
+    let chips: Vec<&str> = window
+        .profile_filters
+        .iter()
+        .map(|chip| chip.label.as_str())
+        .collect();
+    // An empty profile has its chip; the tags in use follow the list.
+    assert_eq!(chips, ["All", "Spare", "Main", "Bots"]);
+    fake.saved_row_selections.lock().unwrap().clear();
+
+    window.set_profile_filter(Some("main"));
+
+    let visible: Vec<(&str, bool)> = window
+        .accounts
+        .iter()
+        .map(|group| (group.account_name.as_str(), group.is_visible))
+        .collect();
+    assert_eq!(visible, [("alpha", true), ("beta", true), ("gamma", false)]);
+    // alpha is in Main through Bea: its row switches to her, saved as a
+    // pick by hand. beta is in Main itself and keeps Cid.
+    assert_eq!(
+        window.row("alpha", "One").unwrap().selected_character,
+        "Bea"
+    );
+    assert_eq!(window.row("beta", "One").unwrap().selected_character, "Cid");
+    assert_eq!(
+        *fake.saved_row_selections.lock().unwrap(),
+        [("alpha".to_owned(), Some("Bea".to_owned()), LaunchMode::Gui)]
+    );
+
+    // Play selected starts the profile's character.
+    window.set_row_checked("alpha", "One", true);
+    window.launch_checked();
+    window.poll();
+    assert_eq!(
+        fake.launch_requests.lock().unwrap().last().cloned(),
+        Some((
+            "One".to_owned(),
+            "alpha".to_owned(),
+            Some("Bea".to_owned()),
+            LaunchMode::Gui
+        ))
+    );
+
+    // All shows every account and changes no character.
+    fake.saved_row_selections.lock().unwrap().clear();
+    window.set_profile_filter(None);
+    assert!(window.accounts.iter().all(|group| group.is_visible));
+    assert_eq!(
+        window.row("alpha", "One").unwrap().selected_character,
+        "Bea"
+    );
+    assert!(fake.saved_row_selections.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_profile_chip_leaves_a_row_already_on_the_profiles_character_alone() {
+    let fake = character_profiled();
+    let mut window = create_started(&fake);
+    window.set_row_character("alpha", "One", "Bea");
+    fake.saved_row_selections.lock().unwrap().clear();
+    window.set_profile_filter(Some("Main"));
+    assert!(fake.saved_row_selections.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_characters_options_tick_the_profiles_it_is_in_and_save_a_change() {
+    let mut bea = character("Local ACE", "testaccount", "Bea", LaunchMode::Gui, &[]);
+    bea.profiles = vec!["Bots".into()];
+    let fake = account_with_plugins(&[], vec![bea]);
+    *fake.profiles.lock().unwrap() = vec!["Main".into()];
+    let mut window = create_started(&fake);
+    open_character(&mut window, "Bea");
+    assert_eq!(window.row_options_title(), "Options for Bea");
+    let boxes: Vec<(&str, bool)> = window
+        .row_options_profiles
+        .iter()
+        .map(|profile| (profile.name.as_str(), profile.is_checked))
+        .collect();
+    assert_eq!(boxes, [("Main", false), ("Bots", true)]);
+
+    // Left alone, the profiles are not written.
+    window.save_row_options();
+    assert!(fake.character_profile_updates.lock().unwrap().is_empty());
+
+    open_character(&mut window, "Bea");
+    window.row_options_profiles[0].is_checked = true;
+    window.save_row_options();
+    assert_eq!(
+        *fake.character_profile_updates.lock().unwrap(),
+        [(
+            "Local ACE".to_owned(),
+            "testaccount".to_owned(),
+            "Bea".to_owned(),
+            vec!["Main".to_owned(), "Bots".to_owned()]
+        )]
+    );
+    assert!(!window.is_row_options_open);
+
+    // An account's plugins show no profile boxes.
+    window.open_account_plugins("testaccount", "Local ACE");
+    assert!(window.row_options_profiles.is_empty());
+}
+
+// --- The Profiles dialog (real orchestrator) --------------------------------------------
+
+struct ProfilesFixture {
+    _root: common::TempDir,
+    core: Arc<LauncherOrchestrator>,
+}
+
+impl ProfilesFixture {
+    /// Coldeve with "alpha" (Ann in Main) and "beta" (in Main itself).
+    fn new() -> Self {
+        let root = common::TempDir::new("profiles-dialog");
+        let paths = root.path_set();
+        let core = Arc::new(LauncherOrchestrator::new(
+            LauncherProfileStore::for_paths(&paths),
+            paths,
+            LauncherExecutableSet::new("unused-client", "unused-headless", None),
+            None,
+        ));
+        core.load_profiles().unwrap();
+        core.add_server("Coldeve", "play.example.test", 9000)
+            .unwrap();
+        core.add_account("Coldeve", "alpha", "pw").unwrap();
+        core.add_account("Coldeve", "beta", "pw").unwrap();
+        core.add_character("Coldeve", "alpha", "Ann", None).unwrap();
+        core.update_character_profiles("Coldeve", "alpha", "Ann", &["Main".to_owned()])
+            .unwrap();
+        core.save_profile_text(
+            LauncherTextEditorKind::Accounts,
+            "#Coldeve\nName=alpha,Password=pw\nName=beta,Password=pw,Profiles=Main\n",
+            &core
+                .read_profile_text(LauncherTextEditorKind::Accounts)
+                .unwrap(),
+        )
+        .unwrap();
+        Self { _root: root, core }
+    }
+
+    fn window(&self) -> LauncherWindow {
+        let mut window = LauncherWindow::new(parts(self.core.clone(), Arc::new(InlineSpawner)));
+        window.initialize();
+        window
+    }
+}
+
+fn chip_labels(window: &LauncherWindow) -> Vec<String> {
+    window
+        .profile_filters
+        .iter()
+        .map(|chip| chip.label.clone())
+        .collect()
+}
+
+#[test]
+fn the_profiles_dialog_lists_every_profile_and_new_profile_adds_an_empty_one() {
+    let fixture = ProfilesFixture::new();
+    let mut window = fixture.window();
+    window.open_profiles();
+    assert!(window.profiles_dialog.is_open);
+    assert!(window.is_modal_open());
+    let entries: Vec<(&str, &str)> = window
+        .profiles_dialog
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.members.as_str()))
+        .collect();
+    assert_eq!(entries, [("Main", "1 account, 1 character")]);
+
+    window.profiles_dialog.new_name = "  Farm  ".into();
+    window.create_profile();
+    assert_eq!(window.profiles_dialog.error, None);
+    assert!(window.profiles_dialog.new_name.is_empty());
+    assert_eq!(window.profiles_dialog.entries[1].name, "Farm");
+    assert_eq!(window.profiles_dialog.entries[1].members, "empty");
+    assert_eq!(chip_labels(&window), ["All", "Main", "Farm"]);
+    // It survives a restart.
+    assert_eq!(chip_labels(&fixture.window()), ["All", "Main", "Farm"]);
+
+    for refused in ["", "farm", "a;b"] {
+        window.profiles_dialog.new_name = refused.into();
+        window.create_profile();
+        assert!(window.profiles_dialog.error.is_some(), "{refused:?}");
+    }
+    assert_eq!(fixture.core.snapshot().unwrap().profiles, ["Main", "Farm"]);
+}
+
+#[test]
+fn deleting_a_profile_asks_then_removes_it_from_every_account_and_character() {
+    let fixture = ProfilesFixture::new();
+    let mut window = fixture.window();
+    window.set_profile_filter(Some("Main"));
+    window.open_profiles();
+    window.request_delete_profile("Main");
+    assert_eq!(
+        window.profiles_dialog.delete_title(),
+        "Delete the profile Main?"
+    );
+    assert!(
+        window
+            .profiles_dialog
+            .delete_message()
+            .contains("(1 account, 1 character)")
+    );
+    // Cancel keeps it.
+    window.cancel_delete_profile();
+    assert_eq!(fixture.core.snapshot().unwrap().profiles, ["Main"]);
+
+    window.request_delete_profile("Main");
+    window.confirm_delete_profile();
+    let snapshot = fixture.core.snapshot().unwrap();
+    assert!(snapshot.profiles.is_empty());
+    let accounts = &snapshot.servers[0].accounts;
+    assert!(accounts.iter().all(|account| account.profiles.is_empty()));
+    assert!(
+        accounts
+            .iter()
+            .flat_map(|account| account.characters.iter())
+            .all(|character| character.profiles.is_empty())
+    );
+    // The chips go, and the filter is back on All.
+    assert_eq!(window.profile_filter, None);
+    assert!(!window.has_profile_filters());
+    assert!(window.profiles_dialog.entries.is_empty());
+    assert!(window.profiles_dialog.is_open);
+    window.close_active_modal();
+    assert!(!window.profiles_dialog.is_open);
 }
