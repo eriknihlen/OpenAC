@@ -10,7 +10,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use ac_host::{
+use ac_host_core::{
     CharacterOption, CharacterSelector, ConfigError, ConfigReader, CredentialProvider, HostConfig,
     PolicyRole, SessionDescriptor, SessionMode, load_config, load_config_file,
 };
@@ -272,7 +272,7 @@ fn character_selector_accepts_exactly_one_valid_way() {
         mode(selector("{\"id\":1342177281}").unwrap()),
         SessionMode::Play {
             character: Some(CharacterSelector::Id(0x5000_0001)),
-            policy: Some(ac_host::PolicyDescriptor {
+            policy: Some(ac_host_core::PolicyDescriptor {
                 id: "idle".into(),
                 role: None
             }),
@@ -317,7 +317,7 @@ fn policy_role_and_enum_names_ignore_case() {
     assert!(matches!(
         session.mode,
         SessionMode::Play {
-            policy: Some(ac_host::PolicyDescriptor {
+            policy: Some(ac_host_core::PolicyDescriptor {
                 role: Some(PolicyRole::Recruit),
                 ..
             }),

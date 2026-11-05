@@ -17,8 +17,10 @@ test-fixtures = []
 ac-plugin-abi = { workspace = true, features = ["ui-host"] }
 # The session's plugin UI state the UI imports act on (owned by the runtime).
 ac-plugin-ui.workspace = true
-# The strict JSON reader for plugin.json and the settings file.
+# The strict JSON reader for the settings file, and the install paths.
 ac-host.workspace = true
+# The plugin.json parser and version rules, shared with the launcher.
+ac-plugin-manifest.workspace = true
 # The network plugins may use (HTTP, TCP, TLS through the OS) on worker threads.
 ac-plugin-net.workspace = true
 # Decodes a plugin's own JPEG art with the dat texture decoder (image_codec).

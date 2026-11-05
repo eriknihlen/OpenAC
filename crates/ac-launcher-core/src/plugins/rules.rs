@@ -89,7 +89,7 @@ pub fn without_client_version(reason: &str) -> String {
 // --- Content policy ------------------------------------------------------------
 
 /// The icon's file name at the plugin root.
-pub use ac_plugin::icon::ICON_FILE_NAME;
+pub use ac_plugin_icon::ICON_FILE_NAME;
 
 /// The file types a plugin package may hold: its module, data, art and
 /// fonts (the plugin package format). No native code of any kind.
@@ -296,13 +296,13 @@ pub mod github {
 
 // --- The icon ----------------------------------------------------------------------
 
-pub use ac_plugin::icon::{ICON_EXTENT, ICON_MAXIMUM_BYTES};
+pub use ac_plugin_icon::{ICON_EXTENT, ICON_MAXIMUM_BYTES};
 
-/// Checks a plugin icon's PNG container (`ac_plugin::icon::validate_icon`,
+/// Checks a plugin icon's PNG container (`ac_plugin_icon::validate_icon`,
 /// the rules the client also applies before it shows the icon), as an
 /// install failure.
 pub fn validate_icon(bytes: &[u8]) -> Result<(), UpdateError> {
-    ac_plugin::icon::validate_icon(bytes).map_err(|error| UpdateError::failed(error.to_string()))
+    ac_plugin_icon::validate_icon(bytes).map_err(|error| UpdateError::failed(error.to_string()))
 }
 
 #[cfg(test)]

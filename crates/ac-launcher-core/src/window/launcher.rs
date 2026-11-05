@@ -53,7 +53,7 @@ use crate::updates::{
     ClientVersionResolution, LauncherUpdateCheckResult, LauncherUpdateProgress, LauncherUpdater,
     LauncherVersion,
 };
-use ac_host::local_time::LocalZone;
+use ac_host_core::local_time::LocalZone;
 
 /// How long Stop waits for a graceful logout before killing the process.
 pub const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(30);

@@ -28,17 +28,8 @@ impl UiOwner {
     }
 }
 
-/// A plugin's `icon.png`, decoded: the image its dock slots show ahead
-/// of a render surface or initials.
-#[derive(Clone, PartialEq, Eq)]
-pub struct PluginIcon {
-    /// Width in pixels.
-    pub width: u32,
-    /// Height in pixels.
-    pub height: u32,
-    /// Four bytes per pixel, red first, top row first.
-    pub rgba: Arc<Vec<u8>>,
-}
+// A plugin's decoded `icon.png`, from the icon crate the launcher shares.
+pub use ac_plugin_icon::PluginIcon;
 
 /// What a plugin's folder holds for the dock icon one of its windows names.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -64,16 +55,6 @@ impl WindowIcon {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.named.is_none() && self.light.is_none() && self.dark.is_none()
-    }
-}
-
-impl std::fmt::Debug for PluginIcon {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginIcon")
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("bytes", &self.rgba.len())
-            .finish()
     }
 }
 

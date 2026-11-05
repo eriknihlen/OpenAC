@@ -12,7 +12,7 @@ use crate::ids::unique_hex32;
 /// resolved by text alone (OpenAC's `Path.GetFullPath`).
 pub fn full_path(path: &Path) -> PathBuf {
     let base = std::env::current_dir().unwrap_or_default();
-    ac_host::paths::full_path(path, &base)
+    ac_host_core::paths::full_path(path, &base)
 }
 
 /// Whether two paths name the same place: full paths compared ignoring case

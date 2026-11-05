@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::rules::github;
 use crate::json::{self, reject_case_insensitive_duplicates};

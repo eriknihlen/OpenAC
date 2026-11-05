@@ -1,5 +1,5 @@
 //! The launcher's start up to the install being in the current folder
-//! layout ([`ac_host::layout`]): it moves the files first, before it reads
+//! layout ([`ac_host_core::layout`]): it moves the files first, before it reads
 //! any of them or starts a client. While clients of the install run it
 //! waits for them to close (they hold the install's session lock); when a
 //! move fails it says so and starts nothing. Once moved, logs older than a
@@ -8,9 +8,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use ac_host::PathSet;
-use ac_host::layout::{MigrationError, clean_old_logs, migrate};
-use ac_host::local_time::LocalZone;
+use ac_host_core::PathSet;
+use ac_host_core::layout::{MigrationError, clean_old_logs, migrate};
+use ac_host_core::local_time::LocalZone;
 
 use crate::launcher_log::LauncherLog;
 
@@ -105,7 +105,7 @@ impl LayoutGate {
         log: &LauncherLog,
         count_clients: Arc<dyn Fn() -> Option<usize> + Send + Sync>,
     ) -> Self {
-        let current = ac_host::layout::is_current(paths);
+        let current = ac_host_core::layout::is_current(paths);
         let inner = Arc::new(GateInner {
             paths: paths.clone(),
             log: log.clone(),
@@ -354,7 +354,7 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac_host::{InstallSessionLease, RootSource};
+    use ac_host_core::{InstallSessionLease, RootSource};
 
     fn root(name: &str) -> (std::path::PathBuf, PathSet) {
         let path = std::env::temp_dir()
@@ -415,7 +415,7 @@ mod tests {
         }
         assert_eq!(gate.state(), LayoutGateState::Ready);
         assert!(paths.vtank_profiles_directory().is_dir());
-        assert!(ac_host::layout::is_current(&paths));
+        assert!(ac_host_core::layout::is_current(&paths));
         let text = std::fs::read_to_string(paths.launcher_log_file()).unwrap();
         assert!(text.contains("Waiting for 2 clients"), "{text}");
         let _ = std::fs::remove_dir_all(&folder);
@@ -487,7 +487,7 @@ mod tests {
         // Free to move now, but no try starts after the stop.
         drop(client);
         std::thread::sleep(RETRY_EVERY * 3);
-        assert!(!ac_host::layout::is_current(&paths));
+        assert!(!ac_host_core::layout::is_current(&paths));
         assert!(!gate.stop());
         let _ = std::fs::remove_dir_all(&folder);
     }
@@ -537,7 +537,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert_eq!(gate.state(), LayoutGateState::Ready);
-        assert!(ac_host::layout::is_current(&paths));
+        assert!(ac_host_core::layout::is_current(&paths));
         let _ = std::fs::remove_dir_all(&folder);
     }
 

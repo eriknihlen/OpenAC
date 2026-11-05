@@ -21,6 +21,7 @@ ac-dat = { path = "crates/ac-dat" }
 ac-core = { path = "crates/ac-core" }
 ac-net = { path = "crates/ac-net" }
 ac-render = { path = "crates/ac-render" }
+ac-host-core = { path = "crates/ac-host-core" }
 ac-host = { path = "crates/ac-host" }
 ac-launcher-core = { path = "crates/ac-launcher-core" }
 ac-launcher-net = { path = "crates/ac-launcher-net" }
@@ -31,7 +32,10 @@ ac-audio = { path = "crates/ac-audio" }
 ac-ui = { path = "crates/ac-ui" }
 ac-vfx = { path = "crates/ac-vfx" }
 ac-nav = { path = "crates/ac-nav" }
+ac-plugin-version = { path = "crates/ac-plugin-version" }
 ac-plugin-abi = { path = "crates/ac-plugin-abi" }
+ac-plugin-icon = { path = "crates/ac-plugin-icon" }
+ac-plugin-manifest = { path = "crates/ac-plugin-manifest" }
 ac-plugin = { path = "crates/ac-plugin" }
 openac-plugin = { path = "crates/openac-plugin" }
 openac-plugin-compat = { path = "crates/openac-plugin-compat" }

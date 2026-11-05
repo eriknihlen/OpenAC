@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
 
-use ac_host::PathSet;
+use ac_host_core::PathSet;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::installation::LauncherInstallRecord;
 use ac_launcher_core::launching::{

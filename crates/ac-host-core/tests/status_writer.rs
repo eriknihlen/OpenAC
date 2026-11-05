@@ -11,9 +11,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use ac_host::json::{self, Node, Value};
-use ac_host::status::format_status_line;
-use ac_host::{FileSink, RosterEntry, RosterReport, ServerRefusalNote, StatusWriter, WriterSink};
+use ac_host_core::json::{self, Node, Value};
+use ac_host_core::status::format_status_line;
+use ac_host_core::{
+    FileSink, RosterEntry, RosterReport, ServerRefusalNote, StatusWriter, WriterSink,
+};
 use common::{TempDir, TempFile};
 
 fn parse(line: &str) -> Node {
@@ -430,7 +432,7 @@ fn each_event_serializes_exactly_its_pinned_property_set_and_nothing_else() {
 fn a_line_is_byte_exact() {
     let line = format_status_line(
         "s1",
-        &ac_host::status::StatusEvent::EnteredWorld {
+        &ac_host_core::status::StatusEvent::EnteredWorld {
             character_id: 0x5000_0001,
             character_name: "Bob's <toon>",
         },
@@ -456,17 +458,17 @@ fn window_lines_are_byte_exact() {
         )
     };
     assert_eq!(
-        line(ac_host::status::StatusEvent::WindowOpened),
+        line(ac_host_core::status::StatusEvent::WindowOpened),
         format!("{}}}", envelope("windowOpened"))
     );
     assert_eq!(
-        line(ac_host::status::StatusEvent::WindowClosed {
+        line(ac_host_core::status::StatusEvent::WindowClosed {
             reason: "closedByUser"
         }),
         format!("{},\"reason\":\"closedByUser\"}}", envelope("windowClosed"))
     );
     assert_eq!(
-        line(ac_host::status::StatusEvent::WindowFailed { error: "no GPU" }),
+        line(ac_host_core::status::StatusEvent::WindowFailed { error: "no GPU" }),
         format!("{},\"error\":\"no GPU\"}}", envelope("windowFailed"))
     );
 }

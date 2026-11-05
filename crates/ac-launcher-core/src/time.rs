@@ -17,7 +17,7 @@ pub struct ParsedTime {
 
 /// `instant` as `yyyy-MM-ddTHH:mm:ss.fffffff+00:00`.
 pub fn format_utc(instant: SystemTime) -> String {
-    ac_host::status::Timestamp(instant).to_string()
+    ac_host_core::status::Timestamp(instant).to_string()
 }
 
 /// Reads `yyyy-MM-dd`, optionally followed by `THH:mm`, `:ss`, a fraction of

@@ -9,7 +9,7 @@ use super::UpdateError;
 use crate::fsutil;
 
 /// The lock file's name in `<data>/app`.
-pub const UPDATE_LOCK_FILE_NAME: &str = ac_host::install_lease::LOCK_FILE_NAME;
+pub const UPDATE_LOCK_FILE_NAME: &str = ac_host_core::install_lease::LOCK_FILE_NAME;
 
 /// The barrier for one data directory.
 #[derive(Debug, Clone)]

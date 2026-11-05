@@ -27,7 +27,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use ac_host::{PathOverrides, PathSet, RootSource, SystemPlatform};
+use ac_host_core::{PathOverrides, PathSet, RootSource, SystemPlatform};
 use ac_launcher_core::control;
 use ac_launcher_core::launcher_log::LauncherLog;
 use ac_launcher_core::layout_gate::{self, LayoutGate, LayoutGateState};

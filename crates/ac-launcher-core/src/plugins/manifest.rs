@@ -1,6 +1,6 @@
 //! The launcher's rules over a plugin's `plugin.json`.
 //!
-//! The file is read by the client's own parser (`ac_plugin::manifest`): one
+//! The file is read by the client's own parser (`ac_plugin_manifest`): one
 //! reader, so the launcher accepts exactly what a session loads. A manifest
 //! naming `entryDll` was built for OpenAC's C# host and that parser refuses
 //! it ("built for OpenAC (C#)"). This module adds what a published plugin
@@ -8,9 +8,11 @@
 //! WebAssembly build (`wasm-v<version>`, or `wasm-<plugin id>-v<version>`
 //! in a repository that publishes several plugins).
 
-pub use ac_plugin::HostVersion;
-pub use ac_plugin::abi::{API_CURRENT, API_MINIMUM, ApiVersion, PERMISSIONS_VERSION, Permission};
-pub use ac_plugin::manifest::{ManifestError, PermissionDeclaration, PluginManifest};
+pub use ac_plugin_manifest::HostVersion;
+pub use ac_plugin_manifest::manifest::{ManifestError, PermissionDeclaration, PluginManifest};
+pub use ac_plugin_version::{
+    API_CURRENT, API_MINIMUM, ApiVersion, PERMISSIONS_VERSION, Permission,
+};
 
 use crate::updates::{LauncherVersion, is_windows_device_name};
 
@@ -125,7 +127,7 @@ impl InstallRules for PluginManifest {
                 self.permissions_version
             )));
         }
-        if !ac_plugin::abi::is_supported(self.api_version) {
+        if !ac_plugin_version::is_supported(self.api_version) {
             return Err(invalid(format!(
                 "apiVersion {} is not supported by this launcher ({API_MINIMUM} to {API_CURRENT})",
                 self.api_version

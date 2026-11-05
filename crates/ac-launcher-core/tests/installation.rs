@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use ac_host::paths::root_pointer;
+use ac_host_core::paths::root_pointer;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::fsutil::full_path;
 use ac_launcher_core::installation::{
@@ -314,8 +314,8 @@ fn save_normalizes_canonical_absolute_dat_and_prepared_paths() {
         .unwrap();
 
     let text = std::fs::read_to_string(fixture.store.record_path()).unwrap();
-    let node = ac_host::json::parse(text.as_bytes()).unwrap();
-    let ac_host::json::Value::Object(members) = node.value else {
+    let node = ac_host_core::json::parse(text.as_bytes()).unwrap();
+    let ac_host_core::json::Value::Object(members) = node.value else {
         panic!("object expected");
     };
     let member = |name: &str| {
@@ -327,13 +327,16 @@ fn save_normalizes_canonical_absolute_dat_and_prepared_paths() {
     };
     assert_eq!(
         member("datDirectory"),
-        ac_host::json::Value::String(full_path(&fixture.dats).to_string_lossy().into_owned())
+        ac_host_core::json::Value::String(full_path(&fixture.dats).to_string_lossy().into_owned())
     );
     assert_eq!(
         member("preparedAssetPath"),
-        ac_host::json::Value::String(full_path(&prepared).to_string_lossy().into_owned())
+        ac_host_core::json::Value::String(full_path(&prepared).to_string_lossy().into_owned())
     );
-    assert_eq!(member("version"), ac_host::json::Value::Number("1".into()));
+    assert_eq!(
+        member("version"),
+        ac_host_core::json::Value::Number("1".into())
+    );
     assert!(fixture.verify().is_verified());
 }
 
@@ -552,14 +555,15 @@ fn backup_recovery_hashes_the_backup_even_when_the_live_cache_is_valid() {
 struct MoveFixture {
     scratch: TempDir,
     default_root: PathBuf,
-    paths: ac_host::PathSet,
+    paths: ac_host_core::PathSet,
 }
 
 impl MoveFixture {
     fn new() -> Self {
         let scratch = TempDir::new("move");
         let default_root = scratch.join("Local").join("OpenAC");
-        let paths = ac_host::PathSet::for_root(&default_root, ac_host::RootSource::Default);
+        let paths =
+            ac_host_core::PathSet::for_root(&default_root, ac_host_core::RootSource::Default);
         Self {
             scratch,
             default_root,
@@ -610,19 +614,19 @@ impl MoveFixture {
 
 fn record_naming(path: &Path) -> String {
     let mut text = String::from("{ \"preparedAssetPath\": ");
-    ac_host::json::write_string(&mut text, &path.to_string_lossy());
+    ac_host_core::json::write_string(&mut text, &path.to_string_lossy());
     text.push_str(" }");
     text
 }
 
 fn recorded_asset(record: &Path) -> String {
-    let document = ac_host::json::parse(&std::fs::read(record).unwrap()).unwrap();
-    let members = ac_host::json::object_members(&document).unwrap();
+    let document = ac_host_core::json::parse(&std::fs::read(record).unwrap()).unwrap();
+    let members = ac_host_core::json::object_members(&document).unwrap();
     let member = members
         .iter()
         .find(|member| member.name == "preparedAssetPath")
         .unwrap();
-    ac_host::json::string_or_null(&member.value)
+    ac_host_core::json::string_or_null(&member.value)
         .unwrap()
         .unwrap()
 }
@@ -700,7 +704,7 @@ fn a_move_is_refused_while_a_session_runs() {
 fn a_move_is_refused_while_a_hand_started_client_runs() {
     let fixture = MoveFixture::new();
     fixture.seed_install();
-    let client = ac_host::InstallSessionLease::try_acquire_shared(&fixture.paths).unwrap();
+    let client = ac_host_core::InstallSessionLease::try_acquire_shared(&fixture.paths).unwrap();
 
     let result = fixture
         .mover(Some(true))
@@ -710,7 +714,7 @@ fn a_move_is_refused_while_a_hand_started_client_runs() {
     assert!(!result.moved);
     assert_eq!(result.message, MOVE_SESSION_REFUSAL);
     assert_eq!(
-        ac_host::InstallSessionLease::lock_path(&fixture.paths),
+        ac_host_core::InstallSessionLease::lock_path(&fixture.paths),
         UpdateSessionBarrier::new(&fixture.paths.data_directory).lock_path()
     );
 }
@@ -719,9 +723,9 @@ fn a_move_is_refused_while_a_hand_started_client_runs() {
 #[test]
 fn an_explicitly_named_root_cannot_be_moved_from_the_launcher() {
     let fixture = MoveFixture::new();
-    let explicit = ac_host::PathSet::for_root(
+    let explicit = ac_host_core::PathSet::for_root(
         &fixture.scratch.join("explicit"),
-        ac_host::RootSource::Explicit,
+        ac_host_core::RootSource::Explicit,
     );
     let mover = InstallRootMover::new(&explicit, &fixture.default_root, None);
 
@@ -764,7 +768,7 @@ fn moving_back_to_the_default_removes_the_pointer() {
     let fixture = MoveFixture::new();
     let elsewhere = fixture.scratch.join("Games").join("OpenAC");
     root_pointer::write(&fixture.default_root, &elsewhere).unwrap();
-    let pointed = ac_host::PathSet::for_root(&elsewhere, ac_host::RootSource::Pointer);
+    let pointed = ac_host_core::PathSet::for_root(&elsewhere, ac_host_core::RootSource::Pointer);
     std::fs::create_dir_all(&pointed.config_directory).unwrap();
     std::fs::write(pointed.settings_file(), "{}").unwrap();
     let mover = InstallRootMover::new(

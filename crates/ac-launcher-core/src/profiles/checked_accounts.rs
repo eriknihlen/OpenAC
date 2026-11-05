@@ -5,8 +5,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use ac_host::PathSet;
-use ac_host::json as host_json;
+use ac_host_core::PathSet;
+use ac_host_core::json as host_json;
 
 use super::account_name::same_account;
 use crate::fsutil;

@@ -15,7 +15,7 @@ native-tls.workspace = true
 ac-proxy.workspace = true
 
 [dev-dependencies]
-ac-host.workspace = true
+ac-host-core.workspace = true
 sha2.workspace = true
 
 [lints]

@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use ac_host::PathSet;
-use ac_host::json::{self as host_json, Node, ObjectReader};
+use ac_host_core::PathSet;
+use ac_host_core::json::{self as host_json, Node, ObjectReader};
 
 use super::UpdateError;
 use super::barrier::UpdateSessionBarrier;
@@ -26,7 +26,7 @@ use crate::integrity;
 use crate::json::{self, ObjectBuilder, Out};
 
 /// The first client release that uses the install's current folder layout
-/// (`ac_host::layout`): the lowest version of the release after 0.1.9, a
+/// (`ac_host_core::layout`): the lowest version of the release after 0.1.9, a
 /// pre-release of it included. An older client reads and writes the folders
 /// the layout moved, so the launcher never starts one and never rolls back
 /// to one.

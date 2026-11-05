@@ -6,12 +6,12 @@
 //! for a session started without a character), beside its status file and
 //! the client's log.
 //!
-//! The document is `ac-host`'s own `HostConfig`, so whatever the launcher
+//! The document is the client's own `HostConfig` (`ac-host-core`), so whatever the launcher
 //! writes is exactly what the host's reader accepts.
 
 use std::path::{Path, PathBuf};
 
-use ac_host::{
+use ac_host_core::{
     CharacterSelector, ContentDescriptor, CredentialProvider, CredentialReference, Endpoint,
     HostConfig, PathSet, PolicyDescriptor, PolicyRole, PreparedAssetOverlay, ProcessSettings,
     SessionDescriptor, SessionMode,
@@ -31,7 +31,7 @@ pub const STANDARD_INPUT_REFERENCE: &str = "session";
 pub struct ComposedSessionConfig {
     /// The session id.
     pub session_id: String,
-    /// The session's folder (see [`ac_host::layout::create_session_folder`]).
+    /// The session's folder (see [`ac_host_core::layout::create_session_folder`]).
     pub session_directory: PathBuf,
     /// `<session folder>/session.json`.
     pub config_file_path: PathBuf,
@@ -140,7 +140,7 @@ impl SessionConfigService for LauncherSessionConfigService {
 /// The files of the session folder `directory`: the document, the status
 /// file and the client log.
 fn session_paths(directory: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    use ac_host::paths::{
+    use ac_host_core::paths::{
         SESSION_CLIENT_LOG_FILE_NAME, SESSION_CONFIG_FILE_NAME, SESSION_STATUS_FILE_NAME,
     };
     (
@@ -160,10 +160,10 @@ fn session_directory(paths: &PathSet, server: &ServerProfile, filed_under: &str)
         .map_or(0, |since| {
             i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
         });
-    let offset = ac_host::local_time::LocalZone::system().utc_offset_seconds(now_ms);
+    let offset = ac_host_core::local_time::LocalZone::system().utc_offset_seconds(now_ms);
     paths
         .session_logs_directory(&server.name, filed_under)
-        .join(ac_host::layout::session_folder_name(
+        .join(ac_host_core::layout::session_folder_name(
             now_ms + i64::from(offset) * 1000,
         ))
 }
@@ -273,7 +273,7 @@ pub fn compose(
         login_commands: (!account.login_commands.is_empty())
             .then(|| account.login_commands.clone()),
         login_command_delay_ms: login_command_delay_ms
-            .unwrap_or(ac_host::config::DEFAULT_LOGIN_COMMAND_DELAY_MS),
+            .unwrap_or(ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS),
         status_file: Some(status_file_path.clone()),
     };
     Ok(ComposedSessionConfig {
@@ -284,7 +284,7 @@ pub fn compose(
         client_log_path,
         document: HostConfig {
             process: ProcessSettings {
-                paths: ac_host::PathOverrides::default(),
+                paths: ac_host_core::PathOverrides::default(),
                 content: Some(content(install)),
             },
             sessions: vec![session],
@@ -321,7 +321,7 @@ pub fn compose_probe(
         plugin_tags: None,
         plugin_settings: None,
         login_commands: None,
-        login_command_delay_ms: ac_host::config::DEFAULT_LOGIN_COMMAND_DELAY_MS,
+        login_command_delay_ms: ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS,
         status_file: Some(status_file_path.clone()),
     };
     Ok(ComposedSessionConfig {
@@ -332,7 +332,7 @@ pub fn compose_probe(
         client_log_path,
         document: HostConfig {
             process: ProcessSettings {
-                paths: ac_host::PathOverrides::default(),
+                paths: ac_host_core::PathOverrides::default(),
                 content: Some(content(install)),
             },
             sessions: vec![session],
@@ -346,7 +346,7 @@ pub fn compose_probe(
 /// the same second) is never reused: the session gets the next free name
 /// (` (2)`, ` (3)`, ...), and the document's paths follow it.
 pub fn write(mut composed: ComposedSessionConfig) -> Result<ComposedSessionConfig, ComposeError> {
-    let claimed = ac_host::layout::claim_session_folder(&composed.session_directory)?;
+    let claimed = ac_host_core::layout::claim_session_folder(&composed.session_directory)?;
     if claimed != composed.session_directory {
         let (config_file_path, status_file_path, client_log_path) = session_paths(&claimed);
         for session in &mut composed.document.sessions {
@@ -599,7 +599,8 @@ fn session_json(session: &SessionDescriptor) -> Out {
         )
         .optional(
             "loginCommandDelayMs",
-            (session.login_command_delay_ms != ac_host::config::DEFAULT_LOGIN_COMMAND_DELAY_MS)
+            (session.login_command_delay_ms
+                != ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS)
                 .then(|| Out::Int(i64::from(session.login_command_delay_ms))),
         )
         .optional("statusFile", session.status_file.as_deref().map(path_text))

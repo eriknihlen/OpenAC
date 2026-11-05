@@ -405,11 +405,11 @@ fn status_names_the_saved_selections_and_sessions_as_openac_does() {
     let reply = handler
         .handle(&ControlRequest::command("status"), &CancelToken::new())
         .unwrap();
-    let node = ac_host::json::parse(reply.to_json().as_bytes()).unwrap();
+    let node = ac_host_core::json::parse(reply.to_json().as_bytes()).unwrap();
     let text = |path: &[&str]| -> String {
         let mut at = &node;
         for name in path {
-            let ac_host::json::Value::Object(members) = &at.value else {
+            let ac_host_core::json::Value::Object(members) = &at.value else {
                 panic!("{name}")
             };
             if let Ok(index) = name.parse::<usize>() {
@@ -419,27 +419,27 @@ fn status_names_the_saved_selections_and_sessions_as_openac_does() {
             at = &members.iter().find(|m| m.name == *name).unwrap().value;
         }
         match &at.value {
-            ac_host::json::Value::String(text) => text.clone(),
-            ac_host::json::Value::Bool(b) => b.to_string(),
+            ac_host_core::json::Value::String(text) => text.clone(),
+            ac_host_core::json::Value::Bool(b) => b.to_string(),
             other => format!("{other:?}"),
         }
     };
     assert_eq!(text(&["ok"]), "true");
     assert_eq!(text(&["data", "ready"]), "true");
     assert_eq!(text(&["data", "clientVersion"]), "0.1.20+local");
-    let ac_host::json::Value::Object(data) = &node.value else {
+    let ac_host_core::json::Value::Object(data) = &node.value else {
         panic!()
     };
     let data = &data.iter().find(|m| m.name == "data").unwrap().value;
-    let ac_host::json::Value::Object(data) = &data.value else {
+    let ac_host_core::json::Value::Object(data) = &data.value else {
         panic!()
     };
     let array = |name: &str| match &data.iter().find(|m| m.name == name).unwrap().value.value {
-        ac_host::json::Value::Array(items) => items.clone(),
+        ac_host_core::json::Value::Array(items) => items.clone(),
         _ => panic!("{name}"),
     };
-    let field = |item: &ac_host::json::Node, name: &str| match &item.value {
-        ac_host::json::Value::Object(members) => members
+    let field = |item: &ac_host_core::json::Node, name: &str| match &item.value {
+        ac_host_core::json::Value::Object(members) => members
             .iter()
             .find(|m| m.name == name)
             .unwrap()
@@ -452,30 +452,33 @@ fn status_names_the_saved_selections_and_sessions_as_openac_does() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(
         field(&accounts[0], "mode"),
-        ac_host::json::Value::String("Headless".into())
+        ac_host_core::json::Value::String("Headless".into())
     );
     assert_eq!(
         field(&accounts[0], "character"),
-        ac_host::json::Value::String("Saved character".into())
+        ac_host_core::json::Value::String("Saved character".into())
     );
     let sessions = array("sessions");
     assert_eq!(
         field(&sessions[0], "state"),
-        ac_host::json::Value::String("InWorld".into())
+        ac_host_core::json::Value::String("InWorld".into())
     );
     assert_eq!(
         field(&sessions[0], "session"),
-        ac_host::json::Value::String("session".into())
+        ac_host_core::json::Value::String("session".into())
     );
     assert_eq!(
         field(&sessions[0], "active"),
-        ac_host::json::Value::Bool(true)
+        ac_host_core::json::Value::Bool(true)
     );
     assert_eq!(
         field(&sessions[0], "graceful"),
-        ac_host::json::Value::Bool(false)
+        ac_host_core::json::Value::Bool(false)
     );
-    assert_eq!(field(&sessions[0], "exitCode"), ac_host::json::Value::Null);
+    assert_eq!(
+        field(&sessions[0], "exitCode"),
+        ac_host_core::json::Value::Null
+    );
 }
 
 // OpenAC ClientReloadRefusesActiveSessionsAndUsesVerifierWhenIdle.
@@ -566,7 +569,7 @@ fn connect(name: &str) -> std::os::unix::net::UnixStream {
 
 /// One request and its reply; `None` when the server closed the
 /// connection without one.
-fn exchange(name: &str, payload: &[u8], declared: Option<i32>) -> Option<ac_host::json::Node> {
+fn exchange(name: &str, payload: &[u8], declared: Option<i32>) -> Option<ac_host_core::json::Node> {
     use std::io::{Read, Write};
     let mut client = connect(name);
     let length = declared.unwrap_or_else(|| i32::try_from(payload.len()).unwrap());
@@ -578,14 +581,15 @@ fn exchange(name: &str, payload: &[u8], declared: Option<i32>) -> Option<ac_host
     client.read_exact(&mut prefix).ok()?;
     let mut response = vec![0u8; usize::try_from(i32::from_le_bytes(prefix)).unwrap()];
     client.read_exact(&mut response).ok()?;
-    Some(ac_host::json::parse(&response).unwrap())
+    Some(ac_host_core::json::parse(&response).unwrap())
 }
 
-fn reply_ok(node: &ac_host::json::Node) -> bool {
-    let ac_host::json::Value::Object(members) = &node.value else {
+fn reply_ok(node: &ac_host_core::json::Node) -> bool {
+    let ac_host_core::json::Value::Object(members) = &node.value else {
         panic!()
     };
-    members.iter().find(|m| m.name == "ok").unwrap().value.value == ac_host::json::Value::Bool(true)
+    members.iter().find(|m| m.name == "ok").unwrap().value.value
+        == ac_host_core::json::Value::Bool(true)
 }
 
 // OpenAC PipeHandlesFramingMalformedRequestsAndCancellation.
@@ -598,7 +602,7 @@ fn the_pipe_handles_framing_malformed_requests_and_cancellation() {
         &name,
         Arc::new(move |request: &ControlRequest, _: &CancelToken| {
             counted.fetch_add(1, Ordering::SeqCst);
-            Ok(ControlReply::done(ac_host::json::Value::String(
+            Ok(ControlReply::done(ac_host_core::json::Value::String(
                 request.command.clone().unwrap_or_default(),
             )))
         }),

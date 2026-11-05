@@ -18,9 +18,9 @@ roxmltree.workspace = true
 # answer alike.
 fontdue.workspace = true
 ttf-parser.workspace = true
-# Inflates a plugin's icon.png, and the client's own icon (the launcher checks
-# and shows the same file).
-miniz_oxide.workspace = true
+# A plugin's icon.png rules and decoder (re-exported as `icon`), shared with
+# the launcher, which checks and shows the same file.
+ac-plugin-icon.workspace = true
 thiserror.workspace = true
 
 [lints]

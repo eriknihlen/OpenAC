@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use ac_host::json as host_json;
+use ac_host_core::json as host_json;
 
 use super::account_name::{find_account, same_account};
 use super::document::{AccountProfile, LauncherProfileDocument, ServerProfile};

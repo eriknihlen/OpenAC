@@ -9,9 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
-use ac_host::json::{self as host_json, Value};
-use ac_host::paths::{root_pointer, same_folder, same_or_inside};
-use ac_host::{PathSet, RootSource};
+use ac_host_core::json::{self as host_json, Value};
+use ac_host_core::paths::{root_pointer, same_folder, same_or_inside};
+use ac_host_core::{PathSet, RootSource};
 
 use crate::updates::UpdateSessionBarrier;
 
@@ -71,7 +71,7 @@ impl InstallRootMover {
     pub fn new(paths: &PathSet, default_root: &Path, same_volume: Option<SameVolume>) -> Self {
         Self {
             paths: paths.clone(),
-            default_root: ac_host::paths::full_path(default_root, Path::new("")),
+            default_root: ac_host_core::paths::full_path(default_root, Path::new("")),
             barrier: UpdateSessionBarrier::new(&paths.data_directory),
             same_volume: same_volume.unwrap_or_else(|| Box::new(default_same_volume)),
         }
@@ -100,7 +100,7 @@ impl InstallRootMover {
         if target.as_os_str().to_string_lossy().trim().is_empty() || !target.is_absolute() {
             return Some("Choose a full folder path.".into());
         }
-        let full = ac_host::paths::full_path(target, Path::new(""));
+        let full = ac_host_core::paths::full_path(target, Path::new(""));
         let root = self.root_directory();
         if same_folder(&full, root) {
             return Some("The install is already in that folder.".into());
@@ -134,7 +134,7 @@ impl InstallRootMover {
         if let Some(invalid) = self.validate_target(target) {
             return InstallRootMoveResult::refused(invalid);
         }
-        let destination = ac_host::paths::full_path(target, Path::new(""));
+        let destination = ac_host_core::paths::full_path(target, Path::new(""));
         let lease = match self.barrier.try_acquire_exclusive() {
             Ok(Some(lease)) => lease,
             Ok(None) => return InstallRootMoveResult::refused(MOVE_SESSION_REFUSAL),

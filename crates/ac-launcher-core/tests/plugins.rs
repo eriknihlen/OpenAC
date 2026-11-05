@@ -5,7 +5,7 @@
 //! file) and `PluginsNeverExecuteBoundaryTests.cs`, with the WebAssembly
 //! plugin manifest (`entry`, `"MAJOR.MINOR"`
 //! `apiVersion`, `permissions`; the parser and its own rules are tested in
-//! `ac-plugin`) and the `wasm-v` release tags. HTTP fixtures are an in-memory
+//! `ac-plugin-manifest`) and the `wasm-v` release tags. HTTP fixtures are an in-memory
 //! transport here.
 
 mod common;
@@ -2809,7 +2809,7 @@ impl Release {
 
 struct InstallerFixture {
     root: TempDir,
-    paths: ac_host::PathSet,
+    paths: ac_host_core::PathSet,
     server: FakeServer,
     records: Arc<Mutex<InstalledPluginRecordStore>>,
     installer: PluginInstaller,
@@ -3848,7 +3848,7 @@ fn vtank_folder(fixture: &InstallerFixture) -> PathBuf {
     fixture
         .plugin_dir()
         .join(HELLO)
-        .join(ac_host::paths::VTANK_FOLDER_NAME)
+        .join(ac_host_core::paths::VTANK_FOLDER_NAME)
 }
 
 #[test]
@@ -4292,8 +4292,8 @@ fn remove_direct_rules() {
 
 // --- PluginsNeverExecuteBoundaryTests and the dependency boundary ---------------------
 
-// The client's plugin host (ac-plugin) is a dependency for its manifest reader
-// only; the launcher never loads a module, so its engine is forbidden here too.
+// The launcher shares the client's manifest reader (ac-plugin-manifest) but never
+// links the plugin host (ac-plugin) or loads a module; its engine is forbidden here.
 const FORBIDDEN: [&str; 17] = [
     "PluginEngine",
     "PluginSession",
@@ -4382,8 +4382,10 @@ fn launcher_core_depends_only_on_pure_rust_crates_it_names() {
     assert_eq!(
         dependencies,
         [
-            "ac-host",
-            "ac-plugin",
+            "ac-host-core",
+            "ac-plugin-icon",
+            "ac-plugin-manifest",
+            "ac-plugin-version",
             "miniz_oxide",
             "nix",
             "roxmltree",

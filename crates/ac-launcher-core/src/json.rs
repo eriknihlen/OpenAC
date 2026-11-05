@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use ac_host::json::{self, JsonError, JsonErrorKind, Node, Value};
+use ac_host_core::json::{self, JsonError, JsonErrorKind, Node, Value};
 
 /// A JSON value to write. Members keep the order they were added in.
 #[derive(Debug, Clone, PartialEq)]
@@ -217,7 +217,7 @@ pub fn depth(node: &Node) -> usize {
 /// whose OpenAC reader matched property names that way.
 #[derive(Debug)]
 pub struct CaseInsensitiveObject<'a> {
-    members: &'a [ac_host::json::Member],
+    members: &'a [ac_host_core::json::Member],
 }
 
 impl<'a> CaseInsensitiveObject<'a> {

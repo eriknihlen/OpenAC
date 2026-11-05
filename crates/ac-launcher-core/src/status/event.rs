@@ -1,8 +1,8 @@
-//! Reading one status line: the version-1 vocabulary `ac-host` writes.
+//! Reading one status line: the version-1 vocabulary `ac-host-core` writes.
 
 use std::time::SystemTime;
 
-use ac_host::json::{self as host_json, Node, Value};
+use ac_host_core::json::{self as host_json, Node, Value};
 
 use crate::time::parse_iso8601;
 

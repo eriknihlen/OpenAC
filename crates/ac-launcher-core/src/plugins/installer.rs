@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
 
-use ac_host::PathSet;
-use ac_host::paths::is_player_folder;
+use ac_host_core::PathSet;
+use ac_host_core::paths::is_player_folder;
 
 use super::catalog::PluginCatalog;
 use super::inventory::{
@@ -74,9 +74,9 @@ pub const PACKAGED_FILES_REFUSAL: &str = "This plugin's package contains a top-l
      will not install it.";
 
 /// The folder inside a plugin's folder that holds the player's files for it.
-const FILES_FOLDER_NAME: &str = ac_host::paths::PLUGIN_FILES_FOLDER_NAME;
+const FILES_FOLDER_NAME: &str = ac_host_core::paths::PLUGIN_FILES_FOLDER_NAME;
 
-/// The player's folders (see [`ac_host::paths::is_player_folder`]) directly
+/// The player's folders (see [`ac_host_core::paths::is_player_folder`]) directly
 /// in `directory`, by name.
 fn player_folders(directory: &Path) -> Vec<std::ffi::OsString> {
     std::fs::read_dir(directory)
@@ -199,7 +199,7 @@ pub fn permissions_match(
         return false;
     }
     let sorted = |declarations: &[PermissionDeclaration]| {
-        let mut entries: Vec<(ac_plugin::abi::Permission, String, Vec<String>)> = declarations
+        let mut entries: Vec<(ac_plugin_version::Permission, String, Vec<String>)> = declarations
             .iter()
             .map(|declaration| {
                 let mut hosts = declaration.hosts.clone();
