@@ -1611,17 +1611,17 @@ impl LauncherWindow {
             let switches: Vec<(String, String, String)> = self
                 .rows()
                 .filter_map(|row| {
-                    row.character_in_profile(profile)
-                        .filter(|character| *character != row.selected_character)
-                        .map(|character| {
-                            (
-                                row.account_name.clone(),
-                                row.server_name.clone(),
-                                character.to_owned(),
-                            )
-                        })
+                    row.character_in_profile(profile).map(|character| {
+                        (
+                            row.account_name.clone(),
+                            row.server_name.clone(),
+                            character.to_owned(),
+                        )
+                    })
                 })
                 .collect();
+            // A row already on its profile's character saves nothing: the
+            // pick is the same.
             for (account, server, character) in switches {
                 self.set_row_character(&account, &server, &character);
             }
