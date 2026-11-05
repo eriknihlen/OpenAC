@@ -1613,12 +1613,19 @@ impl LauncherWindow {
     /// Choosing a profile also sets each row whose account has a character
     /// in it to that character (saved, as choosing it by hand), so Play
     /// selected starts the profile's characters; a row shown for its
-    /// account's tag keeps its character, and "All" changes none.
+    /// account's tag keeps its character, so does a row whose session runs
+    /// or starts, and "All" changes none.
     pub fn set_profile_filter(&mut self, profile: Option<&str>) {
         self.profile_filter = profile.map(str::to_owned);
         if let Some(profile) = profile {
             let switches: Vec<(String, String, String)> = self
                 .rows()
+                // A row whose session runs or starts keeps its pick (its box
+                // is locked too), so a relaunch brings back the character
+                // that was running.
+                .filter(|row| {
+                    !row.is_active() && !self.is_row_starting(&row.account_name, &row.server_name)
+                })
                 .filter_map(|row| {
                     row.character_in_profile(profile).map(|character| {
                         (

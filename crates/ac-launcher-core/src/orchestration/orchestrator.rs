@@ -2352,13 +2352,19 @@ fn apply_roster(
     let server_name = activity.server_name.clone();
     let account = activity.account_name.clone();
     match store.execute_transaction(|store| store.merge_roster(&server_name, &account, &roster)) {
-        Ok(()) => {
+        Ok(notes) => {
             if update_status {
                 activity.status = if roster.len() == 1 {
                     "Character roster refreshed: 1 character.".into()
                 } else {
                     format!("Character roster refreshed: {} characters.", roster.len())
                 };
+            }
+            // What merging two entries of one character could not keep is
+            // said, never dropped quietly.
+            for note in notes {
+                activity.status.push(' ');
+                activity.status.push_str(&note);
             }
         }
         Err(error) => {

@@ -1006,10 +1006,12 @@ fn is_held(folder: &Path) -> bool {
 struct ServerNames(Vec<(String, i32, String)>);
 
 impl ServerNames {
-    /// The servers of the launcher's profile document; none when it cannot
-    /// be read.
+    /// The servers of the launcher's profile document (the version 2 file
+    /// while the launcher has not written the current one yet); none when
+    /// it cannot be read.
     fn read(paths: &PathSet) -> Self {
         let servers = std::fs::read(paths.launcher_profiles_file())
+            .or_else(|_| std::fs::read(paths.older_launcher_profiles_file()))
             .ok()
             .and_then(|bytes| json::parse(&bytes).ok())
             .map(|document| {

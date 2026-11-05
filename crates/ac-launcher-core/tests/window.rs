@@ -6038,6 +6038,31 @@ fn a_profile_chip_leaves_a_row_already_on_the_profiles_character_alone() {
 }
 
 #[test]
+fn a_profile_chip_leaves_a_running_rows_character_alone() {
+    let ann = character("Local ACE", "testaccount", "Ann", LaunchMode::Gui, &[]);
+    let mut bea = character("Local ACE", "testaccount", "Bea", LaunchMode::Gui, &[]);
+    bea.profiles = vec!["Main".into()];
+    let fake = account_with_plugins(&[], vec![ann, bea]);
+    fake.servers.lock().unwrap()[0].accounts[0].selected_character = Some("Ann".into());
+    fake.set_session(|session| {
+        session.state = LauncherActivityState::InWorld;
+        session.character_name = Some("Ann".into());
+    });
+    let mut window = create_started(&fake);
+    assert!(window.row("testaccount", "Local ACE").unwrap().is_active());
+    fake.saved_row_selections.lock().unwrap().clear();
+
+    window.set_profile_filter(Some("Main"));
+
+    // Still shown (Bea is in Main), but the running row keeps Ann, so a
+    // relaunch brings Ann back.
+    let row = window.row("testaccount", "Local ACE").unwrap();
+    assert!(row.is_visible);
+    assert_eq!(row.selected_character, "Ann");
+    assert!(fake.saved_row_selections.lock().unwrap().is_empty());
+}
+
+#[test]
 fn a_characters_options_tick_the_profiles_it_is_in_and_save_a_change() {
     let mut bea = character("Local ACE", "testaccount", "Bea", LaunchMode::Gui, &[]);
     bea.profiles = vec!["Bots".into()];

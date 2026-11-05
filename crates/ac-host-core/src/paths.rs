@@ -37,8 +37,12 @@ pub const VTANK_FOLDER_NAME: &str = "vtank";
 /// and it is kept there even while that plugin is not installed.
 pub const VTANK_PLUGIN_ID: &str = "acdream.mosstank";
 
-/// The launcher's profile document in the settings folder.
-pub const LAUNCHER_PROFILES_FILE_NAME: &str = "launcher-profiles.v2.json";
+/// The launcher's profile document in the settings folder (version 3).
+pub const LAUNCHER_PROFILES_FILE_NAME: &str = "launcher-profiles.v3.json";
+
+/// The version 2 profile document an older launcher reads and writes; this
+/// launcher migrates from it once and never writes it.
+pub const OLDER_LAUNCHER_PROFILES_FILE_NAME: &str = "launcher-profiles.v2.json";
 
 /// A session folder's session-config document.
 pub const SESSION_CONFIG_FILE_NAME: &str = "session.json";
@@ -354,6 +358,13 @@ impl PathSet {
     /// The launcher's profile document, which names the servers.
     pub fn launcher_profiles_file(&self) -> PathBuf {
         self.config_directory.join(LAUNCHER_PROFILES_FILE_NAME)
+    }
+
+    /// The version 2 profile document an older launcher keeps, read while
+    /// the current one does not exist yet.
+    pub fn older_launcher_profiles_file(&self) -> PathBuf {
+        self.config_directory
+            .join(OLDER_LAUNCHER_PROFILES_FILE_NAME)
     }
 
     /// Session folders, chat logs, and the crash and launcher folders.

@@ -1233,7 +1233,23 @@ fn merge_account(
     };
     let profile = &mut server.accounts[index];
     let added = add_characters(profile, &reference.characters);
-    let commands = give_commands(profile, reference);
+    // An account with shared commands runs them for every character, so
+    // Thwarg's per-character commands would run on top of them.
+    let commands = if profile.login_commands.is_empty() {
+        give_commands(profile, reference)
+    } else {
+        if reference
+            .commands
+            .iter()
+            .any(|commands| !commands.commands.is_empty())
+        {
+            report.skipped.push(format!(
+                "{} on {}: keeps the account's shared logon commands; Thwarg's were not imported.",
+                profile.account, server.name
+            ));
+        }
+        GivenCommands::default()
+    };
     let mut gained = Vec::new();
     if !added.is_empty() {
         gained.push(format!(
@@ -1592,7 +1608,6 @@ mod tests {
 
     fn existing() -> LauncherProfileDocument {
         let mut account = AccountProfile::new("brambleton", "keep");
-        account.login_commands = vec!["/shared".into()];
         let mut thorn = CharacterProfile::new("Old Thorn");
         thorn.id = Some("0x50000003".into());
         thorn.login_commands = vec!["/own".into()];
@@ -2010,7 +2025,7 @@ mod tests {
         let report = import(&files(), &mut document);
         let brambleton = account(&document, "Mistvale", "brambleton");
         assert_eq!(brambleton.password, "keep");
-        assert_eq!(brambleton.login_commands, ["/shared"]);
+        assert!(brambleton.login_commands.is_empty());
         assert_eq!(character_names(brambleton), ["Old Thorn", "New Thorn"]);
         // Old Thorn has commands of its own, so Thwarg's are not imported.
         assert_eq!(brambleton.characters[0].login_commands, ["/own"]);
@@ -2032,7 +2047,7 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_character_without_commands_gets_thwargs_and_the_shared_ones_stay() {
+    fn an_existing_character_without_commands_gets_thwargs() {
         let mut document = existing();
         document.servers[0].accounts[0].characters[0]
             .login_commands
@@ -2040,13 +2055,41 @@ mod tests {
         let report = import(&files(), &mut document);
         let brambleton = account(&document, "Mistvale", "brambleton");
         assert_eq!(brambleton.characters[0].login_commands, ["/theirs"]);
-        assert_eq!(brambleton.login_commands, ["/shared"]);
+        assert!(brambleton.login_commands.is_empty());
         assert_eq!(
             report.accounts_present,
             [
                 "brambleton on Mistvale: adds 1 character (New Thorn), logon commands for Old \
                  Thorn"
             ]
+        );
+    }
+
+    #[test]
+    fn an_existing_account_with_shared_commands_gets_no_thwarg_commands() {
+        // Its shared commands run for every character, so Thwarg's would
+        // run on top of them.
+        let mut document = existing();
+        let brambleton = &mut document.servers[0].accounts[0];
+        brambleton.login_commands = vec!["/shared".into()];
+        brambleton.characters[0].login_commands.clear();
+        let report = import(&files(), &mut document);
+        let brambleton = account(&document, "Mistvale", "brambleton");
+        assert_eq!(brambleton.login_commands, ["/shared"]);
+        assert!(
+            brambleton
+                .characters
+                .iter()
+                .all(|character| character.login_commands.is_empty())
+        );
+        assert!(report.skipped.contains(
+            &"brambleton on Mistvale: keeps the account's shared logon commands; Thwarg's were \
+              not imported."
+                .to_owned()
+        ));
+        assert_eq!(
+            report.accounts_present,
+            ["brambleton on Mistvale: adds 1 character (New Thorn)"]
         );
     }
 

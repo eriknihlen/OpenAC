@@ -72,10 +72,43 @@ fn old_session_document(host: &str, port: u16, account: &str) -> String {
 }
 
 fn profiles(paths: &PathSet) {
+    profiles_at(&paths.launcher_profiles_file(), 3);
+}
+
+/// A profile document at `path` naming the server "Coldeve".
+fn profiles_at(path: &Path, version: i32) {
     write(
-        &paths.launcher_profiles_file(),
-        r#"{ "version": 2, "servers": [ { "name": "Coldeve", "host": "play.example.net", "port": 9000, "accounts": [] } ] }"#,
+        path,
+        &format!(
+            r#"{{ "version": {version}, "servers": [ {{ "name": "Coldeve", "host": "play.example.net", "port": 9000, "accounts": [] }} ] }}"#
+        ),
     );
+}
+
+#[test]
+fn a_session_folder_takes_its_server_name_from_the_version2_profiles_while_no_newer_exist() {
+    let (_dir, paths) = root("layout-v2-profiles");
+    old_root(&paths);
+    // Only an older launcher's file: the launcher has not run since.
+    profiles_at(&paths.older_launcher_profiles_file(), 2);
+    assert!(!paths.launcher_profiles_file().exists());
+    let recent = old_session_name(NOW_MS - 3_600_000, 'b');
+    let session = paths.launcher_log_directory().join(&recent);
+    write(
+        &session.join("session.json"),
+        &old_session_document("play.example.net", 9000, "bot1"),
+    );
+    write(
+        &session.join("status.jsonl"),
+        "{\"v\":1,\"e\":\"started\",\"sessionId\":\"x\"}\n\
+         {\"v\":1,\"e\":\"enteredWorld\",\"sessionId\":\"x\",\"characterId\":1,\"characterName\":\"Tester\"}\n",
+    );
+    write(&session.join("client.err.log"), "errors");
+    assert!(migrate(&paths, now(), &utc()).unwrap().moved);
+    let moved = paths
+        .session_logs_directory("Coldeve", "Tester")
+        .join("2026-11-02 11-00-00");
+    assert_eq!(read(&moved.join("client.err.log")), "errors");
 }
 
 /// An older root with something in every place the migration moves.

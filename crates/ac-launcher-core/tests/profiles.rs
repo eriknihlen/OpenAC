@@ -13,7 +13,7 @@ use ac_launcher_core::profiles::{
     AccountProfile, CharacterProfile, CharacterRosterEntry, LaunchMode, LauncherCheckedAccount,
     LauncherCheckedAccountStore, LauncherProfileDocument, LauncherProfileStore,
     LauncherTextEditorKind, OLDER_PROFILE_FILE_NAME, PROFILE_FILE_NAME, ProfileError,
-    ServerProfile, apply_text, describe_account_removals, read_text,
+    ServerProfile, VERSION2_PROFILE_FILE_NAME, apply_text, describe_account_removals, read_text,
 };
 use common::{TempDir, strings};
 
@@ -629,7 +629,15 @@ impl Migration {
     }
 
     fn new_store(&self) -> LauncherProfileStore {
-        LauncherProfileStore::new(self.file_path(), Some(&self.older_file_path())).unwrap()
+        // The settings folder's chain: the version 2 file, then the version 1.
+        LauncherProfileStore::with_older_files(
+            self.file_path(),
+            &[
+                &self.root.join(VERSION2_PROFILE_FILE_NAME),
+                &self.older_file_path(),
+            ],
+        )
+        .unwrap()
     }
 
     fn load_version1(&self, json: &str) -> LauncherProfileStore {
@@ -2190,8 +2198,13 @@ const VERSION2_FILE: &str = r#"{
 }"#;
 
 impl Migration {
+    /// The version 2 launcher's own file.
+    fn version2_file_path(&self) -> PathBuf {
+        self.root.join(VERSION2_PROFILE_FILE_NAME)
+    }
+
     fn load_version2(&self, json: &str) -> LauncherProfileStore {
-        std::fs::write(self.file_path(), json).unwrap();
+        std::fs::write(self.version2_file_path(), json).unwrap();
         let mut store = self.new_store();
         assert!(store.load().unwrap());
         store
@@ -2237,12 +2250,10 @@ fn the_upgrade_keeps_the_commands_of_an_account_without_characters_shared() {
 }
 
 #[test]
-fn the_upgrade_notice_lists_every_move_and_the_backup() {
+fn the_upgrade_notice_lists_every_move_and_names_the_kept_version2_file() {
     let migration = Migration::new();
     let store = migration.load_version2(VERSION2_FILE);
     let notice = store.migration_notice().unwrap();
-    let backup = migration.root.join("launcher-profiles.v2-backup.json");
-    assert_eq!(store.version2_backup_path(), backup);
     assert_eq!(
         notice,
         format!(
@@ -2252,36 +2263,72 @@ fn the_upgrade_notice_lists_every_move_and_the_backup() {
              character screen):\n\nColdeve / picked: logon commands moved to Bea\nColdeve / \
              select: logon commands moved to Cid\nColdeve / lonely: logon commands stay shared \
              (the account has no characters)\n\nThe old file is kept at {}.",
-            backup.display()
+            migration.version2_file_path().display()
         )
     );
     assert!(!notice.contains("pw-"));
 }
 
+// Changed with the version 3 file name: the version 2 file stays the older
+// launcher's own (and so the backup); before, version 3 was written over it
+// and a copy kept as launcher-profiles.v2-backup.json.
 #[test]
-fn the_upgrade_keeps_the_version2_file_byte_for_byte_and_runs_once() {
+fn the_upgrade_writes_the_version3_file_and_never_touches_the_version2_one() {
     let migration = Migration::new();
     let store = migration.load_version2(VERSION2_FILE);
     assert_eq!(
-        std::fs::read_to_string(store.version2_backup_path()).unwrap(),
+        std::fs::read_to_string(migration.version2_file_path()).unwrap(),
         VERSION2_FILE
+    );
+    assert_eq!(
+        migration.file_path(),
+        migration.root.join("launcher-profiles.v3.json")
     );
     let written = std::fs::read_to_string(migration.file_path()).unwrap();
     assert!(written.contains("\"version\": 3"));
+    assert!(
+        !migration
+            .root
+            .join("launcher-profiles.v2-backup.json")
+            .exists()
+    );
 
-    // Read again: already version 3, nothing moves and nothing is said.
+    // Read again: the version 3 file wins, nothing moves and nothing is said,
+    // whatever an older launcher wrote to its own file meanwhile.
+    std::fs::write(
+        migration.version2_file_path(),
+        VERSION2_FILE.replace("picked", "renamed"),
+    )
+    .unwrap();
     let mut reloaded = migration.new_store();
     reloaded.load().unwrap();
     assert_eq!(reloaded.migration_notice(), None);
     assert_eq!(reloaded.document(), store.document());
 
-    // An earlier backup is never overwritten.
-    std::fs::write(migration.file_path(), VERSION2_FILE.replace("/a", "/c")).unwrap();
-    migration.new_store().load().unwrap();
-    assert_eq!(
-        std::fs::read_to_string(store.version2_backup_path()).unwrap(),
-        VERSION2_FILE
+    // An edit writes only the version 3 file.
+    reloaded
+        .execute_transaction(|store| store.add_server("Added later", "h", 9000))
+        .unwrap();
+    assert!(
+        !std::fs::read_to_string(migration.version2_file_path())
+            .unwrap()
+            .contains("Added later")
     );
+}
+
+#[test]
+fn the_version2_file_wins_over_the_version1_file() {
+    let migration = Migration::new();
+    std::fs::write(migration.older_file_path(), VERSION1_FILE).unwrap();
+    let store = migration.load_version2(VERSION2_FILE);
+    let names: Vec<&str> = store
+        .document()
+        .servers
+        .iter()
+        .map(|server| server.name.as_str())
+        .collect();
+    assert_eq!(names, ["Coldeve"]);
+    assert!(!store.version1_backup_path().exists());
 }
 
 #[test]
@@ -2292,7 +2339,128 @@ fn a_version2_file_without_commands_upgrades_without_a_notice() {
     assert_eq!(store.migration_notice(), None);
     assert_eq!(store.document().version, 3);
     assert_eq!(
-        std::fs::read_to_string(store.version2_backup_path()).unwrap(),
+        std::fs::read_to_string(migration.version2_file_path()).unwrap(),
         json
     );
+}
+
+// --- A failed load or migration write -----------------------------------
+
+#[test]
+fn after_a_failed_load_nothing_is_saved_until_a_load_succeeds() {
+    let migration = Migration::new();
+    // A file from a newer launcher this one cannot read.
+    let newer = r#"{"version":4,"servers":[{"name":"keep","host":"h","port":9000}]}"#;
+    std::fs::write(migration.file_path(), newer).unwrap();
+    let mut store = migration.new_store();
+    assert!(is_invalid(store.load()));
+    assert!(store.load_failure().is_some());
+
+    let refused = store.execute_transaction(|store| store.add_server("New", "h", 9000));
+    match refused {
+        Err(ProfileError::Invalid(message)) => assert!(
+            message.starts_with(
+                "The profiles could not be read, so nothing is saved until they load:"
+            ),
+            "{message}"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(is_invalid(store.save()));
+    assert_eq!(
+        std::fs::read_to_string(migration.file_path()).unwrap(),
+        newer
+    );
+    assert!(store.document().servers.is_empty());
+
+    // Once a load succeeds, edits save again.
+    std::fs::write(migration.file_path(), r#"{"version":3,"servers":[]}"#).unwrap();
+    store.load().unwrap();
+    assert_eq!(store.load_failure(), None);
+    store
+        .execute_transaction(|store| store.add_server("New", "h", 9000))
+        .unwrap();
+}
+
+#[test]
+fn a_failed_migration_write_leaves_the_store_as_it_was() {
+    let migration = Migration::new();
+    std::fs::write(migration.version2_file_path(), VERSION2_FILE).unwrap();
+    // The version 3 file's folder is a file, so writing it fails.
+    let blocker = migration.root.join("blocker");
+    std::fs::write(&blocker, "a file, not a folder").unwrap();
+    let mut store = LauncherProfileStore::with_older_files(
+        blocker.join(PROFILE_FILE_NAME),
+        &[&migration.version2_file_path()],
+    )
+    .unwrap();
+    assert!(store.load().is_err());
+    assert!(store.document().servers.is_empty());
+    assert_eq!(store.migration_notice(), None);
+    assert!(store.load_failure().is_some());
+    assert_eq!(
+        std::fs::read_to_string(migration.version2_file_path()).unwrap(),
+        VERSION2_FILE
+    );
+}
+
+// --- A roster merge keeps a duplicate's profiles and commands -------------
+
+#[test]
+fn merging_a_duplicate_moves_its_profiles_and_its_commands_when_the_kept_has_none() {
+    let fixture = fixture();
+    let mut store = character_store(&fixture);
+    {
+        // Ann has the character's id; Ann2 its new name, added by hand.
+        let alpha = &mut store.document_mut().servers[0].accounts[0];
+        alpha.characters[0].id = Some("0x50000001".into());
+        alpha.characters[0].profiles = vec!["Main".into()];
+        alpha.characters[1].name = "Ann2".into();
+        alpha.characters[1].profiles = vec!["Bots".into()];
+        alpha.characters[1].login_commands = vec!["/vt start".into()];
+    }
+    // The roster names the id's character Ann2: both entries are one.
+    let notes = store
+        .merge_roster(
+            "Coldeve",
+            "alpha",
+            &[CharacterRosterEntry::new(0x5000_0001, "Ann2", 0)],
+        )
+        .unwrap();
+    assert!(notes.is_empty());
+    let alpha = account_named(&store, "Coldeve", "alpha");
+    assert_eq!(alpha.characters.len(), 1);
+    let kept = &alpha.characters[0];
+    assert_eq!(kept.name, "Ann2");
+    assert_eq!(kept.profiles, ["Main", "Bots"]);
+    assert_eq!(kept.login_commands, ["/vt start"]);
+}
+
+#[test]
+fn merging_a_duplicate_keeps_the_kept_characters_commands_and_says_what_was_dropped() {
+    let fixture = fixture();
+    let mut store = character_store(&fixture);
+    {
+        let alpha = &mut store.document_mut().servers[0].accounts[0];
+        alpha.characters[0].id = Some("0x50000001".into());
+        alpha.characters[0].login_commands = vec!["/mine".into()];
+        alpha.characters[1].name = "Ann2".into();
+        alpha.characters[1].login_commands = vec!["/theirs".into(), "/more".into()];
+    }
+    let notes = store
+        .merge_roster(
+            "Coldeve",
+            "alpha",
+            &[CharacterRosterEntry::new(0x5000_0001, "Ann2", 0)],
+        )
+        .unwrap();
+    assert_eq!(
+        notes,
+        [
+            "Ann2 was listed twice on alpha; its logon commands were kept and the other entry's \
+          were dropped: /theirs | /more"
+        ]
+    );
+    let kept = &account_named(&store, "Coldeve", "alpha").characters[0];
+    assert_eq!(kept.login_commands, ["/mine"]);
 }
