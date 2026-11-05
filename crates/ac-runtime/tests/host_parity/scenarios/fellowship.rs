@@ -196,3 +196,78 @@ fn a_fellowships_terms_and_levels_reach_a_plugin_on_both_clients() {
         assert!(state.splits_experience_evenly);
     });
 }
+
+/// A fellow standing far out of sight, one the server says is hidden and
+/// one it says is not drawn are still on the roster, at an infinite
+/// distance; the fellows the client can see are still only the one in
+/// sight.
+#[test]
+fn the_roster_keeps_fellows_out_of_sight_on_both_clients() {
+    const UNDRAWN: u32 = 0x5000_0022;
+    const NO_DRAW: u32 = 0x20;
+    run(|arm, transcript| {
+        world::stage(arm);
+        world::stage_another_player(arm);
+        let undrawn = wire::Object {
+            physics_state: NO_DRAW,
+            ..world::bystander(UNDRAWN, world::PLAYER_X - 4.0)
+        };
+        arm.say_grounded(&undrawn);
+        arm.sync();
+
+        transcript.step("the server states a fellowship with fellows out of sight");
+        arm.server.game_event(
+            world::PLAYER,
+            0x02BE,
+            &wire::fellowship_full_update(
+                FELLOWSHIP_NAME,
+                world::PLAYER,
+                true,
+                true,
+                &[
+                    (world::PLAYER, "Parity", OWN_LEVEL),
+                    (world::OTHER_PLAYER, "Another", FELLOW_LEVEL),
+                    (world::PATRON, "Far Away", FELLOW_LEVEL),
+                    (world::HIDDEN_MONSTER, "Hidden", FELLOW_LEVEL),
+                    (UNDRAWN, "Undrawn", FELLOW_LEVEL),
+                ],
+            ),
+        );
+        arm.sync();
+
+        let mut roster = arm.call::<calls::FellowshipRoster>(&());
+        roster.sort_by_key(|m| m.object_id);
+        let read: Vec<String> = roster
+            .iter()
+            .map(|m| format!("{:08X}:{}", m.object_id, m.distance))
+            .collect();
+        transcript.record("roster", &read);
+        let distance_of = |id| {
+            roster
+                .iter()
+                .find(|m| m.object_id == id)
+                .map(|m| m.distance)
+        };
+        assert_eq!(roster.len(), 5, "{}: {read:?}", arm.name());
+        assert_eq!(distance_of(world::PLAYER), Some(0.0));
+        assert!(
+            distance_of(world::OTHER_PLAYER).is_some_and(f32::is_finite),
+            "{read:?}"
+        );
+        for out_of_sight in [world::PATRON, world::HIDDEN_MONSTER, UNDRAWN] {
+            assert_eq!(
+                distance_of(out_of_sight),
+                Some(f32::INFINITY),
+                "{out_of_sight:08X}: {read:?}"
+            );
+        }
+
+        let others: Vec<u32> = arm
+            .call::<calls::FellowshipMembers>(&())
+            .iter()
+            .map(|m| m.object_id)
+            .collect();
+        transcript.record("others", &others);
+        assert_eq!(others, [world::OTHER_PLAYER], "{}", arm.name());
+    });
+}
