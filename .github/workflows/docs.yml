@@ -1,19 +1,17 @@
 name: docs
 
-# Builds the documentation site (the guides under docs/ and the plugin API
-# reference generated from AcDream.Plugin.Abstractions) and publishes it to
-# GitHub Pages on every push to main that touches them.
+# Builds the documentation site (the home page and the guides under docs/,
+# from Markdown alone) and publishes it to GitHub Pages on every push to main
+# that touches them.
 
 on:
   push:
     branches: [ main ]
     paths:
       - "docs/**"
-      - "src/AcDream.Plugin.Abstractions/**"
       - "docfx.json"
       - "toc.yml"
       - "index.md"
-      - "api/index.md"
       - ".config/dotnet-tools.json"
       - ".github/workflows/docs.yml"
   workflow_dispatch:

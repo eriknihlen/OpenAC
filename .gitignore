@@ -10,3 +10,7 @@ CLAUDE.local.md
 /logs/
 # Test fixtures are data, whatever their extension.
 !crates/*/tests/fixtures/**
+# The documentation site build (DocFX).
+/_site/
+/obj/
+/api/

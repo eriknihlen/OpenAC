@@ -1,9 +1,35 @@
 # What's new
 
-The latest releases of both clients. Every release, with its downloads and
-full changelog, is on GitHub:
-[OpenAC releases](https://github.com/eriknihlen/OpenAC/releases) and
+The latest releases, with credits. Every release, with its downloads and full
+changelog, is on GitHub:
+[releases](https://github.com/eriknihlen/OpenAC/releases) (the Rust client
+from 0.2.0 on, and the C# client up to 0.1.33). The Rust client's releases
+before 0.2.0 are at
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
+The entries below 0.2.0 cover both clients, as they were maintained side by
+side until then.
+
+## openac-rust 0.2.0 (2026-11-05)
+
+The Rust client is now released from this repository, the
+[OpenAC repository](https://github.com/eriknihlen/OpenAC), and is simply
+OpenAC from here on.
+
+- **The C# client is retired.** Its last release is
+  [v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33), and its
+  code is kept on the
+  [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
+- **Intel Macs:** a new `OpenAC-0.2.0-osx-x64.zip` download for Macs with an
+  Intel processor (macOS 14 or later), beside the Apple silicon one.
+- **Launchers move over by themselves.** A launcher from 0.1.12 on finds this
+  release in its new home and updates from there. An older launcher updates
+  to 0.1.12 first, then moves over the same way.
+- **Issues:** this repository's
+  [issues](https://github.com/eriknihlen/OpenAC/issues) now track the Rust
+  client.
+- **The site** covers the Rust client only. Plugins write against the
+  `openac-plugin` SDK at this repository; the old address keeps working for
+  pinned revisions.
 
 ## OpenAC (C#) 0.1.33 (2026-11-05)
 

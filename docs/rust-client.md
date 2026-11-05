@@ -1,11 +1,19 @@
-# The Rust client
+# The client
 
-[openac-rust](https://github.com/eriknihlen/openac-rust) is the Rust port of
-OpenAC. It aims at full feature parity with the C# client and is maintained
-alongside it: the same behavior as the original game, in modern Rust. Changes
-go to both clients, so a fix or feature in one reaches the other too.
+OpenAC is an open-source Asheron's Call client written in Rust: the same
+behavior as the original game, in modern code. It began as openac-rust, the
+Rust port of the C# OpenAC client, and since 0.2.0 it is released from
+[this repository](https://github.com/eriknihlen/OpenAC). Download it from
+[Getting started](getting-started.md).
 
-## How it differs from OpenAC
+The C# client is retired. Its last release is
+[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33) and its
+code is kept on the
+[`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
+Its launcher and its .NET plugins get no more updates; the Rust client replaces
+it, with Rust versions of the MossTank and MosswartMassacre plugins.
+
+## What it is
 
 - **One program, many sessions.** `openac` runs any number of game sessions in
   one process, with zero or more windows. A window can open onto any running
@@ -15,12 +23,13 @@ go to both clients, so a fix or feature in one reaches the other too.
 - **Plugins are WebAssembly.** A plugin is an ordinary Rust crate built for
   `wasm32-unknown-unknown`, written against the `openac-plugin` SDK (MIT). The
   same plugin runs with or without a window, sandboxed, with only the
-  permissions its `plugin.json` declares. .NET plugins do not run here; the
-  owner's MossTank and MosswartMassacre plugins have Rust versions.
+  permissions its `plugin.json` declares. See
+  [Writing a plugin](plugin-development.md).
 - **Rendering** goes through [wgpu](https://wgpu.rs): Direct3D 12 or Vulkan on
   Windows, Vulkan on Linux, Metal on macOS.
 - **The launcher** (`openac-launcher`) keeps your accounts and servers, starts
-  sessions graphical or headless, installs plugins, and updates itself.
+  sessions graphical or headless, installs plugins, and updates itself and the
+  client.
 
 ## Plugin API versions
 
@@ -40,7 +49,7 @@ keeps loading and receives exactly what it did before:
 | 1.8 | 0.1.11 | status board subscriptions: a plugin hears another's status changes |
 
 From 1.6 on, a released version never changes: a new function, event or
-field comes with the next minor version.
+field comes with the next minor version. 0.2.0 adds none; 1.8 is current.
 
 To use a newer version, move the plugin's SDK to that release and set
 `"apiVersion"` in its `plugin.json`.
@@ -49,11 +58,13 @@ To use a newer version, move the plugin's SDK to that release and set
 
 Windows 10 and 11 (64-bit) is where it is played most. Linux (64-bit, X11 or
 Wayland) builds and runs, with less time in front of players. macOS 14 or
-later on Apple silicon has downloads since 0.1.8; there is no Intel Mac build.
+later has downloads for Apple silicon since 0.1.8 and for Intel since 0.2.0.
 
 ## More
 
-- [Download and run](getting-started.md#openac-rust-rust)
-- [Building openac-rust](https://github.com/eriknihlen/openac-rust/blob/main/docs/building-and-running.md)
-- [Launch options](https://github.com/eriknihlen/openac-rust/blob/main/docs/launch-options.md)
-- [Writing a Rust plugin](https://github.com/eriknihlen/openac-rust/blob/main/docs/plugin-development.md)
+- [Download and run](getting-started.md)
+- [Building and running](building-and-running.md)
+- [Launch options](launch-options.md)
+- [Writing a plugin](plugin-development.md)
+- [Issues](https://github.com/eriknihlen/OpenAC/issues): bugs and requests for
+  the Rust client

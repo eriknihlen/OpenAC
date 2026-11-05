@@ -2,13 +2,9 @@
 
 | Page | What it is for |
 |---|---|
-| [getting-started.md](getting-started.md) | Downloading a client, the game data and a server, for both clients |
-| [whats-new.md](whats-new.md) | The latest releases of both clients, with credits; updated with every release |
-| [rust-client.md](rust-client.md) | What openac-rust is, how it differs from OpenAC, its plugin API versions |
-| [architecture.md](architecture.md) | The projects, what depends on what, and where a change belongs |
-| [building-and-running.md](building-and-running.md) | SDK, data files, the prepared package, launching the client and the headless host, the useful startup options |
-| [navigation.md](navigation.md) | Walks, moves and jumps: the grid, the router, the motor, `/nav` and `/motor`, and the plugin navigation API |
-| [plugin-ui-markup.md](plugin-ui-markup.md) | The plugin panel markup vocabulary and DAT icon grammar |
-| [plugin-api.md](plugin-api.md) | Chat events and filters, login/logoff/death events, the spell table, storage paths, the clipboard |
-| [ci-and-releases.md](ci-and-releases.md) | What CI runs, on which runners, and how a release is published |
-| [release-gate.md](release-gate.md) | The local bounded test gate and the test lanes |
+| [getting-started.md](getting-started.md) | Downloading the launcher, the game data and a server |
+| [whats-new.md](whats-new.md) | The latest releases, with credits; updated with every release |
+| [rust-client.md](rust-client.md) | What the client is, its platforms, its plugin API versions |
+| [plugin-development.md](plugin-development.md) | Writing, testing, publishing and listing a WebAssembly plugin |
+| [building-and-running.md](building-and-running.md) | Building from source, running the launcher, one session or several |
+| [launch-options.md](launch-options.md) | Every option and environment variable of the programs |
