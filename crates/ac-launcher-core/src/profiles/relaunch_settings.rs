@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use ac_host::PathSet;
-use ac_host::json::{self as host_json, ObjectReader};
+use ac_host_core::PathSet;
+use ac_host_core::json::{self as host_json, ObjectReader};
 
 use crate::fsutil;
 use crate::json::{self, ObjectBuilder, Out};

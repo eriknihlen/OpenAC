@@ -30,7 +30,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ac_host::json::{self as host_json, Node, Value};
+use ac_host_core::json::{self as host_json, Node, Value};
 
 use super::account_name::same_account;
 use super::character_id;
@@ -953,7 +953,7 @@ pub fn import(files: &ThwargFiles, document: &mut LauncherProfileDocument) -> Th
             "Thwarg's logon command wait (WaitMilliseconds) was {}; this launcher has one delay \
              of {} ms between logon commands for every account, so it was not imported.",
             waits.join(", "),
-            ac_host::config::DEFAULT_LOGIN_COMMAND_DELAY_MS
+            ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS
         ));
     }
     for commands in global
