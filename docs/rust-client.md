@@ -1,17 +1,16 @@
 # The client
 
 OpenAC is an open-source Asheron's Call client written in Rust: the same
-behavior as the original game, in modern code. It began as openac-rust, the
-Rust port of the C# OpenAC client, and since 0.2.0 it is released from
-[this repository](https://github.com/eriknihlen/OpenAC). Download it from
-[Getting started](getting-started.md).
+behavior as the original game, in modern code. It began as openac-rust and is
+released from [this repository](https://github.com/eriknihlen/OpenAC) since
+0.2.0. Download the launcher from [Getting started](getting-started.md); it
+fetches the client.
 
-The C# client is retired. Its last release is
-[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33) and its
-code is kept on the
-[`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
-Its launcher and its .NET plugins get no more updates; the Rust client replaces
-it, with Rust versions of the MossTank and MosswartMassacre plugins.
+> **The C# client is retired.** Its last release is
+> [v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33) and its
+> code is on the [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
+> This client replaces it, with Rust versions of the MossTank and
+> MosswartMassacre plugins.
 
 ## What it is
 

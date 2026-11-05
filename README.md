@@ -26,20 +26,15 @@
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue">
 </p>
 
-> **The C# client is retired.** This repository was the home of OpenAC's C#
-> client; that client's last release is
-> [v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33), and
-> its code is kept on the
-> [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
-> The Rust client below replaces it. Its releases move here from 0.2.0 on;
-> until 0.2.0 is published, the current release is
-> [0.1.12 at `eriknihlen/openac-rust`](https://github.com/eriknihlen/openac-rust/releases/latest)
-> (archived, read only). A launcher from 0.1.12 on follows the move by itself.
+> **The C# client is retired.** Its last release is
+> [v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33) and its
+> code is on the [`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
+> This repository now holds the Rust client below.
 
 ## What is OpenAC
 
-OpenAC is an open-source Asheron's Call client in Rust, ported from the C#
-client: the same behavior as the original game, in modern Rust.
+OpenAC is an open-source Asheron's Call client in Rust: the same behavior as
+the original game, in modern Rust.
 
 - **One program, many sessions.** `openac` runs any number of game sessions
   in one process, with zero or more windows. A window can open onto any
@@ -63,8 +58,8 @@ OpenAC does not ship any game data. You supply your own data files.
 
 ## Status
 
-OpenAC is **under active development**. It ported the C# client subsystem by
-subsystem and covers nearly all of it: login and character selection, the
+OpenAC is **under active development** and covers nearly all of the game:
+login and character selection, the
 streamed world with its terrain, buildings and dungeons, movement and
 collision, combat and magic, inventory, vendors and trade, chat, the original
 interface, audio, the WebAssembly plugin host, and the launcher. Expect bugs;
@@ -85,24 +80,33 @@ version, what you did, what happened, and a screenshot if you can.
 The [documentation site](https://eriknihlen.github.io/OpenAC/) has the
 player guide, the plugin guide and the release notes.
 
-Grab the build for your platform from the
+**Download the launcher; it fetches the client.** Take the launcher for your
+platform from the
 [latest release](https://github.com/eriknihlen/OpenAC/releases/latest)
-(until 0.2.0 is out, that link shows the retired C# client: take
-[0.1.12](https://github.com/eriknihlen/openac-rust/releases/latest) instead),
-unzip it anywhere, and run the launcher:
+(until 0.2.0 is published here, from
+[0.1.12](https://github.com/eriknihlen/openac-rust/releases/latest)), unzip it
+anywhere and run it:
 
 | Platform | Download | Run |
 |---|---|---|
-| Windows | `openac-win-x64.zip` | `openac-launcher.exe` |
-| Linux | `openac-linux-x64.zip` | `./openac-launcher` |
+| Windows | `launcher-win-x64.zip` | `openac-launcher.exe` |
+| Linux | `launcher-linux-x64.zip` | `./openac-launcher` |
 | macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | `OpenAC.app` |
 | macOS (Intel, from 0.2.0) | `OpenAC-<version>-osx-x64.zip` | `OpenAC.app` |
 
-The zip holds both programs; the launcher starts the `openac` beside it. On
-macOS they are inside `OpenAC.app`; move it to Applications and open it. The
-app is signed ad hoc, not with an Apple Developer ID, so macOS blocks the
-first start of a downloaded copy: allow it under System Settings, Privacy &
-Security ("Open Anyway").
+On first start the launcher asks for your game data folder, then offers the
+game client ("A new version of the game is available": **Review update**) and
+installs it; from then on it keeps itself and the client up to date. On macOS
+the launcher and the client come together in `OpenAC.app`; move it to
+Applications and open it. The app is signed ad hoc, not with an Apple
+Developer ID, so macOS blocks the first start of a downloaded copy: allow it
+under System Settings, Privacy & Security ("Open Anyway").
+
+**Coming from another launcher?** The launcher imports your accounts,
+servers, characters, profiles and logon commands from the Thwarg launcher
+(**Import from Thwarg launcher…**, beside Logon commands), and, once MossTank
+is installed, your VirindiTank and UtilityBelt settings and profiles
+(**Import VTank & UB…**).
 
 You will need:
 
@@ -188,8 +192,7 @@ listed in the launcher's Discover panel.
 
 ## AI-assisted development
 
-Like the C# client before it, this is a heavily AI-assisted project, and it
-says so openly. Most of the code was written by AI tools working under the
+This is a heavily AI-assisted project, and it says so openly. Most of the code was written by AI tools working under the
 maintainer's direction and supervision. What every change has to pass is the
 same gate: it is formatted, it passes clippy with warnings as errors, it
 passes the test suite, and it behaves like the original game when the
@@ -209,8 +212,7 @@ request.
 
 ## Acknowledgements
 
-OpenAC is a port of its C# client (the `deprecated` branch) and stands on the
-same work of the Asheron's Call preservation community:
+OpenAC stands on the work of the Asheron's Call preservation community:
 [ACEmulator](https://github.com/ACEmulator/ACE) for the server and protocol,
 [DatReaderWriter](https://github.com/Chorizite/DatReaderWriter),
 [WorldBuilder](https://github.com/Chorizite/WorldBuilder) and

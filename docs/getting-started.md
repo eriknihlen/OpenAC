@@ -1,34 +1,50 @@
 # Getting started
 
-You need three things: the client, your own Asheron's Call data files, and a
-server to connect to.
+You need three things: the launcher, your own Asheron's Call data files, and
+a server to connect to.
 
-## 1. Download the client
+## 1. Download the launcher
 
-From the [latest release](https://github.com/eriknihlen/OpenAC/releases/latest):
+Download the launcher; it fetches the game client for you. From the
+[latest release](https://github.com/eriknihlen/OpenAC/releases/latest):
 
 | Platform | Download | Then |
 |---|---|---|
-| Windows | `openac-win-x64.zip` | Unzip it anywhere and run `openac-launcher.exe`. |
-| Linux | `openac-linux-x64.zip` | Unzip it anywhere and run `./openac-launcher`. |
+| Windows | `launcher-win-x64.zip` | Unzip it anywhere and run `openac-launcher.exe`. |
+| Linux | `launcher-linux-x64.zip` | Unzip it anywhere and run `./openac-launcher`. |
 | macOS (Apple silicon) | `OpenAC-<version>-osx-arm64.zip` | Unzip it, drag `OpenAC.app` to Applications, then open it. |
 | macOS (Intel) | `OpenAC-<version>-osx-x64.zip` | The same as Apple silicon. |
 
-The zip holds both programs, the launcher and the `openac` client; the
-launcher starts the client beside it. On macOS both are inside `OpenAC.app`.
-The app is signed ad hoc, not with an Apple Developer ID, so the first time
-you open it macOS blocks it: open System Settings → Privacy & Security and
-click Open Anyway.
+On first start the launcher asks for your game data folder (step 2), then
+offers the game client: the banner says "A new version of the game is
+available"; click **Review update** and it installs the client. From then on
+it keeps itself and the client up to date. On macOS the launcher and the
+client come together in `OpenAC.app`. The app is signed ad hoc, not with an
+Apple Developer ID, so the first time you open it macOS blocks it: open
+System Settings → Privacy & Security and click Open Anyway.
 
-The launcher keeps your accounts and servers, starts sessions with a window
-or headless (without one), installs plugins, and updates itself and the
-client. The `client-*.zip` and `launcher-*.zip` files in a release are the
-launcher's own update payloads; players take the files above.
+The launcher keeps your accounts, characters and servers, starts sessions
+with a window or headless (without one), keeps checked clients running, runs
+each character's logon commands, and installs plugins. (The
+`openac-<platform>.zip` files hold the launcher and the client together, for
+setting up without a connection; the `client-*.zip` files are the launcher's
+own downloads.)
 
-**Coming from the C# client?** It is retired, and its launcher does not
-install this one: download it from the table above. **Coming from an earlier
-release of this client** (published as openac-rust)? A launcher from 0.1.12 on
-moves over by itself; an older one updates to 0.1.12 first, then moves.
+**Coming from an earlier release** (published as openac-rust)? A launcher
+from 0.1.12 on moves over by itself; an older one updates to 0.1.12 first,
+then moves.
+
+## Bring your setup with you
+
+- **From the Thwarg launcher:** **Import from Thwarg launcher…** (beside
+  Logon commands) reads Thwarg's folder and adds your servers, accounts and
+  passwords, characters, profiles and each character's logon commands. It
+  shows what it will add before it changes anything, and never overwrites an
+  account you already have.
+- **From VirindiTank and UtilityBelt:** once the MossTank plugin is
+  installed, **Import VTank & UB…** copies your VirindiTank and UtilityBelt
+  settings and profiles (metas, routes, loot profiles) into the folder
+  MossTank reads; your originals are only read.
 
 ## 2. Your game data
 

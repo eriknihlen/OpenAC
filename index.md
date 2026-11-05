@@ -16,11 +16,6 @@ behavior, in code built to be read, tested and changed. MIT licensed.
 It talks to [ACEmulator](https://github.com/ACEmulator/ACE) servers. It ships
 no game data: you supply your own data files.
 
-The earlier C# client is retired: its last release is
-[v0.1.33](https://github.com/eriknihlen/OpenAC/releases/tag/v0.1.33) and its
-code is on the
-[`deprecated` branch](https://github.com/eriknihlen/OpenAC/tree/deprecated).
-
 ## Playing
 
 - **[Getting started](docs/getting-started.md)**: download the launcher, point
