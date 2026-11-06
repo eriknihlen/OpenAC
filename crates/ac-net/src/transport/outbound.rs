@@ -6,8 +6,18 @@ use super::seq::{is_newer, newest};
 use crate::crypto::Isaac;
 use crate::packet::{
     EncodeError, FragmentHeader, MAX_MESSAGE_BODY, PacketFlags, PacketHeader, SequenceList,
-    seal_in_place, split_message, write_fragment,
+    reseal_in_place, seal_in_place, split_message, write_fragment,
 };
+
+/// Room for data in one packet: optional sections plus fragments.
+pub const MAX_PACKET_DATA: usize = 464;
+
+/// The time-sync section (an 8-byte double) and the echo request section
+/// (a 4-byte float) that travel together.
+pub const TIME_PAIR_LEN: usize = 12;
+
+/// The cumulative ack section (a 4-byte sequence).
+const ACK_LEN: usize = 4;
 
 /// Why a game message could not be sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -27,6 +37,26 @@ pub enum SendError {
     Encode(#[from] EncodeError),
 }
 
+/// The two clocks a time-sync and echo pair carries, read each time the
+/// packet goes out (first sent or resent), never when it was queued.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimeStamps {
+    /// Our estimate of the server's clock, in seconds.
+    pub server_time: f64,
+    /// Our own clock, in seconds.
+    pub local_time: f32,
+}
+
+impl TimeStamps {
+    /// The pair's wire bytes: the time sync, then the echo request.
+    fn to_bytes(self) -> [u8; TIME_PAIR_LEN] {
+        let mut out = [0; TIME_PAIR_LEN];
+        out[..8].copy_from_slice(&self.server_time.to_le_bytes());
+        out[8..].copy_from_slice(&self.local_time.to_le_bytes());
+        out
+    }
+}
+
 /// Where one fragment sits in its message.
 #[derive(Debug, Clone, Copy)]
 struct FragmentPlace {
@@ -43,12 +73,22 @@ pub(crate) fn emit(out: &mut VecDeque<Vec<u8>>, stats: &mut TransportStats, data
 }
 
 /// Outbound reliable delivery: sequence and fragment numbering, the
-/// outbound keystream, the sent-packet cache, and resends on request.
+/// outbound keystream, the time-sync and echo pair, the sent-packet cache,
+/// and resends on request.
 ///
 /// There is no timer-based resend: a packet is resent only when the server
 /// names it in a NAK, and every resend reuses the packet's original
 /// keystream word (the server tolerates only a bounded number of skipped
 /// words, so drawing a new one would slowly kill the session).
+///
+/// Every three seconds a time-sync and echo pair is queued. It travels in
+/// an ordinary numbered, sealed, cached packet, but a packet carrying
+/// nothing else is held until something joins it or is queued behind it:
+/// the next cumulative ack (which joins it), the next game message (whose
+/// last fragment rides in the held packet when it fits) or the next pair.
+/// An idle connection so sends a numbered packet every three seconds,
+/// within two seconds of its pair, and the server sees a gap after a lost
+/// packet even when nothing else follows it.
 #[derive(Debug)]
 pub struct OutboundFlowQueue {
     keystream: Isaac,
@@ -59,6 +99,7 @@ pub struct OutboundFlowQueue {
     highest_id_sent: u32,
     fragment_sequence: u32,
     ack_watermark: u32,
+    time_pair_held: bool,
 }
 
 impl OutboundFlowQueue {
@@ -74,6 +115,7 @@ impl OutboundFlowQueue {
             highest_id_sent: 1,
             fragment_sequence: 1,
             ack_watermark: 0,
+            time_pair_held: false,
         }
     }
 
@@ -97,6 +139,12 @@ impl OutboundFlowQueue {
         self.pending_resends.len()
     }
 
+    /// Whether a time-sync and echo pair waits for something to be queued
+    /// behind it.
+    pub fn time_pair_held(&self) -> bool {
+        self.time_pair_held
+    }
+
     fn next_sequence(&self) -> u32 {
         // Wraps past the top to 1, never 0.
         if self.highest_id_sent == u32::MAX {
@@ -106,16 +154,37 @@ impl OutboundFlowQueue {
         }
     }
 
+    /// A time-sync point: the pair held since the last point now has
+    /// something behind it and goes out, and the new pair is held.
+    pub fn queue_time_pair(
+        &mut self,
+        interval_id: u16,
+        stamps: TimeStamps,
+        stats: &mut TransportStats,
+        out: &mut VecDeque<Vec<u8>>,
+    ) {
+        if self.time_pair_held {
+            self.transmit(None, Some(stamps), None, interval_id, stats, out)
+                .expect("a time pair without fragments always seals");
+        }
+        self.time_pair_held = true;
+    }
+
     /// Send one game message: split into fragments of at most 448 bytes
     /// that share the message's fragment sequence, each fragment in its own
     /// keystream-sealed packet with its own packet sequence, every packet
     /// kept for resending. A full fragment fills a packet, so two pieces of
     /// one message never share a packet.
+    ///
+    /// A held time pair goes out first, carrying the message's last
+    /// fragment when the two fit in one packet (the full pieces before it
+    /// never do).
     pub fn send_game_message(
         &mut self,
         body: &[u8],
         queue: u16,
         interval_id: u16,
+        stamps: TimeStamps,
         stats: &mut TransportStats,
         out: &mut VecDeque<Vec<u8>>,
     ) -> Result<(), SendError> {
@@ -127,14 +196,33 @@ impl OutboundFlowQueue {
         // same identity to the next message.
         let message_sequence = self.fragment_sequence;
         self.fragment_sequence = self.fragment_sequence.wrapping_add(1);
+        let place = |index: u16| FragmentPlace {
+            message_sequence,
+            queue,
+            count,
+            index,
+        };
+        let last = count - 1;
+        let mut tail_rode = false;
+        if self.time_pair_held {
+            self.time_pair_held = false;
+            let tail = pieces[usize::from(last)];
+            tail_rode = TIME_PAIR_LEN + FragmentHeader::SIZE + tail.len() <= MAX_PACKET_DATA;
+            let riding = tail_rode.then(|| (tail, place(last)));
+            self.transmit(None, Some(stamps), riding, interval_id, stats, out)?;
+        }
         for (index, piece) in (0..count).zip(pieces) {
-            let fragment = FragmentPlace {
-                message_sequence,
-                queue,
-                count,
-                index,
-            };
-            self.send_fragment(piece, fragment, interval_id, stats, out)?;
+            if tail_rode && index == last {
+                break;
+            }
+            self.transmit(
+                None,
+                None,
+                Some((piece, place(index))),
+                interval_id,
+                stats,
+                out,
+            )?;
         }
         Ok(())
     }
@@ -145,29 +233,71 @@ impl OutboundFlowQueue {
         self.fragment_sequence
     }
 
-    fn send_fragment(
+    /// The cumulative ack is due while a pair is held (`hold_pair`: or a
+    /// time-sync point came in the same sweep, so its new pair joins the
+    /// ack): the ack joins the held packet, which then has something
+    /// besides the pair and goes out at once.
+    pub fn release_time_pair_with_ack(
         &mut self,
-        piece: &[u8],
-        place: FragmentPlace,
+        ack: u32,
+        hold_pair: bool,
+        interval_id: u16,
+        stamps: TimeStamps,
+        stats: &mut TransportStats,
+        out: &mut VecDeque<Vec<u8>>,
+    ) {
+        if !(self.time_pair_held || hold_pair) {
+            return;
+        }
+        self.time_pair_held = false;
+        self.transmit(Some(ack), Some(stamps), None, interval_id, stats, out)
+            .expect("an ack and a time pair without fragments always seal");
+    }
+
+    /// Number, seal and send one packet carrying any of the ack, the time
+    /// pair and a fragment, and keep it for resending. The optional
+    /// sections go in wire order: the ack, then the time pair.
+    fn transmit(
+        &mut self,
+        ack: Option<u32>,
+        stamps: Option<TimeStamps>,
+        fragment: Option<(&[u8], FragmentPlace)>,
         interval_id: u16,
         stats: &mut TransportStats,
         out: &mut VecDeque<Vec<u8>>,
     ) -> Result<(), SendError> {
+        let piece_len = fragment.map_or(0, |(piece, _)| FragmentHeader::SIZE + piece.len());
         let mut datagram =
-            Vec::with_capacity(PacketHeader::SIZE + FragmentHeader::SIZE + piece.len());
+            Vec::with_capacity(PacketHeader::SIZE + ACK_LEN + TIME_PAIR_LEN + piece_len);
         datagram.resize(PacketHeader::SIZE, 0);
-        let fragment_len = write_fragment(
-            &mut datagram,
-            place.message_sequence,
-            place.queue,
-            place.count,
-            place.index,
-            piece,
-        )
-        .ok_or(SendError::MessageTooLarge(piece.len()))?;
+        let mut flags = PacketFlags::ENCRYPTED_CHECKSUM;
+        let mut optional_len = 0;
+        if let Some(ack) = ack {
+            flags |= PacketFlags::ACK_SEQUENCE;
+            datagram.extend_from_slice(&ack.to_le_bytes());
+            optional_len += ACK_LEN;
+        }
+        if let Some(stamps) = stamps {
+            flags |= PacketFlags::TIME_SYNC | PacketFlags::ECHO_REQUEST;
+            datagram.extend_from_slice(&stamps.to_bytes());
+            optional_len += TIME_PAIR_LEN;
+        }
+        let mut body_len = optional_len;
+        if let Some((piece, place)) = fragment {
+            flags |= PacketFlags::BLOB_FRAGMENTS;
+            body_len += write_fragment(
+                &mut datagram,
+                place.message_sequence,
+                place.queue,
+                place.count,
+                place.index,
+                piece,
+            )
+            .ok_or(SendError::MessageTooLarge(piece.len()))?;
+        }
         let header = PacketHeader {
             sequence: self.next_sequence(),
-            flags: PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+            flags,
             id: self.client_id,
             time: interval_id,
             iteration: self.iteration,
@@ -176,18 +306,24 @@ impl OutboundFlowQueue {
         let sealed = seal_in_place(
             header,
             &mut datagram,
-            fragment_len,
-            0,
+            body_len,
+            optional_len,
             Some(&mut self.keystream),
         )?;
 
         self.highest_id_sent = header.sequence;
+        if stamps.is_some() {
+            stats.time_pairs_sent += 1;
+        }
         emit(out, stats, datagram.clone());
         self.store.add(CachedPacket {
             sequence: header.sequence,
             datagram,
+            key: sealed.key,
             sealed_payload: sealed.sealed_payload,
-            has_fragments: true,
+            has_fragments: fragment.is_some(),
+            has_ack: ack.is_some(),
+            has_time_pair: stamps.is_some(),
         });
         Ok(())
     }
@@ -234,6 +370,7 @@ impl OutboundFlowQueue {
     pub fn transmit_pending_resends(
         &mut self,
         interval_id: u16,
+        stamps: TimeStamps,
         stats: &mut TransportStats,
         out: &mut VecDeque<Vec<u8>>,
     ) {
@@ -244,8 +381,7 @@ impl OutboundFlowQueue {
             let Some(cached) = self.store.get_mut(id) else {
                 continue;
             };
-            if let Some(header) = resend_header(cached, interval_id) {
-                cached.datagram[..PacketHeader::SIZE].copy_from_slice(&header.to_bytes());
+            if rebuild_for_resend(cached, interval_id, stamps) {
                 stats.resends_sent += 1;
                 emit(out, stats, cached.datagram.clone());
             }
@@ -256,19 +392,69 @@ impl OutboundFlowQueue {
 }
 
 /// The header a resend carries: flags become exactly retransmission +
-/// sealed checksum (+ fragments), time becomes the current interval, and
-/// the checksum is a fresh header hash plus the original sealed payload
-/// share. Sequence, size, id and iteration stay; the body is untouched.
+/// sealed checksum (+ fragments, + the ack and time pair it carries), time
+/// becomes the current interval, and the checksum is a fresh header hash
+/// plus the original sealed payload share. Sequence, size, id and
+/// iteration stay; the body is untouched.
 pub(crate) fn resend_header(cached: &CachedPacket, interval_id: u16) -> Option<PacketHeader> {
     let mut header = PacketHeader::from_bytes(&cached.datagram)?;
     let mut flags = PacketFlags::RETRANSMISSION | PacketFlags::ENCRYPTED_CHECKSUM;
     if cached.has_fragments {
         flags |= PacketFlags::BLOB_FRAGMENTS;
     }
+    if cached.has_ack {
+        flags |= PacketFlags::ACK_SEQUENCE;
+    }
+    if cached.has_time_pair {
+        flags |= PacketFlags::TIME_SYNC | PacketFlags::ECHO_REQUEST;
+    }
     header.flags = flags;
     header.time = interval_id;
     header.checksum = header.hash().wrapping_add(cached.sealed_payload);
     Some(header)
+}
+
+/// Rewrite a cached packet for its resend. A packet carrying the time pair
+/// is stamped with the current clocks (a stale echo time would read to the
+/// server as a clock running at the wrong speed), so its payload share is
+/// recomputed and sealed again with the packet's own keystream word; any
+/// other packet only gets the new header. False when the cached bytes are
+/// not a packet (never, for what this queue stored).
+pub(crate) fn rebuild_for_resend(
+    cached: &mut CachedPacket,
+    interval_id: u16,
+    stamps: TimeStamps,
+) -> bool {
+    let Some(header) = resend_header(cached, interval_id) else {
+        return false;
+    };
+    if !cached.has_time_pair {
+        cached.datagram[..PacketHeader::SIZE].copy_from_slice(&header.to_bytes());
+        return true;
+    }
+    // The ack, when carried, comes first and keeps the value it was sent
+    // with; only the time-sensitive pair changes.
+    let ack_len = if cached.has_ack { ACK_LEN } else { 0 };
+    let pair_at = PacketHeader::SIZE + ack_len;
+    let pair = pair_at..pair_at + TIME_PAIR_LEN;
+    let Some(slot) = cached.datagram.get_mut(pair) else {
+        return false;
+    };
+    slot.copy_from_slice(&stamps.to_bytes());
+    let body_len = usize::from(header.data_size);
+    match reseal_in_place(
+        header,
+        &mut cached.datagram,
+        body_len,
+        ack_len + TIME_PAIR_LEN,
+        cached.key,
+    ) {
+        Ok(sealed) => {
+            cached.sealed_payload = sealed.sealed_payload;
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -279,11 +465,16 @@ mod tests {
     const CLIENT_SEED: u32 = 0x11AA_22BB;
     const CLIENT_ID: u16 = 0x1234;
     const ITERATION: u16 = 0x0007;
+    const STAMPS: TimeStamps = TimeStamps {
+        server_time: 1234.5,
+        local_time: 10.25,
+    };
 
     struct Fixture {
         queue: OutboundFlowQueue,
         stats: TransportStats,
         out: VecDeque<Vec<u8>>,
+        stamps: TimeStamps,
     }
 
     impl Fixture {
@@ -292,6 +483,7 @@ mod tests {
                 queue: OutboundFlowQueue::new(Isaac::new(CLIENT_SEED), CLIENT_ID, ITERATION),
                 stats: TransportStats::default(),
                 out: VecDeque::new(),
+                stamps: STAMPS,
             }
         }
 
@@ -301,6 +493,7 @@ mod tests {
                     &message(marker),
                     9,
                     interval,
+                    self.stamps,
                     &mut self.stats,
                     &mut self.out,
                 )
@@ -314,8 +507,12 @@ mod tests {
         }
 
         fn sweep(&mut self, interval: u16) {
-            self.queue
-                .transmit_pending_resends(interval, &mut self.stats, &mut self.out);
+            self.queue.transmit_pending_resends(
+                interval,
+                self.stamps,
+                &mut self.stats,
+                &mut self.out,
+            );
         }
 
         fn take(&mut self) -> Vec<Vec<u8>> {
@@ -384,8 +581,11 @@ mod tests {
         let cached = CachedPacket {
             sequence: 9,
             datagram: header.to_bytes().to_vec(),
+            key: 0,
             sealed_payload: 0xDEAD_BEEF,
             has_fragments: false,
+            has_ack: false,
+            has_time_pair: false,
         };
         let rebuilt = resend_header(&cached, 42).unwrap();
         assert_eq!(rebuilt.flags.bits(), 3);
@@ -500,7 +700,7 @@ mod tests {
 
     fn send_body(f: &mut Fixture, body: &[u8]) -> Vec<Vec<u8>> {
         f.queue
-            .send_game_message(body, 9, 1, &mut f.stats, &mut f.out)
+            .send_game_message(body, 9, 1, f.stamps, &mut f.stats, &mut f.out)
             .unwrap();
         f.take()
     }
@@ -618,7 +818,7 @@ mod tests {
         let too_big = vec![0; MAX_MESSAGE_BODY + 1];
         let err = f
             .queue
-            .send_game_message(&too_big, 9, 1, &mut f.stats, &mut f.out)
+            .send_game_message(&too_big, 9, 1, f.stamps, &mut f.stats, &mut f.out)
             .unwrap_err();
         assert_eq!(err, SendError::MessageTooLarge(MAX_MESSAGE_BODY + 1));
         assert_eq!(f.queue.highest_id_sent(), 1);
@@ -738,5 +938,302 @@ mod tests {
                 .unwrap()
                 .verify(Some(shadow.next_word()))
         );
+    }
+
+    const PAIR_FLAGS: PacketFlags = PacketFlags(
+        PacketFlags::TIME_SYNC.bits()
+            | PacketFlags::ECHO_REQUEST.bits()
+            | PacketFlags::ENCRYPTED_CHECKSUM.bits(),
+    );
+
+    impl Fixture {
+        fn time_point(&mut self, interval: u16) {
+            self.queue
+                .queue_time_pair(interval, self.stamps, &mut self.stats, &mut self.out);
+        }
+    }
+
+    fn pair_of(datagram: &[u8]) -> (f64, f32) {
+        let packet = parse_packet(datagram).unwrap();
+        (packet.optional.time_sync, packet.optional.echo_request_time)
+    }
+
+    // A pair alone is held until the next pair is queued behind it; it
+    // then goes out as an ordinary numbered packet: next sequence, sealed
+    // with the next keystream word, cached, stamped when it goes out.
+    #[test]
+    fn a_time_pair_is_held_until_the_next_pair_releases_it() {
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        let mut f = Fixture::new();
+        f.time_point(7);
+        assert!(f.take().is_empty());
+        assert!(f.queue.time_pair_held());
+        assert_eq!(f.queue.highest_id_sent(), 1);
+        assert_eq!(f.queue.cache_depth(), 0);
+
+        f.stamps = TimeStamps {
+            server_time: 1240.5,
+            local_time: 16.25,
+        };
+        f.time_point(13);
+        let sent = f.take();
+        assert_eq!(sent.len(), 1);
+        let header = PacketHeader::from_bytes(&sent[0]).unwrap();
+        assert_eq!(header.sequence, 2);
+        assert_eq!(header.flags, PAIR_FLAGS);
+        assert_eq!(header.time, 13);
+        assert_eq!(header.data_size, 12);
+        assert_eq!(sent[0].len(), PacketHeader::SIZE + 12);
+        assert_eq!(&sent[0][20..28], &1240.5f64.to_le_bytes());
+        assert_eq!(&sent[0][28..32], &16.25f32.to_le_bytes());
+        assert_eq!(key_of(&sent[0]), shadow.next_word());
+        assert!(
+            parse_packet(&sent[0])
+                .unwrap()
+                .verify(Some(key_of(&sent[0])))
+        );
+        assert_eq!(f.queue.highest_id_sent(), 2);
+        assert_eq!(f.queue.cache_depth(), 1);
+        assert!(f.queue.time_pair_held(), "the new pair is held");
+        assert_eq!(f.stats.time_pairs_sent, 1);
+        assert_eq!(f.stats.packets_sent, 1);
+
+        // The next message (riding the new pair) takes the next sequence
+        // and word.
+        f.send(0xA1, 13);
+        let next = f.take().pop().unwrap();
+        assert_eq!(PacketHeader::from_bytes(&next).unwrap().sequence, 3);
+        assert_eq!(key_of(&next), shadow.next_word());
+    }
+
+    // A small message rides in the held packet: one numbered packet with
+    // the pair, then the fragment.
+    #[test]
+    fn a_small_message_rides_in_the_held_packet() {
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        let mut f = Fixture::new();
+        f.time_point(7);
+        f.send(0xA1, 8);
+        let sent = f.take();
+        assert_eq!(sent.len(), 1);
+        let packet = parse_packet(&sent[0]).unwrap();
+        assert_eq!(packet.header.sequence, 2);
+        assert_eq!(
+            packet.header.flags,
+            PAIR_FLAGS | PacketFlags::BLOB_FRAGMENTS
+        );
+        assert_eq!(packet.header.data_size, 12 + 16 + 8);
+        assert_eq!(pair_of(&sent[0]), (1234.5, 10.25));
+        let fragment = packet.fragments().next().unwrap();
+        assert_eq!(fragment.payload, &message(0xA1)[..]);
+        assert_eq!((fragment.header.count, fragment.header.index), (1, 0));
+        assert!(packet.verify(Some(shadow.next_word())));
+        assert!(!f.queue.time_pair_held());
+        assert_eq!(f.stats.time_pairs_sent, 1);
+
+        // Nothing held: the next message goes alone.
+        f.send(0xB2, 8);
+        let alone = f.take().pop().unwrap();
+        assert_eq!(
+            PacketHeader::from_bytes(&alone).unwrap().flags,
+            PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM
+        );
+    }
+
+    // The packet holds 464 data bytes: the pair (12) and a fragment
+    // (16 + payload) share it up to a 436-byte payload. A bigger one gets
+    // its own packet behind the pair, which goes out first, alone.
+    #[test]
+    fn a_fragment_that_does_not_fit_releases_the_held_packet_first() {
+        for (payload, shares) in [(436usize, true), (437, false), (448, false)] {
+            let mut f = Fixture::new();
+            f.time_point(7);
+            let sent = send_body(&mut f, &vec![0x5A; payload]);
+            let headers: Vec<_> = sent
+                .iter()
+                .map(|d| PacketHeader::from_bytes(d).unwrap())
+                .collect();
+            if shares {
+                assert_eq!(sent.len(), 1, "{payload}");
+                assert_eq!(headers[0].flags, PAIR_FLAGS | PacketFlags::BLOB_FRAGMENTS);
+                assert_eq!(usize::from(headers[0].data_size), 464);
+            } else {
+                assert_eq!(sent.len(), 2, "{payload}");
+                assert_eq!(headers[0].sequence, 2);
+                assert_eq!(headers[0].flags, PAIR_FLAGS);
+                assert_eq!(headers[1].sequence, 3);
+                assert_eq!(
+                    headers[1].flags,
+                    PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM
+                );
+                assert_eq!(parse_packet(&sent[1]).unwrap().fragment_count, 1);
+            }
+            assert!(!f.queue.time_pair_held());
+            assert_eq!(f.queue.cache_depth(), sent.len());
+        }
+    }
+
+    // A split message: its full pieces never fit beside the pair, but its
+    // short last piece does, so the held packet (sent first) carries the
+    // last piece and the full piece follows in its own packet.
+    #[test]
+    fn the_short_last_piece_of_a_split_message_rides_in_the_held_packet() {
+        let body: Vec<u8> = (0..480u32).map(|i| i as u8).collect();
+        let mut f = Fixture::new();
+        f.time_point(7);
+        let sent = send_body(&mut f, &body);
+        assert_eq!(sent.len(), 2);
+        let first = parse_packet(&sent[0]).unwrap();
+        assert_eq!(first.header.sequence, 2);
+        assert_eq!(first.header.flags, PAIR_FLAGS | PacketFlags::BLOB_FRAGMENTS);
+        let tail = first.fragments().next().unwrap();
+        assert_eq!((tail.header.count, tail.header.index), (2, 1));
+        assert_eq!(tail.payload, &body[448..]);
+        let second = parse_packet(&sent[1]).unwrap();
+        assert_eq!(second.header.sequence, 3);
+        let head = second.fragments().next().unwrap();
+        assert_eq!((head.header.count, head.header.index), (2, 0));
+        assert_eq!(head.header.sequence, tail.header.sequence);
+
+        let mut assembler = crate::FragmentAssembler::new();
+        assert!(assembler.ingest(crate::NetTime::ZERO, &tail).is_none());
+        let whole = assembler.ingest(crate::NetTime::ZERO, &head).unwrap();
+        assert_eq!(whole.body, body);
+    }
+
+    // A resent pair is stamped with the clocks of the resend and sealed
+    // again with its own keystream word; no word is drawn. A fragment it
+    // carries is untouched.
+    #[test]
+    fn a_time_pair_resend_restamps_and_reuses_the_key() {
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        let (w1, w2) = (shadow.next_word(), shadow.next_word());
+        let mut f = Fixture::new();
+        f.time_point(7);
+        f.send(0xA1, 8);
+        let original = f.take().pop().unwrap();
+        assert_eq!(key_of(&original), w1);
+
+        f.stamps = TimeStamps {
+            server_time: 1300.0,
+            local_time: 75.5,
+        };
+        f.nak(&[2]);
+        f.sweep(140);
+        let resent = f.take().pop().unwrap();
+        let packet = parse_packet(&resent).unwrap();
+        assert_eq!(packet.header.sequence, 2);
+        assert_eq!(packet.header.time, 140);
+        assert_eq!(
+            packet.header.flags,
+            PAIR_FLAGS | PacketFlags::BLOB_FRAGMENTS | PacketFlags::RETRANSMISSION
+        );
+        assert_eq!(pair_of(&resent), (1300.0, 75.5));
+        assert_eq!(resent[32..], original[32..], "the fragment is untouched");
+        assert!(packet.verify(Some(w1)), "sealed again with its own word");
+        assert_eq!(f.stats.resends_sent, 1);
+        assert_eq!(f.stats.time_pairs_sent, 1);
+
+        // Resent again later: stamped again, same word.
+        f.stamps = TimeStamps {
+            server_time: 1310.0,
+            local_time: 85.5,
+        };
+        f.nak(&[2]);
+        f.sweep(160);
+        let again = f.take().pop().unwrap();
+        assert_eq!(pair_of(&again), (1310.0, 85.5));
+        assert!(parse_packet(&again).unwrap().verify(Some(w1)));
+
+        // The keystream did not move.
+        f.send(0xB2, 160);
+        assert_eq!(key_of(&f.take().pop().unwrap()), w2);
+    }
+
+    // A split message whose last piece is too big to share (437 bytes):
+    // the pair goes alone first, then each piece in its own packet.
+    #[test]
+    fn a_split_message_with_a_long_last_piece_sends_the_pair_alone_first() {
+        let body: Vec<u8> = (0..448 + 437u32).map(|i| i as u8).collect();
+        let mut f = Fixture::new();
+        f.time_point(7);
+        let sent = send_body(&mut f, &body);
+        assert_eq!(sent.len(), 3);
+        let packets: Vec<_> = sent.iter().map(|d| parse_packet(d).unwrap()).collect();
+        assert_eq!(packets[0].header.flags, PAIR_FLAGS);
+        assert_eq!(packets[0].fragment_count, 0);
+        for (packet, (sequence, index)) in packets[1..].iter().zip([(3, 0), (4, 1)]) {
+            assert_eq!(packet.header.sequence, sequence);
+            let fragment = packet.fragments().next().unwrap();
+            assert_eq!((fragment.header.count, fragment.header.index), (2, index));
+        }
+        assert!(!f.queue.time_pair_held());
+    }
+
+    const ACK_PAIR_FLAGS: PacketFlags =
+        PacketFlags(PAIR_FLAGS.bits() | PacketFlags::ACK_SEQUENCE.bits());
+
+    // The ack joins the held pair, ahead of it in the body, and the packet
+    // goes at once: numbered, sealed with the next word, cached. Resent, it
+    // keeps the ack value it was sent with; only the pair is stamped again.
+    #[test]
+    fn the_ack_releases_the_held_pair_and_keeps_its_value_on_a_resend() {
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        let (w1, w2) = (shadow.next_word(), shadow.next_word());
+        let mut f = Fixture::new();
+        f.time_point(7);
+        f.queue
+            .release_time_pair_with_ack(77, false, 8, f.stamps, &mut f.stats, &mut f.out);
+        let sent = f.take();
+        assert_eq!(sent.len(), 1);
+        let packet = parse_packet(&sent[0]).unwrap();
+        assert_eq!(packet.header.sequence, 2);
+        assert_eq!(packet.header.flags, ACK_PAIR_FLAGS);
+        assert_eq!(packet.header.data_size, 16);
+        assert_eq!(&sent[0][20..24], &77u32.to_le_bytes());
+        assert_eq!(packet.optional.ack_sequence, 77);
+        assert_eq!(pair_of(&sent[0]), (1234.5, 10.25));
+        assert!(packet.verify(Some(w1)));
+        assert!(!f.queue.time_pair_held());
+        assert_eq!(f.queue.cache_depth(), 1);
+
+        f.stamps = TimeStamps {
+            server_time: 1250.0,
+            local_time: 26.0,
+        };
+        f.nak(&[2]);
+        f.sweep(60);
+        let resent = f.take().pop().unwrap();
+        let packet = parse_packet(&resent).unwrap();
+        assert_eq!(
+            packet.header.flags,
+            ACK_PAIR_FLAGS | PacketFlags::RETRANSMISSION
+        );
+        assert_eq!(packet.optional.ack_sequence, 77);
+        assert_eq!(pair_of(&resent), (1250.0, 26.0));
+        assert!(packet.verify(Some(w1)));
+        f.send(0xA1, 60);
+        assert_eq!(key_of(&f.take().pop().unwrap()), w2);
+    }
+
+    // The ack and a time-sync point in the same sweep with nothing held:
+    // the new pair joins the ack and nothing is held. With neither, no
+    // packet.
+    #[test]
+    fn an_ack_and_a_new_pair_in_one_sweep_go_together() {
+        let mut f = Fixture::new();
+        f.queue
+            .release_time_pair_with_ack(5, false, 8, f.stamps, &mut f.stats, &mut f.out);
+        assert!(f.take().is_empty());
+        f.queue
+            .release_time_pair_with_ack(5, true, 13, f.stamps, &mut f.stats, &mut f.out);
+        let sent = f.take();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(flags_of(&sent[0]), ACK_PAIR_FLAGS);
+        assert!(!f.queue.time_pair_held());
+    }
+
+    fn flags_of(datagram: &[u8]) -> PacketFlags {
+        PacketHeader::from_bytes(datagram).unwrap().flags
     }
 }

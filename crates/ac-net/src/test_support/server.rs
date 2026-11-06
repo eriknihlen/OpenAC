@@ -2,8 +2,9 @@
 //! to the rules a client must survive: arrival-driven NAKs at expected+2
 //! with a 1 s limit, cleartext-only NAK intake, the exact-flags ack rule,
 //! the 256-word key search, out-of-order packet and fragment buffering,
-//! the 2 s ack / 20 s time-sync bundles, the 120 s resend cache, and
-//! termination on disconnect or 60 s of silence.
+//! the 2 s ack / 20 s time-sync bundles, echo responses and the echo speed
+//! check, the 120 s resend cache, and termination on disconnect or 60 s of
+//! silence.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
@@ -24,6 +25,9 @@ const CACHE_PRUNE_INTERVAL: Duration = Duration::from_secs(5);
 const CACHE_RETENTION_SECONDS: i64 = 120;
 const TERMINATION_WINDOW: Duration = Duration::from_secs(2);
 const SERVER_ID: u16 = 0x000C;
+const ECHO_THRESHOLD: f64 = 2.0;
+const ECHO_DIFF_THRESHOLD: f64 = 0.01;
+const ECHO_LOG_OFF_COUNT: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminationReason {
@@ -46,6 +50,7 @@ struct OwnedPacket {
     optional_raw: Vec<u8>,
     ack_sequence: u32,
     retransmit_requests: Vec<u32>,
+    echo_request_time: Option<f32>,
     fragments: Vec<(FragmentHeader, Vec<u8>)>,
     payload_hash: u32,
 }
@@ -74,6 +79,8 @@ struct Bundle {
     time_sync: bool,
     send_ack: bool,
     encrypted: bool,
+    /// The echo request time to answer with an echo response.
+    client_time: Option<f32>,
 }
 
 impl Bundle {
@@ -215,6 +222,18 @@ pub struct ServerModel {
     pub retransmits_served: usize,
     pub login_requests: usize,
     pub connect_responses_accepted: usize,
+    /// Echo requests handled in order, as (client time, when handled,
+    /// whether the packet was a resend).
+    pub echo_requests: Vec<(f32, NetTime, bool)>,
+    /// The largest clock disagreement the echo check measured, seconds.
+    pub echo_worst_diff: f64,
+    /// The most mismatches in a row the echo check counted (ten log off).
+    pub echo_diff_peak: u32,
+    /// Times the echo check would have logged the character off.
+    pub echo_speed_errors: usize,
+    echo_first: Option<(f32, NetTime)>,
+    echo_last_diff: f64,
+    echo_diff_count: u32,
     /// Messages queued when the connect response is accepted.
     pub welcome: Vec<(Vec<u8>, GameMessageGroup)>,
 }
@@ -226,6 +245,11 @@ fn owned(datagram: &[u8]) -> Option<OwnedPacket> {
         optional_raw: packet.optional.raw.to_vec(),
         ack_sequence: packet.optional.ack_sequence,
         retransmit_requests: packet.optional.retransmit_requests.iter().collect(),
+        echo_request_time: packet
+            .header
+            .flags
+            .has(PacketFlags::ECHO_REQUEST)
+            .then_some(packet.optional.echo_request_time),
         fragments: packet
             .fragments()
             .map(|f| (f.header, f.payload.to_vec()))
@@ -281,6 +305,13 @@ impl ServerModel {
             retransmits_served: 0,
             login_requests: 0,
             connect_responses_accepted: 0,
+            echo_requests: Vec::new(),
+            echo_worst_diff: 0.0,
+            echo_diff_peak: 0,
+            echo_speed_errors: 0,
+            echo_first: None,
+            echo_last_diff: 0.0,
+            echo_diff_count: 0,
             welcome: Vec::new(),
         }
     }
@@ -440,6 +471,17 @@ impl ServerModel {
 
     fn handle_ordered(&mut self, now: NetTime, packet: OwnedPacket) {
         let flags = packet.header.flags;
+        // An echo request (handled only in order) is answered in the next
+        // bundle of queue 0 and checked against the server's own clock.
+        if let Some(client_time) = packet.echo_request_time {
+            let bundle = &mut self.bundles[0];
+            bundle.client_time = Some(client_time);
+            bundle.prop_changed = true;
+            bundle.encrypted = true;
+            self.echo_requests
+                .push((client_time, now, flags.has(PacketFlags::RETRANSMISSION)));
+            self.verify_echo(now, client_time);
+        }
         if flags.has(PacketFlags::ACK_SEQUENCE) {
             let ack = packet.ack_sequence;
             self.cached.retain(|&sequence, _| sequence >= ack);
@@ -708,7 +750,41 @@ impl ServerModel {
             *flags |= PacketFlags::TIME_SYNC;
             w.f64(secs(now));
         }
+        if let Some(client_time) = bundle.client_time {
+            *flags |= PacketFlags::ECHO_RESPONSE;
+            w.f32(client_time);
+            w.f32(secs(now) as f32 - client_time);
+        }
         w.into_vec()
+    }
+
+    /// The speed check on echo requests: the client's clock, measured from
+    /// its first echo, must keep pace with the server's. A disagreement
+    /// over 2 s that grew by more than 0.01 s since the last one counts;
+    /// ten in a row log the character off; one in step clears the count.
+    fn verify_echo(&mut self, now: NetTime, client_time: f32) {
+        let Some((first_client, first_server)) = self.echo_first else {
+            self.echo_first = Some((client_time, now));
+            return;
+        };
+        let server_delta = now.since(first_server).as_secs_f64();
+        let client_delta = f64::from(client_time - first_client);
+        let diff = (server_delta - client_delta).abs();
+        self.echo_worst_diff = self.echo_worst_diff.max(diff);
+        if diff > ECHO_THRESHOLD && diff - self.echo_last_diff > ECHO_DIFF_THRESHOLD {
+            self.echo_last_diff = diff;
+            self.echo_diff_count += 1;
+            self.echo_diff_peak = self.echo_diff_peak.max(self.echo_diff_count);
+            if self.echo_diff_count >= ECHO_LOG_OFF_COUNT {
+                self.echo_speed_errors += 1;
+                self.echo_diff_count = 0;
+                self.echo_last_diff = 0.0;
+                self.echo_first = None;
+            }
+        } else if self.echo_diff_count > 0 {
+            self.echo_last_diff = 0.0;
+            self.echo_diff_count = 0;
+        }
     }
 
     fn flush_one(&mut self, now: NetTime, draft: Draft) {

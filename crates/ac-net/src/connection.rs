@@ -120,6 +120,7 @@ impl Connection {
                 Isaac::new(request.server_seed),
                 client_id,
                 iteration,
+                request.server_time,
             ),
             client_id,
             iteration,
@@ -228,16 +229,21 @@ impl Connection {
         self.outbox.pop_front()
     }
 
-    /// Queue a game message on `group`; a body over 448 bytes goes out as
-    /// several fragments of one message, one packet each.
-    pub fn send_message(&mut self, body: &[u8], group: GameMessageGroup) -> Result<(), SendError> {
+    /// Queue a game message on `group` at `now`; a body over 448 bytes goes
+    /// out as several fragments of one message, one packet each.
+    pub fn send_message(
+        &mut self,
+        now: NetTime,
+        body: &[u8],
+        group: GameMessageGroup,
+    ) -> Result<(), SendError> {
         if self.closed {
             return Err(SendError::Closed);
         }
         if !self.handshake_confirmed {
             return Err(SendError::NotConfirmed);
         }
-        let result = self.transport.send_game_message(body, group.to_u16());
+        let result = self.transport.send_game_message(now, body, group.to_u16());
         self.drain_transport();
         result
     }
@@ -307,6 +313,7 @@ impl Connection {
         }
         if header.flags.has(PacketFlags::TIME_SYNC) && optional.time_sync > 0.0 {
             self.server_time = optional.time_sync;
+            t.note_server_time(optional.time_sync, now);
         }
 
         for fragment in packet.fragments() {
@@ -332,7 +339,7 @@ impl Connection {
             _ => {}
         }
         if self.response_sent_at.is_some() {
-            self.transport.sweep(now);
+            self.transport.sweep(now, self.handshake_confirmed);
             self.drain_transport();
         }
         self.check_server_silence(now);
@@ -574,6 +581,35 @@ mod tests {
         assert_eq!(conn.stats().checksum_failures, 0);
     }
 
+    // The server's answer to our echo request (two floats) may share a
+    // packet with a message; the message must still be read, and the
+    // packet's keystream word spent on it.
+    #[test]
+    fn a_message_after_an_echo_response_is_delivered() {
+        let mut conn = connected();
+        let mut server = Server::new();
+        let mut body = Vec::new();
+        body.extend_from_slice(&6.0f32.to_le_bytes());
+        body.extend_from_slice(&0.25f32.to_le_bytes());
+        write_single_fragment(&mut body, 0, 9, b"\xE0\xF7\0\0echoed").unwrap();
+        server.fragment_sequence += 1;
+        let header = PacketHeader {
+            sequence: 2,
+            flags: PacketFlags::ECHO_RESPONSE
+                | PacketFlags::BLOB_FRAGMENTS
+                | PacketFlags::ENCRYPTED_CHECKSUM,
+            ..PacketHeader::default()
+        };
+        let datagram = encode(header, &body, Some(&mut server.keystream)).unwrap();
+        let got = conn.handle_datagram(ms(1), &datagram);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].body, b"\xE0\xF7\0\0echoed");
+        let next = server.message(3, b"\xE0\xF7\0\0next");
+        assert_eq!(conn.handle_datagram(ms(2), &next).len(), 1);
+        assert_eq!(conn.stats().checksum_failures, 0);
+        assert_eq!(conn.snapshot().nak_set, 0);
+    }
+
     // Source: OpenAC tests `InboundSequenceTrackerTests.DuplicateServerPacket_DropsBeforeDispatch`.
     #[test]
     fn a_duplicate_server_packet_is_dropped_before_dispatch() {
@@ -636,7 +672,7 @@ mod tests {
         assert_eq!(packet.header.iteration, 7);
         assert!(conn.is_closed());
         assert_eq!(
-            conn.send_message(&[1, 2, 3, 4], GameMessageGroup::UiQueue),
+            conn.send_message(ms(0), &[1, 2, 3, 4], GameMessageGroup::UiQueue),
             Err(SendError::Closed)
         );
         conn.tick(ms(10_000));
@@ -649,14 +685,14 @@ mod tests {
         let mut conn = connected();
         // Before the server confirms the handshake, a send is refused.
         assert_eq!(
-            conn.send_message(&[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue),
+            conn.send_message(ms(0), &[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue),
             Err(SendError::NotConfirmed)
         );
         conn.tick(ms(200));
         conn.handle_datagram(ms(250), &Server::new().message(2, &[0xDF, 0xF7, 0, 0]));
         assert!(conn.is_handshake_confirmed());
         drain(&mut conn);
-        conn.send_message(&[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue)
+        conn.send_message(ms(0), &[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue)
             .unwrap();
         let sent = drain(&mut conn);
         assert_eq!(sent.len(), 1);
@@ -670,7 +706,7 @@ mod tests {
         assert_eq!(fragment.header.sequence, 1);
         assert_eq!(fragment.header.queue, GameMessageGroup::UiQueue.to_u16());
         // A body over one fragment goes out as one packet per fragment.
-        conn.send_message(&[0; 449], GameMessageGroup::UiQueue)
+        conn.send_message(ms(0), &[0; 449], GameMessageGroup::UiQueue)
             .unwrap();
         let sent = drain(&mut conn);
         assert_eq!(sent.len(), 2);

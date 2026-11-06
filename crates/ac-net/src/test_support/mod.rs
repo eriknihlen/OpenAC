@@ -177,8 +177,9 @@ impl Harness {
     }
 
     pub fn send(&mut self, body: &[u8]) {
+        let now = self.now;
         self.conn()
-            .send_message(body, GameMessageGroup::UiQueue)
+            .send_message(now, body, GameMessageGroup::UiQueue)
             .expect("send");
         self.flush_client();
     }

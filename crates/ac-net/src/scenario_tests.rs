@@ -584,3 +584,189 @@ fn five_percent_loss_both_ways_every_message_exactly_once() {
     assert_eq!(h.server.fragment_gate_buffer_count(), 0);
     assert!(!h.server.is_terminated());
 }
+
+/// Step 100 ms at a time for at most `limit`, until `done` holds; when it
+/// first held.
+fn step_until(
+    h: &mut Harness,
+    limit: Duration,
+    mut done: impl FnMut(&Harness) -> bool,
+) -> Option<NetTime> {
+    let end = h.now + limit;
+    while h.now < end {
+        h.step(ms(100));
+        if done(h) {
+            return Some(h.now);
+        }
+    }
+    None
+}
+
+/// A chat line lost on the way out from a character that then stands
+/// idle: nothing else game-related follows it, and the server asks for a
+/// resend only once two later numbered packets arrive. The time-sync and
+/// echo pairs (one numbered packet every 3 s while idle) are those
+/// packets, so the line arrives within about 10 s instead of waiting for
+/// the character's next action.
+#[test]
+fn a_lost_packet_with_nothing_after_it_heals_while_the_client_is_idle() {
+    let mut h = Harness::connected();
+    for _ in 0..10 {
+        h.step(ms(100));
+    }
+    settle(&mut h);
+    let base = h.server.dispatched.len();
+    h.link.drop_next(Dir::ClientToServer, 1);
+    let sent_at = h.now;
+    h.send(&talk("hello"));
+    assert_eq!(h.link.dropped(Dir::ClientToServer), 1);
+
+    let healed = step_until(&mut h, Duration::from_secs(20), |h| {
+        h.dispatched_texts()[base..].contains(&"hello".to_string())
+    })
+    .expect("the lost line never reached the server while the client was idle");
+    let delay = healed.since(sent_at);
+    assert!(delay < Duration::from_secs(10), "healed after {delay:?}");
+    assert_eq!(h.dispatched_texts()[base..], ["hello".to_string()]);
+
+    let s = h.conn().snapshot();
+    assert_eq!(s.stats.resends_sent, 1);
+    assert!(s.stats.nak_requests_received >= 1);
+    assert_eq!(s.stats.uncached_nak_ids, 0);
+    assert!(s.stats.time_pairs_sent >= 2);
+    // The server's echo responses parse: no inbound packet failed.
+    assert_eq!(s.stats.checksum_failures, 0);
+    assert!(h.server.sent.iter().any(|d| {
+        PacketHeader::from_bytes(d)
+            .unwrap()
+            .flags
+            .has(PacketFlags::ECHO_RESPONSE)
+    }));
+    assert!(!h.server.is_terminated());
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.state_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert_eq!(h.server.out_of_order_packet_count(), 0);
+}
+
+/// A lost time pair is resent on the server's request like any numbered
+/// packet, stamped with the clock of the resend: the server checks every
+/// echo time against its own clock, and the original stamp would be
+/// several seconds stale by then.
+#[test]
+fn a_resent_time_pair_carries_the_clock_of_the_resend() {
+    let mut h = Harness::connected();
+    let mut dropped = false;
+    h.link.drop_when(Dir::ClientToServer, move |_, d| {
+        let flags = PacketHeader::from_bytes(d).unwrap().flags;
+        if dropped || !flags.has(PacketFlags::TIME_SYNC) {
+            return false;
+        }
+        dropped = true;
+        true
+    });
+    let resent = step_until(&mut h, Duration::from_secs(20), |h| {
+        h.server.echo_requests.iter().any(|e| e.2)
+    });
+    assert!(resent.is_some(), "the lost pair was never resent");
+    assert_eq!(h.link.dropped(Dir::ClientToServer), 1);
+
+    let resends: Vec<_> = h.server.echo_requests.iter().filter(|e| e.2).collect();
+    assert_eq!(resends.len(), 1);
+    let (client_time, handled, _) = *resends[0];
+    let handled = handled.as_duration().as_secs_f64();
+    let staleness = (handled - f64::from(client_time)).abs();
+    assert!(
+        staleness < 0.2,
+        "the resend's echo time is {staleness} s old"
+    );
+    assert_eq!(h.conn().stats().resends_sent, 1);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert!(!h.server.is_terminated());
+}
+
+/// The ack riding a time pair is an ordinary numbered packet to the
+/// server: in order it advances the server's watermark (the standalone
+/// ack's reused sequence never does), it is no duplicate, and its ack
+/// prunes the server's resend cache.
+#[test]
+fn the_server_takes_an_ack_riding_a_time_pair_as_a_numbered_packet() {
+    let mut h = Harness::connected();
+    let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let log = seen.clone();
+    h.link.drop_when(Dir::ClientToServer, move |_, d| {
+        log.borrow_mut().push(PacketHeader::from_bytes(d).unwrap());
+        false
+    });
+    for _ in 0..100 {
+        h.step(ms(100));
+    }
+    let ack_pair = PacketFlags::ACK_SEQUENCE
+        | PacketFlags::TIME_SYNC
+        | PacketFlags::ECHO_REQUEST
+        | PacketFlags::ENCRYPTED_CHECKSUM;
+    let seen = seen.borrow();
+    let riding: Vec<_> = seen.iter().filter(|h| h.flags == ack_pair).collect();
+    assert!(
+        riding.len() >= 3,
+        "{} ack-and-pair packets in 10 s",
+        riding.len()
+    );
+    let mut last = 1;
+    for header in seen.iter().filter(|h| h.sequence != 0) {
+        if header.flags == PacketFlags::ACK_SEQUENCE {
+            assert_eq!(header.sequence, last, "a standalone ack borrows the last");
+        } else {
+            assert_eq!(header.sequence, last + 1, "{:?}", header.flags);
+            last = header.sequence;
+        }
+    }
+    assert_eq!(h.server.last_received_packet_sequence(), last);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.state_drops, 0);
+    assert_eq!(h.server.out_of_order_packet_count(), 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert!(!h.server.is_terminated());
+}
+
+/// Ten idle minutes over a link that loses one client packet in ten: the
+/// lost pairs heal by NAK and resend, every resend carries a fresh echo
+/// time, and the server's speed check never counts two mismatches in a
+/// row (it logs off at ten). A mismatch it does count is a pair held in
+/// the server's out-of-order buffer while a lost one was resent.
+#[test]
+fn a_long_idle_run_with_resends_keeps_the_speed_check_quiet() {
+    let mut h = Harness::new();
+    h.lossy = LossyFilter::new(LossOptions {
+        drop_percent: 10,
+        seed: 0x1D1E_0010,
+        direction: LossDirection::Out,
+    })
+    .unwrap();
+    h.connect();
+    for _ in 0..6_000 {
+        h.step(ms(100));
+    }
+    let loss = h.lossy.as_ref().unwrap().counters();
+    assert!(loss.outbound_dropped >= 20, "{loss:?}");
+    let s = h.conn().snapshot();
+    assert!(s.stats.resends_sent >= 10, "{s:?}");
+    assert!(h.server.echo_requests.iter().filter(|e| e.2).count() >= 5);
+    assert!(
+        h.server.echo_diff_peak <= 1,
+        "peak {}",
+        h.server.echo_diff_peak
+    );
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(s.stats.uncached_nak_ids, 0);
+    assert!(!h.server.is_terminated());
+}

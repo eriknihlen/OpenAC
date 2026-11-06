@@ -36,4 +36,7 @@ pub struct TransportStats {
     pub reject_words_reclaimed: u64,
     /// Server reject (will-not-resend) packets received.
     pub rejects_received: u64,
+    /// Numbered packets sent carrying the time-sync and echo pair (first
+    /// sends; resends count in `resends_sent`).
+    pub time_pairs_sent: u64,
 }

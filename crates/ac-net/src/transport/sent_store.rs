@@ -7,20 +7,31 @@ use super::seq::is_newer;
 pub struct CachedPacket {
     /// Packet sequence.
     pub sequence: u32,
-    /// The whole datagram: header then body. A resend rewrites the header.
+    /// The whole datagram: header then body. A resend rewrites the header
+    /// (and the time pair, when the body starts with one).
     pub datagram: Vec<u8>,
-    /// The payload share of the checksum as first sealed (key XOR payload
+    /// The keystream word the packet was sealed with; a resend that changes
+    /// the body seals it again with this word, never a new one.
+    pub key: u32,
+    /// The payload share of the checksum as last sealed (key XOR payload
     /// hash); a resend adds a fresh header hash to it.
     pub sealed_payload: u32,
     /// Whether the body carries fragments.
     pub has_fragments: bool,
+    /// Whether the body starts with a cumulative ack (as sent; a resend
+    /// keeps its value).
+    pub has_ack: bool,
+    /// Whether the body carries the time-sync and echo pair (after the
+    /// ack, if any).
+    pub has_time_pair: bool,
 }
 
 /// Sent reliable packets in send order, until the server acknowledges them.
 ///
-/// Reliable packets never carry optional sections (control data always
-/// travels in standalone packets), so the cached body is exactly what a
-/// resend needs.
+/// The only optional sections a reliable packet carries are the time-sync
+/// and echo pair and, when it rode with the pair, the cumulative ack; they
+/// travel with it on every resend. Other acks and every NAK go in
+/// standalone packets.
 #[derive(Debug, Default)]
 pub struct SentPacketStore {
     order: VecDeque<u32>,
@@ -71,8 +82,11 @@ mod tests {
         CachedPacket {
             sequence,
             datagram: vec![0; 44],
+            key: 0,
             sealed_payload: 0,
             has_fragments: true,
+            has_ack: false,
+            has_time_pair: false,
         }
     }
 

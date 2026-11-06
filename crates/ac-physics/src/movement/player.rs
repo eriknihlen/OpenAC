@@ -1623,6 +1623,29 @@ impl PlayerMovementController {
     /// The body was teleported: the drawing frame follows, motion stops
     /// (velocity too when asked), the input edges reset and (when asked)
     /// the sticky target is released and the leash re-armed.
+    /// The body, in portal space, waits at a teleport's destination before
+    /// it is placed there (its collision is not in yet): its frame, cell
+    /// and step history move there at once, so everything that reads where
+    /// it is reads the destination. Nothing is simulated or published to
+    /// the collision world; the placement commits the frame properly.
+    pub fn wait_in_portal_space_at(
+        &mut self,
+        cell_id: u32,
+        world_position: Vec3,
+        cell_local: Vec3,
+        orientation: Option<Quat>,
+    ) {
+        if let Some(orientation) = orientation {
+            self.obj.body.orientation = orientation;
+        }
+        self.obj
+            .body
+            .snap_to_cell(cell_id, world_position, cell_local);
+        self.prev_physics_pos = self.obj.body.position();
+        self.curr_physics_pos = self.obj.body.position();
+        self.cell_id = self.obj.body.cell_position().obj_cell_id;
+    }
+
     pub fn commit_canonical_teleport_frame(
         &mut self,
         env: &mut MovementEnv<'_>,
