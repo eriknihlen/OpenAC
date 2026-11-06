@@ -2712,6 +2712,7 @@ impl Movement {
                 accepted: *accepted,
                 route: *route,
             });
+            self.wait_at_destination(world, accepted, route);
             return;
         }
         if !self.residency.is_resident(accepted.cell_id)
@@ -2806,6 +2807,37 @@ impl Movement {
             // arrival completes.
             self.in_portal_space = self.arrival_held;
         }
+        self.publish_player(world);
+    }
+
+    /// The teleport's position has put the character at its destination
+    /// while that destination's collision still loads: the body waits
+    /// there, in portal space (it does not move), as the server's frame
+    /// gives it, until the placement runs once the collision is in.
+    /// Everything that reads where the character is meanwhile (the
+    /// positions sent to the server among them) reads the destination,
+    /// never the spot it left: a server that took a position from that
+    /// spot after the teleport would see the character cross the world in
+    /// a moment.
+    fn wait_at_destination(
+        &mut self,
+        world: &mut World,
+        accepted: &Position,
+        route: &route::PositionRoute,
+    ) {
+        let Some(origin) = self.residency.origin_of(accepted.cell_id) else {
+            return;
+        };
+        let Some(player) = self.player.as_mut() else {
+            return;
+        };
+        let c = &mut player.controller;
+        if c.state != PlayerState::PortalSpace {
+            return;
+        }
+        let local = local_origin(accepted);
+        let orientation = (!route.preserve_heading).then(|| remote::wire_orientation(accepted));
+        c.wait_in_portal_space_at(accepted.cell_id, local + origin, local, orientation);
         self.publish_player(world);
     }
 

@@ -999,6 +999,100 @@ fn a_server_move_to_a_thing_nothing_simulates_follows_the_thing() {
     assert!((end - chest).truncate().length() < 2.5);
 }
 
+/// The tester's spot in Yanshi (#303): a landblock away from Holtburg's,
+/// so a teleport there waits for its collision to load.
+const YANSHI: Position = Position {
+    cell_id: 0xB46F_001E,
+    origin: Vector3 {
+        x: 75.2,
+        y: 124.1,
+        z: 34.688_33,
+    },
+    orientation: Quaternion::IDENTITY,
+};
+
+/// A portal arrival no window holds waits for its destination's
+/// collision. The server's position has put the character there, so the
+/// body waits there too, in portal space, from the moment the position
+/// comes: everything said of where the character is meanwhile (the
+/// positions sent to the server among them) is the destination, never the
+/// spot it left. Once the collision is in, it is placed there.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_body_waiting_for_its_destination_waits_there() {
+    let mut rig = Rig::entered();
+    let left = rig
+        .movement
+        .controller()
+        .unwrap()
+        .current_cell_position()
+        .obj_cell_id;
+    let _ = rig.movement.take_outbound_records();
+    apply(
+        &mut rig,
+        &Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+            teleport_sequence: 1,
+        }),
+    );
+    rig.movement.hold_destination();
+    apply(
+        &mut rig,
+        &Inbound::UpdatePosition(ac_proto::UpdatePosition {
+            guid: PLAYER,
+            flags: 0,
+            position: YANSHI,
+            velocity: None,
+            placement_id: None,
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 1,
+            force_position_sequence: 0,
+        }),
+    );
+    let at = rig.movement.controller().unwrap().current_cell_position();
+    assert_eq!(at.obj_cell_id, YANSHI.cell_id, "the body waits there");
+    let origin = Vec3::new(YANSHI.origin.x, YANSHI.origin.y, YANSHI.origin.z);
+    assert!((at.frame.origin - origin).length() < 0.01, "{at:?}");
+    assert_eq!(
+        rig.movement.controller().unwrap().state,
+        PlayerState::PortalSpace
+    );
+    rig.frames(30);
+    assert_eq!(
+        rig.world
+            .object(PLAYER)
+            .and_then(|o| o.position())
+            .map(|p| p.cell_id),
+        Some(YANSHI.cell_id),
+        "the world has the character there"
+    );
+    let sent = rig.movement.take_outbound_records();
+    assert!(
+        sent.iter().all(|r| r.position.cell_id != left),
+        "nothing names the spot it left: {sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|r| r.kind == OutboundKind::AutonomousPosition
+                && r.position.cell_id == YANSHI.cell_id),
+        "the server hears the destination: {sent:?}"
+    );
+
+    let mut passes = 0;
+    while !rig
+        .movement
+        .prepare_destination(&mut rig.world, &mut rig.outbox)
+    {
+        passes += 1;
+        assert!(passes < 200, "the destination loads");
+    }
+    rig.movement.arrive();
+    rig.frames(1);
+    let placed = rig.movement.controller().unwrap();
+    assert_eq!(placed.state, PlayerState::InWorld);
+    assert_eq!(placed.current_cell_position().obj_cell_id, YANSHI.cell_id);
+}
+
 /// While an attached window holds a portal arrival the body is placed at
 /// the destination but stays in portal space (OpenAC's window keeps the
 /// player in portal space until the presentation's end,
