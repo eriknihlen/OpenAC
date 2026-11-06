@@ -9,6 +9,19 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.1 (2026-11-06)
+
+- Monsters, players and the tall rock pillars in Neftet no longer vanish
+  from some camera angles, which made the Burning Sands and Dust Golems
+  look like invisible attackers that could not be selected.
+  *(reported by Kolossos)*
+- On a bad connection, a lost chat line or action now comes back within a
+  few seconds instead of waiting for your next action.
+  *(reported by Chuck Dudley)*
+- Teleporting right after entering the world no longer sends your old
+  position to the server, which logged it as a speed warning.
+  *(reported by Chuck Dudley)*
+
 ## OpenAC (Rust) 0.2.0 (2026-11-05)
 
 The Rust client is now released from this repository, the
