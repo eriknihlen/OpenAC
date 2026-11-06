@@ -118,6 +118,11 @@ pub struct OptionalHeader<'a> {
     pub time_sync: f64,
     /// Echo request time.
     pub echo_request_time: f32,
+    /// Echo response: the echo request time the peer received.
+    pub echo_response_time: f32,
+    /// Echo response: how long the peer held the request before answering
+    /// (as the server fills it in: its own clock minus the echoed time).
+    pub echo_response_holding: f32,
     /// Flow report: bytes.
     pub flow_bytes: u32,
     /// Flow report: interval.
@@ -200,6 +205,10 @@ fn parse_optional_inner(
     }
     if flags.has(PacketFlags::ECHO_REQUEST) {
         o.echo_request_time = r.f32()?;
+    }
+    if flags.has(PacketFlags::ECHO_RESPONSE) {
+        o.echo_response_time = r.f32()?;
+        o.echo_response_holding = r.f32()?;
     }
     if flags.has(PacketFlags::FLOW) {
         o.flow_bytes = r.u32()?;
@@ -352,12 +361,47 @@ fn payload_hash(body: &[u8], flags: PacketFlags, optional_len: usize) -> Result<
 /// Every check runs before the keystream is touched, so a failure never
 /// costs a word.
 pub fn seal_in_place(
-    mut header: PacketHeader,
+    header: PacketHeader,
     datagram: &mut [u8],
     body_len: usize,
     optional_len: usize,
     keystream: Option<&mut Isaac>,
 ) -> Result<Sealed, EncodeError> {
+    let (header, payload, len) = prepare_seal(header, datagram, body_len, optional_len)?;
+    let key = if header.flags.has(PacketFlags::ENCRYPTED_CHECKSUM) {
+        Some(keystream.ok_or(EncodeError::MissingKeystream)?.next_word())
+    } else {
+        None
+    };
+    Ok(finish_seal(header, datagram, payload, len, key))
+}
+
+/// [`seal_in_place`] with the keystream word the packet already owns, for
+/// a packet whose body changed after it was first sealed (its
+/// time-sensitive sections are stamped again on every resend). No word is
+/// drawn; a cleartext header ignores `key`.
+pub fn reseal_in_place(
+    header: PacketHeader,
+    datagram: &mut [u8],
+    body_len: usize,
+    optional_len: usize,
+    key: u32,
+) -> Result<Sealed, EncodeError> {
+    let (header, payload, len) = prepare_seal(header, datagram, body_len, optional_len)?;
+    let key = header
+        .flags
+        .has(PacketFlags::ENCRYPTED_CHECKSUM)
+        .then_some(key);
+    Ok(finish_seal(header, datagram, payload, len, key))
+}
+
+/// The checks and the payload hash, before any key is chosen.
+fn prepare_seal(
+    mut header: PacketHeader,
+    datagram: &[u8],
+    body_len: usize,
+    optional_len: usize,
+) -> Result<(PacketHeader, u32, usize), EncodeError> {
     let data_size = u16::try_from(body_len).map_err(|_| EncodeError::BodyTooLarge(body_len))?;
     let len = PacketHeader::SIZE + body_len;
     if datagram.len() < len {
@@ -371,22 +415,28 @@ pub fn seal_in_place(
         header.flags,
         optional_len,
     )?;
-
     header.data_size = data_size;
-    let header_hash = header.hash();
-    let (key, sealed_payload) = if header.flags.has(PacketFlags::ENCRYPTED_CHECKSUM) {
-        let key = keystream.ok_or(EncodeError::MissingKeystream)?.next_word();
-        (key, key ^ payload)
-    } else {
-        (0, payload)
+    Ok((header, payload, len))
+}
+
+fn finish_seal(
+    mut header: PacketHeader,
+    datagram: &mut [u8],
+    payload: u32,
+    len: usize,
+    key: Option<u32>,
+) -> Sealed {
+    let (key, sealed_payload) = match key {
+        Some(key) => (key, key ^ payload),
+        None => (0, payload),
     };
-    header.checksum = header_hash.wrapping_add(sealed_payload);
+    header.checksum = header.hash().wrapping_add(sealed_payload);
     datagram[..PacketHeader::SIZE].copy_from_slice(&header.to_bytes());
-    Ok(Sealed {
+    Sealed {
         len,
         key,
         sealed_payload,
-    })
+    }
 }
 
 /// Build a datagram from a header and a body. The optional-section length
@@ -758,5 +808,97 @@ mod tests {
         assert_eq!(header.iteration, 1);
         assert_eq!(header.data_size, 0);
         assert!(decode_with_keystream(&datagram, None).is_ok());
+    }
+
+    // The server answers an echo request with an echo response section:
+    // two floats (the echoed client time, then the server's holding time),
+    // after the echo request section and before the flow section, as the
+    // reference server writes it and the protocol description reads it.
+    // The fragments after it must still be found.
+    #[test]
+    fn an_echo_response_section_is_read_before_the_fragments() {
+        let flags = PacketFlags::ACK_SEQUENCE
+            | PacketFlags::TIME_SYNC
+            | PacketFlags::ECHO_REQUEST
+            | PacketFlags::ECHO_RESPONSE
+            | PacketFlags::FLOW
+            | PacketFlags::BLOB_FRAGMENTS;
+        let mut w = ac_bits::Writer::new();
+        w.u32(77);
+        w.f64(5000.25);
+        w.f32(3.5);
+        w.f32(12.75);
+        w.f32(0.125);
+        w.u32(0xA0A1_A2A3);
+        w.u16(0xB0B1);
+        let optional_len = w.len();
+        let mut body = w.into_vec();
+        write_single_fragment(&mut body, 4, 5, b"\xE0\xF7\0\0after").unwrap();
+        let header = PacketHeader {
+            sequence: 9,
+            flags,
+            ..PacketHeader::default()
+        };
+        let datagram = encode(header, &body, None).unwrap();
+        let packet = decode_with_keystream(&datagram, None).unwrap();
+        let o = packet.optional;
+        assert_eq!(o.raw.len(), optional_len);
+        assert_eq!(o.ack_sequence, 77);
+        assert_eq!(o.time_sync, 5000.25);
+        assert_eq!(o.echo_request_time, 3.5);
+        assert_eq!(o.echo_response_time, 12.75);
+        assert_eq!(o.echo_response_holding, 0.125);
+        assert_eq!(o.flow_bytes, 0xA0A1_A2A3);
+        assert_eq!(o.flow_interval, 0xB0B1);
+        let fragments: Vec<_> = packet.fragments().collect();
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].payload, b"\xE0\xF7\0\0after");
+
+        // Cut short inside the section: malformed, not misread.
+        let short = PacketHeader {
+            flags: PacketFlags::ECHO_RESPONSE,
+            ..PacketHeader::default()
+        };
+        let mut truncated = short.to_bytes().to_vec();
+        truncated[16] = 4;
+        truncated.extend_from_slice(&[0; 4]);
+        assert_eq!(
+            parse_packet(&truncated).unwrap_err(),
+            PacketError::InvalidOptionalHeader
+        );
+    }
+
+    // Sealing again with a word the packet already owns gives what the
+    // first seal with that word gave, and draws nothing.
+    #[test]
+    fn a_reseal_reuses_the_given_word() {
+        let seed = 0x0BAD_F00D;
+        let header = PacketHeader {
+            sequence: 12,
+            flags: PacketFlags::TIME_SYNC | PacketFlags::ENCRYPTED_CHECKSUM,
+            id: 3,
+            ..PacketHeader::default()
+        };
+        let body = 1.5f64.to_le_bytes();
+        let mut first = vec![0; PacketHeader::SIZE + 8];
+        first[PacketHeader::SIZE..].copy_from_slice(&body);
+        let mut keystream = Isaac::new(seed);
+        let sealed = seal_in_place(header, &mut first, 8, 8, Some(&mut keystream)).unwrap();
+        let mut again = first.clone();
+        again[..PacketHeader::SIZE].fill(0);
+        let resealed = reseal_in_place(header, &mut again, 8, 8, sealed.key).unwrap();
+        assert_eq!(resealed, sealed);
+        assert_eq!(again, first);
+        assert!(parse_packet(&again).unwrap().verify(Some(sealed.key)));
+
+        // A changed body verifies under the same word.
+        again[PacketHeader::SIZE..].copy_from_slice(&2.5f64.to_le_bytes());
+        reseal_in_place(header, &mut again, 8, 8, sealed.key).unwrap();
+        let packet = parse_packet(&again).unwrap();
+        assert_eq!(packet.optional.time_sync, 2.5);
+        assert!(packet.verify(Some(sealed.key)));
+        let mut fresh = Isaac::new(seed);
+        fresh.next_word();
+        assert_eq!(keystream.next_word(), fresh.next_word());
     }
 }

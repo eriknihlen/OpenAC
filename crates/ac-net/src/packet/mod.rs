@@ -19,8 +19,8 @@ mod login;
 
 pub use codec::{
     ConnectRequest, EncodeError, OptionalHeader, PacketError, ParsedPacket, Sealed, SequenceList,
-    decode_with_keystream, encode, parse_packet, seal_in_place, transport_disconnect,
-    verify_checksum,
+    decode_with_keystream, encode, parse_packet, reseal_in_place, seal_in_place,
+    transport_disconnect, verify_checksum,
 };
 pub use flags::PacketFlags;
 pub use fragment::{

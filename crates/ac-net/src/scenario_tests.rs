@@ -584,3 +584,107 @@ fn five_percent_loss_both_ways_every_message_exactly_once() {
     assert_eq!(h.server.fragment_gate_buffer_count(), 0);
     assert!(!h.server.is_terminated());
 }
+
+/// Step 100 ms at a time for at most `limit`, until `done` holds; when it
+/// first held.
+fn step_until(
+    h: &mut Harness,
+    limit: Duration,
+    mut done: impl FnMut(&Harness) -> bool,
+) -> Option<NetTime> {
+    let end = h.now + limit;
+    while h.now < end {
+        h.step(ms(100));
+        if done(h) {
+            return Some(h.now);
+        }
+    }
+    None
+}
+
+/// A chat line lost on the way out from a character that then stands
+/// idle: nothing else game-related follows it, and the server asks for a
+/// resend only once two later numbered packets arrive. The time-sync and
+/// echo pairs (one numbered packet every 3 s while idle) are those
+/// packets, so the line arrives within about 10 s instead of waiting for
+/// the character's next action.
+#[test]
+fn a_lost_packet_with_nothing_after_it_heals_while_the_client_is_idle() {
+    let mut h = Harness::connected();
+    for _ in 0..10 {
+        h.step(ms(100));
+    }
+    settle(&mut h);
+    let base = h.server.dispatched.len();
+    h.link.drop_next(Dir::ClientToServer, 1);
+    let sent_at = h.now;
+    h.send(&talk("hello"));
+    assert_eq!(h.link.dropped(Dir::ClientToServer), 1);
+
+    let healed = step_until(&mut h, Duration::from_secs(20), |h| {
+        h.dispatched_texts()[base..].contains(&"hello".to_string())
+    })
+    .expect("the lost line never reached the server while the client was idle");
+    let delay = healed.since(sent_at);
+    assert!(delay < Duration::from_secs(10), "healed after {delay:?}");
+    assert_eq!(h.dispatched_texts()[base..], ["hello".to_string()]);
+
+    let s = h.conn().snapshot();
+    assert_eq!(s.stats.resends_sent, 1);
+    assert!(s.stats.nak_requests_received >= 1);
+    assert_eq!(s.stats.uncached_nak_ids, 0);
+    assert!(s.stats.time_pairs_sent >= 2);
+    // The server's echo responses parse: no inbound packet failed.
+    assert_eq!(s.stats.checksum_failures, 0);
+    assert!(h.server.sent.iter().any(|d| {
+        PacketHeader::from_bytes(d)
+            .unwrap()
+            .flags
+            .has(PacketFlags::ECHO_RESPONSE)
+    }));
+    assert!(!h.server.is_terminated());
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.state_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert_eq!(h.server.out_of_order_packet_count(), 0);
+}
+
+/// A lost time pair is resent on the server's request like any numbered
+/// packet, stamped with the clock of the resend: the server checks every
+/// echo time against its own clock, and the original stamp would be
+/// several seconds stale by then.
+#[test]
+fn a_resent_time_pair_carries_the_clock_of_the_resend() {
+    let mut h = Harness::connected();
+    let mut dropped = false;
+    h.link.drop_when(Dir::ClientToServer, move |_, d| {
+        let flags = PacketHeader::from_bytes(d).unwrap().flags;
+        if dropped || !flags.has(PacketFlags::TIME_SYNC) {
+            return false;
+        }
+        dropped = true;
+        true
+    });
+    let resent = step_until(&mut h, Duration::from_secs(20), |h| {
+        h.server.echo_requests.iter().any(|e| e.2)
+    });
+    assert!(resent.is_some(), "the lost pair was never resent");
+    assert_eq!(h.link.dropped(Dir::ClientToServer), 1);
+
+    let resends: Vec<_> = h.server.echo_requests.iter().filter(|e| e.2).collect();
+    assert_eq!(resends.len(), 1);
+    let (client_time, handled, _) = *resends[0];
+    let handled = handled.as_duration().as_secs_f64();
+    let staleness = (handled - f64::from(client_time)).abs();
+    assert!(
+        staleness < 0.2,
+        "the resend's echo time is {staleness} s old"
+    );
+    assert_eq!(h.conn().stats().resends_sent, 1);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert!(!h.server.is_terminated());
+}

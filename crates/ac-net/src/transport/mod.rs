@@ -18,6 +18,7 @@ pub use clock::INTERVAL;
 pub(crate) use inbound::Admission;
 pub use inbound::{INITIAL_WATERMARK, SANITY_WINDOW};
 pub use outbound::SendError;
+pub(crate) use outbound::TimeStamps;
 pub use scheduler::{ACK_GATE, MAX_NAK_IDS, NAK_GATE};
 pub use stats::TransportStats;
 
@@ -46,20 +47,30 @@ pub(crate) struct ReliableTransport {
     assembler_sweep_at: NetTime,
     client_id: u16,
     iteration: u16,
+    /// The time of the last sweep: the clock the time pair is stamped from.
+    now: NetTime,
+    /// The server's clock as last reported, and when.
+    server_time: f64,
+    server_time_at: NetTime,
     out: VecDeque<Vec<u8>>,
 }
 
 impl ReliableTransport {
-    /// Born when the server's connect request is accepted.
+    /// Born when the server's connect request is accepted, carrying the
+    /// server's clock.
     pub fn new(
         now: NetTime,
         outbound_keystream: Isaac,
         inbound_keystream: Isaac,
         client_id: u16,
         iteration: u16,
+        server_time: f64,
     ) -> Self {
         let stats = TransportStats::default();
         Self {
+            now,
+            server_time,
+            server_time_at: now,
             clock: IntervalClock::new(now),
             loss: PacketLossAverager::new(now, &stats),
             stats,
@@ -76,20 +87,40 @@ impl ReliableTransport {
 
     /// Queue one game message.
     pub fn send_game_message(&mut self, body: &[u8], queue: u16) -> Result<(), SendError> {
+        let stamps = self.stamps();
         self.outbound.send_game_message(
             body,
             queue,
             self.clock.interval_id(),
+            stamps,
             &mut self.stats,
             &mut self.out,
         )
     }
 
+    /// The server reported its clock (a time sync) at `at`.
+    pub fn note_server_time(&mut self, server_time: f64, at: NetTime) {
+        self.server_time = server_time;
+        self.server_time_at = at;
+    }
+
+    /// The clocks a time pair carries now: the server's clock carried
+    /// forward by the time since it was reported, and our own clock.
+    pub fn stamps(&self) -> TimeStamps {
+        TimeStamps {
+            server_time: self.server_time + self.now.since(self.server_time_at).as_secs_f64(),
+            local_time: self.now.as_duration().as_secs_f32(),
+        }
+    }
+
     /// The periodic pump: interval clock, loss sample, the NAK-or-ack
-    /// decision, requested resends (then the cache prune), and every five
-    /// seconds the partial-message eviction.
-    pub fn sweep(&mut self, now: NetTime) {
-        self.clock.update(now);
+    /// decision, requested resends (then the cache prune), the time-sync
+    /// pair when the interval clock reaches a time-sync point (once
+    /// `confirmed`: the server has accepted the connection, so a numbered
+    /// packet may go), and every five seconds the partial-message eviction.
+    pub fn sweep(&mut self, now: NetTime, confirmed: bool) {
+        let time_sync_point = self.clock.update(now);
+        self.now = now;
         self.loss.sweep(now, &self.stats);
         let control = ControlHeader {
             sequence: self.outbound.highest_id_sent(),
@@ -99,11 +130,21 @@ impl ReliableTransport {
         };
         self.scheduler
             .sweep(now, &self.inbound, control, &mut self.stats, &mut self.out);
+        let stamps = self.stamps();
         self.outbound.transmit_pending_resends(
             self.clock.interval_id(),
+            stamps,
             &mut self.stats,
             &mut self.out,
         );
+        if time_sync_point && confirmed {
+            self.outbound.queue_time_pair(
+                self.clock.interval_id(),
+                stamps,
+                &mut self.stats,
+                &mut self.out,
+            );
+        }
         if now.since(self.assembler_sweep_at) >= ASSEMBLER_SWEEP_PERIOD {
             self.assembler_sweep_at = now;
             self.assembler.sweep_expired(now);
@@ -130,11 +171,13 @@ mod tests {
     const SERVER_SEED: u32 = 0x33CC_44DD;
     const CLIENT_ID: u16 = 0x1234;
     const ITERATION: u16 = 0x0007;
+    const SERVER_TIME: f64 = 5000.0;
 
     struct Fixture {
         t: ReliableTransport,
         now: NetTime,
         sent: Vec<Vec<u8>>,
+        confirmed: bool,
     }
 
     impl Fixture {
@@ -146,9 +189,11 @@ mod tests {
                     Isaac::new(SERVER_SEED),
                     CLIENT_ID,
                     ITERATION,
+                    SERVER_TIME,
                 ),
                 now: NetTime::ZERO,
                 sent: Vec::new(),
+                confirmed: true,
             }
         }
 
@@ -162,7 +207,7 @@ mod tests {
         }
 
         fn sweep(&mut self) {
-            self.t.sweep(self.now);
+            self.t.sweep(self.now, self.confirmed);
             while let Some(d) = self.t.pop_outgoing() {
                 self.sent.push(d);
             }
@@ -427,5 +472,80 @@ mod tests {
         f.advance_ms(3_500); // t = 61.5 s
         f.sweep();
         assert_eq!(f.t.assembler.partial_count(), 1);
+    }
+
+    /// Sweep every 100 ms up to `until_ms`; the time-pair packets sent,
+    /// with when they went out.
+    fn idle_time_pairs(f: &mut Fixture, until_ms: u64) -> Vec<(u64, Vec<u8>)> {
+        let mut pairs = Vec::new();
+        while f.now.as_duration() < Duration::from_millis(until_ms) {
+            f.advance_ms(100);
+            let before = f.sent.len();
+            f.sweep();
+            for d in &f.sent[before..] {
+                if flags_of(d).has(PacketFlags::TIME_SYNC) {
+                    pairs.push((f.now.as_duration().as_millis() as u64, d.clone()));
+                }
+            }
+        }
+        pairs
+    }
+
+    // Idle: a pair every 3 s (the interval clock starts at 1 and reaches
+    // 7, 13, 19, ...), each held until the next one is queued, so each goes
+    // out one period late, numbered in turn and stamped as it goes.
+    #[test]
+    fn an_idle_connection_sends_one_numbered_time_pair_every_three_seconds() {
+        let mut f = Fixture::new();
+        let pairs = idle_time_pairs(&mut f, 12_000);
+        let times: Vec<u64> = pairs.iter().map(|(t, _)| *t).collect();
+        assert_eq!(times, vec![6_000, 9_000, 12_000]);
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        for (i, (t, d)) in pairs.iter().enumerate() {
+            let packet = decode_with_keystream(d, Some(&mut shadow)).unwrap();
+            assert_eq!(packet.header.sequence, 2 + i as u32);
+            assert_eq!(
+                packet.header.flags,
+                PacketFlags::TIME_SYNC
+                    | PacketFlags::ECHO_REQUEST
+                    | PacketFlags::ENCRYPTED_CHECKSUM
+            );
+            let seconds = *t as f64 / 1000.0;
+            assert_eq!(packet.optional.time_sync, SERVER_TIME + seconds);
+            assert_eq!(packet.optional.echo_request_time, seconds as f32);
+        }
+        assert_eq!(f.t.outbound.highest_id_sent(), 4);
+        assert_eq!(f.t.outbound.cache_depth(), 3);
+        assert_eq!(f.t.stats.time_pairs_sent, 3);
+        // The idle ack borrows the last numbered sequence: at 12 s the ack
+        // goes out before that sweep's pair, so it carries 3.
+        let last_ack = f
+            .sent
+            .iter()
+            .rev()
+            .find(|d| flags_of(d) == PacketFlags::ACK_SEQUENCE)
+            .unwrap();
+        assert_eq!(PacketHeader::from_bytes(last_ack).unwrap().sequence, 3);
+    }
+
+    // The server's clock is carried forward from its last report.
+    #[test]
+    fn the_time_sync_carries_the_server_clock_forward() {
+        let mut f = Fixture::new();
+        f.advance_ms(1_000);
+        f.t.note_server_time(9_000.0, f.now);
+        let pairs = idle_time_pairs(&mut f, 6_000);
+        let packet = crate::packet::parse_packet(&pairs[0].1).unwrap();
+        assert_eq!(packet.optional.time_sync, 9_005.0);
+    }
+
+    // Nothing numbered goes before the server has accepted the connection.
+    #[test]
+    fn no_time_pair_before_the_handshake_is_confirmed() {
+        let mut f = Fixture::new();
+        f.confirmed = false;
+        assert!(idle_time_pairs(&mut f, 12_000).is_empty());
+        assert!(!f.t.outbound.time_pair_held());
+        assert_eq!(f.t.outbound.highest_id_sent(), 1);
     }
 }

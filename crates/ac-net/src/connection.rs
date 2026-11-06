@@ -120,6 +120,7 @@ impl Connection {
                 Isaac::new(request.server_seed),
                 client_id,
                 iteration,
+                request.server_time,
             ),
             client_id,
             iteration,
@@ -307,6 +308,7 @@ impl Connection {
         }
         if header.flags.has(PacketFlags::TIME_SYNC) && optional.time_sync > 0.0 {
             self.server_time = optional.time_sync;
+            t.note_server_time(optional.time_sync, now);
         }
 
         for fragment in packet.fragments() {
@@ -332,7 +334,7 @@ impl Connection {
             _ => {}
         }
         if self.response_sent_at.is_some() {
-            self.transport.sweep(now);
+            self.transport.sweep(now, self.handshake_confirmed);
             self.drain_transport();
         }
         self.check_server_silence(now);
@@ -572,6 +574,35 @@ mod tests {
         let messages = conn.handle_datagram(ms(3), &server.message(2, b"\xE0\xF7\0\0intact"));
         assert_eq!(messages.len(), 1);
         assert_eq!(conn.stats().checksum_failures, 0);
+    }
+
+    // The server's answer to our echo request (two floats) may share a
+    // packet with a message; the message must still be read, and the
+    // packet's keystream word spent on it.
+    #[test]
+    fn a_message_after_an_echo_response_is_delivered() {
+        let mut conn = connected();
+        let mut server = Server::new();
+        let mut body = Vec::new();
+        body.extend_from_slice(&6.0f32.to_le_bytes());
+        body.extend_from_slice(&0.25f32.to_le_bytes());
+        write_single_fragment(&mut body, 0, 9, b"\xE0\xF7\0\0echoed").unwrap();
+        server.fragment_sequence += 1;
+        let header = PacketHeader {
+            sequence: 2,
+            flags: PacketFlags::ECHO_RESPONSE
+                | PacketFlags::BLOB_FRAGMENTS
+                | PacketFlags::ENCRYPTED_CHECKSUM,
+            ..PacketHeader::default()
+        };
+        let datagram = encode(header, &body, Some(&mut server.keystream)).unwrap();
+        let got = conn.handle_datagram(ms(1), &datagram);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].body, b"\xE0\xF7\0\0echoed");
+        let next = server.message(3, b"\xE0\xF7\0\0next");
+        assert_eq!(conn.handle_datagram(ms(2), &next).len(), 1);
+        assert_eq!(conn.stats().checksum_failures, 0);
+        assert_eq!(conn.snapshot().nak_set, 0);
     }
 
     // Source: OpenAC tests `InboundSequenceTrackerTests.DuplicateServerPacket_DropsBeforeDispatch`.
