@@ -120,6 +120,34 @@ pub fn normalize_damage(damage: u32) -> i32 {
     }
 }
 
+/// A creature's health, and when its appraisal showed them its attributes
+/// and other vitals, from its last appraisal answer, kept as sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClientCreatureProfile {
+    /// The profile's flags as sent.
+    pub flags: u32,
+    pub health: u32,
+    pub health_max: u32,
+    /// Present only when the appraisal showed them: an answer that could
+    /// not assess the creature carries its health alone.
+    pub attributes: Option<ClientCreatureAttributes>,
+}
+
+/// A creature's attributes and its stamina and mana, from an appraisal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClientCreatureAttributes {
+    pub strength: u32,
+    pub endurance: u32,
+    pub quickness: u32,
+    pub coordination: u32,
+    pub focus: u32,
+    pub self_: u32,
+    pub stamina: u32,
+    pub stamina_max: u32,
+    pub mana: u32,
+    pub mana_max: u32,
+}
+
 /// An armor piece's protection against each damage kind from its last
 /// successful appraisal, kept as sent.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -210,6 +238,10 @@ pub struct ClientObject {
     pub weapon_profile: Option<ClientWeaponProfile>,
     /// Replaced by each successful appraisal; untouched by other updates.
     pub armor_profile: Option<ClientArmorProfile>,
+    /// The creature profile the last appraisal answer carried, successful
+    /// or not, as the assess window shows whichever arrives; `None` when
+    /// that answer carried none. Untouched by other updates.
+    pub creature_profile: Option<ClientCreatureProfile>,
     pub cooldown_id: Option<u32>,
     pub cooldown_duration: Option<f64>,
     /// 1 while the item is in a secure-trade window.
@@ -307,6 +339,7 @@ impl ClientObject {
             last_appraisal_unsuccessful_at_seconds: 0.0,
             weapon_profile: None,
             armor_profile: None,
+            creature_profile: None,
             cooldown_id: None,
             cooldown_duration: None,
             trade_state: 0,

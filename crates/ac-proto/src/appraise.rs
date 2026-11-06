@@ -570,6 +570,25 @@ mod tests {
         assert!(parsed.weapon_profile.is_none());
     }
 
+    // A creature the player could not assess: the answer is unsuccessful
+    // but still carries the creature's health, which the assess window
+    // shows.
+    #[test]
+    fn a_failed_answer_still_parses_its_creature_profile() {
+        let mut w = Writer::new();
+        w.u32(0x5000_0001);
+        w.u32(f::CREATURE_PROFILE);
+        w.u32(0);
+        for v in [0, 70, 200] {
+            w.u32(v);
+        }
+        let parsed = IdentifyObjectResponse::parse(w.as_slice()).unwrap();
+        assert!(!parsed.success);
+        let creature = parsed.creature_profile.unwrap();
+        assert_eq!((creature.health, creature.health_max), (70, 200));
+        assert!(creature.attributes.is_none());
+    }
+
     #[test]
     fn hook_profile_keeps_the_following_fields_aligned() {
         let mut w = header(f::HOOK_PROFILE | f::ARMOR_ENCHANTMENT_BITFIELD);

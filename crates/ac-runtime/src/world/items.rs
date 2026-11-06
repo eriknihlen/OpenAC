@@ -8,12 +8,12 @@
 //! request in flight follows them.
 
 use ac_core::items::{
-    AppraisalUpdate, ClientArmorProfile, ClientObjectHeader, ClientObjectPlacement,
-    ClientWeaponProfile, ContainerContentEntry, EquipMask, EquipmentManifestEntry,
-    HouseRestrictionRecord, ItemType, ItemUseable, MoveOrigin, PropertyBundle, PublicWeenieFlags,
-    RemovalReason, TableEvent, WeenieData,
+    AppraisalUpdate, ClientArmorProfile, ClientCreatureAttributes, ClientCreatureProfile,
+    ClientObjectHeader, ClientObjectPlacement, ClientWeaponProfile, ContainerContentEntry,
+    EquipMask, EquipmentManifestEntry, HouseRestrictionRecord, ItemType, ItemUseable, MoveOrigin,
+    PropertyBundle, PublicWeenieFlags, RemovalReason, TableEvent, WeenieData,
 };
-use ac_proto::appraise::IdentifyObjectResponse;
+use ac_proto::appraise::{CreatureProfile, IdentifyObjectResponse};
 use ac_proto::inventory::{
     InventoryServerSaveFailed, PutObjInContainer, ViewContents, WieldObject,
 };
@@ -218,6 +218,7 @@ pub fn appraisal_update(
             weapon_offense: w.weapon_offense,
             max_velocity_estimated: w.max_velocity_estimated,
         }),
+        creature_profile: response.creature_profile.as_ref().map(creature_profile),
         armor_profile: response.armor_profile.map(|a| ClientArmorProfile {
             slashing_protection: a.slashing,
             piercing_protection: a.piercing,
@@ -227,6 +228,28 @@ pub fn appraisal_update(
             acid_protection: a.acid,
             nether_protection: a.nether,
             lightning_protection: a.lightning,
+        }),
+    }
+}
+
+/// A creature profile as the item table keeps it (its attribute highlights
+/// colour the assess window only, so they are not kept).
+fn creature_profile(profile: &CreatureProfile) -> ClientCreatureProfile {
+    ClientCreatureProfile {
+        flags: profile.flags,
+        health: profile.health,
+        health_max: profile.health_max,
+        attributes: profile.attributes.map(|a| ClientCreatureAttributes {
+            strength: a.strength,
+            endurance: a.endurance,
+            quickness: a.quickness,
+            coordination: a.coordination,
+            focus: a.focus,
+            self_: a.self_,
+            stamina: a.stamina,
+            stamina_max: a.stamina_max,
+            mana: a.mana,
+            mana_max: a.mana_max,
         }),
     }
 }
@@ -377,11 +400,13 @@ impl World {
 
     /// An appraisal answer, received at `now_seconds` of session time: a
     /// successful one about an object the table holds is kept; an
-    /// unsuccessful one is recorded on the object (nothing else changes).
+    /// unsuccessful one is recorded on the object, with the creature
+    /// profile it carries (a creature's health), and nothing else changes.
     pub fn apply_appraisal(&mut self, response: &IdentifyObjectResponse, now_seconds: f64) {
         if !response.success {
+            let creature = response.creature_profile.as_ref().map(creature_profile);
             self.with_items(|table, events| {
-                table.record_unsuccessful_appraisal(response.guid, now_seconds, events)
+                table.record_unsuccessful_appraisal(response.guid, now_seconds, creature, events)
             });
             return;
         }

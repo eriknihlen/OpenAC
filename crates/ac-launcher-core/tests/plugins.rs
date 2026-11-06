@@ -160,7 +160,7 @@ fn validate_for_install_rejects_an_unsupported_api_version() {
     let manifest = parse(&VALID_JSON.replace("\"apiVersion\": \"1.0\"", "\"apiVersion\": \"2.0\""));
     assert_eq!(
         manifest.validate_for_install().unwrap_err().0,
-        "apiVersion 2.0 is not supported by this launcher (1.0 to 1.8)"
+        "apiVersion 2.0 is not supported by this launcher (1.0 to 1.9)"
     );
 }
 

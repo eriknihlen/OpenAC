@@ -413,6 +413,50 @@ wire_record! {
 }
 
 wire_record! {
+    /// A creature's attributes and its stamina and mana, as its appraisal
+    /// showed them.
+    pub struct CreatureAttributes {
+        /// Strength.
+        pub strength: u32,
+        /// Endurance.
+        pub endurance: u32,
+        /// Quickness.
+        pub quickness: u32,
+        /// Coordination.
+        pub coordination: u32,
+        /// Focus.
+        pub focus: u32,
+        /// Self.
+        pub self_: u32,
+        /// Stamina.
+        pub stamina: u32,
+        /// Maximum stamina.
+        pub stamina_max: u32,
+        /// Mana.
+        pub mana: u32,
+        /// Maximum mana.
+        pub mana_max: u32,
+    }
+}
+
+wire_record! {
+    /// A creature's profile from its last appraisal answer, as the assess
+    /// window shows it.
+    pub struct CreatureProfile {
+        /// The profile's flags as the server sent them.
+        pub flags: u32,
+        /// Health.
+        pub health: u32,
+        /// Maximum health.
+        pub health_max: u32,
+        /// Attributes, stamina and mana: only when the appraisal could
+        /// assess the creature. An answer that could not still carries its
+        /// health.
+        pub attributes: Option<CreatureAttributes>,
+    }
+}
+
+wire_record! {
     /// Every property the client holds for an object, by property id,
     /// with the profiles kept from the last appraisal.
     pub struct ItemProperties {
@@ -434,6 +478,11 @@ wire_record! {
         pub weapon: Option<WeaponProfile>,
         /// The armor profile, kept until a fresh appraisal replaces it.
         pub armor: Option<ArmorProfile>,
+        /// The creature profile the last appraisal answer carried, whether
+        /// or not the appraisal succeeded (a creature that could not be
+        /// assessed still reports its health); none when that answer
+        /// carried none. Added in API 1.9.
+        since (1, 9) pub creature: Option<CreatureProfile>,
     }
 }
 
@@ -962,6 +1011,73 @@ wire_record! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ApiVersion;
+    use crate::wire::Wire;
+
+    fn appraised_creature() -> ItemProperties {
+        ItemProperties {
+            ints: vec![(25, 30)],
+            creature: Some(CreatureProfile {
+                flags: 8,
+                health: 120,
+                health_max: 200,
+                attributes: Some(CreatureAttributes {
+                    strength: 55,
+                    self_: 70,
+                    stamina_max: 100,
+                    mana_max: 50,
+                    ..CreatureAttributes::default()
+                }),
+            }),
+            ..ItemProperties::default()
+        }
+    }
+
+    // API 1.9 added the creature profile: a plugin built for 1.8 is sent
+    // the item properties without it, byte for byte as before, and one
+    // built for 1.9 gets it.
+    #[test]
+    fn the_creature_profile_reaches_only_plugins_built_for_api_1_9() {
+        let v1_8 = ApiVersion::new(1, 8);
+        let appraised = appraised_creature();
+        let without = ItemProperties {
+            creature: None,
+            ..appraised.clone()
+        };
+        assert_eq!(appraised.to_bytes_at(v1_8), without.to_bytes_at(v1_8));
+        let old = ItemProperties::from_bytes_at(&appraised.to_bytes_at(v1_8), v1_8).unwrap();
+        assert_eq!(old, without);
+        let now = ItemProperties::from_bytes(&appraised.to_bytes()).unwrap();
+        assert_eq!(now, appraised);
+    }
+
+    // A loot classifier's question carries the item properties too.
+    #[test]
+    fn a_loot_question_sent_to_an_api_1_8_classifier_has_no_creature_profile() {
+        use crate::callback::{Callback, LootQuestion};
+        use crate::items::LootContext;
+        let v1_8 = ApiVersion::new(1, 8);
+        let question = |properties: ItemProperties| {
+            Callback::LootClassify(LootQuestion {
+                handle: 1,
+                profile: String::new(),
+                context: LootContext {
+                    item: crate::items::InventoryItem::default(),
+                    properties,
+                    owned_items: Vec::new(),
+                },
+            })
+        };
+        let appraised = appraised_creature();
+        let without = ItemProperties {
+            creature: None,
+            ..appraised.clone()
+        };
+        assert_eq!(
+            question(appraised).to_bytes_at(v1_8),
+            question(without).to_bytes_at(v1_8)
+        );
+    }
 
     // OpenAC `PluginObjectClassifier.Classify`: item-type bits first, then
     // public flags win; books, NPCs and combat pets as special cases.

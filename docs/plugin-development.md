@@ -122,7 +122,10 @@ player has moved it. A change to it alone raises no object change (an
 object is told moved when its cell changes), so a plugin that follows it
 asks again. API 1.8 added subscriptions to the status board
 ([The status board](#the-status-board)), with `Event::StatusChanged`, which
-a plugin built for an older version never gets.
+a plugin built for an older version never gets. API 1.9 added `creature` at
+the end of `ItemProperties`: a creature's profile from its last appraisal
+([Appraising a creature](#appraising-a-creature)). A plugin built for an
+older version is sent the properties without it.
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -353,6 +356,32 @@ and keep it. A texture that does not decode gives its type an `rgb` of 0.
 Neither call needs a permission; both are empty without the
 game files.
 
+## Appraising a creature
+
+`host.identify(id)` asks the server to appraise an object without opening
+the assess window. For a creature, the answer's profile is then in
+`host.properties(id)` (the world object's properties) as `creature`:
+`health` and `health_max`, and in `attributes` its six attributes and its
+stamina, mana and their maximums. These are what the assess window shows
+for the same appraisal. When the character could not assess the creature,
+the server still sends its health, so `creature` holds `health` and
+`health_max` with no `attributes`. Each appraisal answer replaces
+`creature` with the profile it carried, and one with no profile (any
+item's) leaves `None`. A new instance of the creature starts without one.
+
+One appraisal is asked at a time, the player's or a plugin's: `identify`
+answers `ItemStatus::Busy` while another is awaited (a lost answer is given
+up after about 5 seconds), so ask again on a later tick. The answer usually
+comes back within the server's round trip; `host.loot_state().appraisal`
+counts it in `revision` and names the object in `current_id`. An appraisal the player
+starts meanwhile takes the slot from a plugin's; the plugin's answer is
+still kept on the object when it arrives but is not named in `current_id`,
+so a plugin that follows a creature reads `creature` when the object
+changes, or again on a later tick.
+
+This changes nothing else: the server's health reports and
+`CombatTarget::maximum_health` are as they were.
+
 ## Plugin services
 
 Plugins built to work together, a suite, call each other through services
@@ -495,7 +524,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.8",
+  "apiVersion": "1.9",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -511,7 +540,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.8"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.9"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

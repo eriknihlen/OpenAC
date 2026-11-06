@@ -7,7 +7,7 @@
 //! committed state by construction.
 
 use super::*;
-use crate::items::ItemUseable;
+use crate::items::{ClientCreatureAttributes, ItemUseable};
 
 const PLAYER: u32 = 0x5000_0001;
 
@@ -494,6 +494,7 @@ fn capacity_property_bundles_update_the_typed_fields_and_keep_omitted_values() {
                     received_at_seconds: -1.0,
                     weapon_profile: None,
                     armor_profile: None,
+                    creature_profile: None,
                 },
                 &mut f.ev
             )),
@@ -1878,6 +1879,108 @@ fn update_appraisal_without_a_profile_clears_a_stale_one() {
     assert!(f.get(0x702).armor_profile.is_none());
 }
 
+fn creature(health: u32, health_max: u32, strength: Option<u32>) -> ClientCreatureProfile {
+    ClientCreatureProfile {
+        flags: if strength.is_some() { 8 } else { 0 },
+        health,
+        health_max,
+        attributes: strength.map(|strength| ClientCreatureAttributes {
+            strength,
+            stamina: 90,
+            stamina_max: 100,
+            mana: 40,
+            mana_max: 50,
+            ..ClientCreatureAttributes::default()
+        }),
+    }
+}
+
+#[test]
+fn update_appraisal_keeps_a_creature_profile_and_a_later_one_without_it_clears_it() {
+    let mut f = Fixture::new();
+    f.add(ClientObject::new(0x703));
+    let profile = creature(120, 200, Some(55));
+    let appraisal = AppraisalUpdate {
+        creature_profile: Some(profile),
+        ..AppraisalUpdate::default()
+    };
+    assert!(f.t.update_appraisal(0x703, &appraisal, &mut f.ev));
+    assert_eq!(f.get(0x703).creature_profile, Some(profile));
+
+    let mut follow_up = PropertyBundle::default();
+    follow_up.ints.insert(25, 30);
+    assert!(f.t.update_properties(0x703, &follow_up, &mut f.ev));
+    assert_eq!(f.get(0x703).creature_profile, Some(profile));
+
+    f.t.update_appraisal(0x703, &AppraisalUpdate::default(), &mut f.ev);
+    assert!(f.get(0x703).creature_profile.is_none());
+}
+
+// The assess window shows whichever creature profile an answer carries,
+// whatever its success flag: a creature the player could not assess still
+// shows its health, without its attributes.
+#[test]
+fn an_unsuccessful_appraisal_with_a_creature_profile_replaces_the_kept_one() {
+    let mut f = Fixture::new();
+    f.add(ClientObject::new(0x703));
+    let appraisal = AppraisalUpdate {
+        creature_profile: Some(creature(120, 200, Some(55))),
+        ..AppraisalUpdate::default()
+    };
+    f.t.update_appraisal(0x703, &appraisal, &mut f.ev);
+
+    let health_only = creature(80, 200, None);
+    assert!(f.t.record_unsuccessful_appraisal(0x703, 1.0, Some(health_only), &mut f.ev));
+    let item = f.get(0x703);
+    assert_eq!(item.creature_profile, Some(health_only));
+    assert!(item.last_appraisal_unsuccessful);
+}
+
+#[test]
+fn an_unsuccessful_appraisal_without_a_creature_profile_clears_the_kept_one() {
+    let mut f = Fixture::new();
+    f.add(ClientObject::new(0x703));
+    let appraisal = AppraisalUpdate {
+        creature_profile: Some(creature(120, 200, Some(55))),
+        ..AppraisalUpdate::default()
+    };
+    f.t.update_appraisal(0x703, &appraisal, &mut f.ev);
+    assert!(f.t.record_unsuccessful_appraisal(0x703, 1.0, None, &mut f.ev));
+    assert!(f.get(0x703).creature_profile.is_none());
+}
+
+#[test]
+fn a_repeat_refusal_with_a_changed_profile_is_announced_and_an_identical_one_is_not() {
+    let mut f = Fixture::new();
+    f.add(ClientObject::new(0x703));
+    f.take();
+    let first = creature(150, 200, None);
+    f.t.record_unsuccessful_appraisal(0x703, 1.0, Some(first), &mut f.ev);
+    assert_eq!(count_updated(&f.take()), 1);
+
+    f.t.record_unsuccessful_appraisal(0x703, 2.0, Some(first), &mut f.ev);
+    assert_eq!(count_updated(&f.take()), 0);
+
+    let hurt = creature(90, 200, None);
+    f.t.record_unsuccessful_appraisal(0x703, 3.0, Some(hurt), &mut f.ev);
+    assert_eq!(count_updated(&f.take()), 1);
+    assert_eq!(f.get(0x703).creature_profile, Some(hurt));
+}
+
+#[test]
+fn a_new_incarnation_drops_the_creature_profile() {
+    let mut f = Fixture::new();
+    f.ingest(full_weenie(0x800));
+    let appraisal = AppraisalUpdate {
+        creature_profile: Some(creature(120, 200, Some(55))),
+        ..AppraisalUpdate::default()
+    };
+    f.t.update_appraisal(0x800, &appraisal, &mut f.ev);
+    f.t.replace_generation(&full_weenie(0x800), 3, true, &mut f.ev)
+        .expect("installed");
+    assert!(f.get(0x800).creature_profile.is_none());
+}
+
 #[test]
 fn notify_object_updated_publishes_a_client_side_change() {
     let mut f = Fixture::new();
@@ -2057,17 +2160,17 @@ fn the_appraisal_outcome_follows_the_latest_answer() {
     assert!(!f.get(0x701).last_appraisal_unsuccessful);
     assert!(f.get(0x701).appraisal_answered);
 
-    assert!(f.t.record_unsuccessful_appraisal(0x701, 0.0, &mut f.ev));
+    assert!(f.t.record_unsuccessful_appraisal(0x701, 0.0, None, &mut f.ev));
     assert!(f.get(0x701).last_appraisal_unsuccessful);
     assert_eq!(f.get(0x701).properties.ints[&19], 40);
     assert_eq!(count_updated(&f.ev), 2);
 
-    assert!(f.t.record_unsuccessful_appraisal(0x701, 0.0, &mut f.ev));
+    assert!(f.t.record_unsuccessful_appraisal(0x701, 0.0, None, &mut f.ev));
     assert_eq!(count_updated(&f.ev), 2);
 
     assert!(f.t.update_appraisal(0x701, &appraisal, &mut f.ev));
     assert!(!f.get(0x701).last_appraisal_unsuccessful);
-    assert!(!f.t.record_unsuccessful_appraisal(0x702, 0.0, &mut f.ev));
+    assert!(!f.t.record_unsuccessful_appraisal(0x702, 0.0, None, &mut f.ev));
 }
 
 // OpenAC `ClientObjectTableUpdateTests.AnUnsuccessfulAnswer_isStampedWithTheTableClock`
@@ -2077,9 +2180,9 @@ fn the_appraisal_outcome_follows_the_latest_answer() {
 fn an_unsuccessful_answer_is_stamped_with_its_time() {
     let mut f = Fixture::new();
     f.add(ClientObject::new(0x701));
-    assert!(f.t.record_unsuccessful_appraisal(0x701, 12.5, &mut f.ev));
+    assert!(f.t.record_unsuccessful_appraisal(0x701, 12.5, None, &mut f.ev));
     assert_eq!(f.get(0x701).last_appraisal_unsuccessful_at_seconds, 12.5);
-    assert!(f.t.record_unsuccessful_appraisal(0x701, 40.0, &mut f.ev));
+    assert!(f.t.record_unsuccessful_appraisal(0x701, 40.0, None, &mut f.ev));
     assert_eq!(f.get(0x701).last_appraisal_unsuccessful_at_seconds, 40.0);
 }
 
@@ -2187,7 +2290,7 @@ fn anything_the_server_says_about_the_object_overturns_a_refusal() {
         let mut carried = ClientObject::new(CARRIED);
         carried.container_id = PACK;
         f.add(carried);
-        assert!(f.t.record_unsuccessful_appraisal(CARRIED, 0.0, &mut f.ev));
+        assert!(f.t.record_unsuccessful_appraisal(CARRIED, 0.0, None, &mut f.ev));
         f.take();
 
         statement(&mut f.t, &mut f.ev);
@@ -2216,7 +2319,7 @@ fn a_move_the_client_makes_on_its_own_leaves_a_refusal_standing() {
     let mut carried = ClientObject::new(CARRIED);
     carried.container_id = PACK;
     f.add(carried);
-    assert!(f.t.record_unsuccessful_appraisal(CARRIED, 0.0, &mut f.ev));
+    assert!(f.t.record_unsuccessful_appraisal(CARRIED, 0.0, None, &mut f.ev));
 
     assert!(f.t.move_item_optimistic(CARRIED, 0x5000_0002, 0, &mut f.ev));
 
