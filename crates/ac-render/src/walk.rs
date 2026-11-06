@@ -39,6 +39,12 @@ const OUTSIDE_COLUMN: f32 = 1001.0;
 /// Side of a landblock and of a land cell, metres.
 const BLOCK_LENGTH: f32 = 192.0;
 const CELL_LENGTH: f32 = 24.0;
+/// How far above its highest terrain a landblock's column reaches in the
+/// view test, meters.
+const BLOCK_HEIGHT_ABOVE_TERRAIN: f32 = 200.0;
+/// How far below its lowest terrain a landblock's column reaches in the
+/// view test, meters.
+const BLOCK_DEPTH_BELOW_TERRAIN: f32 = 1.0;
 
 /// A plane: points `p` with `normal . p + d = 0`; positive in front.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -1119,13 +1125,16 @@ impl FrameWalk {
             };
             for (b, block) in blocks.iter().enumerate() {
                 let o = block.origin;
+                // The block's column reaches past its terrain: 1 m below
+                // the lowest ground and 200 m above the highest, room for
+                // what stands on it (a mesa's top and the people on it).
                 let bt = column_check(
                     o.x,
                     o.y,
                     o.x + BLOCK_LENGTH,
                     o.y + BLOCK_LENGTH,
-                    block.min_z,
-                    block.max_z,
+                    block.min_z - BLOCK_DEPTH_BELOW_TERRAIN,
+                    block.max_z + BLOCK_HEIGHT_ABOVE_TERRAIN,
                     &cy,
                     &edges,
                 );
@@ -2029,6 +2038,31 @@ mod tests {
         fn draw_cells(&mut self, _cells: &[(u32, ViewSet, usize)]) {}
         fn building_shell(&mut self, _b: usize) {}
         fn interior_landscape_done(&mut self, _seals: &[(Vec<Vec3>, ViewSet, usize)]) {}
+    }
+
+    /// A landblock is tested as a column from 1 m below its lowest
+    /// terrain to 200 m above its highest, room for what stands on it: a
+    /// camera on a mesa top 53 m above sand that lies at 0 to 2 m, looking
+    /// a little upward, sees none of the sand, yet the block's cells (the
+    /// mesa, the player and the monster on it) are walked.
+    #[test]
+    fn a_block_is_walked_while_only_what_stands_on_it_is_in_view() {
+        let blocks = [WalkBlock {
+            coord: (0, 0),
+            origin: Vec3::ZERO,
+            min_z: 0.0,
+            max_z: 2.0,
+            near: true,
+            buildings: Vec::new(),
+        }];
+        let cam = camera(Vec3::new(96.0, -2.0, 55.0), Vec3::new(96.0, 98.0, 113.0));
+        let mut turns = Turns::default();
+        FrameWalk::new().walk_frame(0x0000_0001, &cam, &blocks, &[], &mut turns);
+        assert!(
+            turns.0.iter().any(|t| t.starts_with("objects 0:")),
+            "the block's cells are walked: {:?}",
+            turns.0
+        );
     }
 
     /// OpenAC `RetailFrameWalkTests.DrawLandscape_InterleavesLandCellTurnsWithBuildingAndObjectTurns_FarToNear`:
