@@ -137,8 +137,8 @@ pub struct SessionState {
     login_entry: LoginEntry,
     /// The held login complete may go out (the runner sends it).
     login_release: bool,
-    /// A teleport replaced the held login: its arrival releases the held
-    /// login complete instead of sending its own.
+    /// A teleport started before login complete went: its arrival releases
+    /// the held login complete instead of sending its own.
     login_release_on_arrival: bool,
     last_tick: Option<Duration>,
     /// Passes and the world's simulation time (still while no world is up).
@@ -393,14 +393,23 @@ impl SessionState {
             // A teleport replaces the login presentation: its reveal is
             // abandoned and login complete goes out when the teleport
             // arrives (OpenAC `OnTeleportStarted` resets the login tunnel).
+            // An entry not presented (no window, the player not yet in
+            // the world, or a presentation already over while login
+            // complete still waits for the entry) waits the same way:
+            // login complete sent before the arrival would end the
+            // server's teleport while the character still stands where it
+            // left. The runner drops the wait once login complete went.
             match self.login_entry {
                 LoginEntry::Held { generation, .. } => {
                     self.transit.cancel(generation);
                     self.login_release_on_arrival = true;
                     self.login_entry = LoginEntry::Passed;
                 }
-                LoginEntry::Entering => self.login_entry = LoginEntry::Passed,
-                LoginEntry::Idle | LoginEntry::Passed => {}
+                LoginEntry::Entering | LoginEntry::Passed => {
+                    self.login_release_on_arrival = true;
+                    self.login_entry = LoginEntry::Passed;
+                }
+                LoginEntry::Idle => {}
             }
             self.transit.activate_queued_teleport();
             self.portal_events.push(PortalSpaceEvent::Entered {
@@ -644,7 +653,8 @@ impl SessionState {
         true
     }
 
-    /// Login complete waits for the window's login presentation.
+    /// Login complete waits for the window's login presentation or for
+    /// the arrival of a teleport that started before it went.
     #[must_use]
     pub fn is_login_held(&self) -> bool {
         matches!(self.login_entry, LoginEntry::Held { .. }) || self.login_release_on_arrival
@@ -663,6 +673,13 @@ impl SessionState {
     /// The held login complete may go out now; true once per release.
     pub fn take_login_release(&mut self) -> bool {
         std::mem::take(&mut self.login_release)
+    }
+
+    /// No login complete waits (it went, or never waited): a release is
+    /// moot, and a teleport under way sends its own on arrival.
+    pub fn login_complete_not_held(&mut self) {
+        self.login_release = false;
+        self.login_release_on_arrival = false;
     }
 
     /// The attached window showed the login destination (its presentation
@@ -3465,6 +3482,72 @@ mod tests {
         assert!(outbox.is_empty(), "not the arrival's own login complete");
         assert!(state.take_login_release(), "the held one goes instead");
         assert!(!state.is_login_held());
+    }
+
+    /// Without a window the entry is not presented, but a teleport that
+    /// starts before login complete is out still replaces it: the login's
+    /// login complete waits for the teleport's arrival and is the only one
+    /// sent. Sent earlier, it would tell the server the teleport ended
+    /// while the character still stands at the spot it left.
+    #[test]
+    fn a_teleport_during_an_entry_no_window_presents_sends_login_complete_on_arrival() {
+        let (mut state, mut outbox) = entering(false);
+        let at = crate::world::tests::position(LOGIN_CELL, 1.0);
+        state.apply(
+            &crate::world::tests::create(ENTERING, crate::world::tests::stamps(1, 1), Some(at)),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert!(!state.window_holds_login(), "no window presents it");
+        assert!(!state.is_login_held());
+        let start = Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+            teleport_sequence: 1,
+        });
+        state.apply(&start, &mut outbox, true, CLOCKS);
+        assert!(
+            state.is_login_held(),
+            "login complete waits for the arrival"
+        );
+        assert!(!state.take_login_release());
+        state.apply(
+            &teleported(ENTERING, 1, DESTINATION),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert!(outbox.is_empty(), "not the arrival's own login complete");
+        assert!(state.take_login_release(), "the login's one goes instead");
+        assert!(!state.is_login_held());
+    }
+
+    /// A login complete that already went (no world to enter: it goes with
+    /// the player's object) is not waiting: the teleport's arrival sends
+    /// its own.
+    #[test]
+    fn a_teleport_after_login_complete_went_sends_its_own() {
+        let (mut state, mut outbox) = entering(false);
+        let at = crate::world::tests::position(LOGIN_CELL, 1.0);
+        state.apply(
+            &crate::world::tests::create(ENTERING, crate::world::tests::stamps(1, 1), Some(at)),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        let start = Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+            teleport_sequence: 1,
+        });
+        state.apply(&start, &mut outbox, true, CLOCKS);
+        state.login_complete_not_held();
+        assert!(!state.is_login_held());
+        state.apply(
+            &teleported(ENTERING, 1, DESTINATION),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert_eq!(bodies(&mut outbox), [build_login_complete()]);
+        assert!(!state.take_login_release());
     }
 
     /// A window that does not draw the world (no dats) does not hold the

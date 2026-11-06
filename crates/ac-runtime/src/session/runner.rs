@@ -1753,7 +1753,15 @@ impl Drive<'_> {
     /// the world (at once when the session simulates no world).
     fn follow_held_login(&mut self) {
         if !self.flow.login_complete_held() {
-            self.state.take_login_release();
+            if self.flow.login_complete_sent() {
+                // Login complete went: a teleport under way sends its own
+                // when it arrives.
+                self.state.login_complete_not_held();
+            } else {
+                // Not held yet (the player's object has not arrived): a
+                // teleport's wait stands for the hold to come.
+                self.state.take_login_release();
+            }
             return;
         }
         let window = self.attached.is_some() && self.state.window_holds_login();
