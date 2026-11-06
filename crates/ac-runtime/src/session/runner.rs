@@ -1556,7 +1556,7 @@ impl Drive<'_> {
                     Queue::Login => GameMessageGroup::LoginQueue,
                 };
                 connection
-                    .send_message(&outgoing.body, group)
+                    .send_message(driver.now(), &outgoing.body, group)
                     .map_err(|e| e.to_string())?;
             }
             driver.flush(connection).map_err(|e| e.to_string())?;

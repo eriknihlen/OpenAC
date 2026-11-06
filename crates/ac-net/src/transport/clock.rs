@@ -143,4 +143,36 @@ mod tests {
         now += INTERVAL * 5;
         assert!(clock.update(now));
     }
+
+    // Across the 16-bit wrap, one interval at a time: the stored id wraps
+    // but each step's test adds in 32 bits, so after 65533 (1 mod 6) the
+    // next point is at 1, four intervals later, then every six again.
+    #[test]
+    fn the_time_sync_points_across_the_counter_wrap() {
+        let mut now = NetTime::ZERO;
+        let mut clock = IntervalClock::new(now);
+        now += INTERVAL * 65_520; // 1 -> 65521, a jump of six or more
+        assert!(clock.update(now));
+        assert_eq!(clock.interval_id(), 65_521);
+        let mut fired = Vec::new();
+        for _ in 0..30 {
+            now += INTERVAL;
+            if clock.update(now) {
+                fired.push(clock.interval_id());
+            }
+        }
+        assert_eq!(clock.interval_id(), 15);
+        assert_eq!(fired, vec![65_527, 65_533, 1, 7, 13]);
+
+        // Two intervals at once from 65535 land on 1 once wrapped, but the
+        // 32-bit sum is 65537 (5 mod 6): no point.
+        let mut now = NetTime::ZERO;
+        let mut clock = IntervalClock::new(now);
+        now += INTERVAL * 65_534;
+        clock.update(now);
+        assert_eq!(clock.interval_id(), 65_535);
+        now += INTERVAL * 2;
+        assert!(!clock.update(now));
+        assert_eq!(clock.interval_id(), 1);
+    }
 }

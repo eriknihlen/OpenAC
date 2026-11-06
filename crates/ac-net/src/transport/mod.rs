@@ -85,8 +85,15 @@ impl ReliableTransport {
         }
     }
 
-    /// Queue one game message.
-    pub fn send_game_message(&mut self, body: &[u8], queue: u16) -> Result<(), SendError> {
+    /// Queue one game message at `now`; a held time pair it releases is
+    /// stamped with that time.
+    pub fn send_game_message(
+        &mut self,
+        now: NetTime,
+        body: &[u8],
+        queue: u16,
+    ) -> Result<(), SendError> {
+        self.now = self.now.max(now);
         let stamps = self.stamps();
         self.outbound.send_game_message(
             body,
@@ -118,9 +125,14 @@ impl ReliableTransport {
     /// pair when the interval clock reaches a time-sync point (once
     /// `confirmed`: the server has accepted the connection, so a numbered
     /// packet may go), and every five seconds the partial-message eviction.
+    ///
+    /// A due ack joins a time pair waiting to go (the held one, or the
+    /// one this sweep's time-sync point brings) and sends it at once, as
+    /// one numbered packet; with no pair to join it goes alone, in the
+    /// clear. A NAK always goes alone.
     pub fn sweep(&mut self, now: NetTime, confirmed: bool) {
-        let time_sync_point = self.clock.update(now);
-        self.now = now;
+        let pair_point = self.clock.update(now) && confirmed;
+        self.now = self.now.max(now);
         self.loss.sweep(now, &self.stats);
         let control = ControlHeader {
             sequence: self.outbound.highest_id_sent(),
@@ -128,22 +140,44 @@ impl ReliableTransport {
             interval_id: self.clock.interval_id(),
             iteration: self.iteration,
         };
-        self.scheduler
-            .sweep(now, &self.inbound, control, &mut self.stats, &mut self.out);
-        let stamps = self.stamps();
-        self.outbound.transmit_pending_resends(
-            self.clock.interval_id(),
-            stamps,
+        let held = self.outbound.time_pair_held();
+        let riding_ack = self.scheduler.sweep(
+            now,
+            &self.inbound,
+            control,
+            held || pair_point,
             &mut self.stats,
             &mut self.out,
         );
-        if time_sync_point && confirmed {
-            self.outbound.queue_time_pair(
-                self.clock.interval_id(),
-                stamps,
-                &mut self.stats,
-                &mut self.out,
-            );
+        let stamps = self.stamps();
+        let interval_id = self.clock.interval_id();
+        self.outbound
+            .transmit_pending_resends(interval_id, stamps, &mut self.stats, &mut self.out);
+        match riding_ack {
+            Some(ack) => {
+                // The ack takes the held pair, or else this point's new one.
+                self.outbound.release_time_pair_with_ack(
+                    ack,
+                    pair_point,
+                    interval_id,
+                    stamps,
+                    &mut self.stats,
+                    &mut self.out,
+                );
+                if held && pair_point {
+                    self.outbound.queue_time_pair(
+                        interval_id,
+                        stamps,
+                        &mut self.stats,
+                        &mut self.out,
+                    );
+                }
+            }
+            None if pair_point => {
+                self.outbound
+                    .queue_time_pair(interval_id, stamps, &mut self.stats, &mut self.out);
+            }
+            None => {}
         }
         if now.since(self.assembler_sweep_at) >= ASSEMBLER_SWEEP_PERIOD {
             self.assembler_sweep_at = now;
@@ -165,7 +199,9 @@ impl ReliableTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::{FragmentHeader, PacketFlags, PacketHeader, decode_with_keystream};
+    use crate::packet::{
+        FragmentHeader, PacketFlags, PacketHeader, SequenceList, decode_with_keystream,
+    };
 
     const CLIENT_SEED: u32 = 0x11AA_22BB;
     const SERVER_SEED: u32 = 0x33CC_44DD;
@@ -215,7 +251,7 @@ mod tests {
 
         fn send(&mut self, marker: u8) {
             self.t
-                .send_game_message(&[marker, 0x11, 0x22, 0x33, 0, 0, 0, 0], 9)
+                .send_game_message(self.now, &[marker, 0x11, 0x22, 0x33, 0, 0, 0, 0], 9)
                 .unwrap();
             while let Some(d) = self.t.pop_outgoing() {
                 self.sent.push(d);
@@ -243,7 +279,10 @@ mod tests {
     // Source: OpenAC tests `AckNakSchedulerTests.CumulativeAck_TwoSecondGate_CarriesWatermarkAtEmission`.
     #[test]
     fn cumulative_ack_two_second_gate() {
+        // The ack gate alone: no time pair waits (none before the server
+        // confirms), so every ack goes standalone.
         let mut f = Fixture::new();
+        f.confirmed = false;
         f.admit(2);
         f.admit(3);
         f.sweep();
@@ -491,41 +530,53 @@ mod tests {
         pairs
     }
 
-    // Idle: a pair every 3 s (the interval clock starts at 1 and reaches
-    // 7, 13, 19, ...), each held until the next one is queued, so each goes
-    // out one period late, numbered in turn and stamped as it goes.
+    // Idle: a pair at every time-sync point (the interval clock starts at
+    // 1 and reaches 7, 13, 19, ...: every 3 s). A pair alone is held; the
+    // 2 s ack joins it and it goes out at once as one numbered, sealed
+    // packet, its sections in wire order (ack, time sync, echo). At 3 s the
+    // pair is held and the 4 s ack takes it; at 6 s the ack and the new
+    // pair come in the same sweep and go together; the 8 s ack finds no
+    // pair and goes alone, in the clear, borrowing the last sequence.
     #[test]
-    fn an_idle_connection_sends_one_numbered_time_pair_every_three_seconds() {
+    fn an_idle_connection_sends_its_time_pairs_with_the_ack() {
         let mut f = Fixture::new();
         let pairs = idle_time_pairs(&mut f, 12_000);
         let times: Vec<u64> = pairs.iter().map(|(t, _)| *t).collect();
-        assert_eq!(times, vec![6_000, 9_000, 12_000]);
+        assert_eq!(times, vec![4_000, 6_000, 10_000, 12_000]);
         let mut shadow = Isaac::new(CLIENT_SEED);
         for (i, (t, d)) in pairs.iter().enumerate() {
             let packet = decode_with_keystream(d, Some(&mut shadow)).unwrap();
             assert_eq!(packet.header.sequence, 2 + i as u32);
             assert_eq!(
                 packet.header.flags,
-                PacketFlags::TIME_SYNC
+                PacketFlags::ACK_SEQUENCE
+                    | PacketFlags::TIME_SYNC
                     | PacketFlags::ECHO_REQUEST
                     | PacketFlags::ENCRYPTED_CHECKSUM
             );
+            assert_eq!(packet.header.data_size, 16);
+            assert_eq!(packet.optional.ack_sequence, 1);
             let seconds = *t as f64 / 1000.0;
             assert_eq!(packet.optional.time_sync, SERVER_TIME + seconds);
             assert_eq!(packet.optional.echo_request_time, seconds as f32);
         }
-        assert_eq!(f.t.outbound.highest_id_sent(), 4);
-        assert_eq!(f.t.outbound.cache_depth(), 3);
-        assert_eq!(f.t.stats.time_pairs_sent, 3);
-        // The idle ack borrows the last numbered sequence: at 12 s the ack
-        // goes out before that sweep's pair, so it carries 3.
-        let last_ack = f
+        assert_eq!(f.t.outbound.highest_id_sent(), 5);
+        assert_eq!(f.t.outbound.cache_depth(), 4);
+        assert_eq!(f.t.stats.time_pairs_sent, 4);
+        assert!(!f.t.outbound.time_pair_held());
+
+        let standalone: Vec<_> = f
             .sent
             .iter()
-            .rev()
-            .find(|d| flags_of(d) == PacketFlags::ACK_SEQUENCE)
-            .unwrap();
-        assert_eq!(PacketHeader::from_bytes(last_ack).unwrap().sequence, 3);
+            .filter(|d| !flags_of(d).has(PacketFlags::TIME_SYNC))
+            .map(|d| PacketHeader::from_bytes(d).unwrap())
+            .collect();
+        assert_eq!(standalone.len(), 2, "the 2 s and 8 s acks");
+        for (h, sequence) in standalone.iter().zip([1, 3]) {
+            assert_eq!(h.flags, PacketFlags::ACK_SEQUENCE);
+            assert_eq!(h.sequence, sequence);
+        }
+        assert_eq!(f.t.stats.acks_sent, 6);
     }
 
     // The server's clock is carried forward from its last report.
@@ -536,7 +587,7 @@ mod tests {
         f.t.note_server_time(9_000.0, f.now);
         let pairs = idle_time_pairs(&mut f, 6_000);
         let packet = crate::packet::parse_packet(&pairs[0].1).unwrap();
-        assert_eq!(packet.optional.time_sync, 9_005.0);
+        assert_eq!(packet.optional.time_sync, 9_003.0);
     }
 
     // Nothing numbered goes before the server has accepted the connection.
@@ -547,5 +598,123 @@ mod tests {
         assert!(idle_time_pairs(&mut f, 12_000).is_empty());
         assert!(!f.t.outbound.time_pair_held());
         assert_eq!(f.t.outbound.highest_id_sent(), 1);
+    }
+
+    // While a gap is open the NAK owns the shared gate and acks stop, so a
+    // held pair waits for the next time-sync point. When that point comes
+    // in the same sweep as a requested resend (no NAK is due that sweep:
+    // the last went at 5.6 s), the resend keeps its sequence and word, then
+    // the held pair goes with the next sequence and word, and a new pair is
+    // held.
+    #[test]
+    fn a_time_sync_point_and_a_resend_in_one_sweep() {
+        let mut shadow = Isaac::new(CLIENT_SEED);
+        let (w1, w2) = (shadow.next_word(), shadow.next_word());
+        let mut f = Fixture::new();
+        f.send(0xA1);
+        assert_eq!(key_of(&f.sent[0]), w1);
+        f.admit(2);
+        f.admit(4);
+        f.sent.clear();
+        while f.now.as_duration() < Duration::from_millis(5_900) {
+            f.advance_ms(100);
+            f.sweep();
+        }
+        assert!(f.t.outbound.time_pair_held(), "held at 3 s, no ack since");
+        assert!(
+            f.sent
+                .iter()
+                .all(|d| flags_of(d) == PacketFlags::REQUEST_RETRANSMIT)
+        );
+        assert_eq!(f.t.stats.acks_sent, 0);
+        f.sent.clear();
+
+        f.t.outbound
+            .on_retransmit_request(SequenceList::from_raw(&2u32.to_le_bytes()), &mut f.t.stats);
+        f.advance_ms(100);
+        f.sweep();
+        assert_eq!(f.sent.len(), 2);
+        let resend = PacketHeader::from_bytes(&f.sent[0]).unwrap();
+        assert_eq!(resend.sequence, 2);
+        assert!(resend.flags.has(PacketFlags::RETRANSMISSION));
+        assert_eq!(key_of(&f.sent[0]), w1);
+        let pair = PacketHeader::from_bytes(&f.sent[1]).unwrap();
+        assert_eq!(pair.sequence, 3);
+        assert_eq!(
+            pair.flags,
+            PacketFlags::TIME_SYNC | PacketFlags::ECHO_REQUEST | PacketFlags::ENCRYPTED_CHECKSUM
+        );
+        assert_eq!(key_of(&f.sent[1]), w2);
+        assert!(f.t.outbound.time_pair_held());
+    }
+
+    fn key_of(datagram: &[u8]) -> u32 {
+        let packet = crate::packet::parse_packet(datagram).unwrap();
+        packet.header.checksum.wrapping_sub(packet.header_hash) ^ packet.payload_hash
+    }
+
+    // A pair that rides with a game message is stamped with the time of
+    // the send, not of the sweep before it.
+    #[test]
+    fn a_pair_riding_a_message_is_stamped_at_the_send() {
+        let mut f = Fixture::new();
+        f.advance_ms(2_000);
+        f.sweep(); // the 2 s ack, alone
+        f.advance_ms(1_000);
+        f.sweep();
+        assert!(f.t.outbound.time_pair_held());
+        f.sent.clear();
+        f.advance_ms(40);
+        f.send(0xA1);
+        assert_eq!(f.sent.len(), 1);
+        let packet = crate::packet::parse_packet(&f.sent[0]).unwrap();
+        assert!(packet.header.flags.has(PacketFlags::TIME_SYNC));
+        assert_eq!(packet.optional.echo_request_time, 3.04);
+        assert_eq!(packet.optional.time_sync, SERVER_TIME + 3.04);
+    }
+
+    // The ack, a time-sync point and a held pair in one sweep: the ack
+    // takes the held pair, and the point's new pair is held. (A gap kept
+    // the acks back until 7 s, so the next one falls due at 9 s, a point.)
+    #[test]
+    fn the_ack_takes_the_held_pair_and_the_point_holds_a_new_one() {
+        let mut f = Fixture::new();
+        f.admit(2);
+        f.admit(4);
+        while f.now.as_duration() < Duration::from_millis(7_000) {
+            f.advance_ms(100);
+            f.sweep();
+        }
+        assert_eq!(f.t.stats.naks_sent, 10, "the last NAK at 7.0 s");
+        assert_eq!(f.t.stats.acks_sent, 0);
+        f.admit(3);
+        while f.now.as_duration() < Duration::from_millis(8_900) {
+            f.advance_ms(100);
+            f.sweep();
+        }
+        assert!(f.t.outbound.time_pair_held(), "held at 6 s");
+        let held_since_6 = f.t.outbound.highest_id_sent();
+        f.sent.clear();
+        f.advance_ms(100);
+        f.sweep();
+        assert_eq!(f.sent.len(), 1);
+        let packet = decode_with_keystream(&f.sent[0], None);
+        assert!(packet.is_err(), "sealed, not cleartext");
+        let header = PacketHeader::from_bytes(&f.sent[0]).unwrap();
+        assert_eq!(
+            header.flags,
+            PacketFlags::ACK_SEQUENCE
+                | PacketFlags::TIME_SYNC
+                | PacketFlags::ECHO_REQUEST
+                | PacketFlags::ENCRYPTED_CHECKSUM
+        );
+        assert_eq!(header.sequence, held_since_6 + 1);
+        let packet = crate::packet::parse_packet(&f.sent[0]).unwrap();
+        assert_eq!(packet.optional.ack_sequence, 4);
+        assert!(
+            f.t.outbound.time_pair_held(),
+            "the 9 s point holds a new pair"
+        );
+        assert_eq!(f.t.stats.acks_sent, 1);
     }
 }

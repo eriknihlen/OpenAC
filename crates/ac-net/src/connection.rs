@@ -229,16 +229,21 @@ impl Connection {
         self.outbox.pop_front()
     }
 
-    /// Queue a game message on `group`; a body over 448 bytes goes out as
-    /// several fragments of one message, one packet each.
-    pub fn send_message(&mut self, body: &[u8], group: GameMessageGroup) -> Result<(), SendError> {
+    /// Queue a game message on `group` at `now`; a body over 448 bytes goes
+    /// out as several fragments of one message, one packet each.
+    pub fn send_message(
+        &mut self,
+        now: NetTime,
+        body: &[u8],
+        group: GameMessageGroup,
+    ) -> Result<(), SendError> {
         if self.closed {
             return Err(SendError::Closed);
         }
         if !self.handshake_confirmed {
             return Err(SendError::NotConfirmed);
         }
-        let result = self.transport.send_game_message(body, group.to_u16());
+        let result = self.transport.send_game_message(now, body, group.to_u16());
         self.drain_transport();
         result
     }
@@ -667,7 +672,7 @@ mod tests {
         assert_eq!(packet.header.iteration, 7);
         assert!(conn.is_closed());
         assert_eq!(
-            conn.send_message(&[1, 2, 3, 4], GameMessageGroup::UiQueue),
+            conn.send_message(ms(0), &[1, 2, 3, 4], GameMessageGroup::UiQueue),
             Err(SendError::Closed)
         );
         conn.tick(ms(10_000));
@@ -680,14 +685,14 @@ mod tests {
         let mut conn = connected();
         // Before the server confirms the handshake, a send is refused.
         assert_eq!(
-            conn.send_message(&[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue),
+            conn.send_message(ms(0), &[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue),
             Err(SendError::NotConfirmed)
         );
         conn.tick(ms(200));
         conn.handle_datagram(ms(250), &Server::new().message(2, &[0xDF, 0xF7, 0, 0]));
         assert!(conn.is_handshake_confirmed());
         drain(&mut conn);
-        conn.send_message(&[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue)
+        conn.send_message(ms(0), &[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue)
             .unwrap();
         let sent = drain(&mut conn);
         assert_eq!(sent.len(), 1);
@@ -701,7 +706,7 @@ mod tests {
         assert_eq!(fragment.header.sequence, 1);
         assert_eq!(fragment.header.queue, GameMessageGroup::UiQueue.to_u16());
         // A body over one fragment goes out as one packet per fragment.
-        conn.send_message(&[0; 449], GameMessageGroup::UiQueue)
+        conn.send_message(ms(0), &[0; 449], GameMessageGroup::UiQueue)
             .unwrap();
         let sent = drain(&mut conn);
         assert_eq!(sent.len(), 2);

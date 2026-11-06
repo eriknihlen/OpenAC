@@ -18,15 +18,20 @@ pub struct CachedPacket {
     pub sealed_payload: u32,
     /// Whether the body carries fragments.
     pub has_fragments: bool,
-    /// Whether the body starts with the time-sync and echo pair.
+    /// Whether the body starts with a cumulative ack (as sent; a resend
+    /// keeps its value).
+    pub has_ack: bool,
+    /// Whether the body carries the time-sync and echo pair (after the
+    /// ack, if any).
     pub has_time_pair: bool,
 }
 
 /// Sent reliable packets in send order, until the server acknowledges them.
 ///
 /// The only optional sections a reliable packet carries are the time-sync
-/// and echo pair, which travel with it on every resend; acks and NAKs go
-/// in standalone packets.
+/// and echo pair and, when it rode with the pair, the cumulative ack; they
+/// travel with it on every resend. Other acks and every NAK go in
+/// standalone packets.
 #[derive(Debug, Default)]
 pub struct SentPacketStore {
     order: VecDeque<u32>,
@@ -80,6 +85,7 @@ mod tests {
             key: 0,
             sealed_payload: 0,
             has_fragments: true,
+            has_ack: false,
             has_time_pair: false,
         }
     }

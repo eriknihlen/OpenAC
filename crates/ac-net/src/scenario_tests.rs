@@ -688,3 +688,85 @@ fn a_resent_time_pair_carries_the_clock_of_the_resend() {
     assert_eq!(h.server.echo_speed_errors, 0);
     assert!(!h.server.is_terminated());
 }
+
+/// The ack riding a time pair is an ordinary numbered packet to the
+/// server: in order it advances the server's watermark (the standalone
+/// ack's reused sequence never does), it is no duplicate, and its ack
+/// prunes the server's resend cache.
+#[test]
+fn the_server_takes_an_ack_riding_a_time_pair_as_a_numbered_packet() {
+    let mut h = Harness::connected();
+    let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let log = seen.clone();
+    h.link.drop_when(Dir::ClientToServer, move |_, d| {
+        log.borrow_mut().push(PacketHeader::from_bytes(d).unwrap());
+        false
+    });
+    for _ in 0..100 {
+        h.step(ms(100));
+    }
+    let ack_pair = PacketFlags::ACK_SEQUENCE
+        | PacketFlags::TIME_SYNC
+        | PacketFlags::ECHO_REQUEST
+        | PacketFlags::ENCRYPTED_CHECKSUM;
+    let seen = seen.borrow();
+    let riding: Vec<_> = seen.iter().filter(|h| h.flags == ack_pair).collect();
+    assert!(
+        riding.len() >= 3,
+        "{} ack-and-pair packets in 10 s",
+        riding.len()
+    );
+    let mut last = 1;
+    for header in seen.iter().filter(|h| h.sequence != 0) {
+        if header.flags == PacketFlags::ACK_SEQUENCE {
+            assert_eq!(header.sequence, last, "a standalone ack borrows the last");
+        } else {
+            assert_eq!(header.sequence, last + 1, "{:?}", header.flags);
+            last = header.sequence;
+        }
+    }
+    assert_eq!(h.server.last_received_packet_sequence(), last);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.state_drops, 0);
+    assert_eq!(h.server.out_of_order_packet_count(), 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert!(!h.server.is_terminated());
+}
+
+/// Ten idle minutes over a link that loses one client packet in ten: the
+/// lost pairs heal by NAK and resend, every resend carries a fresh echo
+/// time, and the server's speed check never counts two mismatches in a
+/// row (it logs off at ten). A mismatch it does count is a pair held in
+/// the server's out-of-order buffer while a lost one was resent.
+#[test]
+fn a_long_idle_run_with_resends_keeps_the_speed_check_quiet() {
+    let mut h = Harness::new();
+    h.lossy = LossyFilter::new(LossOptions {
+        drop_percent: 10,
+        seed: 0x1D1E_0010,
+        direction: LossDirection::Out,
+    })
+    .unwrap();
+    h.connect();
+    for _ in 0..6_000 {
+        h.step(ms(100));
+    }
+    let loss = h.lossy.as_ref().unwrap().counters();
+    assert!(loss.outbound_dropped >= 20, "{loss:?}");
+    let s = h.conn().snapshot();
+    assert!(s.stats.resends_sent >= 10, "{s:?}");
+    assert!(h.server.echo_requests.iter().filter(|e| e.2).count() >= 5);
+    assert!(
+        h.server.echo_diff_peak <= 1,
+        "peak {}",
+        h.server.echo_diff_peak
+    );
+    assert_eq!(h.server.echo_speed_errors, 0);
+    assert_eq!(h.server.crc_drops, 0);
+    assert_eq!(h.server.duplicate_drops, 0);
+    assert_eq!(h.server.crypto.headroom(), 256);
+    assert_eq!(s.stats.uncached_nak_ids, 0);
+    assert!(!h.server.is_terminated());
+}

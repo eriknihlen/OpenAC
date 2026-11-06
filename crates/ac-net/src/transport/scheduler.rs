@@ -45,29 +45,38 @@ impl AckNakScheduler {
         }
     }
 
-    /// Run one sweep.
+    /// Run one sweep. When the ack is due and `ack_can_ride` (a numbered
+    /// packet is about to go that it can join), no standalone ack is sent:
+    /// the value to carry is returned instead. A NAK always goes alone.
     pub fn sweep(
         &mut self,
         now: NetTime,
         inbound: &InboundSequenceTracker,
         control: ControlHeader,
+        ack_can_ride: bool,
         stats: &mut TransportStats,
         out: &mut VecDeque<Vec<u8>>,
-    ) {
+    ) -> Option<u32> {
         let elapsed = now.since(self.shared_timestamp);
         if inbound.nak_count() > 0 {
             if elapsed <= NAK_GATE {
-                return;
+                return None;
             }
             emit_request_retransmit(inbound, control, stats, out);
             self.shared_timestamp = now;
-            return;
+            return None;
         }
         if elapsed < ACK_GATE {
-            return;
+            return None;
         }
-        emit_cumulative_ack(inbound.highest_id_received(), control, stats, out);
         self.shared_timestamp = now;
+        stats.acks_sent += 1;
+        let highest = inbound.highest_id_received();
+        if ack_can_ride {
+            return Some(highest);
+        }
+        emit_cumulative_ack(highest, control, stats, out);
+        None
     }
 }
 
@@ -100,7 +109,6 @@ fn emit_cumulative_ack(
         control,
     );
     emit(out, stats, datagram);
-    stats.acks_sent += 1;
 }
 
 fn emit_request_retransmit(

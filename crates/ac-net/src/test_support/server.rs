@@ -227,6 +227,8 @@ pub struct ServerModel {
     pub echo_requests: Vec<(f32, NetTime, bool)>,
     /// The largest clock disagreement the echo check measured, seconds.
     pub echo_worst_diff: f64,
+    /// The most mismatches in a row the echo check counted (ten log off).
+    pub echo_diff_peak: u32,
     /// Times the echo check would have logged the character off.
     pub echo_speed_errors: usize,
     echo_first: Option<(f32, NetTime)>,
@@ -305,6 +307,7 @@ impl ServerModel {
             connect_responses_accepted: 0,
             echo_requests: Vec::new(),
             echo_worst_diff: 0.0,
+            echo_diff_peak: 0,
             echo_speed_errors: 0,
             echo_first: None,
             echo_last_diff: 0.0,
@@ -771,6 +774,7 @@ impl ServerModel {
         if diff > ECHO_THRESHOLD && diff - self.echo_last_diff > ECHO_DIFF_THRESHOLD {
             self.echo_last_diff = diff;
             self.echo_diff_count += 1;
+            self.echo_diff_peak = self.echo_diff_peak.max(self.echo_diff_count);
             if self.echo_diff_count >= ECHO_LOG_OFF_COUNT {
                 self.echo_speed_errors += 1;
                 self.echo_diff_count = 0;
