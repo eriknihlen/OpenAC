@@ -33,8 +33,9 @@ impl DbProperties {
         Ok(Self { id, properties })
     }
 
-    /// Read collection `id` from `dat` (the portal dat); `None` when
-    /// absent. The id is set to the file id.
+    /// Read collection `id` from `dat` (the dat a portal-type id is read
+    /// from, `DatCollection::portal_file`); `None` when absent. The id is
+    /// set to the file id.
     pub fn read(
         dat: &DatFile,
         master: &MasterProperty,

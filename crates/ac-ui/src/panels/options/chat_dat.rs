@@ -58,7 +58,8 @@ fn collection(dats: &DatCollection, master: &MasterProperty, value: u32) -> Opti
     if id == 0 {
         return None;
     }
-    DbProperties::read(&dats.portal, master, id).ok().flatten()
+    let file = dats.portal_file(id).ok()?;
+    DbProperties::read(file, master, id).ok().flatten()
 }
 
 /// The two opacity defaults (unfocused, focused); `None` when the dats do

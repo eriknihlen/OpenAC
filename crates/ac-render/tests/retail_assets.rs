@@ -145,7 +145,11 @@ fn block_compressed_textures_keep_their_blocks_and_get_a_full_mip_chain() {
             .dats
             .get::<SurfaceTexture>(texture)
             .unwrap()
-            .and_then(|st| d.dats.get::<RenderSurface>(st.textures[0]).unwrap());
+            .and_then(|st| {
+                d.dats
+                    .get::<RenderSurface>(d.dats.texture_source(&st)?)
+                    .unwrap()
+            });
         let Some(rs) = rs else { continue };
         let Some(format) = data.texture.block_format() else {
             if BcFormat::from_pixel_format(rs.format).is_some() {
@@ -439,7 +443,7 @@ fn terrain_layers_are_bgra_and_alpha_maps_one_byte_of_the_decode() {
             .unwrap();
         let rs = d
             .dats
-            .get::<RenderSurface>(st.textures[0])
+            .get::<RenderSurface>(d.dats.texture_source(&st).unwrap())
             .unwrap()
             .unwrap();
         let palette = (rs.default_palette_id != 0).then(|| {
@@ -772,4 +776,68 @@ fn holtburg_draws_its_buildings_out_to_the_object_range() {
     );
     assert_eq!(drawn_per_ring[5], 0, "ring 5 kept loaded but not drawn");
     assert_eq!(per_ring, [12, 4, 7, 2, 15, 6]);
+}
+
+/// Without `client_highres.dat` a surface whose texture keeps its
+/// full-detail level only in that dat is drawn from its reduced level (the
+/// portal dat's), not as the missing-texture magenta; with it, from the
+/// full one. The first 64 such surfaces, both ways.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn surfaces_draw_from_the_texture_level_the_dats_hold() {
+    use ac_dat::objects::{RenderSurface, Surface, SurfaceBase, SurfaceTexture};
+    let full = dats();
+    let raw = full.dats.uncached();
+    let high_res = raw
+        .high_res
+        .as_ref()
+        .expect("the install has client_highres.dat");
+    let in_high_res_only = |id: u32| {
+        high_res.find_entry(id).unwrap().is_some() && raw.portal.find_entry(id).unwrap().is_none()
+    };
+    let mut cases = Vec::new();
+    for id in raw.portal.entries().map(|e| e.unwrap().id) {
+        if id >> 24 != 0x08 {
+            continue;
+        }
+        let surface = full.dats.get::<Surface>(id).unwrap().unwrap();
+        let SurfaceBase::Texture { texture, .. } = surface.base else {
+            continue;
+        };
+        let Some(st) = full.dats.get::<SurfaceTexture>(texture).unwrap() else {
+            continue;
+        };
+        if let [hi, lo] = st.textures[..]
+            && in_high_res_only(hi)
+        {
+            cases.push((id, hi, lo));
+        }
+        if cases.len() == 64 {
+            break;
+        }
+    }
+    assert_eq!(cases.len(), 64);
+
+    let dir = std::env::temp_dir().join(format!("ac-render-no-high-res-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in [ac_dat::PORTAL_DAT, ac_dat::CELL_DAT, ac_dat::LOCAL_DAT] {
+        std::fs::hard_link(full.dats.directory().join(name), dir.join(name))
+            .expect("link the dat into the test folder (same volume)");
+    }
+    let reduced = Content::open(&dir).expect("open without client_highres.dat");
+    for (content, pick) in [(&full, 0usize), (&reduced, 1)] {
+        for &(id, hi, lo) in &cases {
+            let level = [hi, lo][pick];
+            let rs = full.dats.get::<RenderSurface>(level).unwrap().unwrap();
+            let built = assets::build_surface(content, id);
+            assert_eq!(
+                (built.texture.width(), built.texture.height()),
+                (rs.width, rs.height),
+                "surface {id:08X} level {pick} {level:08X}"
+            );
+        }
+    }
+    drop(reduced);
+    std::fs::remove_dir_all(dir).ok();
 }

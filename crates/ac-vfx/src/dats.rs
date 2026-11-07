@@ -20,7 +20,7 @@ pub trait VfxDats: Send + Sync {
     fn surface(&self, id: u32) -> Result<Option<Arc<Surface>>, DatError>;
     /// A physics script table (`0x34......`).
     fn physics_script_table(&self, id: u32) -> Result<Option<Arc<PhysicsScriptTable>>, DatError>;
-    /// The raw bytes of a portal-dat file (physics scripts are decoded from
+    /// The raw bytes of a portal-type file (physics scripts are decoded from
     /// these so their stored id can be checked).
     fn portal_bytes(&self, id: u32) -> Result<Option<Vec<u8>>, DatError>;
 }
@@ -47,7 +47,7 @@ impl VfxDats for DatCollection {
     }
 
     fn portal_bytes(&self, id: u32) -> Result<Option<Vec<u8>>, DatError> {
-        self.portal.get_bytes(id)
+        DatCollection::portal_bytes(self, id)
     }
 }
 
@@ -73,6 +73,6 @@ impl VfxDats for CachedDats {
     }
 
     fn portal_bytes(&self, id: u32) -> Result<Option<Vec<u8>>, DatError> {
-        self.uncached().portal.get_bytes(id)
+        self.uncached().portal_bytes(id)
     }
 }

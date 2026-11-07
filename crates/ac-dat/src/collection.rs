@@ -7,7 +7,7 @@ use crate::cache::{
 use crate::database::DatFile;
 use crate::error::{DatError, Result};
 use crate::header::DatFileType;
-use crate::objects::DatObject;
+use crate::objects::{DatObject, SurfaceTexture};
 
 /// File name of the portal dat.
 pub const PORTAL_DAT: &str = "client_portal.dat";
@@ -66,22 +66,52 @@ impl DatCollection {
         match T::DAT {
             DatFileType::Cell => self.cell.get(id),
             DatFileType::Local => self.local.get(id),
-            DatFileType::Portal => match self.portal_source(id)? {
-                DatSource::HighRes => self.high_res.as_ref().map_or(Ok(None), |d| d.get(id)),
-                _ => self.portal.get(id),
-            },
+            DatFileType::Portal => self.portal_file(id)?.get(id),
             DatFileType::Undefined | DatFileType::Other(_) => Ok(None),
         }
     }
 
     /// The dat a portal-type id is read from: the high-resolution dat when
     /// it is open and its directory holds the id, else the portal dat
-    /// (whether or not the portal dat holds it).
+    /// (whether or not the portal dat holds it). A high-resolution
+    /// directory that cannot be read is an error.
     pub fn portal_source(&self, id: u32) -> Result<DatSource> {
+        Ok(self.portal_pick(id)?.0)
+    }
+
+    /// The file a portal-type id is read from (see
+    /// [`DatCollection::portal_source`]), for readers that decode the raw
+    /// bytes themselves.
+    pub fn portal_file(&self, id: u32) -> Result<&DatFile> {
+        Ok(self.portal_pick(id)?.1)
+    }
+
+    fn portal_pick(&self, id: u32) -> Result<(DatSource, &DatFile)> {
         match &self.high_res {
-            Some(high_res) if high_res.find_entry(id)?.is_some() => Ok(DatSource::HighRes),
-            _ => Ok(DatSource::Portal),
+            Some(high_res) if high_res.find_entry(id)?.is_some() => {
+                Ok((DatSource::HighRes, high_res))
+            }
+            _ => Ok((DatSource::Portal, &self.portal)),
         }
+    }
+
+    /// The raw bytes of portal-type file `id`, from the dat
+    /// [`DatCollection::portal_source`] picks; `None` when it has none.
+    pub fn portal_bytes(&self, id: u32) -> Result<Option<Vec<u8>>> {
+        self.portal_file(id)?.get_bytes(id)
+    }
+
+    /// Whether the high-resolution dat is open.
+    #[must_use]
+    pub fn has_high_res(&self) -> bool {
+        self.high_res.is_some()
+    }
+
+    /// The render surface a surface texture is drawn from with these dats
+    /// (see [`SurfaceTexture::source_level`]).
+    #[must_use]
+    pub fn texture_source(&self, texture: &SurfaceTexture) -> Option<u32> {
+        texture.source_level(self.has_high_res())
     }
 
     /// The open dats with their display names, in a fixed order.
@@ -272,6 +302,19 @@ impl CachedDats {
         &self.dats
     }
 
+    /// Whether the high-resolution dat is open.
+    #[must_use]
+    pub fn has_high_res(&self) -> bool {
+        self.dats.has_high_res()
+    }
+
+    /// The render surface a surface texture is drawn from with these dats
+    /// (see [`SurfaceTexture::source_level`]).
+    #[must_use]
+    pub fn texture_source(&self, texture: &SurfaceTexture) -> Option<u32> {
+        self.dats.texture_source(texture)
+    }
+
     /// Hits, misses and evictions of the caches together.
     #[must_use]
     pub fn stats(&self) -> CacheStats {
@@ -284,21 +327,50 @@ impl CachedDats {
         &self.caches[source.cache_index()]
     }
 
-    fn get_from<T: DatObject + Send + Sync + 'static>(
+    /// Read `id` from one dat's file into its cache (the cache was asked).
+    fn read_into_cache<T: DatObject + Send + Sync + 'static>(
         &self,
+        file: &DatFile,
         source: DatSource,
         id: u32,
     ) -> Result<Option<Arc<T>>> {
-        let Some(file) = self.dats.file(source) else {
-            return Ok(None);
-        };
         let cache = self.cache(source);
-        if let Some(object) = cache.get::<T>(id) {
-            return Ok(Some(object));
-        }
         Ok(file
             .get::<T>(id)?
             .map(|object| cache.get_or_add(id, Arc::new(object))))
+    }
+
+    fn get_from<T: DatObject + Send + Sync + 'static>(
+        &self,
+        file: &DatFile,
+        source: DatSource,
+        id: u32,
+    ) -> Result<Option<Arc<T>>> {
+        if let Some(object) = self.cache(source).get::<T>(id) {
+            return Ok(Some(object));
+        }
+        self.read_into_cache(file, source, id)
+    }
+
+    /// A portal-type object: memory first, then the dat
+    /// [`DatCollection::portal_source`] picks. The portal cache only ever
+    /// holds ids the high-resolution dat lacks (the dats do not change), so
+    /// a hit in either cache needs no directory lookup. One hit or one miss
+    /// is counted per read.
+    fn get_portal_type<T: DatObject + Send + Sync + 'static>(
+        &self,
+        id: u32,
+    ) -> Result<Option<Arc<T>>> {
+        for source in [DatSource::HighRes, DatSource::Portal] {
+            let cache = self.cache(source);
+            if let Some(object) = cache.get_uncounted::<T>(id) {
+                cache.count_hit();
+                return Ok(Some(object));
+            }
+        }
+        let (source, file) = self.dats.portal_pick(id)?;
+        self.cache(source).count_miss();
+        self.read_into_cache(file, source, id)
     }
 
     /// Read a typed object as [`DatCollection::get`] does (a portal object
@@ -306,9 +378,9 @@ impl CachedDats {
     /// portal dat), through the cache.
     pub fn get<T: DatObject + Send + Sync + 'static>(&self, id: u32) -> Result<Option<Arc<T>>> {
         match T::DAT {
-            DatFileType::Cell => self.get_from(DatSource::Cell, id),
-            DatFileType::Local => self.get_from(DatSource::Local, id),
-            DatFileType::Portal => self.get_from(self.dats.portal_source(id)?, id),
+            DatFileType::Cell => self.get_from(&self.dats.cell, DatSource::Cell, id),
+            DatFileType::Local => self.get_from(&self.dats.local, DatSource::Local, id),
+            DatFileType::Portal => self.get_portal_type(id),
             DatFileType::Undefined | DatFileType::Other(_) => Ok(None),
         }
     }

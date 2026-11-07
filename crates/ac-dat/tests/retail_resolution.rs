@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ac_dat::objects::{RenderSurface, Setup};
+use ac_dat::objects::{Palette, RenderSurface, Setup, SurfaceTexture};
+use ac_dat::texture::{self, DecodeOptions};
 use ac_dat::{CachedDats, DatFile, DatSource, ITERATION_ID};
 
 fn dats() -> CachedDats {
@@ -86,6 +87,92 @@ fn a_second_read_comes_from_the_cache() {
     assert_eq!((stats.hits, stats.misses), (1, 1));
 }
 
+/// A fresh folder holding the portal, cell and language dats of `full`
+/// (hard links, so the temp folder must be on the dats' volume) and no
+/// `client_highres.dat`.
+fn without_high_res(full: &CachedDats, tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ac-dat-no-high-res-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in [ac_dat::PORTAL_DAT, ac_dat::CELL_DAT, ac_dat::LOCAL_DAT] {
+        std::fs::hard_link(full.directory().join(name), dir.join(name))
+            .expect("link the dat into the test folder (same volume)");
+    }
+    dir
+}
+
+/// Every surface texture (0x05xxxxxx) with its levels.
+fn surface_textures(d: &CachedDats) -> Vec<Arc<SurfaceTexture>> {
+    d.uncached()
+        .portal
+        .entries()
+        .map(|e| e.unwrap().id)
+        .filter(|id| id >> 24 == 0x05)
+        .map(|id| d.get::<SurfaceTexture>(id).unwrap().unwrap())
+        .collect()
+}
+
+/// A two-level surface texture keeps its full-detail image in the
+/// high-resolution dat and a reduced one in the portal dat. Without the
+/// high-resolution dat the reduced one is drawn; with it, the full one.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_two_level_texture_is_drawn_from_the_level_the_dats_hold() {
+    let full = dats();
+    let textures = surface_textures(&full);
+    let mut by_levels = std::collections::BTreeMap::<usize, usize>::new();
+    for t in &textures {
+        *by_levels.entry(t.textures.len()).or_default() += 1;
+    }
+    let two: Vec<_> = textures.iter().filter(|t| t.textures.len() == 2).collect();
+    let portal = &full.uncached().portal;
+    // Where each of the two levels lives: H high-resolution dat only, P
+    // portal dat only, B both, - neither.
+    let place = |id: u32| match (
+        high_res(&full).find_entry(id).unwrap().is_some(),
+        portal.find_entry(id).unwrap().is_some(),
+    ) {
+        (true, false) => 'H',
+        (false, true) => 'P',
+        (true, true) => 'B',
+        (false, false) => '-',
+    };
+    let mut layout = std::collections::BTreeMap::<String, usize>::new();
+    for t in &two {
+        let key: String = t.textures.iter().map(|id| place(*id)).collect();
+        *layout.entry(key).or_default() += 1;
+    }
+    println!("surface textures by level count: {by_levels:?}; two-level layouts: {layout:?}");
+    // The installed dats: 4,197 one-level and 3,024 two-level textures; of
+    // the two-level ones 2,284 keep level 0 only in the high-resolution dat
+    // and level 1 in the portal dat, and 740 keep both in the portal dat.
+    assert_eq!(by_levels, [(1, 4197), (2, 3024)].into());
+    assert_eq!(
+        layout,
+        [("HP".to_owned(), 2284), ("PP".to_owned(), 740)].into()
+    );
+
+    let dir = without_high_res(&full, "levels");
+    let reduced = CachedDats::open(&dir).expect("open without client_highres.dat");
+    for (dats, level) in [(&full, 0), (&reduced, 1)] {
+        for t in &two {
+            let id = dats.texture_source(t).unwrap();
+            assert_eq!(id, t.textures[level], "{:08X}", t.id);
+            let rs = dats
+                .get::<RenderSurface>(id)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{:08X}: no render surface {id:08X}", t.id));
+            let palette = (rs.default_palette_id != 0)
+                .then(|| dats.get::<Palette>(rs.default_palette_id).unwrap())
+                .flatten();
+            texture::decode(&rs, palette.as_deref(), DecodeOptions::default())
+                .unwrap_or_else(|e| panic!("{:08X} level {level}: {e}", t.id));
+        }
+    }
+    drop(reduced);
+    std::fs::remove_dir_all(dir).ok();
+}
+
 /// An install without `client_highres.dat`: the other three dats, linked
 /// into a fresh folder, open and read as usual, and the high-resolution
 /// textures are simply not there.
@@ -94,13 +181,7 @@ fn a_second_read_comes_from_the_cache() {
 fn an_install_without_the_high_res_dat_still_reads() {
     let full = dats();
     let (_, only) = high_res_textures(&full);
-    let dir = std::env::temp_dir().join(format!("ac-dat-no-high-res-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    for name in [ac_dat::PORTAL_DAT, ac_dat::CELL_DAT, ac_dat::LOCAL_DAT] {
-        std::fs::hard_link(full.directory().join(name), dir.join(name))
-            .expect("link the dat into the test folder (same volume)");
-    }
+    let dir = without_high_res(&full, "reads");
     let d = CachedDats::open(&dir).expect("open without client_highres.dat");
     assert!(d.uncached().high_res.is_none());
     assert!(d.get::<Setup>(0x0200_0001).unwrap().is_some());

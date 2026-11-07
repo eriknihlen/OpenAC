@@ -237,7 +237,7 @@ impl GameTables {
     /// record that does not fit.
     pub fn load(dats: &DatCollection) -> Result<Self, TablesError> {
         let component_table: Option<SpellComponentTable> = dats.get(SPELL_COMPONENT_TABLE_ID)?;
-        let component_ids: Option<EnumIdMap> = dats.portal.get(COMPONENT_ID_MAP_ID)?;
+        let component_ids: Option<EnumIdMap> = dats.get(COMPONENT_ID_MAP_ID)?;
         let mut wcid_by_scid = HashMap::new();
         let mut component_names = HashMap::new();
         let mut components_by_class = HashMap::new();
@@ -493,7 +493,6 @@ fn trade_note_denominations(dats: &DatCollection) -> Result<HashMap<u32, i32>, T
     }
     let resolve = |map_id: u32, key: u32| -> Result<Option<u32>, TablesError> {
         Ok(dats
-            .portal
             .get::<EnumIdMap>(map_id)?
             .and_then(|m| m.client_id(key)))
     };
@@ -504,7 +503,6 @@ fn trade_note_denominations(dats: &DatCollection) -> Result<HashMap<u32, i32>, T
         return Ok(HashMap::new());
     };
     Ok(dats
-        .portal
         .get::<ac_dat::objects::DualEnumIdMap>(notes_id)?
         .map(|m| {
             m.map
@@ -531,7 +529,6 @@ pub fn magic_packs(dats: &DatCollection) -> Result<HashMap<u32, u32>, TablesErro
     }
     let resolve = |map_id: u32, key: u32| -> Result<Option<u32>, TablesError> {
         Ok(dats
-            .portal
             .get::<EnumIdMap>(map_id)?
             .and_then(|m| m.client_id(key)))
     };
@@ -542,7 +539,6 @@ pub fn magic_packs(dats: &DatCollection) -> Result<HashMap<u32, u32>, TablesErro
         return Ok(HashMap::new());
     };
     Ok(dats
-        .portal
         .get::<EnumIdMap>(packs_id)?
         .map(|m| m.client_enum_to_id.into_iter().collect())
         .unwrap_or_default())
