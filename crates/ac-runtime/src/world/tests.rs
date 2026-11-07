@@ -691,6 +691,89 @@ fn delete_evicts_the_item_record() {
     )));
 }
 
+fn delete_of(guid: u32, instance_sequence: u16) -> Inbound<'static> {
+    Inbound::DeleteObject(DeleteObject {
+        guid,
+        instance_sequence,
+    })
+}
+
+#[test]
+fn a_delete_that_overtook_its_create_is_taken_after_the_create() {
+    // The game holds a delete for an object it does not know and replays
+    // it after that object's create: a create resent after its delete
+    // (packet loss) leaves no ghost.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    assert_eq!(world.held_delete_count(), 1);
+    assert!(
+        world
+            .take_queue_notes()
+            .contains(&liveness::QueueNote::DeleteHeld(DOOR))
+    );
+    world.apply(&create(
+        DOOR,
+        stamps(1, 10),
+        Some(position(0xA9B4_0031, 5.0)),
+    ));
+    assert!(world.object(DOOR).is_none());
+    assert!(world.item(DOOR).is_none());
+    assert_eq!(world.held_delete_count(), 0);
+    let key = ObjectKey {
+        local_id: 1,
+        incarnation: 1,
+    };
+    assert_eq!(
+        physics_changes(&mut world),
+        [WorldChange::Spawned(key), WorldChange::Removed(key)]
+    );
+}
+
+#[test]
+fn a_held_delete_of_another_incarnation_spares_the_one_created() {
+    // Replayed against the object created, a delete of an older
+    // incarnation is stale and one of a newer incarnation is dropped (the
+    // newer create will replace the object): only the exact one deletes.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    world.apply(&delete_of(DOOR, 3));
+    world.apply(&create(
+        DOOR,
+        stamps(2, 10),
+        Some(position(0xA9B4_0031, 5.0)),
+    ));
+    assert!(world.object(DOOR).is_some());
+    assert_eq!(world.held_delete_count(), 0);
+}
+
+#[test]
+fn a_resent_description_of_an_unknown_object_replays_its_held_delete() {
+    // An update-object for an object not held is a create, held deletes
+    // included.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    let Inbound::CreateObject(door) = named(DOOR, 1, "Door") else {
+        unreachable!()
+    };
+    world.apply(&Inbound::UpdateObject(door));
+    assert!(world.object(DOOR).is_none());
+    assert_eq!(world.held_delete_count(), 0);
+}
+
+#[test]
+fn the_players_delete_is_never_held() {
+    let mut world = World::new();
+    world.set_player(PLAYER);
+    world.apply(&delete_of(PLAYER, 1));
+    assert_eq!(world.held_delete_count(), 0);
+    world.apply(&create(
+        PLAYER,
+        stamps(1, 1),
+        Some(position(0xA9B4_0031, 1.0)),
+    ));
+    assert!(world.object(PLAYER).is_some());
+}
+
 pub(crate) fn named(guid: u32, instance: u16, name: &str) -> Inbound<'static> {
     let mut message = create(guid, stamps(instance, 1), None);
     if let Inbound::CreateObject(create) = &mut message {

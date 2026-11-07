@@ -214,6 +214,9 @@ pub enum QueueNote {
     MovedIntoContainer(u32),
     /// A create for the object landed (new, or described again).
     Spawned(u32),
+    /// A delete for an object not created yet is held for its create; it
+    /// lives as long as an object on the queue.
+    DeleteHeld(u32),
     /// The item table was emptied.
     Cleared,
     /// The trade partner put an item into the trade.
@@ -413,6 +416,7 @@ impl LivenessController {
                     self.queued.remove(&member);
                 }
             }
+            QueueNote::DeleteHeld(guid) => self.enqueue(guid, player),
             QueueNote::Cleared => {
                 self.queued.clear();
                 self.nested_lists.clear();
@@ -475,8 +479,10 @@ impl LivenessController {
                 world.expire(candidate);
                 removed.push(candidate);
             } else {
-                // Known only from a container's contents list, never created.
+                // Known only from a container's contents list or a delete
+                // that came first, never created.
                 world.remove_item(guid);
+                world.forget_held_deletes(guid);
             }
             self.follow(world, kept);
         }
@@ -1071,6 +1077,41 @@ mod tests {
         assert!(f.gone(0x8000_1002));
         assert!(f.world.object(0x8000_1001).is_none());
         assert!(!f.gone(CORPSE));
+    }
+
+    #[test]
+    fn a_held_delete_is_forgotten_twenty_five_seconds_on() {
+        // The game keeps a delete for an object it does not know on the
+        // destruction queue: 25 seconds after it (the last one, when
+        // several came) it is gone, and a create after that stays.
+        const LATE: u32 = 0x7000_0042;
+        let mut f = Contents::new();
+        f.tick(1.0);
+        delete(&mut f.world, LATE);
+        f.tick(25.5);
+        assert_eq!(f.world.held_delete_count(), 1);
+        f.tick(26.5);
+        assert_eq!(f.world.held_delete_count(), 0);
+        assert_eq!(f.controller.queued_object_count(), 0);
+        f.world.apply(&create(
+            LATE,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 5.0)),
+        ));
+        assert!(f.world.object(LATE).is_some());
+
+        // Within the 25 seconds the create takes the delete.
+        const EARLY: u32 = 0x7000_0043;
+        delete(&mut f.world, EARLY);
+        f.tick(30.0);
+        f.world.apply(&create(
+            EARLY,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 6.0)),
+        ));
+        f.tick(40.0);
+        assert!(f.world.object(EARLY).is_none());
+        assert_eq!(f.controller.queued_object_count(), 0);
     }
 
     #[test]

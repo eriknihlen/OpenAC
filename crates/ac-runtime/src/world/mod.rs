@@ -124,6 +124,10 @@ pub struct World {
     /// Each object's single-quality update counters, kept while its item
     /// record lives.
     quality_stamps: HashMap<u32, QualityStamps>,
+    /// Deletes that arrived before their object's create, by object, in
+    /// arrival order (their instance counters). The create replays them;
+    /// the destruction queue forgets them 25 seconds after the last one.
+    held_deletes: HashMap<u32, Vec<u16>>,
     /// The last message applied was a single-quality update the world did
     /// not take (older than the one held, or for an object it has no record
     /// of).
@@ -739,6 +743,7 @@ impl World {
             self.queue_notes
                 .push(liveness::QueueNote::Spawned(create.guid));
             self.attach_after_spawn(create);
+            self.replay_held_deletes(create.guid);
             return;
         };
         match existing.gate.seed_for_create_object(stamps) {
@@ -888,11 +893,28 @@ impl World {
     }
 
     fn apply_delete(&mut self, delete: &DeleteObject) {
-        let is_player = self.is_player(delete.guid);
-        let accepted = self.objects.get(&delete.guid).is_some_and(|o| {
-            o.gate
-                .try_accept_delete(delete.instance_sequence, is_player)
-        });
+        // The local player is never deleted.
+        if self.is_player(delete.guid) {
+            return;
+        }
+        let Some(object) = self.objects.get(&delete.guid) else {
+            // A delete that overtook its object's create (a resent create
+            // after packet loss) waits for that create, which replays it;
+            // the destruction queue forgets it 25 seconds on.
+            self.held_deletes
+                .entry(delete.guid)
+                .or_default()
+                .push(delete.instance_sequence);
+            self.queue_notes
+                .push(liveness::QueueNote::DeleteHeld(delete.guid));
+            return;
+        };
+        // Only the exact incarnation held is deleted; an older one is
+        // stale, and one for a newer incarnation is dropped as well: the
+        // newer create replaces the object held without it.
+        let accepted = object
+            .gate
+            .try_accept_delete(delete.instance_sequence, false);
         if accepted && let Some(object) = self.objects.remove(&delete.guid) {
             self.attachments
                 .delete_generation(delete.guid, delete.instance_sequence);
@@ -901,6 +923,29 @@ impl World {
                 t.remove_logical_generation(delete.guid, delete.instance_sequence, e)
             });
         }
+    }
+
+    /// The object was just created: the deletes that arrived before it are
+    /// taken now, in their order, as if they arrived after it.
+    fn replay_held_deletes(&mut self, guid: u32) {
+        for instance_sequence in self.held_deletes.remove(&guid).unwrap_or_default() {
+            self.apply_delete(&DeleteObject {
+                guid,
+                instance_sequence,
+            });
+        }
+    }
+
+    /// The destruction queue's time for the deletes held for `guid` ran
+    /// out before its create arrived: they are forgotten.
+    pub fn forget_held_deletes(&mut self, guid: u32) {
+        self.held_deletes.remove(&guid);
+    }
+
+    /// How many deletes wait for their object's create.
+    #[must_use]
+    pub fn held_delete_count(&self) -> usize {
+        self.held_deletes.values().map(Vec::len).sum()
     }
 
     fn apply_position(&mut self, update: &UpdatePosition) {
