@@ -574,6 +574,21 @@ impl World {
             {
                 self.with_items(|t, e| t.update_int64_property(player, u.property, u.value, e));
             }
+            Inbound::PublicUpdatePropertyInt64(u)
+                if self.take_quality(u.guid, QualityKind::Int64, u.property, u.sequence) =>
+            {
+                self.with_items(|t, e| t.update_int64_property(u.guid, u.property, u.value, e));
+            }
+            Inbound::PublicUpdatePropertyFloat(u)
+                if self.take_quality(u.guid, QualityKind::Float, u.property, u.sequence) =>
+            {
+                self.with_items(|t, e| t.update_float_property(u.guid, u.property, u.value, e));
+            }
+            Inbound::PrivateUpdatePropertyFloat(u)
+                if self.take_quality(player, QualityKind::Float, u.property, u.sequence) =>
+            {
+                self.with_items(|t, e| t.update_float_property(player, u.property, u.value, e));
+            }
             Inbound::PrivateUpdatePropertyDataId(u)
                 if self.take_quality(player, QualityKind::DataId, u.property, u.sequence) =>
             {

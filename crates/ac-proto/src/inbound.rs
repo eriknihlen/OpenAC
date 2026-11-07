@@ -5,10 +5,11 @@ use crate::{
 };
 use crate::{
     InventoryRemoveObject, PrivateUpdateAttribute, PrivateUpdatePosition,
-    PrivateUpdatePropertyBool, PrivateUpdatePropertyDataId, PrivateUpdatePropertyInstanceId,
-    PrivateUpdatePropertyInt, PrivateUpdatePropertyInt64, PrivateUpdatePropertyString,
-    PrivateUpdateSkill, PrivateUpdateVital, PrivateUpdateVitalCurrent, PublicUpdatePropertyBool,
-    PublicUpdatePropertyDataId, PublicUpdatePropertyInstanceId, PublicUpdatePropertyInt,
+    PrivateUpdatePropertyBool, PrivateUpdatePropertyDataId, PrivateUpdatePropertyFloat,
+    PrivateUpdatePropertyInstanceId, PrivateUpdatePropertyInt, PrivateUpdatePropertyInt64,
+    PrivateUpdatePropertyString, PrivateUpdateSkill, PrivateUpdateVital, PrivateUpdateVitalCurrent,
+    PublicUpdatePropertyBool, PublicUpdatePropertyDataId, PublicUpdatePropertyFloat,
+    PublicUpdatePropertyInstanceId, PublicUpdatePropertyInt, PublicUpdatePropertyInt64,
     PublicUpdatePropertyString, SetStackSize,
 };
 
@@ -49,6 +50,12 @@ pub enum Inbound<'a> {
     PrivateUpdatePropertyInt(PrivateUpdatePropertyInt),
     /// A 64-bit integer property changed on the player.
     PrivateUpdatePropertyInt64(PrivateUpdatePropertyInt64),
+    /// A 64-bit integer property changed on a visible object.
+    PublicUpdatePropertyInt64(PublicUpdatePropertyInt64),
+    /// A decimal property changed on the player.
+    PrivateUpdatePropertyFloat(PrivateUpdatePropertyFloat),
+    /// A decimal property changed on a visible object.
+    PublicUpdatePropertyFloat(PublicUpdatePropertyFloat),
     /// A true/false property changed on the player.
     PrivateUpdatePropertyBool(PrivateUpdatePropertyBool),
     /// A true/false property changed on a visible object.
@@ -170,6 +177,15 @@ impl<'a> Inbound<'a> {
             }
             Some(Opcode::PrivateUpdatePropertyInt64) => {
                 Self::PrivateUpdatePropertyInt64(PrivateUpdatePropertyInt64::parse(body)?)
+            }
+            Some(Opcode::PublicUpdatePropertyInt64) => {
+                Self::PublicUpdatePropertyInt64(PublicUpdatePropertyInt64::parse(body)?)
+            }
+            Some(Opcode::PrivateUpdatePropertyFloat) => {
+                Self::PrivateUpdatePropertyFloat(PrivateUpdatePropertyFloat::parse(body)?)
+            }
+            Some(Opcode::PublicUpdatePropertyFloat) => {
+                Self::PublicUpdatePropertyFloat(PublicUpdatePropertyFloat::parse(body)?)
             }
             Some(Opcode::PrivateUpdatePropertyBool) => {
                 Self::PrivateUpdatePropertyBool(PrivateUpdatePropertyBool::parse(body)?)
@@ -474,7 +490,7 @@ mod tests {
             w.into_vec()
         }
         type Check = fn(&Inbound<'_>) -> bool;
-        let cases: [(Vec<u8>, Check); 14] = [
+        let cases: [(Vec<u8>, Check); 17] = [
             (
                 with_sequence(0x02CE, &[1, 18, 9]),
                 |m| matches!(m, Inbound::PublicUpdatePropertyInt(p) if p.guid == 1 && p.value == 9),
@@ -486,6 +502,19 @@ mod tests {
             (
                 with_sequence(0x02CF, &[1, 7, 0]),
                 |m| matches!(m, Inbound::PrivateUpdatePropertyInt64(p) if p.value == 7),
+            ),
+            (
+                with_sequence(0x02D0, &[1, 2, 7, 0]),
+                |m| matches!(m, Inbound::PublicUpdatePropertyInt64(p) if p.guid == 1 && p.value == 7),
+            ),
+            (
+                // 1.25 as a little-endian double: low word 0, high 0x3FF4_0000.
+                with_sequence(0x02D4, &[1, 39, 0, 0x3FF4_0000]),
+                |m| matches!(m, Inbound::PublicUpdatePropertyFloat(p) if p.property == 39 && p.value == 1.25),
+            ),
+            (
+                with_sequence(0x02D3, &[76, 0, 0x3FE0_0000]),
+                |m| matches!(m, Inbound::PrivateUpdatePropertyFloat(p) if p.property == 76 && p.value == 0.5),
             ),
             (
                 with_sequence(0x02D8, &[1, 52, 0x0600_1234]),

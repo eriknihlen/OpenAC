@@ -476,6 +476,65 @@ fn an_update_for_an_object_without_a_record_is_refused() {
 }
 
 #[test]
+fn float_and_public_int64_updates_land_on_the_item_record() {
+    // The game applies the public float and 64-bit updates (and the private
+    // float) to the object's properties, behind the same counters: a
+    // tailored item's scale or shade, a quest's float or 64-bit stat.
+    let mut world = World::new();
+    world.set_player(PLAYER);
+    world.apply(&named(PLAYER, 1, "Player"));
+    world.apply(&named(DOOR, 1, "Door"));
+    world.take_table_events();
+    let float = |sequence, value| {
+        Inbound::PublicUpdatePropertyFloat(ac_proto::PublicUpdatePropertyFloat {
+            sequence,
+            guid: DOOR,
+            property: 39,
+            value,
+        })
+    };
+    world.apply(&float(2, 1.25));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.floats.get(&39),
+        Some(&1.25)
+    );
+    assert!(
+        world
+            .take_table_events()
+            .iter()
+            .any(|e| matches!(e, TableEvent::Updated { object_id, .. } if *object_id == DOOR))
+    );
+    world.apply(&float(1, 0.5));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.floats.get(&39),
+        Some(&1.25)
+    );
+    world.apply(&Inbound::PublicUpdatePropertyInt64(
+        ac_proto::PublicUpdatePropertyInt64 {
+            sequence: 1,
+            guid: DOOR,
+            property: 2,
+            value: -5,
+        },
+    ));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.int64s.get(&2),
+        Some(&-5)
+    );
+    world.apply(&Inbound::PrivateUpdatePropertyFloat(
+        ac_proto::PrivateUpdatePropertyFloat {
+            sequence: 1,
+            property: 76,
+            value: 0.75,
+        },
+    ));
+    assert_eq!(
+        world.item(PLAYER).unwrap().properties.floats.get(&76),
+        Some(&0.75)
+    );
+}
+
+#[test]
 fn private_updates_wait_for_the_player_description() {
     let mut world = World::new();
     world.set_player(PLAYER);

@@ -121,11 +121,11 @@ pub use player_description::{
 };
 pub use quality_update::{
     PrivateUpdateAttribute, PrivateUpdatePosition, PrivateUpdatePropertyBool,
-    PrivateUpdatePropertyDataId, PrivateUpdatePropertyInstanceId, PrivateUpdatePropertyInt,
-    PrivateUpdatePropertyInt64, PrivateUpdatePropertyString, PrivateUpdateSkill,
-    PrivateUpdateVital, PrivateUpdateVitalCurrent, PublicUpdatePropertyBool,
-    PublicUpdatePropertyDataId, PublicUpdatePropertyInstanceId, PublicUpdatePropertyInt,
-    PublicUpdatePropertyString,
+    PrivateUpdatePropertyDataId, PrivateUpdatePropertyFloat, PrivateUpdatePropertyInstanceId,
+    PrivateUpdatePropertyInt, PrivateUpdatePropertyInt64, PrivateUpdatePropertyString,
+    PrivateUpdateSkill, PrivateUpdateVital, PrivateUpdateVitalCurrent, PublicUpdatePropertyBool,
+    PublicUpdatePropertyDataId, PublicUpdatePropertyFloat, PublicUpdatePropertyInstanceId,
+    PublicUpdatePropertyInt, PublicUpdatePropertyInt64, PublicUpdatePropertyString,
 };
 pub use update_motion::UpdateMotion;
 pub use update_position::*;
