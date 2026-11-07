@@ -152,3 +152,39 @@ fn a_body_in_no_cell_turns_solid_without_asking() {
     assert!(!ethereal(&d));
     assert_eq!(world.asked.get(), 0);
 }
+
+/// The yaw of `q`, radians (turned about the up axis).
+fn yaw(q: Quat) -> f32 {
+    let forward = q * Vec3::X;
+    forward.y.atan2(forward.x)
+}
+
+#[test]
+fn a_spin_hook_turns_a_server_object_by_its_spin_each_second() {
+    // A swarm's spin: radians per second about the up axis.
+    const SPIN: f32 = -0.026_797_784;
+    let world = OverlapWorld::default();
+    let mut d = body_with_hook(HookData::SetOmega {
+        axis: ac_dat::types::Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: SPIN,
+        },
+    });
+    // Off the ground (a floating swarm): nothing holds its spin at zero.
+    d.obj.body.transient_state = TransientState::ACTIVE;
+    d.airborne = true;
+    for _ in 0..3 {
+        tick(&mut d, &world);
+    }
+    assert_eq!(d.obj.body.omega, Vec3::new(0.0, 0.0, SPIN));
+    let before = yaw(d.obj.body.orientation);
+    for _ in 0..10 {
+        tick(&mut d, &world);
+    }
+    let turned = yaw(d.obj.body.orientation) - before;
+    assert!(
+        (turned - SPIN * 1.0).abs() < 1e-4,
+        "one second turned it {turned} radians"
+    );
+}

@@ -257,8 +257,8 @@ impl<W: WeenieObject> ObjectCx<'_, W> {
 
     /// Take the hooks the last advance reached, in order, and carry out the
     /// ones that change the object itself: an animation that finished, the
-    /// object turning ethereal or solid (a host that draws nothing does
-    /// this after each step).
+    /// object turning ethereal or solid, its spin (a host that draws
+    /// nothing does this after each step).
     pub fn take_reached_points(&mut self) {
         let Some(seq) = self.obj.sequencer.as_mut() else {
             return;
@@ -269,6 +269,12 @@ impl<W: WeenieObject> ObjectCx<'_, W> {
                 ac_dat::objects::HookData::AnimationDone => self.animation_done(true),
                 ac_dat::objects::HookData::Ethereal { ethereal } => {
                     self.set_ethereal(ethereal);
+                }
+                // The spin is the body's own: its physics turns it by it
+                // every update until something else sets it (the server's
+                // vector, standing on walkable ground).
+                ac_dat::objects::HookData::SetOmega { axis } => {
+                    self.obj.body.omega = Vec3::new(axis.x, axis.y, axis.z);
                 }
                 _ => {}
             }
