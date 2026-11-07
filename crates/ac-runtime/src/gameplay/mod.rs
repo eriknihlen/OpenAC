@@ -847,8 +847,10 @@ impl Gameplay {
                 self.deaths
                     .forget_incarnation(delete.guid, delete.instance_sequence);
             }
+            // A combat mode the world refused as older than the one it
+            // holds changes nothing.
             Inbound::PrivateUpdatePropertyInt(update)
-                if update.property == COMBAT_MODE_PROPERTY =>
+                if update.property == COMBAT_MODE_PROPERTY && !ctx.world.refused_last_update() =>
             {
                 let mode = CombatMode(update.value.cast_unsigned());
                 if matches!(

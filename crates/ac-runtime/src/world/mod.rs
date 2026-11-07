@@ -5,7 +5,9 @@
 //! position, motion, appearance, behind the update-counter gate) and the item
 //! record in `ac_core`'s object table (description, properties,
 //! containment). A physics update that is not new enough changes nothing
-//! and records nothing; item updates have no counters and always apply.
+//! and records nothing. A single-quality update (one property, vital,
+//! attribute, skill or stack size) has its own one-byte counter per object
+//! and property; one older than the last taken changes nothing either.
 
 mod attachments;
 mod items;
@@ -19,7 +21,9 @@ pub mod transit;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use ac_core::items::{ClientObject, ClientObjectTable, TableEvent};
+use ac_core::items::{
+    ClientObject, ClientObjectTable, QualityKind, QualityStamps, STACK_SIZE_PROPERTY, TableEvent,
+};
 use ac_core::physics::{
     CreateDisposition, PhysicsTimestampGate, PhysicsTimestamps, PositionDisposition, is_newer,
     is_valid_position,
@@ -117,6 +121,13 @@ pub struct World {
     /// The server's last fog override (AdminEnvirons 0..=6, 0 clears it);
     /// `None` until one arrives.
     environ_override: Option<u32>,
+    /// Each object's single-quality update counters, kept while its item
+    /// record lives.
+    quality_stamps: HashMap<u32, QualityStamps>,
+    /// The last message applied was a single-quality update the world did
+    /// not take (older than the one held, or for an object it has no record
+    /// of).
+    refused_update: bool,
 }
 
 impl World {
@@ -496,6 +507,9 @@ impl World {
     /// to [`apply_player_description`](Self::apply_player_description) and
     /// [`apply_appraisal`](Self::apply_appraisal).
     pub fn apply(&mut self, message: &Inbound<'_>) {
+        self.refused_update = false;
+        // The private forms are about the player's own object.
+        let player = self.player_guid.unwrap_or(0);
         match message {
             Inbound::CreateObject(create) => self.apply_create(create),
             Inbound::UpdateObject(update) => self.apply_update_object(update),
@@ -507,62 +521,106 @@ impl World {
             Inbound::ObjDescEvent(update) => self.apply_obj_desc(update),
             Inbound::ParentEvent(update) => self.apply_parent(update),
             Inbound::PickupEvent(update) => self.apply_pickup(update),
-            Inbound::PublicUpdatePropertyInt(u) => {
+            // A single-quality update the object does not take (older than
+            // the one it holds, or for an object without a record) falls
+            // through and changes nothing.
+            Inbound::PublicUpdatePropertyInt(u)
+                if self.take_quality(u.guid, QualityKind::Int, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_int_property(u.guid, u.property, u.value, e));
             }
-            Inbound::PublicUpdatePropertyDataId(u) => {
+            Inbound::PublicUpdatePropertyDataId(u)
+                if self.take_quality(u.guid, QualityKind::DataId, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_data_id_property(u.guid, u.property, u.value, e));
             }
-            Inbound::PublicUpdatePropertyInstanceId(u) => {
+            Inbound::PublicUpdatePropertyInstanceId(u)
+                if self.take_quality(u.guid, QualityKind::InstanceId, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| {
                     t.update_instance_id_property(u.guid, u.property, u.value, e)
                 });
             }
-            Inbound::PublicUpdatePropertyString(u) => {
+            Inbound::PublicUpdatePropertyString(u)
+                if self.take_quality(u.guid, QualityKind::String, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_string_property(u.guid, u.property, &u.value, e));
             }
-            Inbound::PrivateUpdatePropertyString(u) => {
-                let player = self.player_guid.unwrap_or(0);
+            Inbound::PrivateUpdatePropertyString(u)
+                if self.take_quality(player, QualityKind::String, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_string_property(player, u.property, &u.value, e));
             }
-            Inbound::PublicUpdatePropertyBool(u) => {
+            Inbound::PublicUpdatePropertyBool(u)
+                if self.take_quality(u.guid, QualityKind::Bool, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_bool_property(u.guid, u.property, u.value, e));
             }
-            Inbound::PrivateUpdatePropertyBool(u) => {
-                let player = self.player_guid.unwrap_or(0);
+            Inbound::PrivateUpdatePropertyBool(u)
+                if self.take_quality(player, QualityKind::Bool, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_bool_property(player, u.property, u.value, e));
             }
-            Inbound::PrivateUpdatePropertyInt(u) => {
+            Inbound::PrivateUpdatePropertyInt(u)
+                if self.take_quality(player, QualityKind::Int, u.property, u.sequence) =>
+            {
                 // The player's value lives in both projections; one
                 // message updates both so they cannot drift.
-                let player = self.player_guid.unwrap_or(0);
                 self.with_items(|t, e| t.update_int_property(player, u.property, u.value, e));
                 self.update_player(|s| s.apply_int(u.property, u.value));
             }
-            Inbound::PrivateUpdatePropertyInt64(u) => {
-                let player = self.player_guid.unwrap_or(0);
+            Inbound::PrivateUpdatePropertyInt64(u)
+                if self.take_quality(player, QualityKind::Int64, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_int64_property(player, u.property, u.value, e));
             }
-            Inbound::PrivateUpdatePropertyDataId(u) => {
-                let player = self.player_guid.unwrap_or(0);
+            Inbound::PrivateUpdatePropertyDataId(u)
+                if self.take_quality(player, QualityKind::DataId, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_data_id_property(player, u.property, u.value, e));
             }
-            Inbound::PrivateUpdatePropertyInstanceId(u) => {
-                let player = self.player_guid.unwrap_or(0);
+            Inbound::PrivateUpdatePropertyInstanceId(u)
+                if self.take_quality(player, QualityKind::InstanceId, u.property, u.sequence) =>
+            {
                 self.with_items(|t, e| {
                     t.update_instance_id_property(player, u.property, u.value, e)
                 });
             }
-            Inbound::PrivateUpdatePosition(u) => {
+            Inbound::PrivateUpdatePosition(u)
+                if self.take_quality(
+                    player,
+                    QualityKind::Position,
+                    u.position_type,
+                    u.sequence,
+                ) =>
+            {
                 self.update_player(|s| s.apply_position(u.position_type, u.position));
             }
-            Inbound::PrivateUpdateVital(u) => self.update_player(|s| s.apply_vital(u)),
-            Inbound::PrivateUpdateVitalCurrent(u) => {
+            // The whole vital and its current value alone share one counter.
+            Inbound::PrivateUpdateVital(u)
+                if self.take_quality(player, QualityKind::Vital, u.vital, u.sequence) =>
+            {
+                self.update_player(|s| s.apply_vital(u));
+            }
+            Inbound::PrivateUpdateVitalCurrent(u)
+                if self.take_quality(player, QualityKind::Vital, u.vital, u.sequence) =>
+            {
                 self.update_player(|s| s.apply_vital_current(u));
             }
-            Inbound::PrivateUpdateAttribute(u) => self.update_player(|s| s.apply_attribute(u)),
-            Inbound::PrivateUpdateSkill(u) => self.update_player(|s| s.apply_skill(u)),
-            Inbound::SetStackSize(u) => {
+            Inbound::PrivateUpdateAttribute(u)
+                if self.take_quality(player, QualityKind::Attribute, u.attribute, u.sequence) =>
+            {
+                self.update_player(|s| s.apply_attribute(u));
+            }
+            Inbound::PrivateUpdateSkill(u)
+                if self.take_quality(player, QualityKind::Skill, u.skill, u.sequence) =>
+            {
+                self.update_player(|s| s.apply_skill(u));
+            }
+            // The stack size counts with the int stack-size property.
+            Inbound::SetStackSize(u)
+                if self.take_quality(u.guid, QualityKind::Int, STACK_SIZE_PROPERTY, u.sequence) =>
+            {
                 self.with_items(|t, e| t.update_stack_size(u.guid, u.stack_size, u.value, e));
             }
             Inbound::InventoryRemoveObject(u) => {
@@ -614,6 +672,31 @@ impl World {
         Ok(())
     }
 
+    /// Whether the last message [`apply`](Self::apply) took was a
+    /// single-quality update the world refused: older than the one it holds
+    /// for that property, or for an object it has no record of. Owners that
+    /// react to the same message (the combat mode) follow the world's
+    /// verdict.
+    #[must_use]
+    pub fn refused_last_update(&self) -> bool {
+        self.refused_update
+    }
+
+    /// A single-quality update of `property` of `kind` with `sequence`
+    /// arrived for `guid`: whether its object takes it. An object with no
+    /// item record takes none; otherwise the first update of a property is
+    /// taken, then only one not older than the last taken.
+    fn take_quality(&mut self, guid: u32, kind: QualityKind, property: u32, sequence: u8) -> bool {
+        let taken = self.items.get(guid).is_some()
+            && self
+                .quality_stamps
+                .entry(guid)
+                .or_default()
+                .update(kind, property, sequence);
+        self.refused_update = !taken;
+        taken
+    }
+
     fn is_player(&self, guid: u32) -> bool {
         self.player_guid == Some(guid)
     }
@@ -632,6 +715,8 @@ impl World {
     fn apply_create(&mut self, create: &CreateObject) {
         let stamps = timestamps(create);
         let Some(existing) = self.objects.get_mut(&create.guid) else {
+            // A new object starts its quality counters afresh.
+            self.quality_stamps.remove(&create.guid);
             let mut gate = PhysicsTimestampGate::new();
             gate.seed_for_create_object(stamps);
             self.insert(create, gate, false);
@@ -769,6 +854,8 @@ impl World {
         // moves to its pack's top-left slot). One not held only refreshes
         // the item record, where it is; it never puts an object in the
         // world.
+        // Created again, the object starts its quality counters afresh.
+        self.quality_stamps.remove(&update.guid);
         let Some(existing) = self.objects.get_mut(&update.guid) else {
             self.ingest_description(update);
             return;

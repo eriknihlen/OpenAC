@@ -321,6 +321,30 @@ fn the_toggle_sends_the_default_mode_and_the_server_s_word_follows() {
 }
 
 #[test]
+fn a_combat_mode_older_than_the_one_held_changes_nothing() {
+    // The game's per-property update counter: the combat-mode property
+    // follows the world's verdict, so a late packet carrying an older mode
+    // does not undo a newer one.
+    let mut f = Fixture::in_the_field();
+    let mode = |sequence, value| {
+        Inbound::PrivateUpdatePropertyInt(PrivateUpdatePropertyInt {
+            sequence,
+            property: COMBAT_MODE_PROPERTY,
+            value,
+        })
+    };
+    f.apply(&mode(5, CombatMode::MELEE.bits().cast_signed()));
+    assert_eq!(f.gameplay.combat().server_mode(), Some(CombatMode::MELEE));
+    f.apply(&mode(4, CombatMode::NON_COMBAT.bits().cast_signed()));
+    assert_eq!(f.gameplay.combat().server_mode(), Some(CombatMode::MELEE));
+    f.apply(&mode(6, CombatMode::NON_COMBAT.bits().cast_signed()));
+    assert_eq!(
+        f.gameplay.combat().server_mode(),
+        Some(CombatMode::NON_COMBAT)
+    );
+}
+
+#[test]
 fn with_a_body_bound_a_mode_change_waits_for_the_stance_and_a_teleport_refuses_it() {
     // OpenAC `RuntimeCombatModeReadiness` (bound by `GameRuntime`): the body
     // is not ready with no body to ask, so the change is parked; a teleport

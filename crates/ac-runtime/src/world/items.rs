@@ -240,6 +240,14 @@ impl World {
         let mut events = Vec::new();
         let result = mutate(&mut self.items, &mut events);
         for event in events {
+            // An object's quality counters live as long as its record.
+            match &event {
+                TableEvent::Removed { object, .. } => {
+                    self.quality_stamps.remove(&object.object_id());
+                }
+                TableEvent::Cleared => self.quality_stamps.clear(),
+                _ => {}
+            }
             if let Some(change) = ItemChange::of(&event) {
                 self.changes.push(WorldChange::Item(change));
             }
