@@ -448,7 +448,11 @@ fn every_render_surface_decodes_to_the_golden_totals() {
         ]
     );
     assert_eq!(
-        summary(&d.high_res),
+        summary(
+            d.high_res
+                .as_ref()
+                .expect("the install has client_highres.dat")
+        ),
         [
             2294,
             469_120,

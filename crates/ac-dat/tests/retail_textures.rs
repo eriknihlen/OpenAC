@@ -248,7 +248,13 @@ fn every_texture_decodes_like_the_reference_decoders() {
     };
     let mut got = BTreeMap::new();
     sweep(&d.portal, "portal", &mut got);
-    sweep(&d.high_res, "highres", &mut got);
+    sweep(
+        d.high_res
+            .as_ref()
+            .expect("the install has client_highres.dat"),
+        "highres",
+        &mut got,
+    );
     let total = got.values().fold(0u64, |a, (_, h)| a.wrapping_add(*h));
     let expected: BTreeMap<String, (u64, u64)> = [
         ("highres:A8R8G8B8", 3, 0x54FD_BBC1_BF5F_B9DE),

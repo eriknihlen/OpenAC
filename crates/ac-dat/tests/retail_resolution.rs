@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ac_dat::objects::{RenderSurface, Setup};
-use ac_dat::{CachedDats, DatSource};
+use ac_dat::{CachedDats, DatFile, DatSource, ITERATION_ID};
 
 fn dats() -> CachedDats {
     let dir = std::env::var_os("OPENAC_DAT_DIR")
@@ -16,17 +16,32 @@ fn dats() -> CachedDats {
     CachedDats::open(dir).expect("open the retail dats")
 }
 
+fn high_res(d: &CachedDats) -> &DatFile {
+    d.uncached()
+        .high_res
+        .as_ref()
+        .expect("the install has client_highres.dat")
+}
+
+/// The texture ids (0x06xxxxxx and 0x07xxxxxx) the high-resolution dat
+/// holds, split by whether the portal dat holds them too.
+fn high_res_textures(d: &CachedDats) -> (Vec<u32>, Vec<u32>) {
+    let portal = &d.uncached().portal;
+    high_res(d)
+        .entries()
+        .map(|e| e.unwrap().id)
+        .filter(|id| (0x0600_0000..=0x07FF_FFFF).contains(id))
+        .partition(|id| portal.find_entry(*id).unwrap().is_some())
+}
+
 #[test]
 #[ignore = "needs the retail dat files"]
 fn a_texture_only_in_the_high_res_dat_is_read_from_there() {
     let d = dats();
     let raw = d.uncached();
-    let high_res_only = raw
-        .high_res
-        .entries()
-        .map(|e| e.unwrap().id)
-        .filter(|id| (0x0600_0000..=0x07FF_FFFF).contains(id))
-        .find(|id| raw.portal.find_entry(*id).unwrap().is_none())
+    let (_, only) = high_res_textures(&d);
+    let high_res_only = *only
+        .first()
         .expect("the high-resolution dat has textures the portal dat lacks");
     assert_eq!(
         raw.resolve(high_res_only).unwrap(),
@@ -38,25 +53,23 @@ fn a_texture_only_in_the_high_res_dat_is_read_from_there() {
 
 #[test]
 #[ignore = "needs the retail dat files"]
-fn a_texture_in_both_dats_is_read_from_the_portal_dat() {
+fn the_high_res_dat_is_asked_before_the_portal_dat() {
     let d = dats();
     let raw = d.uncached();
-    let both = raw
-        .high_res
+    // The installed dats keep their objects apart: the high-resolution
+    // dat's 2,294 textures are all missing from the portal dat, and the
+    // only id the two share is the iteration record every dat carries. So
+    // the order changes no object read here; the shared record shows it.
+    let (both, only) = high_res_textures(&d);
+    assert_eq!((both.len(), only.len()), (0, 2294));
+    let shared: Vec<u32> = high_res(&d)
         .entries()
         .map(|e| e.unwrap().id)
-        .filter(|id| (0x0600_0000..=0x07FF_FFFF).contains(id))
-        .find(|id| raw.portal.find_entry(*id).unwrap().is_some());
-    // The retail dats may keep the two sets apart; when an id is in both,
-    // the portal copy wins.
-    if let Some(id) = both {
-        assert_eq!(raw.resolve(id).unwrap(), Some(DatSource::Portal));
-        let cached = d.get::<RenderSurface>(id).unwrap().unwrap();
-        assert_eq!(
-            *cached,
-            raw.portal.get::<RenderSurface>(id).unwrap().unwrap()
-        );
-    }
+        .filter(|id| raw.portal.find_entry(*id).unwrap().is_some())
+        .collect();
+    assert_eq!(shared, [ITERATION_ID]);
+    assert_eq!(raw.resolve(ITERATION_ID).unwrap(), Some(DatSource::HighRes));
+    assert_eq!(raw.portal_source(ITERATION_ID).unwrap(), DatSource::HighRes);
     assert_eq!(raw.resolve(0x0200_0001).unwrap(), Some(DatSource::Portal));
     assert_eq!(raw.resolve(0xA9B4_FFFF).unwrap(), Some(DatSource::Cell));
     assert_eq!(raw.resolve(0x7FFF_FFFE).unwrap(), None);
@@ -71,4 +84,32 @@ fn a_second_read_comes_from_the_cache() {
     assert!(Arc::ptr_eq(&first, &second));
     let stats = d.stats();
     assert_eq!((stats.hits, stats.misses), (1, 1));
+}
+
+/// An install without `client_highres.dat`: the other three dats, linked
+/// into a fresh folder, open and read as usual, and the high-resolution
+/// textures are simply not there.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn an_install_without_the_high_res_dat_still_reads() {
+    let full = dats();
+    let (_, only) = high_res_textures(&full);
+    let dir = std::env::temp_dir().join(format!("ac-dat-no-high-res-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in [ac_dat::PORTAL_DAT, ac_dat::CELL_DAT, ac_dat::LOCAL_DAT] {
+        std::fs::hard_link(full.directory().join(name), dir.join(name))
+            .expect("link the dat into the test folder (same volume)");
+    }
+    let d = CachedDats::open(&dir).expect("open without client_highres.dat");
+    assert!(d.uncached().high_res.is_none());
+    assert!(d.get::<Setup>(0x0200_0001).unwrap().is_some());
+    assert!(d.get::<RenderSurface>(only[0]).unwrap().is_none());
+    assert_eq!(d.uncached().resolve(only[0]).unwrap(), None);
+    assert_eq!(
+        d.uncached().resolve(ITERATION_ID).unwrap(),
+        Some(DatSource::Portal)
+    );
+    drop(d);
+    std::fs::remove_dir_all(dir).ok();
 }

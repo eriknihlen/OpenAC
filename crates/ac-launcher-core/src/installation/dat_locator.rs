@@ -1,14 +1,16 @@
-//! Finding the retail DAT directory and checking it holds the four files.
+//! Finding the retail DAT directory and checking it holds the files the
+//! client needs.
 
 use std::path::{Path, PathBuf};
 
 use crate::fsutil;
 
-/// The four retail DAT files the client reads.
-pub const REQUIRED_DAT_FILE_NAMES: [&str; 4] = [
+/// The retail DAT files the client cannot run without. The client also
+/// reads `client_highres.dat` when it is there, but an install without it
+/// still plays (with the portal dat's textures).
+pub const REQUIRED_DAT_FILE_NAMES: [&str; 3] = [
     "client_portal.dat",
     "client_cell_1.dat",
-    "client_highres.dat",
     "client_local_English.dat",
 ];
 
@@ -17,7 +19,7 @@ pub const REQUIRED_DAT_FILE_NAMES: [&str; 4] = [
 pub struct DatDirectoryValidation {
     /// The directory, made absolute, no trailing separator.
     pub directory: PathBuf,
-    /// Whether all four files are there.
+    /// Whether all the required files are there.
     pub is_valid: bool,
     /// A line for the player.
     pub message: String,
@@ -30,7 +32,7 @@ impl DatDirectoryValidation {
         Self {
             directory,
             is_valid: true,
-            message: "All four required retail DAT files were found.".into(),
+            message: "All three required retail DAT files were found.".into(),
             missing_file_names: Vec::new(),
         }
     }

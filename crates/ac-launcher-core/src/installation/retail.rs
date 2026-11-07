@@ -66,8 +66,8 @@ impl RetailContentStore {
         )
     }
 
-    /// Reads the record and checks the directory still holds the four DAT
-    /// files.
+    /// Reads the record and checks the directory still holds the required
+    /// DAT files.
     pub fn load_and_verify(&self) -> InstallRecordVerification {
         let path = self.record_path();
         if !path.exists() {

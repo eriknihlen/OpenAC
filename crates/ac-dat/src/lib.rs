@@ -6,8 +6,9 @@
 //! directory is a B-tree of [`DatEntry`] records keyed by file id; an entry
 //! gives the offset of the file's first block and its size.
 //!
-//! [`DatFile`] opens one dat; [`DatCollection`] opens the four a client
-//! uses. Typed objects ([`objects`]) decode from a file's bytes.
+//! [`DatFile`] opens one dat; [`DatCollection`] opens the ones a client
+//! uses (portal, cell, language, and high-resolution when installed). Typed
+//! objects ([`objects`]) decode from a file's bytes.
 //!
 //! [`DatFile`] is `Send + Sync`: reads go by file position through `&self`,
 //! so many threads may read one open dat at once.

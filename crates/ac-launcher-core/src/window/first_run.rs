@@ -1,6 +1,6 @@
 //! First-run setup: choose the retail DAT directory. OpenAC's wizard also
 //! bakes a prepared content package (with a thread count, progress and
-//! cancel); this client reads the DATs directly, so setup checks the four
+//! cancel); this client reads the DATs directly, so setup checks the required
 //! files and remembers the directory.
 
 use std::path::Path;
@@ -22,7 +22,7 @@ pub struct FirstRunSetup {
     pub missing_files: String,
     /// Why saving failed.
     pub error: Option<String>,
-    /// The directory holds all four files.
+    /// The directory holds all the required files.
     pub is_dat_directory_valid: bool,
     /// Setup finished; the dialog shows its completion page.
     pub is_completed: bool,
@@ -51,7 +51,7 @@ impl FirstRunSetup {
 
     /// The explanation.
     pub fn body(&self) -> &'static str {
-        "Choose your Asheron's Call data folder. OpenAC will check that the four retail DAT \
+        "Choose your Asheron's Call data folder. OpenAC will check that the retail DAT \
          files are there. This client reads them directly, so there is nothing to build."
     }
 

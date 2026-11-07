@@ -75,7 +75,7 @@ pub fn cache_area(
 /// The dats and the caches in front of them.
 #[derive(Debug)]
 pub struct Content {
-    /// The four dats, each behind a bounded object cache.
+    /// The dats, each behind a bounded object cache.
     pub dats: CachedDats,
     /// Decoded texture pixels, bounded.
     pub textures: DecodedTextureCache,
