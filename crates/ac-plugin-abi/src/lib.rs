@@ -9,10 +9,12 @@
 //! with [`wire`] and passed as `(pointer, length)` in the plugin's memory.
 //! This crate is the contract, one module per API group.
 //!
-//! API 1.0 is still being built: its imports and records may change
-//! until the first converted plugin ships, when it is frozen. A change is
-//! never silent: it changes the [`layout`] fingerprint, and the client
-//! refuses a plugin built with another one until it is rebuilt.
+//! A released API version never changes: a new function, event or record
+//! field arrives in the next minor version, and a field or event added
+//! later is marked with the version it arrived in, so a plugin built for an
+//! older version keeps its layout. Every version's shape is pinned by the
+//! [`layout`] fingerprint, and the client compares a plugin with the layout
+//! of the version it was built for.
 
 pub mod callback;
 pub mod character;
