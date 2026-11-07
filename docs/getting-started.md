@@ -49,9 +49,9 @@ then moves.
 ## 2. Your game data
 
 The client ships no game data. You need the original data files:
-`client_portal.dat`, `client_cell_1.dat`, `client_highres.dat` and
-`client_local_English.dat`. The launcher asks for their folder the first time
-it runs.
+`client_portal.dat`, `client_cell_1.dat` and `client_local_English.dat`, and
+`client_highres.dat` if you have it (optional: its sharper textures are used
+when it is there). The launcher asks for their folder the first time it runs.
 
 ## 3. A server
 

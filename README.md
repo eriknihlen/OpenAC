@@ -111,7 +111,8 @@ You will need:
 - A GPU and driver with **Direct3D 12** (Windows) or **Vulkan** (Windows or
   Linux); on macOS, **Metal** (every Mac that runs macOS 14).
 - **Your own Asheron's Call data files** (`client_portal.dat`,
-  `client_cell_1.dat`, `client_highres.dat`, `client_local_English.dat`).
+  `client_cell_1.dat`, `client_local_English.dat`; `client_highres.dat` is
+  optional and used when present).
   The launcher asks for their folder on first run; `openac` looks in
   `Documents\Asheron's Call` under your user profile unless `--dat-dir` or
   `OPENAC_DAT_DIR` names another.

@@ -62,6 +62,11 @@ pub trait DatSource {
         &self,
         id: u32,
     ) -> Result<Option<Arc<T>>, DatError>;
+
+    /// Whether the high-resolution dat is open, which decides the level a
+    /// two-level surface texture is drawn from
+    /// (`SurfaceTexture::source_level`).
+    fn has_high_res(&self) -> bool;
 }
 
 impl DatSource for CachedDats {
@@ -71,6 +76,10 @@ impl DatSource for CachedDats {
     ) -> Result<Option<Arc<T>>, DatError> {
         self.get::<T>(id)
     }
+
+    fn has_high_res(&self) -> bool {
+        CachedDats::has_high_res(self)
+    }
 }
 
 impl DatSource for DatCollection {
@@ -79,6 +88,10 @@ impl DatSource for DatCollection {
         id: u32,
     ) -> Result<Option<Arc<T>>, DatError> {
         Ok(self.get::<T>(id)?.map(Arc::new))
+    }
+
+    fn has_high_res(&self) -> bool {
+        DatCollection::has_high_res(self)
     }
 }
 

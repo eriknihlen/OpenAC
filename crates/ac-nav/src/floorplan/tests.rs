@@ -45,6 +45,10 @@ impl DatSource for FakeDats {
             .get(&id)
             .and_then(|o| Arc::clone(o).downcast::<T>().ok()))
     }
+
+    fn has_high_res(&self) -> bool {
+        true
+    }
 }
 
 const FLOOR: u16 = 0;

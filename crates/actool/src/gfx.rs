@@ -176,8 +176,10 @@ pub fn texture(dir: &Path, id: u32, out: &Path) -> Result {
                 "SurfaceTexture {id:#010X}: type {} textures {:08X?}",
                 t.texture_type.0, t.textures
             );
-            let first = *t.textures.first().ok_or("the surface texture is empty")?;
-            render_surface(&dats, first, DecodeOptions::default())?
+            let level = dats
+                .texture_source(&t)
+                .ok_or("the surface texture has no level to draw")?;
+            render_surface(&dats, level, DecodeOptions::default())?
         }
         0x08 => {
             let s: Surface = dats
@@ -207,8 +209,10 @@ pub fn texture(dir: &Path, id: u32, out: &Path) -> Result {
                     let t: SurfaceTexture = dats
                         .get(texture)?
                         .ok_or_else(|| format!("no SurfaceTexture {texture:08X}"))?;
-                    let first = *t.textures.first().ok_or("the surface texture is empty")?;
-                    render_surface(&dats, first, options)?
+                    let level = dats
+                        .texture_source(&t)
+                        .ok_or("the surface texture has no level to draw")?;
+                    render_surface(&dats, level, options)?
                 }
             }
         }

@@ -37,6 +37,10 @@ impl DatSource for FakeDats {
             .get(&id)
             .and_then(|o| Arc::clone(o).downcast::<T>().ok()))
     }
+
+    fn has_high_res(&self) -> bool {
+        true
+    }
 }
 
 /// A height table of 2 m a step.

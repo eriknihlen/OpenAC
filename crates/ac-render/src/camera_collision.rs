@@ -697,6 +697,10 @@ mod tests {
                 .get(&id)
                 .and_then(|o| std::sync::Arc::clone(o).downcast::<T>().ok()))
         }
+
+        fn has_high_res(&self) -> bool {
+            true
+        }
     }
 
     const POST_SETUP: u32 = 0x0200_0099;

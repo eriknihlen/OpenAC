@@ -310,17 +310,30 @@ impl ObjectCache {
     /// The cached object of type `T` with this file id, now the most
     /// recently used. Counts a hit or a miss.
     pub fn get<T: Any + Send + Sync>(&self, id: u32) -> Option<Arc<T>> {
-        let found = lock(&self.lru).touch(&(TypeId::of::<T>(), id));
-        match found {
-            Some(value) => {
-                Counters::bump(&self.counters.hits);
-                value.downcast::<T>().ok()
-            }
-            None => {
-                Counters::bump(&self.counters.misses);
-                None
-            }
+        let found = self.get_uncounted::<T>(id);
+        if found.is_some() {
+            self.count_hit();
+        } else {
+            self.count_miss();
         }
+        found
+    }
+
+    /// As [`ObjectCache::get`] without counting a hit or a miss: for a
+    /// reader that asks several caches for one object and counts once.
+    pub(crate) fn get_uncounted<T: Any + Send + Sync>(&self, id: u32) -> Option<Arc<T>> {
+        lock(&self.lru)
+            .touch(&(TypeId::of::<T>(), id))?
+            .downcast::<T>()
+            .ok()
+    }
+
+    pub(crate) fn count_hit(&self) {
+        Counters::bump(&self.counters.hits);
+    }
+
+    pub(crate) fn count_miss(&self) {
+        Counters::bump(&self.counters.misses);
     }
 
     /// Publish `candidate` unless an object is already cached under the key,

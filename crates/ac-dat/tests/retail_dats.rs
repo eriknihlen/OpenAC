@@ -99,7 +99,9 @@ fn headers_match_the_goldens() {
         },
     );
     check_header(
-        &d.high_res,
+        d.high_res
+            .as_ref()
+            .expect("the install has client_highres.dat"),
         &HeaderGolden {
             block_size: 1024,
             file_size: 133_169_152,
@@ -184,7 +186,11 @@ fn directory_walks_match_the_goldens() {
         )
     );
     assert_eq!(
-        walk_summary(&d.high_res),
+        walk_summary(
+            d.high_res
+                .as_ref()
+                .expect("the install has client_highres.dat")
+        ),
         (
             2_295,
             0,

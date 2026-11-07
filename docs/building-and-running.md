@@ -23,8 +23,10 @@
 - **A GPU** with Direct3D 12 (Windows) or Vulkan (Windows or Linux) to open a
   game window. Headless sessions need none.
 - **Your own Asheron's Call data files**: `client_portal.dat`,
-  `client_cell_1.dat`, `client_highres.dat` and `client_local_English.dat`,
-  in one folder. Nothing in this repository contains game data.
+  `client_cell_1.dat` and `client_local_English.dat` in one folder, with
+  `client_highres.dat` beside them if you have it (optional: its sharper
+  textures are used when it is there). Nothing in this repository contains
+  game data.
 - **A server.** OpenAC speaks the protocol of
   [ACEmulator](https://github.com/ACEmulator/ACE) servers; a local ACE server
   is the easiest way to try it.

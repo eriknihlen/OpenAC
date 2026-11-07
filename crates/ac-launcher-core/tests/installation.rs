@@ -38,11 +38,11 @@ fn create_complete_dat_directory(directory: &Path) {
 // --- DatDirectoryLocatorTests ---------------------------------------------------
 
 #[test]
-fn portable_validation_requires_the_four_exact_dat_file_names() {
+fn portable_validation_requires_the_three_exact_dat_file_names() {
     let root = TempDir::new("dats");
     let directory = root.join("retail");
     std::fs::create_dir_all(&directory).unwrap();
-    for name in &REQUIRED_DAT_FILE_NAMES[..3] {
+    for name in ["client_portal.dat", "client_cell_1.dat"] {
         std::fs::write(directory.join(name), "fixture").unwrap();
     }
     let locator = DatDirectoryLocator::new(false, None);
@@ -50,11 +50,24 @@ fn portable_validation_requires_the_four_exact_dat_file_names() {
     assert!(!incomplete.is_valid);
     assert_eq!(incomplete.missing_file_names, ["client_local_English.dat"]);
 
+    // No client_highres.dat: the client plays without it.
     std::fs::write(directory.join("client_local_English.dat"), "fixture").unwrap();
     let valid = locator.validate(Some(&directory));
-    assert!(valid.is_valid);
+    assert!(valid.is_valid, "{valid:?}");
     assert_eq!(valid.directory, full_path(&directory));
     assert!(valid.missing_file_names.is_empty());
+    assert_eq!(
+        REQUIRED_DAT_FILE_NAMES,
+        [
+            "client_portal.dat",
+            "client_cell_1.dat",
+            "client_local_English.dat"
+        ]
+    );
+
+    // With it, the directory is just as valid.
+    std::fs::write(directory.join("client_highres.dat"), "fixture").unwrap();
+    assert!(locator.validate(Some(&directory)).is_valid);
 }
 
 #[test]
@@ -72,7 +85,10 @@ fn windows_detection_checks_both_conventional_locations_in_order() {
     assert!(detected[0].is_valid);
     assert_eq!(detected[1].directory, full_path(&turbine));
     assert!(!detected[1].is_valid);
-    assert_eq!(detected[1].missing_file_names.len(), 3);
+    assert_eq!(
+        detected[1].missing_file_names,
+        ["client_cell_1.dat", "client_local_English.dat"]
+    );
 }
 
 #[test]

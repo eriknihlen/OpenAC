@@ -348,7 +348,7 @@ impl Iterator for Entries<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::btree::tests::{entry, node_bytes};
     use std::io::Write;
@@ -360,13 +360,13 @@ mod tests {
 
     /// A tiny in-memory dat builder: 64-byte blocks, header in the first
     /// blocks, then whatever chains the test lays out.
-    struct DatBuilder {
+    pub(crate) struct DatBuilder {
         bytes: Vec<u8>,
         block_size: usize,
     }
 
     impl DatBuilder {
-        fn new(block_size: usize) -> Self {
+        pub(crate) fn new(block_size: usize) -> Self {
             let header_blocks = DatHeader::SIZE.div_ceil(block_size);
             Self {
                 bytes: vec![0; header_blocks * block_size],
@@ -375,7 +375,7 @@ mod tests {
         }
 
         /// Append `data` as a fresh chain; returns its first block offset.
-        fn chain(&mut self, data: &[u8]) -> i32 {
+        pub(crate) fn chain(&mut self, data: &[u8]) -> i32 {
             let per = self.block_size - 4;
             let blocks = data.len().div_ceil(per).max(1);
             let start = self.bytes.len();
@@ -434,7 +434,7 @@ mod tests {
             at(0) as i32
         }
 
-        fn finish(mut self, file_type: u32, root: i32) -> Vec<u8> {
+        pub(crate) fn finish(mut self, file_type: u32, root: i32) -> Vec<u8> {
             let mut header = crate::header::tests::sample_header_bytes();
             header[324..328].copy_from_slice(&(self.block_size as i32).to_le_bytes());
             header[328..332].copy_from_slice(&(self.bytes.len() as i32).to_le_bytes());

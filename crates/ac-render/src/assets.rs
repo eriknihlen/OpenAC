@@ -122,8 +122,8 @@ fn magenta() -> Arc<DecodedTexture> {
     })
 }
 
-/// Decode the first (full-detail) render surface of a surface texture with
-/// its default palette.
+/// Decode the render surface a surface texture is drawn from (its level for
+/// the open dats, see `CachedDats::texture_source`) with its default palette.
 fn decode_surface_texture(
     content: &Content,
     surface_texture_id: u32,
@@ -133,7 +133,7 @@ fn decode_surface_texture(
         .dats
         .get::<SurfaceTexture>(surface_texture_id)
         .ok()??;
-    decode_render_surface(content, *st.textures.first()?, options)
+    decode_render_surface(content, content.dats.texture_source(&st)?, options)
 }
 
 /// The image in the window's title bar and task bar: the retail minimap
@@ -308,22 +308,22 @@ impl LayerTexels {
     }
 }
 
-/// The first (full-detail) render surface of a surface texture.
-fn first_render_surface(content: &Content, surface_texture_id: u32) -> Option<Arc<RenderSurface>> {
+/// The render surface a surface texture is drawn from with the open dats.
+fn source_render_surface(content: &Content, surface_texture_id: u32) -> Option<Arc<RenderSurface>> {
     let st = content
         .dats
         .get::<SurfaceTexture>(surface_texture_id)
         .ok()??;
     content
         .dats
-        .get::<RenderSurface>(*st.textures.first()?)
+        .get::<RenderSurface>(content.dats.texture_source(&st)?)
         .ok()?
 }
 
 /// A terrain layer's BGRA texels: a 32-bit colour image is already BGRA
 /// and is taken as stored; any other is decoded with its default palette.
 fn terrain_layer_texels(content: &Content, surface_texture_id: u32) -> Option<LayerTexels> {
-    let rs = first_render_surface(content, surface_texture_id)?;
+    let rs = source_render_surface(content, surface_texture_id)?;
     if rs.format == PixelFormat::A8R8G8B8
         && let Some(stored) = LayerTexels::stored(&rs, 4)
     {
@@ -338,7 +338,7 @@ fn terrain_layer_texels(content: &Content, surface_texture_id: u32) -> Option<La
 /// channel); any other gives its decoded alpha, the channel the terrain
 /// shader takes the weight from.
 fn alpha_map_texels(content: &Content, surface_texture_id: u32) -> Option<LayerTexels> {
-    let rs = first_render_surface(content, surface_texture_id)?;
+    let rs = source_render_surface(content, surface_texture_id)?;
     if matches!(
         rs.format,
         PixelFormat::A8 | PixelFormat::CUSTOM_LSCAPE_ALPHA
@@ -960,8 +960,8 @@ pub fn alpha_cutoff(surface_type: SurfaceType, paletted: bool) -> f32 {
     }
 }
 
-/// Decode a surface: a solid colour or its texture (first render surface,
-/// default palette, clip-map and additive options from the surface type).
+/// Decode a surface: a solid colour or its texture (the render surface it is
+/// drawn from, default palette, clip-map and additive options from the surface type).
 /// Missing pieces give magenta. The texture is always decoded RGBA.
 #[must_use]
 pub fn build_surface(content: &Content, id: u32) -> SurfaceData {
@@ -1057,7 +1057,7 @@ pub fn build_surface_with(
     }
 }
 
-/// A surface texture's first render surface as stored, when it may stay
+/// The render surface a surface texture is drawn from, as stored, when it may stay
 /// block compressed. A substituted palette does not matter: block-compressed
 /// textures are not paletted.
 fn compressed_surface_texture(
@@ -1072,14 +1072,14 @@ fn compressed_surface_texture(
         .ok()??;
     let rs = content
         .dats
-        .get::<RenderSurface>(*st.textures.first()?)
+        .get::<RenderSurface>(content.dats.texture_source(&st)?)
         .ok()??;
     let format =
         surface_image::keeps_compressed(rs.format, clip_map, translucency, rs.width, rs.height)?;
     surface_image::compressed_from_dat(format, rs.width, rs.height, &rs.data)
 }
 
-/// Decode a surface texture's first render surface, with `palette` in
+/// Decode the render surface a surface texture is drawn from, with `palette` in
 /// place of its own when it is paletted. A substituted palette bypasses the
 /// shared decoded-texture cache (its key names the stored palette).
 fn decode_surface_texture_with(
@@ -1095,7 +1095,7 @@ fn decode_surface_texture_with(
         .dats
         .get::<SurfaceTexture>(surface_texture_id)
         .ok()??;
-    let rs_id = *st.textures.first()?;
+    let rs_id = content.dats.texture_source(&st)?;
     let rs = content.dats.get::<RenderSurface>(rs_id).ok()??;
     if !matches!(rs.format, PixelFormat::P8 | PixelFormat::INDEX16) {
         return decode_render_surface(content, rs_id, options);
@@ -1114,7 +1114,7 @@ fn surface_original_palette(content: &Content, surface: &Surface) -> u32 {
             .get::<SurfaceTexture>(texture)
             .ok()
             .flatten()
-            .and_then(|st| st.textures.first().copied())
+            .and_then(|st| content.dats.texture_source(&st))
             .and_then(|rs| content.dats.get::<RenderSurface>(rs).ok().flatten())
             .map_or(0, |rs| rs.default_palette_id),
         _ => 0,

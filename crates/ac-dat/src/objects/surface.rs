@@ -144,6 +144,24 @@ pub struct SurfaceTexture {
     pub textures: Vec<u32>,
 }
 
+impl SurfaceTexture {
+    /// The render surface the texture is drawn from. A texture with one
+    /// level is drawn from it. A texture with two keeps its full-detail
+    /// image first, which the high-resolution dat holds, and a reduced one
+    /// second: the first is used when `high_res_loaded`, the second
+    /// otherwise. A texture with no level or more than two has none to
+    /// draw.
+    #[must_use]
+    pub fn source_level(&self, high_res_loaded: bool) -> Option<u32> {
+        match self.textures.as_slice() {
+            [only] => Some(*only),
+            [full, _] if high_res_loaded => Some(*full),
+            [_, reduced] => Some(*reduced),
+            _ => None,
+        }
+    }
+}
+
 impl DatObject for SurfaceTexture {
     const DAT: DatFileType = DatFileType::Portal;
 
@@ -241,5 +259,30 @@ mod tests {
         for len in 0..bytes.len() {
             assert!(SurfaceTexture::unpack(&mut Reader::new(&bytes[..len])).is_err());
         }
+    }
+
+    /// The level picked as the original client picks it when the
+    /// environment texture detail is at its highest: one level is always
+    /// it; of two, the full-detail first with the high-resolution dat, the
+    /// reduced second without; any other count, none.
+    #[test]
+    fn surface_texture_source_level() {
+        let texture = |levels: &[u32]| SurfaceTexture {
+            id: 0x0500_0001,
+            data_category: 0,
+            texture_type: TextureType(TextureType::TEXTURE_2D),
+            textures: levels.to_vec(),
+        };
+        for high_res in [true, false] {
+            assert_eq!(
+                texture(&[0x0600_0001]).source_level(high_res),
+                Some(0x0600_0001)
+            );
+            assert_eq!(texture(&[]).source_level(high_res), None);
+            assert_eq!(texture(&[1, 2, 3]).source_level(high_res), None);
+        }
+        let two = texture(&[0x0600_0001, 0x0600_0002]);
+        assert_eq!(two.source_level(true), Some(0x0600_0001));
+        assert_eq!(two.source_level(false), Some(0x0600_0002));
     }
 }

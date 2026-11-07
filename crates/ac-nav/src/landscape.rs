@@ -213,7 +213,7 @@ pub fn read_terrain_palette<D: DatSource>(
     Ok(palette)
 }
 
-/// The mean colour of surface texture `surface_texture_id`'s first image
+/// The mean colour of the image surface texture `surface_texture_id` is drawn from
 /// with its default palette; none when the files lack the texture or its
 /// image.
 fn texture_mean_rgb<D: DatSource>(
@@ -223,7 +223,7 @@ fn texture_mean_rgb<D: DatSource>(
     let Some(texture) = dats.object::<SurfaceTexture>(surface_texture_id)? else {
         return Ok(None);
     };
-    let Some(&render_surface_id) = texture.textures.first() else {
+    let Some(render_surface_id) = texture.source_level(dats.has_high_res()) else {
         return Ok(None);
     };
     let Some(surface) = dats.object::<RenderSurface>(render_surface_id)? else {
