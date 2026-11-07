@@ -805,6 +805,7 @@ impl RemoteMotionDriver {
         }
         for qi in 0..batch.count() {
             let step = batch.get_quantum(qi).unwrap_or(0.0);
+            self.obj.cx(world).retry_ethereal();
             let (sync, recovery) = if self.hidden {
                 self.tick_hidden(engine, world, step, now)
             } else {

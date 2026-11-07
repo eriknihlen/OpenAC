@@ -58,7 +58,8 @@ pub use outbound::{LocalPlayerOutbound, OutboundKind, OutboundRecord};
 pub use readiness::BodyMotion;
 pub(crate) use remote::wire_motion_state;
 use remote::{
-    BodiesView, RemoteBody, body_shape_of, live_position, remote_motion_update, sticky_body_of,
+    BodiesInWorld, BodiesView, RemoteBody, body_shape_of, live_position, remote_motion_update,
+    sticky_body_of,
 };
 pub use residency::Residency;
 use route::{
@@ -1461,6 +1462,19 @@ impl Movement {
         // An object resting where its entry put it keeps its rows there.
         if let Some(local_id) = world.object(guid).map(|o| o.key().local_id) {
             self.follow_resting(local_id);
+            self.rows_take_body_state(local_id);
+        }
+    }
+
+    /// A body's rows carry the body's own state, which its animation may
+    /// have turned ethereal or solid since the server last set it.
+    fn rows_take_body_state(&mut self, local_id: u32) {
+        if let Some(body) = self.remotes.get(&local_id) {
+            self.collision.update_state(
+                &mut self.engine,
+                local_id,
+                body.driver.obj.body.state.bits(),
+            );
         }
     }
 
@@ -1481,6 +1495,10 @@ impl Movement {
         let resting: Vec<u32> = self.resting.keys().copied().collect();
         for local_id in resting {
             self.follow_resting(local_id);
+        }
+        let bodies: Vec<u32> = self.remotes.keys().copied().collect();
+        for local_id in bodies {
+            self.rows_take_body_state(local_id);
         }
     }
 
@@ -3282,10 +3300,20 @@ impl Movement {
         // where this one now stands. Two bodies swept against where both
         // stood when the frame began could step into the same space, and
         // two that overlapped moved on together, never apart.
+        let Some(content) = self.content.clone() else {
+            return;
+        };
         for body in self.remotes.values_mut() {
+            let state_before = body.driver.obj.body.state;
+            let seen = BodiesInWorld {
+                bodies: &view,
+                engine: &self.engine,
+                world: &*world,
+                content: &content,
+            };
             let advance = body.driver.advance(
                 Some(&self.engine),
-                &view,
+                &seen,
                 dt,
                 now.as_secs_f64(),
                 player_position,
@@ -3293,6 +3321,14 @@ impl Movement {
                 true,
             );
             let _ = body.driver.obj.take_move_to_events();
+            // Its animation turned it ethereal or solid: its rows follow.
+            if body.driver.obj.body.state != state_before {
+                self.collision.update_state(
+                    &mut self.engine,
+                    body.key.local_id,
+                    body.driver.obj.body.state.bits(),
+                );
+            }
             // A stalled catch-up asks to be placed at its target (a
             // teleport that may slide aside); a refused placement keeps the
             // target and is tried again on the next frame.
