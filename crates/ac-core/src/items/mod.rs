@@ -42,8 +42,9 @@ pub use inventory_request::InventoryRequestKind;
 pub use item_mana::{ItemManaChange, ItemManaState};
 pub use item_type::{EquipMask, ItemType};
 pub use object::{
-    ClientArmorProfile, ClientObject, ClientObjectHeader, ClientWeaponProfile, ObjectIdentity,
-    PropertyBundle, WeenieData, normalize_damage, pk_status,
+    ClientArmorProfile, ClientCreatureAttributes, ClientCreatureProfile, ClientObject,
+    ClientObjectHeader, ClientWeaponProfile, ObjectIdentity, PropertyBundle, WeenieData,
+    normalize_damage, pk_status,
 };
 pub use placement::PlacementRejection;
 pub use public_weenie_flags::PublicWeenieFlags;

@@ -16,8 +16,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::{
-    ClientArmorProfile, ClientObject, ClientWeaponProfile, EquipMask, HouseRestrictionRecord,
-    ItemType, ObjectIdentity, PropertyBundle, PublicWeenieFlags, WeenieData, pk_status,
+    ClientArmorProfile, ClientCreatureProfile, ClientObject, ClientWeaponProfile, EquipMask,
+    HouseRestrictionRecord, ItemType, ObjectIdentity, PropertyBundle, PublicWeenieFlags,
+    WeenieData, pk_status,
 };
 use crate::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
@@ -183,6 +184,8 @@ pub struct AppraisalUpdate {
     pub weapon_profile: Option<ClientWeaponProfile>,
     /// `None` clears a profile from an earlier appraisal.
     pub armor_profile: Option<ClientArmorProfile>,
+    /// `None` clears a profile from an earlier appraisal.
+    pub creature_profile: Option<ClientCreatureProfile>,
 }
 
 type ContentsIndex = BTreeMap<u32, Vec<u32>>;
@@ -1168,8 +1171,8 @@ impl ClientObjectTable {
     }
 
     /// Applies one successful appraisal at once: properties, spell list,
-    /// and the weapon and armor profiles (each replaced, or cleared when
-    /// the answer carried none).
+    /// and the weapon, armor and creature profiles (each replaced, or
+    /// cleared when the answer carried none).
     pub fn update_appraisal(
         &mut self,
         item_id: u32,
@@ -1185,6 +1188,7 @@ impl ClientObjectTable {
         item.appraised_spell_ids = appraisal.spell_ids.clone();
         item.weapon_profile = appraisal.weapon_profile;
         item.armor_profile = appraisal.armor_profile;
+        item.creature_profile = appraisal.creature_profile;
         let seconds = appraisal.received_at_seconds;
         if seconds.is_finite() && seconds >= 0.0 {
             let milliseconds = (seconds * 1000.0).round() as i64;
@@ -1196,20 +1200,25 @@ impl ClientObjectTable {
     }
 
     /// Records that the server answered an appraisal it could not make, at
-    /// `now_seconds` of session time. The answer carries nothing to keep,
-    /// so nothing else about the object changes; every such answer is
-    /// stamped, a repeat refusal included, but only a change is announced.
+    /// `now_seconds` of session time. Such an answer about a creature still
+    /// carries its health, which replaces the kept creature profile (and an
+    /// answer without one clears it); nothing else about the object
+    /// changes. Every such answer is stamped, a repeat refusal included,
+    /// but only a change is announced.
     pub fn record_unsuccessful_appraisal(
         &mut self,
         item_id: u32,
         now_seconds: f64,
+        creature_profile: Option<ClientCreatureProfile>,
         events: &mut Vec<TableEvent>,
     ) -> bool {
         let Some(item) = self.objects.get_mut(&item_id) else {
             return false;
         };
         item.last_appraisal_unsuccessful_at_seconds = now_seconds;
-        if item.appraisal_answered && item.last_appraisal_unsuccessful {
+        let profile_changed = item.creature_profile != creature_profile;
+        item.creature_profile = creature_profile;
+        if item.appraisal_answered && item.last_appraisal_unsuccessful && !profile_changed {
             return true;
         }
         item.appraisal_answered = true;

@@ -253,6 +253,25 @@ pub(super) fn properties_of(item: &ClientObject) -> ItemProperties {
             nether_mod: a.nether_protection,
             electric_mod: a.lightning_protection,
         }),
+        creature: item.creature_profile.map(|c| abi::CreatureProfile {
+            flags: c.flags,
+            health: c.health,
+            max_health: c.max_health,
+            attribute_highlights: c.attribute_highlights,
+            attribute_colors: c.attribute_colors,
+            attributes: c.attributes.map(|a| abi::CreatureAttributes {
+                strength: a.strength,
+                endurance: a.endurance,
+                quickness: a.quickness,
+                coordination: a.coordination,
+                focus: a.focus,
+                self_: a.self_,
+                stamina: a.stamina,
+                max_stamina: a.max_stamina,
+                mana: a.mana,
+                max_mana: a.max_mana,
+            }),
+        }),
     }
 }
 

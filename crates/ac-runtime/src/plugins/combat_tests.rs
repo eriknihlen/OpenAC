@@ -202,3 +202,147 @@ fn a_creature_carries_the_servers_last_position_beside_its_body() {
         assert!(other.server_position.is_some());
     });
 }
+
+fn creature_profile(
+    health: u32,
+    health_max: u32,
+    strength: Option<u32>,
+) -> ac_proto::appraise::CreatureProfile {
+    ac_proto::appraise::CreatureProfile {
+        // Attributes (0x8) and, with them, enchanted values (0x1).
+        flags: if strength.is_some() { 9 } else { 0 },
+        health,
+        health_max,
+        attributes: strength.map(|strength| ac_proto::appraise::CreatureAttributes {
+            strength,
+            endurance: 40,
+            quickness: 45,
+            coordination: 50,
+            focus: 35,
+            self_: 30,
+            stamina: 90,
+            mana: 25,
+            stamina_max: 100,
+            mana_max: 60,
+        }),
+        // Strength raised, health lowered.
+        attribute_highlights: strength.map(|_| (0x41, 0x01)),
+    }
+}
+
+// API 1.9: identifying a creature lets a plugin read its appraisal profile
+// from its world properties: health, maximum health, attributes and the
+// other vitals, as the assess window shows them.
+#[test]
+fn an_appraised_creature_profile_reaches_world_properties() {
+    let mut state = arena();
+    state.world.apply_appraisal(
+        &ac_proto::appraise::IdentifyObjectResponse {
+            guid: MONSTER,
+            success: true,
+            creature_profile: Some(creature_profile(120, 200, Some(55))),
+            ..Default::default()
+        },
+        1.0,
+    );
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let properties = call::<calls::WorldProperties>(b, &MONSTER).expect("known");
+        let creature = properties.creature.expect("appraised");
+        assert_eq!((creature.health, creature.max_health), (120, 200));
+        let attributes = creature.attributes.expect("assessed");
+        assert_eq!(
+            (
+                attributes.strength,
+                attributes.self_,
+                attributes.max_stamina
+            ),
+            (55, 30, 100)
+        );
+        assert_eq!((attributes.mana, attributes.max_mana), (25, 60));
+        // Which values are enchanted, and which way: strength up, health
+        // down.
+        assert_eq!(
+            (creature.attribute_highlights, creature.attribute_colors),
+            (0x41, 0x01)
+        );
+        // The hostile-target capture is as it was: an appraisal does not
+        // give it a maximum.
+        let targets = call::<calls::CombatHostileTargets>(b, &50.0);
+        assert_eq!(targets[0].maximum_health, 0);
+    });
+}
+
+// The server answers an appraisal of a creature it could not assess with
+// the creature's health alone, and the assess window shows it: so does the
+// plugin's view, after an earlier full profile.
+#[test]
+fn a_failed_creature_appraisal_still_reports_health_to_plugins() {
+    let mut state = arena();
+    state.world.apply_appraisal(
+        &ac_proto::appraise::IdentifyObjectResponse {
+            guid: MONSTER,
+            success: true,
+            creature_profile: Some(creature_profile(120, 200, Some(55))),
+            ..Default::default()
+        },
+        1.0,
+    );
+    state.world.apply_appraisal(
+        &ac_proto::appraise::IdentifyObjectResponse {
+            guid: MONSTER,
+            success: false,
+            creature_profile: Some(creature_profile(70, 200, None)),
+            ..Default::default()
+        },
+        2.0,
+    );
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let creature = call::<calls::WorldProperties>(b, &MONSTER)
+            .and_then(|p| p.creature)
+            .expect("health kept");
+        assert_eq!((creature.health, creature.max_health), (70, 200));
+        assert!(creature.attributes.is_none());
+        assert_eq!(
+            (creature.attribute_highlights, creature.attribute_colors),
+            (0, 0)
+        );
+    });
+}
+
+// An item's appraisal carries no creature profile, and keeps its weapon
+// profile as before.
+#[test]
+fn an_item_appraisal_reports_no_creature_profile() {
+    let mut state = arena();
+    state
+        .world
+        .apply(&described(0x5000_0020, 1, "Sword", 0x1, 0, Some(CELL)));
+    state.world.apply_appraisal(
+        &ac_proto::appraise::IdentifyObjectResponse {
+            guid: 0x5000_0020,
+            success: true,
+            weapon_profile: Some(ac_proto::appraise::WeaponProfile {
+                damage_type: 1,
+                weapon_time: 30,
+                weapon_skill: 45,
+                damage: 12,
+                damage_variance: 0.5,
+                damage_mod: 1.0,
+                weapon_length: 1.0,
+                max_velocity: 0.0,
+                weapon_offense: 1.0,
+                max_velocity_estimated: 0,
+            }),
+            ..Default::default()
+        },
+        1.0,
+    );
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let properties = call::<calls::WorldProperties>(b, &0x5000_0020).expect("known");
+        assert!(properties.creature.is_none());
+        assert_eq!(properties.weapon.map(|w| w.damage), Some(12));
+    });
+}
