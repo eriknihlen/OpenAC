@@ -10,7 +10,7 @@ use crate::geometry::{Plane, Sphere};
 use crate::globals::{EPSILON, LANDING_Z};
 use crate::shadow::{ShadowCollisionType, ShadowEntry};
 use crate::state::{InsertType, ObjectInfoState, TransitionState};
-use crate::world::Placement;
+use crate::world::{CollisionWorld, Placement};
 
 fn sphere_collides_with_sphere(disp: Vec3, radsum: f32) -> bool {
     disp.length_squared() <= radsum * radsum
@@ -84,83 +84,128 @@ impl Transition {
         }
 
         for obj in objs {
-            if self.object_info.self_entity_id != 0
-                && obj.entity_id == self.object_info.self_entity_id
+            if let Some(result) = self.find_obj_collisions_with_row(engine, world, obj)
+                && result != TransitionState::Ok
             {
-                continue;
-            }
-            if self
-                .object_info
-                .missile_ignore(obj.entity_id, obj.state, obj.flags)
-            {
-                continue;
-            }
-            if should_skip(obj.state, obj.flags, self.object_info.state) {
-                continue;
-            }
-
-            let ethereal_for_test =
-                obj.state & 0x4 != 0 || (self.object_info.ethereal && obj.state & 0x1 == 0);
-            if ethereal_for_test && self.sphere_path.step_down {
-                continue;
-            }
-            self.sphere_path.obstruction_ethereal = ethereal_for_test;
-
-            let collision_was_valid_pre = self.collision_info.collision_normal_valid;
-
-            let mut result = match obj.collision_type {
-                ShadowCollisionType::Bsp => {
-                    let physics = world.gfx_obj(obj.gfx_obj_id).filter(|p| p.has_physics());
-                    let Some(physics) = physics else {
-                        self.sphere_path.obstruction_ethereal = false;
-                        continue;
-                    };
-                    self.bsp_find_collisions(
-                        engine,
-                        &physics.bsp,
-                        Placement::new(obj.rotation, obj.position),
-                        obj.scale,
-                    )
-                }
-                ShadowCollisionType::Sphere => {
-                    if bsp_only_dispatch(obj.state) {
-                        continue;
-                    }
-                    let is_creature = obj.state & 0x40 != 0
-                        || obj.flags.contains(EntityCollisionFlags::IS_CREATURE);
-                    self.sphere_collision(obj, engine, is_creature)
-                }
-                ShadowCollisionType::Cylinder => {
-                    if bsp_only_dispatch(obj.state) {
-                        continue;
-                    }
-                    self.cylinder_collision(obj, engine)
-                }
-            };
-
-            if result != TransitionState::Ok
-                && self.sphere_path.obstruction_ethereal
-                && !self.sphere_path.step_down
-                && obj.state & 0x1 == 0
-            {
-                result = TransitionState::Ok;
-                self.collision_info.collision_normal_valid = false;
-            }
-
-            let attributed = result != TransitionState::Ok
-                || (!collision_was_valid_pre && self.collision_info.collision_normal_valid);
-            if attributed {
-                self.collision_info.collide_object_guids.push(obj.entity_id);
-                self.collision_info.last_collided_object_guid = Some(obj.entity_id);
-            }
-
-            self.sphere_path.obstruction_ethereal = false;
-
-            if result != TransitionState::Ok {
                 return result;
             }
         }
         TransitionState::Ok
+    }
+
+    /// One object only, `target_id`, tested in every cell it stands in as
+    /// if its state were `target_state` (rather than the state its rows
+    /// carry): the first of its rows that is not OK ends the search.
+    pub fn find_collisions_with_object(
+        &mut self,
+        engine: &PhysicsEngine,
+        target_id: u32,
+        target_state: u32,
+    ) -> TransitionState {
+        let Some(world) = engine.world() else {
+            return TransitionState::Ok;
+        };
+        if self.sphere_path.insert_type == InsertType::InitialPlacement {
+            return TransitionState::Ok;
+        }
+        for &cell_id in engine.shadows.owner_cells(target_id) {
+            for obj in engine.shadows.objects_in_cell(cell_id) {
+                if obj.entity_id != target_id {
+                    continue;
+                }
+                let row = ShadowEntry {
+                    state: target_state,
+                    ..*obj
+                };
+                if let Some(result) = self.find_obj_collisions_with_row(engine, world, &row)
+                    && result != TransitionState::Ok
+                {
+                    return result;
+                }
+            }
+        }
+        TransitionState::Ok
+    }
+
+    /// One row of an object: `None` when the row is skipped (see
+    /// [`Self::find_obj_collisions_in_cell`]), else what testing it found.
+    fn find_obj_collisions_with_row(
+        &mut self,
+        engine: &PhysicsEngine,
+        world: &CollisionWorld,
+        obj: &ShadowEntry,
+    ) -> Option<TransitionState> {
+        if self.object_info.self_entity_id != 0 && obj.entity_id == self.object_info.self_entity_id
+        {
+            return None;
+        }
+        if self
+            .object_info
+            .missile_ignore(obj.entity_id, obj.state, obj.flags)
+        {
+            return None;
+        }
+        if should_skip(obj.state, obj.flags, self.object_info.state) {
+            return None;
+        }
+
+        let ethereal_for_test =
+            obj.state & 0x4 != 0 || (self.object_info.ethereal && obj.state & 0x1 == 0);
+        if ethereal_for_test && self.sphere_path.step_down {
+            return None;
+        }
+        self.sphere_path.obstruction_ethereal = ethereal_for_test;
+
+        let collision_was_valid_pre = self.collision_info.collision_normal_valid;
+
+        let mut result = match obj.collision_type {
+            ShadowCollisionType::Bsp => {
+                let physics = world.gfx_obj(obj.gfx_obj_id).filter(|p| p.has_physics());
+                let Some(physics) = physics else {
+                    self.sphere_path.obstruction_ethereal = false;
+                    return None;
+                };
+                self.bsp_find_collisions(
+                    engine,
+                    &physics.bsp,
+                    Placement::new(obj.rotation, obj.position),
+                    obj.scale,
+                )
+            }
+            ShadowCollisionType::Sphere => {
+                if bsp_only_dispatch(obj.state) {
+                    return None;
+                }
+                let is_creature =
+                    obj.state & 0x40 != 0 || obj.flags.contains(EntityCollisionFlags::IS_CREATURE);
+                self.sphere_collision(obj, engine, is_creature)
+            }
+            ShadowCollisionType::Cylinder => {
+                if bsp_only_dispatch(obj.state) {
+                    return None;
+                }
+                self.cylinder_collision(obj, engine)
+            }
+        };
+
+        if result != TransitionState::Ok
+            && self.sphere_path.obstruction_ethereal
+            && !self.sphere_path.step_down
+            && obj.state & 0x1 == 0
+        {
+            result = TransitionState::Ok;
+            self.collision_info.collision_normal_valid = false;
+        }
+
+        let attributed = result != TransitionState::Ok
+            || (!collision_was_valid_pre && self.collision_info.collision_normal_valid);
+        if attributed {
+            self.collision_info.collide_object_guids.push(obj.entity_id);
+            self.collision_info.last_collided_object_guid = Some(obj.entity_id);
+        }
+
+        self.sphere_path.obstruction_ethereal = false;
+        Some(result)
     }
 
     // ── Spheres ────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@
 mod motion_fixtures;
 mod support;
 
+mod animation_hook_tests;
 mod do_motion_family;
 mod ground_lifecycle;
 mod interp_tests;

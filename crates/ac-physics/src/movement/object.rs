@@ -31,6 +31,12 @@ pub trait TargetWorld {
     fn resolve(&self, id: u32) -> Option<ObjectToken>;
     /// Where an exact incarnation is now (cell, world origin, orientation).
     fn position_of(&self, token: ObjectToken) -> Option<CellPosition>;
+    /// Whether another object standing in the cells of `token` overlaps
+    /// it, were its state `state` (an object turning solid again stays
+    /// ethereal while one does). A world that cannot tell says none does.
+    fn overlapped_by_another(&self, _token: ObjectToken, _state: PhysicsState) -> bool {
+        false
+    }
 }
 
 /// A world with no other objects.
@@ -249,18 +255,48 @@ impl<W: WeenieObject> ObjectCx<'_, W> {
         self.with_sequencer(|seq, sink| seq.animation_done(success, sink));
     }
 
-    /// Take the hooks the last advance reached and report the animations
-    /// that finished among them (a host that draws nothing does this after
-    /// each step).
+    /// Take the hooks the last advance reached, in order, and carry out the
+    /// ones that change the object itself: an animation that finished, the
+    /// object turning ethereal or solid (a host that draws nothing does
+    /// this after each step).
     pub fn take_reached_points(&mut self) {
         let Some(seq) = self.obj.sequencer.as_mut() else {
             return;
         };
         let reached = seq.consume_pending_hooks();
         for hook in reached {
-            if matches!(hook.data, ac_dat::objects::HookData::AnimationDone) {
-                self.animation_done(true);
+            match hook.data {
+                ac_dat::objects::HookData::AnimationDone => self.animation_done(true),
+                ac_dat::objects::HookData::Ethereal { ethereal } => {
+                    self.set_ethereal(ethereal);
+                }
+                _ => {}
             }
+        }
+    }
+
+    /// Make the object ethereal or solid; turning solid waits while another
+    /// object standing in its cells overlaps it (asked of the world only
+    /// while the object is in a cell). False while it waits.
+    pub fn set_ethereal(&mut self, ethereal: bool) -> bool {
+        let in_cell = self.obj.position().obj_cell_id != 0;
+        let (token, world) = (self.obj.token, self.world);
+        self.obj.body.set_ethereal(ethereal, |state| {
+            in_cell && world.overlapped_by_another(token, state)
+        })
+    }
+
+    /// An object waiting to turn solid tries again (at the start of each of
+    /// its updates while it is in a cell).
+    pub fn retry_ethereal(&mut self) {
+        if self
+            .obj
+            .body
+            .transient_state
+            .contains(TransientState::CHECK_ETHEREAL)
+            && self.obj.position().obj_cell_id != 0
+        {
+            self.set_ethereal(false);
         }
     }
 

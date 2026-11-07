@@ -30,6 +30,19 @@ use crate::world::CollisionWorld;
 /// Side of a landblock, metres.
 const BLOCK_SIZE: f32 = 192.0;
 
+/// How an object is shaped when it is tested for overlapping another: its
+/// spheres (body frame, unscaled; none stands in a small sphere at its
+/// feet), their scale, and the mover bits it collides with.
+#[derive(Debug, Clone, Default)]
+pub struct OverlapShape {
+    /// The spheres.
+    pub spheres: Vec<CollisionSphere>,
+    /// Their scale.
+    pub scale: f32,
+    /// The mover bits.
+    pub mover_flags: ObjectInfoState,
+}
+
 /// One resident landblock: its ground, its cells' surfaces and portals, and
 /// where its corner is in the world.
 #[derive(Debug, Clone, PartialEq)]
@@ -680,6 +693,73 @@ impl PhysicsEngine {
             .ordered_ids()
             .to_vec();
         result
+    }
+
+    /// Whether another object standing in `entity_id`'s cells overlaps it,
+    /// were its state `entity_state` (an object turning solid again stays
+    /// ethereal while one does). Every object listed in those cells that is
+    /// not `entity_id`, not static, and that `shape_of` gives a shape (the
+    /// caller gives none for an object held by another) is placed where it
+    /// stands, with its own spheres and as itself a mover, and tested
+    /// against `entity_id` alone.
+    pub fn is_overlapped_by_another(
+        &self,
+        entity_id: u32,
+        entity_state: u32,
+        shape_of: &mut dyn FnMut(u32) -> Option<OverlapShape>,
+    ) -> bool {
+        let mut tested: Vec<u32> = Vec::new();
+        for &cell_id in self.shadows.owner_cells(entity_id) {
+            for row in self.shadows.objects_in_cell(cell_id) {
+                let other = row.entity_id;
+                if other == entity_id
+                    || row.state & PhysicsState::STATIC.bits() != 0
+                    || tested.contains(&other)
+                {
+                    continue;
+                }
+                tested.push(other);
+                let Some(record) = self.shadows.registration(other) else {
+                    continue;
+                };
+                let Some(shape) = shape_of(other) else {
+                    continue;
+                };
+                let request = PhysicsSetPositionRequest {
+                    position: record.entity_world_pos,
+                    orientation: record.entity_world_rot,
+                    cell_id: record.seed_cell_id,
+                    scale: shape.scale,
+                    mover_physics_state: PhysicsState::from(record.state),
+                    mover_flags: shape.mover_flags,
+                    moving_entity_id: other,
+                    ..PhysicsSetPositionRequest::default()
+                };
+                let mut transition = Transition::new();
+                initialize_set_position_transition(&mut transition, &request);
+                let sphere_scale = if shape.spheres.is_empty() {
+                    1.0
+                } else {
+                    shape.scale
+                };
+                transition.sphere_path.init_path_spheres(
+                    request.position,
+                    request.position,
+                    request.cell_id,
+                    &shape.spheres,
+                    sphere_scale,
+                    Some(request.orientation),
+                    Some(request.orientation),
+                );
+                transition.sphere_path.insert_type = crate::state::InsertType::Placement;
+                if transition.find_collisions_with_object(self, entity_id, entity_state)
+                    != TransitionState::Ok
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn set_scatter_position_internal(

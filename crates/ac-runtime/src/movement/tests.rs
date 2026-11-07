@@ -4790,3 +4790,140 @@ fn the_position_log_changes_nothing_about_where_bodies_go() {
     assert_ne!(off.first().unwrap().0, off.last().unwrap().0);
     assert_ne!(off.first().unwrap().1, off.last().unwrap().1);
 }
+
+/// A retail door: its setup and its motion table, whose open and close
+/// animation carries the ethereal hook (on when it plays forward, off when
+/// it plays back).
+const DOOR_SETUP: u32 = 0x0200_024F;
+const DOOR_MOTION: u32 = 0x0900_0016;
+const DOOR_ON: u16 = 0x000B;
+const DOOR_OFF: u16 = 0x000C;
+const NON_COMBAT: u16 = 0x003D;
+
+fn door_state(forward: u16) -> ac_proto::InterpretedMotionState {
+    ac_proto::InterpretedMotionState {
+        current_style: Some(NON_COMBAT),
+        forward_command: Some(forward),
+        ..ac_proto::InterpretedMotionState::default()
+    }
+}
+
+/// A closed door `dx` metres east of the character's spot.
+fn door_beside(rig: &mut Rig, guid: u32, dx: f32) {
+    let (x, y) = SPOT;
+    let z = ground_z(rig.movement.content.as_ref().unwrap(), x + dx, y);
+    let mut physics = crate::world::tests::physics(
+        PhysicsTimestamps {
+            instance: 1,
+            position: 1,
+            movement: 1,
+            ..PhysicsTimestamps::default()
+        },
+        Some(Position {
+            cell_id: outdoor_cell(x + dx, y),
+            origin: Vector3 { x: x + dx, y, z },
+            orientation: Quaternion::IDENTITY,
+        }),
+    );
+    physics.setup_id = Some(DOOR_SETUP);
+    physics.motion_table_id = Some(DOOR_MOTION);
+    physics.state = 0x0000_0008; // report collisions
+    physics.movement = Some(ac_proto::PhysicsMovement::Present {
+        raw: vec![0; 4],
+        data: ac_proto::MovementData {
+            movement_type: 0,
+            motion_flags: 0,
+            current_style: NON_COMBAT,
+            movement: ac_proto::Movement::Interpreted {
+                state: door_state(DOOR_OFF),
+                sticky_object: None,
+            },
+        },
+        is_autonomous: false,
+    });
+    let create = Inbound::CreateObject(Box::new(CreateObject {
+        guid,
+        model: ModelData::default(),
+        physics,
+        weenie: None,
+    }));
+    apply(rig, &create);
+}
+
+fn door_motion(guid: u32, sequence: u16, forward: u16) -> Inbound<'static> {
+    Inbound::UpdateMotion(Box::new(ac_proto::UpdateMotion {
+        guid,
+        instance_sequence: 1,
+        movement_sequence: sequence,
+        server_control_sequence: 1,
+        is_autonomous: false,
+        movement: ac_proto::MovementData {
+            movement_type: 0,
+            motion_flags: 0,
+            current_style: NON_COMBAT,
+            movement: ac_proto::Movement::Interpreted {
+                state: door_state(forward),
+                sticky_object: None,
+            },
+        },
+    }))
+}
+
+/// Whether every collision row of the object is ethereal.
+fn rows_ethereal(rig: &Rig, local: u32) -> bool {
+    let rows = rig.movement.engine().shadows.capture_entries_for(local);
+    assert!(!rows.is_empty(), "the door has collision rows");
+    rows.iter()
+        .all(|e| e.state & PhysicsState::ETHEREAL.bits() != 0)
+}
+
+/// A door's open animation turns it ethereal and its close animation solid
+/// again, in the session's own simulation and its collision rows, with no
+/// state update from the server (retail's ethereal hook); while a body
+/// stands in the doorway the closing door stays ethereal.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_doors_animation_turns_it_ethereal_and_a_body_in_the_doorway_holds_it() {
+    const DOOR: u32 = 0x7000_0D00;
+    const CREATURE: u32 = 0x7000_0D01;
+    let mut rig = Rig::entered();
+    door_beside(&mut rig, DOOR, 6.0);
+    rig.frames(30);
+    let local = rig.world.object(DOOR).unwrap().key().local_id;
+    assert!(
+        rig.movement.remotes.contains_key(&local),
+        "the door animates"
+    );
+    assert!(!rows_ethereal(&rig, local), "closed, it is solid");
+
+    apply(&mut rig, &door_motion(DOOR, 2, DOOR_ON));
+    rig.frames(120);
+    assert!(rows_ethereal(&rig, local), "opening turned it ethereal");
+    let state = rig.world.object(DOOR).unwrap().physics().state;
+    assert_eq!(
+        state & PhysicsState::ETHEREAL.bits(),
+        0,
+        "the server said nothing"
+    );
+
+    apply(&mut rig, &door_motion(DOOR, 3, DOOR_OFF));
+    rig.frames(120);
+    assert!(!rows_ethereal(&rig, local), "closing turned it solid");
+
+    apply(&mut rig, &door_motion(DOOR, 4, DOOR_ON));
+    rig.frames(120);
+    assert!(rows_ethereal(&rig, local));
+    creature_beside(&mut rig, CREATURE, 6.0, None);
+    rig.frames(30);
+    apply(&mut rig, &door_motion(DOOR, 5, DOOR_OFF));
+    rig.frames(120);
+    assert!(
+        rows_ethereal(&rig, local),
+        "a body standing in the doorway holds the door ethereal"
+    );
+    let body = &rig.movement.remotes[&local].driver.obj.body;
+    assert!(
+        body.transient_state
+            .contains(ac_physics::TransientState::CHECK_ETHEREAL)
+    );
+}

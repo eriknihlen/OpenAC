@@ -84,8 +84,9 @@ pub use cell_array::CellArray;
 pub use cell_surface::{CellSurface, point_in_triangle_xy};
 pub use collision_flags::EntityCollisionFlags;
 pub use engine::{
-    CellCollisionHook, LandblockPhysics, PhysicsEngine, PositionRandom, ResolveRequest,
-    ResolveResult, TerrainWalkableSample, accept_no_slide_placement, is_walkable_contact,
+    CellCollisionHook, LandblockPhysics, OverlapShape, PhysicsEngine, PositionRandom,
+    ResolveRequest, ResolveResult, TerrainWalkableSample, accept_no_slide_placement,
+    is_walkable_contact,
 };
 pub use geometry::{Plane, Sphere};
 pub use interpolation::{InterpolationManager, InterpolationRecoveryTarget};

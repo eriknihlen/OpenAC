@@ -17,8 +17,8 @@ use ac_physics::movement::{
 };
 use ac_physics::settle::try_settle;
 use ac_physics::{
-    CellPosition, ObjectInfoState, PhysicsEngine, PhysicsSetPositionResult, PhysicsState, Quat,
-    Vec3,
+    CellPosition, CollisionSphere, EntityCollisionFlags, ObjectInfoState, OverlapShape,
+    PhysicsEngine, PhysicsSetPositionResult, PhysicsState, Quat, Vec3,
 };
 use ac_proto::{Movement, MovementData, Position};
 
@@ -407,6 +407,88 @@ impl TargetWorld for BodiesView {
             .filter(|(t, _)| *t == token)
             .map(|(_, p)| *p)
     }
+}
+
+/// The bodies as a moving body sees them, with the objects' collision: a
+/// body turning solid again stays ethereal while another object standing
+/// in its cells overlaps it.
+pub struct BodiesInWorld<'a> {
+    /// Where every simulated body is.
+    pub bodies: &'a BodiesView,
+    /// The objects' collision.
+    pub engine: &'a PhysicsEngine,
+    /// The objects.
+    pub world: &'a World,
+    /// Their setups.
+    pub content: &'a WorldContent,
+}
+
+impl std::fmt::Debug for BodiesInWorld<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodiesInWorld").finish_non_exhaustive()
+    }
+}
+
+impl TargetWorld for BodiesInWorld<'_> {
+    fn resolve(&self, id: u32) -> Option<ObjectToken> {
+        self.bodies.resolve(id)
+    }
+
+    fn position_of(&self, token: ObjectToken) -> Option<CellPosition> {
+        self.bodies.position_of(token)
+    }
+
+    fn overlapped_by_another(&self, token: ObjectToken, state: PhysicsState) -> bool {
+        let Some(object) = self.world.object(token.id) else {
+            return false;
+        };
+        if u64::from(object.key().incarnation) != token.incarnation || object.parent().is_some() {
+            return false;
+        }
+        self.engine
+            .is_overlapped_by_another(object.key().local_id, state.bits(), &mut |other| {
+                overlap_shape(self.world, self.content, other)
+            })
+    }
+}
+
+/// How the object with client id `local_id` is shaped when tested for
+/// overlapping another: its setup's spheres at its scale, colliding as its
+/// public bitfield says; none for an object held by another.
+fn overlap_shape(world: &World, content: &WorldContent, local_id: u32) -> Option<OverlapShape> {
+    let object = world.object_by_local_id(local_id)?;
+    if object.parent().is_some() {
+        return None;
+    }
+    let physics = object.physics();
+    let scale = physics.scale.filter(|s| *s > 0.0).unwrap_or(1.0);
+    let spheres = physics
+        .setup_id
+        .and_then(|id| content.setup(id))
+        .map(|setup| {
+            setup
+                .spheres
+                .iter()
+                .map(|s| {
+                    CollisionSphere::new(Vec3::new(s.origin.x, s.origin.y, s.origin.z), s.radius)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let bits = world
+        .item(object.guid())
+        .and_then(|i| i.public_weenie_bitfield)
+        .map_or(0, |b| b.bits());
+    let flags = EntityCollisionFlags::from_pwd_bitfield(bits);
+    let mut mover = flags.to_mover_state().0;
+    if flags.contains(EntityCollisionFlags::IS_PLAYER) {
+        mover |= ObjectInfoState::IS_PLAYER;
+    }
+    Some(OverlapShape {
+        spheres,
+        scale,
+        mover_flags: ObjectInfoState(mover),
+    })
 }
 
 /// The world's live position of a body (its cell and landblock-relative

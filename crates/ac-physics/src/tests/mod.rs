@@ -15,6 +15,7 @@ mod collision_info_tests;
 mod collision_rules;
 mod edge_ordering_tests;
 mod engine_tests;
+mod ethereal_overlap;
 mod fixtures;
 mod ground_tests;
 mod indoor_walkable;

@@ -310,6 +310,32 @@ impl PhysicsBody {
         };
     }
 
+    /// Makes the body ethereal (other bodies pass through it) or solid.
+    /// Turning solid waits while another object overlaps it: `overlaps`
+    /// is asked, with the solid state, only when the body is in a cell and
+    /// held by nothing (the caller knows; it answers false otherwise). While
+    /// it waits the body stays ethereal and is marked to try again
+    /// ([`TransientState::CHECK_ETHEREAL`]); false then, true when the state
+    /// was taken.
+    pub fn set_ethereal(
+        &mut self,
+        ethereal: bool,
+        overlaps: impl FnOnce(PhysicsState) -> bool,
+    ) -> bool {
+        if ethereal {
+            self.state.insert(PhysicsState::ETHEREAL);
+        } else {
+            self.state.remove(PhysicsState::ETHEREAL);
+            if overlaps(self.state) {
+                self.state.insert(PhysicsState::ETHEREAL);
+                self.transient_state.insert(TransientState::CHECK_ETHEREAL);
+                return false;
+            }
+        }
+        self.transient_state.remove(TransientState::CHECK_ETHEREAL);
+        true
+    }
+
     /// Sets the velocity (capped at 50 m/s) and wakes the body.
     pub fn set_velocity(&mut self, new_velocity: Vec3) {
         self.velocity = new_velocity;
