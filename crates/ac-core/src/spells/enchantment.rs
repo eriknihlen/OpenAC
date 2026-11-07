@@ -1,5 +1,5 @@
 //! Active enchantments and how they combine: the stacking rule that keeps
-//! the strongest         .filter_map(EnchantStep::of); of each spell category, the steps a stat query
+//! the strongest of each spell category, the steps a stat query
 //! takes on its value, the death penalty (vitae), and the "in effect" list
 //! the effects window shows.
 
