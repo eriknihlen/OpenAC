@@ -427,7 +427,7 @@ fn a_boot_ends_a_windowless_session_without_logging_in_again() {
     assert_eq!(
         summary.server_refusal,
         Some(super::ServerRefusal {
-            code: 0x01,
+            code: Some(0x01),
             message: "Another account is already logged on from this client.".into(),
             still_logged_on: false,
         })
@@ -466,7 +466,7 @@ fn a_refused_login_says_the_account_is_still_logged_on() {
     assert_eq!(
         summary.server_refusal,
         Some(super::ServerRefusal {
-            code: 0x01,
+            code: Some(0x01),
             message: "Another account is already logged on from this client.".into(),
             still_logged_on: true,
         })
@@ -526,6 +526,94 @@ fn a_failed_attempt_waits_another_interval_and_a_missing_character_ends_the_reco
         between >= TIMING.relogin_interval,
         "the next attempt came {between:?} after the refusal"
     );
+}
+
+/// The server's answer to a wrong password: an account boot (0xF7DC) with
+/// its reason.
+fn wrong_password_boot() -> Vec<u8> {
+    let mut w = Writer::new();
+    w.u32(0xF7DC);
+    w.string16l(" because the password entered for this account was not correct")
+        .unwrap();
+    w.into_vec()
+}
+
+const WRONG_PASSWORD_TEXT: &str = "You have been booted from Asheron's Call because the password \
+                                   entered for this account was not correct.";
+
+// Not an OpenAC test: a login the server boots (a wrong password) ends at
+// once with the game's sentence, not at the connect timeout, and the
+// launcher hears the server's words.
+#[test]
+fn a_booted_login_ends_at_once_with_the_games_text() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.send(&wrong_password_boot());
+        Instant::now()
+    });
+
+    let handle = spawn_timed(config(address, None), TIMING).unwrap();
+    let mut seen = Seen::default();
+    let summary = seen.end(&handle);
+    let ended = Instant::now();
+    let booted_at = server.join().unwrap();
+    handle.join();
+
+    assert!(
+        ended.saturating_duration_since(booted_at) < crate::session::CONNECT_TIMEOUT / 2,
+        "the session ended {:?} after the boot",
+        ended.saturating_duration_since(booted_at)
+    );
+    assert_eq!(summary.error.as_deref(), Some(WRONG_PASSWORD_TEXT));
+    assert_eq!(
+        summary.server_refusal,
+        Some(super::ServerRefusal {
+            code: None,
+            message: WRONG_PASSWORD_TEXT.into(),
+            still_logged_on: false,
+        })
+    );
+    assert_eq!(summary.connections, 1);
+    assert_eq!(
+        seen.failures,
+        [SessionError::AccountBooted(WRONG_PASSWORD_TEXT.into())]
+    );
+}
+
+// A login again after a lost server that the server boots (the password
+// changed meanwhile) ends the recovery: the same password would only be
+// refused again every interval.
+#[test]
+fn a_boot_of_an_attempt_to_log_in_again_ends_the_recovery() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.enter_world();
+        let (mut second, _) = ports.accept();
+        second.send(&wrong_password_boot());
+        // Long enough for a further attempt to have come.
+        let wait = TIMING.relogin_interval * 3;
+        let (again, _) = ports.listen(Instant::now() + wait, None);
+        again.is_none()
+    });
+
+    let handle = spawn_timed(config(address, None), TIMING).unwrap();
+    let mut seen = Seen::default();
+    let summary = seen.end(&handle);
+    let no_third_login = server.join().unwrap();
+    handle.join();
+
+    assert_eq!(seen.entered, 1);
+    assert_eq!(summary.connections, 2);
+    assert_eq!(summary.error.as_deref(), Some(WRONG_PASSWORD_TEXT));
+    assert_eq!(
+        seen.relogins,
+        [Relogin::Scheduled {
+            after: TIMING.relogin_interval
+        }]
+    );
+    assert!(no_third_login, "the session did not try again");
 }
 
 /// OpenAC `WorldSession.BeginConnect` and `ConnectionUiController`: a

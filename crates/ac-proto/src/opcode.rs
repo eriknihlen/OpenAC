@@ -128,11 +128,15 @@ pub enum Opcode {
     CharGenVerificationResponse = 0xF643,
     /// Client sends a legacy friends-list command.
     FriendsOld = 0xF7CD,
+    /// Server says the account is banned; the connection ends.
+    AccountBanned = 0xF7C1,
+    /// Server booted the account; the connection ends.
+    AccountBooted = 0xF7DC,
 }
 
 impl Opcode {
     /// Every known opcode, for lookups and tests.
-    pub const ALL: [Opcode; 59] = [
+    pub const ALL: [Opcode; 61] = [
         Opcode::CharacterLogOff,
         Opcode::CharacterEnterWorld,
         Opcode::CharacterList,
@@ -192,6 +196,8 @@ impl Opcode {
         Opcode::CharacterRestore,
         Opcode::CharGenVerificationResponse,
         Opcode::FriendsOld,
+        Opcode::AccountBanned,
+        Opcode::AccountBooted,
     ];
 
     /// The wire value.

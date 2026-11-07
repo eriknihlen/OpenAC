@@ -587,16 +587,18 @@ pub struct SessionSummary {
     pub parse_failures: BTreeMap<u32, u64>,
     /// Connections made (more than one after a reconnect).
     pub connections: u32,
-    /// The server's own refusal, when a character error ended the session.
+    /// The server's own refusal, when a character error, a boot or a ban
+    /// ended the session.
     pub server_refusal: Option<ServerRefusal>,
 }
 
-/// A character error the server ended the session with: its code, the
-/// game's words for it, and whether it only says the login is still held.
+/// A character error, boot or ban the server ended the session with: the
+/// character error's code, the game's words for it, and whether it only
+/// says the login is still held.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerRefusal {
-    /// The character error code as sent.
-    pub code: u32,
+    /// The character error code as sent; `None` for a boot or a ban.
+    pub code: Option<u32>,
     /// What the game says for it.
     pub message: String,
     /// The account or one of its characters is still logged on (see
@@ -605,11 +607,18 @@ pub struct ServerRefusal {
 }
 
 impl ServerRefusal {
-    /// The refusal behind `error`, when a character error from the server
-    /// is what ended the session.
+    /// The refusal behind `error`, when a character error, a boot or a ban
+    /// from the server is what ended the session.
     #[must_use]
     pub fn from_error(error: &SessionError) -> Option<Self> {
         let (code, message) = match error {
+            SessionError::AccountBooted(message) | SessionError::AccountBanned(message) => {
+                return Some(Self {
+                    code: None,
+                    message: message.clone(),
+                    still_logged_on: false,
+                });
+            }
             SessionError::ServerEnded { code, reason } => (*code, reason.clone()),
             SessionError::CharacterRejected(code) => {
                 let error = CharacterError {
@@ -620,7 +629,7 @@ impl ServerRefusal {
             _ => return None,
         };
         Some(Self {
-            code,
+            code: Some(code),
             message,
             still_logged_on: super::selection::means_still_logged_on(CharacterError {
                 raw_error_code: code,
@@ -1610,6 +1619,7 @@ impl Drive<'_> {
             match Inbound::parse(&message.body) {
                 Ok(parsed) => {
                     self.dump(&parsed, message.body.len());
+                    self.flow.set_wall_clock(now_unix_ms());
                     self.flow.handle(now, &parsed);
                     let clocks = clocks(driver);
                     self.follow_generation(now, clocks);
