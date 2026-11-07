@@ -147,6 +147,87 @@ impl PrivateUpdatePropertyInt64 {
     }
 }
 
+/// One 64-bit integer property changed on a visible object
+/// ([`Opcode::PublicUpdatePropertyInt64`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicUpdatePropertyInt64 {
+    /// Quality sequence.
+    pub sequence: u8,
+    /// The object.
+    pub guid: u32,
+    /// 64-bit property id.
+    pub property: u32,
+    /// New value, signed.
+    pub value: i64,
+}
+
+impl PublicUpdatePropertyInt64 {
+    /// Parse the body: opcode, sequence, object, property, value (no
+    /// padding before the value).
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        let (mut r, sequence) = read_header(body, Opcode::PublicUpdatePropertyInt64)?;
+        Ok(Self {
+            sequence,
+            guid: r.u32()?,
+            property: r.u32()?,
+            value: r.i64()?,
+        })
+    }
+}
+
+/// One decimal property changed on the player
+/// ([`Opcode::PrivateUpdatePropertyFloat`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrivateUpdatePropertyFloat {
+    /// Quality sequence.
+    pub sequence: u8,
+    /// Float property id.
+    pub property: u32,
+    /// New value.
+    pub value: f64,
+}
+
+impl PrivateUpdatePropertyFloat {
+    /// Parse the body: opcode, sequence, property, 8-byte value (no padding
+    /// before the value).
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        let (mut r, sequence) = read_header(body, Opcode::PrivateUpdatePropertyFloat)?;
+        Ok(Self {
+            sequence,
+            property: r.u32()?,
+            value: r.f64()?,
+        })
+    }
+}
+
+/// One decimal property (a scale, a shade, a translucency, ...) changed on
+/// a visible object ([`Opcode::PublicUpdatePropertyFloat`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PublicUpdatePropertyFloat {
+    /// Quality sequence.
+    pub sequence: u8,
+    /// The object.
+    pub guid: u32,
+    /// Float property id.
+    pub property: u32,
+    /// New value.
+    pub value: f64,
+}
+
+impl PublicUpdatePropertyFloat {
+    /// Parse the body: opcode, sequence, object, property, 8-byte value (no
+    /// padding before the value).
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        let (mut r, sequence) = read_header(body, Opcode::PublicUpdatePropertyFloat)?;
+        Ok(Self {
+            sequence,
+            guid: r.u32()?,
+            property: r.u32()?,
+            value: r.f64()?,
+        })
+    }
+}
+
 /// One data-file id property (an icon, a palette, ...) changed on a visible
 /// object ([`Opcode::PublicUpdatePropertyDataId`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -658,6 +739,64 @@ mod tests {
             &int64_body(0x02CF, 1, 100, 1),
             PrivateUpdatePropertyInt64::parse,
         );
+    }
+
+    #[test]
+    fn public_int64_golden_bytes() {
+        // The value follows the property at offset 13, unpadded, as the
+        // game reads it (and the server writes it).
+        let bytes: &[u8] = &[
+            0xD0, 0x02, 0x00, 0x00, 0x09, // opcode 0x02D0, sequence
+            0x01, 0x00, 0x00, 0x50, // guid
+            0x02, 0x00, 0x00, 0x00, // property 2
+            0x2E, 0xFD, 0x69, 0xB6, 0xFF, 0xFF, 0xFF, 0xFF, // -1_234_567_890
+        ];
+        assert_eq!(
+            PublicUpdatePropertyInt64::parse(bytes),
+            Ok(PublicUpdatePropertyInt64 {
+                sequence: 9,
+                guid: 0x5000_0001,
+                property: 2,
+                value: -1_234_567_890,
+            })
+        );
+        assert_every_prefix_fails(bytes, PublicUpdatePropertyInt64::parse);
+        wrong_opcode(PrivateUpdatePropertyInt64::parse(bytes));
+    }
+
+    #[test]
+    fn float_updates_golden_bytes() {
+        // Public: object at +5, property at +9, the double at +0x0D;
+        // private: property at +5, the double at +9. No padding.
+        let mut public = vec![0xD4, 0x02, 0x00, 0x00, 0x03];
+        public.extend_from_slice(&0x5000_0001_u32.to_le_bytes());
+        public.extend_from_slice(&39_u32.to_le_bytes());
+        public.extend_from_slice(&1.25_f64.to_le_bytes());
+        assert_eq!(public.len(), 21);
+        assert_eq!(
+            PublicUpdatePropertyFloat::parse(&public),
+            Ok(PublicUpdatePropertyFloat {
+                sequence: 3,
+                guid: 0x5000_0001,
+                property: 39,
+                value: 1.25,
+            })
+        );
+        assert_every_prefix_fails(&public, PublicUpdatePropertyFloat::parse);
+        let mut private = vec![0xD3, 0x02, 0x00, 0x00, 0x04];
+        private.extend_from_slice(&76_u32.to_le_bytes());
+        private.extend_from_slice(&0.5_f64.to_le_bytes());
+        assert_eq!(private.len(), 17);
+        assert_eq!(
+            PrivateUpdatePropertyFloat::parse(&private),
+            Ok(PrivateUpdatePropertyFloat {
+                sequence: 4,
+                property: 76,
+                value: 0.5,
+            })
+        );
+        assert_every_prefix_fails(&private, PrivateUpdatePropertyFloat::parse);
+        wrong_opcode(PrivateUpdatePropertyFloat::parse(&public));
     }
 
     // --- string -----------------------------------------------------------

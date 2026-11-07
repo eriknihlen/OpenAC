@@ -315,6 +315,225 @@ fn public_property_updates_land_on_the_item_record() {
     ));
 }
 
+fn int_update(sequence: u8, property: u32, value: i32) -> Inbound<'static> {
+    Inbound::PublicUpdatePropertyInt(PublicUpdatePropertyInt {
+        sequence,
+        guid: DOOR,
+        property,
+        value,
+    })
+}
+
+#[test]
+fn a_property_update_older_than_the_one_taken_changes_nothing() {
+    // The game's per-property update counter: the first update is taken,
+    // then only one not older (wrapping at 255, 127 wide) for the same
+    // kind and property; another property counts on its own.
+    let mut world = world_with_door();
+    world.apply(&int_update(10, 18, 7));
+    world.take_table_events();
+    world.apply(&int_update(9, 18, 3));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&7));
+    assert!(world.refused_last_update());
+    assert!(world.take_table_events().is_empty());
+    world.apply(&int_update(9, 19, 3));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&19), Some(&3));
+    assert!(!world.refused_last_update());
+    // Equal is taken; past the wrap a small number is newer.
+    world.apply(&int_update(10, 18, 8));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&8));
+    // A jump of more than 127 counts as older.
+    world.apply(&int_update(0xF0, 18, 9));
+    assert!(world.refused_last_update());
+    world.apply(&int_update(0x80, 18, 9));
+    world.apply(&int_update(0xF0, 18, 9));
+    world.apply(&int_update(0x02, 18, 11));
+    world.apply(&int_update(0xF1, 18, 10));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.ints.get(&18),
+        Some(&11)
+    );
+    // Each kind has its own counters.
+    world.apply(&Inbound::PublicUpdatePropertyBool(
+        ac_proto::PublicUpdatePropertyBool {
+            sequence: 1,
+            guid: DOOR,
+            property: 18,
+            value: true,
+        },
+    ));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.bools.get(&18),
+        Some(&true)
+    );
+}
+
+#[test]
+fn a_stack_size_answer_counts_with_the_stack_size_property() {
+    // The stack-size answer shares the int stack-size property's counter
+    // (property 12): an older answer after a newer property update, or the
+    // other way round, changes nothing.
+    let mut world = world_with_door();
+    let stack = |sequence, stack_size| {
+        Inbound::SetStackSize(ac_proto::SetStackSize {
+            sequence,
+            guid: DOOR,
+            stack_size,
+            value: stack_size * 10,
+        })
+    };
+    world.apply(&stack(4, 20));
+    world.apply(&stack(3, 25));
+    assert_eq!(world.item(DOOR).unwrap().stack_size, 20);
+    world.apply(&int_update(3, 12, 30));
+    assert!(!world.item(DOOR).unwrap().properties.ints.contains_key(&12));
+    world.apply(&int_update(5, 12, 30));
+    world.apply(&stack(4, 40));
+    assert_eq!(world.item(DOOR).unwrap().stack_size, 20);
+}
+
+#[test]
+fn the_players_vitals_skip_a_late_update() {
+    // A vital restated in full and its current value alone share one
+    // counter: a resent older current value does not undo a newer one.
+    let mut world = World::new();
+    world.set_player(PLAYER);
+    world.apply(&create(
+        PLAYER,
+        stamps(1, 1),
+        Some(position(0xA9B4_0031, 1.0)),
+    ));
+    world.apply_player_description(&empty_description());
+    world.apply(&Inbound::PrivateUpdateVital(PrivateUpdateVital {
+        sequence: 7,
+        vital: 2,
+        ranks: 10,
+        start: 100,
+        xp: 5,
+        current: 80,
+    }));
+    let current = |world: &World| {
+        world
+            .player()
+            .unwrap()
+            .numbers()
+            .get(ac_core::player::VitalKind::Health)
+            .unwrap()
+            .current
+    };
+    let vital_current = |sequence, current| {
+        Inbound::PrivateUpdateVitalCurrent(ac_proto::PrivateUpdateVitalCurrent {
+            sequence,
+            vital: 2,
+            current,
+        })
+    };
+    world.apply(&vital_current(6, 50));
+    assert_eq!(current(&world), 80);
+    world.apply(&vital_current(8, 60));
+    assert_eq!(current(&world), 60);
+}
+
+#[test]
+fn a_new_incarnation_or_a_resent_description_starts_the_counters_afresh() {
+    // The counters belong to the object's record: a newer incarnation, an
+    // object described again (update-object) or a record removed starts
+    // with none, so its first update is taken whatever its sequence.
+    let mut world = World::new();
+    world.apply(&named(DOOR, 1, "Door"));
+    world.apply(&int_update(200, 18, 1));
+    world.apply(&named(DOOR, 2, "Door"));
+    world.apply(&int_update(100, 18, 2));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&2));
+    let Inbound::CreateObject(again) = named(DOOR, 2, "Door") else {
+        unreachable!()
+    };
+    world.apply(&Inbound::UpdateObject(again));
+    world.apply(&int_update(10, 18, 3));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&3));
+    // A same-incarnation create keeps them.
+    world.apply(&named(DOOR, 2, "Door"));
+    world.apply(&int_update(9, 18, 4));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&3));
+    world.apply(&Inbound::InventoryRemoveObject(
+        ac_proto::InventoryRemoveObject { guid: DOOR },
+    ));
+    world.apply(&named(DOOR, 2, "Door"));
+    world.apply(&int_update(1, 18, 5));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&5));
+}
+
+#[test]
+fn an_update_for_an_object_without_a_record_is_refused() {
+    // No record, nothing to update: the update is refused and leaves no
+    // counter behind, so the object's own first update is still taken.
+    let mut world = World::new();
+    world.apply(&int_update(50, 18, 1));
+    assert!(world.refused_last_update());
+    world.apply(&named(DOOR, 1, "Door"));
+    world.apply(&int_update(10, 18, 2));
+    assert_eq!(world.item(DOOR).unwrap().properties.ints.get(&18), Some(&2));
+}
+
+#[test]
+fn float_and_public_int64_updates_land_on_the_item_record() {
+    // The game applies the public float and 64-bit updates (and the private
+    // float) to the object's properties, behind the same counters: a
+    // tailored item's scale or shade, a quest's float or 64-bit stat.
+    let mut world = World::new();
+    world.set_player(PLAYER);
+    world.apply(&named(PLAYER, 1, "Player"));
+    world.apply(&named(DOOR, 1, "Door"));
+    world.take_table_events();
+    let float = |sequence, value| {
+        Inbound::PublicUpdatePropertyFloat(ac_proto::PublicUpdatePropertyFloat {
+            sequence,
+            guid: DOOR,
+            property: 39,
+            value,
+        })
+    };
+    world.apply(&float(2, 1.25));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.floats.get(&39),
+        Some(&1.25)
+    );
+    assert!(
+        world
+            .take_table_events()
+            .iter()
+            .any(|e| matches!(e, TableEvent::Updated { object_id, .. } if *object_id == DOOR))
+    );
+    world.apply(&float(1, 0.5));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.floats.get(&39),
+        Some(&1.25)
+    );
+    world.apply(&Inbound::PublicUpdatePropertyInt64(
+        ac_proto::PublicUpdatePropertyInt64 {
+            sequence: 1,
+            guid: DOOR,
+            property: 2,
+            value: -5,
+        },
+    ));
+    assert_eq!(
+        world.item(DOOR).unwrap().properties.int64s.get(&2),
+        Some(&-5)
+    );
+    world.apply(&Inbound::PrivateUpdatePropertyFloat(
+        ac_proto::PrivateUpdatePropertyFloat {
+            sequence: 1,
+            property: 76,
+            value: 0.75,
+        },
+    ));
+    assert_eq!(
+        world.item(PLAYER).unwrap().properties.floats.get(&76),
+        Some(&0.75)
+    );
+}
+
 #[test]
 fn private_updates_wait_for_the_player_description() {
     let mut world = World::new();
@@ -470,6 +689,98 @@ fn delete_evicts_the_item_record() {
             ..
         }
     )));
+}
+
+fn delete_of(guid: u32, instance_sequence: u16) -> Inbound<'static> {
+    Inbound::DeleteObject(DeleteObject {
+        guid,
+        instance_sequence,
+    })
+}
+
+#[test]
+fn a_delete_that_overtook_its_create_is_taken_after_the_create() {
+    // The game holds a delete for an object it does not know and replays
+    // it after that object's create: a create resent after its delete
+    // (packet loss) leaves no ghost.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    assert_eq!(world.held_delete_count(), 1);
+    assert!(
+        world
+            .take_queue_notes()
+            .contains(&liveness::QueueNote::DeleteHeld(DOOR))
+    );
+    world.apply(&create(
+        DOOR,
+        stamps(1, 10),
+        Some(position(0xA9B4_0031, 5.0)),
+    ));
+    assert!(world.object(DOOR).is_none());
+    assert!(world.item(DOOR).is_none());
+    assert_eq!(world.held_delete_count(), 0);
+    let key = ObjectKey {
+        local_id: 1,
+        incarnation: 1,
+    };
+    assert_eq!(
+        physics_changes(&mut world),
+        [WorldChange::Spawned(key), WorldChange::Removed(key)]
+    );
+}
+
+#[test]
+fn a_held_delete_of_another_incarnation_spares_the_one_created() {
+    // Replayed against the object created, a delete of an older
+    // incarnation is stale and one of a newer incarnation is dropped (the
+    // newer create will replace the object): only the exact one deletes.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    world.apply(&delete_of(DOOR, 3));
+    world.apply(&create(
+        DOOR,
+        stamps(2, 10),
+        Some(position(0xA9B4_0031, 5.0)),
+    ));
+    assert!(world.object(DOOR).is_some());
+    assert_eq!(world.held_delete_count(), 0);
+}
+
+#[test]
+fn a_resent_description_of_an_unknown_object_replays_its_held_delete() {
+    // An update-object for an object not held is a create, held deletes
+    // included.
+    let mut world = World::new();
+    world.apply(&delete_of(DOOR, 1));
+    let Inbound::CreateObject(door) = named(DOOR, 1, "Door") else {
+        unreachable!()
+    };
+    world.apply(&Inbound::UpdateObject(door));
+    assert!(world.object(DOOR).is_none());
+    assert_eq!(world.held_delete_count(), 0);
+}
+
+#[test]
+fn a_delete_for_object_id_0_is_not_held() {
+    // Id 0 names no object; nothing would ever take the delete.
+    let mut world = World::new();
+    world.apply(&delete_of(0, 1));
+    assert_eq!(world.held_delete_count(), 0);
+    assert!(world.take_queue_notes().is_empty());
+}
+
+#[test]
+fn the_players_delete_is_never_held() {
+    let mut world = World::new();
+    world.set_player(PLAYER);
+    world.apply(&delete_of(PLAYER, 1));
+    assert_eq!(world.held_delete_count(), 0);
+    world.apply(&create(
+        PLAYER,
+        stamps(1, 1),
+        Some(position(0xA9B4_0031, 1.0)),
+    ));
+    assert!(world.object(PLAYER).is_some());
 }
 
 pub(crate) fn named(guid: u32, instance: u16, name: &str) -> Inbound<'static> {

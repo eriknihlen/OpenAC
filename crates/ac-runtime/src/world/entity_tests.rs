@@ -1,5 +1,6 @@
 //! The world's object directory as presentation and the object list read
-//! it: a re-sent description refreshes and never spawns, the player-killer
+//! it: a re-sent description of a held object refreshes it, one of an
+//! object not held creates it (as the game does), the player-killer
 //! bits a property update changes reach the object's view, and an object's
 //! identity across delete and re-create.
 //!
@@ -42,19 +43,24 @@ fn spawns(world: &mut World) -> usize {
 }
 
 #[test]
-fn update_object_refreshes_the_description_and_is_not_a_spawn() {
-    // WorldSessionUpdateObjectTests.UpdateObject_RefreshesTheDescriptionAndIsNotASpawn:
-    // nothing was known about the object; the description is taken, no
-    // object enters the world.
+fn update_object_for_an_unknown_object_creates_it() {
+    // The game handles a re-sent description of an object it does not
+    // hold as a create (OpenAC took only the description and put nothing
+    // in the world): the object spawns, with its physics record and its
+    // item record.
     let mut world = World::new();
-    world.apply(&Inbound::UpdateObject(Box::new(description(
-        ITEM,
-        "Sword",
-        Some(REND_UNDERLAY),
-    ))));
-    assert_eq!(spawns(&mut world), 0);
-    assert!(world.object(ITEM).is_none(), "no physics record");
+    let mut sword = description(ITEM, "Sword", Some(REND_UNDERLAY));
+    sword.physics.position = Some(position(0xA9B4_0031, 5.0));
+    world.apply(&Inbound::UpdateObject(Box::new(sword)));
+    assert_eq!(spawns(&mut world), 1);
+    let object = world.object(ITEM).expect("a physics record");
+    assert_eq!(object.position().map(|p| p.cell_id), Some(0xA9B4_0031));
     assert_eq!(world.item(ITEM).unwrap().icon_underlay_id, REND_UNDERLAY);
+    assert!(
+        world
+            .take_queue_notes()
+            .contains(&liveness::QueueNote::Spawned(ITEM))
+    );
 }
 
 #[test]
@@ -211,24 +217,30 @@ fn a_repeated_resent_description_recreates_each_time() {
 }
 
 #[test]
-fn a_refresh_of_an_item_with_no_physics_record_updates_the_item_only() {
-    // The table holds the item (it is carried); the re-sent description
-    // updates it and still puts nothing in the world.
+fn a_refresh_of_an_item_with_no_physics_record_creates_its_object() {
+    // The table holds the item (known from a list, never created); the
+    // re-sent description creates the object, as a create would, and
+    // merges into the record it had.
     let mut world = World::new();
-    world.apply(&Inbound::UpdateObject(Box::new(description(
-        ITEM, "Sword", None,
-    ))));
+    let known = description(ITEM, "Sword", None);
+    world.mutate_items_for_test(|table, events| {
+        table.ingest(&weenie_data(&known), events);
+    });
     world.drain_changes().for_each(drop);
     world.apply(&Inbound::UpdateObject(Box::new(description(
         ITEM,
         "Sword",
         Some(REND_UNDERLAY),
     ))));
+    let key = world.object(ITEM).expect("a physics record").key();
     assert_eq!(
         world.drain_changes().collect::<Vec<_>>(),
-        [WorldChange::Item(ItemChange::Updated(ITEM))]
+        [
+            WorldChange::Spawned(key),
+            WorldChange::Item(ItemChange::Updated(ITEM))
+        ]
     );
-    assert!(world.object(ITEM).is_none());
+    assert_eq!(world.item(ITEM).unwrap().icon_underlay_id, REND_UNDERLAY);
 }
 
 // --- A re-created item takes the first place in its pack ----------------
@@ -289,7 +301,8 @@ fn a_resent_description_puts_a_held_item_first_in_its_pack() {
 #[test]
 fn a_resent_description_of_an_item_not_held_keeps_its_place() {
     // Known only to the item table (no create arrived): the game has no
-    // object to delete, and the container still lists it where it was.
+    // object to delete, so it creates one, and the container still lists
+    // it where it was.
     let items = [0x5000_0201, 0x5000_0202];
     let mut world = World::new();
     world.mutate_items_for_test(|table, events| {
@@ -301,7 +314,7 @@ fn a_resent_description_of_an_item_not_held_keeps_its_place() {
     ))));
 
     assert_eq!(world.items().get_contents(AETHERIA_PACK), items);
-    assert!(world.object(items[1]).is_none());
+    assert!(world.object(items[1]).is_some());
 }
 
 // --- The player-killer bits in the object's view -----------------------
@@ -458,16 +471,20 @@ fn no_description_bits_yet_reads_none() {
 
 #[test]
 fn an_item_with_no_object_in_the_world_changes_no_view() {
-    // ObjectUpdated_NoMatchingActiveEntity_NoOp: an inventory item.
+    // ObjectUpdated_NoMatchingActiveEntity_NoOp: an inventory item known
+    // only to the item table.
     const PACK_ITEM: u32 = 0x8000_0001;
     let mut world = World::new();
-    world.apply(&Inbound::UpdateObject(Box::new(CreateObject {
+    let item = CreateObject {
         weenie: Some(PublicWeenieDesc {
             object_description_flags: PLAYER_BIT,
             ..PublicWeenieDesc::default()
         }),
         ..description(PACK_ITEM, "pack item", None)
-    })));
+    };
+    world.mutate_items_for_test(|table, events| {
+        table.ingest(&weenie_data(&item), events);
+    });
     world.drain_changes().for_each(drop);
     world.apply(&int_update(
         PACK_ITEM,
@@ -593,7 +610,9 @@ fn an_item_going_into_a_pack_leaves_the_world_but_keeps_its_record() {
             .any(|o| o.guid == GROUND_ITEM)
     );
 
-    // The server takes it out of the world and the record names the pack.
+    // The server takes it out of the world and the record names the pack;
+    // the re-sent description creates the object again (as the game does
+    // for one it does not hold), without a place in the world.
     world.apply(&Inbound::DeleteObject(ac_proto::DeleteObject {
         guid: GROUND_ITEM,
         instance_sequence: 1,
@@ -611,7 +630,7 @@ fn an_item_going_into_a_pack_leaves_the_world_but_keeps_its_record() {
             .snapshot()
             .objects
             .iter()
-            .any(|o| o.guid == GROUND_ITEM)
+            .any(|o| o.guid == GROUND_ITEM && o.position.is_some())
     );
     assert_eq!(world.item(GROUND_ITEM).unwrap().container_id, PLAYER);
 }

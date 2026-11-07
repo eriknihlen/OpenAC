@@ -214,6 +214,9 @@ pub enum QueueNote {
     MovedIntoContainer(u32),
     /// A create for the object landed (new, or described again).
     Spawned(u32),
+    /// A delete for an object not created yet is held for its create; it
+    /// lives as long as an object on the queue.
+    DeleteHeld(u32),
     /// The item table was emptied.
     Cleared,
     /// The trade partner put an item into the trade.
@@ -285,6 +288,11 @@ pub struct LivenessController {
     /// game client keeps such a list on its container until that container
     /// is destroyed, and only then queues what it still holds.
     nested_lists: HashMap<u32, Vec<u32>>,
+    /// Objects with deletes held for their create, and when those go. Kept
+    /// apart from the queue so nothing that takes an object off the queue
+    /// (a vendor's list, a trade offer, a move into the pack) leaves a held
+    /// delete with no end.
+    held_deletes: HashMap<u32, f64>,
     /// The time of the last pass (the queue's deadlines count from it).
     now: f64,
 }
@@ -338,6 +346,7 @@ impl LivenessController {
             return Vec::new();
         }
         self.next_maintenance_at = now + MAINTENANCE_INTERVAL_SECONDS;
+        self.forget_held_deletes(now, world);
         let mut removed = self.destroy_queued(now, world, kept);
         for candidate in self.expired(now, world, physics_cell) {
             world.expire(candidate);
@@ -409,13 +418,21 @@ impl LivenessController {
             }
             QueueNote::Spawned(guid) => {
                 self.queued.remove(&guid);
+                self.held_deletes.remove(&guid);
                 for member in self.viewed_contents(world, guid).to_vec() {
                     self.queued.remove(&member);
                 }
             }
+            QueueNote::DeleteHeld(guid) => {
+                // Each one sets the deadline again, 25 seconds after the
+                // last.
+                self.held_deletes
+                    .insert(guid, self.now + DESTRUCTION_TIMEOUT_SECONDS);
+            }
             QueueNote::Cleared => {
                 self.queued.clear();
                 self.nested_lists.clear();
+                self.held_deletes.clear();
             }
             QueueNote::PartnerItemAdded(guid) => {
                 // It and what it holds stay.
@@ -481,6 +498,19 @@ impl LivenessController {
             self.follow(world, kept);
         }
         removed
+    }
+
+    /// The deletes held for a create that did not come within 25 seconds
+    /// are forgotten.
+    fn forget_held_deletes(&mut self, now: f64, world: &mut World) {
+        self.held_deletes.retain(|&guid, &mut at| {
+            if at <= now {
+                world.forget_held_deletes(guid);
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// The objects out of the surroundings whose time ran out.
@@ -1071,6 +1101,64 @@ mod tests {
         assert!(f.gone(0x8000_1002));
         assert!(f.world.object(0x8000_1001).is_none());
         assert!(!f.gone(CORPSE));
+    }
+
+    #[test]
+    fn a_held_delete_is_forgotten_twenty_five_seconds_on() {
+        // The game keeps a delete for an object it does not know on the
+        // destruction queue: 25 seconds after it (the last one, when
+        // several came) it is gone, and a create after that stays.
+        const LATE: u32 = 0x7000_0042;
+        let mut f = Contents::new();
+        f.tick(1.0);
+        delete(&mut f.world, LATE);
+        f.tick(25.5);
+        assert_eq!(f.world.held_delete_count(), 1);
+        f.tick(26.5);
+        assert_eq!(f.world.held_delete_count(), 0);
+        f.world.apply(&create(
+            LATE,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 5.0)),
+        ));
+        assert!(f.world.object(LATE).is_some());
+
+        // Within the 25 seconds the create takes the delete.
+        const EARLY: u32 = 0x7000_0043;
+        delete(&mut f.world, EARLY);
+        f.tick(30.0);
+        f.world.apply(&create(
+            EARLY,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 6.0)),
+        ));
+        f.tick(40.0);
+        assert!(f.world.object(EARLY).is_none());
+        assert_eq!(f.controller.queued_object_count(), 0);
+    }
+
+    #[test]
+    fn a_held_delete_keeps_its_deadline_when_the_queue_lets_its_object_go() {
+        // A vendor's list or a trade offer naming the object takes it off
+        // the destruction queue; the held delete still goes 25 seconds on,
+        // so a create after that stays.
+        const LISTED: u32 = 0x7000_0044;
+        let mut f = Contents::new();
+        f.tick(1.0);
+        delete(&mut f.world, LISTED);
+        f.follow();
+        f.world
+            .note_destruction_queue(QueueNote::VendorListed(vec![LISTED]));
+        f.world
+            .note_destruction_queue(QueueNote::PartnerItemAdded(LISTED));
+        f.tick(26.5);
+        assert_eq!(f.world.held_delete_count(), 0);
+        f.world.apply(&create(
+            LISTED,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 5.0)),
+        ));
+        assert!(f.world.object(LISTED).is_some());
     }
 
     #[test]

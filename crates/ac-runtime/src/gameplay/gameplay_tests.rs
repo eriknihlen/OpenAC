@@ -321,6 +321,30 @@ fn the_toggle_sends_the_default_mode_and_the_server_s_word_follows() {
 }
 
 #[test]
+fn a_combat_mode_older_than_the_one_held_changes_nothing() {
+    // The game's per-property update counter: the combat-mode property
+    // follows the world's verdict, so a late packet carrying an older mode
+    // does not undo a newer one.
+    let mut f = Fixture::in_the_field();
+    let mode = |sequence, value| {
+        Inbound::PrivateUpdatePropertyInt(PrivateUpdatePropertyInt {
+            sequence,
+            property: COMBAT_MODE_PROPERTY,
+            value,
+        })
+    };
+    f.apply(&mode(5, CombatMode::MELEE.bits().cast_signed()));
+    assert_eq!(f.gameplay.combat().server_mode(), Some(CombatMode::MELEE));
+    f.apply(&mode(4, CombatMode::NON_COMBAT.bits().cast_signed()));
+    assert_eq!(f.gameplay.combat().server_mode(), Some(CombatMode::MELEE));
+    f.apply(&mode(6, CombatMode::NON_COMBAT.bits().cast_signed()));
+    assert_eq!(
+        f.gameplay.combat().server_mode(),
+        Some(CombatMode::NON_COMBAT)
+    );
+}
+
+#[test]
 fn with_a_body_bound_a_mode_change_waits_for_the_stance_and_a_teleport_refuses_it() {
     // OpenAC `RuntimeCombatModeReadiness` (bound by `GameRuntime`): the body
     // is not ready with no body to ask, so the change is parked; a teleport
@@ -368,6 +392,34 @@ fn death_of(guid: u32) -> Inbound<'static> {
             },
         },
     }))
+}
+
+#[test]
+fn a_corpse_deleted_before_its_create_records_no_death() {
+    // The delete came first and the world takes it right after the
+    // create: the object is gone again, so its death motion is not noted.
+    const CORPSE: u32 = 0x8000_0109;
+    let mut f = Fixture::in_the_field();
+    f.events();
+    f.apply(&Inbound::DeleteObject(ac_proto::DeleteObject {
+        guid: CORPSE,
+        instance_sequence: 1,
+    }));
+    let Inbound::CreateObject(mut corpse) = object(CORPSE, "Corpse", 0x10, 0, 6.0) else {
+        unreachable!()
+    };
+    let Inbound::UpdateMotion(dead) = death_of(CORPSE) else {
+        unreachable!()
+    };
+    corpse.physics.movement = Some(ac_proto::PhysicsMovement::Present {
+        raw: vec![0],
+        data: dead.movement,
+        is_autonomous: false,
+    });
+    f.apply(&Inbound::CreateObject(corpse));
+    assert!(f.world.object(CORPSE).is_none());
+    assert!(!f.gameplay.deaths().is_dead(CORPSE));
+    assert!(!f.events().contains(&GameplayEvent::CreatureDied(CORPSE)));
 }
 
 #[test]

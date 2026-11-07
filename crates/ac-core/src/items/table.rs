@@ -1404,6 +1404,25 @@ impl ClientObjectTable {
         true
     }
 
+    /// Records one decimal property update (a tailored scale, shade or
+    /// translucency, a quest float stat). The value goes into the
+    /// property bag only.
+    pub fn update_float_property(
+        &mut self,
+        item_id: u32,
+        property_id: u32,
+        value: f64,
+        events: &mut Vec<TableEvent>,
+    ) -> bool {
+        let Some(item) = self.objects.get_mut(&item_id) else {
+            return false;
+        };
+        server_showed_object(item);
+        item.properties.floats.insert(property_id, value);
+        self.emit_updated(item_id, events);
+        true
+    }
+
     /// The server's answer to a stack request: new size and value.
     pub fn update_stack_size(
         &mut self,

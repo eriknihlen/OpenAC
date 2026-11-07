@@ -820,7 +820,10 @@ impl Gameplay {
     /// One server message (after the world took it).
     pub fn apply(&mut self, message: &Inbound<'_>, ctx: &mut GameplayContext<'_>) {
         match message {
-            Inbound::CreateObject(create) => {
+            // A create whose object the world deleted in the same message
+            // (a delete that came first, replayed) brought nothing into
+            // the world: no death to note.
+            Inbound::CreateObject(create) if ctx.world.object(create.guid).is_some() => {
                 let motion = match &create.physics.movement {
                     Some(ac_proto::PhysicsMovement::Present { data, .. }) => Some(data),
                     _ => None,
@@ -847,8 +850,10 @@ impl Gameplay {
                 self.deaths
                     .forget_incarnation(delete.guid, delete.instance_sequence);
             }
+            // A combat mode the world refused as older than the one it
+            // holds changes nothing.
             Inbound::PrivateUpdatePropertyInt(update)
-                if update.property == COMBAT_MODE_PROPERTY =>
+                if update.property == COMBAT_MODE_PROPERTY && !ctx.world.refused_last_update() =>
             {
                 let mode = CombatMode(update.value.cast_unsigned());
                 if matches!(
