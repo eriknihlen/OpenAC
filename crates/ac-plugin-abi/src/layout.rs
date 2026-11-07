@@ -207,7 +207,7 @@ mod tests {
     /// server's last position on the world-object records) changed it,
     /// API 1.8 (the status board's change notices) again, and API 1.9 (a
     /// creature's appraisal profile on the item properties) again.
-    const PUBLISHED: u64 = 0xb662_5042_b6f6_eef3;
+    const PUBLISHED: u64 = 0xc38c_91a4_a884_79fa;
 
     /// The fingerprint API 1.7 was published with. A released version's
     /// layout never changes: what a later version adds is marked `since`.

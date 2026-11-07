@@ -361,11 +361,17 @@ game files.
 `host.identify(id)` asks the server to appraise an object without opening
 the assess window. For a creature, the answer's profile is then in
 `host.properties(id)` (the world object's properties) as `creature`:
-`health` and `health_max`, and in `attributes` its six attributes and its
-stamina, mana and their maximums. These are what the assess window shows
+`health` and `max_health`, and in `attributes` its six attributes and its
+stamina, mana and their maximums (`max_stamina`, `max_mana`).
+`attribute_highlights` marks which values enchantments change, one bit each
+(strength `0x1`, endurance `0x2`, quickness `0x4`, coordination `0x8`,
+focus `0x10`, self `0x20`, health `0x40`, stamina `0x80`, mana `0x100`), and
+`attribute_colors` sets the same bit when that value is raised and clears it
+when it is lowered: so a debuff that landed shows as a highlighted bit with
+its colour bit clear. Both are 0 when nothing is enchanted. These are what the assess window shows
 for the same appraisal. When the character could not assess the creature,
 the server still sends its health, so `creature` holds `health` and
-`health_max` with no `attributes`. Each appraisal answer replaces
+`max_health` with no `attributes`. Each appraisal answer replaces
 `creature` with the profile it carried, and one with no profile (any
 item's) leaves `None`. A new instance of the creature starts without one.
 

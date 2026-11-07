@@ -127,10 +127,15 @@ pub struct ClientCreatureProfile {
     /// The profile's flags as sent.
     pub flags: u32,
     pub health: u32,
-    pub health_max: u32,
+    pub max_health: u32,
     /// Present only when the appraisal showed them: an answer that could
     /// not assess the creature carries its health alone.
     pub attributes: Option<ClientCreatureAttributes>,
+    /// Which values enchantments change (one bit each, strength first);
+    /// zero when the answer carried none.
+    pub attribute_highlights: u16,
+    /// For each highlighted value, set when raised, clear when lowered.
+    pub attribute_colors: u16,
 }
 
 /// A creature's attributes and its stamina and mana, from an appraisal.
@@ -143,9 +148,9 @@ pub struct ClientCreatureAttributes {
     pub focus: u32,
     pub self_: u32,
     pub stamina: u32,
-    pub stamina_max: u32,
+    pub max_stamina: u32,
     pub mana: u32,
-    pub mana_max: u32,
+    pub max_mana: u32,
 }
 
 /// An armor piece's protection against each damage kind from its last

@@ -431,11 +431,11 @@ wire_record! {
         /// Stamina.
         pub stamina: u32,
         /// Maximum stamina.
-        pub stamina_max: u32,
+        pub max_stamina: u32,
         /// Mana.
         pub mana: u32,
         /// Maximum mana.
-        pub mana_max: u32,
+        pub max_mana: u32,
     }
 }
 
@@ -448,11 +448,19 @@ wire_record! {
         /// Health.
         pub health: u32,
         /// Maximum health.
-        pub health_max: u32,
+        pub max_health: u32,
         /// Attributes, stamina and mana: only when the appraisal could
         /// assess the creature. An answer that could not still carries its
         /// health.
         pub attributes: Option<CreatureAttributes>,
+        /// Which values enchantments change, one bit each: strength 0x1,
+        /// endurance 0x2, quickness 0x4, coordination 0x8, focus 0x10,
+        /// self 0x20, health 0x40, stamina 0x80, mana 0x100. Zero when the
+        /// answer carried none (nothing enchanted).
+        pub attribute_highlights: u16,
+        /// For each bit set in `attribute_highlights`: set when the value
+        /// is raised (shown green), clear when it is lowered (red).
+        pub attribute_colors: u16,
     }
 }
 
@@ -1020,12 +1028,14 @@ mod tests {
             creature: Some(CreatureProfile {
                 flags: 8,
                 health: 120,
-                health_max: 200,
+                max_health: 200,
+                attribute_highlights: 0x41,
+                attribute_colors: 0x01,
                 attributes: Some(CreatureAttributes {
                     strength: 55,
                     self_: 70,
-                    stamina_max: 100,
-                    mana_max: 50,
+                    max_stamina: 100,
+                    max_mana: 50,
                     ..CreatureAttributes::default()
                 }),
             }),

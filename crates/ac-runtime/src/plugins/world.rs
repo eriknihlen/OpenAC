@@ -256,7 +256,9 @@ pub(super) fn properties_of(item: &ClientObject) -> ItemProperties {
         creature: item.creature_profile.map(|c| abi::CreatureProfile {
             flags: c.flags,
             health: c.health,
-            health_max: c.health_max,
+            max_health: c.max_health,
+            attribute_highlights: c.attribute_highlights,
+            attribute_colors: c.attribute_colors,
             attributes: c.attributes.map(|a| abi::CreatureAttributes {
                 strength: a.strength,
                 endurance: a.endurance,
@@ -265,9 +267,9 @@ pub(super) fn properties_of(item: &ClientObject) -> ItemProperties {
                 focus: a.focus,
                 self_: a.self_,
                 stamina: a.stamina,
-                stamina_max: a.stamina_max,
+                max_stamina: a.max_stamina,
                 mana: a.mana,
-                mana_max: a.mana_max,
+                max_mana: a.max_mana,
             }),
         }),
     }

@@ -209,7 +209,8 @@ fn creature_profile(
     strength: Option<u32>,
 ) -> ac_proto::appraise::CreatureProfile {
     ac_proto::appraise::CreatureProfile {
-        flags: if strength.is_some() { 8 } else { 0 },
+        // Attributes (0x8) and, with them, enchanted values (0x1).
+        flags: if strength.is_some() { 9 } else { 0 },
         health,
         health_max,
         attributes: strength.map(|strength| ac_proto::appraise::CreatureAttributes {
@@ -224,7 +225,8 @@ fn creature_profile(
             stamina_max: 100,
             mana_max: 60,
         }),
-        attribute_highlights: None,
+        // Strength raised, health lowered.
+        attribute_highlights: strength.map(|_| (0x41, 0x01)),
     }
 }
 
@@ -247,17 +249,23 @@ fn an_appraised_creature_profile_reaches_world_properties() {
     with_binding(&mut state, &mut outbox, |b| {
         let properties = call::<calls::WorldProperties>(b, &MONSTER).expect("known");
         let creature = properties.creature.expect("appraised");
-        assert_eq!((creature.health, creature.health_max), (120, 200));
+        assert_eq!((creature.health, creature.max_health), (120, 200));
         let attributes = creature.attributes.expect("assessed");
         assert_eq!(
             (
                 attributes.strength,
                 attributes.self_,
-                attributes.stamina_max
+                attributes.max_stamina
             ),
             (55, 30, 100)
         );
-        assert_eq!((attributes.mana, attributes.mana_max), (25, 60));
+        assert_eq!((attributes.mana, attributes.max_mana), (25, 60));
+        // Which values are enchanted, and which way: strength up, health
+        // down.
+        assert_eq!(
+            (creature.attribute_highlights, creature.attribute_colors),
+            (0x41, 0x01)
+        );
         // The hostile-target capture is as it was: an appraisal does not
         // give it a maximum.
         let targets = call::<calls::CombatHostileTargets>(b, &50.0);
@@ -294,8 +302,12 @@ fn a_failed_creature_appraisal_still_reports_health_to_plugins() {
         let creature = call::<calls::WorldProperties>(b, &MONSTER)
             .and_then(|p| p.creature)
             .expect("health kept");
-        assert_eq!((creature.health, creature.health_max), (70, 200));
+        assert_eq!((creature.health, creature.max_health), (70, 200));
         assert!(creature.attributes.is_none());
+        assert_eq!(
+            (creature.attribute_highlights, creature.attribute_colors),
+            (0, 0)
+        );
     });
 }
 

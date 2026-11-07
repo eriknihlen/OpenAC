@@ -1879,17 +1879,19 @@ fn update_appraisal_without_a_profile_clears_a_stale_one() {
     assert!(f.get(0x702).armor_profile.is_none());
 }
 
-fn creature(health: u32, health_max: u32, strength: Option<u32>) -> ClientCreatureProfile {
+fn creature(health: u32, max_health: u32, strength: Option<u32>) -> ClientCreatureProfile {
     ClientCreatureProfile {
         flags: if strength.is_some() { 8 } else { 0 },
         health,
-        health_max,
+        max_health,
+        attribute_highlights: 0,
+        attribute_colors: 0,
         attributes: strength.map(|strength| ClientCreatureAttributes {
             strength,
             stamina: 90,
-            stamina_max: 100,
+            max_stamina: 100,
             mana: 40,
-            mana_max: 50,
+            max_mana: 50,
             ..ClientCreatureAttributes::default()
         }),
     }
