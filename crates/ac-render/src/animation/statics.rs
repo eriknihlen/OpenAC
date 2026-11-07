@@ -42,8 +42,9 @@ pub struct StaticKey {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StaticStep {
     pending: f64,
-    /// Spin from the last spin hook, radians per 1/30 s about the world
-    /// axes.
+    /// Spin from the last spin hook about the world axes: radians per
+    /// 1/30 s for a static, radians per second for a live object (see
+    /// `LiveAnimation::spin_quantum`).
     pub omega: Vec3,
     /// The turn the spin has made so far (applied before the object's own
     /// orientation).
