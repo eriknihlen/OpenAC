@@ -14,7 +14,7 @@ use ac_runtime::world::{ObjectKey, ObjectView, RadarFacts};
 use glam::Vec3;
 
 use super::source::empty_table;
-use super::test_support::{MapLoader, setup, two_frame_animation};
+use super::test_support::{MapLoader, omega_animation, setup, two_frame_animation};
 use super::*;
 
 const ANIMATION: u32 = 0x0300_0001;
@@ -248,4 +248,64 @@ fn part_fades_set_each_parts_opacity_and_an_invisible_part_is_left_out() {
     );
     let opacities = opacities.unwrap();
     assert!((opacities[0] - 0.8).abs() < 1e-6 && (opacities[1] - 0.4).abs() < 1e-6);
+}
+
+/// The yaw the drawn spin has turned the object, radians.
+fn spin_yaw(p: &AnimationPresenter, local: u32) -> f32 {
+    let forward = p.object(local).unwrap().spin() * Vec3::X;
+    forward.y.atan2(forward.x)
+}
+
+/// An object with no motion table (the session gives it no body: a
+/// butterfly swarm) turns by its spin hook's angular velocity, radians per
+/// second about the world up axis, times each object quantum, from the
+/// quantum after the hook (retail's physics step).
+#[test]
+fn a_spin_hook_turns_an_object_with_no_motion_table_by_its_spin_per_second() {
+    const SPIN: f32 = 0.5;
+    let mut source = FakeSource::new(omega_animation(Vec3::new(0.0, 0.0, SPIN)));
+    let mut p = AnimationPresenter::new();
+    p.sync([&view(2, 1, 0x0200_0002)].into_iter(), &mut source);
+    // Steps of 0.05 s: one object quantum each.
+    tick(&mut p, 0.05);
+    assert!(
+        spin_yaw(&p, 2).abs() < 1e-6,
+        "not before the hook's quantum"
+    );
+    for _ in 0..20 {
+        tick(&mut p, 0.05);
+    }
+    let turned = spin_yaw(&p, 2);
+    assert!(
+        (turned - SPIN).abs() < 1e-3,
+        "one second turned it {turned}"
+    );
+}
+
+/// A new orientation from the server replaces the turn the spin made; the
+/// spin goes on from there.
+#[test]
+fn a_new_server_orientation_starts_the_spin_again_from_it() {
+    let mut source = FakeSource::new(omega_animation(Vec3::new(0.0, 0.0, 0.5)));
+    let mut p = AnimationPresenter::new();
+    let mut v = view(2, 1, 0x0200_0002);
+    p.sync([&v].into_iter(), &mut source);
+    for _ in 0..10 {
+        tick(&mut p, 0.05);
+    }
+    assert!(spin_yaw(&p, 2) > 0.1);
+    // The same view again changes nothing.
+    p.sync([&v].into_iter(), &mut source);
+    assert!(spin_yaw(&p, 2) > 0.1);
+    let (s, c) = (0.3_f32.sin(), 0.3_f32.cos());
+    v.position.as_mut().unwrap().orientation = Quaternion {
+        w: c,
+        x: 0.0,
+        y: 0.0,
+        z: s,
+    };
+    p.sync([&v].into_iter(), &mut source);
+    assert_eq!(p.object(2).unwrap().spin(), glam::Quat::IDENTITY);
+    tick(&mut p, 0.05);
+    assert!(spin_yaw(&p, 2) > 0.0, "it keeps spinning");
 }

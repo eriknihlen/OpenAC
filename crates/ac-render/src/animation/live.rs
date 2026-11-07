@@ -60,8 +60,12 @@ pub struct LiveAnimation {
     grounded: bool,
     hidden: bool,
     is_static: bool,
-    /// Whole-elapsed stepping and spin, for static objects.
+    /// Whole-elapsed stepping and spin, for static objects; the spin of
+    /// an object with no motion table too (see [`Self::spin`]).
     pub step: StaticStep,
+    /// The orientation of its last view: a new one from the server starts
+    /// its spin again from there.
+    orientation: Option<ac_proto::Quaternion>,
     /// Its parts' poses (object-local, see [`PartPose`]).
     pub poses: Vec<PartPose>,
     /// The size it wears.
@@ -116,6 +120,7 @@ impl LiveAnimation {
             hidden: false,
             is_static: false,
             step: StaticStep::default(),
+            orientation: None,
             scale,
             frames: Vec::new(),
         };
@@ -163,6 +168,13 @@ impl LiveAnimation {
         self.hidden = hidden;
         self.is_static = state.contains(PhysicsState::STATIC);
         self.obj.body.state = state;
+        let orientation = view.position.as_ref().map(|p| p.orientation);
+        if orientation != self.orientation && !self.is_static {
+            // The spin turned the drawn object from where the server last
+            // put it; a new orientation replaces that.
+            self.step.spin = Quat::IDENTITY;
+        }
+        self.orientation = orientation;
         match &view.motion {
             Some(motion) => self.follow_motion(motion),
             None => false,
@@ -360,6 +372,9 @@ impl LiveAnimation {
                 self.frames.clear();
                 self.frames.extend_from_slice(frames);
                 posed = true;
+                if !self.interpreted {
+                    self.spin_quantum(quantum);
+                }
             }
             self.capture_hooks(queue);
             let mut cx = self.obj.cx(&NoTargets);
@@ -400,6 +415,24 @@ impl LiveAnimation {
         true
     }
 
+    /// One object quantum of `quantum` seconds turns an object with no
+    /// motion table (one the session gives no body) by its spin, radians
+    /// per second about the world axes, times the quantum; then the last
+    /// spin hook the quantum reached sets the spin for the quanta after it.
+    /// An object the session moves turns by its own body's spin instead.
+    fn spin_quantum(&mut self, quantum: f32) {
+        if self.step.omega != Vec3::ZERO {
+            let mut frame = Frame::new(Vec3::ZERO, self.step.spin);
+            frame.grotate(self.step.omega * quantum);
+            self.step.spin = frame.orientation;
+        }
+        if let Some(sequencer) = self.obj.sequencer.as_ref()
+            && let Some(omega) = super::statics::resolve_omega(sequencer.pending_hooks())
+        {
+            self.step.omega = omega;
+        }
+    }
+
     /// Take the hooks the last step reached: an animation-done hook
     /// completes its motion at once; all of them go to the frame's queue.
     fn capture_hooks(&mut self, queue: &mut HookFrameQueue) {
@@ -418,8 +451,9 @@ impl LiveAnimation {
         queue.capture(HookOwner::Object(self.key.local_id), self.guid, hooks);
     }
 
-    /// The root turn a spin hook made (static objects), applied before the
-    /// object's own orientation.
+    /// The root turn a spin hook made (static objects, and objects with no
+    /// motion table), applied after the object's own orientation, about
+    /// the world axes.
     #[must_use]
     pub fn spin(&self) -> Quat {
         self.step.spin

@@ -1462,7 +1462,6 @@ impl Movement {
         // An object resting where its entry put it keeps its rows there.
         if let Some(local_id) = world.object(guid).map(|o| o.key().local_id) {
             self.follow_resting(local_id);
-            self.rows_take_body_state(local_id);
         }
     }
 
