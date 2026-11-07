@@ -289,8 +289,7 @@ impl VfxWorld {
         if local_id == 0 {
             return;
         }
-        self.sink
-            .stop_all_for_entity(&mut self.particles, local_id, false);
+        self.sink.destroy_emitters_of(&mut self.particles, local_id);
     }
 
     /// An object's effects end: its scripts stop, its emitters go at once,

@@ -4812,6 +4812,16 @@ fn a_new_motion_table_rearms_the_body_under_a_fresh_movement_manager() {
             .len()
     };
     assert!(pending(&rig) > 0, "the emote is under way");
+    let table_of = |rig: &Rig| {
+        rig.movement
+            .controller()
+            .unwrap()
+            .object()
+            .sequencer
+            .as_ref()
+            .and_then(|s| s.manager().table().map(|t| t.table().id))
+    };
+    assert_eq!(table_of(&rig), Some(HUMAN_MOTION));
     let _ = rig.world.drain_changes().count();
     assert!(
         rig.movement
@@ -4827,8 +4837,12 @@ fn a_new_motion_table_rearms_the_body_under_a_fresh_movement_manager() {
             .any(|c| matches!(c, crate::world::WorldChange::AppearanceChanged(_)))
     );
     assert_eq!(pending(&rig), 0, "a new movement manager");
+    assert_eq!(
+        table_of(&rig),
+        Some(EMPYREAN_MALE_WALKING),
+        "animates by the new table"
+    );
     let c = rig.movement.controller().unwrap();
-    assert!(c.object().sequencer.is_some());
     assert!(c.object().move_to_made());
     let (start, _, _) = rig.body();
     rig.command(MovementCommand::Keys(MovementKeys {
