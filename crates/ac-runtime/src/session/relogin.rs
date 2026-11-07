@@ -5,8 +5,8 @@
 //! that moment: a session with no window attached logs in again on a fixed
 //! interval until one attempt gets back to where its start took it; a
 //! session a window shows ends, and the window shows the loss. A failed
-//! attempt waits another interval; only an account with no character to
-//! enter ends the recovery.
+//! attempt waits another interval; an account with no character to enter,
+//! or one the server boots or bans, ends the recovery.
 
 use std::time::{Duration, Instant};
 
@@ -57,10 +57,20 @@ pub(crate) fn after_loss(enters_world: bool, window_attached: bool, ending: bool
 
 /// Whether a failed attempt to log in again is tried again after the
 /// interval: every failure is (the server still gone, not yet taking
-/// logins, the account still in use), except an account with no character
-/// to enter, which no later attempt changes.
+/// logins, the account still in use), except what no later attempt
+/// changes: an account with no character to enter, and the server booting
+/// the login (a wrong password or client version) or refusing the account
+/// as banned. Repeating a refused password every interval would only look
+/// like guessing it.
 pub(crate) fn retries_after(error: Option<&SessionError>) -> bool {
-    !matches!(error, Some(SessionError::NoCharacter(_)))
+    !matches!(
+        error,
+        Some(
+            SessionError::NoCharacter(_)
+                | SessionError::AccountBooted(_)
+                | SessionError::AccountBanned(_)
+        )
+    )
 }
 
 /// One session's recovery from a lost server: whether it is recovering,
@@ -212,6 +222,12 @@ mod tests {
         assert!(retries_after(Some(&SessionError::ConnectionLost)));
         assert!(!retries_after(Some(&SessionError::NoCharacter(
             "+Gone".into()
+        ))));
+        assert!(!retries_after(Some(&SessionError::AccountBooted(
+            "booted".into()
+        ))));
+        assert!(!retries_after(Some(&SessionError::AccountBanned(
+            "banned".into()
         ))));
     }
 }

@@ -1,5 +1,6 @@
 //! A game session: login, character selection, the world, log off.
 
+mod account_end;
 mod chargen_table;
 pub mod creation;
 pub mod diagnostics;

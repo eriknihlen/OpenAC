@@ -1,7 +1,8 @@
 use crate::{
-    CharacterError, CharacterList, CreateObject, DddBegin, DeleteObject, GameEventEnvelope,
-    ObjDescEvent, Opcode, ParentEvent, PickupEvent, PlayerTeleport, ProtoError, Result, ServerName,
-    SetState, UpdateMotion, UpdatePosition, VectorUpdate, is_logoff_confirmation, read_opcode,
+    AccountBanned, AccountBooted, CharacterError, CharacterList, CreateObject, DddBegin,
+    DeleteObject, GameEventEnvelope, ObjDescEvent, Opcode, ParentEvent, PickupEvent,
+    PlayerTeleport, ProtoError, Result, ServerName, SetState, UpdateMotion, UpdatePosition,
+    VectorUpdate, is_logoff_confirmation, read_opcode,
 };
 use crate::{
     InventoryRemoveObject, PrivateUpdateAttribute, PrivateUpdatePosition,
@@ -25,6 +26,11 @@ pub enum Inbound<'a> {
     /// A login or character-selection rejection. Check
     /// [`CharacterError::is_sentinel`] before treating it as one.
     CharacterError(CharacterError),
+    /// The server booted the account; it drops the connection next.
+    AccountBooted(AccountBooted),
+    /// The server refused the account as banned; it drops the connection
+    /// next.
+    AccountBanned(AccountBanned),
     /// The server confirmed the character log-off.
     LogOffConfirmed,
     /// The server is ready for the enter-world message.
@@ -147,6 +153,8 @@ impl<'a> Inbound<'a> {
             Some(Opcode::CharacterList) => Self::CharacterList(CharacterList::parse(body)?),
             Some(Opcode::ServerName) => Self::ServerName(ServerName::parse(body)?),
             Some(Opcode::CharacterError) => Self::CharacterError(CharacterError::parse(body)?),
+            Some(Opcode::AccountBooted) => Self::AccountBooted(AccountBooted::parse(body)?),
+            Some(Opcode::AccountBanned) => Self::AccountBanned(AccountBanned::parse(body)?),
             Some(Opcode::ServerReady) => Self::ServerReady,
             Some(Opcode::DddInterrogation) => Self::DddInterrogation,
             Some(Opcode::DddBegin) => Self::DddBegin(DddBegin::parse(body)?),
@@ -351,6 +359,23 @@ mod tests {
             Inbound::parse(&event),
             Ok(Inbound::GameEvent(e)) if e.event_type == GameEventType::PLAYER_DESCRIPTION
         ));
+    }
+
+    #[test]
+    fn account_boot_and_ban_are_classified() {
+        assert_eq!(
+            Inbound::parse(&words(&[0xF7DC])),
+            Ok(Inbound::AccountBooted(AccountBooted { reason: None }))
+        );
+        assert_eq!(
+            Inbound::parse(&words(&[0xF7C1, 60])),
+            Ok(Inbound::AccountBanned(AccountBanned {
+                seconds_remaining: 60,
+                reason: None,
+            }))
+        );
+        // A ban without its seconds is malformed.
+        assert!(Inbound::parse(&words(&[0xF7C1])).is_err());
     }
 
     /// Opcode, guid, empty appearance, empty physics block with zero

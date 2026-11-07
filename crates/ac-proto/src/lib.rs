@@ -25,6 +25,7 @@
 //! requests (`build_*`). Game-action builders take the session's next
 //! action sequence number, see [`GameActionSequence`].
 
+mod account_boot;
 mod character_error;
 mod character_list;
 mod create_object;
@@ -80,6 +81,7 @@ mod sequence_tests;
 mod test_util;
 
 pub use ac_bits::BitsError;
+pub use account_boot::{AccountBanned, AccountBooted};
 pub use character_error::{CharacterError, CharacterErrorCode};
 pub use character_list::{Character, CharacterList, EnterWorldSelection, SelectionError};
 pub use create_object::CreateObject;

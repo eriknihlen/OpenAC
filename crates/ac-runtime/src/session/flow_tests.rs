@@ -259,6 +259,98 @@ fn a_boot_at_selection_or_while_entering_ends_the_session_too() {
     assert_eq!(flow.phase(), Phase::Failed);
 }
 
+/// The server's answer to a wrong password: an account boot (0xF7DC) with
+/// its reason, while logging in. The game shows its disconnected screen
+/// with "You have been booted from Asheron's Call<reason>."; the session
+/// ends at once, not after the connect timeout.
+fn wrong_password_boot() -> Vec<u8> {
+    let mut w = Writer::new();
+    w.u32(0xF7DC);
+    w.string16l(" because the password entered for this account was not correct")
+        .unwrap();
+    w.into_vec()
+}
+
+#[test]
+fn a_wrong_password_boot_ends_the_login_at_once_with_the_games_text() {
+    let mut flow = SessionFlow::new(Duration::ZERO);
+    flow.handle_message(Duration::from_millis(50), &wrong_password_boot());
+    assert_eq!(flow.phase(), Phase::Failed);
+    let error = ended_by(&mut flow).expect("the session failed");
+    let text = "You have been booted from Asheron's Call because the password entered for this \
+                account was not correct.";
+    assert_eq!(error, SessionError::AccountBooted(text.into()));
+    assert_eq!(error.to_string(), text);
+    // No connect timeout follows.
+    flow.tick(CONNECT_TIMEOUT);
+    assert!(ended_by(&mut flow).is_none());
+}
+
+#[test]
+fn a_boot_in_the_world_or_entering_ends_the_session_and_drops_the_held_entry() {
+    let mut flow = in_world();
+    flow.drain_events().for_each(drop);
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DC]));
+    assert_eq!(flow.phase(), Phase::Failed);
+    assert_eq!(
+        ended_by(&mut flow),
+        Some(SessionError::AccountBooted(
+            "You have been booted from Asheron's Call for Code of Conduct Violations.".into()
+        ))
+    );
+
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DC]));
+    assert_eq!(flow.phase(), Phase::Failed);
+    flow.drain_outgoing().for_each(drop);
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+    assert!(
+        opcodes(&mut flow).is_empty(),
+        "the enter-world stays unsent"
+    );
+}
+
+#[test]
+fn a_ban_ends_the_login_at_once_naming_its_end_in_local_time() {
+    // 2026-11-07 09:30:20 UTC; the ban has an hour left; the zone is UTC+1.
+    let mut flow = SessionFlow::new(Duration::ZERO);
+    flow.set_wall_clock(1_794_043_820_000);
+    flow.set_time_zone(crate::local_time::LocalZone::fixed(3600));
+    let mut w = Writer::new();
+    w.u32(0xF7C1);
+    w.u32(3600);
+    w.string16l(" - cheating").unwrap();
+    flow.handle_message(Duration::ZERO, &w.into_vec());
+    assert_eq!(flow.phase(), Phase::Failed);
+    assert_eq!(
+        ended_by(&mut flow),
+        Some(SessionError::AccountBanned(
+            "You have been banned until Sat Nov 07 11:31:00 2026 - cheating. For ban appeals, \
+             please visit support.turbine.com"
+                .into()
+        ))
+    );
+
+    let mut flow = connected();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7C1, 0]));
+    assert_eq!(
+        ended_by(&mut flow).map(|e| e.to_string()),
+        Some("You have been banned from Asheron's Call.".into())
+    );
+}
+
+#[test]
+fn a_boot_after_the_log_off_keeps_the_log_off() {
+    let mut flow = in_world();
+    flow.request_logoff(Duration::ZERO).unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF653]));
+    assert_eq!(flow.phase(), Phase::LoggedOff);
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DC]));
+    assert_eq!(flow.phase(), Phase::LoggedOff);
+}
+
 #[test]
 fn an_enter_game_error_in_the_world_does_not_end_the_session() {
     // Enter-game errors go back to character selection in the game; in the

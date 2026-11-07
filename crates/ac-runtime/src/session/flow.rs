@@ -21,6 +21,7 @@ use ac_proto::{
     build_interrogation_response, build_login_complete, build_logoff_request, read_opcode,
 };
 
+use super::account_end::{banned_message, booted_message};
 use super::creation::{
     CharacterCreation, ChargenRandom, CreationCommand, CreationDeltaKind, CreationSnapshot,
     SeededRandom,
@@ -28,6 +29,7 @@ use super::creation::{
 use super::generation::Generation;
 use super::outbox::{Outbox, Outgoing, Queue};
 use super::selection::{CharacterSelection, SelectionEntry, SelectionSnapshot};
+use crate::local_time::LocalZone;
 
 /// How long connecting may take, from the login request to a usable
 /// character list with the data check finished.
@@ -86,6 +88,15 @@ pub enum SessionError {
         /// What the game says for it.
         reason: String,
     },
+    /// The server booted the account (a wrong password, a wrong client
+    /// version, an administrator, the world closing, ...); the text is the
+    /// game's sentence with the server's reason.
+    #[error("{0}")]
+    AccountBooted(String),
+    /// The server refused the account as banned; the text is the game's
+    /// sentence, naming the ban's end when it has one.
+    #[error("{0}")]
+    AccountBanned(String),
     /// The server fell silent for longer than the transport allows (it
     /// died, or dropped the session without a word).
     #[error("the connection to the server was lost")]
@@ -214,6 +225,10 @@ pub struct SessionFlow {
     selection_revision_seen: u64,
     outbox: Outbox,
     events: VecDeque<SessionEvent>,
+    /// The wall clock (UTC milliseconds since the Unix epoch) at the
+    /// message being handled, and the zone a ban's end is shown in.
+    wall_unix_ms: i64,
+    zone: LocalZone,
 }
 
 impl SessionFlow {
@@ -266,6 +281,8 @@ impl SessionFlow {
             selection_revision_seen: 0,
             outbox: Outbox::new(),
             events: VecDeque::new(),
+            wall_unix_ms: 0,
+            zone: LocalZone::system(),
         }
     }
 
@@ -345,6 +362,17 @@ impl SessionFlow {
             self.outbox.send_action(build_house_query);
         }
         self.events.push_back(SessionEvent::LoginCompleteSent);
+    }
+
+    /// The wall clock (UTC milliseconds since the Unix epoch) at the
+    /// messages handled next: a ban names its end from it.
+    pub fn set_wall_clock(&mut self, unix_ms: i64) {
+        self.wall_unix_ms = unix_ms;
+    }
+
+    /// Show times in a fixed zone instead of the system's (tests).
+    pub fn set_time_zone(&mut self, zone: LocalZone) {
+        self.zone = zone;
     }
 
     /// The character-selection state.
@@ -447,6 +475,14 @@ impl SessionFlow {
                     .push_back(SessionEvent::ServerName(name.clone()));
             }
             Inbound::CharacterError(error) => self.on_character_error(*error),
+            Inbound::AccountBooted(boot) => {
+                self.end_by_server(SessionError::AccountBooted(booted_message(boot)));
+            }
+            Inbound::AccountBanned(ban) => {
+                let now = self.wall_unix_ms.div_euclid(1000);
+                let message = banned_message(ban, now, &self.zone);
+                self.end_by_server(SessionError::AccountBanned(message));
+            }
             Inbound::ServerReady => self.on_server_ready(),
             Inbound::CharacterDeleteAcknowledged => self.selection.apply_delete_acknowledged(),
             Inbound::CharGenVerification(response) => self.on_chargen_answer(now, response),
@@ -857,6 +893,17 @@ impl SessionFlow {
                 )));
             self.set_phase(Phase::InCharacterSelect);
         }
+    }
+
+    /// The server ended the session (a boot or a ban), in the world or
+    /// not: it drops the connection right after, so the session ends at
+    /// once instead of running out a timeout.
+    fn end_by_server(&mut self, error: SessionError) {
+        if matches!(self.phase, Phase::LoggedOff | Phase::Failed) {
+            return;
+        }
+        self.pending_enter_world = None;
+        self.fail(error);
     }
 
     fn on_chargen_answer(&mut self, now: Duration, response: &CharGenVerificationResponse) {
