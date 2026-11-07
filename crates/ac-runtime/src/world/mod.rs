@@ -866,13 +866,12 @@ impl World {
         // icon underlay a rend adds, a revealed Aetheria), keeping what was
         // learned about it; being created again, it takes the first place
         // in the container the description names (a revealed Aetheria
-        // moves to its pack's top-left slot). One not held only refreshes
-        // the item record, where it is; it never puts an object in the
-        // world.
+        // moves to its pack's top-left slot). One not held is created
+        // from it as from a create-object: it enters the world.
         // Created again, the object starts its quality counters afresh.
         self.quality_stamps.remove(&update.guid);
         let Some(existing) = self.objects.get_mut(&update.guid) else {
-            self.ingest_description(update);
+            self.apply_create(update);
             return;
         };
         let stamps = timestamps(update);
