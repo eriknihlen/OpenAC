@@ -179,6 +179,11 @@ impl WorldObject {
         self.physics.motion_table_id.is_some_and(|id| id != 0)
     }
 
+    /// The client changed the motion table itself.
+    pub(super) fn set_motion_table(&mut self, table: u32) {
+        self.physics.motion_table_id = Some(table);
+    }
+
     /// Apply an accepted appearance change.
     pub(super) fn apply_model(&mut self, model: &ModelData) {
         self.model = model.clone();

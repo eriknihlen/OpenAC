@@ -789,6 +789,27 @@ impl PlayerMovementController {
         cx.handle_exit_world();
     }
 
+    /// The motion table changed: the body animates by `sequencer` (the
+    /// new table's) under a new movement manager, as a new body would:
+    /// a fresh interpreter, the move-to manager made again, the physics
+    /// woken.
+    pub fn replace_motion_table(
+        &mut self,
+        env: &mut MovementEnv<'_>,
+        sequencer: ac_motion::AnimationSequencer,
+    ) {
+        self.obj.reset_movement_manager();
+        {
+            let mut cx = self.obj.cx(env.world);
+            crate::movement::movement_manager::MovementManagerHost::make_move_to_manager(&mut cx);
+            crate::movement::movement_manager::MovementManagerHost::activate_physics_object(
+                &mut cx,
+            );
+        }
+        let scale = self.object_scale;
+        self.arm_animation(env, sequencer, scale);
+    }
+
     fn advance_root_motion(&mut self, dt: f32, out: &mut MotionDeltaFrame) -> bool {
         if let Some(advance) = &mut self.root_motion {
             advance(dt, out);

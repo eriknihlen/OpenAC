@@ -89,6 +89,11 @@ pub enum ServerEffect {
         /// Intensity.
         intensity: f32,
     },
+    /// Object `guid`'s particles go at once.
+    DestroyParticles {
+        /// The object.
+        guid: u32,
+    },
     /// Object `guid` plays sound-table slot `sound_type` at `volume`.
     Sound {
         /// The object.
@@ -834,6 +839,11 @@ impl WindowEffects {
 
     fn server_effect(&mut self, effect: ServerEffect) {
         match effect {
+            ServerEffect::DestroyParticles { guid } => {
+                if let Some(&local) = self.guid_to_local.get(&guid) {
+                    self.vfx.destroy_particles(local);
+                }
+            }
             ServerEffect::PlayScript { guid, script_id } => {
                 self.vfx.handle_play_script(&self.facts, guid, script_id);
             }

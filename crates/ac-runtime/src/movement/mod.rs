@@ -1039,6 +1039,35 @@ impl Movement {
         self.player.is_some() && self.input.scripted_mut().begin_jump(power, leave_at)
     }
 
+    /// The client changed the character's motion table on its own (the
+    /// barber's Empyrean toggle): the physics record takes the table, and
+    /// the body animates by it under a new movement manager, as a body
+    /// that changes its table does. False without a character body, or when
+    /// the table's animations cannot be read (the record still takes it).
+    pub fn set_player_motion_table(&mut self, world: &mut World, table: u32) -> bool {
+        let Some(guid) = world.player_guid() else {
+            return false;
+        };
+        world.set_motion_table(guid, table);
+        let Some(content) = self.content.clone() else {
+            return false;
+        };
+        let Some(sequencer) = world
+            .object(guid)
+            .and_then(|o| o.physics().setup_id)
+            .and_then(|setup| content.sequencer(setup, table))
+        else {
+            return false;
+        };
+        let view = self.bodies_view();
+        let Some(player) = self.player.as_mut() else {
+            return false;
+        };
+        let mut env = MovementEnv::new(&mut self.engine, &view);
+        player.controller.replace_motion_table(&mut env, sequencer);
+        true
+    }
+
     /// Turns the character to a compass heading through its move-to
     /// manager; false when it cannot turn now.
     pub(crate) fn turn_to_heading(&mut self, heading: f32) -> bool {

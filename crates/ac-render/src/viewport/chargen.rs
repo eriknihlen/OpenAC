@@ -4,13 +4,14 @@
 //!
 //! Two previews exist, one per wizard page: the appearance page starts at
 //! the close eye (the face) and has the turn and zoom buttons; the summary
-//! page stays at the far eye (the whole body).
+//! page stays at the far eye (the whole body). The barber's preview is a
+//! third: it stays at its own eye with the figure at rest.
 
 use ac_core::chargen::ChargenAppearanceSelection;
 use glam::{Quat, Vec3};
 
 use super::camera::{
-    ROTATION_SECONDS_PER_REVOLUTION, ZOOM_TWEEN_SECONDS, chargen_default_eye,
+    ROTATION_SECONDS_PER_REVOLUTION, ZOOM_TWEEN_SECONDS, barber_eye, chargen_default_eye,
     chargen_zoomed_out_eye,
 };
 use super::pose::ChargenFigure;
@@ -166,6 +167,7 @@ struct Built {
 /// One creation preview. See the module documentation.
 #[derive(Debug, Clone)]
 pub struct ChargenPreviewState {
+    barber: bool,
     summary: bool,
     /// The camera's eye.
     pub eye: Vec3,
@@ -188,6 +190,7 @@ impl ChargenPreviewState {
     #[must_use]
     pub fn new(summary: bool) -> Self {
         Self {
+            barber: false,
             summary,
             eye: if summary {
                 chargen_zoomed_out_eye(0)
@@ -201,6 +204,18 @@ impl ChargenPreviewState {
             built: None,
             backdrop: 0,
             last_tick: None,
+        }
+    }
+
+    /// The barber's preview: its own eye, the figure at rest (no idle
+    /// loop is started for it), turned by its buttons.
+    #[must_use]
+    pub fn barber() -> Self {
+        Self {
+            barber: true,
+            eye: barber_eye(0),
+            zoomed_in: true,
+            ..Self::new(false)
         }
     }
 
@@ -239,7 +254,10 @@ impl ChargenPreviewState {
         let body_changed = self
             .built
             .is_none_or(|b| b.heritage != heritage || b.gender != gender);
-        if body_changed {
+        if body_changed && self.barber {
+            self.eye = barber_eye(heritage);
+            self.zoom = None;
+        } else if body_changed {
             self.eye = if self.summary {
                 chargen_zoomed_out_eye(heritage)
             } else {
@@ -595,5 +613,28 @@ mod tests {
         );
         assert!(p.is_zoomed_in());
         assert_eq!(p.figure().unwrap().parts()[0].transform.w_axis.x, 99.0);
+    }
+
+    #[test]
+    fn the_barber_preview_stands_at_rest_at_the_barbers_eye() {
+        // The barber's camera: (0, -0.65, 1.7) metres, (0, -0.8, 1.5) for a
+        // Gearknight or an Olthoi; its figure is never set idling.
+        let mut p = ChargenPreviewState::barber();
+        p.rebuild(
+            ALUVIAN,
+            1,
+            ChargenAppearanceSelection::default(),
+            figure(),
+            0,
+        );
+        assert_eq!(p.eye, Vec3::new(0.0, -0.65, 1.7));
+        assert!(p.is_zoomed_in());
+        assert_eq!(p.figure().unwrap().parts()[0].transform.w_axis.x, 99.0);
+        p.tick(1.0);
+        p.tick(9.0);
+        assert_eq!(p.eye, Vec3::new(0.0, -0.65, 1.7));
+        p.rebuild(6, 1, ChargenAppearanceSelection::default(), figure(), 0);
+        assert_eq!(p.eye, Vec3::new(0.0, -0.8, 1.5));
+        assert!((p.rotation.heading - DEFAULT_HEADING).abs() < 1e-6);
     }
 }

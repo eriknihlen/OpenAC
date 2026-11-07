@@ -5,6 +5,7 @@
 //! change runtime state themselves.
 
 pub mod appraisal;
+pub mod barber;
 pub mod book;
 pub mod cell_template;
 pub mod character;

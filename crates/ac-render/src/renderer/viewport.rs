@@ -33,8 +33,8 @@ use crate::viewport::{
 pub(crate) struct Viewports {
     format: wgpu::TextureFormat,
     gpu: Option<Vec<ViewportGpu>>,
-    /// The appearance page's preview and the summary page's.
-    chargen: [ChargenPreviewState; 2],
+    /// The appearance page's preview, the summary page's and the barber's.
+    chargen: [ChargenPreviewState; 3],
     /// Pose animations by pose enum (`None`: the dats have none).
     poses: HashMap<u32, Option<Arc<Animation>>>,
     /// Models the previews draw that no world object holds (the scenery
@@ -42,8 +42,8 @@ pub(crate) struct Viewports {
     models: HashSet<u32>,
     /// The looks each creation preview shows and last asked for, kept
     /// from the sweep.
-    shown_looks: [Option<AppearanceKey>; 2],
-    wanted_looks: [Option<AppearanceKey>; 2],
+    shown_looks: [Option<AppearanceKey>; 3],
+    wanted_looks: [Option<AppearanceKey>; 3],
     epoch: Instant,
     generation: u64,
 }
@@ -56,11 +56,12 @@ impl Viewports {
             chargen: [
                 ChargenPreviewState::new(false),
                 ChargenPreviewState::new(true),
+                ChargenPreviewState::barber(),
             ],
             poses: HashMap::new(),
             models: HashSet::new(),
-            shown_looks: [None, None],
-            wanted_looks: [None, None],
+            shown_looks: [None, None, None],
+            wanted_looks: [None, None, None],
             epoch: Instant::now(),
             generation: 0,
         }
@@ -74,18 +75,27 @@ impl Viewports {
     /// Character creation is over: its previews let their looks go and
     /// start afresh next time (their figures name the looks' variants).
     pub(crate) fn end_creation(&mut self) {
-        if self
-            .shown_looks
+        if self.shown_looks[..BARBER]
             .iter()
-            .chain(&self.wanted_looks)
+            .chain(&self.wanted_looks[..BARBER])
             .any(Option::is_some)
         {
-            self.shown_looks = [None, None];
-            self.wanted_looks = [None, None];
-            self.chargen = [
-                ChargenPreviewState::new(false),
-                ChargenPreviewState::new(true),
-            ];
+            for index in 0..BARBER {
+                self.shown_looks[index] = None;
+                self.wanted_looks[index] = None;
+            }
+            self.chargen[0] = ChargenPreviewState::new(false);
+            self.chargen[1] = ChargenPreviewState::new(true);
+        }
+    }
+
+    /// The barber window is not showing: its preview lets its look go and
+    /// starts afresh next time.
+    fn end_barber(&mut self) {
+        if self.shown_looks[BARBER].is_some() || self.wanted_looks[BARBER].is_some() {
+            self.shown_looks[BARBER] = None;
+            self.wanted_looks[BARBER] = None;
+            self.chargen[BARBER] = ChargenPreviewState::barber();
         }
     }
 
@@ -94,6 +104,19 @@ impl Viewports {
     /// world objects, whose looks the world keeps.
     pub(crate) fn appearance_keys(&self) -> impl Iterator<Item = &AppearanceKey> + '_ {
         self.shown_looks.iter().chain(&self.wanted_looks).flatten()
+    }
+}
+
+/// The barber preview's place among the look previews.
+const BARBER: usize = 2;
+
+/// A look preview's place: the appearance page's, the summary page's, the
+/// barber's.
+fn preview_index(slot: ViewportSlot) -> usize {
+    match slot {
+        ViewportSlot::ChargenSummary => 1,
+        ViewportSlot::Barber => BARBER,
+        _ => 0,
     }
 }
 
@@ -150,10 +173,13 @@ impl WorldRenderer {
         queue: &wgpu::Queue,
         scene: Option<&Scene>,
         requests: &[ViewportRequest],
-        controls: &[PreviewRequest],
+        controls: &[(ViewportSlot, PreviewRequest)],
     ) -> Vec<(ViewportSlot, ViewportOutcome)> {
-        let preview = &mut self.viewports.chargen[0];
-        for control in controls {
+        if !requests.iter().any(|r| r.slot == ViewportSlot::Barber) {
+            self.viewports.end_barber();
+        }
+        for (slot, control) in controls {
+            let preview = &mut self.viewports.chargen[preview_index(*slot)];
             match control {
                 PreviewRequest::RotateClockwise => preview.rotate(RotateDirection::Clockwise),
                 PreviewRequest::RotateCounterClockwise => {
@@ -171,6 +197,7 @@ impl WorldRenderer {
                     "examine viewport",
                     "chargen viewport",
                     "summary viewport",
+                    "barber viewport",
                 ]
                 .into_iter()
                 .map(|label| ViewportGpu::new(device, layout, label))
@@ -368,12 +395,14 @@ impl WorldRenderer {
         look: &ChargenLook,
         now: f64,
     ) -> Option<SceneDraw> {
-        let index = usize::from(slot == ViewportSlot::ChargenSummary);
+        let index = preview_index(slot);
+        // A new body with the same choices (the barber's toggle) is a new
+        // look too.
         let rebuild = self.viewports.chargen[index].needs_rebuild(
             look.heritage,
             look.gender,
             &look.selection,
-        );
+        ) || self.viewports.shown_looks[index].as_ref() != Some(&look.key);
         if rebuild {
             self.viewports.wanted_looks[index] = Some(look.key.clone());
         }

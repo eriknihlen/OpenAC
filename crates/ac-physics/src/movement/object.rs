@@ -196,6 +196,14 @@ impl<W: WeenieObject> MovementObject<W> {
         ObjectCx { obj: self, world }
     }
 
+    /// A new movement manager, as a new object has: a fresh interpreter
+    /// and no move-to manager yet (the motion table changed).
+    pub fn reset_movement_manager(&mut self) {
+        self.interp = MotionInterpreter::new();
+        self.move_to = MoveToManager::new(self.sim_time);
+        self.move_to_made = false;
+    }
+
     /// The move-to manager has been made.
     #[must_use]
     pub fn move_to_made(&self) -> bool {

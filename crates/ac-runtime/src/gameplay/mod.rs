@@ -9,6 +9,7 @@
 //! ([`GameplayEvent`]).
 
 pub mod allegiance;
+pub mod barber;
 pub mod book;
 pub mod chess;
 pub mod combat;
@@ -52,6 +53,7 @@ use crate::world::{World, distance};
 
 pub use ac_core::combat::{AttackHeight, CombatMode};
 pub use allegiance::{AllegianceMemberView, AllegianceState, AllegianceView};
+pub use barber::{BarberCommand, BarberState, BarberView};
 pub use book::{BookFlushAction, BookPageAction, BookPageTurn, BookState, BookView};
 pub use chess::{ChessCommand, ChessStage, ChessState, ChessView};
 pub use combat::{
@@ -308,6 +310,8 @@ pub enum GameplayCommand {
     Book(BookCommand),
     /// The chess game.
     Chess(ChessCommand),
+    /// The barber.
+    Barber(BarberCommand),
     /// The fellowship.
     Fellowship(FellowshipCommand),
     /// The allegiance.
@@ -415,6 +419,21 @@ pub enum GameplayNotice {
     CombatLine(String, CombatLineKind),
 }
 
+/// An effect the client plays on one of its own objects, without the
+/// server (the barber's change of body).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalEffect {
+    /// The object's particles go at once.
+    DestroyParticles(u32),
+    /// The object plays a physics script.
+    PlayScript {
+        /// The object.
+        guid: u32,
+        /// The script.
+        script_id: u32,
+    },
+}
+
 /// What the gameplay owners read and write besides themselves.
 #[derive(Debug)]
 pub struct GameplayContext<'a> {
@@ -476,11 +495,13 @@ pub struct Gameplay {
     health: HealthQuery,
     book: BookState,
     chess: ChessState,
+    barber: BarberState,
     fellowship: FellowshipState,
     allegiance: AllegianceState,
     house: HouseState,
     titles: TitleState,
     notices: Vec<GameplayNotice>,
+    local_effects: Vec<LocalEffect>,
     events: Vec<GameplayEvent>,
     busy: u32,
     explicit_mode_request: bool,
@@ -515,11 +536,13 @@ impl Gameplay {
             health: HealthQuery::default(),
             book: BookState::default(),
             chess: ChessState::default(),
+            barber: BarberState::default(),
             fellowship: FellowshipState::default(),
             allegiance: AllegianceState::default(),
             house: HouseState::default(),
             titles: TitleState::default(),
             notices: Vec::new(),
+            local_effects: Vec::new(),
             events: Vec::new(),
             busy: 0,
             explicit_mode_request: false,
@@ -707,6 +730,12 @@ impl Gameplay {
     #[must_use]
     pub fn chess(&self) -> &ChessState {
         &self.chess
+    }
+
+    /// The barber.
+    #[must_use]
+    pub fn barber(&self) -> &BarberState {
+        &self.barber
     }
 
     /// The fellowship.
@@ -985,6 +1014,27 @@ impl Gameplay {
                         .push(GameplayNotice::Text(text, magic::EXPIRY_TEXT_TYPE));
                 }
             }
+            GameEventType::START_BARBER => {
+                let look = ac_proto::barber::BarberLook::parse(payload)?;
+                let (heritage, gender) = ctx.world.player().map_or((0, 0), |p| {
+                    let numbers = p.numbers();
+                    (
+                        numbers.int_property(PropertyInt::HERITAGE_GROUP),
+                        numbers.int_property(PropertyInt::GENDER),
+                    )
+                });
+                // The outfit the preview wears is random; the session clock
+                // seeds it.
+                let seed = u64::try_from(ctx.clocks.session.as_nanos()).unwrap_or(u64::MAX);
+                self.barber.start(
+                    &barber::core_look(&look),
+                    heritage.cast_unsigned(),
+                    gender.cast_unsigned(),
+                    Arc::clone(self.tables.chargen()),
+                    self.tables.chargen_pal_sets(),
+                    seed,
+                );
+            }
             GameEventType::BOOK_DATA_RESPONSE => {
                 let book = OpenBook::parse(payload)?;
                 let turn = self.book.apply_open_book(&book, player);
@@ -1224,6 +1274,7 @@ impl Gameplay {
         self.health.reset();
         self.book.reset_session();
         self.chess.reset_session();
+        self.barber.reset_session();
         self.fellowship.reset_session();
         self.allegiance.reset_session();
         self.house.reset_session();
@@ -1462,6 +1513,7 @@ impl Gameplay {
             }
             GameplayCommand::Book(command) => self.book_command(command, ctx),
             GameplayCommand::Chess(command) => self.chess_command(command, ctx),
+            GameplayCommand::Barber(command) => self.barber_command(command, ctx),
             GameplayCommand::Fellowship(command) => self.fellowship_command(command, ctx),
             GameplayCommand::Allegiance(command) => self.allegiance_command(command, ctx),
             GameplayCommand::QueryHouse => {
@@ -1591,6 +1643,42 @@ impl Gameplay {
         for (text, class) in self.chess.drain_lines() {
             self.notices.push(GameplayNotice::Text(text, class));
         }
+    }
+
+    /// A barber request. Accepting changes the character at once, before
+    /// the look goes out: an Empyrean's motion table, then (for the bodies
+    /// with flames or a crown) its particles stopped and the new body's
+    /// effect played. The look is sent when it could be composed.
+    fn barber_command(&mut self, command: BarberCommand, ctx: &mut GameplayContext<'_>) {
+        let Some(finish) = self.barber.command(command, self.tables.chargen_pal_sets()) else {
+            return;
+        };
+        let player = ctx.player();
+        if finish.motion_table != ac_core::chargen::barber::NO_ID
+            && let Some(body) = ctx.body.as_deref_mut()
+        {
+            body.set_player_motion_table(ctx.world, finish.motion_table);
+        }
+        if finish.stop_effects {
+            self.local_effects
+                .push(LocalEffect::DestroyParticles(player));
+        }
+        if finish.script != ac_core::chargen::barber::NO_ID {
+            self.local_effects.push(LocalEffect::PlayScript {
+                guid: player,
+                script_id: finish.script,
+            });
+        }
+        if let Some(look) = finish.look {
+            let look = barber::wire_look(&look);
+            ctx.send(|seq| ac_proto::barber::build_finish_barber(seq, &look));
+        }
+    }
+
+    /// Take the effects the client played on its own objects since the
+    /// last call, oldest first (a window shows them; headless drops them).
+    pub fn take_local_effects(&mut self) -> Vec<LocalEffect> {
+        std::mem::take(&mut self.local_effects)
     }
 
     fn chess_command(&mut self, command: ChessCommand, ctx: &mut GameplayContext<'_>) {

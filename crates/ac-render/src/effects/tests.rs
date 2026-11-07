@@ -791,3 +791,20 @@ fn the_particle_range_setting_decides_how_far_emitters_are_drawn() {
         "retail: 150 m is past 100 m"
     );
 }
+
+#[test]
+fn the_clients_own_particle_stop_ends_the_objects_emitters_but_not_the_object() {
+    // The barber's change of body: the character's particles go at once;
+    // the character stays.
+    let source = setups();
+    let mut fx = effects();
+    let s = scene(vec![view(7, 0x5000_0007, SETUP)]);
+    frame(&mut fx, Some(&s), &source);
+    assert_eq!(emitters_of(&fx, 7).len(), 1);
+    fx.queue_server(ServerEffect::DestroyParticles { guid: 0x5000_0007 });
+    // An object the window does not know is no harm.
+    fx.queue_server(ServerEffect::DestroyParticles { guid: 0x5000_0999 });
+    frame(&mut fx, Some(&s), &source);
+    assert!(emitters_of(&fx, 7).is_empty());
+    assert_eq!(fx.owner_counts().0, 1);
+}

@@ -628,3 +628,27 @@ fn decompose_matches_rotation_and_rejects_skew() {
     ]);
     assert!(decompose_rotation(&skew).is_none());
 }
+
+#[test]
+fn destroying_an_owners_emitters_keeps_its_pass_examination_and_hidden_marks() {
+    // The character's particles go when it changes body; the character
+    // stays, with how its particles are drawn.
+    const ID: u32 = 0x3200_0058;
+    let (mut system, mut sink, poses) = harness(ID, false, 0, 0.0);
+    sink.on_hook(&mut system, &poses, OWNER, &create(ID, 41, 0));
+    sink.on_hook(&mut system, &poses, OWNER, &create(ID, 42, 0));
+    sink.set_entity_render_pass(&mut system, OWNER, ParticleRenderPass::SkyPostScene);
+    sink.set_entity_examination_object(&mut system, OWNER, true);
+    sink.set_entity_presentation_visible(&mut system, OWNER, false);
+
+    sink.destroy_emitters_of(&mut system, OWNER);
+
+    assert_eq!(system.active_emitter_count(), 0);
+    assert_eq!(sink.take_retired_emitters(&mut system).len(), 2);
+    assert_eq!(sink.active_binding_count(), 0);
+    assert_eq!(sink.logical_emitter_count(), 0);
+    assert_eq!(sink.tracked_owner_count(), 0);
+    assert_eq!(sink.render_pass_owner_count(), 1);
+    assert_eq!(sink.examination_owner_count(), 1);
+    assert_eq!(sink.hidden_presentation_owner_count(), 1);
+}

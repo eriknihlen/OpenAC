@@ -4927,3 +4927,75 @@ fn a_doors_animation_turns_it_ethereal_and_a_body_in_the_doorway_holds_it() {
             .contains(ac_physics::TransientState::CHECK_ETHEREAL)
     );
 }
+
+/// A motion table the client changes itself (the barber's Empyrean
+/// choice): the record takes it, the body animates by the new table under
+/// a new movement manager (the queued emote is gone), and it still walks.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_new_motion_table_rearms_the_body_under_a_fresh_movement_manager() {
+    const EMPYREAN_MALE_WALKING: u32 = 0x0900_020E;
+    let mut rig = Rig::entered();
+    rig.frames(30);
+    rig.command(MovementCommand::Motion(ac_motion::motion_command::CHEER));
+    rig.frames(1);
+    let pending = |rig: &Rig| {
+        rig.movement
+            .controller()
+            .unwrap()
+            .object()
+            .interp
+            .pending_motions()
+            .len()
+    };
+    assert!(pending(&rig) > 0, "the emote is under way");
+    let table_of = |rig: &Rig| {
+        rig.movement
+            .controller()
+            .unwrap()
+            .object()
+            .sequencer
+            .as_ref()
+            .and_then(|s| s.manager().table().map(|t| t.table().id))
+    };
+    assert_eq!(table_of(&rig), Some(HUMAN_MOTION));
+    let _ = rig.world.drain_changes().count();
+    assert!(
+        rig.movement
+            .set_player_motion_table(&mut rig.world, EMPYREAN_MALE_WALKING)
+    );
+    assert_eq!(
+        rig.world.object(PLAYER).unwrap().physics().motion_table_id,
+        Some(EMPYREAN_MALE_WALKING)
+    );
+    assert!(
+        rig.world
+            .drain_changes()
+            .any(|c| matches!(c, crate::world::WorldChange::AppearanceChanged(_)))
+    );
+    assert_eq!(pending(&rig), 0, "a new movement manager");
+    assert_eq!(
+        table_of(&rig),
+        Some(EMPYREAN_MALE_WALKING),
+        "animates by the new table"
+    );
+    let c = rig.movement.controller().unwrap();
+    assert!(c.object().move_to_made());
+    let (start, _, _) = rig.body();
+    rig.command(MovementCommand::Keys(MovementKeys {
+        forward: true,
+        walk: true,
+        ..MovementKeys::default()
+    }));
+    rig.frames(120);
+    let (end, _, _) = rig.body();
+    let walked = (end - start).truncate().length();
+    assert!(walked > 1.0, "walked {walked}");
+}
+
+#[test]
+fn without_a_character_no_motion_table_is_set() {
+    let mut world = World::new();
+    let mut movement = Movement::new(true);
+    assert!(!movement.set_player_motion_table(&mut world, 0x0900_020E));
+}

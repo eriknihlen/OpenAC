@@ -1605,6 +1605,11 @@ impl AttachedWindow {
                         });
                     }
                 }
+                SceneEffect::DestroyParticles(guid) => {
+                    if let Some(world) = self.world.as_mut() {
+                        world.queue_server_effect(ServerEffect::DestroyParticles { guid });
+                    }
+                }
                 SceneEffect::PlayScriptType(play) => {
                     if let Some(world) = self.world.as_mut() {
                         world.queue_server_effect(ServerEffect::PlayScriptType {

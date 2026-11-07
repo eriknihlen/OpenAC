@@ -267,6 +267,22 @@ impl ParticleHookSink {
     /// Stop every emitter of `owner` (fading out, or at once) and forget
     /// the owner.
     pub fn stop_all_for_entity(&mut self, system: &mut ParticleSystem, owner: u32, fade_out: bool) {
+        self.stop_emitters_of(system, owner, fade_out);
+        self.clear_entity_render_pass(system, owner);
+        self.examination_owners.remove(&owner);
+        self.hidden_presentation_owners.remove(&owner);
+        self.sync_deaths(system);
+    }
+
+    /// Destroy every emitter of `owner` at once; the owner stays as it is
+    /// (its render pass, examination mark and hidden presentation hold for
+    /// emitters it makes later).
+    pub fn destroy_emitters_of(&mut self, system: &mut ParticleSystem, owner: u32) {
+        self.stop_emitters_of(system, owner, false);
+        self.sync_deaths(system);
+    }
+
+    fn stop_emitters_of(&mut self, system: &mut ParticleSystem, owner: u32, fade_out: bool) {
         if let Some(handles) = self.handles_by_entity.remove(&owner) {
             for handle in handles {
                 if let Some(binding) = self.bindings.remove(&handle)
@@ -281,10 +297,6 @@ impl ParticleHookSink {
                 system.stop_emitter(handle, fade_out);
             }
         }
-        self.clear_entity_render_pass(system, owner);
-        self.examination_owners.remove(&owner);
-        self.hidden_presentation_owners.remove(&owner);
-        self.sync_deaths(system);
     }
 
     fn destroy_logical(

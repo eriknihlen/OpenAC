@@ -405,6 +405,8 @@ pub enum PresentationEvent {
     /// An object plays the physics script of a type at an intensity
     /// (spell casts and hits, level-up, portalling in and out).
     PlayScriptType(ac_proto::effects::PlayScriptType),
+    /// An object's particles go at once (the client changed its body).
+    DestroyParticles(u32),
     /// The server changed the environment (a fog override or a sound cue).
     AdminEnvirons(u32),
     /// Chat lines, oldest first: the whole transcript after the snapshot,
@@ -2183,6 +2185,14 @@ impl Drive<'_> {
         {
             self.attached = None;
         }
+        let local = self.state.gameplay.take_local_effects();
+        if let Some(window) = &self.attached
+            && local
+                .into_iter()
+                .any(|e| window.send(local_effect(e)).is_err())
+        {
+            self.attached = None;
+        }
         let requests = self.state.communication.take_window_requests();
         if let Some(window) = &self.attached
             && requests
@@ -2536,6 +2546,19 @@ fn clocks(driver: &UdpDriver) -> Clocks {
     }
 }
 
+/// What an attached window must do for an effect the client played on its
+/// own objects.
+fn local_effect(effect: crate::gameplay::LocalEffect) -> PresentationEvent {
+    match effect {
+        crate::gameplay::LocalEffect::DestroyParticles(guid) => {
+            PresentationEvent::DestroyParticles(guid)
+        }
+        crate::gameplay::LocalEffect::PlayScript { guid, script_id } => {
+            PresentationEvent::PlayScript(ac_proto::effects::PlayScript { guid, script_id })
+        }
+    }
+}
+
 /// What an attached window must hear about a parsed message that changes no
 /// world state: the server's sound event, its physics-script plays and its
 /// environment change.
@@ -2782,6 +2805,25 @@ mod tests {
         wait_finished(&h);
         assert!(h.next_event(Duration::from_millis(1)).is_none());
         assert_eq!(h.join_quarantining(), SessionEnd::Faulted);
+    }
+
+    #[test]
+    fn the_clients_own_effects_reach_the_window_as_particles_gone_and_a_script() {
+        use crate::gameplay::LocalEffect;
+        assert_eq!(
+            local_effect(LocalEffect::DestroyParticles(0x5000_0001)),
+            PresentationEvent::DestroyParticles(0x5000_0001)
+        );
+        assert_eq!(
+            local_effect(LocalEffect::PlayScript {
+                guid: 0x5000_0001,
+                script_id: 0x3300_12D4,
+            }),
+            PresentationEvent::PlayScript(ac_proto::effects::PlayScript {
+                guid: 0x5000_0001,
+                script_id: 0x3300_12D4,
+            })
+        );
     }
 
     #[test]

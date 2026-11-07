@@ -1072,6 +1072,19 @@ impl World {
         }
     }
 
+    /// The client changed an object's motion table on its own (the
+    /// barber's Empyrean toggle): its physics record takes the table and
+    /// a window redraws it. False for an unknown object.
+    pub fn set_motion_table(&mut self, guid: u32, table: u32) -> bool {
+        let Some(object) = self.objects.get_mut(&guid) else {
+            return false;
+        };
+        object.set_motion_table(table);
+        self.changes
+            .push(WorldChange::AppearanceChanged(object.key));
+        true
+    }
+
     fn apply_obj_desc(&mut self, update: &ObjDescEvent) {
         if let Some(object) = self.objects.get_mut(&update.guid)
             && object
