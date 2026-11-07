@@ -199,6 +199,7 @@ fn the_chat_vitals_and_radar_mount_feed_and_draw_from_the_dats() {
             ac_render::ui::window::HOUSE_PURCHASE_WINDOW,
             OPTIONS_WINDOW,
             ac_render::ui::pregame::PREGAME_SCREENS,
+            ac_render::ui::barber_window::BARBER_WINDOW,
             ac_render::ui::indicator_panels::POSITIVE_EFFECTS_WINDOW,
             ac_render::ui::indicator_panels::NEGATIVE_EFFECTS_WINDOW,
             ac_render::ui::indicator_panels::LINK_STATUS_WINDOW,
