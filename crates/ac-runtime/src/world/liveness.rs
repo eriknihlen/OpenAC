@@ -288,6 +288,11 @@ pub struct LivenessController {
     /// game client keeps such a list on its container until that container
     /// is destroyed, and only then queues what it still holds.
     nested_lists: HashMap<u32, Vec<u32>>,
+    /// Objects with deletes held for their create, and when those go. Kept
+    /// apart from the queue so nothing that takes an object off the queue
+    /// (a vendor's list, a trade offer, a move into the pack) leaves a held
+    /// delete with no end.
+    held_deletes: HashMap<u32, f64>,
     /// The time of the last pass (the queue's deadlines count from it).
     now: f64,
 }
@@ -341,6 +346,7 @@ impl LivenessController {
             return Vec::new();
         }
         self.next_maintenance_at = now + MAINTENANCE_INTERVAL_SECONDS;
+        self.forget_held_deletes(now, world);
         let mut removed = self.destroy_queued(now, world, kept);
         for candidate in self.expired(now, world, physics_cell) {
             world.expire(candidate);
@@ -412,14 +418,21 @@ impl LivenessController {
             }
             QueueNote::Spawned(guid) => {
                 self.queued.remove(&guid);
+                self.held_deletes.remove(&guid);
                 for member in self.viewed_contents(world, guid).to_vec() {
                     self.queued.remove(&member);
                 }
             }
-            QueueNote::DeleteHeld(guid) => self.enqueue(guid, player),
+            QueueNote::DeleteHeld(guid) => {
+                // Each one sets the deadline again, 25 seconds after the
+                // last.
+                self.held_deletes
+                    .insert(guid, self.now + DESTRUCTION_TIMEOUT_SECONDS);
+            }
             QueueNote::Cleared => {
                 self.queued.clear();
                 self.nested_lists.clear();
+                self.held_deletes.clear();
             }
             QueueNote::PartnerItemAdded(guid) => {
                 // It and what it holds stay.
@@ -479,14 +492,25 @@ impl LivenessController {
                 world.expire(candidate);
                 removed.push(candidate);
             } else {
-                // Known only from a container's contents list or a delete
-                // that came first, never created.
+                // Known only from a container's contents list, never created.
                 world.remove_item(guid);
-                world.forget_held_deletes(guid);
             }
             self.follow(world, kept);
         }
         removed
+    }
+
+    /// The deletes held for a create that did not come within 25 seconds
+    /// are forgotten.
+    fn forget_held_deletes(&mut self, now: f64, world: &mut World) {
+        self.held_deletes.retain(|&guid, &mut at| {
+            if at <= now {
+                world.forget_held_deletes(guid);
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// The objects out of the surroundings whose time ran out.
@@ -1092,7 +1116,6 @@ mod tests {
         assert_eq!(f.world.held_delete_count(), 1);
         f.tick(26.5);
         assert_eq!(f.world.held_delete_count(), 0);
-        assert_eq!(f.controller.queued_object_count(), 0);
         f.world.apply(&create(
             LATE,
             stamps(7, 1),
@@ -1112,6 +1135,30 @@ mod tests {
         f.tick(40.0);
         assert!(f.world.object(EARLY).is_none());
         assert_eq!(f.controller.queued_object_count(), 0);
+    }
+
+    #[test]
+    fn a_held_delete_keeps_its_deadline_when_the_queue_lets_its_object_go() {
+        // A vendor's list or a trade offer naming the object takes it off
+        // the destruction queue; the held delete still goes 25 seconds on,
+        // so a create after that stays.
+        const LISTED: u32 = 0x7000_0044;
+        let mut f = Contents::new();
+        f.tick(1.0);
+        delete(&mut f.world, LISTED);
+        f.follow();
+        f.world
+            .note_destruction_queue(QueueNote::VendorListed(vec![LISTED]));
+        f.world
+            .note_destruction_queue(QueueNote::PartnerItemAdded(LISTED));
+        f.tick(26.5);
+        assert_eq!(f.world.held_delete_count(), 0);
+        f.world.apply(&create(
+            LISTED,
+            stamps(7, 1),
+            Some(position(0x0101_0001, 5.0)),
+        ));
+        assert!(f.world.object(LISTED).is_some());
     }
 
     #[test]

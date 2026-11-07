@@ -820,7 +820,10 @@ impl Gameplay {
     /// One server message (after the world took it).
     pub fn apply(&mut self, message: &Inbound<'_>, ctx: &mut GameplayContext<'_>) {
         match message {
-            Inbound::CreateObject(create) => {
+            // A create whose object the world deleted in the same message
+            // (a delete that came first, replayed) brought nothing into
+            // the world: no death to note.
+            Inbound::CreateObject(create) if ctx.world.object(create.guid).is_some() => {
                 let motion = match &create.physics.movement {
                     Some(ac_proto::PhysicsMovement::Present { data, .. }) => Some(data),
                     _ => None,

@@ -761,6 +761,15 @@ fn a_resent_description_of_an_unknown_object_replays_its_held_delete() {
 }
 
 #[test]
+fn a_delete_for_object_id_0_is_not_held() {
+    // Id 0 names no object; nothing would ever take the delete.
+    let mut world = World::new();
+    world.apply(&delete_of(0, 1));
+    assert_eq!(world.held_delete_count(), 0);
+    assert!(world.take_queue_notes().is_empty());
+}
+
+#[test]
 fn the_players_delete_is_never_held() {
     let mut world = World::new();
     world.set_player(PLAYER);

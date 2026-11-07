@@ -395,6 +395,34 @@ fn death_of(guid: u32) -> Inbound<'static> {
 }
 
 #[test]
+fn a_corpse_deleted_before_its_create_records_no_death() {
+    // The delete came first and the world takes it right after the
+    // create: the object is gone again, so its death motion is not noted.
+    const CORPSE: u32 = 0x8000_0109;
+    let mut f = Fixture::in_the_field();
+    f.events();
+    f.apply(&Inbound::DeleteObject(ac_proto::DeleteObject {
+        guid: CORPSE,
+        instance_sequence: 1,
+    }));
+    let Inbound::CreateObject(mut corpse) = object(CORPSE, "Corpse", 0x10, 0, 6.0) else {
+        unreachable!()
+    };
+    let Inbound::UpdateMotion(dead) = death_of(CORPSE) else {
+        unreachable!()
+    };
+    corpse.physics.movement = Some(ac_proto::PhysicsMovement::Present {
+        raw: vec![0],
+        data: dead.movement,
+        is_autonomous: false,
+    });
+    f.apply(&Inbound::CreateObject(corpse));
+    assert!(f.world.object(CORPSE).is_none());
+    assert!(!f.gameplay.deaths().is_dead(CORPSE));
+    assert!(!f.events().contains(&GameplayEvent::CreatureDied(CORPSE)));
+}
+
+#[test]
 fn selecting_a_monster_streams_its_health_and_its_death_lets_it_go() {
     // RuntimeSelectedObjectHealthQuery and RuntimeCreatureDeathState: the
     // selection asks for health; the death motion clears the selection and

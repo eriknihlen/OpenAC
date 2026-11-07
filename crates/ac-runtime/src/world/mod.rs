@@ -893,14 +893,15 @@ impl World {
     }
 
     fn apply_delete(&mut self, delete: &DeleteObject) {
-        // The local player is never deleted.
-        if self.is_player(delete.guid) {
+        // The local player is never deleted, and id 0 names no object
+        // (nothing would ever create it to take a held delete).
+        if delete.guid == 0 || self.is_player(delete.guid) {
             return;
         }
         let Some(object) = self.objects.get(&delete.guid) else {
             // A delete that overtook its object's create (a resent create
             // after packet loss) waits for that create, which replays it;
-            // the destruction queue forgets it 25 seconds on.
+            // the destruction queue's clock forgets it 25 seconds on.
             self.held_deletes
                 .entry(delete.guid)
                 .or_default()
