@@ -9,6 +9,7 @@
 //! ([`GameplayEvent`]).
 
 pub mod allegiance;
+pub mod barber;
 pub mod book;
 pub mod chess;
 pub mod combat;
@@ -52,6 +53,7 @@ use crate::world::{World, distance};
 
 pub use ac_core::combat::{AttackHeight, CombatMode};
 pub use allegiance::{AllegianceMemberView, AllegianceState, AllegianceView};
+pub use barber::{BarberCommand, BarberState, BarberView};
 pub use book::{BookFlushAction, BookPageAction, BookPageTurn, BookState, BookView};
 pub use chess::{ChessCommand, ChessStage, ChessState, ChessView};
 pub use combat::{
@@ -308,6 +310,8 @@ pub enum GameplayCommand {
     Book(BookCommand),
     /// The chess game.
     Chess(ChessCommand),
+    /// The barber.
+    Barber(BarberCommand),
     /// The fellowship.
     Fellowship(FellowshipCommand),
     /// The allegiance.
@@ -476,6 +480,7 @@ pub struct Gameplay {
     health: HealthQuery,
     book: BookState,
     chess: ChessState,
+    barber: BarberState,
     fellowship: FellowshipState,
     allegiance: AllegianceState,
     house: HouseState,
@@ -515,6 +520,7 @@ impl Gameplay {
             health: HealthQuery::default(),
             book: BookState::default(),
             chess: ChessState::default(),
+            barber: BarberState::default(),
             fellowship: FellowshipState::default(),
             allegiance: AllegianceState::default(),
             house: HouseState::default(),
@@ -707,6 +713,12 @@ impl Gameplay {
     #[must_use]
     pub fn chess(&self) -> &ChessState {
         &self.chess
+    }
+
+    /// The barber.
+    #[must_use]
+    pub fn barber(&self) -> &BarberState {
+        &self.barber
     }
 
     /// The fellowship.
@@ -980,6 +992,27 @@ impl Gameplay {
                         .push(GameplayNotice::Text(text, magic::EXPIRY_TEXT_TYPE));
                 }
             }
+            GameEventType::START_BARBER => {
+                let look = ac_proto::barber::BarberLook::parse(payload)?;
+                let (heritage, gender) = ctx.world.player().map_or((0, 0), |p| {
+                    let numbers = p.numbers();
+                    (
+                        numbers.int_property(PropertyInt::HERITAGE_GROUP),
+                        numbers.int_property(PropertyInt::GENDER),
+                    )
+                });
+                // The outfit the preview wears is random; the session clock
+                // seeds it.
+                let seed = u64::try_from(ctx.clocks.session.as_nanos()).unwrap_or(u64::MAX);
+                self.barber.start(
+                    &barber::core_look(&look),
+                    heritage.cast_unsigned(),
+                    gender.cast_unsigned(),
+                    Arc::clone(self.tables.chargen()),
+                    self.tables.chargen_pal_sets(),
+                    seed,
+                );
+            }
             GameEventType::BOOK_DATA_RESPONSE => {
                 let book = OpenBook::parse(payload)?;
                 let turn = self.book.apply_open_book(&book, player);
@@ -1219,6 +1252,7 @@ impl Gameplay {
         self.health.reset();
         self.book.reset_session();
         self.chess.reset_session();
+        self.barber.reset_session();
         self.fellowship.reset_session();
         self.allegiance.reset_session();
         self.house.reset_session();
@@ -1457,6 +1491,7 @@ impl Gameplay {
             }
             GameplayCommand::Book(command) => self.book_command(command, ctx),
             GameplayCommand::Chess(command) => self.chess_command(command, ctx),
+            GameplayCommand::Barber(command) => self.barber_command(command, ctx),
             GameplayCommand::Fellowship(command) => self.fellowship_command(command, ctx),
             GameplayCommand::Allegiance(command) => self.allegiance_command(command, ctx),
             GameplayCommand::QueryHouse => {
@@ -1585,6 +1620,13 @@ impl Gameplay {
     fn chess_said(&mut self) {
         for (text, class) in self.chess.drain_lines() {
             self.notices.push(GameplayNotice::Text(text, class));
+        }
+    }
+
+    fn barber_command(&mut self, command: BarberCommand, ctx: &mut GameplayContext<'_>) {
+        if let Some(look) = self.barber.command(command, self.tables.chargen_pal_sets()) {
+            let look = barber::wire_look(&look);
+            ctx.send(|seq| ac_proto::barber::build_finish_barber(seq, &look));
         }
     }
 

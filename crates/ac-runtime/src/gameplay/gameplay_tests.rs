@@ -1030,3 +1030,59 @@ fn a_guest_list_reply_prints_the_list_in_green_as_one_text() {
         )]
     );
 }
+
+// -- The barber ----------------------------------------------------------------
+
+#[test]
+fn the_start_barber_event_opens_the_barber_and_accepting_sends_the_look() {
+    use super::barber::tests::{HUMAN, MALE, options, pal_sets, server_look};
+    let mut f = Fixture::new();
+    f.gameplay = Gameplay::new(
+        Arc::new(
+            GameTables::empty()
+                .with_chargen(options())
+                .with_chargen_pal_sets(pal_sets()),
+        ),
+        String::new(),
+    );
+    f.describe(&crate::world::tests::empty_description());
+    for (property, value) in [
+        (PropertyInt::HERITAGE_GROUP.0, HUMAN),
+        (PropertyInt::GENDER.0, MALE),
+    ] {
+        f.apply(&Inbound::PrivateUpdatePropertyInt(
+            PrivateUpdatePropertyInt {
+                sequence: 1,
+                property,
+                value: value.cast_signed(),
+            },
+        ));
+    }
+    f.sent();
+    let look = barber::wire_look(&server_look());
+    let mut payload = ac_proto::barber::build_finish_barber(0, &look);
+    payload.drain(..12);
+    f.apply_bytes(&event(GameEventType::START_BARBER, &payload));
+    let view = f.gameplay.barber().view();
+    assert!(view.open);
+    assert_eq!((view.heritage, view.gender), (HUMAN, MALE));
+    assert_eq!(view.appearance.hair_style, 1);
+    assert!(f.sent().is_empty());
+    f.run(GameplayCommand::Barber(BarberCommand::Finish));
+    assert_eq!(f.sent(), [ac_proto::barber::build_finish_barber(2, &look)]);
+    assert!(!f.gameplay.barber().is_open());
+}
+
+#[test]
+fn cancelling_the_barber_sends_nothing() {
+    use super::barber::tests::server_look;
+    let mut f = Fixture::new();
+    let look = barber::wire_look(&server_look());
+    let mut payload = ac_proto::barber::build_finish_barber(0, &look);
+    payload.drain(..12);
+    f.apply_bytes(&event(GameEventType::START_BARBER, &payload));
+    assert!(f.gameplay.barber().is_open());
+    f.run(GameplayCommand::Barber(BarberCommand::Cancel));
+    assert!(f.sent().is_empty());
+    assert!(!f.gameplay.barber().is_open());
+}

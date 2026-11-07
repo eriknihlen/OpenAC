@@ -8,6 +8,7 @@
 
 mod appearance;
 pub mod attributes;
+pub mod barber;
 mod options;
 mod skills;
 

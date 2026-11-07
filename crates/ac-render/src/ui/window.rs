@@ -560,6 +560,8 @@ pub struct WindowUi {
     /// Which vitals window shows, as the character option says (only when
     /// the side-by-side window mounted).
     vitals_side_by_side: Option<VitalsSideBySide>,
+    /// The barber window's swatch sources (`super::barber_window`).
+    pub(super) barber: super::barber_window::BarberWindow,
 }
 
 impl std::fmt::Debug for WindowUi {
@@ -638,6 +640,7 @@ impl WindowUi {
             character_pages,
             plugins: super::plugin_ui::PluginWindowUi::default(),
             vitals_side_by_side: None,
+            barber: super::barber_window::BarberWindow::default(),
         };
         let pregame_dats = dats.clone();
         ui.load_tables(&dats);
@@ -661,6 +664,7 @@ impl WindowUi {
         }
         ui.apply_chat_settings();
         ui.mount_pregame(&pregame_dats);
+        ui.mount_barber(&pregame_dats);
         ui.mount_status();
         ui.mount_item_cooldowns();
         ui.mount_plugin_ui();
@@ -1022,6 +1026,7 @@ impl WindowUi {
         self.update_salvage();
         self.update_book(dirty);
         self.update_map_house(scene);
+        self.update_barber(dirty, scene);
         self.update_journal_pages(dirty, scene);
         self.refresh_examined_spell(dirty);
         self.show_appraisals();

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ac_core::chargen::ChargenOptions;
+use ac_core::chargen::{ChargenOptions, ChargenPalSet, ChargenPalSetSource};
 use ac_core::items::component_fill::ComponentDescription;
 use ac_core::player::{SkillBase, SkillFormula};
 use ac_core::quests::{ContractCatalog, ContractEntry};
@@ -123,6 +123,9 @@ pub struct GameTables {
     /// Each trade note's value in pyreals, by its weenie class.
     trade_notes: Arc<HashMap<u32, i32>>,
     chargen: Arc<ChargenOptions>,
+    /// The palette sets the character-creation options name (skin and
+    /// hair), by id: what the barber reads a look back from.
+    chargen_pal_sets: Arc<ChargenPalSets>,
     contracts: Arc<ContractCatalog>,
     /// The language filter's banned patterns for chat.
     chat_taboo: ChatTaboo,
@@ -160,6 +163,7 @@ impl GameTables {
             skills,
             trade_notes: Arc::default(),
             chargen: Arc::default(),
+            chargen_pal_sets: Arc::default(),
             contracts: Arc::default(),
             chat_taboo: ChatTaboo::default(),
             chat_poses: Arc::default(),
@@ -206,6 +210,20 @@ impl GameTables {
     pub fn with_chargen(mut self, chargen: ChargenOptions) -> Self {
         self.chargen = Arc::new(chargen);
         self
+    }
+
+    /// The same tables with these character-creation palette sets (tests,
+    /// tools).
+    #[must_use]
+    pub fn with_chargen_pal_sets(mut self, sets: ChargenPalSets) -> Self {
+        self.chargen_pal_sets = Arc::new(sets);
+        self
+    }
+
+    /// The palette sets the character-creation options name.
+    #[must_use]
+    pub fn chargen_pal_sets(&self) -> &ChargenPalSets {
+        &self.chargen_pal_sets
     }
 
     /// The same tables with this contract catalog (tests, tools).
@@ -377,6 +395,7 @@ impl GameTables {
             component_details,
             magic_packs,
             skills,
+            chargen_pal_sets: Arc::new(chargen_pal_sets(dats, &chargen)?),
             chargen: Arc::new(chargen),
             trade_notes: Arc::new(trade_notes),
             contracts: Arc::new(contracts),
@@ -482,6 +501,44 @@ impl GameTables {
         self.trade_notes = Arc::new(notes);
         self
     }
+}
+
+/// Palette sets by id, as the dats hold them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChargenPalSets(pub HashMap<u32, Arc<ChargenPalSet>>);
+
+impl ChargenPalSetSource for ChargenPalSets {
+    fn pal_set(&self, pal_set_id: u32) -> Option<Arc<ChargenPalSet>> {
+        self.0.get(&pal_set_id).cloned()
+    }
+}
+
+/// Every gender's skin palette set and hair colours' palette sets.
+fn chargen_pal_sets(
+    dats: &DatCollection,
+    chargen: &ChargenOptions,
+) -> Result<ChargenPalSets, TablesError> {
+    let mut sets = HashMap::new();
+    for heritage in chargen.heritages_by_id.values() {
+        for gender in heritage.genders_by_key.values() {
+            let ids =
+                std::iter::once(gender.skin_pal_set_id).chain(gender.hair_colors.iter().copied());
+            for id in ids {
+                if sets.contains_key(&id) {
+                    continue;
+                }
+                if let Some(set) = dats.get::<ac_dat::objects::PaletteSet>(id)? {
+                    sets.insert(
+                        id,
+                        Arc::new(ChargenPalSet {
+                            palette_ids: set.palettes,
+                        }),
+                    );
+                }
+            }
+        }
+    }
+    Ok(ChargenPalSets(sets))
 }
 
 /// The trade notes: the master map names the category's map, whose slot

@@ -308,6 +308,8 @@ game_action_types! {
     CLEAR_ALLEGIANCE_OFFICERS = 0x02A7,
     /// Recall to the allegiance hometown.
     RECALL_ALLEGIANCE_HOMETOWN = 0x02AB,
+    /// The look chosen at a barber.
+    FINISH_BARBER = 0x0311,
     /// Abandon a contract (quest).
     ABANDON_CONTRACT = 0x0316,
     /// Jump.

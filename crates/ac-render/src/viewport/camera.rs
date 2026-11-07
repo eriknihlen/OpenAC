@@ -106,6 +106,16 @@ pub fn chargen_zoomed_out_eye(heritage: u32) -> Vec3 {
     }
 }
 
+/// The barber preview's eye for a heritage: a little further down and
+/// back for the bodies without a face to choose.
+#[must_use]
+pub fn barber_eye(heritage: u32) -> Vec3 {
+    match H(heritage) {
+        H::GEARKNIGHT | H::OLTHOI | H::OLTHOI_ACID => Vec3::new(0.0, -0.8, 1.5),
+        _ => Vec3::new(0.0, -0.65, 1.7),
+    }
+}
+
 /// Seconds the creation preview's turn buttons take for a full turn.
 pub const ROTATION_SECONDS_PER_REVOLUTION: f32 = 3.0;
 

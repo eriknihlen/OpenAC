@@ -9,6 +9,9 @@
 //!   shows on the creature and character pages, for the examined object.
 //! - The creation previews show on the wizard's appearance and summary
 //!   pages, the look composed from the wizard's choices.
+//! - The barber preview (element 0x1000059B of the barber window) shows
+//!   while the barber is open, the look the barber builds on the body it
+//!   names.
 //!
 //! OpenAC: `RetailPaperdollFrameView`, `RetailCreatureAppraisalFrameView`,
 //! `RetailChargenPreviewFrameView`, and the creation preview controller's
@@ -22,6 +25,7 @@ use ac_dat::DatCollection;
 use ac_runtime::session::creation::CreationAppearance;
 use ac_ui::draw::TextureRef;
 use ac_ui::panels::appraisal::{AppraisalController, AppraisalPage};
+use ac_ui::panels::barber::BarberController;
 use ac_ui::panels::paperdoll::DOLL_VIEWPORT_ID;
 use ac_ui::pregame::chargen::ChargenPreview;
 use ac_ui::pregame::chargen::appearance::PreviewRequest;
@@ -30,6 +34,7 @@ use ac_ui::root::UiRoot;
 use ac_ui::tree::ElementId;
 use ac_ui::widgets::Viewport;
 
+use super::barber_window::BARBER_WINDOW;
 use super::window::{EXAMINATION_WINDOW, INVENTORY_WINDOW, WindowUi};
 use crate::appearance::{AppearanceKey, PaletteSpec, SubPaletteRange};
 use crate::scene::Scene;
@@ -40,11 +45,16 @@ use crate::viewport::{
 /// The examine portrait's viewport in the examination window.
 pub const EXAMINE_VIEWPORT_ID: u32 = 0x1000_0148;
 
+/// What a barber look was composed from: heritage, gender, choices, body.
+type BarberLookCache = ((u32, u32, CreationAppearance, u32), Option<ChargenLook>);
+
 /// What the window keeps for the viewports between frames.
 pub struct UiViewports {
     catalog: DatChargenCatalog,
     /// The last creation look composed, by what it was composed from.
     composed: Option<(u32, u32, CreationAppearance, Option<ChargenLook>)>,
+    /// The last barber look composed, by what it was composed from.
+    barber_composed: Option<BarberLookCache>,
     /// The element each slot was last requested for.
     elements: [Option<ElementId>; ViewportSlot::ALL.len()],
     /// Flashes of the paperdoll figure asked for since the window last
@@ -67,6 +77,7 @@ impl UiViewports {
         Self {
             catalog: DatChargenCatalog::new(dats),
             composed: None,
+            barber_composed: None,
             elements: [None; ViewportSlot::ALL.len()],
             figure_flashes: Vec::new(),
         }
@@ -83,6 +94,25 @@ impl UiViewports {
         std::mem::take(&mut self.figure_flashes)
     }
 
+    /// The barber's look for `preview` with the body `body` in place of
+    /// its own (0: its own), cached while they stay.
+    fn barber_look(
+        &mut self,
+        options: &ChargenOptions,
+        preview: &ChargenPreview,
+        body: u32,
+    ) -> Option<ChargenLook> {
+        let key = (preview.heritage, preview.gender, preview.appearance, body);
+        if let Some((k, look)) = &self.barber_composed
+            && *k == key
+        {
+            return look.clone();
+        }
+        let look = compose(options, &self.catalog, preview, (body != 0).then_some(body));
+        self.barber_composed = Some((key, look.clone()));
+        look
+    }
+
     /// The creation look for `preview` (cached while the choices stay).
     fn look(&mut self, options: &ChargenOptions, preview: &ChargenPreview) -> Option<ChargenLook> {
         if let Some((heritage, gender, appearance, look)) = &self.composed
@@ -91,7 +121,7 @@ impl UiViewports {
         {
             return look.clone();
         }
-        let look = compose(options, &self.catalog, preview);
+        let look = compose(options, &self.catalog, preview, None);
         self.composed = Some((
             preview.heritage,
             preview.gender,
@@ -130,13 +160,15 @@ pub fn selection(a: &CreationAppearance) -> ChargenAppearanceSelection {
 }
 
 /// Compose the preview's look: the body, its parts, textures and palettes
-/// as the renderer draws them, and the heritage's scenery. `None` when the
-/// choices cannot be composed.
+/// as the renderer draws them, and the heritage's scenery; `body` (unless
+/// `None`) replaces the look's own body. `None` when the choices cannot be
+/// composed.
 #[must_use]
 pub fn compose(
     options: &ChargenOptions,
     catalog: &DatChargenCatalog,
     preview: &ChargenPreview,
+    body: Option<u32>,
 ) -> Option<ChargenLook> {
     let gender = i32::try_from(preview.gender).ok()?;
     let selection = selection(&preview.appearance);
@@ -147,7 +179,7 @@ pub fn compose(
         &selection,
         catalog,
         catalog,
-        None,
+        body,
     )
     .ok()?;
     let desc = &result.obj_desc;
@@ -227,7 +259,7 @@ impl WindowUi {
         &mut self,
         scene: &Scene,
         pixels_per_unit: f32,
-    ) -> (Vec<ViewportRequest>, Vec<PreviewRequest>) {
+    ) -> (Vec<ViewportRequest>, Vec<(ViewportSlot, PreviewRequest)>) {
         let mut requests = Vec::new();
         let root_frame = |ui: &UiRoot, name: &str| ui.window(name).map(|w| w.frame);
         // The inventory figure.
@@ -282,7 +314,11 @@ impl WindowUi {
         let mut controls = Vec::new();
         let preview = match self.pregame.as_mut().and_then(|p| p.creation_mut()) {
             Some(creation) => {
-                controls = creation.take_preview_requests();
+                controls = creation
+                    .take_preview_requests()
+                    .into_iter()
+                    .map(|r| (ViewportSlot::ChargenAppearance, r))
+                    .collect();
                 creation.preview()
             }
             None => None,
@@ -305,6 +341,41 @@ impl WindowUi {
                     subject: ViewportSubject::Chargen(Box::new(look)),
                 },
             ));
+        }
+        // The barber's preview.
+        let barber = self
+            .host
+            .with_controller::<BarberController, _>(BARBER_WINDOW, |c, _| {
+                (c.viewport(), c.view().clone(), c.take_preview_requests())
+            });
+        if let Some((viewport, view, turns)) = barber {
+            controls.extend(turns.into_iter().map(|r| (ViewportSlot::Barber, r)));
+            let preview = viewport.map(|viewport| ChargenPreview {
+                viewport,
+                summary: false,
+                heritage: view.heritage,
+                gender: view.gender,
+                appearance: view.appearance,
+            });
+            if view.open
+                && let (Some(preview), Some(options)) = (preview, scene.pregame().options.clone())
+                && shown(&self.host.root, preview.viewport)
+                && let Some((size, aspect)) =
+                    extent(&self.host.root, preview.viewport, pixels_per_unit)
+                && let Some(look) =
+                    self.viewports
+                        .barber_look(&options, &preview, view.preview_setup)
+            {
+                requests.push((
+                    preview.viewport,
+                    ViewportRequest {
+                        slot: ViewportSlot::Barber,
+                        size,
+                        aspect,
+                        subject: ViewportSubject::Chargen(Box::new(look)),
+                    },
+                ));
+            }
         }
         let mut out = Vec::with_capacity(requests.len());
         for (element, request) in requests {

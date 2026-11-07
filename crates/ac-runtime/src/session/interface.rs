@@ -22,7 +22,7 @@ use super::runner::HostEvent;
 use super::state::SessionState;
 use crate::character::CharacterOptions;
 use crate::communication::{ClientConfirmation, JournalView, TrackedContract};
-use crate::gameplay::{BookView, ChessView, FellowshipView, HouseView, TitleState};
+use crate::gameplay::{BarberView, BookView, ChessView, FellowshipView, HouseView, TitleState};
 use crate::inventory::{
     AppraisalView, HousePurchaseView, InteractionMode, PendingPlacement, TradeView, VendorView,
     VendorViewReason,
@@ -62,6 +62,8 @@ pub enum InterfaceEvent {
     OpenSalvage(u32),
     /// The chess game as it stands (after the snapshot and each change).
     Chess(Box<ChessView>),
+    /// The barber as it stands (after the snapshot and each change).
+    Barber(Box<BarberView>),
     /// Someone else's game board was used: the game window shows.
     BeginGame(u32),
     /// A pack the player carries was used: the inventory window shows and
@@ -525,6 +527,7 @@ pub(crate) struct InterfaceFeed {
     contracts: Option<u64>,
     book: Option<u64>,
     chess: Option<u64>,
+    barber: Option<u64>,
     house: Option<u64>,
     house_purchase: Option<u64>,
     journal: Option<u64>,
@@ -628,6 +631,11 @@ impl InterfaceFeed {
         if self.chess != Some(chess.revision()) {
             self.chess = Some(chess.revision());
             events.push(InterfaceEvent::Chess(Box::new(chess.view())));
+        }
+        let barber = state.gameplay.barber();
+        if self.barber != Some(barber.revision()) {
+            self.barber = Some(barber.revision());
+            events.push(InterfaceEvent::Barber(Box::new(barber.view())));
         }
         let house = state.gameplay.house();
         if self.house != Some(house.revision()) {

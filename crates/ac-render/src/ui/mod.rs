@@ -6,6 +6,7 @@
 //! Everything here belongs to one attached window: built on attach,
 //! dropped on detach.
 
+pub mod barber_window;
 pub mod batch;
 pub mod book_window;
 pub mod character_pages;

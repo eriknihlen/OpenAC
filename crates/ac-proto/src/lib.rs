@@ -18,7 +18,8 @@
 //!
 //! The gameplay messages live in public modules by subject: [`chat`],
 //! [`turbine_chat`], [`client_commands`], [`social`], [`allegiance`],
-//! [`fellowship`], [`house`], [`trade`], [`book`], [`chess`], [`vendor`],
+//! [`fellowship`], [`house`], [`trade`], [`book`], [`chess`], [`barber`],
+//! [`vendor`],
 //! [`inventory`], [`combat`], [`magic`], [`appraise`], [`character`],
 //! [`contract`], [`effects`] and [`movement_out`]. Each holds the server
 //! messages and event payloads of its subject (`parse`) and the client
@@ -56,6 +57,7 @@ mod wire;
 
 pub mod allegiance;
 pub mod appraise;
+pub mod barber;
 pub mod book;
 pub mod character;
 pub mod chat;
