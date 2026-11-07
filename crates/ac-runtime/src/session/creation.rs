@@ -980,6 +980,17 @@ impl CharacterCreation {
         true
     }
 
+    /// Set a shade as read back from a look, unclamped: a palette its set
+    /// does not hold reads back past 1, and that shade picks no palette.
+    pub(crate) fn set_read_back_shade(&mut self, slot: ShadeSlot, value: f64) -> bool {
+        if !self.active {
+            return false;
+        }
+        self.appearance.set_shade(slot, value);
+        self.changed();
+        true
+    }
+
     fn gender(&self) -> Option<&ChargenGenderOptions> {
         if self.heritage_id == 0 || self.gender_key == 0 {
             return None;

@@ -283,6 +283,16 @@ impl VfxWorld {
         Ok(())
     }
 
+    /// An object's particles go at once; its scripts keep running (a later
+    /// particle hook of theirs starts new particles).
+    pub fn destroy_particles(&mut self, local_id: u32) {
+        if local_id == 0 {
+            return;
+        }
+        self.sink
+            .stop_all_for_entity(&mut self.particles, local_id, false);
+    }
+
     /// An object's effects end: its scripts stop, its emitters go at once,
     /// its pose is forgotten.
     pub fn deactivate_entity(&mut self, local_id: u32) {

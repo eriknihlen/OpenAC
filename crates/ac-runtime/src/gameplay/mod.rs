@@ -419,6 +419,21 @@ pub enum GameplayNotice {
     CombatLine(String, CombatLineKind),
 }
 
+/// An effect the client plays on one of its own objects, without the
+/// server (the barber's change of body).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalEffect {
+    /// The object's particles go at once.
+    DestroyParticles(u32),
+    /// The object plays a physics script.
+    PlayScript {
+        /// The object.
+        guid: u32,
+        /// The script.
+        script_id: u32,
+    },
+}
+
 /// What the gameplay owners read and write besides themselves.
 #[derive(Debug)]
 pub struct GameplayContext<'a> {
@@ -486,6 +501,7 @@ pub struct Gameplay {
     house: HouseState,
     titles: TitleState,
     notices: Vec<GameplayNotice>,
+    local_effects: Vec<LocalEffect>,
     events: Vec<GameplayEvent>,
     busy: u32,
     explicit_mode_request: bool,
@@ -526,6 +542,7 @@ impl Gameplay {
             house: HouseState::default(),
             titles: TitleState::default(),
             notices: Vec::new(),
+            local_effects: Vec::new(),
             events: Vec::new(),
             busy: 0,
             explicit_mode_request: false,
@@ -1623,11 +1640,40 @@ impl Gameplay {
         }
     }
 
+    /// A barber request. Accepting changes the character at once, before
+    /// the look goes out: an Empyrean's motion table, then (for the bodies
+    /// with flames or a crown) its particles stopped and the new body's
+    /// effect played. The look is sent when it could be composed.
     fn barber_command(&mut self, command: BarberCommand, ctx: &mut GameplayContext<'_>) {
-        if let Some(look) = self.barber.command(command, self.tables.chargen_pal_sets()) {
+        let Some(finish) = self.barber.command(command, self.tables.chargen_pal_sets()) else {
+            return;
+        };
+        let player = ctx.player();
+        if finish.motion_table != ac_core::chargen::barber::NO_ID
+            && let Some(body) = ctx.body.as_deref_mut()
+        {
+            body.set_player_motion_table(ctx.world, finish.motion_table);
+        }
+        if finish.stop_effects {
+            self.local_effects
+                .push(LocalEffect::DestroyParticles(player));
+        }
+        if finish.script != ac_core::chargen::barber::NO_ID {
+            self.local_effects.push(LocalEffect::PlayScript {
+                guid: player,
+                script_id: finish.script,
+            });
+        }
+        if let Some(look) = finish.look {
             let look = barber::wire_look(&look);
             ctx.send(|seq| ac_proto::barber::build_finish_barber(seq, &look));
         }
+    }
+
+    /// Take the effects the client played on its own objects since the
+    /// last call, oldest first (a window shows them; headless drops them).
+    pub fn take_local_effects(&mut self) -> Vec<LocalEffect> {
+        std::mem::take(&mut self.local_effects)
     }
 
     fn chess_command(&mut self, command: ChessCommand, ctx: &mut GameplayContext<'_>) {

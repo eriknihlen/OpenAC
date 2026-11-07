@@ -576,8 +576,8 @@ pub fn appearance_of(
 /// stopped and a new one played, the Empyrean's motion table changed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BarberFinish {
-    /// The look sent.
-    pub look: BarberLook,
+    /// The look sent (`None`: nothing is sent, see [`appearance_of`]).
+    pub look: Option<BarberLook>,
     /// The character's particle effects are stopped first.
     pub stop_effects: bool,
     /// The effect the character then plays ([`NO_ID`]: none).
@@ -590,7 +590,8 @@ pub struct BarberFinish {
 /// style (none for a Gearknight or an Olthoi), the body (an Undead,
 /// Shadowbound or Penumbraen body with or without flames or crown) and
 /// its effect, the Empyrean's option and motion table, and the
-/// appearance. `None` when nothing is sent (see [`appearance_of`]).
+/// appearance. The character's own effects happen whether or not a
+/// look is sent.
 #[must_use]
 pub fn finish(
     heritage: u32,
@@ -599,7 +600,7 @@ pub fn finish(
     choices: &BarberChoices,
     on: bool,
     pal_sets: &impl ChargenPalSetSource,
-) -> Option<BarberFinish> {
+) -> BarberFinish {
     let female = gender_key == FEMALE;
     let mut setup = look_setup(gender, choices.hair_style);
     let (mut hair_texture, mut default_hair_texture) = (NO_ID, NO_ID);
@@ -668,30 +669,30 @@ pub fn finish(
         }
         _ => {}
     }
-    let a = appearance_of(heritage, gender, choices, pal_sets)?;
-    Some(BarberFinish {
-        look: BarberLook {
-            base_palette: a.base_palette,
-            head_object: a.head_object,
-            hair_texture,
-            default_hair_texture,
-            eyes_texture: a.eyes_texture.0,
-            default_eyes_texture: a.eyes_texture.1,
-            nose_texture: a.nose_texture.0,
-            default_nose_texture: a.nose_texture.1,
-            mouth_texture: a.mouth_texture.0,
-            default_mouth_texture: a.mouth_texture.1,
-            skin_palette: a.skin_palette,
-            hair_palette: a.hair_palette,
-            eyes_palette: a.eyes_palette,
-            setup,
-            option1,
-            option2: 0,
-        },
+    let look = appearance_of(heritage, gender, choices, pal_sets).map(|a| BarberLook {
+        base_palette: a.base_palette,
+        head_object: a.head_object,
+        hair_texture,
+        default_hair_texture,
+        eyes_texture: a.eyes_texture.0,
+        default_eyes_texture: a.eyes_texture.1,
+        nose_texture: a.nose_texture.0,
+        default_nose_texture: a.nose_texture.1,
+        mouth_texture: a.mouth_texture.0,
+        default_mouth_texture: a.mouth_texture.1,
+        skin_palette: a.skin_palette,
+        hair_palette: a.hair_palette,
+        eyes_palette: a.eyes_palette,
+        setup,
+        option1,
+        option2: 0,
+    });
+    BarberFinish {
+        look,
         stop_effects,
         script,
         motion_table,
-    })
+    }
 }
 
 #[cfg(test)]

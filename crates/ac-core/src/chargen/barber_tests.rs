@@ -188,9 +188,9 @@ fn a_palette_reads_back_to_a_shade_that_picks_it_again() {
 #[test]
 fn accepting_sends_the_look_the_choices_compose() {
     let g = gender();
-    let f = finish(H::ALUVIAN.0, 1, &g, &choices(), false, &sets()).unwrap();
+    let f = finish(H::ALUVIAN.0, 1, &g, &choices(), false, &sets());
     assert_eq!(
-        f.look,
+        f.look.unwrap(),
         BarberLook {
             base_palette: 0x0400_007E,
             head_object: HEAD_B,
@@ -218,8 +218,8 @@ fn accepting_sends_the_look_the_choices_compose() {
 fn the_look_sent_reads_back_to_the_same_choices() {
     let g = gender();
     let sets = sets();
-    let f = finish(H::ALUVIAN.0, 1, &g, &choices(), false, &sets).unwrap();
-    assert_eq!(choices_from_look(&g, &f.look, &sets), choices());
+    let f = finish(H::ALUVIAN.0, 1, &g, &choices(), false, &sets);
+    assert_eq!(choices_from_look(&g, &f.look.unwrap(), &sets), choices());
 }
 
 #[test]
@@ -230,13 +230,13 @@ fn a_skeleton_style_sends_the_second_face_textures_and_reads_them_back() {
         hair_style: 3,
         ..choices()
     };
-    let f = finish(H::UNDEAD.0, 1, &g, &c, false, &sets).unwrap();
-    assert_eq!(f.look.eyes_texture, 0x0500_E102);
-    assert_eq!(f.look.nose_texture, 0x0500_C101);
-    assert_eq!(f.look.setup, undead::MALE_SKELETON_SETUP);
+    let f = finish(H::UNDEAD.0, 1, &g, &c, false, &sets);
+    assert_eq!(f.look.unwrap().eyes_texture, 0x0500_E102);
+    assert_eq!(f.look.unwrap().nose_texture, 0x0500_C101);
+    assert_eq!(f.look.unwrap().setup, undead::MALE_SKELETON_SETUP);
     assert_eq!(f.script, undead::MALE_SKELETON_SCRIPT);
     assert!(f.stop_effects);
-    assert_eq!(choices_from_look(&g, &f.look, &sets), c);
+    assert_eq!(choices_from_look(&g, &f.look.unwrap(), &sets), c);
 }
 
 #[test]
@@ -246,10 +246,10 @@ fn a_bald_style_sends_the_bald_eyes() {
         hair_style: 2,
         ..choices()
     };
-    let f = finish(H::ALUVIAN.0, 1, &g, &c, false, &sets()).unwrap();
-    assert_eq!(f.look.hair_texture, BALD_TEXTURE);
-    assert_eq!(f.look.eyes_texture, 0x0500_B002);
-    assert_eq!(choices_from_look(&g, &f.look, &sets()), c);
+    let f = finish(H::ALUVIAN.0, 1, &g, &c, false, &sets());
+    assert_eq!(f.look.unwrap().hair_texture, BALD_TEXTURE);
+    assert_eq!(f.look.unwrap().eyes_texture, 0x0500_B002);
+    assert_eq!(choices_from_look(&g, &f.look.unwrap(), &sets()), c);
 }
 
 #[test]
@@ -260,12 +260,12 @@ fn the_undead_toggle_picks_the_body_without_flames() {
         hair_style: 3,
         ..choices()
     };
-    let on = finish(H::UNDEAD.0, 1, &g, &skeleton, true, &sets).unwrap();
-    assert_eq!(on.look.setup, undead::MALE_SKELETON_NOFLAME_SETUP);
+    let on = finish(H::UNDEAD.0, 1, &g, &skeleton, true, &sets);
+    assert_eq!(on.look.unwrap().setup, undead::MALE_SKELETON_NOFLAME_SETUP);
     assert_eq!(on.script, NO_ID);
-    let female = finish(H::UNDEAD.0, FEMALE, &g, &skeleton, false, &sets).unwrap();
+    let female = finish(H::UNDEAD.0, FEMALE, &g, &skeleton, false, &sets);
     // Not a zombie body: the female skeleton.
-    assert_eq!(female.look.setup, undead::FEMALE_SKELETON_SETUP);
+    assert_eq!(female.look.unwrap().setup, undead::FEMALE_SKELETON_SETUP);
     assert_eq!(female.script, undead::FEMALE_SKELETON_SCRIPT);
     assert_eq!(
         toggled_preview_setup(H::UNDEAD.0, 1, undead::MALE_ZOMBIE_SETUP, true),
@@ -290,11 +290,11 @@ fn the_undead_toggle_picks_the_body_without_flames() {
 fn the_shadow_toggle_takes_the_crown_off() {
     let g = gender();
     let sets = sets();
-    let crowned = finish(H::SHADOWBOUND.0, FEMALE, &g, &choices(), false, &sets).unwrap();
-    assert_eq!(crowned.look.setup, umbraen::FEMALE_CROWN_SETUP);
+    let crowned = finish(H::SHADOWBOUND.0, FEMALE, &g, &choices(), false, &sets);
+    assert_eq!(crowned.look.unwrap().setup, umbraen::FEMALE_CROWN_SETUP);
     assert_eq!(crowned.script, umbraen::FEMALE_CROWN_SCRIPT);
-    let bare = finish(H::PENUMBRAEN.0, 1, &g, &choices(), true, &sets).unwrap();
-    assert_eq!(bare.look.setup, penumbraen::MALE_NOCROWN_SETUP);
+    let bare = finish(H::PENUMBRAEN.0, 1, &g, &choices(), true, &sets);
+    assert_eq!(bare.look.unwrap().setup, penumbraen::MALE_NOCROWN_SETUP);
     assert_eq!(bare.script, NO_ID);
     assert!(bare.stop_effects);
     assert_eq!(
@@ -313,12 +313,12 @@ fn the_shadow_toggle_takes_the_crown_off() {
 fn the_empyrean_toggle_is_the_first_option_and_changes_the_motion_table() {
     let g = gender();
     let sets = sets();
-    let walking = finish(H::EMPYREAN.0, FEMALE, &g, &choices(), true, &sets).unwrap();
-    assert_eq!(walking.look.option1, 1);
+    let walking = finish(H::EMPYREAN.0, FEMALE, &g, &choices(), true, &sets);
+    assert_eq!(walking.look.unwrap().option1, 1);
     assert_eq!(walking.motion_table, empyrean::FEMALE_MOTION_TABLE);
     assert!(!walking.stop_effects);
-    let floating = finish(H::EMPYREAN.0, 1, &g, &choices(), false, &sets).unwrap();
-    assert_eq!(floating.look.option1, 0);
+    let floating = finish(H::EMPYREAN.0, 1, &g, &choices(), false, &sets);
+    assert_eq!(floating.look.unwrap().option1, 0);
     assert_eq!(floating.motion_table, empyrean::MALE_FLOAT_MOTION_TABLE);
     let look = BarberLook {
         option1: 1,
@@ -330,15 +330,18 @@ fn the_empyrean_toggle_is_the_first_option_and_changes_the_motion_table() {
 
 #[test]
 fn a_gearknight_sends_no_head_and_no_hair_texture() {
-    let f = finish(H::GEARKNIGHT.0, 1, &gender(), &choices(), false, &sets()).unwrap();
-    assert_eq!(f.look.head_object, NO_ID);
+    let f = finish(H::GEARKNIGHT.0, 1, &gender(), &choices(), false, &sets());
+    assert_eq!(f.look.unwrap().head_object, NO_ID);
     assert_eq!(
-        (f.look.hair_texture, f.look.default_hair_texture),
+        (
+            f.look.unwrap().hair_texture,
+            f.look.unwrap().default_hair_texture
+        ),
         (NO_ID, NO_ID)
     );
-    let olthoi = finish(H::OLTHOI.0, 1, &gender(), &choices(), false, &sets()).unwrap();
-    assert_eq!(olthoi.look.head_object, HEAD_B);
-    assert_eq!(olthoi.look.hair_texture, NO_ID);
+    let olthoi = finish(H::OLTHOI.0, 1, &gender(), &choices(), false, &sets());
+    assert_eq!(olthoi.look.unwrap().head_object, HEAD_B);
+    assert_eq!(olthoi.look.unwrap().hair_texture, NO_ID);
 }
 
 #[test]
@@ -346,7 +349,10 @@ fn nothing_is_sent_without_the_skin_or_hair_palette_set() {
     let g = gender();
     let mut sets = sets();
     sets.0.remove(&HAIR_SET_B);
-    assert!(finish(H::ALUVIAN.0, 1, &g, &choices(), false, &sets).is_none());
+    // The effects still happen; only the look is not sent.
+    let f = finish(H::UNDEAD.0, 1, &g, &choices(), false, &sets);
+    assert!(f.look.is_none());
+    assert!(f.stop_effects);
     sets.0.remove(&SKIN_SET);
     assert!(appearance_of(H::ALUVIAN.0, &g, &choices(), &sets).is_none());
 }
@@ -380,4 +386,18 @@ fn the_look_body_is_the_styles_own_else_the_genders() {
     assert_eq!(look_setup(&g, 3), undead::MALE_SKELETON_SETUP);
     assert_eq!(look_setup(&g, 0), GENDER_SETUP);
     assert_eq!(look_setup(&g, u32::MAX), GENDER_SETUP);
+}
+
+#[test]
+fn a_palette_its_set_lacks_reads_back_past_one_and_picks_no_palette() {
+    // The palette set's lookup gives no palette for a shade past 1.
+    let g = gender();
+    let sets = sets();
+    let c = BarberChoices {
+        skin_shade: skin_shade_from_id(&g, 0x0400_0999, &sets),
+        ..choices()
+    };
+    assert!(c.skin_shade > 1.0);
+    let look = finish(H::ALUVIAN.0, 1, &g, &c, false, &sets).look.unwrap();
+    assert_eq!(look.skin_palette, NO_ID);
 }

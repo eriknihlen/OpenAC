@@ -16,6 +16,7 @@ use crate::gameplay::tables::ChargenPalSets;
 
 pub(crate) const HUMAN: u32 = 1;
 pub(crate) const UNDEAD: u32 = 11;
+pub(crate) const EMPYREAN: u32 = 9;
 pub(crate) const MALE: u32 = 1;
 const SKIN_SET: u32 = 0x0F00_0001;
 const HAIR_SET: u32 = 0x0F00_0010;
@@ -93,12 +94,13 @@ fn heritage(id: u32, skeleton_setup: u32) -> ChargenHeritageOptions {
     }
 }
 
-/// A human and an Undead heritage, both genders each.
+/// A human, an Undead and an Empyrean heritage, both genders each.
 pub(crate) fn options() -> ChargenOptions {
     ChargenOptions {
         heritages_by_id: HashMap::from([
             (HUMAN, heritage(HUMAN, 0)),
             (UNDEAD, heritage(UNDEAD, undead::MALE_SKELETON_SETUP)),
+            (EMPYREAN, heritage(EMPYREAN, 0)),
         ]),
         ..ChargenOptions::default()
     }
@@ -179,7 +181,9 @@ fn opening_reads_the_servers_look_into_the_choices() {
 fn accepting_unchanged_sends_the_look_back_and_closes() {
     let mut barber = opened(HUMAN);
     let revision = barber.revision();
-    let sent = barber.command(BarberCommand::Finish, &pal_sets());
+    let sent = barber
+        .command(BarberCommand::Finish, &pal_sets())
+        .and_then(|f| f.look);
     assert_eq!(sent, Some(server_look()));
     assert!(!barber.is_open());
     assert!(barber.revision() > revision);
@@ -196,7 +200,10 @@ fn a_choice_changes_the_look_sent() {
     );
     barber.command(BarberCommand::SetShade(ShadeSlot::Skin, 0.0), &sets);
     assert_eq!(barber.revision(), revision + 2);
-    let sent = barber.command(BarberCommand::Finish, &sets).unwrap();
+    let sent = barber
+        .command(BarberCommand::Finish, &sets)
+        .and_then(|f| f.look)
+        .unwrap();
     assert_eq!(sent.head_object, 0x0100_1000);
     assert_eq!(sent.hair_texture, 0x0500_A000);
     assert_eq!(sent.skin_palette, 0x0400_0101);
@@ -252,7 +259,10 @@ fn the_undead_toggle_changes_the_preview_body_and_the_look_sent() {
     let view = barber.view();
     assert!(view.toggle_on);
     assert_eq!(view.preview_setup, undead::MALE_SKELETON_NOFLAME_SETUP);
-    let sent = barber.command(BarberCommand::Finish, &sets).unwrap();
+    let sent = barber
+        .command(BarberCommand::Finish, &sets)
+        .and_then(|f| f.look)
+        .unwrap();
     assert_eq!(sent.setup, undead::MALE_SKELETON_NOFLAME_SETUP);
 }
 
@@ -282,4 +292,125 @@ fn opening_again_starts_afresh_and_leaving_the_world_closes() {
 fn the_messages_look_converts_both_ways() {
     let look = server_look();
     assert_eq!(core_look(&wire_look(&look)), look);
+}
+
+#[test]
+fn a_skin_palette_its_set_lacks_comes_back_as_no_palette() {
+    // A palette the skin set does not hold reads back past the last
+    // shade; accepting then names no skin palette rather than the last.
+    let mut barber = BarberState::default();
+    let look = BarberLook {
+        skin_palette: 0x0400_0999,
+        ..server_look()
+    };
+    barber.start(&look, HUMAN, MALE, Arc::new(options()), &pal_sets(), 7);
+    assert!(barber.view().appearance.skin_shade > 1.0);
+    let sent = barber
+        .command(BarberCommand::Finish, &pal_sets())
+        .and_then(|f| f.look)
+        .unwrap();
+    assert_eq!(sent.skin_palette, NO_ID);
+}
+
+#[test]
+fn accepting_an_undead_stops_its_particles_and_plays_the_new_bodys_flames() {
+    let mut barber = opened(UNDEAD);
+    let sets = pal_sets();
+    barber.command(
+        BarberCommand::SetAppearance(AppearanceSlot::HairStyle, 2),
+        &sets,
+    );
+    let f = barber.command(BarberCommand::Finish, &sets).unwrap();
+    assert!(f.stop_effects);
+    assert_eq!(f.script, undead::MALE_SKELETON_SCRIPT);
+    assert_eq!(f.motion_table, NO_ID);
+}
+
+/// Against the retail dats: for every heritage and gender, looks built
+/// from choices across each list (and each toggle a heritage offers) open
+/// the barber, over several random outfits, and accepting unchanged sends
+/// the same sixteen words back.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn every_heritage_and_gender_accepts_its_own_look_unchanged() {
+    use ac_core::chargen::barber::{finish, toggle_starts_on};
+    let tables = crate::gameplay::GameTables::open(None).expect("the retail dats");
+    let options = Arc::clone(tables.chargen());
+    let sets = tables.chargen_pal_sets();
+    let mut checked = 0;
+    let mut heritages: Vec<_> = options.heritages_by_id.keys().copied().collect();
+    heritages.sort_unstable();
+    for heritage in heritages {
+        let h = &options.heritages_by_id[&heritage];
+        let mut keys: Vec<_> = h.genders_by_key.keys().copied().collect();
+        keys.sort_unstable();
+        for key in keys {
+            let g = &h.genders_by_key[&key];
+            let gender = key.cast_unsigned();
+            let lens = [
+                g.hair_styles.len(),
+                g.eye_strips.len(),
+                g.nose_strips.len(),
+                g.mouth_strips.len(),
+                g.hair_colors.len(),
+                g.eye_colors.len(),
+            ];
+            let rounds = lens.iter().copied().max().unwrap_or(0).max(1);
+            let skin = sets
+                .pal_set(g.skin_pal_set_id)
+                .map_or(0, |s| s.palette_ids.len());
+            for i in 0..rounds {
+                let pick = |n: usize| if n == 0 { 0 } else { (i % n) as u32 };
+                let hair_color = pick(g.hair_colors.len());
+                let hair_len = g
+                    .hair_colors
+                    .get(hair_color as usize)
+                    .and_then(|&id| sets.pal_set(id))
+                    .map_or(0, |s| s.palette_ids.len());
+                let shade = |n: usize| {
+                    if n == 0 {
+                        0.0
+                    } else {
+                        (i % n + 1) as f64 / n as f64
+                    }
+                };
+                let choices = BarberChoices {
+                    hair_style: pick(g.hair_styles.len()),
+                    hair_color,
+                    hair_shade: shade(hair_len),
+                    eyes_strip: pick(g.eye_strips.len()),
+                    eye_color: pick(g.eye_colors.len()),
+                    nose_strip: pick(g.nose_strips.len()),
+                    mouth_strip: pick(g.mouth_strips.len()),
+                    skin_shade: shade(skin),
+                };
+                let toggles: &[bool] = if BarberToggle::of(heritage).is_some() {
+                    &[false, true]
+                } else {
+                    &[false]
+                };
+                for &on in toggles {
+                    let Some(look) = finish(heritage, gender, g, &choices, on, sets).look else {
+                        continue;
+                    };
+                    assert_eq!(toggle_starts_on(heritage, &look), on, "{heritage} {gender}");
+                    for seed in [1, 7, 12_345] {
+                        let mut barber = BarberState::default();
+                        barber.start(&look, heritage, gender, Arc::clone(&options), sets, seed);
+                        let back = barber
+                            .command(BarberCommand::Finish, sets)
+                            .and_then(|f| f.look);
+                        assert_eq!(
+                            back.map(|b| wire_look(&b)),
+                            Some(wire_look(&look)),
+                            "heritage {heritage} gender {gender} round {i} toggle {on} seed {seed}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("{checked} looks came back unchanged");
+    assert!(checked > 0);
 }

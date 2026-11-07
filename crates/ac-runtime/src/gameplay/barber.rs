@@ -11,7 +11,8 @@
 use std::sync::Arc;
 
 use ac_core::chargen::barber::{
-    self, BarberChoices, BarberLook, BarberToggle, NO_ID, choices_from_look, look_setup,
+    self, BarberChoices, BarberFinish, BarberLook, BarberToggle, NO_ID, choices_from_look,
+    look_setup,
 };
 use ac_core::chargen::{ChargenGenderOptions, ChargenOptions, ChargenPalSetSource};
 
@@ -191,8 +192,8 @@ impl BarberState {
             ] {
                 creation.try_set_appearance_index(slot, index);
             }
-            creation.try_set_shade(ShadeSlot::Hair, c.hair_shade);
-            creation.try_set_shade(ShadeSlot::Skin, c.skin_shade);
+            creation.set_read_back_shade(ShadeSlot::Hair, c.hair_shade);
+            creation.set_read_back_shade(ShadeSlot::Skin, c.skin_shade);
         }
         open.creation.drain_deltas();
         self.open = Some(open);
@@ -200,13 +201,14 @@ impl BarberState {
         self.revision += 1;
     }
 
-    /// Run a window request; a finish answers with the look to send
-    /// (`None` when nothing is sent).
+    /// Run a window request; a finish answers with what accepting does (the
+    /// look to send, if any, and the character's own effects; `None`
+    /// without the gender's choices).
     pub fn command(
         &mut self,
         command: BarberCommand,
         pal_sets: &impl ChargenPalSetSource,
-    ) -> Option<BarberLook> {
+    ) -> Option<BarberFinish> {
         let open = self.open.as_mut()?;
         let changed = match command {
             BarberCommand::SetAppearance(slot, index) => {
@@ -230,7 +232,7 @@ impl BarberState {
                 }
             }
             BarberCommand::Finish => {
-                let send = open.gender_options().and_then(|g| {
+                let send = open.gender_options().map(|g| {
                     barber::finish(
                         open.heritage,
                         open.gender,
@@ -241,7 +243,7 @@ impl BarberState {
                     )
                 });
                 self.close();
-                return send.map(|f| f.look);
+                return send;
             }
             BarberCommand::Cancel => {
                 self.close();

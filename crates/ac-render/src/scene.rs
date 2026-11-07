@@ -19,6 +19,8 @@ pub enum SceneEffect {
     Sound(ac_proto::effects::SoundEvent),
     /// An object plays a physics script by id.
     PlayScript(ac_proto::effects::PlayScript),
+    /// An object's particles go at once.
+    DestroyParticles(u32),
     /// An object plays the physics script of a type at an intensity.
     PlayScriptType(ac_proto::effects::PlayScriptType),
     /// The server changed the environment.
@@ -94,6 +96,9 @@ impl Scene {
             PresentationEvent::Sound(sound) => self.effects.push(SceneEffect::Sound(sound)),
             PresentationEvent::PlayScript(play) => {
                 self.effects.push(SceneEffect::PlayScript(play));
+            }
+            PresentationEvent::DestroyParticles(guid) => {
+                self.effects.push(SceneEffect::DestroyParticles(guid));
             }
             PresentationEvent::PlayScriptType(play) => {
                 self.effects.push(SceneEffect::PlayScriptType(play));

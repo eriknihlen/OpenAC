@@ -1086,3 +1086,94 @@ fn cancelling_the_barber_sends_nothing() {
     assert!(f.sent().is_empty());
     assert!(!f.gameplay.barber().is_open());
 }
+
+/// The barber opened for a character of `heritage` (male), placed in the
+/// world, with a movement owner beside it (no body: no dats).
+fn barber_for(heritage: u32) -> Fixture {
+    use super::barber::tests::{MALE, options, pal_sets, server_look};
+    let mut f = Fixture::new();
+    f.gameplay = Gameplay::new(
+        Arc::new(
+            GameTables::empty()
+                .with_chargen(options())
+                .with_chargen_pal_sets(pal_sets()),
+        ),
+        String::new(),
+    );
+    f.body = Some(Movement::new(true));
+    f.apply(&object(
+        PLAYER,
+        "+Horan",
+        0x10,
+        PublicWeenieFlags::PLAYER.bits(),
+        0.0,
+    ));
+    f.describe(&crate::world::tests::empty_description());
+    for (property, value) in [
+        (PropertyInt::HERITAGE_GROUP.0, heritage),
+        (PropertyInt::GENDER.0, MALE),
+    ] {
+        f.apply(&Inbound::PrivateUpdatePropertyInt(
+            PrivateUpdatePropertyInt {
+                sequence: 1,
+                property,
+                value: value.cast_signed(),
+            },
+        ));
+    }
+    f.sent();
+    let look = barber::wire_look(&server_look());
+    let mut payload = ac_proto::barber::build_finish_barber(0, &look);
+    payload.drain(..12);
+    f.apply_bytes(&event(GameEventType::START_BARBER, &payload));
+    assert!(f.gameplay.barber().is_open());
+    f
+}
+
+#[test]
+fn accepting_an_undead_look_stops_the_particles_then_plays_the_flames() {
+    use ac_core::chargen::barber::undead;
+    let mut f = barber_for(super::barber::tests::UNDEAD);
+    f.run(GameplayCommand::Barber(BarberCommand::SetAppearance(
+        crate::session::creation::AppearanceSlot::HairStyle,
+        2,
+    )));
+    assert!(f.gameplay.take_local_effects().is_empty());
+    f.run(GameplayCommand::Barber(BarberCommand::Finish));
+    assert_eq!(
+        f.gameplay.take_local_effects(),
+        [
+            LocalEffect::DestroyParticles(PLAYER),
+            LocalEffect::PlayScript {
+                guid: PLAYER,
+                script_id: undead::MALE_SKELETON_SCRIPT
+            },
+        ]
+    );
+    assert_eq!(f.sent().len(), 1);
+}
+
+#[test]
+fn accepting_an_empyrean_on_the_ground_gives_the_character_the_walking_table() {
+    use ac_core::chargen::barber::empyrean;
+    let mut f = barber_for(super::barber::tests::EMPYREAN);
+    let _ = f.world.drain_changes().count();
+    f.run(GameplayCommand::Barber(BarberCommand::SetToggle(true)));
+    f.run(GameplayCommand::Barber(BarberCommand::Finish));
+    assert_eq!(
+        f.world.object(PLAYER).unwrap().physics().motion_table_id,
+        Some(empyrean::MALE_MOTION_TABLE)
+    );
+    let key = f.world.object(PLAYER).unwrap().key();
+    assert!(
+        f.world
+            .drain_changes()
+            .any(|c| c == crate::world::WorldChange::AppearanceChanged(key))
+    );
+    // No particles or effect for an Empyrean.
+    assert!(f.gameplay.take_local_effects().is_empty());
+    let sent = f.sent();
+    assert_eq!(sent.len(), 1);
+    // The first option (walking) is the fifteenth word after the envelope.
+    assert_eq!(&sent[0][12 + 56..12 + 60], &1u32.to_le_bytes());
+}
