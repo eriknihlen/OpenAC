@@ -5,16 +5,47 @@
 //! while it starts the child, and attaches to the child's console to send
 //! the event.
 //!
-//! This is the crate's only unsafe code: four console calls with no
-//! pointers but one fixed-size out-buffer.
+//! Taking a console points the process's standard handles at it, and
+//! letting it go leaves them naming handles that are closed; a later start
+//! that inherits them fails with "The handle is invalid". So the standard
+//! handles are put back as they were whenever the console is let go.
+//!
+//! This is the crate's only unsafe code: console calls with no pointers but
+//! one fixed-size out-buffer.
 #![allow(unsafe_code)]
 
 use std::sync::Mutex;
 
+use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::Console::{
     AllocConsole, AttachConsole, CTRL_BREAK_EVENT, FreeConsole, GenerateConsoleCtrlEvent,
-    GetConsoleProcessList, GetConsoleWindow,
+    GetConsoleProcessList, GetConsoleWindow, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
+
+const STANDARD_HANDLES: [STD_HANDLE; 3] = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE];
+
+/// The process's standard handles before it takes a console.
+struct StandardHandles([HANDLE; 3]);
+
+impl StandardHandles {
+    fn save() -> Self {
+        // SAFETY: plain integer arguments; the handles are only stored.
+        Self(STANDARD_HANDLES.map(|id| unsafe { GetStdHandle(id) }))
+    }
+
+    /// Lets the console go and puts the saved standard handles back.
+    fn free_console_and_restore(self) {
+        // SAFETY: no arguments, then integer ids with the handles this
+        // process had before it took the console.
+        unsafe {
+            FreeConsole();
+            for (id, handle) in STANDARD_HANDLES.into_iter().zip(self.0) {
+                SetStdHandle(id, handle);
+            }
+        }
+    }
+}
 use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
 
 /// Serializes console attach and detach: the console a process is attached
@@ -36,11 +67,12 @@ pub fn with_console<T>(start: impl FnOnce() -> T) -> T {
     let _gate = CONSOLE_GATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut allocated = false;
+    let mut allocated = None;
     if !has_console() {
+        let saved = StandardHandles::save();
         // SAFETY: no arguments; failure is reported by the return value.
-        allocated = unsafe { AllocConsole() } != 0;
-        if allocated {
+        if unsafe { AllocConsole() } != 0 {
+            allocated = Some(saved);
             // SAFETY: GetConsoleWindow takes no arguments; ShowWindow
             // accepts any window handle, including null.
             unsafe {
@@ -52,11 +84,8 @@ pub fn with_console<T>(start: impl FnOnce() -> T) -> T {
         }
     }
     let result = start();
-    if allocated {
-        // SAFETY: no arguments; detaches the console allocated above.
-        unsafe {
-            FreeConsole();
-        }
+    if let Some(saved) = allocated {
+        saved.free_console_and_restore();
     }
     result
 }
@@ -70,22 +99,20 @@ pub fn send_ctrl_break(pid: u32) -> bool {
     let _gate = CONSOLE_GATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut attached = false;
+    let mut attached = None;
     if !has_console() {
+        let saved = StandardHandles::save();
         // SAFETY: plain integer argument; failure is reported by the return.
         if unsafe { AttachConsole(pid) } == 0 {
             return false;
         }
-        attached = true;
+        attached = Some(saved);
     }
     // SAFETY: plain integer arguments; the group id is the child's pid,
     // which names only the child's own process group.
     let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) } != 0;
-    if attached {
-        // SAFETY: no arguments; detaches the console attached above.
-        unsafe {
-            FreeConsole();
-        }
+    if let Some(saved) = attached {
+        saved.free_console_and_restore();
     }
     sent
 }
