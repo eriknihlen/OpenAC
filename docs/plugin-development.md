@@ -131,7 +131,7 @@ a stronger enchantment of its family surpasses (an item's spell under a
 stronger buff), where `Host::enchantments` lists only those in effect. An
 enchantment that does not run out reads `seconds_remaining` infinite; a timed
 one that has run out reads 0. A plugin built for an older version cannot
-import it.
+import it. It also added `align` on a list's `<column>` in markup.
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -208,6 +208,15 @@ plugin registers a window with `ui::PanelSpec`, pushes values to its
 bindings, and hears its buttons as `Event::Ui`. The window's state lives in
 the session, so a game window that attaches later shows it as it stands, and
 a session without a window answers the same.
+
+**List columns.** A list's `<column>` takes `align="left"` (the default) or
+`align="right"` (API 1.10), which keeps its text cells and its header caption
+to that edge of the column, a few pixels in, so numbers line up; text too
+wide for the column starts at the left and is cut at the right, as a
+left-aligned cell is. Any other value refuses the markup. The attribute
+moves only text: check, icon and button cells draw as they do. A client
+older than 1.10 ignores the attribute, as it ignores any it does not know,
+and draws the column left-aligned.
 
 **World drawing.** A plugin can put labels over objects
 (`Host::show_labels`), lines (`Host::create_line_layer`) and filled triangles

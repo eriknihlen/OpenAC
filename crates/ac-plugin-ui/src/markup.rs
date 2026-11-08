@@ -324,6 +324,19 @@ pub struct Column {
     /// What it sorts by instead of its cells (`sortkeys`): a float-list
     /// binding (numbers) or a string-list binding (text).
     pub sort_keys: Option<SortKeysSource>,
+    /// Which edge its text cells and header caption keep to (`align`).
+    pub align: ColumnAlign,
+}
+
+/// Which edge of its column a cell's text keeps to (`align="left|right"`,
+/// API 1.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColumnAlign {
+    /// The left edge (the default).
+    #[default]
+    Left,
+    /// The right edge, as numbers line up.
+    Right,
 }
 
 /// A column's header cell.
@@ -3077,6 +3090,15 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        let align = match attr(el, "align") {
+            None | Some("left") => ColumnAlign::Left,
+            Some("right") => ColumnAlign::Right,
+            Some(other) => {
+                return err(format!(
+                    "column[{index}] align=\"{other}\" must be left or right"
+                ));
+            }
+        };
         Ok(Column {
             width,
             auto,
@@ -3084,6 +3106,7 @@ impl<'a> Parser<'a> {
             header: ColumnHeader::None,
             sort: SortKind::None,
             sort_keys: None,
+            align,
         })
     }
 }

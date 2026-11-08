@@ -785,6 +785,7 @@ fn list_columns_bind_each_columns_own_source() {
                 header: ColumnHeader::None,
                 sort: SortKind::None,
                 sort_keys: None,
+                align: ColumnAlign::Left,
             },
             Column {
                 width: 20.0,
@@ -797,6 +798,7 @@ fn list_columns_bind_each_columns_own_source() {
                 header: ColumnHeader::None,
                 sort: SortKind::None,
                 sort_keys: None,
+                align: ColumnAlign::Left,
             },
             Column {
                 width: 20.0,
@@ -809,8 +811,53 @@ fn list_columns_bind_each_columns_own_source() {
                 header: ColumnHeader::None,
                 sort: SortKind::None,
                 sort_keys: None,
+                align: ColumnAlign::Left,
             },
         ]
+    );
+}
+
+/// The columns of a list read from `columns`, against [`three_columns`].
+fn columns_of(columns: &str) -> Vec<Column> {
+    let doc = parse(&list_xml("", columns), &three_columns()).unwrap();
+    let Element::List {
+        body: ListBody::Columns(columns),
+        ..
+    } = &doc.nodes[0].element
+    else {
+        panic!("a column list")
+    };
+    columns.clone()
+}
+
+// API 1.10: a column's text aligns left (the default) or right.
+#[test]
+fn a_column_aligns_left_unless_it_says_right() {
+    let columns = columns_of(
+        "<column type=\"text\" width=\"40\" align=\"right\" items=\"{Names}\"/>\
+         <column type=\"text\" width=\"40\" align=\"left\" items=\"{Names}\"/>\
+         <column type=\"text\" width=\"40\" items=\"{Names}\"/>\
+         <column type=\"icon\" width=\"20\" iconkind=\"did\" align=\"right\" values=\"{Icons}\" onclick=\"{ClickIcon}\"/>",
+    );
+    let aligns: Vec<ColumnAlign> = columns.iter().map(|c| c.align).collect();
+    assert_eq!(
+        aligns,
+        [
+            ColumnAlign::Right,
+            ColumnAlign::Left,
+            ColumnAlign::Left,
+            ColumnAlign::Right
+        ]
+    );
+    assert_eq!(
+        error(
+            &list_xml(
+                "",
+                "<column type=\"text\" width=\"40\" align=\"middle\" items=\"{Names}\"/>"
+            ),
+            &three_columns()
+        ),
+        "column[0] align=\"middle\" must be left or right"
     );
 }
 
