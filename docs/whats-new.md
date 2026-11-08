@@ -9,6 +9,27 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.2 (2026-11-08)
+
+- Sir Bellas, the Neftet golems and other long fights no longer turn
+  invisible and unselectable after about 30 seconds. MossTank was removing
+  them as "ghost monsters" because the client never told it the monster's
+  health was still being reported.
+- The barber window opens, and the look you choose is applied when you
+  press Accept.
+- Objects that spin or turn see-through in their animations now do so.
+- Some textures draw at the right detail.
+- Objects the server deletes or changes in quick succession no longer go
+  missing or linger.
+- The client handles more kinds of server updates to item and character
+  properties, and applies them in the right order.
+- Being booted or banned from the server ends the session right away.
+- The slopes you can walk on match retail exactly.
+- The high-res dat file is optional.
+- Plugin API 1.9: a creature's appraisal profile (health, attributes,
+  stamina and mana, and which of them are enchanted) in its item
+  properties. *(code by David Smith)*
+
 ## OpenAC (Rust) 0.2.1 (2026-11-06)
 
 - Monsters, players and the tall rock pillars in Neftet no longer vanish
