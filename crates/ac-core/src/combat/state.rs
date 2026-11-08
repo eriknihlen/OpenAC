@@ -1,6 +1,6 @@
 //! The local combat state: the combat mode (the client's and the
-//! server's), the last health percent reported for each object, and the
-//! combat notifications turned into typed events.
+//! server's), the last health percent reported for each object (and when),
+//! and the combat notifications turned into typed events.
 
 use std::collections::HashMap;
 
@@ -84,10 +84,22 @@ pub enum CombatEvent {
     },
 }
 
+/// When an object's health was last reported.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HealthReport {
+    /// The session's count of health reports when this one arrived: every
+    /// report, about any object, counts one, from 1.
+    pub revision: i64,
+    /// When it arrived, in session seconds.
+    pub received_at: f64,
+}
+
 /// The local player's combat state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CombatState {
     health_by_guid: HashMap<u32, f32>,
+    reports_by_guid: HashMap<u32, HealthReport>,
+    report_count: i64,
     current_mode: CombatMode,
     server_mode: Option<CombatMode>,
 }
@@ -104,6 +116,8 @@ impl CombatState {
     pub fn new() -> Self {
         Self {
             health_by_guid: HashMap::new(),
+            reports_by_guid: HashMap::new(),
+            report_count: 0,
             current_mode: CombatMode::NON_COMBAT,
             server_mode: None,
         }
@@ -142,9 +156,30 @@ impl CombatState {
         self.health_by_guid.len()
     }
 
-    /// An object's health was reported.
-    pub fn on_update_health(&mut self, target_guid: u32, health_percent: f32) -> CombatEvent {
+    /// When the object's health was last reported, `None` before any report
+    /// this session. A report counts even when its percent repeats the last
+    /// one: a boss's health can sit at 99% for minutes.
+    #[must_use]
+    pub fn health_report(&self, guid: u32) -> Option<HealthReport> {
+        self.reports_by_guid.get(&guid).copied()
+    }
+
+    /// An object's health was reported, at `now` session seconds.
+    pub fn on_update_health(
+        &mut self,
+        target_guid: u32,
+        health_percent: f32,
+        now: f64,
+    ) -> CombatEvent {
         self.health_by_guid.insert(target_guid, health_percent);
+        self.report_count += 1;
+        self.reports_by_guid.insert(
+            target_guid,
+            HealthReport {
+                revision: self.report_count,
+                received_at: now,
+            },
+        );
         CombatEvent::HealthChanged {
             guid: target_guid,
             percent: health_percent,
@@ -282,6 +317,8 @@ impl CombatState {
     /// server mode. Always reports peace mode, even when already in it.
     pub fn clear(&mut self) -> CombatEvent {
         self.health_by_guid.clear();
+        self.reports_by_guid.clear();
+        self.report_count = 0;
         self.current_mode = CombatMode::NON_COMBAT;
         self.server_mode = None;
         CombatEvent::CombatModeChanged(CombatMode::NON_COMBAT)
@@ -299,7 +336,7 @@ mod tests {
     fn update_health_caches_percent() {
         let mut state = CombatState::new();
         assert_eq!(
-            state.on_update_health(0xBEEF, 0.33),
+            state.on_update_health(0xBEEF, 0.33, 0.0),
             CombatEvent::HealthChanged {
                 guid: 0xBEEF,
                 percent: 0.33
@@ -378,14 +415,15 @@ mod tests {
     #[test]
     fn clear_resets_to_peace() {
         let mut state = CombatState::new();
-        state.on_update_health(1, 0.5);
-        state.on_update_health(2, 0.8);
+        state.on_update_health(1, 0.5, 0.0);
+        state.on_update_health(2, 0.8, 0.0);
         state.set_server_combat_mode(CombatMode::MELEE);
         assert_eq!(
             state.clear(),
             CombatEvent::CombatModeChanged(CombatMode::NON_COMBAT)
         );
         assert!(state.health_percent(1) == 1.0);
+        assert_eq!(state.health_report(1), None);
         assert_eq!(state.tracked_target_count(), 0);
         assert_eq!(state.current_mode(), CombatMode::NON_COMBAT);
         assert_eq!(state.server_mode(), None);

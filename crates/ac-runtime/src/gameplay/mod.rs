@@ -925,7 +925,7 @@ impl Gameplay {
             GameEventType::UPDATE_HEALTH => {
                 let update = wire_combat::UpdateHealth::parse(payload)?;
                 self.combat
-                    .on_update_health(update.target_guid, update.health_percent);
+                    .on_update_health(update.target_guid, update.health_percent, ctx.now());
                 if self.selection.selected() == Some(update.target_guid) {
                     self.events.push(GameplayEvent::Health {
                         guid: update.target_guid,

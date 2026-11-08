@@ -346,3 +346,43 @@ fn an_item_appraisal_reports_no_creature_profile() {
         assert_eq!(properties.weapon.map(|w| w.damage), Some(12));
     });
 }
+
+// OpenAC `RuntimeActionState.TryGetHealthActivity`: every health report
+// counts, a repeated percent too, and a plugin sees how many came and how
+// long ago the last one did. A plugin that clears out monsters whose health
+// has gone quiet reads these; a boss's health can sit at one percent for
+// minutes while its reports keep coming.
+#[test]
+fn a_hostile_target_carries_its_last_health_report() {
+    use ac_proto::{GameEventType, Inbound};
+
+    let mut state = arena();
+    let mut outbox = Outbox::new();
+    let at_ten_seconds = crate::session::Clocks {
+        session: std::time::Duration::from_secs(10),
+        ..super::tests::CLOCKS
+    };
+    for _ in 0..2 {
+        let body = crate::world::tests::game_event(
+            GameEventType::UPDATE_HEALTH,
+            &[MONSTER, 0.99f32.to_bits()],
+        );
+        state.apply(
+            &Inbound::parse(&body).unwrap(),
+            &mut outbox,
+            true,
+            at_ten_seconds,
+        );
+    }
+    with_binding(&mut state, &mut outbox, |b| {
+        let targets = call::<calls::CombatHostileTargets>(b, &50.0);
+        let reported = targets.iter().find(|t| t.object_id == MONSTER).unwrap();
+        assert!(reported.is_health_known);
+        assert_eq!(reported.health_revision, 2);
+        // The binding's clock reads 30 s: the last report is 20 s old.
+        assert!((reported.seconds_since_health_update - 20.0).abs() < 1e-9);
+        let silent = targets.iter().find(|t| t.object_id == OTHER).unwrap();
+        assert_eq!(silent.health_revision, 0);
+        assert!(silent.seconds_since_health_update.is_infinite());
+    });
+}

@@ -131,6 +131,7 @@ impl PluginBinding<'_> {
         let o = here.orientation;
         let facing =
             ac_motion::move_to_math::get_heading(glam::Quat::from_xyzw(o.x, o.y, o.z, o.w));
+        let now = self.session_seconds();
         let combat = self.state.gameplay.combat();
         let deaths = self.state.gameplay.deaths();
         let names = self.state.gameplay.tables().creature_names();
@@ -152,6 +153,7 @@ impl PluginBinding<'_> {
             let item = world.item(guid);
             let incarnation = object.key().incarnation;
             let has_health = combat.has_health(guid);
+            let report = combat.health_report(guid);
             let species_id = item.map_or(0, |i| {
                 i.properties
                     .ints
@@ -181,8 +183,9 @@ impl PluginBinding<'_> {
                     .iter()
                     .any(|i| i.item_type.intersects(ItemType::ARMOR)),
                 incarnation,
-                health_revision: 0,
-                seconds_since_health_update: f64::INFINITY,
+                health_revision: report.map_or(0, |r| r.revision),
+                seconds_since_health_update: report
+                    .map_or(f64::INFINITY, |r| (now - r.received_at).max(0.0)),
                 height_difference: delta.z,
                 is_dead: deaths.is_dead_incarnation(guid, incarnation),
                 server_position: object.accepted_position().map(super::world::position_of),

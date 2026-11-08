@@ -26,7 +26,7 @@ pub use model::{
     default_combat_mode_decision, height_for, player_in_ready_position,
     player_in_ready_position_for_attack, supports_targeted_attack, toggle_mode,
 };
-pub use state::{CombatEvent, CombatState, DamageDealt, DamageIncoming};
+pub use state::{CombatEvent, CombatState, DamageDealt, DamageIncoming, HealthReport};
 pub use target_policy::{
     CombatObject, is_hostile_monster, object_is_attackable, should_query_health,
 };
