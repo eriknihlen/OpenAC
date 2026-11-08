@@ -153,7 +153,18 @@ merge or a pickup selecting the stack it joins; so `PLUGIN` does not mean the
 plugin's own selection). The event compares the selection
 once a pass, so when it changed more than once in a pass it reports the last
 change's source. A plugin built for an older version is sent the change
-without it and reads `SYSTEM`.
+without it and reads `SYSTEM`. API 1.12
+added `launch_speed` at the end of `ProjectilePathQuery`: for a missile or arc,
+the launcher's maximum velocity in metres per second, so the probe flies at
+that total speed on the lower arc to the aim point, as the server launches
+the shot, instead of the fixed speed lofted to land there. A speed above
+50 m/s is capped at 50. A speed that is not a finite number above 0 answers
+`InvalidTarget`, and so does a target no arc reaches at the capped speed
+("The target is out of reach at 20.0 m/s.", with no angle, as there is no
+launch). Any other answer's notice ends with the speed and launch angle used
+("Launched at 20.0 m/s, 28.0° up."). A straight shot ignores the speed. A
+plugin built for an older version sends no launch speed, and its probe flies
+as before.
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -569,7 +580,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.11",
+  "apiVersion": "1.12",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -585,7 +596,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.11"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.12"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

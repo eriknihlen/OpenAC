@@ -36,26 +36,82 @@ fn result(status: ProjectilePathStatus) -> ProjectilePathResult {
     }
 }
 
+/// The most a launch speed can be, metres per second: no object moves
+/// faster.
+const MAXIMUM_LAUNCH_SPEED: f32 = 50.0;
+
+/// Gravity's pull on a curved flight, metres per second squared.
+const GRAVITY: f32 = 9.8;
+
+/// The launch of a missile or arc at a total `speed`, as a server
+/// launches one: the lower of the two arcs under [`GRAVITY`] that reach a
+/// point `across` metres away along the ground and `rise` metres higher.
+/// The velocity across and up, and the launch angle in radians; `None`
+/// when no arc reaches the point at this speed.
+pub(super) fn ballistic_launch(speed: f32, across: f32, rise: f32) -> Option<(f32, f32, f32)> {
+    let speed2 = speed * speed;
+    let root = speed2 * speed2 - GRAVITY * (GRAVITY * across * across + 2.0 * rise * speed2);
+    if !root.is_finite() || root < 0.0 {
+        return None;
+    }
+    let angle = (speed2 - root.sqrt()).atan2(GRAVITY * across);
+    Some((speed * angle.cos(), speed * angle.sin(), angle))
+}
+
+/// The velocity a flight starts with.
+struct Launch {
+    /// Along the ground towards the aim point, metres per second.
+    across: f32,
+    /// Upwards, metres per second.
+    up: f32,
+    /// The launch speed used and its angle in degrees, when the query gave
+    /// a speed.
+    asked: Option<(f32, f32)>,
+}
+
 /// OpenAC `EvaluateProjectilePath`: the shot leaves 1.2 m up (1.8 m for
 /// an arc) a little ahead of the shooter, aims at 0.3, 0.9 or 1.5 m above
-/// the target's base, flies at 100, 46 or 37.5185 m/s (straight, missile,
-/// arc), the curved kinds lofted to land under 9.8 m/s² gravity, and is
-/// swept one step at a time; a step that ends on the target clears it,
-/// anything else that stops it blocks. `samples` collects one marker per
-/// step (in frame metres) when given.
-#[allow(clippy::too_many_lines)]
+/// the target's base, flies at 100, 46 or 37.5185 m/s across (straight,
+/// missile, arc), the curved kinds lofted to land under 9.8 m/s² gravity,
+/// and is swept one step at a time; a step that ends on the target clears
+/// it, anything else that stops it blocks. A missile or arc query with a
+/// launch speed flies instead at that total speed (capped at 50 m/s) on the
+/// lower arc that reaches the aim point, as a server launches a missile,
+/// and the notice says the speed and angle used; a target no arc reaches at
+/// that speed is invalid. `samples` collects one marker per step (in frame
+/// metres) when given.
 pub fn evaluate(
     engine: &PhysicsEngine,
     flight: &Flight,
     query: &ProjectilePathQuery,
-    mut samples: Option<&mut Vec<(Vec3, bool)>>,
+    samples: Option<&mut Vec<(Vec3, bool)>>,
 ) -> ProjectilePathResult {
+    let mut answer = fly(engine, flight, query, samples);
+    if let Some((speed, degrees)) = answer.1 {
+        let launched = format!("Launched at {speed:.1} m/s, {degrees:.1}° up.");
+        answer.0.notice = Some(match answer.0.notice.take() {
+            Some(notice) => format!("{notice} {launched}"),
+            None => launched,
+        });
+    }
+    answer.0
+}
+
+/// [`evaluate`]'s flight, with the launch it modelled when the query gave
+/// a speed.
+#[allow(clippy::too_many_lines)]
+fn fly(
+    engine: &PhysicsEngine,
+    flight: &Flight,
+    query: &ProjectilePathQuery,
+    mut samples: Option<&mut Vec<(Vec3, bool)>>,
+) -> (ProjectilePathResult, Option<(f32, f32)>) {
     let radius = query.projectile_radius;
     let base_delta = flight.target - flight.shooter;
     let mut horizontal = Vec2::new(base_delta.x, base_delta.y);
     let mut horizontal_distance = horizontal.length();
     if !horizontal_distance.is_finite() || horizontal_distance <= EPSILON {
-        return result(ProjectilePathStatus::InvalidTarget);
+        return (result(ProjectilePathStatus::InvalidTarget), None);
     }
     let mut direction = horizontal / horizontal_distance;
     let source_forward = match query.kind {
@@ -84,21 +140,26 @@ pub fn evaluate(
     horizontal = Vec2::new(delta.x, delta.y);
     horizontal_distance = horizontal.length();
     if horizontal_distance <= EPSILON {
-        return result(ProjectilePathStatus::Clear);
+        // The aim point is straight above or below the start: nothing to
+        // fly through. A launch at a given speed must still be usable and
+        // reach that high.
+        if query.launch_speed.is_none() || query.kind == ProjectilePathKind::Straight {
+            return (result(ProjectilePathStatus::Clear), None);
+        }
+        return match launch(query, horizontal_distance, delta.z) {
+            Ok(launch) => (result(ProjectilePathStatus::Clear), launch.asked),
+            Err(refused) => (refused, None),
+        };
     }
     direction = horizontal / horizontal_distance;
-    let speed = match query.kind {
-        ProjectilePathKind::Arc => 37.5185,
-        ProjectilePathKind::Missile => 46.0,
-        ProjectilePathKind::Straight => 100.0,
+    let launch = match launch(query, horizontal_distance, delta.z) {
+        Ok(launch) => launch,
+        Err(refused) => return (refused, None),
     };
+    let asked = launch.asked;
+    let speed = launch.across;
     let total_time = horizontal_distance / speed;
-    let vertical_speed = if query.kind == ProjectilePathKind::Straight {
-        delta.z / total_time
-    } else {
-        (delta.z + 4.9 * total_time * total_time) / total_time
-    };
-    let mut velocity = Vec3::new(direction.x * speed, direction.y * speed, vertical_speed);
+    let mut velocity = Vec3::new(direction.x * speed, direction.y * speed, launch.up);
     let mut elapsed = 0.0f32;
     let mut cell_id = flight.cell_id;
     let mut probe = PhysicsBody::new();
@@ -107,18 +168,24 @@ pub fn evaluate(
     for check in 1..=maximum {
         let remaining = (total_time - elapsed).max(0.0);
         if remaining <= EPSILON {
-            return ProjectilePathResult {
-                collision_checks: check - 1,
-                ..result(ProjectilePathStatus::Clear)
-            };
+            return (
+                ProjectilePathResult {
+                    collision_checks: check - 1,
+                    ..result(ProjectilePathStatus::Clear)
+                },
+                asked,
+            );
         }
         let velocity_magnitude = velocity.length();
         if !velocity_magnitude.is_finite() || velocity_magnitude <= EPSILON {
-            return ProjectilePathResult {
-                collision_checks: check - 1,
-                notice: Some("The projectile trajectory became invalid.".to_owned()),
-                ..result(ProjectilePathStatus::Error)
-            };
+            return (
+                ProjectilePathResult {
+                    collision_checks: check - 1,
+                    notice: Some("The projectile trajectory became invalid.".to_owned()),
+                    ..result(ProjectilePathStatus::Error)
+                },
+                asked,
+            );
         }
         let quantum = remaining.min(query.step_distance / velocity_magnitude);
         let mut next = current + velocity * quantum;
@@ -155,31 +222,90 @@ pub fn evaluate(
             samples.push((resolved.position, target_hit || !stopped));
         }
         if target_hit {
-            return ProjectilePathResult {
-                collision_checks: check,
-                blocking_object_id: flight.target_id,
-                ..result(ProjectilePathStatus::Clear)
-            };
+            return (
+                ProjectilePathResult {
+                    collision_checks: check,
+                    blocking_object_id: flight.target_id,
+                    ..result(ProjectilePathStatus::Clear)
+                },
+                asked,
+            );
         }
         if stopped {
-            return ProjectilePathResult {
-                collision_checks: check,
-                blocking_object_id: resolved.last_collided_object_id,
-                ..result(ProjectilePathStatus::Blocked)
-            };
+            return (
+                ProjectilePathResult {
+                    collision_checks: check,
+                    blocking_object_id: resolved.last_collided_object_id,
+                    ..result(ProjectilePathStatus::Blocked)
+                },
+                asked,
+            );
         }
         current = resolved.position;
         cell_id = resolved.cell_id;
         elapsed += quantum;
         if query.kind != ProjectilePathKind::Straight {
-            velocity.z -= 9.8 * quantum;
+            velocity.z -= GRAVITY * quantum;
         }
     }
-    ProjectilePathResult {
-        collision_checks: maximum,
-        notice: Some("The projectile collision-check budget was exhausted.".to_owned()),
-        ..result(ProjectilePathStatus::BudgetExceeded)
+    (
+        ProjectilePathResult {
+            collision_checks: maximum,
+            notice: Some("The projectile collision-check budget was exhausted.".to_owned()),
+            ..result(ProjectilePathStatus::BudgetExceeded)
+        },
+        asked,
+    )
+}
+
+/// The velocity the flight starts with. Without a launch speed, or for a
+/// straight shot: the kind's speed across, and the climb that lands on the
+/// aim point (lofted against gravity for the curved kinds). With one, for
+/// a missile or arc: the lower arc at that total speed (above 50 m/s,
+/// 50), or an invalid target when the speed is not a finite number above 0
+/// or no arc reaches.
+fn launch(
+    query: &ProjectilePathQuery,
+    across: f32,
+    rise: f32,
+) -> Result<Launch, ProjectilePathResult> {
+    let curved = query.kind != ProjectilePathKind::Straight;
+    if let Some(asked) = query.launch_speed.filter(|_| curved) {
+        if !asked.is_finite() || asked <= 0.0 {
+            return Err(ProjectilePathResult {
+                notice: Some("The launch speed must be a finite number above 0 m/s.".to_owned()),
+                ..result(ProjectilePathStatus::InvalidTarget)
+            });
+        }
+        let speed = asked.min(MAXIMUM_LAUNCH_SPEED);
+        let Some((across_speed, up, angle)) = ballistic_launch(speed, across, rise) else {
+            return Err(ProjectilePathResult {
+                notice: Some(format!("The target is out of reach at {speed:.1} m/s.")),
+                ..result(ProjectilePathStatus::InvalidTarget)
+            });
+        };
+        return Ok(Launch {
+            across: across_speed,
+            up,
+            asked: Some((speed, angle.to_degrees())),
+        });
     }
+    let speed = match query.kind {
+        ProjectilePathKind::Arc => 37.5185,
+        ProjectilePathKind::Missile => 46.0,
+        ProjectilePathKind::Straight => 100.0,
+    };
+    let total_time = across / speed;
+    let up = if curved {
+        (rise + 4.9 * total_time * total_time) / total_time
+    } else {
+        rise / total_time
+    };
+    Ok(Launch {
+        across: speed,
+        up,
+        asked: None,
+    })
 }
 
 impl PluginBinding<'_> {
