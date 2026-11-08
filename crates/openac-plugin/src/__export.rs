@@ -7,11 +7,11 @@ use ac_plugin_abi::{Event, StartInfo, Wire};
 use crate::{Host, Plugin};
 
 /// The length of the API version custom section.
-pub const API_SECTION_LEN: usize = 3;
+pub const API_SECTION_LEN: usize = 4;
 
 /// The API version custom section's bytes: [`ac_plugin_abi::API_CURRENT`]
 /// as `MAJOR.MINOR`.
-pub const API_SECTION_BYTES: [u8; API_SECTION_LEN] = *b"1.9";
+pub const API_SECTION_BYTES: [u8; API_SECTION_LEN] = *b"1.10";
 
 /// The length of the layout fingerprint custom section.
 pub const LAYOUT_SECTION_LEN: usize = ac_plugin_abi::layout::LAYOUT_SECTION_LEN;

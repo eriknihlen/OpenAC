@@ -4,7 +4,7 @@
 
 use ac_core::player::{AttributeKind, VitalKind, skill_names};
 use ac_core::properties::PropertyInt;
-use ac_core::spells::get_vitae_multiplier;
+use ac_core::spells::{ActiveEnchantmentRecord, Spellbook, get_vitae_multiplier};
 use ac_plugin::abi::CharacterInfo;
 use ac_plugin::abi::character::{
     ActiveEnchantment, AdvancementKind, AdvancementRequest, AdvancementResult, AdvancementStatus,
@@ -273,7 +273,6 @@ impl PluginBinding<'_> {
         let Some(book) = self.state.world.spellbook() else {
             return Vec::new();
         };
-        let now = self.session_seconds();
         let records = if timed {
             book.active_enchantment_snapshot()
                 .into_iter()
@@ -282,6 +281,30 @@ impl PluginBinding<'_> {
         } else {
             book.enchantments_in_effect_snapshot()
         };
+        self.enchantment_records(book, records)
+    }
+
+    /// Every enchantment on the character, in every list, those a
+    /// stronger one of their family surpasses too (API 1.10).
+    pub(super) fn character_all_enchantments(&self) -> Vec<ActiveEnchantment> {
+        if self.character.is_none() {
+            return Vec::new();
+        }
+        let Some(book) = self.state.world.spellbook() else {
+            return Vec::new();
+        };
+        self.enchantment_records(book, book.active_enchantment_snapshot())
+    }
+
+    /// Enchantment records as plugins read them: family and tier from the
+    /// spell table, seconds left at session time (infinite for one that
+    /// does not run out).
+    fn enchantment_records(
+        &self,
+        book: &Spellbook,
+        records: Vec<ActiveEnchantmentRecord>,
+    ) -> Vec<ActiveEnchantment> {
+        let now = self.session_seconds();
         records
             .into_iter()
             .map(|record| {

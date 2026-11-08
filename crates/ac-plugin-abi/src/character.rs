@@ -149,7 +149,8 @@ wire_record! {
         pub family: u32,
         /// Its rank in the family.
         pub tier: i32,
-        /// Seconds left; negative for one that does not run out.
+        /// Seconds left: 0 for a timed one that has run out, infinite
+        /// (`f64::INFINITY`) for one that does not run out (an item's spell).
         pub seconds_remaining: f64,
     }
 }

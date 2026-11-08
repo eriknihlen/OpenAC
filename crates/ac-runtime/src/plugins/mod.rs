@@ -450,6 +450,7 @@ impl SessionApi for PluginBinding<'_> {
             CharacterAttributes => |()| self.character_attributes(),
             CharacterVitals => |()| self.character_vitals(),
             CharacterEnchantments => |timed| self.character_enchantments(timed),
+            CharacterAllEnchantments => |()| self.character_all_enchantments(),
             CharacterAdvance => |request| self.character_advance(request),
             CharacterOptions => |()| self.character_options(),
             CharacterSetOption => |change| self.character_set_option(change),

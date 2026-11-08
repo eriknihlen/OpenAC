@@ -52,7 +52,7 @@ impl fmt::Display for ApiVersion {
 }
 
 /// The API version this build of the ABI provides.
-pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 9);
+pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 10);
 
 /// The oldest API version a client built on this ABI still loads.
 pub const API_MINIMUM: ApiVersion = ApiVersion::new(1, 0);
@@ -90,7 +90,7 @@ mod tests {
             API_CURRENT.minor + 1
         )));
         assert!(!is_supported(ApiVersion::new(0, 9)));
-        assert_eq!(API_CURRENT.to_string(), "1.9");
+        assert_eq!(API_CURRENT.to_string(), "1.10");
         assert_eq!(API_MINIMUM.to_string(), "1.0");
     }
 
@@ -101,6 +101,10 @@ mod tests {
         assert!(v(1, 0).is_at_most(v(1, 1)));
         assert!(!v(1, 1).is_at_most(v(1, 0)));
         assert!(v(1, 9).is_at_most(v(2, 0)));
+        // By number, not by text: 1.10 comes after 1.9.
+        assert!(v(1, 9).is_at_most(v(1, 10)));
+        assert!(!v(1, 10).is_at_most(v(1, 9)));
+        assert_eq!(ApiVersion::parse("1.10"), Some(v(1, 10)));
         assert!(!v(2, 0).is_at_most(v(1, 9)));
         for (a, b) in [(v(1, 0), v(1, 1)), (v(1, 1), v(1, 0)), (v(2, 3), v(2, 3))] {
             assert_eq!(a.is_at_most(b), a <= b);

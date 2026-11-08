@@ -333,6 +333,12 @@ macro_rules! import_table {
             CharacterEnchantments = character_enchantments(bool)
                 -> Vec<$crate::character::ActiveEnchantment>,
                 permission: None, window: false, since: (1, 0);
+            /// Every enchantment on the character, in every list, including
+            /// one a stronger enchantment of its family surpasses (which
+            /// `character_enchantments(false)` leaves out).
+            CharacterAllEnchantments = character_all_enchantments(())
+                -> Vec<$crate::character::ActiveEnchantment>,
+                permission: None, window: false, since: (1, 10);
             /// Spend experience or credits on one stat.
             CharacterAdvance = character_advance($crate::character::AdvancementRequest)
                 -> $crate::character::AdvancementResult,

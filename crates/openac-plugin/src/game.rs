@@ -64,6 +64,13 @@ impl Host<'_> {
         self.call::<calls::CharacterEnchantments>(&true)
     }
 
+    /// Every enchantment on the character, including those a stronger one
+    /// of the same family surpasses (API 1.10). [`Self::enchantments`]
+    /// lists only the ones in effect.
+    pub fn all_enchantments(&mut self) -> Vec<ActiveEnchantment> {
+        self.call::<calls::CharacterAllEnchantments>(&())
+    }
+
     /// Spend experience (or credits, to train) on one stat.
     pub fn advance(&mut self, kind: AdvancementKind, stat_id: u32, cost: u64) -> AdvancementResult {
         self.call::<calls::CharacterAdvance>(&AdvancementRequest {
