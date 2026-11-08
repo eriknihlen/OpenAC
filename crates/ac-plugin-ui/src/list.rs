@@ -2,7 +2,7 @@
 //! what a press at a point means. Pure, so the window's list widget and
 //! its tests share it.
 
-use crate::markup::{Column, ColumnKind};
+use crate::markup::{Column, ColumnAlign, ColumnKind};
 
 /// Room for the scrollbar when the rows overflow, pixels.
 pub const SCROLLBAR_WIDTH: f32 = 16.0;
@@ -54,6 +54,20 @@ pub fn column_layout(columns: &[Column], total_width: f32) -> Vec<(f32, f32)> {
         cursor += w;
     }
     layout
+}
+
+/// Where a cell's text starts in a column at `x`, `width` wide: `padding`
+/// in from the left edge, or (right-aligned) ending `padding` short of the
+/// right edge. Text wider than the room starts at the left padding, so a
+/// right-aligned cell that does not fit is cut at the right, as a
+/// left-aligned one is.
+#[must_use]
+pub fn text_x(align: ColumnAlign, x: f32, width: f32, text_width: f32, padding: f32) -> f32 {
+    let left = x + padding;
+    match align {
+        ColumnAlign::Left => left,
+        ColumnAlign::Right => (x + width - padding - text_width).max(left),
+    }
 }
 
 /// Rows that fit: at least one.
@@ -200,6 +214,7 @@ mod tests {
             header: ColumnHeader::None,
             sort: SortKind::None,
             sort_keys: None,
+            align: ColumnAlign::Left,
         }
     }
 
@@ -215,6 +230,7 @@ mod tests {
             header: ColumnHeader::None,
             sort: SortKind::None,
             sort_keys: None,
+            align: ColumnAlign::Left,
         }
     }
 
@@ -230,6 +246,7 @@ mod tests {
             header: ColumnHeader::None,
             sort: SortKind::None,
             sort_keys: None,
+            align: ColumnAlign::Left,
         }
     }
 
@@ -326,6 +343,7 @@ mod tests {
                 header: ColumnHeader::None,
                 sort: SortKind::None,
                 sort_keys: None,
+                align: ColumnAlign::Left,
             },
         ];
         let layout = column_layout(&columns, 100.0);
@@ -333,6 +351,21 @@ mod tests {
             press_columns(&columns, &layout, &[3, 3], 0, 3, 20.0, (70.0, 45.0)),
             ColumnPress::Nothing
         );
+    }
+
+    // API 1.10: a right-aligned cell ends its text a padding short of the
+    // column's right edge; one too wide for its room starts at the left
+    // padding, as a left-aligned one does.
+    #[test]
+    fn right_aligned_text_ends_a_padding_short_of_the_right_edge() {
+        let padding = 3.0;
+        assert_eq!(text_x(ColumnAlign::Left, 0.0, 40.0, 20.0, padding), 3.0);
+        assert_eq!(
+            text_x(ColumnAlign::Right, 0.0, 40.0, 20.0, padding),
+            40.0 - 20.0 - padding
+        );
+        assert_eq!(text_x(ColumnAlign::Right, 50.0, 40.0, 20.0, padding), 67.0);
+        assert_eq!(text_x(ColumnAlign::Right, 50.0, 40.0, 60.0, padding), 53.0);
     }
 
     #[test]

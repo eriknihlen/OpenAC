@@ -129,6 +129,28 @@ impl SessionApi for FakeSession {
                 })
                 .map_err(|error| error.to_string())
             }
+            // A timed buff and the weaker one an item casts, which never
+            // runs out.
+            Import::CharacterAllEnchantments => {
+                serve::<calls::CharacterAllEnchantments>(request, |()| {
+                    use ac_plugin::abi::character::ActiveEnchantment;
+                    vec![
+                        ActiveEnchantment {
+                            spell_id: 0x100,
+                            family: 5,
+                            tier: 7,
+                            seconds_remaining: 3600.0,
+                        },
+                        ActiveEnchantment {
+                            spell_id: 0x101,
+                            family: 5,
+                            tier: 5,
+                            seconds_remaining: f64::INFINITY,
+                        },
+                    ]
+                })
+                .map_err(|error| error.to_string())
+            }
             other => Ok(other.default_reply()),
         }
     }
@@ -446,7 +468,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.9 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.10 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +677,17 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.9""#, r#""apiVersion": "1.10""#);
+    edit_manifest(
+        &folder,
+        r#""apiVersion": "1.10""#,
+        r#""apiVersion": "1.11""#,
+    );
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.10, but this build supports 1.0..1.9"
+        "plugin 'openac.probe' declares apiVersion 1.11, but this build supports 1.0..1.10"
     );
 }
 
@@ -710,7 +736,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.9""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.10""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +850,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.9""#,
+        r#""apiVersion": "1.10""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -915,6 +941,28 @@ fn a_plugin_built_for_api_1_7_still_loads() {
     let v1_7 = ApiVersion::new(1, 7);
     let (loaded, error) = load_probe_built_for("probe-1-7", "1.7", &section_at(v1_7));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.10 added only an import (every enchantment on the character):
+/// `probe` as an API 1.9 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_9_still_loads() {
+    let v1_9 = ApiVersion::new(1, 9);
+    let (loaded, error) = load_probe_built_for("probe-1-9", "1.9", &section_at(v1_9));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.10: a plugin reads every enchantment on the character through a
+/// real module, the ones a stronger enchantment surpasses and the ones that
+/// never run out among them, apart from those in effect.
+#[test]
+fn a_plugin_reads_every_enchantment_on_the_character() {
+    let (_root, mut plugins, mut api) = suite_session("all-enchantments", engine(), &["suite"]);
+    assert_eq!(plugins.loaded_ids(), ["openac.suite"]);
+    assert_eq!(
+        order(&mut plugins, &mut api, "suite", "enchantments"),
+        "suite enchantments: 2 on, 0 in effect, 1 without end"
+    );
 }
 
 /// An object change reaches a plugin exactly as its API version encodes
@@ -1415,7 +1463,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.9 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.10 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2680,7 +2728,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.9""#,
+            r#""apiVersion": "1.10""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),
@@ -3426,8 +3474,9 @@ fn a_service_that_fails_as_another_plugin_stops_is_reported() {
 /// A module that says it was built for an older API version but imports a
 /// function a later one added is refused at load, even with a layout
 /// section that matches: the plugin would never hear the events that go
-/// with it. `suite` imports plugin services (API 1.7) and the status
-/// board's subscriptions (API 1.8).
+/// with it. `suite` imports plugin services (API 1.7), the status
+/// board's subscriptions (API 1.8) and every enchantment on the
+/// character (API 1.10).
 #[test]
 fn an_import_newer_than_the_plugins_api_version_is_refused() {
     let error = forged_suite_error("service-forged-1-6", ApiVersion::new(1, 6));
@@ -3438,6 +3487,14 @@ fn an_import_newer_than_the_plugins_api_version_is_refused() {
     let error = forged_suite_error("status-forged-1-7", ApiVersion::new(1, 7));
     assert!(
         error.contains("which API 1.8 added (the plugin was built for API 1.7)"),
+        "{error}"
+    );
+    let error = forged_suite_error("enchantments-forged-1-9", ApiVersion::new(1, 9));
+    assert!(
+        error.contains(
+            "imports openac.character_all_enchantments, which API 1.10 added (the plugin was \
+             built for API 1.9)"
+        ),
         "{error}"
     );
 }

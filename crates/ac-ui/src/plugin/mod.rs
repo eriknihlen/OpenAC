@@ -1892,6 +1892,8 @@ mod file_icon_tests;
 #[cfg(test)]
 mod flex_tests;
 #[cfg(test)]
+mod list_align_tests;
+#[cfg(test)]
 mod list_button_tests;
 #[cfg(test)]
 mod repeat_tests;

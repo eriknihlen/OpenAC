@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use ac_core::spells::{SpellFlags, SpellMetadata, SpellTable};
+use ac_core::spells::{
+    ActiveEnchantmentRecord, BUCKET_COOLDOWN, BUCKET_MULTIPLICATIVE, BUCKET_VITAE, SpellFlags,
+    SpellMetadata, SpellTable,
+};
 use ac_plugin::abi::calls;
 use ac_plugin::abi::magic::{
     CastCompletion, CastGate, CastRequest, CastResult, ReportedCast, SpellList,
@@ -11,7 +14,7 @@ use ac_plugin::abi::magic::{
 
 use super::events_tests::described;
 use super::magic::EnchantmentTracker;
-use super::tests::{PLAYER, call, in_world_with, with_binding};
+use super::tests::{CLOCKS, PLAYER, call, in_world_with, with_binding};
 use crate::session::{Outbox, SessionState};
 
 /// OpenAC `TimedBeneficial`: a creature enchantment of one minute.
@@ -321,6 +324,105 @@ fn the_tracker_shares_reported_and_confirmed_local_casts() {
     assert!(tracker.capture(100, now + 31_000).is_empty());
     tracker.forget(0, 2);
     assert!(tracker.capture(200, now).is_empty());
+}
+
+/// A spell of family 5 at `generation`.
+fn family_five(id: u32, generation: i32) -> SpellMetadata {
+    let mut spell = SpellMetadata::new(id, format!("Family Five {generation}"), 5);
+    spell.generation = generation;
+    spell
+}
+
+/// An enchantment of family 5 in the multiplicative list, arrived at the
+/// session time the test binding reads at.
+fn family_five_record(spell_id: u32, power: u32, duration: f64) -> ActiveEnchantmentRecord {
+    ActiveEnchantmentRecord {
+        bucket: BUCKET_MULTIPLICATIVE,
+        spell_category: 5,
+        power_level: power,
+        start_time: CLOCKS.session.as_secs_f64(),
+        ..ActiveEnchantmentRecord::new(spell_id, 1, duration, PLAYER)
+    }
+}
+
+// API 1.10: a timed buff surpasses the weaker one an item casts (which
+// does not run out); the in-effect list has the winner only, the list of
+// every enchantment has both.
+#[test]
+fn all_enchantments_lists_a_surpassed_one_too() {
+    let mut state = with_spells(vec![family_five(0x100, 7), family_five(0x101, 5)], &[]);
+    state.world.update_spellbook(|book| {
+        book.on_enchantment_added(family_five_record(0x100, 7, 3600.0));
+        book.on_enchantment_added(family_five_record(0x101, 5, -1.0));
+    });
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let in_effect = call::<calls::CharacterEnchantments>(b, &false);
+        assert_eq!(in_effect.len(), 1, "in effect: one winner per family");
+        assert_eq!((in_effect[0].spell_id, in_effect[0].tier), (0x100, 7));
+        let all = call::<calls::CharacterAllEnchantments>(b, &());
+        assert_eq!(all.len(), 2);
+        assert!(
+            all.iter().any(|e| e.spell_id == 0x100
+                && e.family == 5
+                && e.tier == 7
+                && (e.seconds_remaining - 3600.0).abs() < 1e-6),
+            "{all:?}"
+        );
+        assert!(
+            all.iter()
+                .any(|e| e.spell_id == 0x101 && e.tier == 5 && e.seconds_remaining.is_infinite()),
+            "{all:?}"
+        );
+    });
+}
+
+// Every list is in it, vitae and cooldowns too, in order of layer then
+// spell id; a record with no spell-table entry reads family and tier 0.
+#[test]
+fn all_enchantments_covers_every_list_in_layer_then_spell_order() {
+    let mut state = with_spells(vec![family_five(0x100, 7), family_five(0x101, 5)], &[]);
+    state.world.update_spellbook(|book| {
+        book.on_enchantment_added(family_five_record(0x101, 5, -1.0));
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            layer_id: 2,
+            ..family_five_record(0x100, 7, 3600.0)
+        });
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            bucket: BUCKET_VITAE,
+            ..ActiveEnchantmentRecord::new(0x0300, 1, -1.0, PLAYER)
+        });
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            bucket: BUCKET_COOLDOWN,
+            start_time: CLOCKS.session.as_secs_f64(),
+            ..ActiveEnchantmentRecord::new(0x8010, 1, 30.0, PLAYER)
+        });
+    });
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let all = call::<calls::CharacterAllEnchantments>(b, &());
+        let listed: Vec<(u32, u32, i32)> =
+            all.iter().map(|e| (e.spell_id, e.family, e.tier)).collect();
+        assert_eq!(
+            listed,
+            [(0x101, 5, 5), (0x0300, 0, 0), (0x8010, 0, 0), (0x100, 5, 7)]
+        );
+        assert!((all[2].seconds_remaining - 30.0).abs() < 1e-6, "{all:?}");
+    });
+}
+
+// Out of the world there is nothing to list.
+#[test]
+fn all_enchantments_is_empty_without_a_character() {
+    let mut state = with_spells(vec![family_five(0x100, 7)], &[]);
+    state.world.update_spellbook(|book| {
+        book.on_enchantment_added(family_five_record(0x100, 7, 3600.0));
+    });
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        b.character = None;
+        assert!(call::<calls::CharacterAllEnchantments>(b, &()).is_empty());
+    });
 }
 
 // ── Time left on an effect (OpenAC `RuntimeAutomationSurfaceEffectTimeTests`,

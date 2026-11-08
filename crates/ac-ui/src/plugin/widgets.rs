@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use ac_plugin_ui::list::{self, ColumnPress};
-use ac_plugin_ui::markup::{Column, ColumnHeader, ColumnKind};
+use ac_plugin_ui::markup::{Column, ColumnAlign, ColumnHeader, ColumnKind};
 
 use super::style::{self, PointerState};
 use crate::draw::{Color, DEFAULT_OUTLINE_COLOR, RenderContext, TextureRef};
@@ -261,6 +261,23 @@ fn line_height(font: Option<&Arc<UiFont>>) -> f32 {
 
 fn measure(font: Option<&Arc<UiFont>>, s: &str) -> f32 {
     font.map_or(s.chars().count() as f32 * 7.0, |f| f.measure_width(s))
+}
+
+/// Where a list cell's (or header caption's) text starts in a column at
+/// `x`, `width` wide ([`list::text_x`]); the text is measured only when it
+/// is right-aligned.
+fn aligned_text_x(
+    align: ColumnAlign,
+    x: f32,
+    width: f32,
+    font: Option<&Arc<UiFont>>,
+    s: &str,
+) -> f32 {
+    let text_width = match align {
+        ColumnAlign::Left => 0.0,
+        ColumnAlign::Right => measure(font, s),
+    };
+    list::text_x(align, x, width, text_width, PADDING)
 }
 
 /// The alpha an unselected tab draws its icon at, so it recedes like its
@@ -1463,22 +1480,12 @@ impl MarkupList {
             }
             let caption = ext.captions.get(c).cloned().flatten().unwrap_or_default();
             let is_sorted = c as i32 == sorted;
-            rc.push_clip(
-                cx,
-                0.0,
-                (cw - if is_sorted { 12.0 } else { 0.0 }).max(0.0),
-                h,
-            );
+            // The room left of the sort arrow, when the column shows one.
+            let room = (cw - if is_sorted { 12.0 } else { 0.0 }).max(0.0);
+            rc.push_clip(cx, 0.0, room, h);
             let ty = ((h - line_height(font.as_ref())) * 0.5).max(0.0);
-            text(
-                rc,
-                font.as_ref(),
-                &caption,
-                cx + PADDING,
-                ty,
-                text_color,
-                p.is_none(),
-            );
+            let tx = aligned_text_x(column.align, cx, room, font.as_ref(), &caption);
+            text(rc, font.as_ref(), &caption, tx, ty, text_color, p.is_none());
             rc.pop_clip();
             if is_sorted {
                 let left = cx + cw - 10.0;
@@ -1788,7 +1795,11 @@ impl Widget for MarkupList {
                             .and_then(|x| x.tree.as_ref().map(|t| t.column))
                             .filter(|column| *column == c)
                             .and_then(|_| self.ext.as_ref()?.tree_row(plugin));
-                        let mut tx = cx + PADDING;
+                        let align = self
+                            .columns
+                            .get(c)
+                            .map_or_else(ColumnAlign::default, |column| column.align);
+                        let mut tx = aligned_text_x(align, cx, cw, font.as_ref(), s);
                         if let Some((level, parent, expanded)) = tree {
                             let slot = cx + PADDING + level as f32 * super::list_ext::TREE_INDENT;
                             if let (true, Some(p)) = (parent, &p) {

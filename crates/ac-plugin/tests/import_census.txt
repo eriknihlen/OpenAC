@@ -83,6 +83,7 @@ character_skill -
 character_attributes -
 character_vitals -
 character_enchantments -
+character_all_enchantments -
 character_advance -
 character_options -
 character_set_option -

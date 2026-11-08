@@ -705,3 +705,20 @@ fn a_tree_list_names_its_levels_keys_and_expansion() {
     ));
     assert!(message.contains("text column"), "{message}");
 }
+
+// API 1.10: the tree indents its column's text from the left, so that
+// column cannot be right-aligned; another column of the tree list can.
+#[test]
+fn a_tree_lists_tree_column_cannot_align_right() {
+    let tree = r#"tree="true" levels="{Levels}" keys="{Ids}" selected="{Selected}""#;
+    let list = |first: &str, second: &str| {
+        format!(
+            r#"<list x="0" y="0" w="300" h="200" {tree}><column type="text" width="100" items="{{Names}}" {first}/><column type="text" items="{{Dists}}" {second}/></list>"#
+        )
+    };
+    assert_eq!(
+        refused(&list(r#"align="right""#, "")),
+        "column[0] align=\"right\" can't be on the tree's column (the tree indents from the left)"
+    );
+    assert!(build(&list(r#"align="left""#, r#"align="right""#)).is_ok());
+}

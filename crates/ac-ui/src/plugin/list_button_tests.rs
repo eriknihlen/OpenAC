@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use ac_plugin_ui::markup::{Column, ColumnKind};
+use ac_plugin_ui::markup::{Column, ColumnAlign, ColumnKind};
 
 use super::widgets::{ButtonLook, Cell, DISABLED_ALPHA, MarkupList};
 use crate::draw::{Color, DrawCmd, DrawList, NoSprites, TextureRef};
@@ -32,6 +32,7 @@ fn text_column(width: f32) -> Column {
         header: ac_plugin_ui::markup::ColumnHeader::None,
         sort: ac_plugin_ui::markup::SortKind::None,
         sort_keys: None,
+        align: ColumnAlign::Left,
     }
 }
 
@@ -48,6 +49,7 @@ fn button_column(width: f32, button_width: f32, button_height: f32) -> Column {
         header: ac_plugin_ui::markup::ColumnHeader::None,
         sort: ac_plugin_ui::markup::SortKind::None,
         sort_keys: None,
+        align: ColumnAlign::Left,
     }
 }
 

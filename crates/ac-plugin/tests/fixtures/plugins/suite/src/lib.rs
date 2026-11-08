@@ -46,6 +46,11 @@
 //!   <value>` (`-` for none), and answers a change of the key `ping` to a
 //!   number by publishing the next number under its own `ping`.
 //!
+//! Character:
+//! - `/<verb> enchantments` logs `<verb> enchantments: <n> on, <m> in
+//!   effect, <k> without end`: how many enchantments are on the character
+//!   (API 1.10), how many are in effect, and how many of all never run out.
+//!
 //! Callbacks the client asks (they need the `chat` permission):
 //! - `/<verb> filter <scoped id>` installs a chat filter, and `/<verb>
 //!   intercept <scoped id>` an input interceptor, that call that service
@@ -191,6 +196,18 @@ impl Plugin for Suite {
             ["unsubscribe", id] => {
                 let result = host.status_unsubscribe(id);
                 host.info(&format!("{verb} unsubscribe {id}: {result}"));
+            }
+            ["enchantments"] => {
+                let all = host.all_enchantments();
+                let in_effect = host.enchantments().len();
+                let endless = all
+                    .iter()
+                    .filter(|e| e.seconds_remaining.is_infinite())
+                    .count();
+                host.info(&format!(
+                    "{verb} enchantments: {} on, {in_effect} in effect, {endless} without end",
+                    all.len()
+                ));
             }
             ["list"] => {
                 let ids: Vec<String> = host
