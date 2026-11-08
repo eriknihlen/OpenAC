@@ -1,6 +1,6 @@
 //! Every startup option is documented in one place: each `OPENAC_*`
 //! environment variable named anywhere in the workspace's sources must
-//! appear in `docs/launch-options.md` (OpenAC keeps the same census over
+//! appear in `content/docs/launch-options.md` (OpenAC keeps the same census over
 //! its `building-and-running.md`).
 
 use std::collections::BTreeSet;
@@ -52,8 +52,8 @@ fn variables(text: &str) -> BTreeSet<String> {
 #[test]
 fn every_environment_variable_is_documented() {
     let root = workspace_root();
-    let doc = std::fs::read_to_string(root.join("docs").join("launch-options.md"))
-        .expect("docs/launch-options.md exists");
+    let doc = std::fs::read_to_string(root.join("content").join("docs").join("launch-options.md"))
+        .expect("content/docs/launch-options.md exists");
     let mut files = Vec::new();
     rust_files(&root.join("crates"), &mut files);
     assert!(!files.is_empty());

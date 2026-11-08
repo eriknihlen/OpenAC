@@ -1,5 +1,8 @@
-# Getting started
-
++++
+title = "Getting started"
+weight = 10
+aliases = ["docs/getting-started.html"]
++++
 You need three things: the launcher, your own Asheron's Call data files, and
 a server to connect to.
 

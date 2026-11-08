@@ -224,7 +224,7 @@ fn parse_manifest(path: &Path, checks: &mut Vec<CheckItem>) -> Option<PluginMani
                 "plugin.json parses",
                 &error.0,
                 "Correct the problem named above in plugin.json; the field rules are in the \
-                 plugin.json section of docs/plugin-development.md. Parsing stops at the first problem, so run this \
+                 plugin.json section of content/docs/plugin-development.md. Parsing stops at the first problem, so run this \
                  again after each fix.",
             ));
             None

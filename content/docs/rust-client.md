@@ -1,9 +1,12 @@
-# The client
-
++++
+title = "The client"
+weight = 30
+aliases = ["docs/rust-client.html"]
++++
 OpenAC is an open-source Asheron's Call client written in Rust: the same
 behavior as the original game, in modern code. It began as openac-rust and is
 released from [this repository](https://github.com/eriknihlen/OpenAC) since
-0.2.0. Download the launcher from [Getting started](getting-started.md); it
+0.2.0. Download the launcher from [Getting started](@/docs/getting-started.md); it
 fetches the client.
 
 > **The C# client is retired.** Its last release is
@@ -23,7 +26,7 @@ fetches the client.
   `wasm32-unknown-unknown`, written against the `openac-plugin` SDK (MIT). The
   same plugin runs with or without a window, sandboxed, with only the
   permissions its `plugin.json` declares. See
-  [Writing a plugin](plugin-development.md).
+  [Writing a plugin](@/docs/plugin-development.md).
 - **Rendering** goes through [wgpu](https://wgpu.rs): Direct3D 12 or Vulkan on
   Windows, Vulkan on Linux, Metal on macOS.
 - **The launcher** (`openac-launcher`) keeps your accounts and servers, starts
@@ -62,9 +65,9 @@ later has downloads for Apple silicon since 0.1.8 and for Intel since 0.2.0.
 
 ## More
 
-- [Download and run](getting-started.md)
-- [Building and running](building-and-running.md)
-- [Launch options](launch-options.md)
-- [Writing a plugin](plugin-development.md)
+- [Download and run](@/docs/getting-started.md)
+- [Building and running](@/docs/building-and-running.md)
+- [Launch options](@/docs/launch-options.md)
+- [Writing a plugin](@/docs/plugin-development.md)
 - [Issues](https://github.com/eriknihlen/OpenAC/issues): bugs and requests for
   the Rust client

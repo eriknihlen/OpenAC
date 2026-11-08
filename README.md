@@ -158,8 +158,8 @@ export OPENAC_PASSWORD='...'
 Type `/window` in its console to open a game window on the session and
 `/close` to close it again; `--headless` runs without any window support.
 `openac run --config <file>` runs several sessions from one configuration
-document. [docs/building-and-running.md](docs/building-and-running.md) walks
-through it, and [docs/launch-options.md](docs/launch-options.md) lists every
+document. [content/docs/building-and-running.md](content/docs/building-and-running.md) walks
+through it, and [content/docs/launch-options.md](content/docs/launch-options.md) lists every
 option and environment variable.
 
 Before sending a change, run the same check CI runs:
@@ -187,7 +187,7 @@ permissions allow, within a memory cap and a time limit per call.
 the launcher's own rules, and `plugincheck pack` writes its release assets.
 Plugins are published as GitHub releases tagged `wasm-v<version>` and can be
 listed in the launcher's Discover panel.
-[docs/plugin-development.md](docs/plugin-development.md) walks the whole path.
+[content/docs/plugin-development.md](content/docs/plugin-development.md) walks the whole path.
 
 ## AI-assisted development
 

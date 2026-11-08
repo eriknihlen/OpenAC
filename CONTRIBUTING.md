@@ -24,7 +24,7 @@ fork it, ship it, or build something else on it without asking either.
 Install Rust with [rustup](https://rustup.rs); `rust-toolchain.toml` pins the
 toolchain (Rust 1.95.0 with `rustfmt`, `clippy` and the
 `wasm32-unknown-unknown` target). See
-[docs/building-and-running.md](docs/building-and-running.md) for the
+[content/docs/building-and-running.md](content/docs/building-and-running.md) for the
 platform prerequisites. Short version:
 
 ```bash
@@ -75,7 +75,7 @@ A few rules keep the design honest:
   each `unsafe` block carries a `// SAFETY:` comment.
 - Parsers return typed errors and never panic on malformed input.
 - Startup options come in through one options struct and are documented in
-  [docs/launch-options.md](docs/launch-options.md) in the same commit.
+  [content/docs/launch-options.md](content/docs/launch-options.md) in the same commit.
 - Tests live beside the crate they test, and golden values name their source.
 
 ## Faithfulness and provenance
@@ -138,5 +138,5 @@ original client doing it right is gold.
 Most people who want to extend OpenAC do not need to change the client
 at all. A plugin is a Rust crate in its own repository, built against the
 `openac-plugin` SDK, and it installs through the launcher.
-**[docs/plugin-development.md](docs/plugin-development.md)** is the full
+**[content/docs/plugin-development.md](content/docs/plugin-development.md)** is the full
 path.

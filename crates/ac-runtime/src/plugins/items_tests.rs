@@ -1175,7 +1175,7 @@ mod world_object_details {
     }
 }
 
-// OPENAC_PROBE_EXTERNAL_CONTAINER (docs/launch-options.md): each plugin
+// OPENAC_PROBE_EXTERNAL_CONTAINER (content/docs/launch-options.md): each plugin
 // close of a container is one line with its answer and why.
 #[test]
 fn the_external_container_probe_names_a_refused_plugin_close_and_why() {

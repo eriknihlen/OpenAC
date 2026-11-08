@@ -2285,7 +2285,7 @@ fn the_open_corpse_leaving_the_world_closes_it_and_sends_nothing() {
 
 #[test]
 fn the_external_container_probe_is_silent_off_and_names_each_step_on() {
-    // OPENAC_PROBE_EXTERNAL_CONTAINER (docs/launch-options.md).
+    // OPENAC_PROBE_EXTERNAL_CONTAINER (content/docs/launch-options.md).
     const CORPSE: u32 = 0x8000_D121;
     let mut f = Fixture::new();
     open_empty_corpse(&mut f, CORPSE);

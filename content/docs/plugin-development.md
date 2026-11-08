@@ -1,5 +1,8 @@
-# Writing a plugin
-
++++
+title = "Writing a plugin"
+weight = 40
+aliases = ["docs/plugin-development.html"]
++++
 OpenAC plugins are WebAssembly modules. You write one as an ordinary
 Rust crate against the `openac-plugin` SDK, build it for
 `wasm32-unknown-unknown`, and drop it into the plugins folder. The client

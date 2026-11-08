@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{#- The layout every guide page shares: the guides on the left, the page in
+    the middle, its headings on the right. `doc` is the page, or the section on its own index. -#}
+
+{% block title %}{%- if page is defined %}{% set_global doc = page %}{% else %}{% set_global doc = section %}{% endif -%}{{ doc.title }} · OpenAC{% endblock title %}
+{% block description %}{%- if page is defined %}{% set_global doc = page %}{% else %}{% set_global doc = section %}{% endif -%}{{ doc.description | default(value=config.description) }}{% endblock description %}
+{% block body_class %}docs{% endblock body_class %}
+
+{% block content %}
+{%- if page is defined %}{% set_global doc = page %}{% else %}{% set_global doc = section %}{% endif -%}
+{%- set guides = get_section(path="docs/_index.md") -%}
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="sidebar-menu" open>
+      <summary>Guides</summary>
+      <nav aria-label="Guides">
+        <a href="{{ guides.permalink | safe }}"{% if doc.permalink == guides.permalink %} aria-current="page"{% endif %}>Overview</a>
+        {%- for p in guides.pages %}
+        <a href="{{ p.permalink | safe }}"{% if p.permalink == doc.permalink %} aria-current="page"{% endif %}>{{ p.title }}</a>
+        {%- endfor %}
+      </nav>
+    </details>
+  </aside>
+
+  <article class="prose">
+    <h1>{{ doc.title }}</h1>
+    {{ doc.content | safe }}
+    <p class="edit"><a href="{{ config.extra.repo }}/edit/main/content/{{ doc.relative_path }}">Edit this page on GitHub</a></p>
+  </article>
+
+  {%- if doc.toc | length > 1 %}
+  <aside class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    <ul>
+      {%- for h in doc.toc %}
+      <li><a href="{{ h.permalink | safe }}">{{ h.title }}</a></li>
+      {%- endfor %}
+    </ul>
+  </aside>
+  {%- endif %}
+</div>
+{% endblock content %}

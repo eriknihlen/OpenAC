@@ -1,5 +1,8 @@
-# Building and running
-
++++
+title = "Building and running"
+weight = 50
+aliases = ["docs/building-and-running.html"]
++++
 ## Prerequisites
 
 - **Rust**, installed with [rustup](https://rustup.rs). `rust-toolchain.toml`
@@ -85,7 +88,7 @@ Until a client is installed through its update feed, it starts the `openac`
 in its own folder, so build both (`cargo build --release` does).
 
 Its options (another install folder, a test update feed, a plugin list) are
-listed in the `openac-launcher` section of [launch-options.md](launch-options.md).
+listed in the `openac-launcher` section of [launch-options.md](@/docs/launch-options.md).
 
 ## Run one session
 
@@ -114,7 +117,7 @@ Useful options:
 | `--log <level>` | `error`, `warn`, `info` (default), `debug`, `trace` |
 | `--dat-dir <path>` | the data-file folder |
 
-`openac --help` prints the rest, and [launch-options.md](launch-options.md)
+`openac --help` prints the rest, and [launch-options.md](@/docs/launch-options.md)
 lists every option and environment variable.
 
 ## Run several sessions
@@ -148,7 +151,7 @@ With `--console` you type into the sessions: `/sessions` lists them,
 one line to one session, `/window [id]` opens or moves the game window to a
 session, `/close` closes it, and `/quit [id]` logs off. The document's full
 grammar (paths, content, credentials, status files) is in
-the session-config section of [launch-options.md](launch-options.md).
+the session-config section of [launch-options.md](@/docs/launch-options.md).
 
 ## Where files go
 

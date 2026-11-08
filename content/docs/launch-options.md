@@ -1,5 +1,8 @@
-# Launch options
-
++++
+title = "Launch options"
+weight = 60
+aliases = ["docs/launch-options.html"]
++++
 Every command-line flag and environment variable the programs read, with its
 default: `openac` (the client), `openac-launcher` (the launcher window),
 `actool` (dat and image tools) and `plugincheck` (the plugin checker). It also
@@ -389,7 +392,7 @@ command.
 
 The plugin checker for plugin authors: the launcher's own install rules, then
 the plugin's WebAssembly module loaded without running it. See
-[Writing a plugin](plugin-development.md).
+[Writing a plugin](@/docs/plugin-development.md).
 
 | Command | Does |
 |---|---|
