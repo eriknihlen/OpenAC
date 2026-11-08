@@ -128,7 +128,10 @@ the end of `ItemProperties`: a creature's profile from its last appraisal
 older version is sent the properties without it. API 1.10 added
 `Host::all_enchantments`: every enchantment on the character, also one that
 a stronger enchantment of its family surpasses (an item's spell under a
-stronger buff), where `Host::enchantments` lists only those in effect. An
+stronger buff), where `Host::enchantments` lists only those in effect. It
+covers every list (the multiplicative and additive ones, vitae and
+cooldowns), in order of layer, then spell id; one with no spell-table entry,
+such as a cooldown, reads family 0 and tier 0. An
 enchantment that does not run out reads `seconds_remaining` infinite; a timed
 one that has run out reads 0. A plugin built for an older version cannot
 import it. It also added `align` on a list's `<column>` in markup.
@@ -213,7 +216,9 @@ a session without a window answers the same.
 `align="right"` (API 1.10), which keeps its text cells and its header caption
 to that edge of the column, a few pixels in, so numbers line up; text too
 wide for the column starts at the left and is cut at the right, as a
-left-aligned cell is. Any other value refuses the markup. The attribute
+left-aligned cell is. Any other value refuses the markup, and so does
+`align="right"` on a tree list's tree column (the first text column), whose
+tree indents from the left; its other columns may align right. The attribute
 moves only text: check, icon and button cells draw as they do. A client
 older than 1.10 ignores the attribute, as it ignores any it does not know,
 and draws the column left-aligned.

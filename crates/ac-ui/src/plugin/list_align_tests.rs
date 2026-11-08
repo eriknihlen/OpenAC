@@ -1,11 +1,15 @@
 //! A list column's text alignment (`align="left|right"`, API 1.10): where
-//! a text cell's glyphs are drawn. The markup cases are in `ac-plugin-ui`'s
-//! `markup/tests.rs`, the arithmetic in its `list.rs`.
+//! a text cell's and a header caption's glyphs are drawn. The markup cases
+//! are in `ac-plugin-ui`'s `markup/tests.rs`, the arithmetic in its `list.rs`.
 
 use std::sync::Arc;
 
 use ac_plugin_ui::markup::{Column, ColumnAlign, ColumnHeader, ColumnKind, SortKind};
 
+use super::PluginOutbox;
+use super::controls::Emit;
+use super::fold::Remembered;
+use super::list_ext::ListExt;
 use super::widgets::{Cell, MarkupList};
 use crate::draw::{Color, DrawCmd, NoSprites, TextureRef};
 use crate::font::UiFont;
@@ -42,8 +46,6 @@ fn font() -> Arc<UiFont> {
 /// The left edge of the leftmost glyph a 40-wide first column (then a
 /// 60-wide one) draws for `text`, aligned `align`.
 fn first_glyph_x(font: &Arc<UiFont>, text: &str, align: ColumnAlign) -> f32 {
-    let mut ui = UiRoot::new();
-    ui.set_size(800.0, 600.0);
     let mut list = MarkupList::new(Some(Arc::clone(font)), 20.0);
     list.columns = vec![
         text_column(40.0, align),
@@ -52,6 +54,14 @@ fn first_glyph_x(font: &Arc<UiFont>, text: &str, align: ColumnAlign) -> f32 {
     list.rows = vec![vec![Cell::Text(text.to_owned(), Color::WHITE), Cell::Empty]];
     list.background = Color::TRANSPARENT;
     list.border = Color::TRANSPARENT;
+    leftmost_glyph(list)
+}
+
+/// The left edge of the leftmost glyph `list` draws, at the screen's corner,
+/// 100 by 60.
+fn leftmost_glyph(list: MarkupList) -> f32 {
+    let mut ui = UiRoot::new();
+    ui.set_size(800.0, 600.0);
     let root = ui.root();
     ui.add(root, Element::at(0.0, 0.0, 100.0, 60.0), list);
     let drawn = ui.draw((800.0, 600.0), &NoSprites);
@@ -95,4 +105,50 @@ fn a_right_aligned_text_too_wide_for_its_column_starts_at_the_left_padding() {
         first_glyph_x(&font, text, ColumnAlign::Right),
         first_glyph_x(&font, text, ColumnAlign::Left)
     );
+}
+
+/// The room a sorted column's caption leaves for its sort arrow, pixels.
+const SORT_ARROW_ROOM: f32 = 12.0;
+
+/// The left edge of the leftmost glyph of `caption` in the header of a
+/// 40-wide, sortable first column (then a 60-wide one, no caption), aligned
+/// `align`; `sorted`: the list is sorted by that column.
+fn caption_glyph_x(font: &Arc<UiFont>, caption: &str, align: ColumnAlign, sorted: bool) -> f32 {
+    let mut first = text_column(40.0, align);
+    first.sort = SortKind::Text;
+    let columns = vec![first, text_column(60.0, ColumnAlign::Left)];
+    let mut list = MarkupList::new(Some(Arc::clone(font)), 20.0);
+    list.columns.clone_from(&columns);
+    list.markup_columns.clone_from(&columns);
+    let none = || Remembered::new(None, "test", None, "list");
+    let mut ext = ListExt::new(
+        &columns,
+        none(),
+        none(),
+        Emit::new(1, PluginOutbox::default()),
+    );
+    ext.header = true;
+    ext.captions = vec![Some(caption.to_owned()), None];
+    ext.bound_sort = Some(if sorted { (0, false) } else { (-1, false) });
+    list.ext = Some(Box::new(ext));
+    list.background = Color::TRANSPARENT;
+    list.border = Color::TRANSPARENT;
+    leftmost_glyph(list)
+}
+
+#[test]
+fn a_right_aligned_header_caption_ends_a_padding_short_of_its_right_edge() {
+    let font = font();
+    let width = font.measure_width("12");
+    for (sorted, room) in [(false, 40.0), (true, 40.0 - SORT_ARROW_ROOM)] {
+        let left = caption_glyph_x(&font, "12", ColumnAlign::Left, sorted);
+        let right = caption_glyph_x(&font, "12", ColumnAlign::Right, sorted);
+        assert!(left.is_finite() && right.is_finite(), "sorted {sorted}");
+        // Left of the sort arrow when sorted, else of the column's edge.
+        let moved = (room - width - PADDING) - PADDING;
+        assert!(
+            (right - left - moved).abs() < 0.01,
+            "sorted {sorted}: {left} {right} {moved}"
+        );
+    }
 }

@@ -2151,6 +2151,12 @@ impl<'a> Parser<'a> {
         else {
             return err("<list tree=\"true\"> needs a text column to draw the tree in");
         };
+        // The tree indents its column's text from the left edge.
+        if columns[column].align == ColumnAlign::Right {
+            return err(format!(
+                "column[{column}] align=\"right\" can't be on the tree's column (the tree indents from the left)"
+            ));
+        }
         let levels = self.required_of(
             attr(el, "levels"),
             "list levels",

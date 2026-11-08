@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use ac_core::spells::{
-    ActiveEnchantmentRecord, BUCKET_MULTIPLICATIVE, SpellFlags, SpellMetadata, SpellTable,
+    ActiveEnchantmentRecord, BUCKET_COOLDOWN, BUCKET_MULTIPLICATIVE, BUCKET_VITAE, SpellFlags,
+    SpellMetadata, SpellTable,
 };
 use ac_plugin::abi::calls;
 use ac_plugin::abi::magic::{
@@ -373,6 +374,40 @@ fn all_enchantments_lists_a_surpassed_one_too() {
                 .any(|e| e.spell_id == 0x101 && e.tier == 5 && e.seconds_remaining.is_infinite()),
             "{all:?}"
         );
+    });
+}
+
+// Every list is in it, vitae and cooldowns too, in order of layer then
+// spell id; a record with no spell-table entry reads family and tier 0.
+#[test]
+fn all_enchantments_covers_every_list_in_layer_then_spell_order() {
+    let mut state = with_spells(vec![family_five(0x100, 7), family_five(0x101, 5)], &[]);
+    state.world.update_spellbook(|book| {
+        book.on_enchantment_added(family_five_record(0x101, 5, -1.0));
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            layer_id: 2,
+            ..family_five_record(0x100, 7, 3600.0)
+        });
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            bucket: BUCKET_VITAE,
+            ..ActiveEnchantmentRecord::new(0x0300, 1, -1.0, PLAYER)
+        });
+        book.on_enchantment_added(ActiveEnchantmentRecord {
+            bucket: BUCKET_COOLDOWN,
+            start_time: CLOCKS.session.as_secs_f64(),
+            ..ActiveEnchantmentRecord::new(0x8010, 1, 30.0, PLAYER)
+        });
+    });
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let all = call::<calls::CharacterAllEnchantments>(b, &());
+        let listed: Vec<(u32, u32, i32)> =
+            all.iter().map(|e| (e.spell_id, e.family, e.tier)).collect();
+        assert_eq!(
+            listed,
+            [(0x101, 5, 5), (0x0300, 0, 0), (0x8010, 0, 0), (0x100, 5, 7)]
+        );
+        assert!((all[2].seconds_remaining - 30.0).abs() < 1e-6, "{all:?}");
     });
 }
 

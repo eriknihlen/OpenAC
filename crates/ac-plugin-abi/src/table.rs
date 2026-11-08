@@ -333,9 +333,12 @@ macro_rules! import_table {
             CharacterEnchantments = character_enchantments(bool)
                 -> Vec<$crate::character::ActiveEnchantment>,
                 permission: None, window: false, since: (1, 0);
-            /// Every enchantment on the character, in every list, including
-            /// one a stronger enchantment of its family surpasses (which
-            /// `character_enchantments(false)` leaves out).
+            /// Every enchantment on the character, in every list (the
+            /// multiplicative and additive ones, vitae and cooldowns),
+            /// including one a stronger enchantment of its family surpasses
+            /// (which `character_enchantments(false)` leaves out). One with no
+            /// spell-table entry (such as a cooldown) reads family 0 and tier 0.
+            /// In order of layer, then spell id.
             CharacterAllEnchantments = character_all_enchantments(())
                 -> Vec<$crate::character::ActiveEnchantment>,
                 permission: None, window: false, since: (1, 10);
