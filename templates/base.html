@@ -6,7 +6,9 @@
   <title>{% block title %}{{ config.title }}{% endblock title %}</title>
   <meta name="description" content="{% block description %}{{ config.description }}{% endblock description %}">
   <meta name="color-scheme" content="dark light">
-  <link rel="icon" href="{{ get_url(path='favicon.svg') }}" type="image/svg+xml">
+  <link rel="icon" href="{{ get_url(path='favicon.ico') }}" sizes="any">
+  <link rel="icon" href="{{ get_url(path='icon-256.png') }}" type="image/png" sizes="256x256">
+  <link rel="apple-touch-icon" href="{{ get_url(path='icon-256.png') }}">
   <link rel="stylesheet" href="{{ get_url(path='site.css', cachebust=true) }}">
   <script>
     // Apply a theme the visitor picked before the page paints.
@@ -22,7 +24,8 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ get_url(path='@/_index.md') }}">
-        <img src="{{ get_url(path='favicon.svg') }}" alt="" width="26" height="26">
+        {%- set logo = resize_image(path="icon-256.png", width=64, height=64, op="fit_width") %}
+        <img src="{{ logo.url }}" alt="" width="32" height="32">
         <span>OpenAC</span>
       </a>
       <nav class="topnav" aria-label="Site">
