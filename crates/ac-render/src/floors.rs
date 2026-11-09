@@ -170,4 +170,70 @@ mod tests {
         let z = floors.highest_at_or_below(1.0, 5.0, 10.0).unwrap();
         assert!((z - 2.5).abs() < 1e-4, "{z}");
     }
+
+    // The route corners a walk through the Facility Hub dungeon (0x8A02)
+    // gave, landblock-local: each pair is joined by stairs, some of them
+    // objects the dungeon places rather than its cells. Every corner stands
+    // on a floor, and a line between a pair, laid on the floors, stays on
+    // them all the way rather than in the air.
+    #[test]
+    #[ignore = "needs the retail dat files"]
+    fn the_facility_hub_routes_lie_on_its_stairs() {
+        use crate::world_frame::LandblockCoord;
+        use crate::world_lines::{PlacedLine, build};
+
+        let dir = std::env::var_os("OPENAC_DAT_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(ac_dat::default_dat_dir)
+            .expect("no dat directory: set OPENAC_DAT_DIR");
+        let dats = ac_dat::DatCollection::open(dir).expect("open the retail dats");
+        let region: ac_dat::objects::Region = dats.get(0x1300_0000).unwrap().expect("region");
+        let engine = crate::camera_collision::build_neighbourhood(
+            &dats,
+            &region.land_defs.land_height_table,
+            LandblockCoord { x: 0x8A, y: 0x02 },
+        )
+        .expect("the neighbourhood");
+        let floors = Floors::of(&engine);
+        let floor = |x: f32, y: f32, at_most: f32| floors.highest_at_or_below(x, y, at_most);
+
+        let corners = [
+            (
+                Vec3::new(59.88, -79.88, 5.39),
+                Vec3::new(59.88, -61.12, 0.0),
+            ),
+            (
+                Vec3::new(59.88, -49.88, -0.61),
+                Vec3::new(64.12, -38.12, -6.0),
+            ),
+            (
+                Vec3::new(99.62, -38.38, -9.0),
+                Vec3::new(98.88, -24.12, -12.0),
+            ),
+        ];
+        let lift = 0.1;
+        for (a, b) in corners {
+            for corner in [a, b] {
+                let z = floor(corner.x, corner.y, corner.z + 0.5).expect("a floor at a corner");
+                assert!((corner.z - z).abs() <= 0.5, "{corner}: floor at {z}");
+            }
+            let line = PlacedLine {
+                start: a + Vec3::Z * lift,
+                end: b + Vec3::Z * lift,
+                color_rgb: 0xFFFFFF,
+                follow_terrain: true,
+                width_metres: 0.01,
+            };
+            let mut out = Vec::new();
+            build(&[line], a, |_, _| None, floor, &mut out);
+            assert!(!out.is_empty());
+            let mut worst = 0.0f32;
+            for v in &out {
+                let p = Vec3::from(v.position);
+                let z = floor(p.x, p.y, p.z).expect("a floor under the line");
+                worst = worst.max(p.z - z - lift);
+            }
+            assert!(worst <= 0.1, "{a} -> {b}: {worst} m over the floor");
+        }
+    }
 }

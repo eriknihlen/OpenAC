@@ -16,9 +16,13 @@ fn no_ground(_: f32, _: f32) -> Option<f32> {
     None
 }
 
+fn no_floor(_: f32, _: f32, _: f32) -> Option<f32> {
+    None
+}
+
 fn draw(lines: &[PlacedLine], camera: Vec3) -> Vec<WorldLineVertex> {
     let mut out = Vec::new();
-    build(lines, camera, no_ground, &mut out);
+    build(lines, camera, no_ground, no_floor, &mut out);
     out
 }
 
@@ -171,7 +175,7 @@ fn a_terrain_following_line_is_raised_just_above_the_ground_and_never_lowered() 
     let mut l = line(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), true);
     l.width_metres = 0.1;
     let mut out = Vec::new();
-    build(&[l], Vec3::ZERO, ground, &mut out);
+    build(&[l], Vec3::ZERO, ground, no_floor, &mut out);
     // 10 m in pieces of 0.75 m: 14 pieces.
     assert_eq!(out.len(), 14 * VERTICES_PER_BAR);
     for p in positions(&out) {
@@ -190,6 +194,7 @@ fn a_terrain_following_line_is_raised_just_above_the_ground_and_never_lowered() 
         &[line(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), false)],
         Vec3::ZERO,
         ground,
+        no_floor,
         &mut out,
     );
     assert_eq!(out.len(), VERTICES_PER_BAR);
@@ -261,7 +266,7 @@ fn bump(height: f32) -> impl Fn(f32, f32) -> Option<f32> {
 
 fn draw_over(l: PlacedLine, ground: &impl Fn(f32, f32) -> Option<f32>) -> Vec<Vec3> {
     let mut out = Vec::new();
-    build(&[l], Vec3::ZERO, ground, &mut out);
+    build(&[l], Vec3::ZERO, ground, no_floor, &mut out);
     assert!(!out.is_empty());
     positions(&out)
 }
@@ -286,14 +291,21 @@ fn a_line_between_two_ground_points_hugs_a_dip() {
     assert_hugs(&points, &dip);
     let lowest = points.iter().map(|p| p.z).fold(f32::MAX, f32::min);
     assert!(lowest < -4.9, "{lowest}");
-    // Ends a little off the ground still count as on it.
+    // Ends a little off the ground still count as on it, and the line keeps
+    // their heights over the ground, taken evenly along it: 0.5 m at the
+    // start, the least lift at the buried end.
     let mut l = line(
         Vec3::new(0.0, 0.0, ON_GROUND_METRES),
         Vec3::new(100.0, 0.0, -2.0),
         true,
     );
     l.width_metres = 0.1;
-    assert_hugs(&draw_over(l, &dip), &dip);
+    for p in draw_over(l, &dip) {
+        let t = (p.x / 100.0).clamp(0.0, 1.0);
+        let lift = ON_GROUND_METRES + (GROUND_LIFT_METRES - ON_GROUND_METRES) * t;
+        let centre = dip(p.x, p.y).unwrap() + lift;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
 }
 
 // A route with an end on a bridge deck over the dip keeps its height across
@@ -357,4 +369,184 @@ fn a_line_over_a_hill_rises_over_it() {
     }
     let highest = points.iter().map(|p| p.z).fold(f32::MIN, f32::max);
     assert!(highest > 5.0, "{highest}");
+}
+
+/// A building's floors, 2 m wide along y from x = 0 to x = 2: an upper
+/// floor at 5.39 m to y = 4, stairs down to y = 12, a lower floor at 0 to
+/// y = 25; a storey overhead at 9 m and a cellar at -6 m under it all.
+fn stairs() -> crate::floors::Floors {
+    let quad = |a: Vec3, b: Vec3, c: Vec3, d: Vec3| [[a, b, c], [a, c, d]];
+    let flat = |y0: f32, y1: f32, z: f32| {
+        quad(
+            Vec3::new(0.0, y0, z),
+            Vec3::new(2.0, y0, z),
+            Vec3::new(2.0, y1, z),
+            Vec3::new(0.0, y1, z),
+        )
+    };
+    let mut faces = Vec::new();
+    faces.extend(flat(-5.0, 4.0, 5.39));
+    faces.extend(quad(
+        Vec3::new(0.0, 4.0, 5.39),
+        Vec3::new(2.0, 4.0, 5.39),
+        Vec3::new(2.0, 12.0, 0.0),
+        Vec3::new(0.0, 12.0, 0.0),
+    ));
+    faces.extend(flat(12.0, 25.0, 0.0));
+    faces.extend(flat(-5.0, 25.0, 9.0));
+    faces.extend(flat(-5.0, 25.0, -6.0));
+    crate::floors::Floors::from_faces(faces)
+}
+
+/// The floor a walk down the stairs stands on.
+fn down_the_stairs(y: f32) -> f32 {
+    if y <= 4.0 {
+        5.39
+    } else if y >= 12.0 {
+        0.0
+    } else {
+        5.39 * (12.0 - y) / 8.0
+    }
+}
+
+fn draw_indoors(
+    l: PlacedLine,
+    terrain: impl Fn(f32, f32) -> Option<f32>,
+    floors: &crate::floors::Floors,
+) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    build(
+        &[l],
+        Vec3::ZERO,
+        terrain,
+        |x, y, at_most| floors.highest_at_or_below(x, y, at_most),
+        &mut out,
+    );
+    assert!(!out.is_empty());
+    positions(&out)
+}
+
+// A route down stairs between two floors stands on the stairs, at the
+// height the plugin gave its ends over their floors, not on the storey
+// overhead or the cellar under it, and not in the air.
+#[test]
+fn a_line_between_two_floors_follows_the_stairs_between_them() {
+    let floors = stairs();
+    for (from, to) in [(0.0, 18.76), (18.76, 0.0)] {
+        let mut l = line(
+            Vec3::new(1.0, from, down_the_stairs(from) + 0.1),
+            Vec3::new(1.0, to, down_the_stairs(to) + 0.1),
+            true,
+        );
+        l.width_metres = 0.1;
+        // Indoors the terrain may be anywhere; it is not followed.
+        let points = draw_indoors(l, |_, _| Some(3.0), &floors);
+        for p in &points {
+            let centre = down_the_stairs(p.y) + 0.1;
+            assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+        }
+    }
+}
+
+// Where no floor is under a piece end, the piece stays on the straight line;
+// and a line with only one end on a floor, or none, does not follow floors.
+#[test]
+fn a_line_follows_floors_only_where_they_are_and_from_both_ends() {
+    let floors = stairs();
+    // From the lower floor out past its end at y = 25, over nothing, to a
+    // landing at y = 40 on the same height, with nothing under the gap.
+    let mut faces = Vec::new();
+    for [a, b, c] in [
+        [
+            Vec3::new(0.0, 12.0, 0.0),
+            Vec3::new(2.0, 12.0, 0.0),
+            Vec3::new(2.0, 25.0, 0.0),
+        ],
+        [
+            Vec3::new(0.0, 12.0, 0.0),
+            Vec3::new(2.0, 25.0, 0.0),
+            Vec3::new(0.0, 25.0, 0.0),
+        ],
+        [
+            Vec3::new(0.0, 35.0, 0.0),
+            Vec3::new(2.0, 35.0, 0.0),
+            Vec3::new(2.0, 45.0, 0.0),
+        ],
+        [
+            Vec3::new(0.0, 35.0, 0.0),
+            Vec3::new(2.0, 45.0, 0.0),
+            Vec3::new(0.0, 45.0, 0.0),
+        ],
+    ] {
+        faces.push([a, b, c]);
+    }
+    let gap = crate::floors::Floors::from_faces(faces);
+    let mut l = line(Vec3::new(1.0, 20.0, 0.1), Vec3::new(1.0, 40.0, 0.1), true);
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, no_ground, &gap) {
+        assert!((p.z - 0.1).abs() <= 0.05 + 1e-4, "{p}");
+    }
+    // One end on the upper floor, the other in the air over the stairs: not
+    // on floors, so with no terrain known it stays straight.
+    let mut l = line(Vec3::new(1.0, 0.0, 5.49), Vec3::new(1.0, 8.0, 5.49), true);
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, no_ground, &floors) {
+        assert!((p.z - 5.49).abs() <= 0.05 + 1e-4, "{p}");
+    }
+    // A straight line indoors is straight.
+    let mut l = line(Vec3::new(1.0, 0.0, 5.49), Vec3::new(1.0, 18.0, 0.1), false);
+    l.width_metres = 0.1;
+    let mut out = Vec::new();
+    build(
+        &[l],
+        Vec3::ZERO,
+        no_ground,
+        |x, y, at_most| floors.highest_at_or_below(x, y, at_most),
+        &mut out,
+    );
+    assert_eq!(out.len(), VERTICES_PER_BAR);
+}
+
+/// Flat floors, as pairs of faces over x0..x1 (2 m wide in y) at a height.
+fn slabs(spans: &[(f32, f32, f32)]) -> crate::floors::Floors {
+    let mut faces = Vec::new();
+    for &(x0, x1, z) in spans {
+        let a = Vec3::new(x0, -1.0, z);
+        let b = Vec3::new(x1, -1.0, z);
+        let c = Vec3::new(x1, 1.0, z);
+        let d = Vec3::new(x0, 1.0, z);
+        faces.push([a, b, c]);
+        faces.push([a, c, d]);
+    }
+    crate::floors::Floors::from_faces(faces)
+}
+
+// Outdoors, between two ends on paving level with the terrain, the line
+// keeps to the terrain over the yard between them: it does not drop to a
+// cellar floor under the yard, nor hang straight over a dip where the paving
+// ends.
+#[test]
+fn a_line_between_floors_level_with_the_terrain_keeps_to_the_terrain_between_them() {
+    let dip = bump(-5.0);
+    // Paving at both ends; a cellar 3 m under the terrain in the middle.
+    let floors = slabs(&[(0.0, 2.0, 0.0), (45.0, 55.0, -8.0), (98.0, 100.0, 0.0)]);
+    let mut l = line(Vec3::new(1.0, 0.0, 0.1), Vec3::new(99.0, 0.0, 0.1), true);
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, &dip, &floors) {
+        let centre = dip(p.x, p.y).unwrap() + 0.1;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
+}
+
+// Between two ends on a bridge deck high over a dip, the line lies on the
+// deck, not on the terrain under it.
+#[test]
+fn a_line_on_a_bridge_deck_lies_on_the_deck() {
+    let dip = bump(-5.0);
+    let floors = slabs(&[(15.0, 85.0, 1.0)]);
+    let mut l = line(Vec3::new(20.0, 0.0, 1.1), Vec3::new(80.0, 0.0, 1.1), true);
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, &dip, &floors) {
+        assert!((p.z - 1.1).abs() <= 0.05 + 1e-4, "{p}");
+    }
 }
