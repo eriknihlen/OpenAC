@@ -1029,18 +1029,23 @@ wire_record! {
 /// Who changed the selection ([`SelectionChange::source`]).
 pub mod selection_source {
     /// The client itself: the selected object died, left the world or
-    /// hid, or the session ended.
+    /// hid, or the session ended; the nearest monster picked as the next
+    /// target (the selected one died, or an attack with nothing selected,
+    /// with the auto-target option); a window picking a listing on its own
+    /// (a shop's first listing as it opens or changes category).
     pub const SYSTEM: u8 = 0;
-    /// A selection key (nearest, previous, self, a fellow, the last
-    /// attacker), or the nearest monster picked when the selection emptied
-    /// in combat. A deselect asked for on purpose (Escape, a window's or a
-    /// plugin's clear) reads this too.
+    /// A key: a selection key (nearest, previous, self, a fellow, the last
+    /// attacker) or a quick-slot select key. A deselect asked for on
+    /// purpose (Escape, a window's or a plugin's clear) reads this too.
     pub const KEYBOARD: u8 = 1;
-    /// The mouse: a click on an object in the world, or on its icon or row
-    /// in a window.
+    /// The mouse, however it selected: a left click, a right click that
+    /// examines, or lifting an item to drag it, on an object in the world
+    /// or on its icon or row in a window.
     pub const MOUSE: u8 = 2;
-    /// A plugin, or the client acting on a command: an attack or a spell
-    /// at a target, or a give or a stack merge selecting where it went.
+    /// A plugin's select, or a selection the client makes for a command:
+    /// an attack or a spell at a target, the give key selecting where the
+    /// item went, a merge or a pickup selecting the stack it joins. A
+    /// plugin cannot read it as "my own selection".
     pub const PLUGIN: u8 = 3;
 }
 

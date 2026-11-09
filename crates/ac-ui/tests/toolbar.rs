@@ -22,6 +22,7 @@ macro_rules! assert_dbg_eq {
 use ac_core::combat::CombatMode;
 use ac_core::items::{ClientObject, EquipMask, ItemType, ItemUseable, ShortcutEntry};
 use ac_dat::objects::{DIRECT_STATE_ID, PropertyValue};
+use ac_runtime::gameplay::{GameplayCommand, SelectionSource};
 use ac_runtime::inventory::{ItemCommand, ObjectRef};
 use ac_runtime::session::SessionCommand;
 use ac_ui::draw::TextureRef;
@@ -956,7 +957,11 @@ fn quick_slot_keys_use_or_select_and_a_target_mode_takes_them_first() {
             PanelOutput::Session(SessionCommand::Item(ItemCommand::Use(ObjectRef::Guid(
                 0x5001
             )))),
-            PanelOutput::SelectObject(0x5001),
+            // A key selects as the keyboard, not as a click.
+            PanelOutput::Session(SessionCommand::Gameplay(GameplayCommand::SelectAs(
+                ObjectRef::Guid(0x5001),
+                SelectionSource::Keyboard
+            ))),
         ]
     );
     b.update(&ItemsView {

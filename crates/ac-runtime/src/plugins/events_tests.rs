@@ -726,7 +726,10 @@ fn the_selection_event_says_who_changed_the_selection() {
     gameplay(
         &mut state,
         &mut outbox,
-        GameplayCommand::SelectClicked(ObjectRef::Guid(DRUDGE)),
+        GameplayCommand::SelectAs(
+            ObjectRef::Guid(DRUDGE),
+            crate::gameplay::SelectionSource::Mouse,
+        ),
     );
     assert_eq!(
         sources(&mut state),
@@ -751,7 +754,10 @@ fn the_selection_event_says_who_changed_the_selection() {
     gameplay(
         &mut state,
         &mut outbox,
-        GameplayCommand::SelectClicked(ObjectRef::Guid(DRUDGE)),
+        GameplayCommand::SelectAs(
+            ObjectRef::Guid(DRUDGE),
+            crate::gameplay::SelectionSource::Mouse,
+        ),
     );
     assert_eq!(
         sources(&mut state),

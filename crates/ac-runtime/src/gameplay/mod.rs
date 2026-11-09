@@ -197,9 +197,10 @@ pub enum BookCommand {
 pub enum GameplayCommand {
     /// Select an object.
     Select(ObjectRef),
-    /// Select an object the player clicked: in the world, or its icon in a
-    /// window.
-    SelectClicked(ObjectRef),
+    /// Select an object as `source` chose it: the mouse (a click in the
+    /// world or on an icon in a window), a key (a quick-slot key) or the
+    /// client itself (a window picking a listing on its own).
+    SelectAs(ObjectRef, SelectionSource),
     /// Clear the selection, on purpose.
     ClearSelection,
     /// A login or portal reveal began while the window showed this selected
@@ -1299,9 +1300,9 @@ impl Gameplay {
                     self.select(guid, SelectionSource::Host, ctx);
                 }
             }
-            GameplayCommand::SelectClicked(reference) => {
+            GameplayCommand::SelectAs(reference, source) => {
                 if let Some(guid) = self.resolve(&reference, ctx) {
-                    self.select(guid, SelectionSource::Mouse, ctx);
+                    self.select(guid, source, ctx);
                 }
             }
             // The session answers the Escape key: it reads the movement,
@@ -1333,7 +1334,7 @@ impl Gameplay {
             }
             GameplayCommand::SelectNearestMonster => {
                 let mut ops = ops!(self, ctx);
-                ops.select_closest();
+                ops.select_closest(SelectionSource::Keyboard);
                 self.finish(ctx);
             }
             GameplayCommand::CycleSelection { kind, direction } => {
@@ -2026,16 +2027,17 @@ impl Gameplay {
                 .target
                 .on_selection_changed(&t, auto_target, self.combat.current_mode())
             {
+                // The client picks the next target itself: its own selection.
                 let closest = find_closest_monster(ctx.world, &self.deaths, &self.combat);
                 let next = match closest {
                     Some(guid) => self.selection.select(
                         guid,
-                        SelectionSource::Keyboard,
+                        SelectionSource::System,
                         SelectionReason::Selected,
                     ),
                     None => self
                         .selection
-                        .clear(SelectionSource::Keyboard, SelectionReason::Cleared),
+                        .clear(SelectionSource::System, SelectionReason::Cleared),
                 };
                 queue.extend(next);
             }
@@ -2314,17 +2316,15 @@ impl Ops<'_> {
     }
 
     /// Select the nearest monster (or clear the selection when there is
-    /// none), as the select-nearest key does.
-    fn select_closest(&mut self) -> Option<u32> {
+    /// none), as the select-nearest key does (`source` the keyboard) or an
+    /// attack's auto-target (the client itself).
+    fn select_closest(&mut self, source: SelectionSource) -> Option<u32> {
         let closest = find_closest_monster(self.world, self.deaths, self.combat);
         let t = match closest {
-            Some(guid) => {
-                self.selection
-                    .select(guid, SelectionSource::Keyboard, SelectionReason::Selected)
-            }
-            None => self
+            Some(guid) => self
                 .selection
-                .clear(SelectionSource::Keyboard, SelectionReason::Cleared),
+                .select(guid, source, SelectionReason::Selected),
+            None => self.selection.clear(source, SelectionReason::Cleared),
         };
         self.record(t);
         closest
@@ -2342,7 +2342,7 @@ impl Ops<'_> {
         if !allow_auto_target || !self.options.get(option_id::AUTO_TARGET) {
             return None;
         }
-        self.select_closest()
+        self.select_closest(SelectionSource::System)
     }
 
     /// Stop the body before a swing or a cast and tell the server.

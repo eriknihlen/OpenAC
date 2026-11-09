@@ -23,8 +23,8 @@ use ac_host::settings::PlayerSettings;
 use ac_proto::Position;
 use ac_runtime::character::{CharacterCommand, option_id};
 use ac_runtime::communication::ClientConfirmation;
-use ac_runtime::gameplay::GameplayCommand;
 use ac_runtime::gameplay::magic::cast_gate;
+use ac_runtime::gameplay::{GameplayCommand, SelectionSource};
 use ac_runtime::inventory::{InteractionMode, ItemCommand, ObjectRef};
 use ac_runtime::session::SessionCommand;
 use ac_runtime::world::PlayerView;
@@ -193,7 +193,7 @@ pub fn session_command(output: &PanelOutput) -> Option<SessionCommand> {
     match output {
         PanelOutput::Session(command) => Some(command.clone()),
         PanelOutput::SelectObject(guid) => Some(SessionCommand::Gameplay(
-            GameplayCommand::SelectClicked(ObjectRef::Guid(*guid)),
+            GameplayCommand::SelectAs(ObjectRef::Guid(*guid), SelectionSource::Mouse),
         )),
         PanelOutput::SetUiLocked(locked) => Some(SessionCommand::SetCharacterOption {
             option: option_id::LOCK_UI,
@@ -2135,8 +2135,9 @@ mod tests {
         // mouse.
         assert!(matches!(
             session_command(&PanelOutput::SelectObject(0x5000_0001)),
-            Some(SessionCommand::Gameplay(GameplayCommand::SelectClicked(
-                ObjectRef::Guid(0x5000_0001)
+            Some(SessionCommand::Gameplay(GameplayCommand::SelectAs(
+                ObjectRef::Guid(0x5000_0001),
+                SelectionSource::Mouse
             )))
         ));
         assert!(matches!(

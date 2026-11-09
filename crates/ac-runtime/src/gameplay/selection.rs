@@ -5,13 +5,14 @@
 /// Who changed the selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectionSource {
-    /// The client itself (a death, a removal, the session ending).
+    /// The client itself (a death, a removal, the session ending, a target
+    /// or a listing it picks on its own).
     #[default]
     System,
-    /// The keyboard (select-nearest, escape).
+    /// The keyboard (select-nearest, a quick-slot key, escape).
     Keyboard,
-    /// The mouse: a click on an object in the world or on its icon in a
-    /// window.
+    /// The mouse: a click, a right click or a drag lift on an object in
+    /// the world or on its icon in a window.
     Mouse,
     /// A host command (a plugin, the give and merge selections).
     Host,

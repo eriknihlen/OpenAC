@@ -137,13 +137,17 @@ one that has run out reads 0. A plugin built for an older version cannot
 import it. It also added `align` on a list's `<column>` in markup. API 1.11
 added `source` at the end of `SelectionChange` (`Event::SelectionChanged`):
 who changed the selection, one of the constants in `world::selection_source`:
-`SYSTEM` (0: the selected object died, left the world or hid, or the session
-ended), `KEYBOARD` (1: a selection key, or the nearest monster picked when the
-selection emptied in combat; a deselect asked for on purpose, by Escape, a
-window or a plugin, reads this too), `MOUSE` (2: a click on an object in the
-world, or on its icon or row in a window) and `PLUGIN` (3: a plugin, or the
-client acting on a command, such as an attack or a spell at a target, or a give
-or a stack merge selecting where it went). The event compares the selection
+`SYSTEM` (0: the client itself: the selected object died, left the world or
+hid, or the session ended; the nearest monster picked as the next target with
+the auto-target option; a window picking a listing on its own, such as a
+shop's first listing as it opens), `KEYBOARD` (1: a selection key or a
+quick-slot select key; a deselect asked for on purpose, by Escape, a window or
+a plugin, reads this too), `MOUSE` (2: any selection made with the mouse: a
+left click, a right click that examines, or lifting an item to drag it, in the
+world or in a window) and `PLUGIN` (3: a plugin's select, or a selection the
+client makes for a command: an attack or a spell at a target, the give key, a
+merge or a pickup selecting the stack it joins; so `PLUGIN` does not mean the
+plugin's own selection). The event compares the selection
 once a pass, so when it changed more than once in a pass it reports the last
 change's source. A plugin built for an older version is sent the change
 without it and reads `SYSTEM`.
