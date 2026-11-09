@@ -11,8 +11,11 @@
 //!
 //! A bar is a box around the segment, as wide and as tall as the line's
 //! width in metres. A line that follows the terrain is cut into pieces
-//! about [`PIECE_METRES`] long, each end raised to just above the ground
-//! under it (never lowered: a route over a bridge keeps its height).
+//! about [`PIECE_METRES`] long. When both of the line's ends are on the
+//! ground, each piece end sits just above the ground under it, down into
+//! dips as well as up over rises. When either end is above the ground, on
+//! a bridge or a floor, piece ends are only raised, never lowered, so a
+//! route over a bridge keeps its height.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -37,6 +40,11 @@ pub const VERTEX_BUDGET: usize = 4 * 1024 * 1024 / size_of::<WorldLineVertex>();
 
 /// How far above the ground a terrain-following line is kept, metres.
 pub const GROUND_LIFT_METRES: f32 = 0.05;
+
+/// A terrain-following line's end is on the ground when it is no more than
+/// this above the ground under it, metres. Anything higher is on a bridge,
+/// a floor or a ledge.
+pub const ON_GROUND_METRES: f32 = 0.5;
 
 /// A line's width when the plugin's is not a number, metres.
 pub const DEFAULT_WIDTH_METRES: f32 = 0.25;
@@ -203,8 +211,8 @@ struct Planned {
 }
 
 /// Builds this frame's bars into `out` (cleared first): the lines seen from
-/// `camera`, each terrain-following end raised by `ground`, the height of
-/// the ground under a drawing-frame point where it is known.
+/// `camera`, each terrain-following piece end fitted to `ground`, the
+/// height of the ground under a drawing-frame point where it is known.
 pub fn build(
     lines: &[PlacedLine],
     camera: Vec3,
@@ -263,9 +271,10 @@ impl Bars<'_> {
     fn line(&mut self, line: &Planned, ground: &impl Fn(f32, f32) -> Option<f32>) {
         let pieces = line.pieces;
         let along = line.end - line.start;
+        let fit = Fit::of(line, ground);
         let at = |i: u32| {
             let t = (f64::from(i) / f64::from(pieces.count)) as f32;
-            raise(line.start + along * t, line.follow_terrain, ground)
+            fit.place(line.start + along * t, ground)
         };
         let mut previous = at(pieces.first);
         for i in pieces.first + 1..=pieces.last {
@@ -324,14 +333,53 @@ impl Bars<'_> {
     }
 }
 
-/// A terrain-following point raised to just above the ground under it.
-/// Outdoor routes can cross raised geometry above the heightmap, so the
-/// recorded height is kept; the ground only lifts a buried point.
-fn raise(mut point: Vec3, follow: bool, ground: &impl Fn(f32, f32) -> Option<f32>) -> Vec3 {
-    if follow && let Some(z) = ground(point.x, point.y) {
-        point.z = point.z.max(z + GROUND_LIFT_METRES);
+/// How a line's piece ends meet the ground.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Fit {
+    /// A straight line: the ground is not looked at.
+    Straight,
+    /// Both ends on the ground: each piece end sits just above the ground,
+    /// lowered into dips as well as raised over rises.
+    Hug,
+    /// An end above the ground: outdoor routes can cross raised geometry
+    /// above the heightmap, so the line's height is kept and the ground only
+    /// lifts a buried piece end.
+    Raise,
+}
+
+impl Fit {
+    fn of(line: &Planned, ground: &impl Fn(f32, f32) -> Option<f32>) -> Self {
+        if !line.follow_terrain {
+            Self::Straight
+        } else if on_ground(line.start, ground) && on_ground(line.end, ground) {
+            Self::Hug
+        } else {
+            Self::Raise
+        }
     }
-    point
+
+    /// A point of the line placed for this fit. Where the ground under it is
+    /// not known, the point is left where it is.
+    fn place(self, mut point: Vec3, ground: &impl Fn(f32, f32) -> Option<f32>) -> Vec3 {
+        if self == Self::Straight {
+            return point;
+        }
+        if let Some(z) = ground(point.x, point.y) {
+            let lifted = z + GROUND_LIFT_METRES;
+            point.z = match self {
+                Self::Hug => lifted,
+                _ => point.z.max(lifted),
+            };
+        }
+        point
+    }
+}
+
+/// Whether a point is on the ground: no more than [`ON_GROUND_METRES`]
+/// above the ground under it, or below it. Not where the ground is not
+/// known.
+fn on_ground(point: Vec3, ground: &impl Fn(f32, f32) -> Option<f32>) -> bool {
+    ground(point.x, point.y).is_some_and(|z| point.z <= z + ON_GROUND_METRES)
 }
 
 #[cfg(test)]

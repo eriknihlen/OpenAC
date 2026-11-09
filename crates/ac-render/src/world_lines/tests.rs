@@ -246,3 +246,115 @@ fn ground_pieces_are_cut_along_the_whole_line() {
     assert_eq!(pieces.last, (0.625f64 * 2667.0).ceil() as u32);
     assert_eq!(pieces.distance_squared, 0.0);
 }
+
+/// Ground level along x, flat at 0 but for a smooth bowl (negative
+/// `height`) or mound (positive) from x = 20 to x = 80.
+fn bump(height: f32) -> impl Fn(f32, f32) -> Option<f32> {
+    move |x: f32, _: f32| {
+        Some(if (20.0..=80.0).contains(&x) {
+            height * (std::f32::consts::PI * (x - 20.0) / 60.0).sin()
+        } else {
+            0.0
+        })
+    }
+}
+
+fn draw_over(l: PlacedLine, ground: &impl Fn(f32, f32) -> Option<f32>) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    build(&[l], Vec3::ZERO, ground, &mut out);
+    assert!(!out.is_empty());
+    positions(&out)
+}
+
+/// Every corner of a 0.1 m bar within its half width (and a little for the
+/// slope) of a centre 0.05 m over the ground.
+fn assert_hugs(points: &[Vec3], ground: &impl Fn(f32, f32) -> Option<f32>) {
+    for p in points {
+        let centre = ground(p.x, p.y).unwrap() + GROUND_LIFT_METRES;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
+}
+
+// A route between two points on the ground goes down into a dip on the way,
+// not across it in the air.
+#[test]
+fn a_line_between_two_ground_points_hugs_a_dip() {
+    let dip = bump(-5.0);
+    let mut l = line(Vec3::ZERO, Vec3::new(100.0, 0.0, 0.0), true);
+    l.width_metres = 0.1;
+    let points = draw_over(l, &dip);
+    assert_hugs(&points, &dip);
+    let lowest = points.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+    assert!(lowest < -4.9, "{lowest}");
+    // Ends a little off the ground still count as on it.
+    let mut l = line(
+        Vec3::new(0.0, 0.0, ON_GROUND_METRES),
+        Vec3::new(100.0, 0.0, -2.0),
+        true,
+    );
+    l.width_metres = 0.1;
+    assert_hugs(&draw_over(l, &dip), &dip);
+}
+
+// A route with an end on a bridge deck over the dip keeps its height across
+// it: the ground only raises it.
+#[test]
+fn a_line_with_an_end_on_a_bridge_is_never_lowered() {
+    let dip = bump(-5.0);
+    // From the bank at x = 10 to the middle of a deck at z = 0 over the
+    // dip's floor at x = 50.
+    let mut l = line(Vec3::new(10.0, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0), true);
+    l.width_metres = 0.1;
+    for p in draw_over(l, &dip) {
+        // Kept at the deck's 0, or lifted 0.05 m on the bank.
+        assert!(
+            (-0.05 - 1e-4..=GROUND_LIFT_METRES + 0.05 + 1e-4).contains(&p.z),
+            "{p}"
+        );
+    }
+    // An end just over the on-the-ground height is above the ground, too.
+    let mut l = line(
+        Vec3::new(10.0, 0.0, ON_GROUND_METRES + 0.1),
+        Vec3::new(50.0, 0.0, ON_GROUND_METRES + 0.1),
+        true,
+    );
+    l.width_metres = 0.1;
+    let lowest = draw_over(l, &dip)
+        .iter()
+        .map(|p| p.z)
+        .fold(f32::MAX, f32::min);
+    assert!(lowest >= ON_GROUND_METRES + 0.1 - 0.05 - 1e-4, "{lowest}");
+    // Where the ground under an end is not known, it is not on the ground.
+    let unknown_far_end = |x: f32, y: f32| if x < 45.0 { dip(x, y) } else { None };
+    let mut l = line(Vec3::new(10.0, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0), true);
+    l.width_metres = 0.1;
+    for p in draw_over(l, &unknown_far_end) {
+        // Kept at the deck's 0, or lifted 0.05 m on the bank.
+        assert!(
+            (-0.05 - 1e-4..=GROUND_LIFT_METRES + 0.05 + 1e-4).contains(&p.z),
+            "{p}"
+        );
+    }
+}
+
+// A route over a hill rises over it, from the ground and from a bridge.
+#[test]
+fn a_line_over_a_hill_rises_over_it() {
+    let hill = bump(5.0);
+    let mut l = line(Vec3::ZERO, Vec3::new(100.0, 0.0, 0.0), true);
+    l.width_metres = 0.1;
+    let points = draw_over(l, &hill);
+    assert_hugs(&points, &hill);
+    let highest = points.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+    assert!(highest > 5.0, "{highest}");
+    // With an end raised above the ground, the hill still lifts it.
+    let mut l = line(Vec3::ZERO, Vec3::new(100.0, 0.0, 2.0), true);
+    l.width_metres = 0.1;
+    let points = draw_over(l, &hill);
+    for p in &points {
+        let ground = hill(p.x, p.y).unwrap() + GROUND_LIFT_METRES;
+        assert!(p.z >= ground - 0.05 - 0.03, "{p}");
+    }
+    let highest = points.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+    assert!(highest > 5.0, "{highest}");
+}
