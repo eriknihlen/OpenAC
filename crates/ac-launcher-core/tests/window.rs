@@ -4558,6 +4558,38 @@ fn a_launcher_update_notice_is_shown_once_and_dismissed() {
     assert_eq!(manager.take_update_notice(), None);
 }
 
+// A launcher update that waits for the install is a status line: the
+// window stays usable (no dialog), as the launcher's start wires it.
+#[test]
+fn a_waiting_launcher_update_is_a_status_line_not_a_dialog() {
+    use ac_launcher_core::updates::{LauncherSelfUpdateManager, self_update_bootstrap};
+    let feed = UpdateFeed::new(true);
+    let mut window = feed.window(
+        &batch(),
+        "1.0.0",
+        Some(Arc::new(|_: &CancelToken| Ok(false))),
+    );
+    auto_opening(&mut window);
+    startup_check(&mut window);
+    window.install_update();
+    window.poll();
+    assert!(feed.pending_launcher_update());
+
+    let manager = LauncherSelfUpdateManager::new(&feed.root.path_set(), feed.server.transport());
+    let mut window = feed.window(&batch(), "1.0.0", None);
+    window.launcher_update_waiting = self_update_bootstrap::waiting_update_text(&manager);
+    window.self_update_notice = manager.take_update_notice();
+
+    let waiting = window
+        .launcher_update_waiting
+        .clone()
+        .expect("a status line");
+    assert!(waiting.contains("2.0.0"), "{waiting}");
+    assert_eq!(window.self_update_notice, None);
+    assert!(!window.is_modal_open());
+    assert!(window.can_interact());
+}
+
 // A 0.2.2 launcher: the update staged, but its
 // helper could not be started; Update again said the release was "already
 // Staged" and to restart the launcher, and a start that found a client of

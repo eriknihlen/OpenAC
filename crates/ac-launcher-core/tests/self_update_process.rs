@@ -41,6 +41,9 @@ const DATA_ENVIRONMENT: &str = "OPENAC_SELF_UPDATE_FIXTURE_DATA";
 const TARGET_ENVIRONMENT: &str = "OPENAC_SELF_UPDATE_FIXTURE_TARGET";
 const HELPER_PID_ENVIRONMENT: &str = "OPENAC_SELF_UPDATE_FIXTURE_HELPER_PID";
 const MODE_ENVIRONMENT: &str = "OPENAC_SELF_UPDATE_FIXTURE_MODE";
+/// A file every start of the fixture as the canonical launcher (before its
+/// self-update step) adds a line to.
+const STARTS_ENVIRONMENT: &str = "OPENAC_SELF_UPDATE_FIXTURE_STARTS";
 
 // --- The fixture program ------------------------------------------------------------------
 
@@ -95,6 +98,18 @@ fn fixture_main() -> Option<i32> {
             && !helper_pid.trim().is_empty()
         {
             std::fs::write(&helper_pid, std::process::id().to_string()).unwrap();
+        }
+        if arguments[0] == "canonical-probe"
+            && let Ok(starts) = std::env::var(STARTS_ENVIRONMENT)
+            && !starts.trim().is_empty()
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&starts)
+                .unwrap();
+            writeln!(file, "{}", std::process::id()).unwrap();
         }
         let manager = fixture_manager(Path::new(data));
         let executable = std::env::current_exe().unwrap();
@@ -242,6 +257,10 @@ const CASES: &[Case] = &[
     (
         "a_staged_update_applies_through_the_helper_and_the_new_launcher_confirms_it",
         a_staged_update_applies_through_the_helper_and_the_new_launcher_confirms_it,
+    ),
+    (
+        "helper_defers_silently_when_another_update_holds_the_install",
+        helper_defers_silently_when_another_update_holds_the_install,
     ),
     (
         "an_update_that_fails_before_changing_anything_opens_the_launcher_with_why",
@@ -888,8 +907,63 @@ fn helper_defers_and_opens_the_launcher_as_it_was_when_a_session_lease_appears()
     let deferred = manager.load_pending().unwrap().unwrap();
     assert_eq!(deferred.state, SelfUpdatePlanState::Staged);
     assert_eq!(deferred.transaction_id, plan.transaction_id);
-    let notice = manager.take_update_notice().expect("why the update waits");
-    assert!(notice.contains("not installed yet"), "{notice}");
+    // The window says it on a status line; no dialog waits for it.
+    assert_eq!(manager.take_update_notice(), None);
+}
+
+// Another update holds the install (a second helper for the same plan, when
+// the launcher was started again during a hand-over): the helper leaves it
+// to that update, starts nothing and leaves no notice.
+fn helper_defers_silently_when_another_update_holds_the_install() {
+    let root = TempDir::new("self-update-process");
+    let data = root.join("data");
+    let target = root.join("launcher");
+    let unexpected_launch = root.join("unexpected-launch");
+    let starts = root.join("starts");
+    let helper_pid = root.join("helper.pid");
+    let rid = detect_rid().unwrap();
+    let prepared = prepare_launcher_closure(&target, &rid);
+    let server = FakeServer::new();
+    let manager = LauncherSelfUpdateManager::new(&root.path_set(), server.transport());
+    let plan = stage(&manager, &server, &prepared.new_archive, &target, &rid);
+    let _other_update = manager.barrier().acquire_exclusive().unwrap();
+    let mut environment = bootstrap_environment(&data, &target, &helper_pid);
+    environment.push((STARTS_ENVIRONMENT, &starts));
+
+    let max = i32::MAX.to_string();
+    let target_text = target.display().to_string();
+    let launch_text = unexpected_launch.display().to_string();
+    let mut helper = start(
+        &manager.staged_launcher_path(&plan).unwrap(),
+        &[
+            HELPER_ARGUMENT,
+            &max,
+            &target_text,
+            &plan.transaction_id,
+            "canonical-probe",
+            &launch_text,
+        ],
+        &environment,
+    );
+    let code = wait_exit(&mut helper, Duration::from_secs(10));
+
+    assert_eq!(
+        code,
+        UPDATE_LEASE_BUSY_EXIT_CODE,
+        "stderr: {}",
+        stderr_of(&mut helper)
+    );
+    assert!(helper_pid.exists());
+    // A launcher it started would have recorded its start (and failed: the
+    // other update holds the install) within this time.
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!starts.exists(), "the helper started a launcher");
+    assert!(!unexpected_launch.exists());
+    assert_eq!(manager.take_update_notice(), None);
+    assert_ne!(hash(&prepared.canonical_path), prepared.new_canonical_hash);
+    let deferred = manager.load_pending().unwrap().unwrap();
+    assert_eq!(deferred.transaction_id, plan.transaction_id);
+    assert_eq!(deferred.state, SelfUpdatePlanState::Staged);
 }
 
 fn set_plan_state(manager: &LauncherSelfUpdateManager, state: &str) {

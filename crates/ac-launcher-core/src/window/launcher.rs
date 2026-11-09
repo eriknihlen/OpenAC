@@ -345,6 +345,9 @@ pub struct LauncherWindow {
     /// Why the last launcher update was not installed (it changed nothing),
     /// shown once.
     pub self_update_notice: Option<String>,
+    /// A downloaded launcher update waits for the install to be free: a
+    /// line under the header, never a dialog (clients may run all day).
+    pub launcher_update_waiting: Option<String>,
     /// The profile tag the accounts are filtered by, or `None` for all.
     pub profile_filter: Option<String>,
     /// "All" and one chip per profile tag, in the order the tags first
@@ -650,6 +653,7 @@ impl LauncherWindow {
             remove_character_target: None,
             profile_migration_notice: None,
             self_update_notice: None,
+            launcher_update_waiting: None,
             profile_filter: None,
             profile_filters: Vec::new(),
             checked_accounts: parts.checked_accounts,

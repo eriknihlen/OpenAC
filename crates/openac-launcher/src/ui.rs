@@ -267,6 +267,14 @@ fn banners(app: &mut LauncherApp, ui: &mut Ui) {
                 });
             });
     }
+    if let Some(waiting) = &window.launcher_update_waiting {
+        Frame::new()
+            .fill(theme::BANNER)
+            .inner_margin(Margin::symmetric(14, 6))
+            .show(ui, |ui| {
+                ui.label(muted(waiting.clone()));
+            });
+    }
     if window.show_update_banner() {
         Frame::new()
             .fill(theme::BANNER)

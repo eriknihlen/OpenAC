@@ -78,6 +78,7 @@ pub struct Prepared {
     install_folder: Option<InstallFolderParts>,
     control: Option<control::ControlServer>,
     self_update_notice: Option<String>,
+    launcher_update_waiting: Option<String>,
 }
 
 /// The updater over the release feed: the client and the launcher's own
@@ -401,6 +402,7 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
         install_folder,
         control,
         self_update_notice,
+        launcher_update_waiting: self_update_bootstrap::waiting_update_text(&context.self_updates),
     })
 }
 
@@ -444,6 +446,7 @@ impl Prepared {
         });
         window.initialize();
         window.self_update_notice = self.self_update_notice;
+        window.launcher_update_waiting = self.launcher_update_waiting;
         Running {
             app: LauncherApp::new(window, self.shared, self.script),
             _control: self.control,

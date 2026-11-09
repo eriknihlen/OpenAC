@@ -170,8 +170,8 @@ pub fn handle(
                 blocked.state
             )));
         }
-        // Nothing was changed; the update waits, and the window says why.
-        manager.keep_update_notice(&waiting_notice(&blocked.version));
+        // Nothing was changed; the update waits, and the window says so
+        // (`waiting_update_text`).
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     };
 
@@ -343,14 +343,18 @@ fn run_helper(
     wait_for_parent_exit(parent_pid)?;
     let Some(lease) = manager.barrier().try_acquire_exclusive()? else {
         // Something took the install after the launcher closed. Nothing
-        // was changed: the plan stays for a start with the install free,
-        // and the launcher opens as it is and says why.
-        manager.keep_update_notice(&waiting_notice(&plan.version));
-        let mut prior = Command::new(&launcher_path);
-        prior
-            .args(public_arguments)
-            .current_dir(&launcher_directory);
-        let _ = prior.spawn();
+        // was changed: the plan stays for a start with the install free.
+        // When only clients hold it, the launcher opens as it is (its start
+        // finds the install in use and says the update waits); the shared
+        // hold lasts until it is started. Another update (a second helper
+        // for this plan, say) is left to finish, and nothing is started.
+        if let Some(_clients) = manager.barrier().try_acquire_session()? {
+            let mut prior = Command::new(&launcher_path);
+            prior
+                .args(public_arguments)
+                .current_dir(&launcher_directory);
+            let _ = prior.spawn();
+        }
         return Ok(UPDATE_LEASE_BUSY_EXIT_CODE);
     };
 
@@ -484,13 +488,20 @@ fn run_helper(
 pub const INSTALL_IN_USE: &str = "a running client, another update or a plugin install is using \
                                   this install";
 
-/// What the launcher shows while a downloaded update waits for the install.
-fn waiting_notice(version: &str) -> String {
-    format!(
-        "Launcher {version} is downloaded but not installed yet: {INSTALL_IN_USE}. Nothing was \
-         changed.\n\nClose every OpenAC client (and let other updates finish), then start the \
-         launcher again or choose Update to install it."
-    )
+/// The line the window shows while a downloaded launcher update waits for
+/// the install (a start found it in use): `None` when nothing is staged.
+/// A status line, not a dialog: clients may run all day.
+pub fn waiting_update_text(manager: &LauncherSelfUpdateManager) -> Option<String> {
+    let plan = manager
+        .load_pending()
+        .ok()
+        .flatten()
+        .filter(|plan| plan.state == SelfUpdatePlanState::Staged)?;
+    Some(format!(
+        "Launcher {} is downloaded and installs when the launcher starts with no client \
+         running: {INSTALL_IN_USE}.",
+        plan.version
+    ))
 }
 
 /// What the launcher shows after an update that could not be installed and

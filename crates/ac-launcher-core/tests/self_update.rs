@@ -719,10 +719,15 @@ fn a_start_whose_helper_cannot_start_drops_the_plan_and_opens_with_why() {
 }
 
 // A start that finds the install in use leaves the staged update waiting,
-// as before, but says so instead of opening silently.
+// as before. The window says so on a status line, not in a dialog: clients
+// may run all day, and a dialog would greet every start.
 #[test]
-fn a_start_with_the_install_in_use_says_the_update_waits() {
+fn a_start_with_the_install_in_use_says_the_update_waits_without_a_dialog() {
     let harness = Harness::new();
+    assert_eq!(
+        self_update_bootstrap::waiting_update_text(&harness.manager),
+        None
+    );
     harness.stage().unwrap();
     let plan = harness.pending();
     {
@@ -730,15 +735,12 @@ fn a_start_with_the_install_in_use_says_the_update_waits() {
         assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
     }
     assert_eq!(harness.pending(), plan);
-    let notice = harness.manager.take_update_notice().expect("why it waits");
-    assert!(
-        notice.contains("Launcher 2.0.0 is downloaded but not installed yet"),
-        "{notice}"
-    );
-    assert!(notice.contains("plugin install"), "{notice}");
-    assert!(notice.contains("Close every OpenAC client"), "{notice}");
+    assert_eq!(harness.manager.take_update_notice(), None, "no dialog");
+    let line = self_update_bootstrap::waiting_update_text(&harness.manager).expect("a line");
+    assert!(line.contains("Launcher 2.0.0 is downloaded"), "{line}");
+    assert!(line.contains("no client running"), "{line}");
+    assert!(line.contains("plugin install"), "{line}");
 }
-
 // The plan goes before the notice is written: a notice that cannot be
 // written must not leave the plan for every start to retry.
 #[test]
