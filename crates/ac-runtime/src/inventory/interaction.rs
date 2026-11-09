@@ -131,6 +131,12 @@ impl Interaction {
         self.awaiting_appraisal
     }
 
+    /// Who asked the awaited question (the player when none is awaited).
+    #[must_use]
+    pub fn awaiting_origin(&self) -> AppraisalOrigin {
+        self.awaiting_origin
+    }
+
     /// The object the examination shows (0 for none).
     #[must_use]
     pub fn current_appraisal(&self) -> u32 {
