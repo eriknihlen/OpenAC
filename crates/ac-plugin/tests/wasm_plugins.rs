@@ -468,7 +468,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.10 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.11 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -679,15 +679,15 @@ fn an_api_version_this_client_does_not_support_is_refused() {
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.10""#,
         r#""apiVersion": "1.11""#,
+        r#""apiVersion": "1.12""#,
     );
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.11, but this build supports 1.0..1.10"
+        "plugin 'openac.probe' declares apiVersion 1.12, but this build supports 1.0..1.11"
     );
 }
 
@@ -736,7 +736,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.10""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.11""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -850,7 +850,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.10""#,
+        r#""apiVersion": "1.11""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -1008,6 +1008,44 @@ fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_7() {
         } else {
             assert!(handed[0].len() < event.to_bytes().len(), "{version}");
             assert_eq!(read.server_position, None, "{version}");
+        }
+    }
+}
+
+/// A selection change reaches a plugin exactly as its API version encodes
+/// it, through a real module: `rawbytes` built for API 1.10 is handed the
+/// change without who made it (byte for byte the 1.10 encoding) and reads
+/// it as the client's own; built for this API it gets it.
+#[test]
+fn the_selection_source_reaches_only_plugins_built_for_api_1_11() {
+    use ac_plugin::abi::world::{SelectionChange, selection_source};
+    let event = Event::SelectionChanged(SelectionChange {
+        previous: None,
+        selected: Some(0x8012_D57D),
+        source: selection_source::MOUSE,
+    });
+    for version in [ApiVersion::new(1, 10), API_CURRENT] {
+        let root = Root::new(&format!("raw-selection-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        assert_eq!(handed, [event.to_bytes_at(version)], "{version}");
+        let Ok(Event::SelectionChanged(read)) = Event::from_bytes_at(&handed[0], version) else {
+            panic!("{version}: a selection change");
+        };
+        assert_eq!(read.selected, Some(0x8012_D57D), "{version}");
+        if version == API_CURRENT {
+            assert_eq!(handed[0], event.to_bytes());
+            assert_eq!(read.source, selection_source::MOUSE);
+        } else {
+            assert_eq!(handed[0].len() + 1, event.to_bytes().len(), "{version}");
+            assert_eq!(read.source, selection_source::SYSTEM, "{version}");
         }
     }
 }
@@ -1463,7 +1501,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.10 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.11 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2728,7 +2766,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.10""#,
+            r#""apiVersion": "1.11""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),

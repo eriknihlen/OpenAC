@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 fancy-regex.workspace = true
+regex-automata.workspace = true
 thiserror.workspace = true
 
 [lints]

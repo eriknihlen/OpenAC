@@ -3,7 +3,7 @@
   "displayName": "Suite",
   "version": "0.1.0",
   "entry": "suite.wasm",
-  "apiVersion": "1.10",
+  "apiVersion": "1.11",
   "permissionsVersion": 1,
   "permissions": [
     { "name": "chat", "note": "Its chat filter and input interceptor." }

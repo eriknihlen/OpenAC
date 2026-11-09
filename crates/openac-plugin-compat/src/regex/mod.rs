@@ -7,7 +7,10 @@
 //! Where .NET gives a match a 100 ms timeout, a backtracking step limit
 //! stops a runaway pattern instead: deterministic, the same on every
 //! machine, and reported as [`RegexError::StepLimitExceeded`] where .NET
-//! throws `RegexMatchTimeoutException`. Positions are
+//! throws `RegexMatchTimeoutException`. For patterns a player types,
+//! [`DotNetRegex::with_limits`] also caps the compiled size, so a short
+//! pattern that compiles huge (`\w{1000}`) is refused quickly as
+//! [`RegexError::TooLarge`]. Positions are
 //! byte offsets into the UTF-8 input, not UTF-16 indexes.
 
 mod translate;
@@ -18,8 +21,55 @@ use translate::{Flags, Slot, translate};
 /// one million backtracking steps.
 pub const DEFAULT_STEP_LIMIT: usize = 1_000_000;
 
+/// A compiled-size cap for patterns a player types, in bytes (128 KiB).
+/// Literal text, `.*`, alternations and look-arounds take a few KiB; a
+/// Unicode `\w` takes about 50 KiB (other Unicode classes such as `\p{L}`
+/// somewhat less), so two `\w` fit (`^Legendary \w+ of \w+$`) and three do
+/// not (`(\w+) (\w+) (\w+)` is refused). A pattern that would spend a plugin
+/// call's time compiling (`\w{1000}`, `\w{0,50}Ring`: a Unicode class under
+/// a counted repeat) is refused as [`RegexError::TooLarge`] after about a
+/// millisecond of native work. Meant for searches a player types, where
+/// "pattern too large" is an acceptable answer.
+pub const UNTRUSTED_PATTERN_SIZE_LIMIT: usize = 128 * 1024;
+
+/// The limits a pattern is compiled with (see [`DotNetRegex::with_limits`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegexLimits {
+    /// Backtracking steps one match may take before it stops with
+    /// [`RegexError::StepLimitExceeded`].
+    pub step_limit: usize,
+    /// The most memory, in bytes, each compiled automaton of the pattern may
+    /// take; a larger pattern fails to compile with [`RegexError::TooLarge`].
+    /// `None` keeps the engine's own cap (10 MiB, reported as
+    /// [`RegexError::Unsupported`], as before the cap existed).
+    ///
+    /// The cap is checked while compiling, so a refused pattern costs about
+    /// as much as compiling one at the cap. It applies to each automaton
+    /// separately: a pattern with back-references or look-arounds is split
+    /// into pieces, each held to the cap. The parts the backtracking engine
+    /// runs itself (back-references, look-arounds, repeats around them) grow
+    /// with the pattern's length, not its repeat counts, and need no cap.
+    /// The plain parts of every look-behind (`(?<=\w{0,50})`, anywhere in
+    /// the pattern) are compiled once more against the cap, backwards as the
+    /// engine compiles them, before the pattern itself, because the engine
+    /// compiles a variable-length look-behind outside the cap. An alternation
+    /// inside a look-behind is checked whole, which errs on the safe side.
+    pub compiled_size_limit: Option<usize>,
+}
+
+impl Default for RegexLimits {
+    /// The limits [`DotNetRegex::new`] uses.
+    fn default() -> Self {
+        Self {
+            step_limit: DEFAULT_STEP_LIMIT,
+            compiled_size_limit: None,
+        }
+    }
+}
+
 /// Why a pattern does not compile or a match did not finish.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum RegexError {
     /// .NET refuses the pattern too (`RegexParseException`).
     #[error("invalid pattern {0}")]
@@ -31,6 +81,10 @@ pub enum RegexError {
     /// The match ran past the step limit (.NET: `RegexMatchTimeoutException`).
     #[error("regular expression exceeded its step limit")]
     StepLimitExceeded,
+    /// The pattern compiles larger than its size limit, in bytes
+    /// ([`RegexLimits::compiled_size_limit`]); .NET has no such limit.
+    #[error("pattern too large: it compiles past the {0}-byte size limit")]
+    TooLarge(usize),
 }
 
 /// .NET's `RegexOptions`.
@@ -122,6 +176,42 @@ impl DotNetRegex {
         options: RegexOptions,
         step_limit: usize,
     ) -> Result<Self, RegexError> {
+        Self::with_limits(
+            pattern,
+            options,
+            RegexLimits {
+                step_limit,
+                ..RegexLimits::default()
+            },
+        )
+    }
+
+    /// `new Regex(pattern, options, matchTimeout)` with a cap on the compiled
+    /// size as well: for patterns a player types, where a short pattern such
+    /// as `\w{1000}` would otherwise spend a plugin call's whole time budget
+    /// compiling. Pass [`UNTRUSTED_PATTERN_SIZE_LIMIT`] as
+    /// `compiled_size_limit` and show [`RegexError::TooLarge`] as "pattern
+    /// too large".
+    ///
+    /// ```
+    /// use openac_plugin_compat::regex::{
+    ///     DotNetRegex, RegexError, RegexLimits, RegexOptions, UNTRUSTED_PATTERN_SIZE_LIMIT,
+    /// };
+    /// let limits = RegexLimits {
+    ///     compiled_size_limit: Some(UNTRUSTED_PATTERN_SIZE_LIMIT),
+    ///     ..RegexLimits::default()
+    /// };
+    /// assert!(DotNetRegex::with_limits("(Gold|Silver) Ring", RegexOptions::NONE, limits).is_ok());
+    /// assert_eq!(
+    ///     DotNetRegex::with_limits(r"\w{1000}", RegexOptions::NONE, limits).map(|_| ()),
+    ///     Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT))
+    /// );
+    /// ```
+    pub fn with_limits(
+        pattern: &str,
+        options: RegexOptions,
+        limits: RegexLimits,
+    ) -> Result<Self, RegexError> {
         for (flag, name) in [
             (RegexOptions::RIGHT_TO_LEFT, "RegexOptions.RightToLeft"),
             (RegexOptions::ECMA_SCRIPT, "RegexOptions.ECMAScript"),
@@ -142,11 +232,34 @@ impl DotNetRegex {
             ignore_whitespace: options.has(RegexOptions::IGNORE_PATTERN_WHITESPACE),
         };
         let translation = translate(pattern, flags)?;
+        if let Some(limit) = limits.compiled_size_limit {
+            let mut checked = Vec::new();
+            for text in std::iter::once(&translation.pattern)
+                .chain(translation.pattern_no_final_newline.as_ref())
+            {
+                check_look_behinds(text, limit, &mut checked)?;
+            }
+        }
         let build = |text: &str| {
-            fancy_regex::RegexBuilder::new(text)
-                .backtrack_limit(step_limit)
+            let mut builder = fancy_regex::RegexBuilder::new(text);
+            builder.backtrack_limit(limits.step_limit);
+            if let Some(limit) = limits.compiled_size_limit {
+                builder.delegate_size_limit(limit);
+            }
+            builder
                 .build()
-                .map_err(|e| RegexError::Unsupported(format!("{pattern:?}: {e}")))
+                .map_err(|e| match (&e, limits.compiled_size_limit) {
+                    (fancy_regex::Error::CompileError(inner), Some(limit))
+                        if matches!(
+                            **inner,
+                            fancy_regex::CompileError::InnerError(ref built)
+                                if built.size_limit().is_some()
+                        ) =>
+                    {
+                        RegexError::TooLarge(limit)
+                    }
+                    _ => RegexError::Unsupported(format!("{pattern:?}: {e}")),
+                })
         };
         Ok(Self {
             pattern: pattern.to_owned(),
@@ -382,6 +495,119 @@ impl<'r, 't> RegexMatch<'r, 't> {
     }
 }
 
+/// Holds every look-behind of `pattern` (fancy-regex syntax) to the size
+/// cap. `fancy-regex` compiles a variable-length look-behind's plain parts
+/// into a reverse automaton of its own, outside the cap it applies to the
+/// rest of the pattern; here the same reverse automaton is built once with
+/// the cap first, so a part too large is refused before that uncapped build
+/// runs. The pieces are the ones `fancy-regex` builds: the whole body when it
+/// is plain, else each run of plain parts side by side in a sequence (beside
+/// the parts the backtracking engine runs itself). An alternation is checked
+/// whole, where `fancy-regex` may build each branch on its own: that errs on
+/// the safe side. `checked` holds the pieces already built. Errors other than
+/// the size are left to the real compile.
+fn check_look_behinds(
+    pattern: &str,
+    limit: usize,
+    checked: &mut Vec<String>,
+) -> Result<(), RegexError> {
+    use fancy_regex::{Expr, LookAround};
+
+    /// What `Expr::to_str` can write: the parts the `regex` crate compiles.
+    fn is_plain(expr: &Expr) -> bool {
+        use fancy_regex::Assertion as A;
+        let node = matches!(
+            expr,
+            Expr::Empty
+                | Expr::Any { .. }
+                | Expr::Literal { .. }
+                | Expr::Assertion(
+                    A::StartText
+                        | A::EndText
+                        | A::StartLine { .. }
+                        | A::StartLineOniguruma { .. }
+                        | A::EndLine { .. }
+                )
+                | Expr::Concat(_)
+                | Expr::Alt(_)
+                | Expr::Group(_)
+                | Expr::Repeat { .. }
+                | Expr::Delegate { .. }
+                | Expr::DefineGroup { .. }
+        );
+        node && expr.children_iter().all(is_plain)
+    }
+
+    /// Builds `text` as `fancy-regex` builds a look-behind piece: a reverse
+    /// automaton without captures, here with the size limit.
+    fn check_piece(
+        text: String,
+        limit: usize,
+        checked: &mut Vec<String>,
+    ) -> Result<(), RegexError> {
+        use regex_automata::nfa::thompson;
+        if text.is_empty() || checked.contains(&text) {
+            return Ok(());
+        }
+        let built = thompson::Compiler::new()
+            .configure(
+                thompson::Config::new()
+                    .reverse(true)
+                    .which_captures(thompson::WhichCaptures::None)
+                    .nfa_size_limit(Some(limit)),
+            )
+            .build(&text);
+        if built.is_err_and(|e| e.size_limit().is_some()) {
+            return Err(RegexError::TooLarge(limit));
+        }
+        checked.push(text);
+        Ok(())
+    }
+
+    fn check_body(expr: &Expr, limit: usize, checked: &mut Vec<String>) -> Result<(), RegexError> {
+        let text_of = |parts: &[&Expr]| {
+            let mut text = String::new();
+            for part in parts {
+                part.to_str(&mut text, 1);
+            }
+            text
+        };
+        if is_plain(expr) {
+            return check_piece(text_of(&[expr]), limit, checked);
+        }
+        let Expr::Concat(children) = expr else {
+            return expr
+                .children_iter()
+                .try_for_each(|child| check_body(child, limit, checked));
+        };
+        let mut run: Vec<&Expr> = Vec::new();
+        for child in children {
+            if is_plain(child) {
+                run.push(child);
+                continue;
+            }
+            check_piece(text_of(&run), limit, checked)?;
+            run.clear();
+            check_body(child, limit, checked)?;
+        }
+        check_piece(text_of(&run), limit, checked)
+    }
+
+    fn walk(expr: &Expr, limit: usize, checked: &mut Vec<String>) -> Result<(), RegexError> {
+        if let Expr::LookAround(body, LookAround::LookBehind | LookAround::LookBehindNeg) = expr {
+            check_body(body, limit, checked)?;
+        }
+        expr.children_iter()
+            .try_for_each(|child| walk(child, limit, checked))
+    }
+
+    match Expr::parse_tree(pattern) {
+        Ok(tree) => walk(&tree.expr, limit, checked),
+        // The real compile reports the error.
+        Err(_) => Ok(()),
+    }
+}
+
 enum Substitution {
     Text(String),
     Group(usize),
@@ -512,5 +738,119 @@ mod tests {
         // A generous limit lets an ordinary pattern finish.
         let ok = DotNetRegex::new(r"^(\w+)\s\1$", RegexOptions::NONE).unwrap();
         assert_eq!(ok.is_match("hello hello"), Ok(true));
+    }
+
+    fn capped(pattern: &str) -> Result<DotNetRegex, RegexError> {
+        DotNetRegex::with_limits(
+            pattern,
+            RegexOptions::NONE,
+            RegexLimits {
+                compiled_size_limit: Some(UNTRUSTED_PATTERN_SIZE_LIMIT),
+                ..RegexLimits::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_pattern_past_the_size_limit_is_refused_as_too_large() {
+        for pattern in [
+            r"\w{1000}",
+            r"\w{0,50}Ring",
+            r"(?:\p{L}|\p{N}){999}",
+            r"[\w\W]{2000}",
+            // Parts of a pattern the backtracking engine runs itself.
+            r"(?<!x)\w{1000}",
+            r"(\w)\1\w{1000}",
+            // Three Unicode word classes do not fit.
+            r"(\w+) (\w+) (\w+)",
+        ] {
+            assert_eq!(
+                capped(pattern).map(|_| ()),
+                Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT)),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_patterns_compile_under_the_size_limit() {
+        for (pattern, input) in [
+            ("Atlan.*Fire", "Atlan Sword of Fire"),
+            ("(Gold|Silver) Ring", "a Silver Ring"),
+            ("(?<!x)Pack", "Pack"),
+            ("(?=.*Sword)(?=.*Fire)", "Fire Sword"),
+            (r"^(\w+)\s\1$", "hello hello"),
+            // Two Unicode word classes fit.
+            (r"^Legendary \w+ of \w+$", "Legendary Ring of Fire"),
+        ] {
+            let re = capped(pattern).unwrap_or_else(|e| panic!("{pattern}: {e}"));
+            assert_eq!(re.is_match(input), Ok(true), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn without_a_size_limit_the_engine_default_applies() {
+        // What `new` uses: a pattern far past the untrusted cap still
+        // compiles, as before the cap existed.
+        assert_eq!(RegexLimits::default().compiled_size_limit, None);
+        assert_eq!(RegexLimits::default().step_limit, DEFAULT_STEP_LIMIT);
+        assert!(DotNetRegex::new(r"\w{0,50}Ring", RegexOptions::NONE).is_ok());
+        // Past the engine's own cap the error stays what it always was.
+        assert!(matches!(
+            DotNetRegex::new(r"\w{1000}", RegexOptions::NONE),
+            Err(RegexError::Unsupported(_))
+        ));
+        // And a variable-length look-behind is not checked against any cap.
+        assert!(DotNetRegex::new(r"(?<=\w{0,50})Ring", RegexOptions::NONE).is_ok());
+        assert!(matches!(
+            DotNetRegex::new(r"(?<!\w{0,400})Ring", RegexOptions::NONE),
+            Err(RegexError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn a_variable_length_look_behind_past_the_size_limit_is_refused_as_too_large() {
+        for pattern in [
+            r"(?<!\w{0,400})Ring",
+            r"(?<=\p{L}{0,200})x",
+            r"(?<=\w{0,50})Ring",
+            r"(?i)(?<!\w{0,400})Ring",
+            // Nested inside other look-arounds and groups.
+            r"(?=(?<=\w{0,300})a)b",
+            r"(?<!(?:a|\w{0,300}))x",
+            r"(?<=a(?<!\w{0,300}))x",
+            r"((?<=\w{0,300})x)+",
+            // Beside a part the backtracking engine runs itself.
+            r"(?<=(?=a)\w{0,300})x",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            // Each run of plain parts beside one the backtracking engine
+            // runs itself is compiled as one piece: each `\w` alone fits.
+            [40, 200].map(|n| format!(r"(?<=\b{}\w+)x", r"\w".repeat(n))),
+        ) {
+            let pattern = pattern.as_str();
+            assert_eq!(
+                capped(pattern).map(|_| ()),
+                Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT)),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_look_behinds_compile_under_the_size_limit() {
+        for (pattern, input) in [
+            ("(?<=Gold )Ring", "Gold Ring"),
+            ("(?<!un)known", "known"),
+            (r"(?<=^|\s)Ring", "a Ring"),
+            (r"(?<=\w{0,2}) Ring", "ab Ring"),
+            (r"(?<=(Gold|Silver)\s+)Ring", "Gold  Ring"),
+            (r"(?<=\bof\s.*)Fire", "Ring of Cold Fire"),
+        ] {
+            let re = capped(pattern).unwrap_or_else(|e| panic!("{pattern}: {e}"));
+            assert_eq!(re.is_match(input), Ok(true), "{pattern}");
+        }
     }
 }

@@ -18,12 +18,25 @@ use ac_plugin::abi::world::{
     PortalTransition, SelectionChange,
 };
 
+use super::world::Ownership;
 use crate::communication::ClientConfirmation;
-use crate::gameplay::GameplayEvent;
+use crate::gameplay::{GameplayEvent, SelectionSource};
 use crate::local_time::LocalZone;
 use crate::session::{HostEvent, SessionState};
 use crate::world::transit::{PortalKind, PortalSnapshot};
 use crate::world::{ItemChange, World, WorldChange};
+
+/// Who changed the selection, as plugins read it
+/// ([`ac_plugin::abi::world::selection_source`]).
+fn selection_source_code(source: SelectionSource) -> u8 {
+    use ac_plugin::abi::world::selection_source as code;
+    match source {
+        SelectionSource::System => code::SYSTEM,
+        SelectionSource::Keyboard => code::KEYBOARD,
+        SelectionSource::Mouse => code::MOUSE,
+        SelectionSource::Host => code::PLUGIN,
+    }
+}
 
 /// The runtime state kept for plugins, owned by the session state.
 #[derive(Debug)]
@@ -193,10 +206,17 @@ impl PluginServices {
         z ^ (z >> 31)
     }
 
-    fn change(&mut self, world: &World, object_id: u32, kind: ObjectChangeKind) -> Event {
+    /// One object change, its state read with the pass's `ownership`.
+    fn change(
+        &mut self,
+        world: &World,
+        ownership: &Ownership<'_>,
+        object_id: u32,
+        kind: ObjectChangeKind,
+    ) -> Event {
         self.object_revision += 1;
         let current = (kind != ObjectChangeKind::Released)
-            .then(|| super::world::project_object(world, object_id))
+            .then(|| super::world::project_object_owned(world, object_id, ownership))
             .flatten();
         Event::ObjectChanged(ObjectChange {
             object_id,
@@ -227,6 +247,10 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
         plugin_services: services,
         ..
     } = state;
+    let world: &World = world;
+    // The world does not change during the pass, so one ownership serves
+    // every change in it: the contents lists are walked once at most.
+    let ownership = Ownership::of(world.items(), world.player_guid().unwrap_or(0));
     let mut seen: Vec<(u32, ObjectChangeKind)> = Vec::new();
     let mut out = Vec::new();
     let mut emit = |services: &mut PluginServices, out: &mut Vec<Event>, id, kind| {
@@ -234,7 +258,7 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
             return;
         }
         seen.push((id, kind));
-        out.push(services.change(world, id, kind));
+        out.push(services.change(world, &ownership, id, kind));
     };
     for change in changes {
         match *change {
@@ -289,10 +313,9 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
                     emit(services, &mut out, guid, ObjectChangeKind::Created);
                     // An item that enters the world already worn (OpenAC
                     // `PublishInitialEquipmentPlacement`).
-                    let player = world.player_guid().unwrap_or(0);
                     if let Some(added) = world.item(guid)
                         && added.currently_equipped_location.bits() != 0
-                        && super::world::is_player_owned(added, player, world.items())
+                        && ownership.owns(added)
                     {
                         out.push(Event::EquipmentPlacement(EquipmentObservation {
                             object_id: guid,
@@ -531,6 +554,7 @@ fn follow_experience(state: &mut SessionState, out: &mut Vec<Event>) {
 pub fn follow(state: &mut SessionState, in_world: bool, listening: bool) -> Vec<Event> {
     let open = state.inventory.external_containers().current_container_id();
     let selected = state.gameplay.selection().selected();
+    let selection_source = state.gameplay.selection().source();
     let completions = *state.inventory.completions();
     let services = &mut state.plugin_services;
     let mut out = Vec::new();
@@ -559,10 +583,13 @@ pub fn follow(state: &mut SessionState, in_world: bool, listening: bool) -> Vec<
         }
         services.open_container = open;
     }
+    // Compared once a pass: a selection that changed twice in the pass is
+    // reported once, with who made the last change.
     if services.selected != selected {
         out.push(Event::SelectionChanged(SelectionChange {
             previous: services.selected,
             selected,
+            source: selection_source_code(selection_source),
         }));
         services.selected = selected;
     }

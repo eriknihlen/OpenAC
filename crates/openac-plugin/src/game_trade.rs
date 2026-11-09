@@ -53,7 +53,9 @@ impl Host<'_> {
         self.call::<calls::VendorAddBuy>(&(template_id, count))
     }
 
-    /// Add an owned item to the sell list.
+    /// Add an owned item to the sell list. An item listed in a pack but not
+    /// yet described (no `header`, see [`Host::owned_items`]) is refused as
+    /// an invalid item until its description arrives.
     pub fn vendor_add_to_sell_list(&mut self, item_id: u32) -> VendorResult {
         self.call::<calls::VendorAddSell>(&item_id)
     }

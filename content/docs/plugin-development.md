@@ -137,7 +137,23 @@ cooldowns), in order of layer, then spell id; one with no spell-table entry,
 such as a cooldown, reads family 0 and tier 0. An
 enchantment that does not run out reads `seconds_remaining` infinite; a timed
 one that has run out reads 0. A plugin built for an older version cannot
-import it. It also added `align` on a list's `<column>` in markup.
+import it. It also added `align` on a list's `<column>` in markup. API 1.11
+added `source` at the end of `SelectionChange` (`Event::SelectionChanged`):
+who changed the selection, one of the constants in `world::selection_source`:
+`SYSTEM` (0: the client itself: the selected object died, left the world or
+hid, or the session ended; the nearest monster picked as the next target with
+the auto-target option; a window picking a listing on its own, such as a
+shop's first listing as it opens), `KEYBOARD` (1: a selection key or a
+quick-slot select key; a deselect asked for on purpose, by Escape, a window or
+a plugin, reads this too), `MOUSE` (2: any selection made with the mouse: a
+left click, a right click that examines, or lifting an item to drag it, in the
+world or in a window) and `PLUGIN` (3: a plugin's select, or a selection the
+client makes for a command: an attack or a spell at a target, the give key, a
+merge or a pickup selecting the stack it joins; so `PLUGIN` does not mean the
+plugin's own selection). The event compares the selection
+once a pass, so when it changed more than once in a pass it reports the last
+change's source. A plugin built for an older version is sent the change
+without it and reads `SYSTEM`.
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -553,7 +569,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.10",
+  "apiVersion": "1.11",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -569,7 +585,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.10"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.11"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

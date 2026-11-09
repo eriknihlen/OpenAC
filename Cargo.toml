@@ -134,6 +134,10 @@ wasmtime = { version = "=48.0.5", default-features = false, features = ["runtime
 # wasm32-unknown-unknown. Its backtracking step limit stands in for .NET's match timeout.
 # These are its default features, spelled out.
 fancy-regex = { version = "0.19.2", default-features = false, features = ["std", "unicode", "perf", "variable-lookbehinds"] }
+# The reverse automaton fancy-regex builds for a variable-length look-behind takes no size limit,
+# so openac-plugin-compat builds the same automaton once with one first. The version fancy-regex
+# already uses; these features are a subset of the ones it turns on, so nothing new is built.
+regex-automata = { version = "0.4.18", default-features = false, features = ["std", "syntax", "unicode", "nfa-thompson"] }
 # The bundled Noto Sans of the modern plugin themes (ac-ui) and plugin canvas fonts (ac-plugin-ui): fontdue turns the glyph outlines
 # into coverage pixels (OpenAC uses StbTrueTypeSharp). Pure
 # Rust, no build script. Default features off: no `simd` (x86 intrinsics) and no `hashbrown`.

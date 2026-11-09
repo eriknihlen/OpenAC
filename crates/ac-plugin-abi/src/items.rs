@@ -25,7 +25,11 @@ wire_record! {
 
 wire_record! {
     /// One item the character owns (or one in an open container), with the
-    /// numbers the automation reads.
+    /// numbers the automation reads. The server lists a container's
+    /// contents before it describes them (every side pack at login), so an
+    /// item may be known only by its id and place until its description
+    /// arrives: an empty name, zeroed numbers, class `Unknown` and no
+    /// `header`. The same item, with the same id, is described later.
     pub struct InventoryItem {
         /// Its id.
         pub object_id: u32,

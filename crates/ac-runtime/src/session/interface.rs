@@ -478,11 +478,19 @@ impl InterfaceState {
     }
 }
 
-/// OpenAC `RuntimeItemInteraction.BusyCount` + `AppraisalCount`.
+/// OpenAC `RuntimeItemInteraction.BusyCount` + `AppraisalCount`, the
+/// appraisal counted only while the awaited question is the player's own:
+/// the busy cursor belongs to the player's examine, not to a question a
+/// plugin or a walk asks for him (an identify, a door check), which would
+/// otherwise keep the cursor busy for seconds at a time.
 fn busy_count(state: &SessionState) -> u32 {
+    use crate::inventory::AppraisalOrigin;
     let transactions = state.inventory.transactions();
+    let interaction = state.inventory.interaction();
     let now_ms = (state.session_seconds() * 1000.0) as i64;
-    let appraisals = if state.inventory.interaction().is_awaiting_expired(now_ms) {
+    let appraisals = if interaction.is_awaiting_expired(now_ms)
+        || interaction.awaiting_origin() != AppraisalOrigin::User
+    {
         0
     } else {
         transactions.appraisal_count()
@@ -960,5 +968,53 @@ mod tests {
     fn nothing_changed_is_an_empty_update() {
         let table = ClientObjectTable::new();
         assert!(items_update(&table, &[WorldChange::PlayerChanged]).is_empty());
+    }
+
+    /// The busy cursor counts the player's own examine only: a question
+    /// asked for the player (a plugin's identify, a walk's door check)
+    /// leaves the cursor alone, while the player's examine counts, also
+    /// when it takes over a question asked for the player.
+    #[test]
+    fn only_the_players_own_examine_counts_toward_the_busy_cursor() {
+        use super::super::{Clocks, Outbox, SessionCommand};
+        use crate::communication::CommunicationPaths;
+        use crate::inventory::{ItemCommand, ObjectRef};
+        const PLAYER: u32 = 0x5000_000B;
+        const ITEM: u32 = 0x8000_0001;
+        const OTHER: u32 = 0x8000_0002;
+        let clocks = Clocks {
+            wall_unix_ms: 1_790_000_000_000,
+            session: std::time::Duration::ZERO,
+        };
+        let fresh = || {
+            let mut state = SessionState::new(CommunicationPaths::default());
+            state.world.set_player(PLAYER);
+            state.world.ingest_item(&data(ITEM, PLAYER));
+            state.world.ingest_item(&data(OTHER, PLAYER));
+            (state, Outbox::new())
+        };
+        let examine = |state: &mut SessionState, outbox: &mut Outbox, object: u32| {
+            let command = SessionCommand::Item(ItemCommand::Appraise(ObjectRef::Guid(object)));
+            assert!(state.command(command, outbox, true, clocks).is_none());
+        };
+
+        // A plugin's identify (or a walk's door check): no busy cursor.
+        let (mut state, mut outbox) = fresh();
+        assert!(state.inventory.appraise_quietly(ITEM, 0, true, &mut outbox));
+        assert_eq!(state.inventory.interaction().awaiting_appraisal(), ITEM);
+        assert_eq!(busy_count(&state), 0, "an identify shows no busy cursor");
+
+        // The player's own examine: busy until its answer.
+        let (mut state, mut outbox) = fresh();
+        examine(&mut state, &mut outbox, ITEM);
+        assert_eq!(state.inventory.interaction().awaiting_appraisal(), ITEM);
+        assert_eq!(busy_count(&state), 1);
+
+        // The player's examine takes over a question asked for him.
+        let (mut state, mut outbox) = fresh();
+        assert!(state.inventory.appraise_quietly(ITEM, 0, true, &mut outbox));
+        examine(&mut state, &mut outbox, OTHER);
+        assert_eq!(state.inventory.interaction().awaiting_appraisal(), OTHER);
+        assert_eq!(busy_count(&state), 1);
     }
 }

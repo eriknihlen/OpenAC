@@ -26,7 +26,7 @@ use ac_plugin::abi::items::{
 };
 use ac_plugin::abi::world::ItemProperties;
 
-use super::world::{classify, is_player_owned, position_of, properties_of};
+use super::world::{Ownership, classify, is_player_owned, position_of, properties_of};
 use super::{PluginBinding, Ran};
 use crate::inventory::{BackpackPlacement, ItemCommand, ObjectRef};
 use crate::session::SessionCommand;
@@ -394,7 +394,9 @@ impl PluginBinding<'_> {
     }
 
     /// Everything the character owns, by name then id (OpenAC
-    /// `CaptureOwnedItems`).
+    /// `CaptureOwnedItems`), with what its own and its packs' contents list
+    /// before the server describes it (see [`Ownership`]): such an item is
+    /// in the pack whose list holds it, at its place there.
     pub(super) fn items_owned(&self) -> Vec<InventoryItem> {
         let player = self.player();
         if !self.facts.in_world || player == 0 {
@@ -402,19 +404,25 @@ impl PluginBinding<'_> {
         }
         let items = self.state.world.items();
         let places = ContainerPlaces::of(items);
+        let ownership = Ownership::of(items, player);
         let mut owned: Vec<InventoryItem> = items
             .objects()
-            .filter(|i| is_player_owned(i, player, items))
+            .filter(|i| ownership.owns(i))
             .map(|i| {
-                project_item(
-                    places.place(items, i),
+                let (container, place) = ownership
+                    .listing(i.object_id())
+                    .unwrap_or_else(|| (i.container_id, places.place(items, i)));
+                let mut projected = project_item(
+                    place,
                     i,
                     palettes_of(
                         &self.state.world,
                         self.state.movement.content().map(AsRef::as_ref),
                         i.object_id(),
                     ),
-                )
+                );
+                projected.container_id = container;
+                projected
             })
             .collect();
         owned.sort_by(|a, b| a.name.cmp(&b.name).then(a.object_id.cmp(&b.object_id)));
@@ -781,9 +789,10 @@ impl PluginBinding<'_> {
             return Vec::new();
         }
         let items = self.state.world.items();
+        let ownership = Ownership::of(items, player);
         let mut built: Vec<EquipmentItem> = items
             .objects()
-            .filter(|i| i.valid_locations.bits() != 0 && is_player_owned(i, player, items))
+            .filter(|i| i.valid_locations.bits() != 0 && ownership.owns(i))
             .map(|item| EquipmentItem {
                 object_id: item.object_id(),
                 name: item.name.clone(),
