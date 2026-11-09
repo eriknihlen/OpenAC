@@ -987,6 +987,12 @@ impl Inventory {
         &self.external
     }
 
+    /// The viewed container's state, for a test that sets it up directly.
+    #[cfg(test)]
+    pub(crate) fn external_containers_mut(&mut self) -> &mut ExternalContainerState {
+        &mut self.external
+    }
+
     /// Ask to open `container`. Another container still open is retired:
     /// the server hears the player stopped viewing it, and its contents
     /// lists are dropped.
@@ -1027,6 +1033,23 @@ impl Inventory {
                 self.external.requested_container_id(),
                 self.external.current_container_id(),
             ));
+        }
+    }
+
+    /// Once a frame: the open outside container closes when the world holds
+    /// no object for it. The removal's own event closes a container that
+    /// is open when its object leaves; this covers the one opened after
+    /// (the server's contents list arriving for a corpse already gone),
+    /// which no later event would close. Nothing goes to the server: there
+    /// is no object left to use.
+    pub fn close_external_container_without_object(&mut self, ctx: &mut ItemContext<'_>) {
+        let open = self.external.current_container_id();
+        if open == 0 || ctx.world.item(open).is_some() {
+            return;
+        }
+        if let Some(transition) = self.external.apply_close(open) {
+            self.probe_external(|| format!("open 0x{open:08X} has no object in the world, closed"));
+            Self::retire_external(transition, ctx);
         }
     }
 

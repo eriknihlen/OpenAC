@@ -2283,6 +2283,85 @@ fn the_open_corpse_leaving_the_world_closes_it_and_sends_nothing() {
     assert!(f.sent().is_empty());
 }
 
+/// Ask to open `corpse`, have it leave the world before the server's
+/// contents list, then receive that list: the list opens a container the
+/// client holds no object for, and no removal can follow to close it.
+fn open_corpse_that_left_before_its_list(f: &mut Fixture, corpse: u32) {
+    f.world.apply(&create(corpse, "Corpse", |d| {
+        d.item_type = ItemType::CONTAINER.bits();
+        d.object_description_flags =
+            (PublicWeenieFlags::CORPSE | PublicWeenieFlags::OPENABLE).bits();
+        d.useability = Some(ItemUseable::REMOTE.bits());
+        d.items_capacity = Some(120);
+    }));
+    f.world.take_table_events();
+    assert!(f.run(ItemCommand::Use(guid(corpse))));
+    f.sent();
+    delete(f, corpse);
+    f.server(GameEventType::VIEW_CONTENTS, &[corpse, 0]);
+    f.server(GameEventType::USE_DONE, &[0]);
+    assert_eq!(
+        f.inventory.external_containers().current_container_id(),
+        corpse,
+        "the list opened a container whose object is gone"
+    );
+    assert!(f.world.item(corpse).is_none());
+}
+
+fn enforce_open_container(f: &mut Fixture) {
+    let mut inventory = std::mem::take(&mut f.inventory);
+    inventory.close_external_container_without_object(&mut f.ctx());
+    f.inventory = inventory;
+}
+
+#[test]
+fn an_open_container_with_no_object_closes_and_sends_nothing() {
+    // The once-a-frame check: the open container is measured against the
+    // world as it is now, not only on the removal's event, so a container
+    // opened after its object left is closed as the removal would have
+    // closed it (the Closed transition; nothing goes to the server).
+    const CORPSE: u32 = 0x8000_D141;
+    let mut f = Fixture::new();
+    open_corpse_that_left_before_its_list(&mut f, CORPSE);
+    enforce_open_container(&mut f);
+    let external = f.inventory.external_containers();
+    assert_eq!(external.current_container_id(), 0);
+    assert_eq!(external.requested_container_id(), 0);
+    assert!(f.sent().is_empty());
+}
+
+#[test]
+fn an_open_container_whose_object_is_there_stays_open() {
+    const CORPSE: u32 = 0x8000_D151;
+    let mut f = Fixture::new();
+    open_empty_corpse(&mut f, CORPSE);
+    enforce_open_container(&mut f);
+    assert_eq!(
+        f.inventory.external_containers().current_container_id(),
+        CORPSE
+    );
+    assert!(f.sent().is_empty());
+}
+
+#[test]
+fn the_probe_names_an_open_container_closed_for_having_no_object() {
+    const CORPSE: u32 = 0x8000_D161;
+    let mut f = Fixture::new();
+    f.inventory.enable_external_container_probe();
+    open_corpse_that_left_before_its_list(&mut f, CORPSE);
+    f.inventory.take_probe_lines();
+    enforce_open_container(&mut f);
+    let lines = f.inventory.take_probe_lines();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].ends_with(
+            "open 0x8000D161 has no object in the world, closed (requested 0x00000000, open 0x00000000)"
+        ),
+        "{}",
+        lines[0]
+    );
+}
+
 #[test]
 fn the_external_container_probe_is_silent_off_and_names_each_step_on() {
     // OPENAC_PROBE_EXTERNAL_CONTAINER (content/docs/launch-options.md).
