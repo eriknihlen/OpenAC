@@ -342,8 +342,8 @@ pub struct LauncherWindow {
     /// What the profile load could not carry over from an older file,
     /// shown once.
     pub profile_migration_notice: Option<String>,
-    /// Why the last launcher update could not be installed (it changed
-    /// nothing), shown once.
+    /// Why the last launcher update was not installed (it changed nothing),
+    /// shown once.
     pub self_update_notice: Option<String>,
     /// The profile tag the accounts are filtered by, or `None` for all.
     pub profile_filter: Option<String>,
@@ -987,14 +987,16 @@ impl LauncherWindow {
                 self.update_prompt.is_progress_indeterminate = false;
                 match result {
                     Ok(true) => self.shutdown_requested = true,
-                    // The install was in use (a client of it runs) when the
-                    // helper was to start; Update hands the staged release
-                    // over once it is free.
+                    // Staging took the install, but something took it again
+                    // before the helper could (staging itself refuses while
+                    // the install is in use); Update hands the staged
+                    // release over once it is free.
                     Ok(false) => {
-                        self.update_prompt.status = "The launcher update is ready, but a client \
-                                                     of this install is running. Close every \
-                                                     client, then choose Update again."
-                            .into();
+                        self.update_prompt.status = format!(
+                            "The launcher update is ready, but {}. Close every client (and let \
+                             other updates finish), then choose Update again.",
+                            crate::updates::self_update_bootstrap::INSTALL_IN_USE
+                        );
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {
                         self.update_prompt.status = "Update cancelled.".into();

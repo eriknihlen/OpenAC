@@ -232,8 +232,8 @@ const CASES: &[Case] = &[
         concurrent_startup_cannot_delete_a_visible_slow_stage_transaction,
     ),
     (
-        "helper_defers_without_restart_when_shared_session_lease_appears",
-        helper_defers_without_restart_when_shared_session_lease_appears,
+        "helper_defers_and_opens_the_launcher_as_it_was_when_a_session_lease_appears",
+        helper_defers_and_opens_the_launcher_as_it_was_when_a_session_lease_appears,
     ),
     (
         "spoofed_internal_prefixes_cannot_bypass_any_durable_plan_state",
@@ -831,11 +831,14 @@ fn concurrent_startup_cannot_delete_a_visible_slow_stage_transaction() {
 }
 
 // OpenAC LauncherSelfUpdateProcessTests.HelperDefersWithoutRestartWhenSharedSessionLeaseAppears.
-fn helper_defers_without_restart_when_shared_session_lease_appears() {
+// Changed from OpenAC, which started nothing: the user saw the launcher
+// close and never come back. The launcher as it was opens instead and says
+// why the update waits.
+fn helper_defers_and_opens_the_launcher_as_it_was_when_a_session_lease_appears() {
     let root = TempDir::new("self-update-process");
     let data = root.join("data");
     let target = root.join("launcher");
-    let unexpected_launch = root.join("unexpected-launch");
+    let prior_launch = root.join("prior-launch");
     let helper_pid = root.join("helper.pid");
     let rid = detect_rid().unwrap();
     let prepared = prepare_launcher_closure(&target, &rid);
@@ -846,7 +849,7 @@ fn helper_defers_without_restart_when_shared_session_lease_appears() {
 
     let max = i32::MAX.to_string();
     let target_text = target.display().to_string();
-    let launch_text = unexpected_launch.display().to_string();
+    let launch_text = prior_launch.display().to_string();
     let mut helper = start(
         &manager.staged_launcher_path(&plan).unwrap(),
         &[
@@ -868,11 +871,25 @@ fn helper_defers_without_restart_when_shared_session_lease_appears() {
         stderr_of(&mut helper)
     );
     assert!(helper_pid.exists());
-    assert!(!unexpected_launch.exists());
+    let marker = prior_launch.clone();
+    wait_until(
+        || marker.exists(),
+        Duration::from_secs(20),
+        "The helper did not open the launcher as it was.",
+        None,
+    );
+    let text = std::fs::read_to_string(&prior_launch).unwrap();
+    let launched_path = text.lines().next().unwrap().split('|').nth(1).unwrap();
+    assert!(
+        ac_launcher_core::fsutil::paths_equal(Path::new(launched_path), &prepared.canonical_path),
+        "{text}"
+    );
     assert_ne!(hash(&prepared.canonical_path), prepared.new_canonical_hash);
     let deferred = manager.load_pending().unwrap().unwrap();
     assert_eq!(deferred.state, SelfUpdatePlanState::Staged);
     assert_eq!(deferred.transaction_id, plan.transaction_id);
+    let notice = manager.take_update_notice().expect("why the update waits");
+    assert!(notice.contains("not installed yet"), "{notice}");
 }
 
 fn set_plan_state(manager: &LauncherSelfUpdateManager, state: &str) {
@@ -1058,7 +1075,7 @@ fn an_update_that_fails_before_changing_anything_opens_the_launcher_with_why() {
     assert!(text.ends_with("\n--public\nargument"), "{text}");
     let pid: u32 = text.split('|').next().unwrap().parse().unwrap();
     assert_ne!(pid, first.id());
-    let notice = manager.take_failure_notice().expect("the reason is kept");
+    let notice = manager.take_update_notice().expect("the reason is kept");
     assert!(
         notice.contains("Launcher 2.0.0 could not be installed"),
         "{notice}"
@@ -1066,7 +1083,7 @@ fn an_update_that_fails_before_changing_anything_opens_the_launcher_with_why() {
     assert!(notice.contains("Nothing was changed"), "{notice}");
     assert!(notice.contains(INSTALL_RECORD_FILE_NAME), "{notice}");
     assert!(notice.contains("new, empty folder"), "{notice}");
-    assert_eq!(manager.take_failure_notice(), None, "shown once");
+    assert_eq!(manager.take_update_notice(), None, "shown once");
 
     // The next start is an ordinary one: no helper, no loop.
     std::fs::remove_file(&launched).unwrap();

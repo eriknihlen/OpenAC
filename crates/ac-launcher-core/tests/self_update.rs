@@ -624,7 +624,7 @@ fn staging_another_release_replaces_a_staged_one() {
     );
 }
 
-// What the owner's install held after 0.2.2 installed itself: no plan, and
+// What an install holds after a 0.2.2 launcher installed itself: no plan, and
 // the helper's own transaction (its payload kept by the helper's running
 // executable). Staging the next release reclaims it.
 #[test]
@@ -642,6 +642,119 @@ fn staging_reclaims_the_previous_updates_helper_transaction() {
 
     assert!(!previous.parent().unwrap().exists());
     assert_eq!(harness.pending().state, SelfUpdatePlanState::Staged);
+}
+
+// A notice an earlier attempt left is stale once an update is confirmed:
+// the confirming launcher drops it before its window reads it, and so does
+// an ordinary start that confirms the update itself, and a new staging.
+#[test]
+fn a_confirmed_or_new_update_forgets_an_earlier_attempts_notice() {
+    let stale = "Launcher 1.9.0 could not be installed.";
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let applied = harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    harness.manager.keep_update_notice(stale);
+    {
+        let _helper_lease = harness.manager.barrier().acquire_exclusive().unwrap();
+        let confirmation = harness
+            .handle(&[CONFIRM_ARGUMENT, &applied.transaction_id])
+            .unwrap();
+        assert!(!confirmation.should_exit);
+    }
+    assert_eq!(harness.manager.take_update_notice(), None);
+
+    // An ordinary start that confirms the update itself.
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    harness.manager.keep_update_notice(stale);
+    assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+    assert!(!harness.manager.pending_plan_path().exists());
+    assert_eq!(harness.manager.take_update_notice(), None);
+
+    // A new staging.
+    let harness = Harness::new();
+    harness.manager.keep_update_notice(stale);
+    harness.stage().unwrap();
+    assert_eq!(harness.manager.take_update_notice(), None);
+}
+
+// The helper could not be started from the staged payload (security
+// software removed it, say): nothing was changed and the next start could
+// not start it either. The plan goes, and the start opens the launcher as
+// it is with the reason, instead of failing on every start.
+#[test]
+fn a_start_whose_helper_cannot_start_drops_the_plan_and_opens_with_why() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    std::fs::remove_file(harness.manager.staged_launcher_path(&plan).unwrap()).unwrap();
+
+    let startup = harness.handle(&["ordinary", "argument"]).unwrap();
+
+    assert!(!startup.should_exit);
+    assert_eq!(startup.remaining_arguments, ["ordinary", "argument"]);
+    assert!(!harness.manager.pending_plan_path().exists());
+    assert!(
+        !harness
+            .manager
+            .transaction_directory(&plan.transaction_id)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+    let notice = harness.manager.take_update_notice().expect("why");
+    assert!(
+        notice.contains("Launcher 2.0.0 could not be installed"),
+        "{notice}"
+    );
+    assert!(notice.contains("Nothing was changed"), "{notice}");
+    assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+}
+
+// A start that finds the install in use leaves the staged update waiting,
+// as before, but says so instead of opening silently.
+#[test]
+fn a_start_with_the_install_in_use_says_the_update_waits() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    {
+        let _client = harness.manager.barrier().acquire_session().unwrap();
+        assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+    }
+    assert_eq!(harness.pending(), plan);
+    let notice = harness.manager.take_update_notice().expect("why it waits");
+    assert!(
+        notice.contains("Launcher 2.0.0 is downloaded but not installed yet"),
+        "{notice}"
+    );
+    assert!(notice.contains("plugin install"), "{notice}");
+    assert!(notice.contains("Close every OpenAC client"), "{notice}");
+}
+
+// The plan goes before the notice is written: a notice that cannot be
+// written must not leave the plan for every start to retry.
+#[test]
+fn abandoning_drops_the_plan_even_when_the_notice_cannot_be_written() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    std::fs::create_dir_all(harness.manager.update_notice_path().join("blocked")).unwrap();
+    let lease = harness.manager.barrier().acquire_exclusive().unwrap();
+
+    harness
+        .manager
+        .abandon_unapplied_under_lease(&plan.transaction_id, "why", &lease)
+        .unwrap();
+
+    assert!(!harness.manager.pending_plan_path().exists());
 }
 
 // A plan past staging changes the installation; only a start finishes or

@@ -4511,9 +4511,11 @@ fn a_launcher_update_stages_then_restarts_without_touching_the_client() {
     assert!(window.should_exit());
 }
 
-// OpenAC LauncherUpdateViewModelTests.ALauncherUpdateThatCannotRestartTellsTheUserToReopen.
+// From OpenAC LauncherUpdateViewModelTests.ALauncherUpdateThatCannotRestartTellsTheUserToReopen;
+// changed: the text names what can hold the install, and Update again
+// hands the staged release over.
 #[test]
-fn a_launcher_update_that_cannot_restart_tells_the_user_to_reopen() {
+fn a_launcher_update_that_cannot_hand_over_says_the_install_is_in_use() {
     let feed = UpdateFeed::new(true);
     let mut window = feed.window(
         &batch(),
@@ -4529,13 +4531,34 @@ fn a_launcher_update_that_cannot_restart_tells_the_user_to_reopen() {
     assert!(!window.is_shutdown_requested());
     let status = window.update_prompt.status.to_lowercase();
     assert!(
-        status.contains("close every client") && status.contains("update again"),
+        status.contains("close every client")
+            && status.contains("plugin install")
+            && status.contains("update again"),
         "{}",
         window.update_prompt.status
     );
 }
 
-// The owner's 0.2.2 launcher, 2026-11-09: the update staged, but its
+// What a launcher update left for the window (it failed before changing
+// anything, or waits for the install) is a dialog shown once.
+#[test]
+fn a_launcher_update_notice_is_shown_once_and_dismissed() {
+    use ac_launcher_core::updates::LauncherSelfUpdateManager;
+    let feed = UpdateFeed::new(true);
+    let manager = LauncherSelfUpdateManager::new(&feed.root.path_set(), feed.server.transport());
+    manager.keep_update_notice("Launcher 2.0.0 could not be installed. Nothing was changed.");
+    let mut window = feed.window(&batch(), "2.0.0", None);
+    window.self_update_notice = manager.take_update_notice();
+    assert!(window.is_modal_open());
+    assert!(!window.can_interact());
+
+    window.dismiss_self_update_notice();
+
+    assert!(!window.is_modal_open());
+    assert_eq!(manager.take_update_notice(), None);
+}
+
+// A 0.2.2 launcher: the update staged, but its
 // helper could not be started; Update again said the release was "already
 // Staged" and to restart the launcher, and a start that found a client of
 // the install running left it staged. Update again now hands the staged

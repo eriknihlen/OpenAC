@@ -135,6 +135,10 @@ pub fn handle(
             ));
         }
         manager.confirm(&arguments[1], &base_directory, &executable, &cancel)?;
+        // The update is in: a notice an earlier attempt left is stale. It
+        // goes here, before this launcher's window reads it, not when the
+        // helper completes the update.
+        manager.clear_update_notice();
         return Ok(SelfUpdateStartupResult::continue_with(&arguments[2..]));
     }
 
@@ -166,6 +170,8 @@ pub fn handle(
                 blocked.state
             )));
         }
+        // Nothing was changed; the update waits, and the window says why.
+        manager.keep_update_notice(&waiting_notice(&blocked.version));
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     };
 
@@ -182,6 +188,7 @@ pub fn handle(
         }
         manager.complete_confirmed(&plan.transaction_id, &base_directory)?;
         manager.cleanup_owned_residue_under_lease(None, &base_directory, &lease)?;
+        manager.clear_update_notice();
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     }
 
@@ -202,7 +209,18 @@ pub fn handle(
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     }
 
-    start_staged_helper(manager, &plan, &base_directory, arguments)?;
+    if let Err(error) = start_staged_helper(manager, &plan, &base_directory, arguments) {
+        // Nothing was changed, and the next start could not start the
+        // helper either (security software may have removed or blocked
+        // it): the plan goes, and this launcher opens as it is and says
+        // why.
+        manager.abandon_unapplied_under_lease(
+            &plan.transaction_id,
+            &unapplied_notice(&plan.version, &error),
+            &lease,
+        )?;
+        return Ok(SelfUpdateStartupResult::continue_with(arguments));
+    }
     Ok(SelfUpdateStartupResult::exit(0))
 }
 
@@ -324,6 +342,15 @@ fn run_helper(
 
     wait_for_parent_exit(parent_pid)?;
     let Some(lease) = manager.barrier().try_acquire_exclusive()? else {
+        // Something took the install after the launcher closed. Nothing
+        // was changed: the plan stays for a start with the install free,
+        // and the launcher opens as it is and says why.
+        manager.keep_update_notice(&waiting_notice(&plan.version));
+        let mut prior = Command::new(&launcher_path);
+        prior
+            .args(public_arguments)
+            .current_dir(&launcher_directory);
+        let _ = prior.spawn();
         return Ok(UPDATE_LEASE_BUSY_EXIT_CODE);
     };
 
@@ -451,6 +478,19 @@ fn run_helper(
         return Ok(AMBIGUOUS_EXIT_CODE);
     }
     Ok(ROLLED_BACK_EXIT_CODE)
+}
+
+/// What holds the install while an update waits.
+pub const INSTALL_IN_USE: &str = "a running client, another update or a plugin install is using \
+                                  this install";
+
+/// What the launcher shows while a downloaded update waits for the install.
+fn waiting_notice(version: &str) -> String {
+    format!(
+        "Launcher {version} is downloaded but not installed yet: {INSTALL_IN_USE}. Nothing was \
+         changed.\n\nClose every OpenAC client (and let other updates finish), then start the \
+         launcher again or choose Update to install it."
+    )
 }
 
 /// What the launcher shows after an update that could not be installed and

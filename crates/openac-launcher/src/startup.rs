@@ -200,12 +200,12 @@ impl RescueUpdate {
                         rescue.handed_over.store(true, Ordering::Release);
                         Ok("Installing the launcher update…".to_owned())
                     } else {
-                        Ok(
-                            "The launcher update is ready, but a client of this install is \
-                            running. Close every client, then start the launcher again to \
-                            install it."
-                                .to_owned(),
-                        )
+                        Ok(format!(
+                            "The launcher update is ready, but {}. Close every client (and \
+                             let other updates finish), then start the launcher again to \
+                             install it.",
+                            self_update_bootstrap::INSTALL_IN_USE
+                        ))
                     }
                 })();
                 let text = outcome.unwrap_or_else(|error| {
@@ -231,9 +231,9 @@ impl RescueUpdate {
 pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
     let paths = &context.paths;
     let log = &context.log;
-    // A launcher update whose helper could not install it (and changed
-    // nothing) left its reason; the window shows it once.
-    let self_update_notice = context.self_updates.take_failure_notice();
+    // A launcher update that was not installed (it failed before changing
+    // anything, or waits for the install to be free) left why; shown once.
+    let self_update_notice = context.self_updates.take_update_notice();
     if let Some(notice) = &self_update_notice {
         log.line(&format!(
             "launcher update not installed: {}",
