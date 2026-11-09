@@ -46,9 +46,11 @@ pub struct RegexLimits {
     /// separately: a pattern with back-references or look-arounds is split
     /// into pieces, each held to the cap. The parts the backtracking engine
     /// runs itself (back-references, look-arounds, repeats around them) grow
-    /// with the pattern's length, not its repeat counts, and need no cap. A
-    /// variable-length look-behind (`(?<=\w{0,50})`) is the exception: it is
-    /// compiled outside the cap.
+    /// with the pattern's length, not its repeat counts, and need no cap.
+    /// The plain parts of every look-behind (`(?<=\w{0,50})`, anywhere in
+    /// the pattern) are compiled once more against the cap before the pattern
+    /// itself, because the engine compiles a variable-length look-behind
+    /// outside it.
     pub compiled_size_limit: Option<usize>,
 }
 
@@ -226,6 +228,14 @@ impl DotNetRegex {
             ignore_whitespace: options.has(RegexOptions::IGNORE_PATTERN_WHITESPACE),
         };
         let translation = translate(pattern, flags)?;
+        if let Some(limit) = limits.compiled_size_limit {
+            let mut checked = Vec::new();
+            for text in std::iter::once(&translation.pattern)
+                .chain(translation.pattern_no_final_newline.as_ref())
+            {
+                check_look_behinds(text, limit, &mut checked)?;
+            }
+        }
         let build = |text: &str| {
             let mut builder = fancy_regex::RegexBuilder::new(text);
             builder.backtrack_limit(limits.step_limit);
@@ -481,6 +491,88 @@ impl<'r, 't> RegexMatch<'r, 't> {
     }
 }
 
+/// Holds every look-behind of `pattern` (fancy-regex syntax) to the size
+/// cap. `fancy-regex` compiles a variable-length look-behind's plain parts
+/// into a reverse automaton of its own, outside the cap it applies to the
+/// rest of the pattern; here each such part is compiled once with the cap
+/// first (the same text, in both directions), so a part too large is refused
+/// before that uncapped build runs. `checked` holds the parts already
+/// compiled. Errors other than the size are left to the real compile.
+fn check_look_behinds(
+    pattern: &str,
+    limit: usize,
+    checked: &mut Vec<String>,
+) -> Result<(), RegexError> {
+    use fancy_regex::{Expr, LookAround};
+
+    /// What `Expr::to_str` can write: the parts the `regex` crate compiles.
+    fn is_plain(expr: &Expr) -> bool {
+        use fancy_regex::Assertion as A;
+        let node = matches!(
+            expr,
+            Expr::Empty
+                | Expr::Any { .. }
+                | Expr::Literal { .. }
+                | Expr::Assertion(
+                    A::StartText
+                        | A::EndText
+                        | A::StartLine { .. }
+                        | A::StartLineOniguruma { .. }
+                        | A::EndLine { .. }
+                )
+                | Expr::Concat(_)
+                | Expr::Alt(_)
+                | Expr::Group(_)
+                | Expr::Repeat { .. }
+                | Expr::Delegate { .. }
+                | Expr::DefineGroup { .. }
+        );
+        node && expr.children_iter().all(is_plain)
+    }
+
+    fn check_plain_parts(
+        expr: &Expr,
+        limit: usize,
+        checked: &mut Vec<String>,
+    ) -> Result<(), RegexError> {
+        if !is_plain(expr) {
+            return expr
+                .children_iter()
+                .try_for_each(|child| check_plain_parts(child, limit, checked));
+        }
+        let mut text = String::new();
+        expr.to_str(&mut text, 0);
+        if checked.contains(&text) {
+            return Ok(());
+        }
+        let built = fancy_regex::RegexBuilder::new(&text)
+            .delegate_size_limit(limit)
+            .build();
+        if let Err(fancy_regex::Error::CompileError(inner)) = &built
+            && let fancy_regex::CompileError::InnerError(e) = &**inner
+            && e.size_limit().is_some()
+        {
+            return Err(RegexError::TooLarge(limit));
+        }
+        checked.push(text);
+        Ok(())
+    }
+
+    fn walk(expr: &Expr, limit: usize, checked: &mut Vec<String>) -> Result<(), RegexError> {
+        if let Expr::LookAround(body, LookAround::LookBehind | LookAround::LookBehindNeg) = expr {
+            check_plain_parts(body, limit, checked)?;
+        }
+        expr.children_iter()
+            .try_for_each(|child| walk(child, limit, checked))
+    }
+
+    match Expr::parse_tree(pattern) {
+        Ok(tree) => walk(&tree.expr, limit, checked),
+        // The real compile reports the error.
+        Err(_) => Ok(()),
+    }
+}
+
 enum Substitution {
     Text(String),
     Group(usize),
@@ -671,5 +763,49 @@ mod tests {
             DotNetRegex::new(r"\w{1000}", RegexOptions::NONE),
             Err(RegexError::Unsupported(_))
         ));
+        // And a variable-length look-behind is not checked against any cap.
+        assert!(DotNetRegex::new(r"(?<=\w{0,50})Ring", RegexOptions::NONE).is_ok());
+        assert!(matches!(
+            DotNetRegex::new(r"(?<!\w{0,400})Ring", RegexOptions::NONE),
+            Err(RegexError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn a_variable_length_look_behind_past_the_size_limit_is_refused_as_too_large() {
+        for pattern in [
+            r"(?<!\w{0,400})Ring",
+            r"(?<=\p{L}{0,200})x",
+            r"(?<=\w{0,50})Ring",
+            r"(?i)(?<!\w{0,400})Ring",
+            // Nested inside other look-arounds and groups.
+            r"(?=(?<=\w{0,300})a)b",
+            r"(?<!(?:a|\w{0,300}))x",
+            r"(?<=a(?<!\w{0,300}))x",
+            r"((?<=\w{0,300})x)+",
+            // Beside a part the backtracking engine runs itself.
+            r"(?<=(?=a)\w{0,300})x",
+        ] {
+            assert_eq!(
+                capped(pattern).map(|_| ()),
+                Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT)),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_look_behinds_compile_under_the_size_limit() {
+        for (pattern, input) in [
+            ("(?<=Gold )Ring", "Gold Ring"),
+            ("(?<!un)known", "known"),
+            (r"(?<=^|\s)Ring", "a Ring"),
+            (r"(?<=\w{0,2}) Ring", "ab Ring"),
+            (r"(?<=(Gold|Silver)\s+)Ring", "Gold  Ring"),
+            (r"(?<=\bof\s.*)Fire", "Ring of Cold Fire"),
+        ] {
+            let re = capped(pattern).unwrap_or_else(|e| panic!("{pattern}: {e}"));
+            assert_eq!(re.is_match(input), Ok(true), "{pattern}");
+        }
     }
 }
