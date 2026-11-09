@@ -3,7 +3,7 @@
   "displayName": "Fetcher",
   "version": "0.1.0",
   "entry": "fetcher.wasm",
-  "apiVersion": "1.10",
+  "apiVersion": "1.11",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [

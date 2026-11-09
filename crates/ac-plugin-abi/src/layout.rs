@@ -206,9 +206,50 @@ mod tests {
     /// event's kind byte, not a shape. API 1.7 (plugin services, the
     /// server's last position on the world-object records) changed it,
     /// API 1.8 (the status board's change notices) again, API 1.9 (a
-    /// creature's appraisal profile on the item properties) again, and API
-    /// 1.10 (every enchantment on the character, an import) again.
-    const PUBLISHED: u64 = 0x4f98_d3ca_2e58_145f;
+    /// creature's appraisal profile on the item properties) again, API
+    /// 1.10 (every enchantment on the character, an import) again, and API
+    /// 1.11 (who changed the selection, on the selection event) again.
+    const PUBLISHED: u64 = 0x27ec_8bdc_27cc_d94c;
+
+    /// The fingerprint API 1.10 was published with.
+    const PUBLISHED_1_10: u64 = 0x4f98_d3ca_2e58_145f;
+
+    /// API 1.10 is published: it keeps the fingerprint it was published
+    /// with, whatever later versions add.
+    #[test]
+    fn api_1_10_keeps_its_published_fingerprint() {
+        let v1_10 = fingerprint_at(ApiVersion::new(1, 10));
+        assert_eq!(
+            v1_10, PUBLISHED_1_10,
+            "API 1.10's layout changed (fingerprint {v1_10:016x}, published {PUBLISHED_1_10:016x}): \
+             mark what was added `since` the version that adds it"
+        );
+    }
+
+    /// The core shape every plugin built for API 1.9 or 1.10 carries.
+    const API_1_9_CORE: u64 = 0x5cd8_bc3e_ecf2_2441;
+
+    /// API 1.11 added a field at the end of the selection event's record,
+    /// marked `since`: it changes the core shape and no import. A plugin
+    /// built for API 1.10 keeps 1.10's core shape (1.9's: 1.10 added only
+    /// an import) and has every import as it is now.
+    #[test]
+    fn api_1_10_plugins_keep_their_core_and_import_shapes() {
+        let v1_10 = ApiVersion::new(1, 10);
+        assert_eq!(core_shape(v1_10), API_1_9_CORE);
+        assert_ne!(CORE_SHAPE, API_1_9_CORE);
+        let section = PluginLayout::parse(&section_at(v1_10)).unwrap();
+        for import in Import::ALL {
+            assert!(import.since().is_at_most(v1_10), "{import:?}");
+            assert_eq!(import.shape_at(v1_10), import.shape(), "{import:?}");
+            assert_eq!(
+                section.import_shape(import.name()),
+                Some(import.shape()),
+                "{import:?}"
+            );
+        }
+        assert_ne!(section_at(v1_10), LAYOUT_SECTION_BYTES);
+    }
 
     /// The fingerprint API 1.7 was published with. A released version's
     /// layout never changes: what a later version adds is marked `since`.
@@ -236,12 +277,12 @@ mod tests {
     const API_1_10_ENCHANTMENTS: [Import; 1] = [Import::CharacterAllEnchantments];
 
     /// API 1.10 added only an import, marked `since`: a plugin built for
-    /// API 1.9 keeps this version's core shape, lacks the import, and has
-    /// every other import as it is now.
+    /// API 1.9 keeps 1.10's core shape, lacks the import, and has every
+    /// other import as it is now.
     #[test]
     fn api_1_9_plugins_keep_their_core_and_import_shapes() {
         let v1_9 = ApiVersion::new(1, 9);
-        assert_eq!(core_shape(v1_9), CORE_SHAPE);
+        assert_eq!(core_shape(v1_9), API_1_9_CORE);
         let section = PluginLayout::parse(&section_at(v1_9)).unwrap();
         for import in Import::ALL {
             let new = API_1_10_ENCHANTMENTS.contains(import);

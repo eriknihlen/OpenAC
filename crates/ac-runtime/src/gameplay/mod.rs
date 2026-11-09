@@ -197,6 +197,9 @@ pub enum BookCommand {
 pub enum GameplayCommand {
     /// Select an object.
     Select(ObjectRef),
+    /// Select an object the player clicked: in the world, or its icon in a
+    /// window.
+    SelectClicked(ObjectRef),
     /// Clear the selection, on purpose.
     ClearSelection,
     /// A login or portal reveal began while the window showed this selected
@@ -1294,6 +1297,11 @@ impl Gameplay {
             GameplayCommand::Select(reference) => {
                 if let Some(guid) = self.resolve(&reference, ctx) {
                     self.select(guid, SelectionSource::Host, ctx);
+                }
+            }
+            GameplayCommand::SelectClicked(reference) => {
+                if let Some(guid) = self.resolve(&reference, ctx) {
+                    self.select(guid, SelectionSource::Mouse, ctx);
                 }
             }
             // The session answers the Escape key: it reads the movement,

@@ -192,9 +192,9 @@ pub fn session_command(output: &PanelOutput) -> Option<SessionCommand> {
     let character = |c| Some(SessionCommand::Character(c));
     match output {
         PanelOutput::Session(command) => Some(command.clone()),
-        PanelOutput::SelectObject(guid) => Some(SessionCommand::Gameplay(GameplayCommand::Select(
-            ObjectRef::Guid(*guid),
-        ))),
+        PanelOutput::SelectObject(guid) => Some(SessionCommand::Gameplay(
+            GameplayCommand::SelectClicked(ObjectRef::Guid(*guid)),
+        )),
         PanelOutput::SetUiLocked(locked) => Some(SessionCommand::SetCharacterOption {
             option: option_id::LOCK_UI,
             value: *locked,
@@ -2131,10 +2131,11 @@ mod tests {
     fn panel_requests_become_session_commands() {
         // OpenAC `RetailUiRuntime.MountRadar` (a blip click selects through
         // the selection owner) and `RadarController` (the lock button flips
-        // the LockUI option).
+        // the LockUI option). A click on an object's icon selects as the
+        // mouse.
         assert!(matches!(
             session_command(&PanelOutput::SelectObject(0x5000_0001)),
-            Some(SessionCommand::Gameplay(GameplayCommand::Select(
+            Some(SessionCommand::Gameplay(GameplayCommand::SelectClicked(
                 ObjectRef::Guid(0x5000_0001)
             )))
         ));

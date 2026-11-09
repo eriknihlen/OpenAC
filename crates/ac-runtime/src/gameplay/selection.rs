@@ -3,13 +3,17 @@
 //! combat owner reads (health stream, auto-target).
 
 /// Who changed the selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectionSource {
-    /// The client itself (a death, a removal).
+    /// The client itself (a death, a removal, the session ending).
+    #[default]
     System,
     /// The keyboard (select-nearest, escape).
     Keyboard,
-    /// A host command.
+    /// The mouse: a click on an object in the world or on its icon in a
+    /// window.
+    Mouse,
+    /// A host command (a plugin, the give and merge selections).
     Host,
 }
 
@@ -49,6 +53,7 @@ pub struct Selection {
     selected: Option<u32>,
     previous: Option<u32>,
     previous_valid: Option<u32>,
+    source: SelectionSource,
 }
 
 impl Selection {
@@ -62,6 +67,13 @@ impl Selection {
     #[must_use]
     pub fn previous(&self) -> Option<u32> {
         self.previous
+    }
+
+    /// Who made the last change of the selection (the client itself before
+    /// any).
+    #[must_use]
+    pub fn source(&self) -> SelectionSource {
+        self.source
     }
 
     /// The last object that was selected before the current selection.
@@ -123,6 +135,7 @@ impl Selection {
         let old = self.selected;
         self.selected = selected;
         self.previous = old;
+        self.source = source;
         if old.is_some() {
             self.previous_valid = old;
         }
