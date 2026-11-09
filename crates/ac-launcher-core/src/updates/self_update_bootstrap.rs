@@ -38,6 +38,10 @@ pub const ROLLED_BACK_EXIT_CODE: i32 = 74;
 /// The helper could not establish a safe state and started nothing.
 pub const AMBIGUOUS_EXIT_CODE: i32 = 75;
 
+/// The helper could not install the update, changed nothing, dropped the
+/// plan and started the launcher as it was, which shows why.
+pub const NOT_INSTALLED_EXIT_CODE: i32 = 76;
+
 const INTERNAL_ARGUMENT_PREFIX: &str = "--acdream-self-update-";
 const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -372,9 +376,10 @@ fn run_helper(
             }
             manager.complete_confirmed(transaction_id, target_directory)
         })();
-        if applied.is_ok() {
-            return Ok(0);
-        }
+        let error = match applied {
+            Ok(()) => return Ok(0),
+            Err(error) => error,
+        };
 
         if let Some(child) = replacement.as_mut()
             && child.try_wait().ok().flatten().is_none()
@@ -383,8 +388,35 @@ fn run_helper(
             let _ = child.wait();
         }
         let none = CancelToken::new();
+        let pending = manager.load_pending();
+        if let Ok(Some(plan)) = &pending
+            && plan.state == SelfUpdatePlanState::Staged
+            && plan.transaction_id == transaction_id
+        {
+            // The apply stopped before it changed anything beside the
+            // launcher. Retrying it on every start would only fail again
+            // with nothing on screen: the plan goes, the reason is kept for
+            // the launcher to show, and the launcher starts as it was.
+            let notice = unapplied_notice(&plan.version, &error);
+            if manager
+                .abandon_unapplied_under_lease(transaction_id, &notice, &lease)
+                .is_err()
+            {
+                return Ok(AMBIGUOUS_EXIT_CODE);
+            }
+            drop(lease);
+            let mut prior = Command::new(&launcher_path);
+            prior
+                .args(public_arguments)
+                .current_dir(&launcher_directory);
+            return Ok(if prior.spawn().is_ok() {
+                NOT_INSTALLED_EXIT_CODE
+            } else {
+                AMBIGUOUS_EXIT_CODE
+            });
+        }
         let receipt = (|| -> Result<Option<SelfUpdatePlan>, UpdateError> {
-            let pending = manager.load_pending()?;
+            let pending = pending?;
             Ok(match pending.as_ref().map(|plan| plan.state) {
                 Some(SelfUpdatePlanState::Applying) => {
                     Some(manager.recover_applying(target_directory, &none)?)
@@ -419,6 +451,17 @@ fn run_helper(
         return Ok(AMBIGUOUS_EXIT_CODE);
     }
     Ok(ROLLED_BACK_EXIT_CODE)
+}
+
+/// What the launcher shows after an update that could not be installed and
+/// changed nothing.
+fn unapplied_notice(version: &str, error: &UpdateError) -> String {
+    format!(
+        "Launcher {version} could not be installed. Nothing was changed: this launcher runs \
+         as before.\n\n{error}\n\nChoose Update to try again. If it fails the same way, \
+         reinstall the launcher: unpack the release into a new, empty folder and start it \
+         from there."
+    )
 }
 
 fn validate_canonical_startup(

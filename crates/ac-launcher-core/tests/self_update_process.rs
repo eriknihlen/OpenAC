@@ -243,6 +243,10 @@ const CASES: &[Case] = &[
         "a_staged_update_applies_through_the_helper_and_the_new_launcher_confirms_it",
         a_staged_update_applies_through_the_helper_and_the_new_launcher_confirms_it,
     ),
+    (
+        "an_update_that_fails_before_changing_anything_opens_the_launcher_with_why",
+        an_update_that_fails_before_changing_anything_opens_the_launcher_with_why,
+    ),
 ];
 
 /// The test filters on the command line (the harness's own flags and their
@@ -1009,4 +1013,73 @@ fn a_staged_update_applies_through_the_helper_and_the_new_launcher_confirms_it()
         first.id(),
         "the new launcher continued, not the old one"
     );
+}
+
+// The helper stops before it changes anything when the launcher's files do
+// not match its install record. It used to exit and start nothing, leaving
+// the plan staged, so every start handed it over again and the launcher
+// never opened. Now the plan goes, the launcher starts as it was, and the
+// reason waits for its window; the next start is an ordinary one.
+fn an_update_that_fails_before_changing_anything_opens_the_launcher_with_why() {
+    let root = TempDir::new("self-update-process");
+    let data = root.join("data");
+    let target = root.join("launcher");
+    let launched = root.join("prior.ready");
+    let helper_pid = root.join("helper.pid");
+    let rid = detect_rid().unwrap();
+    let prepared = prepare_launcher_closure(&target, &rid);
+    let server = FakeServer::new();
+    let manager = LauncherSelfUpdateManager::new(&root.path_set(), server.transport());
+    stage(&manager, &server, &prepared.new_archive, &target, &rid);
+    std::fs::write(target.join(INSTALL_RECORD_FILE_NAME), "{}").unwrap();
+    let prior_hash = hash(&prepared.canonical_path);
+
+    let launched_text = launched.display().to_string();
+    let environment = bootstrap_environment(&data, &target, &helper_pid);
+    let mut first = start(
+        &prepared.canonical_path,
+        &["canonical-probe", &launched_text, "--public", "argument"],
+        &environment,
+    );
+    let code = wait_exit(&mut first, Duration::from_secs(20));
+    assert_eq!(code, 0, "{}", stderr_of(&mut first));
+    let marker = launched.clone();
+    wait_until(
+        || marker.exists(),
+        Duration::from_secs(30),
+        "The helper did not start the launcher as it was.",
+        None,
+    );
+
+    assert!(helper_pid.exists(), "the start handed over to the helper");
+    assert!(!manager.pending_plan_path().exists());
+    assert_eq!(hash(&prepared.canonical_path), prior_hash);
+    let text = std::fs::read_to_string(&launched).unwrap();
+    assert!(text.ends_with("\n--public\nargument"), "{text}");
+    let pid: u32 = text.split('|').next().unwrap().parse().unwrap();
+    assert_ne!(pid, first.id());
+    let notice = manager.take_failure_notice().expect("the reason is kept");
+    assert!(
+        notice.contains("Launcher 2.0.0 could not be installed"),
+        "{notice}"
+    );
+    assert!(notice.contains("Nothing was changed"), "{notice}");
+    assert!(notice.contains(INSTALL_RECORD_FILE_NAME), "{notice}");
+    assert!(notice.contains("new, empty folder"), "{notice}");
+    assert_eq!(manager.take_failure_notice(), None, "shown once");
+
+    // The next start is an ordinary one: no helper, no loop.
+    std::fs::remove_file(&launched).unwrap();
+    std::fs::remove_file(&helper_pid).unwrap();
+    let mut second = start(
+        &prepared.canonical_path,
+        &["canonical-probe", &launched_text],
+        &environment,
+    );
+    let code = wait_exit(&mut second, Duration::from_secs(20));
+    assert_eq!(code, 0, "{}", stderr_of(&mut second));
+    let text = std::fs::read_to_string(&launched).unwrap();
+    let pid: u32 = text.split('|').next().unwrap().parse().unwrap();
+    assert_eq!(pid, second.id(), "the start continued itself");
+    assert!(!helper_pid.exists());
 }

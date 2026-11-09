@@ -77,6 +77,7 @@ pub struct Prepared {
     apply_launcher_update: Option<ApplyLauncherUpdate>,
     install_folder: Option<InstallFolderParts>,
     control: Option<control::ControlServer>,
+    self_update_notice: Option<String>,
 }
 
 /// The updater over the release feed: the client and the launcher's own
@@ -230,6 +231,15 @@ impl RescueUpdate {
 pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
     let paths = &context.paths;
     let log = &context.log;
+    // A launcher update whose helper could not install it (and changed
+    // nothing) left its reason; the window shows it once.
+    let self_update_notice = context.self_updates.take_failure_notice();
+    if let Some(notice) = &self_update_notice {
+        log.line(&format!(
+            "launcher update not installed: {}",
+            notice.replace('\n', " ")
+        ));
+    }
     // A move of the install folder can leave the install record naming the
     // old folder's content; the install check that follows would reject it.
     match ac_launcher_core::installation::repair_content_records(paths) {
@@ -390,6 +400,7 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
         apply_launcher_update,
         install_folder,
         control,
+        self_update_notice,
     })
 }
 
@@ -432,6 +443,7 @@ impl Prepared {
             )),
         });
         window.initialize();
+        window.self_update_notice = self.self_update_notice;
         Running {
             app: LauncherApp::new(window, self.shared, self.script),
             _control: self.control,

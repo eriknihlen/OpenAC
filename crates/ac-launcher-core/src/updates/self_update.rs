@@ -50,6 +50,9 @@ pub const MAC_BUNDLE_NAME: &str = "OpenAC.app";
 
 const TARGET_TRANSACTION_PREFIX: &str = ".acdream-self-update-";
 
+/// Why the last update could not be installed, in the manager's folder.
+const FAILURE_NOTICE_FILE_NAME: &str = "failed.txt";
+
 /// How the launcher is installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LauncherInstallationKind {
@@ -634,9 +637,22 @@ impl LauncherSelfUpdateManager {
         }
 
         self.verify_payload(&plan, cancel)?;
-        let previous = read_and_verify_install_record(&expected_target, &plan.rid, cancel)?;
+        let previous = read_and_verify_install_record(&expected_target, &plan.rid, cancel)
+            .map_err(|error| {
+                if error.is_cancelled() {
+                    error
+                } else {
+                    UpdateError::failed(format!(
+                        "This launcher's files do not match its install record \
+                         '{INSTALL_RECORD_FILE_NAME}': {error}"
+                    ))
+                }
+            })?;
         let apply = build_apply_journal(&plan, previous.as_ref(), &expected_target, cancel)?;
         let apply = self.prepare_target_transaction(&plan, apply, cancel)?;
+        // Nothing beside the launcher changes before this state is written:
+        // a failure up to here leaves the plan staged (see
+        // `abandon_unapplied_under_lease`).
         plan.state = SelfUpdatePlanState::Applying;
         plan.apply = Some(apply);
         self.write_plan(&plan)?;
@@ -791,6 +807,49 @@ impl LauncherSelfUpdateManager {
             .map_err(|error| io_error("The staged self-update could not be discarded", error))?;
         try_delete_directory(&self.transaction_directory(&plan.transaction_id)?);
         Ok(())
+    }
+
+    /// `<root>/app/launcher-update/failed.txt`: why the last update could
+    /// not be installed, for the next start to show.
+    pub fn failure_notice_path(&self) -> PathBuf {
+        self.root_directory.join(FAILURE_NOTICE_FILE_NAME)
+    }
+
+    /// The helper could not install the staged update and changed nothing
+    /// beside the launcher (the plan is still staged): the plan is dropped,
+    /// so the next start does not hand it over again, and `notice` is kept
+    /// for the launcher to show.
+    pub fn abandon_unapplied_under_lease(
+        &self,
+        transaction_id: &str,
+        notice: &str,
+        lease: &ExclusiveLease,
+    ) -> Result<(), UpdateError> {
+        self.barrier.require_owned(lease)?;
+        let plan = self
+            .load_pending()?
+            .ok_or_else(|| UpdateError::failed("There is no staged self-update to abandon."))?;
+        if plan.transaction_id != transaction_id || plan.state != SelfUpdatePlanState::Staged {
+            return Err(UpdateError::failed(
+                "The self-update changed the installation; it is not abandoned.",
+            ));
+        }
+        fsutil::write_atomic_unique(&self.failure_notice_path(), notice.as_bytes()).map_err(
+            |error| io_error("The self-update failure notice could not be written", error),
+        )?;
+        self.discard_staged_under_lease(&plan, lease)?;
+        // The copies the apply prepared beside the launcher, if it got that far.
+        try_delete_directory(&self.target_transaction_directory(&plan)?);
+        Ok(())
+    }
+
+    /// Why the last launcher update could not be installed, once: the
+    /// notice is removed as it is read.
+    pub fn take_failure_notice(&self) -> Option<String> {
+        let path = self.failure_notice_path();
+        let notice = std::fs::read_to_string(&path).ok()?;
+        fsutil::try_delete_file(&path);
+        Some(notice.trim().to_owned()).filter(|notice| !notice.is_empty())
     }
 
     /// Ends a rolled-back update once the prior files verify.

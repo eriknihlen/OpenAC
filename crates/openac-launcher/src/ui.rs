@@ -1648,6 +1648,21 @@ fn dialogs(app: &mut LauncherApp, ctx: &egui::Context) {
             });
         });
     }
+    if let Some(notice) = window.self_update_notice.clone() {
+        modal(ctx, "self-update-notice", 560.0, |ui| {
+            dialog_title(ui, "Launcher update not installed");
+            egui::ScrollArea::vertical()
+                .max_height(360.0)
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(notice).selectable(true).wrap());
+                });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary(ui, "OK", true, true) {
+                    window.dismiss_self_update_notice();
+                }
+            });
+        });
+    }
     if let Some(notice) = window.profile_migration_notice.clone() {
         modal(ctx, "migration-notice", 640.0, |ui| {
             dialog_title(ui, "Profiles updated");

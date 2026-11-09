@@ -342,6 +342,9 @@ pub struct LauncherWindow {
     /// What the profile load could not carry over from an older file,
     /// shown once.
     pub profile_migration_notice: Option<String>,
+    /// Why the last launcher update could not be installed (it changed
+    /// nothing), shown once.
+    pub self_update_notice: Option<String>,
     /// The profile tag the accounts are filtered by, or `None` for all.
     pub profile_filter: Option<String>,
     /// "All" and one chip per profile tag, in the order the tags first
@@ -646,6 +649,7 @@ impl LauncherWindow {
             character_uses_account_plugins: false,
             remove_character_target: None,
             profile_migration_notice: None,
+            self_update_notice: None,
             profile_filter: None,
             profile_filters: Vec::new(),
             checked_accounts: parts.checked_accounts,
@@ -1813,6 +1817,7 @@ impl LauncherWindow {
             || self.remove_character_target.is_some()
             || self.profiles_dialog.is_open
             || self.profile_migration_notice.is_some()
+            || self.self_update_notice.is_some()
             || self.close_prompt.is_some()
     }
 
@@ -3304,6 +3309,11 @@ impl LauncherWindow {
     /// Dismisses the one-time profile migration notice.
     pub fn dismiss_migration_notice(&mut self) {
         self.profile_migration_notice = None;
+    }
+
+    /// Dismisses the notice of a launcher update that was not installed.
+    pub fn dismiss_self_update_notice(&mut self) {
+        self.self_update_notice = None;
     }
 
     /// Opens the session log.
