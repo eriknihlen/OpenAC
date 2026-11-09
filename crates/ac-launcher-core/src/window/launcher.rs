@@ -983,9 +983,13 @@ impl LauncherWindow {
                 self.update_prompt.is_progress_indeterminate = false;
                 match result {
                     Ok(true) => self.shutdown_requested = true,
+                    // The install was in use (a client of it runs) when the
+                    // helper was to start; Update hands the staged release
+                    // over once it is free.
                     Ok(false) => {
-                        self.update_prompt.status = "The launcher update is ready. Close and \
-                                                     reopen the launcher to finish it."
+                        self.update_prompt.status = "The launcher update is ready, but a client \
+                                                     of this install is running. Close every \
+                                                     client, then choose Update again."
                             .into();
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {

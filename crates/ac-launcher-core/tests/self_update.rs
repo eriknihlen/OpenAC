@@ -560,6 +560,127 @@ fn verified_stage_is_durable_and_does_not_touch_running_target() {
     assert!(!pending.to_lowercase().contains("cmd"));
 }
 
+// A staged update that was never handed to its helper (the helper could not
+// be started, or a client held the install when the launcher started) is
+// staged again by Update, not refused with "Restart the launcher": the
+// same release keeps its verified transaction, so Update can hand it over.
+// An addition over OpenAC, which refused any second stage.
+#[test]
+fn staging_the_same_release_again_reuses_the_staged_transaction() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let first = harness.pending();
+
+    let again = harness.stage().unwrap();
+    let plan = harness.pending();
+
+    assert_eq!(again.version.value(), "2.0.0");
+    assert_eq!(plan, first);
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+    assert_eq!(
+        read(&harness.manager.staged_launcher_path(&plan).unwrap()),
+        "new-launcher"
+    );
+}
+
+// A staged release that is not the one being staged (an older one, or one
+// whose payload no longer verifies) never touched the installation, so it
+// is dropped with its transaction and the new release is staged.
+#[test]
+fn staging_another_release_replaces_a_staged_one() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let older = harness.pending();
+
+    let newer = harness
+        .stage_archive("3.0.0", &launcher_zip(&harness.rid, "newer-launcher"))
+        .unwrap();
+    let plan = harness.pending();
+
+    assert_eq!(newer.version.value(), "3.0.0");
+    assert_eq!(plan.version, "3.0.0");
+    assert_eq!(plan.state, SelfUpdatePlanState::Staged);
+    assert_ne!(plan.transaction_id, older.transaction_id);
+    assert!(
+        !harness
+            .manager
+            .transaction_directory(&older.transaction_id)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+
+    // A damaged payload of the same release is staged afresh too.
+    let damaged = harness.manager.staged_launcher_path(&plan).unwrap();
+    std::fs::write(&damaged, "tampered").unwrap();
+    harness
+        .stage_archive("3.0.0", &launcher_zip(&harness.rid, "newer-launcher"))
+        .unwrap();
+    let restaged = harness.pending();
+    assert_ne!(restaged.transaction_id, plan.transaction_id);
+    assert_eq!(
+        read(&harness.manager.staged_launcher_path(&restaged).unwrap()),
+        "newer-launcher"
+    );
+}
+
+// What the owner's install held after 0.2.2 installed itself: no plan, and
+// the helper's own transaction (its payload kept by the helper's running
+// executable). Staging the next release reclaims it.
+#[test]
+fn staging_reclaims_the_previous_updates_helper_transaction() {
+    let harness = Harness::new();
+    let previous = harness
+        .manager
+        .payload_directory(&ac_launcher_core::ids::unique_hex32())
+        .unwrap();
+    std::fs::create_dir_all(&previous).unwrap();
+    std::fs::write(previous.join(&harness.launcher_name), "previous-helper").unwrap();
+    std::fs::write(previous.join("THIRD-PARTY-LICENSES.html"), "licenses").unwrap();
+
+    harness.stage().unwrap();
+
+    assert!(!previous.parent().unwrap().exists());
+    assert_eq!(harness.pending().state, SelfUpdatePlanState::Staged);
+}
+
+// A plan past staging changes the installation; only a start finishes or
+// undoes it, so staging over it is refused, and so is staging over a
+// release staged for another copy of the launcher.
+#[test]
+fn staging_refuses_an_applied_plan_and_another_launchers_staged_plan() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    let refused = harness.stage().unwrap_err().to_string();
+    assert!(refused.contains("AwaitingConfirmation"), "{refused}");
+    assert!(refused.contains("Restart the launcher"), "{refused}");
+
+    let other = Harness::new();
+    let elsewhere = other.root.join("another copy");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    other
+        .manager
+        .stage_artifact(
+            &version("2.0.0"),
+            &other.rid,
+            &other.artifact,
+            &LauncherInstallationLayout::flat(&elsewhere, &other.rid).unwrap(),
+            &mut |_| {},
+            &none(),
+        )
+        .unwrap();
+    let refused = other.stage().unwrap_err().to_string();
+    assert!(refused.contains("another copy"), "{refused}");
+    assert_eq!(
+        other.pending().target_directory.file_name().unwrap(),
+        "another copy"
+    );
+}
+
 // OpenAC LauncherSelfUpdateManagerTests.ApplyConfirmAndCompletionUseMoveJournalAndRemoveTransaction.
 #[test]
 fn apply_confirm_and_completion_use_move_journal_and_remove_transaction() {

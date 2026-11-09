@@ -199,9 +199,12 @@ impl RescueUpdate {
                         rescue.handed_over.store(true, Ordering::Release);
                         Ok("Installing the launcher update…".to_owned())
                     } else {
-                        Ok("The launcher update is ready; start the launcher again to \
+                        Ok(
+                            "The launcher update is ready, but a client of this install is \
+                            running. Close every client, then start the launcher again to \
                             install it."
-                            .to_owned())
+                                .to_owned(),
+                        )
                     }
                 })();
                 let text = outcome.unwrap_or_else(|error| {

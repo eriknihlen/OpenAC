@@ -4527,15 +4527,52 @@ fn a_launcher_update_that_cannot_restart_tells_the_user_to_reopen() {
 
     assert!(feed.pending_launcher_update());
     assert!(!window.is_shutdown_requested());
+    let status = window.update_prompt.status.to_lowercase();
     assert!(
-        window
-            .update_prompt
-            .status
-            .to_lowercase()
-            .contains("reopen"),
+        status.contains("close every client") && status.contains("update again"),
         "{}",
         window.update_prompt.status
     );
+}
+
+// The owner's 0.2.2 launcher, 2026-11-09: the update staged, but its
+// helper could not be started; Update again said the release was "already
+// Staged" and to restart the launcher, and a start that found a client of
+// the install running left it staged. Update again now hands the staged
+// release to its helper.
+#[test]
+fn update_again_hands_over_a_launcher_update_whose_helper_did_not_start() {
+    let feed = UpdateFeed::new(true);
+    let attempts = Arc::new(Mutex::new(0));
+    let calls = Arc::clone(&attempts);
+    let mut window = feed.window(
+        &batch(),
+        "1.0.0",
+        Some(Arc::new(move |_: &CancelToken| {
+            let mut attempts = calls.lock().unwrap();
+            *attempts += 1;
+            if *attempts == 1 {
+                Err("The launcher self-update helper could not be started.".to_owned())
+            } else {
+                Ok(true)
+            }
+        })),
+    );
+    auto_opening(&mut window);
+    startup_check(&mut window);
+    window.install_update();
+    window.poll();
+    assert!(feed.pending_launcher_update());
+    assert!(!window.is_shutdown_requested());
+    assert!(window.update_prompt.error.is_some());
+
+    window.install_update();
+    window.poll();
+
+    assert_eq!(window.update_prompt.error, None);
+    assert_eq!(*attempts.lock().unwrap(), 2);
+    assert!(window.is_shutdown_requested());
+    assert!(feed.pending_launcher_update());
 }
 
 // OpenAC LauncherUpdateViewModelTests.AnUnreachableFeedStaysSilent.

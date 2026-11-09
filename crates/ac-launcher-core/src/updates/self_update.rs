@@ -445,7 +445,9 @@ impl LauncherSelfUpdateManager {
     }
 
     /// Stages one launcher archive: download, verify, extract, check, and
-    /// write the plan. The running installation is not touched.
+    /// write the plan. The running installation is not touched. A release
+    /// already staged for this installation is kept (the same one, still
+    /// verified) or replaced; a plan past staging is refused.
     pub fn stage_artifact(
         &self,
         version: &LauncherVersion,
@@ -466,11 +468,49 @@ impl LauncherSelfUpdateManager {
         let existing = self.load_pending()?;
         self.cleanup_owned_residue_under_lease(existing.as_ref(), &target, &lease)?;
         if let Some(existing) = existing {
-            return Err(UpdateError::failed(format!(
-                "Launcher self-update {} is already {}. Restart the launcher to finish it \
-                 before staging another.",
-                existing.version, existing.state
-            )));
+            if existing.state != SelfUpdatePlanState::Staged {
+                // Past staging the installation is changed; only a start
+                // finishes or undoes it.
+                return Err(UpdateError::failed(format!(
+                    "Launcher self-update {} is already {}. Restart the launcher to finish it \
+                     before staging another.",
+                    existing.version, existing.state
+                )));
+            }
+            if !fsutil::paths_equal(&existing.target_directory, &target) {
+                return Err(UpdateError::failed(format!(
+                    "Launcher self-update {} is staged for the launcher in '{}'. Start that \
+                     launcher to install it before updating this one.",
+                    existing.version,
+                    existing.target_directory.display()
+                )));
+            }
+            // A staged update has not touched the installation yet: a
+            // start may have left it because a client held the install, or
+            // its helper could not be started. Staging the same release
+            // again keeps it, so the caller can hand it over now; any other
+            // (or a damaged one) is dropped and this release staged.
+            let same_release = existing.version == version.value()
+                && existing.rid == rid
+                && existing.installation_kind == layout.kind
+                && existing.archive_sha256 == artifact.sha256.to_lowercase();
+            if same_release {
+                match self.verify_payload(&existing, cancel) {
+                    Ok(()) => {
+                        drop(lease);
+                        return Ok(SelfUpdateStageResult {
+                            version: version.clone(),
+                            pending_plan_path: self.pending_plan_path.clone(),
+                            status: format!(
+                                "Launcher {version} is staged and will be applied on next start."
+                            ),
+                        });
+                    }
+                    Err(error) if error.is_cancelled() => return Err(error),
+                    Err(_) => {}
+                }
+            }
+            self.discard_staged_under_lease(&existing, &lease)?;
         }
 
         let transaction_id = ids::unique_hex32();
@@ -731,6 +771,25 @@ impl LauncherSelfUpdateManager {
             .map_err(|error| io_error("The self-update plan could not be removed", error))?;
         try_delete_directory(&self.target_transaction_directory(&plan)?);
         try_delete_directory(&self.transaction_directory(transaction_id)?);
+        Ok(())
+    }
+
+    /// Drops a staged plan that was never applied, with its transaction:
+    /// nothing beside the launcher was changed yet.
+    fn discard_staged_under_lease(
+        &self,
+        plan: &SelfUpdatePlan,
+        lease: &ExclusiveLease,
+    ) -> Result<(), UpdateError> {
+        self.barrier.require_owned(lease)?;
+        if plan.state != SelfUpdatePlanState::Staged {
+            return Err(UpdateError::failed(
+                "Only a staged self-update can be discarded.",
+            ));
+        }
+        std::fs::remove_file(&self.pending_plan_path)
+            .map_err(|error| io_error("The staged self-update could not be discarded", error))?;
+        try_delete_directory(&self.transaction_directory(&plan.transaction_id)?);
         Ok(())
     }
 
