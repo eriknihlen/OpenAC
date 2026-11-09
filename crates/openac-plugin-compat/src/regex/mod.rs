@@ -7,7 +7,10 @@
 //! Where .NET gives a match a 100 ms timeout, a backtracking step limit
 //! stops a runaway pattern instead: deterministic, the same on every
 //! machine, and reported as [`RegexError::StepLimitExceeded`] where .NET
-//! throws `RegexMatchTimeoutException`. Positions are
+//! throws `RegexMatchTimeoutException`. For patterns a player types,
+//! [`DotNetRegex::with_limits`] also caps the compiled size, so a short
+//! pattern that compiles huge (`\w{1000}`) is refused quickly as
+//! [`RegexError::TooLarge`]. Positions are
 //! byte offsets into the UTF-8 input, not UTF-16 indexes.
 
 mod translate;
@@ -17,6 +20,47 @@ use translate::{Flags, Slot, translate};
 /// The step limit used by [`DotNetRegex::new`]: `fancy-regex`'s default of
 /// one million backtracking steps.
 pub const DEFAULT_STEP_LIMIT: usize = 1_000_000;
+
+/// A compiled-size cap for patterns a player types, in bytes (128 KiB).
+/// Literal text, `.*`, alternations and look-arounds take a few KiB; each
+/// Unicode class such as `\w` or `\p{L}` takes about 50 KiB, so two of them
+/// fit (`^Legendary \w+ of \w+$`). A pattern that would spend a plugin
+/// call's time compiling (`\w{1000}`, `\w{0,50}Ring`: a Unicode class under
+/// a counted repeat) is refused as [`RegexError::TooLarge`] after well under
+/// a millisecond of native work.
+pub const UNTRUSTED_PATTERN_SIZE_LIMIT: usize = 128 * 1024;
+
+/// The limits a pattern is compiled with (see [`DotNetRegex::with_limits`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegexLimits {
+    /// Backtracking steps one match may take before it stops with
+    /// [`RegexError::StepLimitExceeded`].
+    pub step_limit: usize,
+    /// The most memory, in bytes, each compiled automaton of the pattern may
+    /// take; a larger pattern fails to compile with [`RegexError::TooLarge`].
+    /// `None` keeps the engine's own cap (10 MiB, reported as
+    /// [`RegexError::Unsupported`], as before the cap existed).
+    ///
+    /// The cap is checked while compiling, so a refused pattern costs about
+    /// as much as compiling one at the cap. It applies to each automaton
+    /// separately: a pattern with back-references or look-arounds is split
+    /// into pieces, each held to the cap. The parts the backtracking engine
+    /// runs itself (back-references, look-arounds, repeats around them) grow
+    /// with the pattern's length, not its repeat counts, and need no cap. A
+    /// variable-length look-behind (`(?<=\w{0,50})`) is the exception: it is
+    /// compiled outside the cap.
+    pub compiled_size_limit: Option<usize>,
+}
+
+impl Default for RegexLimits {
+    /// The limits [`DotNetRegex::new`] uses.
+    fn default() -> Self {
+        Self {
+            step_limit: DEFAULT_STEP_LIMIT,
+            compiled_size_limit: None,
+        }
+    }
+}
 
 /// Why a pattern does not compile or a match did not finish.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -31,6 +75,10 @@ pub enum RegexError {
     /// The match ran past the step limit (.NET: `RegexMatchTimeoutException`).
     #[error("regular expression exceeded its step limit")]
     StepLimitExceeded,
+    /// The pattern compiles larger than its size limit, in bytes
+    /// ([`RegexLimits::compiled_size_limit`]); .NET has no such limit.
+    #[error("pattern too large: it compiles past the {0}-byte size limit")]
+    TooLarge(usize),
 }
 
 /// .NET's `RegexOptions`.
@@ -122,6 +170,42 @@ impl DotNetRegex {
         options: RegexOptions,
         step_limit: usize,
     ) -> Result<Self, RegexError> {
+        Self::with_limits(
+            pattern,
+            options,
+            RegexLimits {
+                step_limit,
+                ..RegexLimits::default()
+            },
+        )
+    }
+
+    /// `new Regex(pattern, options, matchTimeout)` with a cap on the compiled
+    /// size as well: for patterns a player types, where a short pattern such
+    /// as `\w{1000}` would otherwise spend a plugin call's whole time budget
+    /// compiling. Pass [`UNTRUSTED_PATTERN_SIZE_LIMIT`] as
+    /// `compiled_size_limit` and show [`RegexError::TooLarge`] as "pattern
+    /// too large".
+    ///
+    /// ```
+    /// use openac_plugin_compat::regex::{
+    ///     DotNetRegex, RegexError, RegexLimits, RegexOptions, UNTRUSTED_PATTERN_SIZE_LIMIT,
+    /// };
+    /// let limits = RegexLimits {
+    ///     compiled_size_limit: Some(UNTRUSTED_PATTERN_SIZE_LIMIT),
+    ///     ..RegexLimits::default()
+    /// };
+    /// assert!(DotNetRegex::with_limits("(Gold|Silver) Ring", RegexOptions::NONE, limits).is_ok());
+    /// assert_eq!(
+    ///     DotNetRegex::with_limits(r"\w{1000}", RegexOptions::NONE, limits).map(|_| ()),
+    ///     Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT))
+    /// );
+    /// ```
+    pub fn with_limits(
+        pattern: &str,
+        options: RegexOptions,
+        limits: RegexLimits,
+    ) -> Result<Self, RegexError> {
         for (flag, name) in [
             (RegexOptions::RIGHT_TO_LEFT, "RegexOptions.RightToLeft"),
             (RegexOptions::ECMA_SCRIPT, "RegexOptions.ECMAScript"),
@@ -143,10 +227,25 @@ impl DotNetRegex {
         };
         let translation = translate(pattern, flags)?;
         let build = |text: &str| {
-            fancy_regex::RegexBuilder::new(text)
-                .backtrack_limit(step_limit)
+            let mut builder = fancy_regex::RegexBuilder::new(text);
+            builder.backtrack_limit(limits.step_limit);
+            if let Some(limit) = limits.compiled_size_limit {
+                builder.delegate_size_limit(limit);
+            }
+            builder
                 .build()
-                .map_err(|e| RegexError::Unsupported(format!("{pattern:?}: {e}")))
+                .map_err(|e| match (&e, limits.compiled_size_limit) {
+                    (fancy_regex::Error::CompileError(inner), Some(limit))
+                        if matches!(
+                            **inner,
+                            fancy_regex::CompileError::InnerError(ref built)
+                                if built.size_limit().is_some()
+                        ) =>
+                    {
+                        RegexError::TooLarge(limit)
+                    }
+                    _ => RegexError::Unsupported(format!("{pattern:?}: {e}")),
+                })
         };
         Ok(Self {
             pattern: pattern.to_owned(),
@@ -512,5 +611,65 @@ mod tests {
         // A generous limit lets an ordinary pattern finish.
         let ok = DotNetRegex::new(r"^(\w+)\s\1$", RegexOptions::NONE).unwrap();
         assert_eq!(ok.is_match("hello hello"), Ok(true));
+    }
+
+    fn capped(pattern: &str) -> Result<DotNetRegex, RegexError> {
+        DotNetRegex::with_limits(
+            pattern,
+            RegexOptions::NONE,
+            RegexLimits {
+                compiled_size_limit: Some(UNTRUSTED_PATTERN_SIZE_LIMIT),
+                ..RegexLimits::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_pattern_past_the_size_limit_is_refused_as_too_large() {
+        for pattern in [
+            r"\w{1000}",
+            r"\w{0,50}Ring",
+            r"(?:\p{L}|\p{N}){999}",
+            r"[\w\W]{2000}",
+            // Parts of a pattern the backtracking engine runs itself.
+            r"(?<!x)\w{1000}",
+            r"(\w)\1\w{1000}",
+        ] {
+            assert_eq!(
+                capped(pattern).map(|_| ()),
+                Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT)),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_patterns_compile_under_the_size_limit() {
+        for (pattern, input) in [
+            ("Atlan.*Fire", "Atlan Sword of Fire"),
+            ("(Gold|Silver) Ring", "a Silver Ring"),
+            ("(?<!x)Pack", "Pack"),
+            ("(?=.*Sword)(?=.*Fire)", "Fire Sword"),
+            (r"^(\w+)\s\1$", "hello hello"),
+            // Two Unicode word classes fit.
+            (r"^Legendary \w+ of \w+$", "Legendary Ring of Fire"),
+        ] {
+            let re = capped(pattern).unwrap_or_else(|e| panic!("{pattern}: {e}"));
+            assert_eq!(re.is_match(input), Ok(true), "{pattern}");
+        }
+    }
+
+    #[test]
+    fn without_a_size_limit_the_engine_default_applies() {
+        // What `new` uses: a pattern far past the untrusted cap still
+        // compiles, as before the cap existed.
+        assert_eq!(RegexLimits::default().compiled_size_limit, None);
+        assert_eq!(RegexLimits::default().step_limit, DEFAULT_STEP_LIMIT);
+        assert!(DotNetRegex::new(r"\w{0,50}Ring", RegexOptions::NONE).is_ok());
+        // Past the engine's own cap the error stays what it always was.
+        assert!(matches!(
+            DotNetRegex::new(r"\w{1000}", RegexOptions::NONE),
+            Err(RegexError::Unsupported(_))
+        ));
     }
 }
