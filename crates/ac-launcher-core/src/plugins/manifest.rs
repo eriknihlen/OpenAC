@@ -10,9 +10,7 @@
 
 pub use ac_plugin_manifest::HostVersion;
 pub use ac_plugin_manifest::manifest::{ManifestError, PermissionDeclaration, PluginManifest};
-pub use ac_plugin_version::{
-    API_CURRENT, API_MINIMUM, ApiVersion, PERMISSIONS_VERSION, Permission,
-};
+pub use ac_plugin_version::{ApiVersion, PERMISSIONS_VERSION, Permission};
 
 use crate::updates::{LauncherVersion, is_windows_device_name};
 
@@ -85,9 +83,11 @@ fn invalid(message: impl Into<String>) -> ManifestError {
 /// The rules a manifest the launcher installs must meet beyond parsing.
 pub trait InstallRules {
     /// A namespaced id that is not a Windows device name, a strict SemVer
-    /// version, a declared minimum client version, and an API version this
-    /// build loads. (The parser already enforced the permission vocabulary
-    /// and the note rules.)
+    /// version, a declared minimum client version and a permission
+    /// vocabulary this build knows. (The parser already enforced the
+    /// permission vocabulary's entries and the note rules.) Whether the
+    /// `apiVersion` loads is the installed client's to say, so it is judged
+    /// with the client versions (`version_only_reason`), not here.
     fn validate_for_install(&self) -> Result<(), ManifestError>;
 
     /// Whether a release tag names this manifest's version, as
@@ -125,12 +125,6 @@ impl InstallRules for PluginManifest {
                 "permissionsVersion {} is newer than this client's vocabulary \
                  ({PERMISSIONS_VERSION})",
                 self.permissions_version
-            )));
-        }
-        if !ac_plugin_version::is_supported(self.api_version) {
-            return Err(invalid(format!(
-                "apiVersion {} is not supported by this launcher ({API_MINIMUM} to {API_CURRENT})",
-                self.api_version
             )));
         }
         Ok(())

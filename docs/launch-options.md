@@ -46,6 +46,7 @@ or the launcher's way of starting a client, see the next section.
 | `OPENAC_DATA_DIR` (one-session form) | `openac` | the install root | The data folder for `/log` files and journals in this form; it follows the same rules as in `openac run` (see the next section). |
 | `-h`, `--help` | `actool`, `openac` | — | Print usage. |
 | `openac peer-hub <folder>` | `openac` | — | The peer hub the sessions on this computer share for plugin peers. A session starts it when a plugin first subscribes and no hub answers, at `<folder>` (the sessions' peer folder; a named pipe for the current user on Windows, a Unix socket in the folder elsewhere). One hub per user and folder (a second exits at once); it exits 15 s after its last client leaves. Not meant to be typed. |
+| `openac plugin-api` | `openac` | — | Print the plugin API versions this client loads, one line of JSON: `{"schemaVersion":1,"minimum":"1.0","current":"1.11"}`. Every release carries this output as `plugin-api.json` beside `openac` (in `OpenAC.app`, under `Contents/Resources`), and the launcher installs, updates and lists plugins by the installed client's file (a client released before the file, 0.2.3 and older, by its version; one without the file whose version is not such a release has an unknown range, and the launcher installs nothing for it). A client run beside a developer-built launcher has no file unless it is written there (`openac plugin-api > plugin-api.json` in that folder). |
 
 ## The client, session-config documents
 

@@ -17,6 +17,7 @@ use ac_launcher_core::net::HttpTransport;
 use ac_launcher_core::orchestration::{
     LauncherExecutableSet, LauncherOrchestrator, OrchestratorParts,
 };
+use ac_launcher_core::plugins::beside_launcher_plugin_api;
 use ac_launcher_core::profiles::LauncherProfileStore;
 use ac_launcher_core::status::{KnownServerCatalog, ServerHealthService};
 use ac_launcher_core::updates::{
@@ -306,6 +307,11 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
             .join(format!("openac{}", suffix_for_current_os()));
         let directory = context.launcher_directory.clone();
         let version = launcher_version.clone();
+        // Read once: the launcher's own folder does not change while it runs.
+        let plugin_api = beside
+            .is_file()
+            .then(|| beside_launcher_plugin_api(&directory, Some(&version)))
+            .flatten();
         Arc::new(move || {
             let resolution = versions.cached_resolution();
             if resolution.is_verified() || !beside.is_file() {
@@ -319,6 +325,7 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
                 directory: Some(directory.clone()),
                 previous_version: None,
                 record: None,
+                plugin_api,
             })
         })
     };

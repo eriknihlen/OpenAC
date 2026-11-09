@@ -449,11 +449,10 @@ impl PluginComposition {
         if catalog.is_some_and(|catalog| catalog.is_blocked(&record.id, Some(&remote))) {
             return withheld("the plugin is blocked");
         }
-        let client_version = client.and_then(|client| client.version.as_ref());
-        if let Some(reason) = version_only_reason(manifest, client_version) {
+        if let Some(reason) = version_only_reason(manifest, client) {
             return withheld(&reason);
         }
-        let compatibility = describe(manifest, client_version);
+        let compatibility = describe(manifest, client);
         PluginSingleCheckResult {
             available: Some(PluginUpdateAvailability {
                 version: manifest.version.clone(),

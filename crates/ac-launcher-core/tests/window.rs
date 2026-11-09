@@ -845,6 +845,7 @@ fn the_version_lines_show_launcher_and_client_without_build_metadata() {
             directory: None,
             previous_version: None,
             record: None,
+            plugin_api: None,
         };
         let mut parts = parts(batch(), Arc::new(InlineSpawner));
         parts.launcher_version = Some(launcher.into());
@@ -2880,8 +2881,23 @@ impl PanelFixture {
         self.window_with(Arc::new(Fake::default()))
     }
 
+    /// A window over an installed, verified client (0.1.7, loading plugin
+    /// API 1.0 to 1.11): the launcher installs plugins only for one.
+    fn window_with_client(&self, fake: Arc<Fake>) -> LauncherWindow {
+        self.window_parts(fake, Some(installed_client()))
+    }
+
     fn window_with(&self, fake: Arc<Fake>) -> LauncherWindow {
+        self.window_parts(fake, None)
+    }
+
+    fn window_parts(
+        &self,
+        fake: Arc<Fake>,
+        client: Option<ClientVersionResolution>,
+    ) -> LauncherWindow {
         let mut parts = parts(fake, Arc::new(InlineSpawner));
+        parts.client_version = Arc::new(move || client.clone());
         parts.plugins = Some(Arc::new(PluginComposition::new(
             &self.paths(),
             WebUrl::parse(LIST_URI).unwrap(),
@@ -2891,6 +2907,20 @@ impl PanelFixture {
         let mut window = LauncherWindow::new(parts);
         window.initialize();
         window
+    }
+}
+
+/// A verified client 0.1.7 that loads plugin API 1.0 to 1.11.
+fn installed_client() -> ClientVersionResolution {
+    use ac_launcher_core::plugins::{ApiRange, ApiVersion};
+    ClientVersionResolution {
+        state: ClientVersionState::Verified,
+        status: String::new(),
+        version: LauncherVersion::try_parse("0.1.7"),
+        directory: None,
+        previous_version: None,
+        record: None,
+        plugin_api: Some(ApiRange::new(ApiVersion::new(1, 0), ApiVersion::new(1, 11))),
     }
 }
 
@@ -3128,7 +3158,7 @@ fn a_first_install_turns_the_plugin_on_for_every_account_and_character() {
             }
         }
     }
-    let mut window = fixture.window_with(fake.clone());
+    let mut window = fixture.window_with_client(fake.clone());
     check(&mut window);
     window.refresh_discover_details();
     window.poll();
@@ -3803,7 +3833,7 @@ fn add_from_url_with_three_plugins(fixture: &PanelFixture) -> LauncherWindow {
     for (tag, id, version) in releases {
         fixture.release_zip(tag, id, version);
     }
-    let mut window = fixture.window();
+    let mut window = fixture.window_with_client(Arc::new(Fake::default()));
     check(&mut window);
     window.plugins.add_from_url_text = format!("https://github.com/{HELLO_REPO}");
     window.add_from_url();
@@ -5441,7 +5471,7 @@ fn install_from_zip_shows_review_then_installs_without_a_github_release() {
     std::fs::create_dir_all(&cache).unwrap();
     let zip = cache.join("mosswart.zip");
     std::fs::write(&zip, zip_bytes).unwrap();
-    let mut window = fixture.window();
+    let mut window = fixture.window_with_client(Arc::new(Fake::default()));
     assert!(window.can_install_local_zip());
 
     window.open_local_zip(&zip);

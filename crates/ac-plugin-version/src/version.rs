@@ -51,18 +51,58 @@ impl fmt::Display for ApiVersion {
     }
 }
 
-/// The API version this build of the ABI provides.
-pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 11);
-
-/// The oldest API version a client built on this ABI still loads.
-pub const API_MINIMUM: ApiVersion = ApiVersion::new(1, 0);
-
-/// Whether a plugin built for `version` can load here: from [`API_MINIMUM`]
-/// to [`API_CURRENT`], both included.
-#[must_use]
-pub fn is_supported(version: ApiVersion) -> bool {
-    version >= API_MINIMUM && version <= API_CURRENT
+/// The plugin API versions a client loads: from `minimum` to `current`,
+/// both included. Which range a client has belongs to that client (its
+/// `ac-plugin-abi`); the launcher learns it from the installed client's
+/// [`PLUGIN_API_FILE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ApiRange {
+    /// The oldest version it still loads.
+    pub minimum: ApiVersion,
+    /// The newest version it provides.
+    pub current: ApiVersion,
 }
+
+impl ApiRange {
+    /// A range from `minimum` to `current`.
+    #[must_use]
+    pub const fn new(minimum: ApiVersion, current: ApiVersion) -> Self {
+        Self { minimum, current }
+    }
+
+    /// Whether a plugin built for `version` loads in this range.
+    #[must_use]
+    pub const fn contains(self, version: ApiVersion) -> bool {
+        self.minimum.is_at_most(version) && version.is_at_most(self.current)
+    }
+
+    /// The text of [`PLUGIN_API_FILE`] for this range, one line of JSON:
+    /// `{"schemaVersion":1,"minimum":"1.0","current":"1.11"}`. Schema
+    /// version 1 may gain members; a reader ignores members it does not
+    /// know.
+    #[must_use]
+    pub fn to_file_text(self) -> String {
+        format!(
+            "{{\"schemaVersion\":{PLUGIN_API_SCHEMA_VERSION},\"minimum\":\"{}\",\"current\":\"{}\"}}\n",
+            self.minimum, self.current
+        )
+    }
+}
+
+impl fmt::Display for ApiRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} to {}", self.minimum, self.current)
+    }
+}
+
+/// The file at the root of a released client's folder, beside the `openac`
+/// program, that says which plugin API versions that client loads (as
+/// [`ApiRange::to_file_text`] writes it). `openac plugin-api` prints it and
+/// the release packages that output, so it is the program's own answer.
+pub const PLUGIN_API_FILE: &str = "plugin-api.json";
+
+/// The schema version of [`PLUGIN_API_FILE`].
+pub const PLUGIN_API_SCHEMA_VERSION: u32 = 1;
 
 /// The custom section the SDK writes into every plugin's `.wasm`: the API
 /// version it was built for, as UTF-8 `MAJOR.MINOR`.
@@ -82,16 +122,25 @@ mod tests {
     }
 
     #[test]
-    fn support_is_the_closed_range_minimum_to_current() {
-        assert!(is_supported(API_CURRENT));
-        assert!(is_supported(API_MINIMUM));
-        assert!(!is_supported(ApiVersion::new(
-            API_CURRENT.major,
-            API_CURRENT.minor + 1
-        )));
-        assert!(!is_supported(ApiVersion::new(0, 9)));
-        assert_eq!(API_CURRENT.to_string(), "1.11");
-        assert_eq!(API_MINIMUM.to_string(), "1.0");
+    fn a_range_holds_its_ends_and_what_lies_between() {
+        let v = ApiVersion::new;
+        let range = ApiRange::new(v(1, 0), v(1, 11));
+        for inside in [v(1, 0), v(1, 9), v(1, 10), v(1, 11)] {
+            assert!(range.contains(inside), "{inside}");
+        }
+        for outside in [v(0, 9), v(1, 12), v(2, 0)] {
+            assert!(!range.contains(outside), "{outside}");
+        }
+        assert_eq!(range.to_string(), "1.0 to 1.11");
+    }
+
+    #[test]
+    fn the_file_text_is_one_line_of_json() {
+        let range = ApiRange::new(ApiVersion::new(1, 0), ApiVersion::new(1, 11));
+        assert_eq!(
+            range.to_file_text(),
+            "{\"schemaVersion\":1,\"minimum\":\"1.0\",\"current\":\"1.11\"}\n"
+        );
     }
 
     #[test]

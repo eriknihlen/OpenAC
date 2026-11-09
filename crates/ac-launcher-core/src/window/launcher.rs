@@ -4697,10 +4697,7 @@ fn channel_option(
     client: Option<&ClientVersionResolution>,
 ) -> Option<DiscoverChannelOption> {
     let resolution = result.resolution()?;
-    let compatibility = describe(
-        &resolution.manifest,
-        client.and_then(|client| client.version.as_ref()),
-    );
+    let compatibility = describe(&resolution.manifest, client);
     Some(DiscoverChannelOption {
         tag: resolution.tag.clone(),
         version: resolution.manifest.version.clone(),

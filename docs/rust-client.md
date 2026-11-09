@@ -56,6 +56,14 @@ field comes with the next minor version. 0.2.0 adds none; 1.11 is current.
 To use a newer version, move the plugin's SDK to that release and set
 `"apiVersion"` in its `plugin.json`.
 
+Which versions run is the client's to say, not the launcher's: each client
+release carries `plugin-api.json` beside the `openac` program (`openac
+plugin-api` prints it), and the launcher installs a plugin only when the
+installed client loads the plugin's version; for a client released before
+that file it knows the versions above. So a new plugin API version needs a
+client update, never a launcher update. With no client installed, the
+launcher installs no plugin.
+
 ## Platforms
 
 Windows 10 and 11 (64-bit) is where it is played most. Linux (64-bit, X11 or
