@@ -407,7 +407,7 @@ impl PluginBinding<'_> {
         let ownership = Ownership::of(items, player);
         let mut owned: Vec<InventoryItem> = items
             .objects()
-            .filter(|i| ownership.owns(i, items))
+            .filter(|i| ownership.owns(i))
             .map(|i| {
                 let (container, place) = ownership
                     .listing(i.object_id())
@@ -792,7 +792,7 @@ impl PluginBinding<'_> {
         let ownership = Ownership::of(items, player);
         let mut built: Vec<EquipmentItem> = items
             .objects()
-            .filter(|i| i.valid_locations.bits() != 0 && ownership.owns(i, items))
+            .filter(|i| i.valid_locations.bits() != 0 && ownership.owns(i))
             .map(|item| EquipmentItem {
                 object_id: item.object_id(),
                 name: item.name.clone(),

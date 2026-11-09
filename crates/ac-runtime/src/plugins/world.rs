@@ -3,6 +3,7 @@
 //! world, the inventory's appraisal slot, the contract tracker and the game
 //! clock.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
 use ac_core::items::placement::PlaceCounter;
@@ -48,7 +49,29 @@ pub(super) fn position_of(position: &ac_proto::Position) -> Position {
 /// Whether the player carries or wields `item`: see [`Ownership`]. For one
 /// check; a walk over many objects builds the [`Ownership`] once.
 pub(super) fn is_player_owned(item: &ClientObject, player: u32, items: &ClientObjectTable) -> bool {
-    Ownership::of(items, player).owns(item, items)
+    Ownership::of(items, player).owns(item)
+}
+
+/// How many levels down from the player ownership reaches: an item in the
+/// main pack is the first, one in a pack four packs down the fifth.
+const OWNED_LEVELS: usize = 5;
+
+/// Where a listed object with no placement of its own is.
+#[derive(Debug, Clone, Copy)]
+struct Listing {
+    /// The container whose list holds it.
+    container: u32,
+    /// Its place in that list among its kind.
+    place: i32,
+    /// Its level below the player (1: in the player's own list).
+    level: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread walked the player's contents lists: the
+    /// walk is the costly part of [`Ownership`], and tests hold its count.
+    pub(super) static OWNERSHIP_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// An object with no placement of its own: in no container, worn by no one.
@@ -64,32 +87,51 @@ fn is_unplaced(item: &ClientObject) -> bool {
 /// `IsPlayerOwned`. An object the server has listed in the player's
 /// contents, or in an owned pack's, before describing it has no placement
 /// of its own yet (a listing names a container's members and moves none of
-/// them); it is owned too, in the container whose list holds it. At login
-/// every side pack's contents are listed before their descriptions arrive,
-/// so without this the owned list would miss them while the inventory
-/// already counts as complete.
-pub(super) struct Ownership {
+/// them); it is owned too, in the container whose list holds it, to the same
+/// depth. At login every side pack's contents are listed before their
+/// descriptions arrive, so without this the owned list would miss them
+/// while the inventory already counts as complete.
+///
+/// The placement is read first; the contents lists are walked only when it
+/// ends at an object with no placement, and then once for this value, so
+/// build one for a pass over many objects.
+pub(super) struct Ownership<'a> {
+    items: &'a ClientObjectTable,
     player: u32,
-    /// Each listed object with no placement of its own: the container whose
-    /// list holds it and its place there among its kind.
-    listed: HashMap<u32, (u32, i32)>,
+    /// Each listed object with no placement of its own, walked on first
+    /// need.
+    listed: OnceCell<HashMap<u32, Listing>>,
 }
 
-impl Ownership {
+impl<'a> Ownership<'a> {
+    /// The player's ownership in `items`; nothing is walked yet.
+    pub(super) fn of(items: &'a ClientObjectTable, player: u32) -> Self {
+        Self {
+            items,
+            player,
+            listed: OnceCell::new(),
+        }
+    }
+
     /// Walks the player's contents list and the list of every pack on it,
-    /// nested. A member whose own placement names another container is
-    /// that container's, so its lists are not followed from here.
-    pub(super) fn of(items: &ClientObjectTable, player: u32) -> Self {
+    /// nested to [`OWNED_LEVELS`]. A member whose own placement names
+    /// another container is that container's, so its lists are not
+    /// followed from here.
+    fn walk(&self) -> HashMap<u32, Listing> {
+        #[cfg(test)]
+        OWNERSHIP_WALKS.with(|walks| walks.set(walks.get() + 1));
+        let items = self.items;
         let mut listed = HashMap::new();
         let mut pending = Vec::new();
-        if player != 0 {
-            pending.push(player);
+        if self.player != 0 {
+            pending.push((self.player, 0));
         }
         let mut visited = HashSet::new();
-        while let Some(container) = pending.pop() {
+        while let Some((container, container_level)) = pending.pop() {
             if !visited.insert(container) {
                 continue;
             }
+            let level = container_level + 1;
             let mut places = PlaceCounter::default();
             for &id in items.get_contents(container) {
                 let place = places.next(items, id);
@@ -97,33 +139,49 @@ impl Ownership {
                     continue;
                 };
                 if is_unplaced(member) {
-                    listed.insert(id, (container, place.unwrap_or(-1)));
+                    listed.insert(
+                        id,
+                        Listing {
+                            container,
+                            place: place.unwrap_or(-1),
+                            level,
+                        },
+                    );
                 } else if member.container_id != container {
                     continue;
                 }
-                if items.contents_list(id).is_some() {
-                    pending.push(id);
+                if level < OWNED_LEVELS && items.contents_list(id).is_some() {
+                    pending.push((id, level));
                 }
             }
         }
-        Self { player, listed }
+        listed
+    }
+
+    fn listed(&self) -> &HashMap<u32, Listing> {
+        self.listed.get_or_init(|| self.walk())
     }
 
     /// Whether the player owns `item`.
-    pub(super) fn owns(&self, item: &ClientObject, items: &ClientObjectTable) -> bool {
+    pub(super) fn owns(&self, item: &ClientObject) -> bool {
         if self.player == 0 {
             return false;
         }
-        // The item, then up to four packs around it.
+        // The item, then the packs around it, to the levels ownership
+        // reaches.
         let mut current = item;
-        for _ in 0..5 {
+        for climbed in 0..OWNED_LEVELS {
             if current.wielder_id == self.player || current.container_id == self.player {
                 return true;
             }
             if current.container_id == 0 {
-                return is_unplaced(current) && self.listed.contains_key(&current.object_id());
+                return is_unplaced(current)
+                    && self
+                        .listed()
+                        .get(&current.object_id())
+                        .is_some_and(|listing| listing.level + climbed <= OWNED_LEVELS);
             }
-            let Some(parent) = items.get(current.container_id) else {
+            let Some(parent) = self.items.get(current.container_id) else {
                 return false;
             };
             current = parent;
@@ -134,7 +192,12 @@ impl Ownership {
     /// The owned container whose list holds `object_id`, and its place
     /// there, when the object has no placement of its own.
     pub(super) fn listing(&self, object_id: u32) -> Option<(u32, i32)> {
-        self.listed.get(&object_id).copied()
+        if self.player == 0 || !self.items.get(object_id).is_some_and(is_unplaced) {
+            return None;
+        }
+        self.listed()
+            .get(&object_id)
+            .map(|listing| (listing.container, listing.place))
     }
 }
 
@@ -204,13 +267,14 @@ pub(super) fn project_object(world: &World, object_id: u32) -> Option<abi::World
     project_object_owned(world, object_id, &ownership)
 }
 
-/// [`project_object`] with the player's [`Ownership`] already walked. An
+/// [`project_object`] with the player's [`Ownership`] shared by a pass over many
+/// objects, so its contents lists are walked once at most. An
 /// owned object listed before it is described is in the container whose
 /// list holds it.
 pub(super) fn project_object_owned(
     world: &World,
     object_id: u32,
-    ownership: &Ownership,
+    ownership: &Ownership<'_>,
 ) -> Option<abi::WorldObject> {
     let record = world.object(object_id);
     let item = world.item(object_id);
@@ -219,7 +283,7 @@ pub(super) fn project_object_owned(
     }
     let player = world.player_guid().unwrap_or(0);
     let source = record.and_then(|r| r.position());
-    let owned = item.is_some_and(|i| ownership.owns(i, world.items()));
+    let owned = item.is_some_and(|i| ownership.owns(i));
     let flags = item
         .and_then(|i| i.public_weenie_bitfield)
         .map_or(0, |f| f.bits());

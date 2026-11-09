@@ -551,7 +551,8 @@ macro_rules! import_table {
             /// in the main pack and inside every pack. An item the server has
             /// listed in a pack but not described yet is included, in the
             /// pack whose list holds it, with no name, class `Unknown` and no
-            /// header until its description arrives.
+            /// header until its description arrives; until then it cannot be
+            /// sold, moved or used (those calls refuse it or send nothing).
             ItemsOwned = items_owned(()) -> Vec<$crate::items::InventoryItem>,
                 permission: None, window: false, since: (1, 0);
             /// Where the item commands stand (busy, completions).
@@ -719,7 +720,8 @@ macro_rules! import_table {
             /// Add (listing, count) to the buy list.
             VendorAddBuy = vendor_add_buy((u32, i32)) -> $crate::trade::VendorResult,
                 permission: None, window: false, since: (1, 0);
-            /// Add an owned item to the sell list.
+            /// Add an owned item to the sell list; one listed but not yet
+            /// described is refused as an invalid item.
             VendorAddSell = vendor_add_sell(u32) -> $crate::trade::VendorResult,
                 permission: None, window: false, since: (1, 0);
             /// Take a listing off the buy list.

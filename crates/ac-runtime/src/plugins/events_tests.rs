@@ -121,6 +121,61 @@ fn object_changes_follow_openac_vocabulary() {
     assert_eq!(released.changed_fields, 0b1);
 }
 
+/// Applies the character description with one side pack, `pack`, in the
+/// main pack, and returns the server's listing of `contents` in it (the
+/// event's bytes): what a login sends before it describes the pack's items.
+fn pack_listing(state: &mut SessionState, pack: u32, contents: &[u32]) -> Vec<u8> {
+    let mut description = crate::world::tests::empty_description();
+    description.inventory = vec![ac_proto::InventoryEntry {
+        guid: pack,
+        container_type: 1,
+    }];
+    state.world.apply_player_description(&description);
+    state.world.drain_changes().for_each(drop);
+    let count = u32::try_from(contents.len()).unwrap();
+    let mut payload = vec![pack, count];
+    payload.extend(contents.iter().flat_map(|&guid| [guid, 0]));
+    crate::world::tests::game_event(ac_proto::GameEventType::VIEW_CONTENTS, &payload)
+}
+
+// A pack's contents listed before they are described: each item's creation
+// says it is the character's, in that pack.
+#[test]
+fn an_item_a_pack_lists_is_created_owned_in_that_pack() {
+    const PACK: u32 = 0x7000_1234;
+    const GEM: u32 = 0x8000_0001;
+    let mut state = in_world();
+    let listing = pack_listing(&mut state, PACK, &[GEM]);
+    let created = changes_of(&mut state, &ac_proto::Inbound::parse(&listing).unwrap());
+    assert_eq!(kinds(&created), [(GEM, ObjectChangeKind::Created)]);
+    let Event::ObjectChanged(change) = &created[0] else {
+        panic!("an object change");
+    };
+    let current = change.current.as_ref().expect("its state");
+    assert!(current.is_owned && !current.is_landscape);
+    assert_eq!(current.container_id, PACK);
+}
+
+// A login's burst of listed items is one pass of object changes: the
+// player's contents lists are walked at most once for all of them, not once
+// per item.
+#[test]
+fn one_pass_of_object_changes_walks_the_contents_lists_at_most_once() {
+    const PACK: u32 = 0x7000_1234;
+    let mut state = in_world();
+    let contents: Vec<u32> = (0..50).map(|i| 0x8000_1000 + i).collect();
+    let listing = pack_listing(&mut state, PACK, &contents);
+    state
+        .world
+        .apply(&ac_proto::Inbound::parse(&listing).unwrap());
+    let changes: Vec<_> = state.world.drain_changes().collect();
+    super::world::OWNERSHIP_WALKS.with(|walks| walks.set(0));
+    let events = events::objects_changed(&mut state, &changes);
+    let walks = super::world::OWNERSHIP_WALKS.with(std::cell::Cell::get);
+    assert_eq!(kinds(&events).len(), 50);
+    assert!(walks <= 1, "{walks} walks for one pass");
+}
+
 // OpenAC `RuntimeWorldEntityProjection.OnEntity`: an object entering the
 // world with a place is an entity spawned (its local id, the server id,
 // where it stands); a move or an update is not; a new incarnation is.

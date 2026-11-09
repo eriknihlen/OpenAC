@@ -18,6 +18,7 @@ use ac_plugin::abi::world::{
     PortalTransition, SelectionChange,
 };
 
+use super::world::Ownership;
 use crate::communication::ClientConfirmation;
 use crate::gameplay::GameplayEvent;
 use crate::local_time::LocalZone;
@@ -193,10 +194,17 @@ impl PluginServices {
         z ^ (z >> 31)
     }
 
-    fn change(&mut self, world: &World, object_id: u32, kind: ObjectChangeKind) -> Event {
+    /// One object change, its state read with the pass's `ownership`.
+    fn change(
+        &mut self,
+        world: &World,
+        ownership: &Ownership<'_>,
+        object_id: u32,
+        kind: ObjectChangeKind,
+    ) -> Event {
         self.object_revision += 1;
         let current = (kind != ObjectChangeKind::Released)
-            .then(|| super::world::project_object(world, object_id))
+            .then(|| super::world::project_object_owned(world, object_id, ownership))
             .flatten();
         Event::ObjectChanged(ObjectChange {
             object_id,
@@ -227,6 +235,10 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
         plugin_services: services,
         ..
     } = state;
+    let world: &World = world;
+    // The world does not change during the pass, so one ownership serves
+    // every change in it: the contents lists are walked once at most.
+    let ownership = Ownership::of(world.items(), world.player_guid().unwrap_or(0));
     let mut seen: Vec<(u32, ObjectChangeKind)> = Vec::new();
     let mut out = Vec::new();
     let mut emit = |services: &mut PluginServices, out: &mut Vec<Event>, id, kind| {
@@ -234,7 +246,7 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
             return;
         }
         seen.push((id, kind));
-        out.push(services.change(world, id, kind));
+        out.push(services.change(world, &ownership, id, kind));
     };
     for change in changes {
         match *change {
@@ -289,10 +301,9 @@ pub fn objects_changed(state: &mut SessionState, changes: &[WorldChange]) -> Vec
                     emit(services, &mut out, guid, ObjectChangeKind::Created);
                     // An item that enters the world already worn (OpenAC
                     // `PublishInitialEquipmentPlacement`).
-                    let player = world.player_guid().unwrap_or(0);
                     if let Some(added) = world.item(guid)
                         && added.currently_equipped_location.bits() != 0
-                        && super::world::is_player_owned(added, player, world.items())
+                        && ownership.owns(added)
                     {
                         out.push(Event::EquipmentPlacement(EquipmentObservation {
                             object_id: guid,

@@ -27,7 +27,9 @@ impl Host<'_> {
     /// is here, in the pack that lists it at its place, but with an empty
     /// name, class `Unknown`, zeroed numbers and `header: None`. Its
     /// description fills in the same id later; wait for `header` (or a
-    /// name) before judging an item by what it is.
+    /// name) before judging an item by what it is. Until then it cannot be
+    /// sold, moved or used: the vendor's sell list and moves refuse it, and
+    /// a use sends nothing.
     pub fn owned_items(&mut self) -> Vec<InventoryItem> {
         self.call::<calls::ItemsOwned>(&())
     }
