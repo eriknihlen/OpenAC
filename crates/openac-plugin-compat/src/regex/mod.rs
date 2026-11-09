@@ -22,12 +22,14 @@ use translate::{Flags, Slot, translate};
 pub const DEFAULT_STEP_LIMIT: usize = 1_000_000;
 
 /// A compiled-size cap for patterns a player types, in bytes (128 KiB).
-/// Literal text, `.*`, alternations and look-arounds take a few KiB; each
-/// Unicode class such as `\w` or `\p{L}` takes about 50 KiB, so two of them
-/// fit (`^Legendary \w+ of \w+$`). A pattern that would spend a plugin
+/// Literal text, `.*`, alternations and look-arounds take a few KiB; a
+/// Unicode `\w` takes about 50 KiB (other Unicode classes such as `\p{L}`
+/// somewhat less), so two `\w` fit (`^Legendary \w+ of \w+$`) and three do
+/// not (`(\w+) (\w+) (\w+)` is refused). A pattern that would spend a plugin
 /// call's time compiling (`\w{1000}`, `\w{0,50}Ring`: a Unicode class under
-/// a counted repeat) is refused as [`RegexError::TooLarge`] after well under
-/// a millisecond of native work.
+/// a counted repeat) is refused as [`RegexError::TooLarge`] after about a
+/// millisecond of native work. Meant for searches a player types, where
+/// "pattern too large" is an acceptable answer.
 pub const UNTRUSTED_PATTERN_SIZE_LIMIT: usize = 128 * 1024;
 
 /// The limits a pattern is compiled with (see [`DotNetRegex::with_limits`]).
@@ -48,9 +50,10 @@ pub struct RegexLimits {
     /// runs itself (back-references, look-arounds, repeats around them) grow
     /// with the pattern's length, not its repeat counts, and need no cap.
     /// The plain parts of every look-behind (`(?<=\w{0,50})`, anywhere in
-    /// the pattern) are compiled once more against the cap before the pattern
-    /// itself, because the engine compiles a variable-length look-behind
-    /// outside it.
+    /// the pattern) are compiled once more against the cap, backwards as the
+    /// engine compiles them, before the pattern itself, because the engine
+    /// compiles a variable-length look-behind outside the cap. An alternation
+    /// inside a look-behind is checked whole, which errs on the safe side.
     pub compiled_size_limit: Option<usize>,
 }
 
@@ -66,6 +69,7 @@ impl Default for RegexLimits {
 
 /// Why a pattern does not compile or a match did not finish.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum RegexError {
     /// .NET refuses the pattern too (`RegexParseException`).
     #[error("invalid pattern {0}")]
@@ -494,10 +498,14 @@ impl<'r, 't> RegexMatch<'r, 't> {
 /// Holds every look-behind of `pattern` (fancy-regex syntax) to the size
 /// cap. `fancy-regex` compiles a variable-length look-behind's plain parts
 /// into a reverse automaton of its own, outside the cap it applies to the
-/// rest of the pattern; here each such part is compiled once with the cap
-/// first (the same text, in both directions), so a part too large is refused
-/// before that uncapped build runs. `checked` holds the parts already
-/// compiled. Errors other than the size are left to the real compile.
+/// rest of the pattern; here the same reverse automaton is built once with
+/// the cap first, so a part too large is refused before that uncapped build
+/// runs. The pieces are the ones `fancy-regex` builds: the whole body when it
+/// is plain, else each run of plain parts side by side in a sequence (beside
+/// the parts the backtracking engine runs itself). An alternation is checked
+/// whole, where `fancy-regex` may build each branch on its own: that errs on
+/// the safe side. `checked` holds the pieces already built. Errors other than
+/// the size are left to the real compile.
 fn check_look_behinds(
     pattern: &str,
     limit: usize,
@@ -530,37 +538,64 @@ fn check_look_behinds(
         node && expr.children_iter().all(is_plain)
     }
 
-    fn check_plain_parts(
-        expr: &Expr,
+    /// Builds `text` as `fancy-regex` builds a look-behind piece: a reverse
+    /// automaton without captures, here with the size limit.
+    fn check_piece(
+        text: String,
         limit: usize,
         checked: &mut Vec<String>,
     ) -> Result<(), RegexError> {
-        if !is_plain(expr) {
-            return expr
-                .children_iter()
-                .try_for_each(|child| check_plain_parts(child, limit, checked));
-        }
-        let mut text = String::new();
-        expr.to_str(&mut text, 0);
-        if checked.contains(&text) {
+        use regex_automata::nfa::thompson;
+        if text.is_empty() || checked.contains(&text) {
             return Ok(());
         }
-        let built = fancy_regex::RegexBuilder::new(&text)
-            .delegate_size_limit(limit)
-            .build();
-        if let Err(fancy_regex::Error::CompileError(inner)) = &built
-            && let fancy_regex::CompileError::InnerError(e) = &**inner
-            && e.size_limit().is_some()
-        {
+        let built = thompson::Compiler::new()
+            .configure(
+                thompson::Config::new()
+                    .reverse(true)
+                    .which_captures(thompson::WhichCaptures::None)
+                    .nfa_size_limit(Some(limit)),
+            )
+            .build(&text);
+        if built.is_err_and(|e| e.size_limit().is_some()) {
             return Err(RegexError::TooLarge(limit));
         }
         checked.push(text);
         Ok(())
     }
 
+    fn check_body(expr: &Expr, limit: usize, checked: &mut Vec<String>) -> Result<(), RegexError> {
+        let text_of = |parts: &[&Expr]| {
+            let mut text = String::new();
+            for part in parts {
+                part.to_str(&mut text, 1);
+            }
+            text
+        };
+        if is_plain(expr) {
+            return check_piece(text_of(&[expr]), limit, checked);
+        }
+        let Expr::Concat(children) = expr else {
+            return expr
+                .children_iter()
+                .try_for_each(|child| check_body(child, limit, checked));
+        };
+        let mut run: Vec<&Expr> = Vec::new();
+        for child in children {
+            if is_plain(child) {
+                run.push(child);
+                continue;
+            }
+            check_piece(text_of(&run), limit, checked)?;
+            run.clear();
+            check_body(child, limit, checked)?;
+        }
+        check_piece(text_of(&run), limit, checked)
+    }
+
     fn walk(expr: &Expr, limit: usize, checked: &mut Vec<String>) -> Result<(), RegexError> {
         if let Expr::LookAround(body, LookAround::LookBehind | LookAround::LookBehindNeg) = expr {
-            check_plain_parts(body, limit, checked)?;
+            check_body(body, limit, checked)?;
         }
         expr.children_iter()
             .try_for_each(|child| walk(child, limit, checked))
@@ -726,6 +761,8 @@ mod tests {
             // Parts of a pattern the backtracking engine runs itself.
             r"(?<!x)\w{1000}",
             r"(\w)\1\w{1000}",
+            // Three Unicode word classes do not fit.
+            r"(\w+) (\w+) (\w+)",
         ] {
             assert_eq!(
                 capped(pattern).map(|_| ()),
@@ -785,7 +822,15 @@ mod tests {
             r"((?<=\w{0,300})x)+",
             // Beside a part the backtracking engine runs itself.
             r"(?<=(?=a)\w{0,300})x",
-        ] {
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            // Each run of plain parts beside one the backtracking engine
+            // runs itself is compiled as one piece: each `\w` alone fits.
+            [40, 200].map(|n| format!(r"(?<=\b{}\w+)x", r"\w".repeat(n))),
+        ) {
+            let pattern = pattern.as_str();
             assert_eq!(
                 capped(pattern).map(|_| ()),
                 Err(RegexError::TooLarge(UNTRUSTED_PATTERN_SIZE_LIMIT)),

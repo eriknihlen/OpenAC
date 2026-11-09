@@ -2473,6 +2473,7 @@ name = "openac-plugin-compat"
 version = "0.2.2"
 dependencies = [
  "fancy-regex",
+ "regex-automata",
  "thiserror 2.0.21",
 ]
 
