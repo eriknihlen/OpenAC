@@ -3136,9 +3136,6 @@ fn the_plugin_release_watch_backs_off_when_rate_limited() {
     assert_eq!(fixture.server.count(&feed), before + 2);
 }
 
-// Not an OpenAC test (owner, 2026-11-05): a first install turns the plugin
-// on for every account and for every character with a plugin list of its
-// own; a character that already has it is left alone.
 // With no client installed nothing can say whether a plugin would run: Discover's
 // Install says so on the panel at once instead of opening the review first.
 #[test]
@@ -3158,6 +3155,9 @@ fn discover_install_without_a_client_says_so_at_once() {
     );
 }
 
+// Not an OpenAC test (owner, 2026-11-05): a first install turns the plugin
+// on for every account and for every character with a plugin list of its
+// own; a character that already has it is left alone.
 #[test]
 fn a_first_install_turns_the_plugin_on_for_every_account_and_character() {
     let fixture = PanelFixture::new();
