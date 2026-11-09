@@ -14,8 +14,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ac_physics::{CellSurface, TerrainSurface};
+use ac_physics::globals::FLOOR_Z;
+use ac_physics::{CellSurface, TerrainSurface, point_in_triangle_xy};
 use glam::Vec3;
+
+use super::reach::ON_THE_FLOOR;
 
 use super::{
     COVER_MARGIN, DEFAULT_CELL_SIZE, Job, LANDBLOCK_SIZE, MAXIMUM_DUNGEON_REGION, NavAvoidance,
@@ -300,6 +303,19 @@ impl WalkController {
             .into_iter()
             .map(widen)
             .collect();
+        let ground: Vec<PlacedGround> = if sealed {
+            Vec::new()
+        } else {
+            landblock_ids
+                .iter()
+                .filter_map(|&id| cx.physics.landblock(id))
+                .map(|landblock| PlacedGround {
+                    corner_x: landblock.world_offset_x,
+                    corner_y: landblock.world_offset_y,
+                    terrain: landblock.terrain.clone(),
+                })
+                .collect()
+        };
         let start_cell = sample.cell_id;
         PathPreview(Job::start(self.mode, move || {
             let begun = Instant::now();
@@ -339,13 +355,24 @@ impl WalkController {
                     ..NavPlan::failed(PlanStatus::NoRoute, &found.reason)
                 };
             }
+            let namer = PointNamer {
+                start,
+                global_start,
+                start_cell,
+                cells: &cells,
+                ground: &ground,
+                sealed_dungeon: sealed,
+            };
+            let mut came_from = start_cell;
             NavPlan {
                 status: PlanStatus::Routed,
                 path: found
                     .legs
                     .iter()
                     .map(|&point| {
-                        plan_point(point, start, global_start, start_cell, &cells, sealed)
+                        let named = namer.name(point, came_from);
+                        came_from = named.cell_id;
+                        named
                     })
                     .collect(),
                 reason: found.reason,
@@ -488,20 +515,78 @@ impl WalkController {
     }
 }
 
-/// A route point as a preview reports it: measured from the corner of the
-/// first landblock, in the cell whose floor lies nearest its height, else
-/// the start's cell in a sealed dungeon, else the outdoor cell under it
+/// One landblock's ground, placed in the world frame.
+struct PlacedGround {
+    corner_x: f32,
+    corner_y: f32,
+    terrain: TerrainSurface,
+}
+
+/// Floors whose heights differ by less than this are as near as each other
+/// to a point, metres.
+const SAME_HEIGHT: f32 = 0.01;
+
+/// Names the points of a found route for the cells they stand in
 /// (OpenAC `PreviewPosition`).
-fn plan_point(
-    point: Vec3,
+struct PointNamer<'a> {
     start: Vec3,
     global_start: Vec3,
     start_cell: u32,
-    cells: &[CellSurface],
+    cells: &'a [CellSurface],
+    ground: &'a [PlacedGround],
     sealed_dungeon: bool,
-) -> PlanPoint {
-    let global = global_start + point - start;
-    let mut cell_id = 0;
+}
+
+impl PointNamer<'_> {
+    /// A route point as a preview reports it, measured from the corner of
+    /// the first landblock. In a sealed dungeon it is in the cell whose
+    /// floor lies nearest its height, else the start's cell. Elsewhere it
+    /// is in an interior cell only when it stands on one of that cell's
+    /// floors, within [`ON_THE_FLOOR`]; else in the outdoor cell under it.
+    /// Where the ground and a floor, or two floors, are both that close,
+    /// the nearer wins, and on a tie the cell the route `came_from`.
+    fn name(&self, point: Vec3, came_from: u32) -> PlanPoint {
+        let global = self.global_start + point - self.start;
+        let cell_id = if self.sealed_dungeon {
+            nearest_floor_cell(point, self.cells).unwrap_or(self.start_cell)
+        } else {
+            let mut best = (
+                outdoor_cell_at(global),
+                self.ground_height(point)
+                    .map_or(f32::INFINITY, |z| (z - point.z).abs()),
+            );
+            for cell in self.cells {
+                let Some(off) = off_the_floor(cell, point) else {
+                    continue;
+                };
+                let id = cell.cell_id();
+                let nearer = off < best.1 - SAME_HEIGHT;
+                let tied = off <= best.1 + SAME_HEIGHT && id == came_from && best.0 != came_from;
+                if off <= ON_THE_FLOOR && (nearer || tied) {
+                    best = (id, off);
+                }
+            }
+            best.0
+        };
+        PlanPoint { cell_id, global }
+    }
+
+    /// The ground's height under a world-frame point, when its landblock
+    /// is among those captured.
+    fn ground_height(&self, point: Vec3) -> Option<f32> {
+        self.ground.iter().find_map(|ground| {
+            let x = point.x - ground.corner_x;
+            let y = point.y - ground.corner_y;
+            ((0.0..LANDBLOCK_SIZE).contains(&x) && (0.0..LANDBLOCK_SIZE).contains(&y))
+                .then(|| ground.terrain.sample_z(x, y))
+        })
+    }
+}
+
+/// The cell whose floor lies nearest a point's height, among those with a
+/// floor under it.
+fn nearest_floor_cell(point: Vec3, cells: &[CellSurface]) -> Option<u32> {
+    let mut found = None;
     let mut nearest = f32::INFINITY;
     for cell in cells {
         let Some(z) = cell.sample_floor_z(point.x, point.y) else {
@@ -511,20 +596,226 @@ fn plan_point(
             continue;
         }
         nearest = (z - point.z).abs();
-        cell_id = cell.cell_id();
+        found = Some(cell.cell_id());
     }
-    if cell_id == 0 && sealed_dungeon {
-        cell_id = start_cell;
+    found
+}
+
+/// How far a point stands off the nearest of a cell's walkable faces under
+/// it, metres, or `None` where the cell has none there. Ceilings, which
+/// face down, are not floors.
+fn off_the_floor(cell: &CellSurface, point: Vec3) -> Option<f32> {
+    let mut nearest: Option<f32> = None;
+    for [a, b, c] in cell.triangles() {
+        let normal = (*b - *a).cross(*c - *a);
+        let length = normal.length();
+        if length <= 1e-6 || normal.z / length < FLOOR_Z {
+            continue;
+        }
+        if let Some(z) = point_in_triangle_xy(point.x, point.y, *a, *b, *c) {
+            let off = (z - point.z).abs();
+            if nearest.is_none_or(|n| off < n) {
+                nearest = Some(off);
+            }
+        }
     }
-    if cell_id == 0 {
-        let bx = (global.x / LANDBLOCK_SIZE).floor().clamp(0.0, 255.0);
-        let by = (global.y / LANDBLOCK_SIZE).floor().clamp(0.0, 255.0);
-        let landblock = ((bx as u32) << 24) | ((by as u32) << 16);
-        cell_id = TerrainSurface::compute_outdoor_cell_id_in(
-            landblock,
-            global.x - bx * LANDBLOCK_SIZE,
-            global.y - by * LANDBLOCK_SIZE,
+    nearest
+}
+
+/// The outdoor cell over which a point lies, by its position from the
+/// corner of the first landblock.
+fn outdoor_cell_at(global: Vec3) -> u32 {
+    let bx = (global.x / LANDBLOCK_SIZE).floor().clamp(0.0, 255.0);
+    let by = (global.y / LANDBLOCK_SIZE).floor().clamp(0.0, 255.0);
+    let landblock = ((bx as u32) << 24) | ((by as u32) << 16);
+    TerrainSurface::compute_outdoor_cell_id_in(
+        landblock,
+        global.x - bx * LANDBLOCK_SIZE,
+        global.y - by * LANDBLOCK_SIZE,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::{Quat, vec3};
+
+    use super::*;
+
+    /// Eastham's landblock, whose corner the world frame's origin is.
+    const LANDBLOCK: u32 = 0xCE94_0000;
+    const BUILDING: u32 = 0xCE94_0100;
+    const CELLAR: u32 = 0xCE94_0101;
+    const DUNGEON_START: u32 = 0x0123_0100;
+    const DUNGEON_ROOM: u32 = 0x0123_0102;
+
+    /// A cell holding a level square floor over `x0..x1`, `y0..y1` at
+    /// height `z`, and its ceiling 4 m above.
+    fn room(cell_id: u32, (x0, x1): (f32, f32), (y0, y1): (f32, f32), z: f32) -> CellSurface {
+        let up = 4.0;
+        CellSurface::transformed(
+            cell_id,
+            &[
+                vec![
+                    vec3(x0, y0, z),
+                    vec3(x1, y0, z),
+                    vec3(x1, y1, z),
+                    vec3(x0, y1, z),
+                ],
+                vec![
+                    vec3(x0, y0, z + up),
+                    vec3(x0, y1, z + up),
+                    vec3(x1, y1, z + up),
+                    vec3(x1, y0, z + up),
+                ],
+            ],
+            Quat::IDENTITY,
+            Vec3::ZERO,
+        )
+    }
+
+    /// Level ground at height 0 over the landblock.
+    fn flat_ground() -> Vec<PlacedGround> {
+        vec![PlacedGround {
+            corner_x: 0.0,
+            corner_y: 0.0,
+            terrain: TerrainSurface::new(&[0; 81], &[0.0; 256], 0xCE, 0x94, None),
+        }]
+    }
+
+    fn name(
+        point: Vec3,
+        came_from: u32,
+        cells: &[CellSurface],
+        ground: &[PlacedGround],
+        sealed_dungeon: bool,
+        start_cell: u32,
+    ) -> u32 {
+        let corner = vec3(
+            f32::from(0xCE_u8) * LANDBLOCK_SIZE,
+            f32::from(0x94_u8) * LANDBLOCK_SIZE,
+            0.0,
+        );
+        let start = vec3(1.0, 1.0, 0.0);
+        let namer = PointNamer {
+            start,
+            global_start: corner + start,
+            start_cell,
+            cells,
+            ground,
+            sealed_dungeon,
+        };
+        let named = namer.name(point, came_from);
+        assert_eq!(named.global, corner + point);
+        named.cell_id
+    }
+
+    fn outdoors_at(x: f32, y: f32) -> u32 {
+        TerrainSurface::compute_outdoor_cell_id_in(LANDBLOCK, x, y)
+    }
+
+    /// Open ground over a cellar whose floor is 10 m down is outdoors.
+    #[test]
+    fn open_ground_over_a_cellar_is_the_outdoor_cell() {
+        let cells = [room(CELLAR, (40.0, 60.0), (40.0, 60.0), -10.0)];
+        let ground = flat_ground();
+        let point = vec3(50.0, 50.0, 0.0);
+        let outdoors = outdoors_at(50.0, 50.0);
+        assert_eq!(
+            name(point, outdoors, &cells, &ground, false, outdoors),
+            outdoors
+        );
+        assert_eq!(
+            name(point, CELLAR, &cells, &ground, false, outdoors),
+            outdoors
         );
     }
-    PlanPoint { cell_id, global }
+
+    /// A point on a building's floor is in the building, whatever lies
+    /// above it or below it, and on its cellar's floor in the cellar.
+    #[test]
+    fn a_point_on_a_floor_keeps_its_cell() {
+        let cells = [
+            room(CELLAR, (40.0, 60.0), (40.0, 60.0), -10.0),
+            room(BUILDING, (40.0, 60.0), (40.0, 60.0), 1.5),
+        ];
+        let ground = flat_ground();
+        let outdoors = outdoors_at(50.0, 50.0);
+        let on_the_floor = vec3(50.0, 50.0, 1.5);
+        assert_eq!(
+            name(on_the_floor, outdoors, &cells, &ground, false, outdoors),
+            BUILDING
+        );
+        let a_node_off_it = vec3(50.0, 50.0, 1.5 + ON_THE_FLOOR - 0.05);
+        assert_eq!(
+            name(a_node_off_it, outdoors, &cells, &ground, false, outdoors),
+            BUILDING
+        );
+        let in_the_cellar = vec3(50.0, 50.0, -10.0);
+        assert_eq!(
+            name(in_the_cellar, BUILDING, &cells, &ground, false, outdoors),
+            CELLAR
+        );
+    }
+
+    /// Where the ground and a floor are both under foot, the nearer wins,
+    /// and on a tie the cell the route came from.
+    #[test]
+    fn a_doorway_takes_the_nearer_floor_then_the_one_it_came_from() {
+        let ground = flat_ground();
+        let outdoors = outdoors_at(50.0, 50.0);
+        let raised = [room(BUILDING, (40.0, 60.0), (40.0, 60.0), 0.2)];
+        let on_the_ground = vec3(50.0, 50.0, 0.0);
+        let on_the_step = vec3(50.0, 50.0, 0.2);
+        assert_eq!(
+            name(on_the_ground, BUILDING, &raised, &ground, false, outdoors),
+            outdoors
+        );
+        assert_eq!(
+            name(on_the_step, outdoors, &raised, &ground, false, outdoors),
+            BUILDING
+        );
+        let flush = [room(BUILDING, (40.0, 60.0), (40.0, 60.0), 0.0)];
+        assert_eq!(
+            name(on_the_ground, outdoors, &flush, &ground, false, outdoors),
+            outdoors
+        );
+        assert_eq!(
+            name(on_the_ground, BUILDING, &flush, &ground, false, outdoors),
+            BUILDING
+        );
+    }
+
+    /// In a sealed dungeon a point is in the cell whose floor lies nearest
+    /// its height, however far, else in the start's cell, as before.
+    #[test]
+    fn a_sealed_dungeon_names_points_as_before() {
+        let cells = [
+            room(DUNGEON_START, (0.0, 10.0), (0.0, 10.0), 0.0),
+            room(DUNGEON_ROOM, (20.0, 30.0), (0.0, 10.0), -10.0),
+        ];
+        let high_over_the_room = vec3(25.0, 5.0, 0.0);
+        assert_eq!(
+            name(
+                high_over_the_room,
+                DUNGEON_START,
+                &cells,
+                &[],
+                true,
+                DUNGEON_START
+            ),
+            DUNGEON_ROOM
+        );
+        let between_rooms = vec3(15.0, 5.0, 0.0);
+        assert_eq!(
+            name(
+                between_rooms,
+                DUNGEON_ROOM,
+                &cells,
+                &[],
+                true,
+                DUNGEON_START
+            ),
+            DUNGEON_START
+        );
+    }
 }
