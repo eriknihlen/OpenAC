@@ -175,6 +175,71 @@ mod tests {
         }
     }
 
+    /// A fresh empty folder under the temporary directory.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "openac-client-api-{name}-{}",
+            crate::ids::unique_hex32()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn beside_the_launcher_the_file_wins_over_the_released_table() {
+        let folder = scratch("beside");
+        let released = LauncherVersion::try_parse("0.2.2").unwrap();
+        // No file: a released version is known by the table.
+        assert_eq!(
+            beside_launcher_plugin_api(&folder, Some(&released)),
+            Some(range((1, 0), (1, 9)))
+        );
+        // The file beside the program says otherwise, and wins.
+        std::fs::write(
+            folder.join(PLUGIN_API_FILE),
+            range((1, 0), (1, 12)).to_file_text(),
+        )
+        .unwrap();
+        assert_eq!(
+            beside_launcher_plugin_api(&folder, Some(&released)),
+            Some(range((1, 0), (1, 12)))
+        );
+        assert_eq!(
+            beside_launcher_plugin_api(&folder, None),
+            Some(range((1, 0), (1, 12)))
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn in_a_macos_bundle_the_file_is_read_from_its_resources() {
+        let bundle = scratch("bundle").join("OpenAC.app");
+        let programs = bundle.join("Contents").join("MacOS");
+        let resources = bundle.join("Contents").join("Resources");
+        std::fs::create_dir_all(&programs).unwrap();
+        std::fs::create_dir_all(&resources).unwrap();
+        let unreleased = LauncherVersion::try_parse("0.2.4").unwrap();
+        assert_eq!(
+            beside_launcher_plugin_api(&programs, Some(&unreleased)),
+            None
+        );
+        std::fs::write(
+            resources.join(PLUGIN_API_FILE),
+            range((1, 0), (1, 12)).to_file_text(),
+        )
+        .unwrap();
+        assert_eq!(
+            beside_launcher_plugin_api(&programs, Some(&unreleased)),
+            Some(range((1, 0), (1, 12)))
+        );
+        // Only a bundle's program folder looks there.
+        let plain = bundle.join("Contents").join("Other");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(beside_launcher_plugin_api(&plain, Some(&unreleased)), None);
+        std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
+    }
+
     // The released clients' `API_CURRENT`, read at each release tag
     // (`ac-plugin-abi`, from 0.1.12 `ac-plugin-version`); `API_MINIMUM` was
     // 1.0 in every one.

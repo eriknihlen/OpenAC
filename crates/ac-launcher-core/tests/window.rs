@@ -3139,6 +3139,25 @@ fn the_plugin_release_watch_backs_off_when_rate_limited() {
 // Not an OpenAC test (owner, 2026-11-05): a first install turns the plugin
 // on for every account and for every character with a plugin list of its
 // own; a character that already has it is left alone.
+// With no client installed nothing can say whether a plugin would run: Discover's
+// Install says so on the panel at once instead of opening the review first.
+#[test]
+fn discover_install_without_a_client_says_so_at_once() {
+    let fixture = PanelFixture::new();
+    fixture.list(&["edwards.hello"], "");
+    fixture.release("edwards.hello", "1.0.0");
+    let mut window = fixture.window();
+    check(&mut window);
+    window.refresh_discover_details();
+    window.poll();
+    window.open_discover_install("edwards.hello");
+    assert!(!window.plugins.install_dialog.is_open);
+    assert_eq!(
+        window.plugins.error.as_deref(),
+        Some(ac_launcher_core::plugins::CLIENT_NEEDED_REFUSAL)
+    );
+}
+
 #[test]
 fn a_first_install_turns_the_plugin_on_for_every_account_and_character() {
     let fixture = PanelFixture::new();
@@ -4292,20 +4311,25 @@ struct UpdateFeed {
     rid: String,
     launcher_directory: PathBuf,
     versions: Arc<ac_launcher_core::updates::ClientVersionStore>,
+    /// The client payload release 2.0.0 offers.
+    client: Vec<u8>,
 }
 
 impl UpdateFeed {
     /// A feed offering release 2.0.0 (client and launcher), or a feed that
     /// fails when `reachable` is false.
     fn new(reachable: bool) -> Self {
-        use common::fixtures::{FakeServer, Route, client_zip, launcher_zip};
+        let rid = ac_launcher_core::updates::detect_rid().unwrap();
+        Self::offering(reachable, common::fixtures::client_zip(&rid, "client-v2"))
+    }
+
+    /// A feed offering release 2.0.0 with `client` as its client payload.
+    fn offering(reachable: bool, client: Vec<u8>) -> Self {
+        use common::fixtures::{FakeServer, Route, launcher_zip};
         let root = common::TempDir::new("window-updates");
         let rid = ac_launcher_core::updates::detect_rid().unwrap();
         let server = FakeServer::new();
-        server.add(
-            &FakeServer::url("client.zip"),
-            &client_zip(&rid, "client-v2"),
-        );
+        server.add(&FakeServer::url("client.zip"), &client);
         server.add(
             &FakeServer::url("launcher.zip"),
             &launcher_zip(&rid, "launcher-v2"),
@@ -4329,6 +4353,7 @@ impl UpdateFeed {
             rid,
             launcher_directory,
             versions,
+            client,
         };
         if reachable {
             feed.reachable();
@@ -4341,8 +4366,8 @@ impl UpdateFeed {
 
     /// The feed answers with release 2.0.0.
     fn reachable(&self) {
-        use common::fixtures::{FakeServer, client_zip, launcher_zip, manifest};
-        let client = client_zip(&self.rid, "client-v2");
+        use common::fixtures::{FakeServer, launcher_zip, manifest};
+        let client = &self.client;
         let launcher = launcher_zip(&self.rid, "launcher-v2");
         self.server.add(
             &FakeServer::url("manifest.json"),
@@ -4351,7 +4376,7 @@ impl UpdateFeed {
                 "1.0.0",
                 &self.rid,
                 &FakeServer::url("client.zip"),
-                &client,
+                client,
                 &FakeServer::url("launcher.zip"),
                 &launcher,
             ),
@@ -4365,6 +4390,19 @@ impl UpdateFeed {
         launcher_version: &str,
         apply_launcher_update: Option<ac_launcher_core::window::ApplyLauncherUpdate>,
     ) -> LauncherWindow {
+        let mut window =
+            LauncherWindow::new(self.parts(fake, launcher_version, apply_launcher_update));
+        window.initialize();
+        window
+    }
+
+    /// The window's parts over this feed, the launcher at `launcher_version`.
+    fn parts(
+        &self,
+        fake: &Arc<Fake>,
+        launcher_version: &str,
+        apply_launcher_update: Option<ac_launcher_core::window::ApplyLauncherUpdate>,
+    ) -> LauncherWindowParts {
         use ac_launcher_core::updates::{
             LauncherInstallationLayout, LauncherSelfUpdateManager, LauncherUpdater,
             ReleaseManifestClient,
@@ -4393,9 +4431,7 @@ impl UpdateFeed {
         let mut parts = parts(fake.clone(), Arc::new(InlineSpawner));
         parts.updater = Some(Arc::new(updater));
         parts.apply_launcher_update = apply_launcher_update;
-        let mut window = LauncherWindow::new(parts);
-        window.initialize();
-        window
+        parts
     }
 
     fn installed_client(&self) -> Option<String> {
@@ -4505,6 +4541,75 @@ fn a_client_update_asks_once_and_installs_on_update() {
     assert!(!feed.pending_launcher_update());
     assert!(!window.update_prompt.is_open);
     assert_eq!(window.update_prompt.error, None);
+}
+
+// A plugin update withheld because of the installed client (here: none yet, then
+// a client too old for its plugin API) is offered as soon as a client update
+// that can run it is installed, not at the next periodic check.
+#[test]
+fn a_client_update_rechecks_the_installed_plugins_at_once() {
+    let panel = PanelFixture::new();
+    panel.write_manifest("edwards.managed", "0.1.0");
+    panel.add_record("edwards.managed", "0.1.0");
+    panel.list(&[], "");
+    panel.releases(&[("wasm-v0.2.0", "edwards.managed", "0.2.0")]);
+    // The release needs plugin API 1.12, which only the new client loads.
+    panel.server.add(
+        &ac_launcher_core::plugins::github::tagged_asset(HELLO_REPO, "wasm-v0.2.0", "plugin.json")
+            .unwrap()
+            .to_string(),
+        manifest_json("edwards.managed", "0.2.0")
+            .replace("\"apiVersion\": \"1.0\"", "\"apiVersion\": \"1.12\"")
+            .as_bytes(),
+    );
+    let rid = ac_launcher_core::updates::detect_rid().unwrap();
+    let new_client = ac_launcher_core::plugins::ApiRange::new(
+        ac_launcher_core::plugins::ApiVersion::new(1, 0),
+        ac_launcher_core::plugins::ApiVersion::new(1, 12),
+    );
+    let feed = UpdateFeed::offering(
+        true,
+        common::fixtures::client_zip_with_plugin_api(&rid, "client-v2", &new_client.to_file_text()),
+    );
+    let mut parts = feed.parts(&batch(), "2.0.0", None);
+    parts.plugins = Some(Arc::new(PluginComposition::new(
+        &panel.paths(),
+        WebUrl::parse(LIST_URI).unwrap(),
+        panel.server.transport(),
+        LauncherLog::open(&panel.paths()),
+    )));
+    let versions = Arc::clone(&feed.versions);
+    parts.client_version = Arc::new(move || Some(versions.cached_resolution()));
+    let mut window = LauncherWindow::new(parts);
+    window.initialize();
+    let managed = |window: &LauncherWindow| {
+        window
+            .plugins
+            .installed
+            .iter()
+            .find(|row| row.info.id == "edwards.managed")
+            .map(|row| {
+                (
+                    row.update.as_ref().map(|update| update.version.clone()),
+                    row.update_withheld_reason.clone(),
+                )
+            })
+            .unwrap()
+    };
+    check(&mut window);
+    assert_eq!(
+        managed(&window),
+        (None, Some("client not installed".to_owned()))
+    );
+
+    auto_opening(&mut window);
+    startup_check(&mut window);
+    window.install_update();
+    window.poll();
+    window.poll();
+
+    assert_eq!(feed.installed_client().as_deref(), Some("2.0.0"));
+    assert_eq!(managed(&window), (Some("0.2.0".to_owned()), None));
 }
 
 // OpenAC LauncherUpdateViewModelTests.ALauncherUpdateStagesThenRestartsWithoutTouchingTheClient.
