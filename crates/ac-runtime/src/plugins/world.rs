@@ -3,7 +3,10 @@
 //! world, the inventory's appraisal slot, the contract tracker and the game
 //! clock.
 
-use ac_core::items::{ClientObject, ClientObjectTable};
+use std::collections::{HashMap, HashSet};
+
+use ac_core::items::placement::PlaceCounter;
+use ac_core::items::{ClientObject, ClientObjectTable, EquipMask};
 use ac_core::properties::{PropertyInt, PropertyString};
 use ac_core::world::{HOUR_TICKS, YEAR_TICKS, ZERO_YEAR};
 use ac_plugin::abi::items::{ItemResult, ItemStatus};
@@ -42,29 +45,97 @@ pub(super) fn position_of(position: &ac_proto::Position) -> Position {
     )
 }
 
-/// Whether the player carries or wields `item`, directly or in a pack (up
-/// to four packs deep), as OpenAC's `IsPlayerOwned`.
+/// Whether the player carries or wields `item`: see [`Ownership`]. For one
+/// check; a walk over many objects builds the [`Ownership`] once.
 pub(super) fn is_player_owned(item: &ClientObject, player: u32, items: &ClientObjectTable) -> bool {
-    if player == 0 {
-        return false;
+    Ownership::of(items, player).owns(item, items)
+}
+
+/// An object with no placement of its own: in no container, worn by no one.
+fn is_unplaced(item: &ClientObject) -> bool {
+    item.container_id == 0
+        && item.wielder_id == 0
+        && item.currently_equipped_location == EquipMask::NONE
+}
+
+/// What the player owns, as plugins are told. An object is owned when its
+/// own placement says so: wielded by the player, or in the player or in a
+/// pack the player holds (up to four packs deep), as OpenAC's
+/// `IsPlayerOwned`. An object the server has listed in the player's
+/// contents, or in an owned pack's, before describing it has no placement
+/// of its own yet (a listing names a container's members and moves none of
+/// them); it is owned too, in the container whose list holds it. At login
+/// every side pack's contents are listed before their descriptions arrive,
+/// so without this the owned list would miss them while the inventory
+/// already counts as complete.
+pub(super) struct Ownership {
+    player: u32,
+    /// Each listed object with no placement of its own: the container whose
+    /// list holds it and its place there among its kind.
+    listed: HashMap<u32, (u32, i32)>,
+}
+
+impl Ownership {
+    /// Walks the player's contents list and the list of every pack on it,
+    /// nested. A member whose own placement names another container is
+    /// that container's, so its lists are not followed from here.
+    pub(super) fn of(items: &ClientObjectTable, player: u32) -> Self {
+        let mut listed = HashMap::new();
+        let mut pending = Vec::new();
+        if player != 0 {
+            pending.push(player);
+        }
+        let mut visited = HashSet::new();
+        while let Some(container) = pending.pop() {
+            if !visited.insert(container) {
+                continue;
+            }
+            let mut places = PlaceCounter::default();
+            for &id in items.get_contents(container) {
+                let place = places.next(items, id);
+                let Some(member) = items.get(id) else {
+                    continue;
+                };
+                if is_unplaced(member) {
+                    listed.insert(id, (container, place.unwrap_or(-1)));
+                } else if member.container_id != container {
+                    continue;
+                }
+                if items.contents_list(id).is_some() {
+                    pending.push(id);
+                }
+            }
+        }
+        Self { player, listed }
     }
-    if item.wielder_id == player || item.container_id == player {
-        return true;
-    }
-    let mut parent_id = item.container_id;
-    for _ in 0..4 {
-        if parent_id == 0 {
+
+    /// Whether the player owns `item`.
+    pub(super) fn owns(&self, item: &ClientObject, items: &ClientObjectTable) -> bool {
+        if self.player == 0 {
             return false;
         }
-        let Some(parent) = items.get(parent_id) else {
-            return false;
-        };
-        if parent.wielder_id == player || parent.container_id == player {
-            return true;
+        // The item, then up to four packs around it.
+        let mut current = item;
+        for _ in 0..5 {
+            if current.wielder_id == self.player || current.container_id == self.player {
+                return true;
+            }
+            if current.container_id == 0 {
+                return is_unplaced(current) && self.listed.contains_key(&current.object_id());
+            }
+            let Some(parent) = items.get(current.container_id) else {
+                return false;
+            };
+            current = parent;
         }
-        parent_id = parent.container_id;
+        false
     }
-    false
+
+    /// The owned container whose list holds `object_id`, and its place
+    /// there, when the object has no placement of its own.
+    pub(super) fn listing(&self, object_id: u32) -> Option<(u32, i32)> {
+        self.listed.get(&object_id).copied()
+    }
 }
 
 /// The object class of an item: OpenAC's classifier, and a writable item
@@ -129,6 +200,18 @@ fn player_active_spells(world: &World) -> Vec<u32> {
 /// session moves it, else the server's last word; owned, landscape and
 /// door state as OpenAC reads them.
 pub(super) fn project_object(world: &World, object_id: u32) -> Option<abi::WorldObject> {
+    let ownership = Ownership::of(world.items(), world.player_guid().unwrap_or(0));
+    project_object_owned(world, object_id, &ownership)
+}
+
+/// [`project_object`] with the player's [`Ownership`] already walked. An
+/// owned object listed before it is described is in the container whose
+/// list holds it.
+pub(super) fn project_object_owned(
+    world: &World,
+    object_id: u32,
+    ownership: &Ownership,
+) -> Option<abi::WorldObject> {
     let record = world.object(object_id);
     let item = world.item(object_id);
     if record.is_none() && item.is_none() {
@@ -136,12 +219,14 @@ pub(super) fn project_object(world: &World, object_id: u32) -> Option<abi::World
     }
     let player = world.player_guid().unwrap_or(0);
     let source = record.and_then(|r| r.position());
-    let owned = item.is_some_and(|i| is_player_owned(i, player, world.items()));
+    let owned = item.is_some_and(|i| ownership.owns(i, world.items()));
     let flags = item
         .and_then(|i| i.public_weenie_bitfield)
         .map_or(0, |f| f.bits());
     let class = classify(item);
-    let container_id = item.map_or(0, |i| i.container_id);
+    let container_id = ownership
+        .listing(object_id)
+        .map_or_else(|| item.map_or(0, |i| i.container_id), |(c, _)| c);
     let wielder_id = item.map_or(0, |i| i.wielder_id);
     let is_door_open = flags & DOOR_FLAG != 0
         && match record {
@@ -287,8 +372,9 @@ impl PluginBinding<'_> {
         ids.extend(world.items().objects().map(ClientObject::object_id));
         ids.sort_unstable();
         ids.dedup();
+        let ownership = Ownership::of(world.items(), world.player_guid().unwrap_or(0));
         ids.into_iter()
-            .filter_map(|id| project_object(world, id))
+            .filter_map(|id| project_object_owned(world, id, &ownership))
             .collect()
     }
 

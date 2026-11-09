@@ -542,6 +542,86 @@ fn a_plugin_sees_the_inventory_complete_only_with_every_nested_pack_listed() {
     });
 }
 
+// A live login: the character description lists the main pack and the
+// server then lists each side pack's contents before it describes the
+// items in them. Once every pack is listed the inventory is complete, so
+// the owned list must hold every listed item, the pack's too, though not
+// described yet: no name, no class, no header. The listed item reports the
+// pack whose list holds it and its place there, as it will once described.
+#[test]
+fn a_complete_inventory_owns_the_items_a_pack_lists_before_they_are_described() {
+    use ac_plugin::abi::world::ObjectClass;
+    use ac_proto::{GameEventType, Inbound};
+    const PACK: u32 = 0x7000_1234;
+    let mut state = in_world();
+    let mut description = crate::world::tests::empty_description();
+    description.inventory = vec![
+        ac_proto::InventoryEntry {
+            guid: LOOSE,
+            container_type: 0,
+        },
+        ac_proto::InventoryEntry {
+            guid: PACK,
+            container_type: 1,
+        },
+    ];
+    state.world.apply_player_description(&description);
+    let view =
+        crate::world::tests::game_event(GameEventType::VIEW_CONTENTS, &[PACK, 2, GEM, 0, KIT, 0]);
+    state.world.apply(&Inbound::parse(&view).unwrap());
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        assert!(call::<calls::ItemsInventoryComplete>(b, &()));
+        let items = call::<calls::ItemsOwned>(b, &());
+        let mut ids: Vec<u32> = items.iter().map(|i| i.object_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [PACK, GEM, KIT, LOOSE]);
+        let gem = items.iter().find(|i| i.object_id == GEM).unwrap();
+        assert_eq!((gem.container_id, gem.container_slot), (PACK, 0));
+        assert_eq!(gem.wielder_id, 0);
+        assert!(gem.name.is_empty() && gem.header.is_none());
+        assert_eq!(gem.object_class, ObjectClass::Unknown);
+        let kit = items.iter().find(|i| i.object_id == KIT).unwrap();
+        assert_eq!((kit.container_id, kit.container_slot), (PACK, 1));
+        // The other calls on owned items agree.
+        assert!(call::<calls::ItemsProperties>(b, &KIT).is_some());
+        let object = call::<calls::WorldObject>(b, &KIT).unwrap();
+        assert!(object.is_owned && !object.is_landscape);
+        assert_eq!(object.container_id, PACK);
+    });
+    // The description arrives: the same item, once, now named.
+    state.world.apply(&owned(GEM, "Gem", 0x800, |w| {
+        w.container_id = Some(PACK);
+    }));
+    with_binding(&mut state, &mut outbox, |b| {
+        let items = call::<calls::ItemsOwned>(b, &());
+        let gems: Vec<_> = items.iter().filter(|i| i.object_id == GEM).collect();
+        assert_eq!(gems.len(), 1);
+        assert_eq!(gems[0].name, "Gem");
+        assert_eq!((gems[0].container_id, gems[0].container_slot), (PACK, 0));
+    });
+}
+
+// What a ground container lists is not the character's: a chest's contents
+// listed before they are described stay out of the owned list.
+#[test]
+fn items_a_chest_lists_are_not_owned() {
+    use ac_proto::{GameEventType, Inbound};
+    const CHEST: u32 = 0x7000_2000;
+    let mut state = in_world();
+    state
+        .world
+        .apply_player_description(&crate::world::tests::empty_description());
+    let view = crate::world::tests::game_event(GameEventType::VIEW_CONTENTS, &[CHEST, 1, GEM, 0]);
+    state.world.apply(&Inbound::parse(&view).unwrap());
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        assert!(call::<calls::ItemsOwned>(b, &()).is_empty());
+        assert!(call::<calls::ItemsProperties>(b, &GEM).is_none());
+        assert!(!call::<calls::WorldObject>(b, &GEM).unwrap().is_owned);
+    });
+}
+
 // OpenAC `RuntimeItemInteraction.IsAutoWieldBusy` (bound to
 // `IEquipmentAutomation.IsBusy`) and `AutoWieldGenerationTests`
 // (`tests/AcDream.Runtime.Tests/Gameplay/AutoWieldGenerationTests.cs`): the

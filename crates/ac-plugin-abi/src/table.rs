@@ -547,7 +547,11 @@ macro_rules! import_table {
                 permission: None, window: false, since: (1, 0);
 
             // ── G. Items, equipment, loot ───────────────────────────────
-            /// Everything the character owns, by name then id.
+            /// Everything the character owns, by name then id: worn, wielded,
+            /// in the main pack and inside every pack. An item the server has
+            /// listed in a pack but not described yet is included, in the
+            /// pack whose list holds it, with no name, class `Unknown` and no
+            /// header until its description arrives.
             ItemsOwned = items_owned(()) -> Vec<$crate::items::InventoryItem>,
                 permission: None, window: false, since: (1, 0);
             /// Where the item commands stand (busy, completions).
@@ -556,7 +560,8 @@ macro_rules! import_table {
             /// The server has listed the character's inventory and every
             /// nested pack, and no inventory move or request is pending: only
             /// then does an item missing from the owned list mean it is no
-            /// longer owned. False outside the world.
+            /// longer owned. Listed, not described: an item may still lack
+            /// its description. False outside the world.
             ItemsInventoryComplete = items_inventory_complete(()) -> bool,
                 permission: None, window: false, since: (1, 0);
             /// The properties of an item the character owns.

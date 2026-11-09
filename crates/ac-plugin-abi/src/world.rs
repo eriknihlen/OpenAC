@@ -289,7 +289,9 @@ wire_record! {
         pub wielder_id: u32,
         /// [`capabilities`] bits.
         pub capabilities: u32,
-        /// The player carries or wields it (directly or in a pack).
+        /// The player carries or wields it (directly or in a pack), also
+        /// when a pack lists it before its description arrives (then
+        /// `container_id` is that pack).
         pub is_owned: bool,
         /// A landscape object (a static, non-item object).
         pub is_landscape: bool,

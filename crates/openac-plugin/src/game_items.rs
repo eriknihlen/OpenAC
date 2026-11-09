@@ -14,12 +14,20 @@ use crate::Host;
 
 /// G. Items, equipment, loot.
 impl Host<'_> {
-    /// Everything the character owns, by name then id. Each item's
+    /// Everything the character owns, by name then id: worn, wielded, in
+    /// the main pack and inside every side pack. Each item's
     /// `container_slot` is its place in its own container (the main pack
     /// or a side pack) among its kind, loose items and packs counted
     /// apart; -1 for one in no container, such as a worn or wielded item,
     /// or one its container's list does not hold; 0 when that container
     /// has no list at all.
+    ///
+    /// The server lists a pack's contents before it describes them, so
+    /// shortly after login an item may be listed but not yet described: it
+    /// is here, in the pack that lists it at its place, but with an empty
+    /// name, class `Unknown`, zeroed numbers and `header: None`. Its
+    /// description fills in the same id later; wait for `header` (or a
+    /// name) before judging an item by what it is.
     pub fn owned_items(&mut self) -> Vec<InventoryItem> {
         self.call::<calls::ItemsOwned>(&())
     }
@@ -32,8 +40,10 @@ impl Host<'_> {
     /// True when the server has listed the character's inventory and every
     /// nested pack and no inventory move or request is pending. A plugin
     /// that remembers item ids must not treat an item missing from
-    /// [`Host::owned_items`] as sold or dropped while this is false. It says
-    /// the listing is complete, not that the items are appraised.
+    /// [`Host::owned_items`] as sold or dropped while this is false. Once it
+    /// is true every owned item is in [`Host::owned_items`], so one missing
+    /// from it is gone. It says every item is listed, not that each is
+    /// described (some may still have no name or header) or appraised.
     pub fn owned_inventory_complete(&mut self) -> bool {
         self.call::<calls::ItemsInventoryComplete>(&())
     }
