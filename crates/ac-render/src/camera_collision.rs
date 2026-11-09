@@ -28,6 +28,7 @@ use ac_proto::Position;
 use ac_runtime::world::ObjectView;
 use glam::{Quat, Vec3};
 
+use crate::floors::Floors;
 use crate::world_frame::{LandblockCoord, landblock_offset, landblocks_around};
 
 /// The eye is a sphere of this radius, meters.
@@ -227,6 +228,9 @@ pub fn build_neighbourhood<D: DatSource>(
 #[derive(Debug, Default)]
 pub struct CameraCollision {
     resident: Option<(LandblockCoord, Box<PhysicsEngine>)>,
+    /// The floors of the resident neighbourhood's interior cells and
+    /// static objects.
+    floors: Floors,
     requested: Option<LandblockCoord>,
     objects: HashMap<u32, Mirrored>,
 }
@@ -301,22 +305,23 @@ impl CameraCollision {
         Some(player_block)
     }
 
-    /// A neighbourhood arrived. `Err`: it could not be built; the camera
-    /// keeps the previous one and it is not asked for again until the
-    /// player enters another landblock.
+    /// A neighbourhood arrived, with its floors. `Err`: it could not be
+    /// built; the camera keeps the previous one and it is not asked for
+    /// again until the player enters another landblock.
     ///
     /// # Errors
     /// Hands back the build failure for the window to report.
     pub fn arrived(
         &mut self,
         center: LandblockCoord,
-        engine: Result<Box<PhysicsEngine>, String>,
+        engine: Result<(Box<PhysicsEngine>, Floors), String>,
     ) -> Result<(), String> {
-        let engine = engine?;
+        let (engine, floors) = engine?;
         if self.requested == Some(center) {
             self.requested = None;
         }
         self.resident = Some((center, engine));
+        self.floors = floors;
         // The new engine has no server objects: the next sync puts them in.
         self.objects.clear();
         Ok(())
@@ -325,6 +330,7 @@ impl CameraCollision {
     /// Drop everything (the window left the world).
     pub fn clear(&mut self) {
         self.resident = None;
+        self.floors = Floors::default();
         self.requested = None;
         self.objects.clear();
     }
@@ -471,6 +477,24 @@ impl CameraCollision {
             engine.shadows.capture_entries(),
             landblock_offset(origin, *center),
         ))
+    }
+
+    /// The height of the highest floor under the drawing-frame point (`x`,
+    /// `y`) no higher than `at_most`, among the resident neighbourhood's
+    /// interior cells and static objects; `None` where there is none.
+    #[must_use]
+    pub fn floor_under(
+        &self,
+        origin: &LiveWorldOrigin,
+        x: f32,
+        y: f32,
+        at_most: f32,
+    ) -> Option<f32> {
+        let (center, _) = self.resident.as_ref()?;
+        let offset = landblock_offset(origin, *center);
+        self.floors
+            .highest_at_or_below(x - offset.x, y - offset.y, at_most - offset.z)
+            .map(|z| z + offset.z)
     }
 
     /// A probe for a player in `player_cell`, when the resident
@@ -832,8 +856,11 @@ mod tests {
         let dats = crate_dats();
         let mut c = CameraCollision::new();
         let center = LandblockCoord { x: 0xA9, y: 0xB4 };
-        c.arrived(center, Ok(Box::new(engine_with_building(0))))
-            .unwrap();
+        c.arrived(
+            center,
+            Ok((Box::new(engine_with_building(0)), Floors::default())),
+        )
+        .unwrap();
         // Unknown: drawn where it stands.
         assert_eq!(c.render_cells(7), None);
         // Inside land cell 1 (x 0 to 24 m): that cell alone.
@@ -856,8 +883,11 @@ mod tests {
         let dats = post_dats();
         let mut c = CameraCollision::new();
         let center = LandblockCoord { x: 0xA9, y: 0xB4 };
-        c.arrived(center, Ok(Box::new(engine_with_building(0))))
-            .unwrap();
+        c.arrived(
+            center,
+            Ok((Box::new(engine_with_building(0)), Floors::default())),
+        )
+        .unwrap();
         // Nothing in the way: the eye goes where the boom wants it.
         assert!(pulled_in(&mut c, &dats, &[]) < 0.05);
 
@@ -893,8 +923,11 @@ mod tests {
         assert!(!c.has_object(7));
 
         // A new neighbourhood starts empty and the next sync fills it.
-        c.arrived(center, Ok(Box::new(engine_with_building(0))))
-            .unwrap();
+        c.arrived(
+            center,
+            Ok((Box::new(engine_with_building(0)), Floors::default())),
+        )
+        .unwrap();
         assert!(!c.has_object(7));
         assert!(pulled_in(&mut c, &dats, std::slice::from_ref(&post)) >= 0.5);
     }
@@ -907,8 +940,11 @@ mod tests {
         let dats = post_dats();
         let mut c = CameraCollision::new();
         let center = LandblockCoord { x: 0xA9, y: 0xB4 };
-        c.arrived(center, Ok(Box::new(engine_with_building(0))))
-            .unwrap();
+        c.arrived(
+            center,
+            Ok((Box::new(engine_with_building(0)), Floors::default())),
+        )
+        .unwrap();
         let posts: Vec<ObjectView> = (0..3)
             .map(|i| {
                 let mut v = post_view(10.0 * i as f32, 3.0, 94.0);
@@ -944,7 +980,8 @@ mod tests {
         let b = LandblockCoord { x: 0xA9, y: 0xB5 };
         assert_eq!(c.wanted(a), Some(a));
         assert_eq!(c.wanted(a), None);
-        c.arrived(a, Ok(Box::new(PhysicsEngine::new()))).unwrap();
+        c.arrived(a, Ok((Box::new(PhysicsEngine::new()), Floors::default())))
+            .unwrap();
         assert_eq!(c.wanted(a), None);
         assert_eq!(c.wanted(b), Some(b));
         assert_eq!(c.wanted(b), None);

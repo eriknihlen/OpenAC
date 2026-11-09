@@ -234,6 +234,7 @@ dependencies = [
  "ac-dat",
  "ac-host",
  "ac-motion",
+ "ac-nav",
  "ac-physics",
  "ac-plugin-ui",
  "ac-proto",
