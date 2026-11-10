@@ -12,6 +12,13 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.5 (2026-11-10)
+
+- When a combat-mode change has to wait on the character's body for 5
+  seconds or more, the client log now says why: the stance and motion it is
+  waiting behind, and which condition isn't met. It helps explain a character
+  stuck in a combat stance. Nothing changes in how the game plays.
+
 ## OpenAC (Rust) 0.2.4 (2026-11-10)
 
 - The launcher no longer gets stuck on "update is already Staged": pressing
