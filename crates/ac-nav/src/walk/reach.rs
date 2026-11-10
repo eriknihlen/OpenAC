@@ -19,7 +19,7 @@ use super::{
 /// How far a node may stand off a cell's floor and still count as on it,
 /// metres: a grid node stands at its column's middle, a little off a
 /// sloping face's height there.
-const ON_THE_FLOOR: f32 = 0.35;
+pub(super) const ON_THE_FLOOR: f32 = 0.35;
 
 /// One cell a reach search reached.
 #[derive(Debug, Clone, Copy, PartialEq)]
