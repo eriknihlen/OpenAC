@@ -1018,10 +1018,10 @@ impl FrameWalk {
         if viewer_cell & 0xFFFF < 0x0100 || !self.cells.contains_key(&viewer_cell) {
             let mut root = PortalView::default();
             // A window one pixel wide or tall collapses the full-screen quad
-            // to a line, so no view is added. The landscape, like the one an
-            // interior sees through no window, is then not drawn at all: the
-            // frame comes out empty instead of asking for a view that does
-            // not exist.
+            // to a line (or, at 1x1, a point), so no view is added. The
+            // landscape, like the one an interior sees through no window, is
+            // then not drawn at all: the frame comes out empty instead of
+            // asking for a view that does not exist.
             if copy_full_view(&mut root, camera) {
                 self.draw_landscape(camera, blocks, buildings, &root, true, sink);
             }
