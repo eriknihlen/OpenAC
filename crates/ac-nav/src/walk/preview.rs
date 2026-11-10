@@ -318,10 +318,10 @@ impl WalkController {
                 })
                 .collect()
         };
-        let object_floors = if sealed {
-            Vec::new()
+        let object_floors: Arc<[CellSurface]> = if sealed {
+            Arc::from([])
         } else {
-            object_floors_of(cx.physics, &landblock_ids)
+            self.object_floors_for(cx, &landblock_ids, source.is_kept())
         };
         let start_cell = sample.cell_id;
         PathPreview(Job::start(self.mode, move || {
@@ -489,38 +489,65 @@ impl WalkController {
         landblock_ids: &[u32],
         kept: bool,
     ) -> Arc<[CellSurface]> {
-        if !kept {
-            return landblock_ids
+        let copy = || -> Arc<[CellSurface]> {
+            landblock_ids
                 .iter()
                 .filter_map(|&id| cx.physics.landblock(id))
                 .flat_map(|landblock| landblock.cells.iter().cloned())
-                .collect();
+                .collect()
+        };
+        if !kept {
+            return copy();
         }
-        let placed: Vec<super::PlacedLandblock> = landblock_ids
-            .iter()
-            .filter_map(|&id| {
-                cx.physics.landblock(id).map(|landblock| {
-                    (
-                        id,
-                        landblock.world_offset_x.to_bits(),
-                        landblock.world_offset_y.to_bits(),
-                    )
-                })
-            })
-            .collect();
+        let placed = placed_landblocks(cx, landblock_ids);
         if let Some((kept, cells)) = &self.grid_cells
             && *kept == placed
         {
             return Arc::clone(cells);
         }
-        let cells: Arc<[CellSurface]> = landblock_ids
-            .iter()
-            .filter_map(|&id| cx.physics.landblock(id))
-            .flat_map(|landblock| landblock.cells.iter().cloned())
-            .collect();
+        let cells = copy();
         self.grid_cells = Some((placed, Arc::clone(&cells)));
         cells
     }
+
+    /// The floors of the objects placed in the interior cells of the
+    /// landblocks a grid covers ([`object_floors_of`]), kept with the grid
+    /// the controller keeps as its cell surfaces are.
+    fn object_floors_for(
+        &mut self,
+        cx: &WalkWorld<'_>,
+        landblock_ids: &[u32],
+        kept: bool,
+    ) -> Arc<[CellSurface]> {
+        if !kept {
+            return object_floors_of(cx.physics, landblock_ids).into();
+        }
+        let placed = placed_landblocks(cx, landblock_ids);
+        if let Some((kept, floors)) = &self.grid_object_floors
+            && *kept == placed
+        {
+            return Arc::clone(floors);
+        }
+        let floors: Arc<[CellSurface]> = object_floors_of(cx.physics, landblock_ids).into();
+        self.grid_object_floors = Some((placed, Arc::clone(&floors)));
+        floors
+    }
+}
+
+/// Each resident landblock among `landblock_ids` with where it is loaded.
+fn placed_landblocks(cx: &WalkWorld<'_>, landblock_ids: &[u32]) -> Vec<super::PlacedLandblock> {
+    landblock_ids
+        .iter()
+        .filter_map(|&id| {
+            cx.physics.landblock(id).map(|landblock| {
+                (
+                    id,
+                    landblock.world_offset_x.to_bits(),
+                    landblock.world_offset_y.to_bits(),
+                )
+            })
+        })
+        .collect()
 }
 
 /// One landblock's ground, placed in the world frame.
@@ -545,7 +572,8 @@ struct PointNamer<'a> {
     start_cell: u32,
     cells: &'a [CellSurface],
     /// The floors of the objects placed in interior cells (a building's
-    /// stairs, a dais), each under the id of a cell the object stands in.
+    /// stairs, a dais), each under the id of every interior cell the
+    /// collision files it in.
     object_floors: &'a [CellSurface],
     ground: &'a [PlacedGround],
     sealed_dungeon: bool,
@@ -602,11 +630,13 @@ impl PointNamer<'_> {
     }
 }
 
-/// The floors of the fixed objects the landblocks place that stand in
-/// interior cells, such as a building's stairs: each object's walkable
-/// faces (facing up, no steeper than a floor), once under the id of every
-/// interior cell the collision files it in. Read on the thread that owns
-/// the physics world.
+/// The floors of the fixed objects the landblocks place inside interior
+/// cells, such as a building's stairs: each object's walkable faces
+/// (facing up, no steeper than a floor), once under the id of every
+/// interior cell the collision files it in. An object placed outdoors is
+/// left out even where the collision files it in a room too, as it does a
+/// step or a barrel across a doorway: its top is outdoors. Read on the
+/// thread that owns the physics world.
 fn object_floors_of(physics: &PhysicsEngine, landblock_ids: &[u32]) -> Vec<CellSurface> {
     let mut floors = Vec::new();
     for &landblock_id in landblock_ids {
@@ -614,6 +644,9 @@ fn object_floors_of(physics: &PhysicsEngine, landblock_ids: &[u32]) -> Vec<CellS
             .shadows
             .capture_static_owners_for_landblock(landblock_id)
         {
+            if !placed_indoors(physics, owner) {
+                continue;
+            }
             let mut indoors = physics
                 .shadows
                 .owner_cells(owner)
@@ -651,6 +684,14 @@ fn object_floors_of(physics: &PhysicsEngine, landblock_ids: &[u32]) -> Vec<CellS
         }
     }
     floors
+}
+
+/// Whether an object was placed in an interior cell, rather than outdoors.
+fn placed_indoors(physics: &PhysicsEngine, owner: u32) -> bool {
+    physics
+        .shadows
+        .registration(owner)
+        .is_some_and(|placed| placed.seed_cell_id & 0xFFFF >= 0x0100)
 }
 
 /// The cell whose floor lies nearest a point's height, among those with a
@@ -1048,5 +1089,113 @@ mod tests {
             .filter(|&&(tread, _)| without.name(tread, GROUND_FLOOR).cell_id & 0xFFFF < 0x0100)
             .count();
         assert!(outdoors > 0);
+    }
+
+    /// The objects landblock 0x0906 places outdoors, 15 m over the ground,
+    /// that the collision files in a building's room (0x09060101) too, as
+    /// it does an object that reaches into a room, are not that room's
+    /// floors: a point on the top of one, where the cells' containment puts
+    /// it outdoors, is named outdoors.
+    #[test]
+    #[ignore = "needs the retail dat files"]
+    fn an_object_placed_outdoors_is_not_a_rooms_floor() {
+        use ac_dat::DatCollection;
+        use ac_dat::objects::Region;
+        use ac_physics::CollisionWorld;
+        use ac_physics::content::publish_landblock;
+
+        const LANDBLOCK: u32 = 0x0906_FFFF;
+
+        let dir = std::env::var_os("OPENAC_DAT_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(ac_dat::default_dat_dir)
+            .expect("no dat directory: set OPENAC_DAT_DIR");
+        let dats = DatCollection::open(dir).expect("open the retail dats");
+        let region: Region = dats.get(0x1300_0000).unwrap().expect("the region");
+        let mut engine = PhysicsEngine::new();
+        engine.attach_world(CollisionWorld::new());
+        publish_landblock(
+            &mut engine,
+            &dats,
+            &region.land_defs.land_height_table,
+            LANDBLOCK,
+            Vec3::ZERO,
+        )
+        .expect("the landblock publishes")
+        .expect("the landblock exists");
+        let landblock = engine
+            .landblock(LANDBLOCK)
+            .expect("the landblock is resident");
+        let cells = landblock.cells.clone();
+        let ground = vec![PlacedGround {
+            corner_x: 0.0,
+            corner_y: 0.0,
+            terrain: landblock.terrain.clone(),
+        }];
+        let object_floors = object_floors_of(&engine, &[LANDBLOCK]);
+
+        // The tops of the objects placed outdoors but filed in a room too,
+        // where the containment puts a point a little above them outdoors.
+        let mut objects = 0;
+        let mut tops = Vec::new();
+        for owner in engine
+            .shadows
+            .capture_static_owners_for_landblock(LANDBLOCK)
+        {
+            let seed = engine.shadows.registration(owner).unwrap().seed_cell_id;
+            let in_a_room = engine
+                .shadows
+                .owner_cells(owner)
+                .iter()
+                .any(|&cell| cell & 0xFFFF >= 0x0100);
+            if seed & 0xFFFF >= 0x0100 || !in_a_room {
+                continue;
+            }
+            let Some(surfaces) = surfaces_of(&engine, owner) else {
+                continue;
+            };
+            let before = tops.len();
+            for t in &surfaces.triangles {
+                let normal = (t.b - t.a).cross(t.c - t.a);
+                if normal.length() <= 1e-6 || normal.z / normal.length() < FLOOR_Z {
+                    continue;
+                }
+                let top = (t.a + t.b + t.c) / 3.0;
+                let (cell, _) = engine.adjust_position(seed, top + Vec3::new(0.0, 0.0, 0.5));
+                if cell & 0xFFFF < 0x0100 {
+                    tops.push(top);
+                }
+            }
+            if tops.len() > before {
+                objects += 1;
+            }
+        }
+        assert_eq!(
+            (objects, tops.len()),
+            (4, 8),
+            "four such objects, two tops each"
+        );
+
+        let corner = vec3(
+            f32::from(0x09_u8) * LANDBLOCK_SIZE,
+            f32::from(0x06_u8) * LANDBLOCK_SIZE,
+            0.0,
+        );
+        let namer = PointNamer {
+            start: Vec3::ZERO,
+            global_start: corner,
+            start_cell: 0,
+            cells: &cells,
+            object_floors: &object_floors,
+            ground: &ground,
+            sealed_dungeon: false,
+        };
+        for &top in &tops {
+            let named = namer.name(top, 0).cell_id;
+            assert!(
+                named & 0xFFFF < 0x0100,
+                "the top at {top:?} is named {named:08X}"
+            );
+        }
     }
 }
