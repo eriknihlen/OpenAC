@@ -111,6 +111,10 @@ macro_rules! import_table {
             /// Remove a canvas.
             UiCanvasRemove = ui_canvas_remove(u32) -> bool,
                 permission: None, window: false, since: (1, 0);
+            /// Resize a canvas on the screen: false for a size below 1, no
+            /// such canvas, or an in-markup canvas (its element sizes it).
+            UiCanvasResize = ui_canvas_resize($crate::ui::CanvasResize) -> bool,
+                permission: None, window: false, since: (1, 12);
             /// Measure text in the interface font.
             UiMeasureText = ui_measure_text(String) -> $crate::ui::TextSize,
                 permission: None, window: false, since: (1, 0);

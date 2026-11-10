@@ -7,10 +7,10 @@
 
 use crate::ui::{
     self as abi, ActionValue, BindingKind, CanvasChange, CanvasPaint, CanvasRegistration,
-    CanvasSet, CanvasState, ClientWindowRequest, ControlLabel, ControlRef, ControlVisible,
-    EncodedImage, HotkeyRebind, HotkeyRegistration, HotkeyState, IconSet, ImageInfo, KeyChord,
-    LineSet, MarkerAnchor, PanelRegistration, PanelValues, PointerEvent, RgbaImage, ShapeSet,
-    TextSize, TriangleSet, UiAction, UiValue, ViewShow,
+    CanvasResize, CanvasSet, CanvasState, ClientWindowRequest, ControlLabel, ControlRef,
+    ControlVisible, EncodedImage, HotkeyRebind, HotkeyRegistration, HotkeyState, IconSet,
+    ImageInfo, KeyChord, LineSet, MarkerAnchor, PanelRegistration, PanelValues, PointerEvent,
+    RgbaImage, ShapeSet, TextSize, TriangleSet, UiAction, UiValue, ViewShow,
 };
 use crate::{ApiVersion, DecodeError, Event, Import, Wire};
 use ac_plugin_ui::{
@@ -502,7 +502,7 @@ pub fn handle(
             done.to_bytes()
         }
         Import::UiCanvasRegister => {
-            let r = CanvasRegistration::from_bytes(request).map_err(bad)?;
+            let r = CanvasRegistration::from_bytes_at(request, version).map_err(bad)?;
             let Some(anchor) = CanvasAnchor::from_index(r.anchor) else {
                 return Ok(
                     Err::<u32, String>(format!("canvas anchor {} is not 0 to 8", r.anchor))
@@ -517,6 +517,7 @@ pub fn handle(
                 offset: (r.offset_x, r.offset_y),
                 start_visible: r.start_visible,
                 accepts_pointer_input: r.accepts_pointer_input,
+                in_markup: r.in_markup,
             };
             state.register_canvas(owner, descriptor).to_bytes()
         }
@@ -546,8 +547,8 @@ pub fn handle(
             state
                 .canvas(id, canvas)
                 .map(|c| CanvasState {
-                    width: c.descriptor.width,
-                    height: c.descriptor.height,
+                    width: c.size.0,
+                    height: c.size.1,
                     visible: c.visible,
                     anchor: c.anchor.index(),
                     offset_x: c.offset.0,
@@ -563,6 +564,12 @@ pub fn handle(
         Import::UiCanvasRemove => {
             let canvas = u32::from_bytes(request).map_err(bad)?;
             state.remove_canvas(id, canvas).to_bytes()
+        }
+        Import::UiCanvasResize => {
+            let r = CanvasResize::from_bytes(request).map_err(bad)?;
+            state
+                .resize_canvas(id, r.canvas, r.width, r.height)
+                .to_bytes()
         }
         Import::UiMeasureText => {
             let text = String::from_bytes(request).map_err(bad)?;
@@ -776,6 +783,18 @@ pub fn handle(
 /// The session's UI event as the plugin's event.
 #[must_use]
 pub fn event(event: ui::UiEvent) -> Event {
+    if let ui::UiEvent::CanvasResized {
+        canvas,
+        width,
+        height,
+    } = event
+    {
+        return Event::CanvasResized(abi::CanvasSize {
+            canvas,
+            width,
+            height,
+        });
+    }
     Event::Ui(match event {
         ui::UiEvent::Action {
             panel,
@@ -823,6 +842,7 @@ pub fn event(event: ui::UiEvent) -> Event {
             handler: format!("{}{handle}", abi::DIALOG_HANDLER_PREFIX),
             value: ActionValue::Int(button),
         }),
+        ui::UiEvent::CanvasResized { .. } => unreachable!("answered above"),
     })
 }
 
@@ -954,6 +974,110 @@ mod theme_tests {
         assert_eq!(abi::FONT_MAXIMUM_GLYPHS as usize, f::MAXIMUM_GLYPHS);
         assert_eq!(abi::FONT_MINIMUM_PIXEL_SIZE, f::MINIMUM_PIXEL_SIZE);
         assert_eq!(abi::FONT_MAXIMUM_PIXEL_SIZE, f::MAXIMUM_PIXEL_SIZE);
+    }
+
+    // A plugin built before API 1.12 registers a canvas without saying
+    // whether it sits in markup, and gets one on the screen; one built for
+    // 1.12 can ask for markup, and resizes a canvas on the screen only.
+    #[test]
+    fn an_in_markup_canvas_came_with_api_1_12_and_refuses_a_resize() {
+        let older = ApiVersion::new(1, 11);
+        let owner = UiOwner::new("test.atlas", "Atlas");
+        let mut state = PluginUi::new();
+        let registration = |id: &str, in_markup| abi::CanvasRegistration {
+            canvas_id: id.into(),
+            width: 64,
+            height: 48,
+            anchor: 0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            start_visible: true,
+            accepts_pointer_input: false,
+            in_markup,
+        };
+        let bytes = registration("hud", true).to_bytes_at(older);
+        assert_eq!(bytes.len() + 1, registration("hud", true).to_bytes().len());
+        let register = |state: &mut PluginUi, bytes: &[u8], version| {
+            let reply = handle(
+                Import::UiCanvasRegister,
+                bytes,
+                &owner,
+                state,
+                None,
+                version,
+            );
+            Result::<u32, String>::from_bytes(&reply.unwrap())
+                .unwrap()
+                .unwrap()
+        };
+        let hud = register(&mut state, &bytes, older);
+        assert!(
+            !state
+                .canvas("test.atlas", hud)
+                .unwrap()
+                .descriptor
+                .in_markup
+        );
+        let map = register(
+            &mut state,
+            &registration("map", true).to_bytes(),
+            crate::API_CURRENT,
+        );
+        assert!(
+            state
+                .canvas("test.atlas", map)
+                .unwrap()
+                .descriptor
+                .in_markup
+        );
+        let resize = |state: &mut PluginUi, canvas, width| {
+            let request = abi::CanvasResize {
+                canvas,
+                width,
+                height: 30,
+            };
+            let reply = handle(
+                Import::UiCanvasResize,
+                &request.to_bytes(),
+                &owner,
+                state,
+                None,
+                crate::API_CURRENT,
+            );
+            bool::from_bytes(&reply.unwrap()).unwrap()
+        };
+        assert!(resize(&mut state, hud, 90));
+        assert!(!resize(&mut state, map, 90));
+        assert!(!resize(&mut state, hud, 0));
+        let reply = handle(
+            Import::UiCanvasState,
+            &hud.to_bytes(),
+            &owner,
+            &mut state,
+            None,
+            crate::API_CURRENT,
+        );
+        let read = Option::<abi::CanvasState>::from_bytes(&reply.unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!((read.width, read.height), (90, 30));
+        assert_eq!(Import::UiCanvasResize.since(), ApiVersion::new(1, 12));
+        // The session's news of a laid-out size is the plugin's event, which
+        // a plugin built before 1.12 is never sent.
+        let resized = event(ui::UiEvent::CanvasResized {
+            canvas: map,
+            width: 300,
+            height: 200,
+        });
+        assert_eq!(
+            resized,
+            Event::CanvasResized(abi::CanvasSize {
+                canvas: map,
+                width: 300,
+                height: 200
+            })
+        );
+        assert_eq!(resized.since(), ApiVersion::new(1, 12));
     }
 
     // What a plugin built before fonts paints reads with the interface font,

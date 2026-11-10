@@ -384,6 +384,7 @@ fn canvas(id: &str) -> CanvasDescriptor {
         offset: (0.0, 0.0),
         start_visible: true,
         accepts_pointer_input: false,
+        in_markup: false,
     }
 }
 
@@ -687,6 +688,7 @@ fn a_held_pointer_is_measured_from_where_the_plugin_last_put_the_canvas() {
                 offset: (-20.0, 30.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -752,6 +754,7 @@ fn a_held_pointer_whose_place_is_not_known_is_heard_as_sent() {
                 offset: (-20.0, -30.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -1953,4 +1956,172 @@ fn a_reloaded_plugin_never_gets_a_handle_again_so_a_window_draws_its_new_image()
     assert!(view.image("edwards.tank", old).is_none());
     let image = view.image("edwards.tank", new).unwrap();
     assert!(matches!(&image.source, ImageSource::Rgba(p) if p.as_slice() == [9, 9, 9, 9]));
+}
+
+#[test]
+fn a_canvas_on_the_screen_resizes_and_keeps_everything_else() {
+    // IPluginCanvas.TryResize: true at the new size, at once; the same size
+    // changes nothing; below 1, a removed canvas and an in-markup one
+    // answer false and change nothing.
+    let mut ui = PluginUi::new();
+    let id = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                anchor: CanvasAnchor::BottomRight,
+                offset: (-10.0, -20.0),
+                accepts_pointer_input: true,
+                ..canvas("hud")
+            },
+        )
+        .unwrap();
+    assert!(ui.listen_canvas("edwards.tank", id, true));
+    assert!(ui.paint_canvas("edwards.tank", id, Vec::new()).is_ok());
+    ui.take_changes();
+    assert!(ui.resize_canvas("edwards.tank", id, 128, 96));
+    let c = ui.canvas("edwards.tank", id).unwrap();
+    assert_eq!(c.size, (128, 96));
+    assert_eq!(
+        (c.descriptor.width, c.descriptor.height),
+        (64, 32),
+        "as registered"
+    );
+    assert_eq!(
+        (c.anchor, c.offset),
+        (CanvasAnchor::BottomRight, (-10.0, -20.0))
+    );
+    assert!(c.visible && c.listening);
+    assert_eq!(
+        ui.take_changes(),
+        vec![UiChange::CanvasResized {
+            canvas: id,
+            size: (128, 96)
+        }]
+    );
+    let mut view = PluginUiView::new();
+    view.apply_all(ui.snapshot());
+    assert_eq!(view.canvas(id).unwrap().size, (128, 96));
+    ui.take_changes();
+    assert!(
+        ui.resize_canvas("edwards.tank", id, 128, 96),
+        "the same size"
+    );
+    assert!(ui.take_changes().is_empty());
+    for (w, h) in [(0, 10), (10, 0), (-1, 5)] {
+        assert!(!ui.resize_canvas("edwards.tank", id, w, h), "{w}x{h}");
+    }
+    assert!(
+        !ui.resize_canvas("another.plugin", id, 10, 10),
+        "not its canvas"
+    );
+    assert_eq!(ui.canvas("edwards.tank", id).unwrap().size, (128, 96));
+    let markup = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                in_markup: true,
+                ..canvas("map")
+            },
+        )
+        .unwrap();
+    ui.take_changes();
+    assert!(
+        !ui.resize_canvas("edwards.tank", markup, 10, 10),
+        "its element sizes it"
+    );
+    assert_eq!(ui.canvas("edwards.tank", markup).unwrap().size, (64, 32));
+    assert!(ui.take_changes().is_empty());
+    assert!(ui.remove_canvas("edwards.tank", id));
+    assert!(!ui.resize_canvas("edwards.tank", id, 10, 10), "removed");
+}
+
+#[test]
+fn an_in_markup_canvas_is_available_only_while_hosted_and_hears_its_laid_out_size() {
+    let mut ui = PluginUi::new();
+    let id = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                in_markup: true,
+                ..canvas("map")
+            },
+        )
+        .unwrap();
+    let screen = ui.register_canvas(&tank(), canvas("hud")).unwrap();
+    assert!(!ui.canvas_available("edwards.tank", id), "no window");
+    ui.set_window_attached(true);
+    assert!(ui.canvas_available("edwards.tank", screen));
+    assert!(
+        !ui.canvas_available("edwards.tank", id),
+        "no element hosts it"
+    );
+    let hosted = |size| UiInput::CanvasHosted { canvas: id, size };
+    ui.input(hosted(Some((240, 180))));
+    assert!(ui.canvas_available("edwards.tank", id));
+    assert_eq!(ui.canvas("edwards.tank", id).unwrap().size, (240, 180));
+    assert_eq!(
+        ui.take_events(),
+        vec![(
+            "edwards.tank".to_owned(),
+            UiEvent::CanvasResized {
+                canvas: id,
+                width: 240,
+                height: 180
+            }
+        )]
+    );
+    // Hosted elsewhere at the same size: no news.
+    ui.input(hosted(None));
+    assert!(!ui.canvas_available("edwards.tank", id));
+    ui.input(hosted(Some((240, 180))));
+    assert!(ui.take_events().is_empty());
+    // A canvas on the screen is never hosted.
+    ui.input(UiInput::CanvasHosted {
+        canvas: screen,
+        size: Some((10, 10)),
+    });
+    assert_eq!(ui.canvas("edwards.tank", screen).unwrap().size, (64, 32));
+    assert!(ui.take_events().is_empty());
+    // The window leaves: nothing hosts it, and a report after is ignored.
+    ui.set_window_attached(false);
+    assert!(!ui.canvas("edwards.tank", id).unwrap().hosted);
+    ui.input(hosted(Some((300, 200))));
+    assert_eq!(ui.canvas("edwards.tank", id).unwrap().size, (240, 180));
+    assert!(ui.take_events().is_empty());
+}
+
+#[test]
+fn a_resized_canvas_measures_a_held_drag_from_its_new_size() {
+    // The place correction uses the size the canvas has now: a canvas
+    // anchored bottom-right that grew left and up is measured from there.
+    let mut ui = PluginUi::new();
+    let id = ui
+        .register_canvas(
+            &tank(),
+            CanvasDescriptor {
+                anchor: CanvasAnchor::BottomRight,
+                accepts_pointer_input: true,
+                ..canvas("hud")
+            },
+        )
+        .unwrap();
+    assert!(ui.resize_canvas("edwards.tank", id, 164, 132));
+    let layer = (800.0, 600.0);
+    let now = canvas_origin(CanvasAnchor::BottomRight, (0.0, 0.0), (164.0, 132.0), layer);
+    let event = UiEvent::Pointer {
+        canvas: id,
+        event: PointerEvent {
+            kind: PointerKind::Move,
+            x: 5.0,
+            y: 5.0,
+            button: 1,
+            modifiers: 0,
+            wheel_delta: 0,
+        },
+        place: Some(CanvasPlace { origin: now, layer }),
+    };
+    let UiEvent::Pointer { event, .. } = ui.pointer_as_placed_now(event) else {
+        panic!("a pointer event");
+    };
+    assert_eq!((event.x, event.y), (5.0, 5.0));
 }

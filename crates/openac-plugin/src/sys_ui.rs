@@ -29,6 +29,7 @@ mod raw {
         pub(super) fn ui_canvas_state(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_canvas_available(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_canvas_remove(ptr: *const u8, len: usize) -> i32;
+        pub(super) fn ui_canvas_resize(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_measure_text(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_font_bundled(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_font_load(ptr: *const u8, len: usize) -> i32;
@@ -93,6 +94,7 @@ wrappers!(
     ui_canvas_state,
     ui_canvas_available,
     ui_canvas_remove,
+    ui_canvas_resize,
     ui_measure_text,
     ui_font_bundled,
     ui_font_load,

@@ -153,7 +153,24 @@ merge or a pickup selecting the stack it joins; so `PLUGIN` does not mean the
 plugin's own selection). The event compares the selection
 once a pass, so when it changed more than once in a pass it reports the last
 change's source. A plugin built for an older version is sent the change
-without it and reads `SYSTEM`.
+without it and reads `SYSTEM`. API 1.12
+added `launch_speed` at the end of `ProjectilePathQuery`: for a missile or arc,
+the launcher's maximum velocity in metres per second, so the probe flies at
+that total speed on the lower arc to the aim point, as the server launches
+the shot, instead of the fixed speed lofted to land there. A speed above
+50 m/s is capped at 50. A speed that is not a finite number above 0 answers
+`InvalidTarget`, and so does a target no arc reaches at the capped speed
+("The target is out of reach at 20.0 m/s.", with no angle, as there is no
+launch). Any other answer's notice ends with the speed and launch angle used
+("Launched at 20.0 m/s, 28.0° up."). A straight shot ignores the speed. The
+probe flies toward where the target is now; the server aims ahead of a moving
+target, so the real shot can take a different arc. A
+plugin built for an older version sends no launch speed, and its probe flies
+as before. API 1.12 also added canvases inside windows: `in_markup` at the end
+of a canvas registration, the markup `<canvas>` element that hosts such a canvas
+([Canvases in windows](#canvases-in-windows)), and `Event::CanvasResized`,
+which a plugin built for an older version never gets; its canvases sit on the
+screen as before. It also added `Canvas::resize` for a canvas on the screen.
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -241,6 +258,62 @@ tree indents from the left; its other columns may align right. The attribute
 moves only text: check, icon and button cells draw as they do. A client
 older than 1.10 ignores the attribute, as it ignores any it does not know,
 and draws the column left-aligned.
+
+### Canvases in windows
+
+A canvas can sit inside one of the plugin's windows instead of on the screen
+by itself (API 1.12), say a map with routes to edit. Put a `<canvas id="map">`
+element in the markup and register the canvas with the same id and
+`in_markup` on (`CanvasSpec::in_markup("map", 320, 240)`):
+
+```xml
+<panel title="Atlas" w="420" h="360" layout="column">
+  <label text="{Route}"/>
+  <canvas id="map" grow="1" tooltip="Drag a waypoint to move it"/>
+</panel>
+```
+
+The element is an empty rectangle the window's layout places and sizes like
+any other element: `x`, `y`, `w` and `h` in a window without a layout, or
+`w`, `h`, `grow`, `minw` and the other flex item attributes in a flex
+container. Its `id` is required and is the canvas's id as text, not a
+binding. It holds no children and cannot be inside a `<repeat>`. It draws nothing itself and lets clicks
+through; the canvas fills it, in whole pixels, at its top-left, and answers
+for the rectangle, its tooltip included. It clips, so a canvas whose element
+has no room shows nothing.
+
+The registered `width` and `height` are the canvas's size only until it is
+laid out. After that `Canvas::state` reports the laid-out size, and each new
+size arrives as `Event::CanvasResized` with the canvas and its width and
+height, the first layout included when it differs from the registered size. What the canvas shows was painted for the
+old size, so paint it again then: `Canvas::paint` gives the painter the size
+the canvas has now. The anchor and offset are kept but ignored, and
+`Canvas::resize` answers false: the element decides the size.
+
+Either side may come first. A canvas registered before its window waits for
+its element, and an element draws nothing until its canvas is registered.
+When two of the plugin's windows have an element with the same id, the first
+one mounted hosts the canvas, and the other takes over if that window goes;
+when the last one goes, the canvas waits for the next.
+`Canvas::is_available` is true only while an element hosts it. The canvas is
+drawn and takes input only while it is shown and its element is: its window
+open, its tab or group not hidden. Pointer input (presses, held moves, the
+wheel, hover and leave) works as for a canvas on the screen, in the canvas's
+own pixels. A press on the canvas does not move the window. The client logs
+once, not every frame, a canvas that waits for its element, an element whose
+canvas another window already shows, and an element naming a canvas
+registered without `in_markup`, which sits on the screen by itself.
+
+**Resizing a canvas on the screen.** `Canvas::resize(host, width, height)`
+(API 1.12) changes the size of a canvas on the screen. Its anchor, offset,
+visibility, pointer listening and what it shows are kept, so a canvas
+anchored at a right or bottom edge keeps that edge where it was. Paint it
+again for the new size; `Canvas::width` and `Canvas::height` of the handle
+you resized report the new size at once. A `Canvas` is `Copy`, so another copy
+of the handle keeps the old size; `Canvas::state` asks the client for the size
+it has now. Resizing to the size it has answers true and changes nothing.
+It answers false, and nothing changes, for a width or height below 1, a
+removed canvas, and an in-markup canvas.
 
 **World drawing.** A plugin can put labels over objects
 (`Host::show_labels`), lines (`Host::create_line_layer`) and filled triangles
@@ -569,7 +642,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.11",
+  "apiVersion": "1.12",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -585,7 +658,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.11"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.12"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

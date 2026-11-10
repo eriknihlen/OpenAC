@@ -3,5 +3,5 @@
   "displayName": "Raw Bytes",
   "version": "0.1.0",
   "entry": "rawbytes.wasm",
-  "apiVersion": "1.11"
+  "apiVersion": "1.12"
 }

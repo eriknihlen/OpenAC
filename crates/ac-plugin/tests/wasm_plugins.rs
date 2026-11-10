@@ -468,7 +468,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.11 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.12 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -679,15 +679,15 @@ fn an_api_version_this_client_does_not_support_is_refused() {
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.11""#,
         r#""apiVersion": "1.12""#,
+        r#""apiVersion": "1.13""#,
     );
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.12, but this build supports 1.0..1.11"
+        "plugin 'openac.probe' declares apiVersion 1.13, but this build supports 1.0..1.12"
     );
 }
 
@@ -736,7 +736,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.11""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.12""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -850,7 +850,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.11""#,
+        r#""apiVersion": "1.12""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -949,6 +949,26 @@ fn a_plugin_built_for_api_1_7_still_loads() {
 fn a_plugin_built_for_api_1_9_still_loads() {
     let v1_9 = ApiVersion::new(1, 9);
     let (loaded, error) = load_probe_built_for("probe-1-9", "1.9", &section_at(v1_9));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.11 gave the selection event a source (marked `since`): `probe` as
+/// an API 1.10 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_10_still_loads() {
+    let v1_10 = ApiVersion::new(1, 10);
+    let (loaded, error) = load_probe_built_for("probe-1-10", "1.10", &section_at(v1_10));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.12 gave the projectile path query a launch speed and the canvas
+/// registration `in_markup` (both marked `since`), and added an import and
+/// an event: `probe` (which asks projectile paths) as an API 1.11 SDK built
+/// it still loads.
+#[test]
+fn a_plugin_built_for_api_1_11_still_loads() {
+    let v1_11 = ApiVersion::new(1, 11);
+    let (loaded, error) = load_probe_built_for("probe-1-11", "1.11", &section_at(v1_11));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
@@ -1501,7 +1521,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.11 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.12 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2389,23 +2409,29 @@ fn the_session_hands_a_held_pointer_over_measured_from_the_canvass_latest_place(
     );
 }
 
-/// API 1.6 added hover and leave on a canvas. `uidemo` built for API 1.6
+/// API 1.6 added hover and leave on a canvas. A plugin built for API 1.6
 /// or this API hears a hover (two moves before its pump are one hover, at
 /// the later place) and the leave; built for API 1.5 it hears neither,
 /// only the press it heard before: an older plugin may read an unknown
-/// kind as a drag.
+/// kind as a drag. (`rawbytes` registers its canvas with the bytes the
+/// version it claims knows, and logs every event as it arrived.)
 #[test]
 fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
+    use ac_plugin::abi::ui::UiEvent as AbiUiEvent;
     use ac_plugin_ui::{PointerEvent, PointerKind, UiInput};
     let v1_6 = ApiVersion::new(1, 6);
     for version in [ApiVersion::new(1, 5), v1_6, API_CURRENT] {
-        let root = Root::new(&format!("uidemo-hover-{version}"));
-        install_built_for(&root.0, "uidemo", version);
+        let root = Root::new(&format!("raw-hover-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
         let mut api = FakeSession::default();
-        let mut plugins = session(&[&root.0], Some(&["openac.uidemo"]));
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
         plugins.start(&mut api);
-        assert_eq!(plugins.loaded_ids(), ["openac.uidemo"], "{version}");
+        assert!(plugins.handle_line(&format!("/rawpaint {version}"), &mut api));
+        plugins.pump(0.0, None, &mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
         let canvas = api.ui.canvases().next().unwrap().id;
+        assert!(api.ui.canvases().next().unwrap().takes_input(), "{version}");
+        let before = raw_handed(&api, "event").len();
         let mut pointer = |kind, x, button| {
             api.ui.input(UiInput::Pointer {
                 canvas,
@@ -2426,18 +2452,17 @@ fn a_canvas_hover_and_leave_reach_only_plugins_built_for_api_1_6() {
         pointer(PointerKind::Up, 30.0, 1);
         pointer(PointerKind::Leave, 30.0, 0);
         plugins.pump(0.0, Some(1), &mut api);
-        let heard: Vec<String> = api
-            .messages("openac.uidemo")
-            .into_iter()
-            .filter(|m| m.starts_with("uidemo pointer"))
+        let heard: Vec<(u8, f32, u8)> = raw_handed(&api, "event")[before..]
+            .iter()
+            .filter_map(|bytes| match Event::from_bytes_at(bytes, version) {
+                Ok(Event::Ui(AbiUiEvent::Pointer(p))) => Some((p.kind, p.x, p.button)),
+                _ => None,
+            })
             .collect();
-        let mut expected = vec![
-            "uidemo pointer kind=0 at 30,50 button=1".to_owned(),
-            "uidemo pointer kind=1 at 30,50 button=1".to_owned(),
-        ];
+        let mut expected = vec![(0, 30.0, 1), (1, 30.0, 1)];
         if v1_6.is_at_most(version) {
-            expected.insert(0, "uidemo pointer kind=5 at 30,50 button=0".to_owned());
-            expected.push("uidemo pointer kind=6 at 30,50 button=0".to_owned());
+            expected.insert(0, (5, 30.0, 0));
+            expected.push((6, 30.0, 0));
         }
         assert_eq!(heard, expected, "{version}");
         plugins.shutdown(&mut api);
@@ -2766,7 +2791,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.11""#,
+            r#""apiVersion": "1.12""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),

@@ -421,6 +421,10 @@ pub struct CanvasDescriptor {
     pub start_visible: bool,
     /// Takes pointer input while someone listens.
     pub accepts_pointer_input: bool,
+    /// Hosted by the `<canvas>` element of the same id in one of its
+    /// plugin's markup windows, which places and sizes it; the anchor and
+    /// offset are kept but ignored (OpenAC `InMarkup`).
+    pub in_markup: bool,
 }
 
 /// One canvas as a window draws it.
@@ -432,6 +436,12 @@ pub struct CanvasView {
     pub owner: UiOwner,
     /// As registered.
     pub descriptor: CanvasDescriptor,
+    /// Its size in pixels now: as registered, as the plugin last resized
+    /// it, or (an in-markup canvas) as its element last laid it out.
+    pub size: (i32, i32),
+    /// An element of one of its plugin's windows hosts it (an in-markup
+    /// canvas, as the window last said; never an overlay canvas).
+    pub hosted: bool,
     /// Shown.
     pub visible: bool,
     /// Where it is measured from now.
@@ -953,6 +963,13 @@ pub enum UiChange {
     },
     /// The plugin let go of the pointer its canvas held.
     CanvasReleasePointer(u32),
+    /// The plugin resized a canvas on the screen.
+    CanvasResized {
+        /// The canvas.
+        canvas: u32,
+        /// Its new size, pixels.
+        size: (i32, i32),
+    },
     /// A plugin took hold of an image.
     ImageAdded(Box<ImageView>),
     /// A plugin window's file icon: the image the session holds for
@@ -1117,6 +1134,14 @@ pub enum UiInput {
     /// How many framebuffer pixels a unit the window's display has, sent when
     /// it changes.
     DisplayDensity(f32),
+    /// An in-markup canvas's element: hosting it at this size (whole
+    /// pixels), or no longer hosting it (`None`). Sent when either changes.
+    CanvasHosted {
+        /// The canvas.
+        canvas: u32,
+        /// Its laid-out size, while hosted.
+        size: Option<(i32, i32)>,
+    },
     /// The player answered a dialog (the button's index).
     DialogAnswered {
         /// The dialog.
@@ -1162,5 +1187,14 @@ pub enum UiEvent {
         handle: u32,
         /// The button picked.
         button: i32,
+    },
+    /// One of its in-markup canvases was laid out at a new size.
+    CanvasResized {
+        /// The canvas.
+        canvas: u32,
+        /// Width, pixels.
+        width: i32,
+        /// Height, pixels.
+        height: i32,
     },
 }

@@ -1,6 +1,7 @@
-//! The plugins' canvases on the overlay band (OpenAC
-//! `PluginCanvasElement`): each a rectangle at its anchor plus offset,
-//! over the world and under every window, showing its retained paint list
+//! The plugins' canvases (OpenAC `PluginCanvasElement`): on the overlay
+//! band each a rectangle at its anchor plus offset, over the world and
+//! under every window, or in a markup window's `<canvas>` element, where
+//! the window's layout places and sizes it; each showing its retained paint list
 //! and, when it opted in and its plugin listens, taking the pointer inside
 //! its rectangle: a press holds the pointer until the button comes up, the
 //! moves and the release reach the plugin wherever they happen, and a press
@@ -118,7 +119,9 @@ pub struct CanvasWidget {
     /// leave not yet.
     hovering: Option<(i32, i32, u8)>,
     releases_seen: u32,
-    place: CanvasPlace,
+    /// Where it sits on the overlay band; none in a markup window, whose
+    /// layout places it.
+    place: Option<CanvasPlace>,
 }
 
 fn color(c: ac_plugin_ui::Color8) -> Color {
@@ -138,7 +141,7 @@ impl CanvasWidget {
                 modifiers,
                 wheel_delta: wheel,
             },
-            place: Some(self.place),
+            place: self.place,
         });
     }
 
@@ -403,11 +406,213 @@ impl Widget for CanvasWidget {
     }
 }
 
-/// Every canvas, on one layer of the overlay band.
+/// A markup `<canvas id="...">` (OpenAC `UiMarkupCanvas`): an empty
+/// rectangle its window's layout places and sizes, which hosts the plugin's
+/// in-markup canvas of the same id. It draws nothing itself and lets clicks
+/// through (its element is click-through); the canvas it hosts fills it,
+/// rounded to whole pixels, and answers for itself. It clips, so a canvas
+/// whose host has no room shows nothing.
+#[derive(Debug, Clone)]
+pub struct MarkupCanvas {
+    /// The plugin's id of the canvas it hosts.
+    pub canvas_id: String,
+}
+
+/// `size` rounded to whole pixels, when that is at least one each way.
+fn whole_pixels(size: (f32, f32)) -> Option<(f32, f32)> {
+    let w = (size.0 + 0.5).floor();
+    let h = (size.1 + 0.5).floor();
+    (w >= 1.0 && h >= 1.0).then_some((w, h))
+}
+
+impl MarkupCanvas {
+    /// Fits `canvas` (its hosted element) to `host`: at its top-left,
+    /// filling it in whole pixels. With no room it keeps its last size and
+    /// the host's clip hides it. The tooltip authored on `<canvas>` goes on
+    /// the canvas, which answers for the rectangle.
+    fn fill(ui: &mut UiRoot, host: ElementId, canvas: ElementId) {
+        let Some((size, tooltip)) = ui
+            .element(host)
+            .map(|e| ((e.width, e.height), e.runtime_tooltip_text.clone()))
+        else {
+            return;
+        };
+        if let Some(e) = ui.element_mut(canvas) {
+            e.left = 0.0;
+            e.top = 0.0;
+            if let Some((w, h)) = whole_pixels(size) {
+                e.width = w;
+                e.height = h;
+            }
+            e.runtime_tooltip_text = tooltip;
+        }
+    }
+}
+
+impl Widget for MarkupCanvas {
+    fn layout_children(&mut self, ui: &mut UiRoot, me: ElementId) -> bool {
+        for child in ui.children(me) {
+            Self::fill(ui, me, child);
+        }
+        true
+    }
+}
+
+/// A `<canvas>` element of a mounted plugin window, offered to the layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanvasHost {
+    /// The window's plugin.
+    pub owner: String,
+    /// The canvas id it names.
+    pub canvas_id: String,
+    /// The element ([`MarkupCanvas`]).
+    pub element: ElementId,
+}
+
+/// A `<canvas>` element as the layer keeps it: the canvas it hosts, and
+/// whether why it shows nothing was said.
+#[derive(Debug)]
+struct Slot {
+    host: CanvasHost,
+    hosted: Option<u32>,
+    reported: bool,
+}
+
+/// Every canvas: those on the screen on one layer of the overlay band, and
+/// the in-markup ones in the `<canvas>` elements of their plugins' windows
+/// (OpenAC `PluginMarkupCanvases`). Either side of an in-markup pair may
+/// come first: a canvas waits for its element, and an element draws
+/// nothing until its canvas is registered. Of two elements naming the same
+/// canvas the first mounted hosts it; when its window goes, the canvas moves
+/// to the other or waits. What shows nothing says why once.
 #[derive(Debug)]
 pub struct CanvasLayer {
     layer: ElementId,
     elements: BTreeMap<u32, ElementId>,
+    /// The `<canvas>` elements, in the order they were mounted.
+    slots: Vec<Slot>,
+    /// What the session was last told of each in-markup canvas's hosting:
+    /// its size while hosted.
+    told: BTreeMap<u32, Option<(i32, i32)>>,
+    /// The canvases whose waiting was said (or need not be).
+    waiting_said: std::collections::BTreeSet<u32>,
+    /// The snapshot the session's copy was at: a new one (a window
+    /// attached) has heard nothing of the hosting yet.
+    snapshot: u64,
+    notices: Vec<String>,
+}
+
+/// Lets go of a canvas's element: a press it holds is cancelled and a
+/// hover left, then the element goes.
+fn drop_canvas_element(ui: &mut UiRoot, el: ElementId) {
+    if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
+        if let Some(button) = w.held.take() {
+            w.deliver(PointerKind::Cancelled, 0.0, 0.0, button, 0, 0);
+        }
+        if w.hovering.take().is_some() {
+            w.deliver(PointerKind::Leave, 0.0, 0.0, 0, 0, 0);
+        }
+    }
+    if ui.captured() == Some(el) {
+        ui.release_capture();
+    }
+    ui.destroy(el);
+}
+
+/// What one frame of [`CanvasLayer::sync`] draws canvases with.
+struct Paints<'a, 'b> {
+    view: &'a PluginUiView,
+    image: &'a mut dyn FnMut(&str, u32) -> Option<Icon>,
+    font_of: &'a mut dyn FnMut(&FontView) -> CanvasFont,
+    font: Option<&'b Arc<UiFont>>,
+    outbox: &'a PluginOutbox,
+}
+
+impl Paints<'_, '_> {
+    fn widget(&self, canvas: &CanvasView, place: Option<CanvasPlace>) -> CanvasWidget {
+        CanvasWidget {
+            canvas: canvas.clone(),
+            images: HashMap::new(),
+            fonts: HashMap::new(),
+            font: self.font.cloned(),
+            outbox: std::rc::Rc::clone(self.outbox),
+            held: None,
+            hovering: None,
+            releases_seen: canvas.release_count,
+            place,
+        }
+    }
+
+    /// The canvas's widget as the copy has it now: its paint, its plugin's
+    /// images and fonts, and whether it takes the pointer.
+    fn follow(
+        &mut self,
+        ui: &mut UiRoot,
+        el: ElementId,
+        canvas: &CanvasView,
+        place: Option<CanvasPlace>,
+    ) {
+        let images: HashMap<u32, Icon> = self
+            .view
+            .images
+            .values()
+            .filter(|i| i.owner == canvas.owner.id)
+            .filter_map(|i| (self.image)(&i.owner, i.handle).map(|icon| (i.handle, icon)))
+            .collect();
+        let fonts: HashMap<u32, CanvasFont> = self
+            .view
+            .fonts
+            .values()
+            .filter(|f| f.owner == canvas.owner.id)
+            .map(|f| (f.handle, (self.font_of)(f)))
+            .collect();
+        let mut release = false;
+        if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
+            w.canvas = canvas.clone();
+            w.images = images;
+            w.place = place;
+            w.fonts = fonts;
+            if w.releases_seen != canvas.release_count {
+                w.releases_seen = canvas.release_count;
+                // The plugin let go: no cancel follows.
+                release = w.held.take().is_some();
+            }
+        }
+        if release && ui.captured() == Some(el) {
+            ui.release_capture();
+        }
+        let takes_input = canvas.takes_input();
+        if let Some(e) = ui.element_mut(el) {
+            e.click_through = !takes_input;
+        }
+        if !takes_input {
+            // It stopped taking the pointer: the hover ends now, though
+            // the pointer may not move again, and a listen after starts
+            // a new stretch.
+            if ui.hovered() == Some(el) {
+                ui.leave_hover();
+            }
+            let (mx, my) = ui.mouse();
+            let (sx, sy) = ui.screen_position(el);
+            if let Some(w) = ui.widget_mut::<CanvasWidget>(el)
+                && w.hovering.take().is_some()
+            {
+                w.deliver(PointerKind::Leave, mx as f32 - sx, my as f32 - sy, 0, 0, 0);
+            }
+        }
+        ui.set_visible(el, canvas.visible);
+    }
+}
+
+fn element_name(canvas: &CanvasView) -> String {
+    format!(
+        "PluginCanvas:{}:{}",
+        canvas.owner.id, canvas.descriptor.canvas_id
+    )
+}
+
+fn pairs(host: &CanvasHost, canvas: &CanvasView) -> bool {
+    host.owner == canvas.owner.id && host.canvas_id == canvas.descriptor.canvas_id
 }
 
 impl CanvasLayer {
@@ -416,6 +621,11 @@ impl CanvasLayer {
         Self {
             layer: host.add_layer(ui, LAYER_NAME),
             elements: BTreeMap::new(),
+            slots: Vec::new(),
+            told: BTreeMap::new(),
+            waiting_said: std::collections::BTreeSet::new(),
+            snapshot: 0,
+            notices: Vec::new(),
         }
     }
 
@@ -431,20 +641,85 @@ impl CanvasLayer {
         self.elements.get(&id).copied()
     }
 
-    /// One frame: the canvases as the copy has them, placed on the band's
-    /// viewport, with their plugins' images (`image`: a plugin's handle to
-    /// its texture) and fonts (`font_of`: a font to its textures).
+    /// The `<canvas>` element hosting canvas `id`, if one does.
+    #[must_use]
+    pub fn host_of(&self, id: u32) -> Option<ElementId> {
+        self.slots
+            .iter()
+            .find(|s| s.hosted == Some(id))
+            .map(|s| s.host.element)
+    }
+
+    /// Why canvases and `<canvas>` elements show nothing, each said once,
+    /// since the last call.
+    pub fn take_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notices)
+    }
+
+    /// Takes canvas `id` out of whatever element hosts it.
+    fn unhost(&mut self, ui: &mut UiRoot, id: u32) {
+        for slot in &mut self.slots {
+            if slot.hosted == Some(id) {
+                slot.hosted = None;
+            }
+        }
+        if let Some(el) = self.elements.remove(&id) {
+            drop_canvas_element(ui, el);
+        }
+    }
+
+    /// The `<canvas>` elements now: one gone (its window went) gives up
+    /// its canvas, which waits without saying so (the plugin closed that
+    /// window, or the client is shutting down); a new one goes last.
+    fn follow_hosts(&mut self, ui: &mut UiRoot, hosts: &[CanvasHost]) {
+        let gone: Vec<usize> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| ui.element(s.host.element).is_none() || !hosts.contains(&s.host))
+            .map(|(i, _)| i)
+            .collect();
+        for i in gone.into_iter().rev() {
+            let slot = self.slots.remove(i);
+            if let Some(id) = slot.hosted {
+                self.unhost(ui, id);
+                self.waiting_said.insert(id);
+            }
+        }
+        for host in hosts {
+            if !self.slots.iter().any(|s| s.host == *host) {
+                self.slots.push(Slot {
+                    host: host.clone(),
+                    hosted: None,
+                    reported: false,
+                });
+            }
+        }
+    }
+
+    /// One frame: the canvases as the copy has them, those on the screen
+    /// placed on the band's viewport and the in-markup ones in the
+    /// `<canvas>` elements of `hosts` (in the order their windows mounted),
+    /// with their plugins' images (`image`: a plugin's handle to its
+    /// texture) and fonts (`font_of`: a font to its textures). The session
+    /// hears through `outbox` when an in-markup canvas is hosted, at what
+    /// size, and when it no longer is.
     #[allow(clippy::too_many_arguments)]
     pub fn sync(
         &mut self,
         ui: &mut UiRoot,
         host: &OverlayHost,
         view: &PluginUiView,
+        hosts: &[CanvasHost],
         image: &mut dyn FnMut(&str, u32) -> Option<Icon>,
         font_of: &mut dyn FnMut(&FontView) -> CanvasFont,
         font: Option<&Arc<UiFont>>,
         outbox: &PluginOutbox,
     ) {
+        if self.snapshot != view.snapshots {
+            self.snapshot = view.snapshots;
+            self.told.clear();
+        }
         let gone: Vec<u32> = self
             .elements
             .keys()
@@ -452,27 +727,25 @@ impl CanvasLayer {
             .filter(|id| view.canvas(*id).is_none())
             .collect();
         for id in gone {
-            if let Some(el) = self.elements.remove(&id) {
-                if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
-                    if let Some(button) = w.held.take() {
-                        w.deliver(PointerKind::Cancelled, 0.0, 0.0, button, 0, 0);
-                    }
-                    if w.hovering.take().is_some() {
-                        w.deliver(PointerKind::Leave, 0.0, 0.0, 0, 0, 0);
-                    }
-                }
-                if ui.captured() == Some(el) {
-                    ui.release_capture();
-                }
-                ui.destroy(el);
-            }
+            self.unhost(ui, id);
         }
+        self.told.retain(|id, _| view.canvas(*id).is_some());
+        self.waiting_said.retain(|id| view.canvas(*id).is_some());
+        self.follow_hosts(ui, hosts);
+        let mut paints = Paints {
+            view,
+            image,
+            font_of,
+            font,
+            outbox,
+        };
         let viewport = host.viewport();
         for canvas in &view.canvases {
-            let size = (
-                canvas.descriptor.width as f32,
-                canvas.descriptor.height as f32,
-            );
+            if canvas.descriptor.in_markup {
+                self.sync_in_markup(ui, canvas, &mut paints);
+                continue;
+            }
+            let size = (canvas.size.0 as f32, canvas.size.1 as f32);
             let (x, y) = canvas_origin(canvas.anchor, canvas.offset, size, viewport);
             let place = CanvasPlace {
                 origin: (x, y),
@@ -480,81 +753,116 @@ impl CanvasLayer {
             };
             let el = *self.elements.entry(canvas.id).or_insert_with(|| {
                 let mut e = Element::at(x, y, size.0, size.1).with_anchors(AnchorEdges::NONE);
-                e.name = Some(format!(
-                    "PluginCanvas:{}:{}",
-                    canvas.owner.id, canvas.descriptor.canvas_id
-                ));
+                e.name = Some(element_name(canvas));
                 e.captures_pointer_drag = true;
-                let el = ui.insert(
-                    e,
-                    CanvasWidget {
-                        canvas: canvas.clone(),
-                        images: HashMap::new(),
-                        fonts: HashMap::new(),
-                        font: font.cloned(),
-                        outbox: std::rc::Rc::clone(outbox),
-                        held: None,
-                        hovering: None,
-                        releases_seen: canvas.release_count,
-                        place,
-                    },
-                );
+                let el = ui.insert(e, paints.widget(canvas, Some(place)));
                 OverlayHost::add_to_layer(ui, self.layer, el, true);
                 el
             });
-            let images: HashMap<u32, Icon> = view
-                .images
-                .values()
-                .filter(|i| i.owner == canvas.owner.id)
-                .filter_map(|i| image(&i.owner, i.handle).map(|icon| (i.handle, icon)))
-                .collect();
-            let fonts: HashMap<u32, CanvasFont> = view
-                .fonts
-                .values()
-                .filter(|f| f.owner == canvas.owner.id)
-                .map(|f| (f.handle, font_of(f)))
-                .collect();
-            let mut release = false;
-            if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
-                w.canvas = canvas.clone();
-                w.images = images;
-                w.place = place;
-                w.fonts = fonts;
-                if w.releases_seen != canvas.release_count {
-                    w.releases_seen = canvas.release_count;
-                    // The plugin let go: no cancel follows.
-                    release = w.held.take().is_some();
-                }
-            }
-            if release && ui.captured() == Some(el) {
-                ui.release_capture();
-            }
-            let takes_input = canvas.takes_input();
             if let Some(e) = ui.element_mut(el) {
                 e.left = x;
                 e.top = y;
                 e.width = size.0;
                 e.height = size.1;
-                e.click_through = !takes_input;
             }
-            if !takes_input {
-                // It stopped taking the pointer: the hover ends now, though
-                // the pointer may not move again, and a listen after starts
-                // a new stretch.
-                if ui.hovered() == Some(el) {
-                    ui.leave_hover();
-                }
-                let (mx, my) = ui.mouse();
-                let (sx, sy) = ui.screen_position(el);
-                if let Some(w) = ui.widget_mut::<CanvasWidget>(el)
-                    && w.hovering.take().is_some()
-                {
-                    w.deliver(PointerKind::Leave, mx as f32 - sx, my as f32 - sy, 0, 0, 0);
-                }
-            }
-            ui.set_visible(el, canvas.visible);
+            paints.follow(ui, el, canvas, Some(place));
         }
-        ui.set_visible(self.layer, !view.canvases.is_empty());
+        self.report_idle(view);
+        ui.set_visible(
+            self.layer,
+            view.canvases.iter().any(|c| !c.descriptor.in_markup),
+        );
+    }
+
+    /// One in-markup canvas this frame: hosted by the first free element
+    /// naming it, else waiting; the session told of a change.
+    fn sync_in_markup(
+        &mut self,
+        ui: &mut UiRoot,
+        canvas: &CanvasView,
+        paints: &mut Paints<'_, '_>,
+    ) {
+        let id = canvas.id;
+        let hosted = self.slots.iter().position(|s| s.hosted == Some(id));
+        let slot = hosted.or_else(|| {
+            self.slots
+                .iter()
+                .position(|s| s.hosted.is_none() && pairs(&s.host, canvas))
+        });
+        let Some(slot) = slot else {
+            if self.waiting_said.insert(id) {
+                self.notices.push(format!(
+                    "plugin canvas '{}/{}' is registered in markup and waits for a <canvas id=\"{}\"> \
+                     in one of the plugin's windows; nothing is drawn until one is mounted",
+                    canvas.owner.id, canvas.descriptor.canvas_id, canvas.descriptor.canvas_id
+                ));
+            }
+            self.tell(id, None, paints.outbox);
+            return;
+        };
+        let parent = self.slots[slot].host.element;
+        let el = match self.elements.get(&id) {
+            Some(el) if hosted.is_some() => *el,
+            _ => {
+                let mut e = Element::at(0.0, 0.0, canvas.size.0 as f32, canvas.size.1 as f32)
+                    .with_anchors(AnchorEdges::NONE);
+                e.name = Some(element_name(canvas));
+                e.captures_pointer_drag = true;
+                let el = ui.add(parent, e, paints.widget(canvas, None));
+                MarkupCanvas::fill(ui, parent, el);
+                self.slots[slot].hosted = Some(id);
+                self.elements.insert(id, el);
+                el
+            }
+        };
+        paints.follow(ui, el, canvas, None);
+        let size = ui
+            .element(el)
+            .map(|e| (e.width as i32, e.height as i32))
+            .filter(|s| s.0 >= 1 && s.1 >= 1);
+        self.tell(id, size, paints.outbox);
+    }
+
+    /// Tells the session an in-markup canvas's hosting, when it changed.
+    fn tell(&mut self, canvas: u32, size: Option<(i32, i32)>, outbox: &PluginOutbox) {
+        if self.told.get(&canvas) != Some(&size) {
+            self.told.insert(canvas, size);
+            outbox
+                .borrow_mut()
+                .push(UiInput::CanvasHosted { canvas, size });
+        }
+    }
+
+    /// Says once, for each `<canvas>` element still empty, why it shows
+    /// nothing when that is known: another window already shows its canvas,
+    /// or its canvas was registered for the screen. One whose canvas is not
+    /// registered yet just waits.
+    fn report_idle(&mut self, view: &PluginUiView) {
+        for slot in &mut self.slots {
+            if slot.reported || slot.hosted.is_some() {
+                continue;
+            }
+            let Some(canvas) = view.canvases.iter().find(|c| pairs(&slot.host, c)) else {
+                continue;
+            };
+            slot.reported = true;
+            let where_ = format!(
+                "<canvas id=\"{}\"> of plugin '{}'",
+                slot.host.canvas_id, slot.host.owner
+            );
+            self.notices.push(if canvas.descriptor.in_markup {
+                format!(
+                    "{where_} shows nothing: another window of the plugin already shows that \
+                     canvas; it takes over if that window goes away"
+                )
+            } else {
+                format!(
+                    "{where_} shows nothing: the plugin registered canvas '{}' without in_markup, \
+                     so it sits on the screen by itself",
+                    slot.host.canvas_id
+                )
+            });
+        }
     }
 }
 
