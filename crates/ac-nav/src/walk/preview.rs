@@ -15,8 +15,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use ac_physics::globals::FLOOR_Z;
-use ac_physics::{CellSurface, TerrainSurface, point_in_triangle_xy};
-use glam::Vec3;
+use ac_physics::{CellSurface, PhysicsEngine, TerrainSurface, point_in_triangle_xy};
+use glam::{Quat, Vec3};
+
+use crate::geometry::surfaces_of;
 
 use super::reach::ON_THE_FLOOR;
 
@@ -316,6 +318,11 @@ impl WalkController {
                 })
                 .collect()
         };
+        let object_floors = if sealed {
+            Vec::new()
+        } else {
+            object_floors_of(cx.physics, &landblock_ids)
+        };
         let start_cell = sample.cell_id;
         PathPreview(Job::start(self.mode, move || {
             let begun = Instant::now();
@@ -360,6 +367,7 @@ impl WalkController {
                 global_start,
                 start_cell,
                 cells: &cells,
+                object_floors: &object_floors,
                 ground: &ground,
                 sealed_dungeon: sealed,
             };
@@ -526,13 +534,19 @@ struct PlacedGround {
 /// to a point, metres.
 const SAME_HEIGHT: f32 = 0.01;
 
-/// Names the points of a found route for the cells they stand in
-/// (OpenAC `PreviewPosition`).
+/// Names the points of a found route for the cells they stand in. Outside
+/// a sealed dungeon a point is in an interior cell only when it stands on
+/// one of that cell's floors; this differs from the C# client, which took
+/// the cell whose floor lay nearest at any distance, so open ground over a
+/// cellar was named for the cellar.
 struct PointNamer<'a> {
     start: Vec3,
     global_start: Vec3,
     start_cell: u32,
     cells: &'a [CellSurface],
+    /// The floors of the objects placed in interior cells (a building's
+    /// stairs, a dais), each under the id of a cell the object stands in.
+    object_floors: &'a [CellSurface],
     ground: &'a [PlacedGround],
     sealed_dungeon: bool,
 }
@@ -542,9 +556,14 @@ impl PointNamer<'_> {
     /// the first landblock. In a sealed dungeon it is in the cell whose
     /// floor lies nearest its height, else the start's cell. Elsewhere it
     /// is in an interior cell only when it stands on one of that cell's
-    /// floors, within [`ON_THE_FLOOR`]; else in the outdoor cell under it.
+    /// floors, within [`ON_THE_FLOOR`], or on the floor of an object placed
+    /// in it, such as a staircase; else in the outdoor cell under it.
     /// Where the ground and a floor, or two floors, are both that close,
-    /// the nearer wins, and on a tie the cell the route `came_from`.
+    /// the nearer wins, and on a tie (within [`SAME_HEIGHT`]) the cell the
+    /// route `came_from`. So a route that comes from outdoors onto a floor
+    /// within 0.01 m of the ground stays outdoors across it, through a
+    /// building whose floor lies that flush with the ground, until it
+    /// reaches a floor that is nearer than the ground.
     fn name(&self, point: Vec3, came_from: u32) -> PlanPoint {
         let global = self.global_start + point - self.start;
         let cell_id = if self.sealed_dungeon {
@@ -555,7 +574,7 @@ impl PointNamer<'_> {
                 self.ground_height(point)
                     .map_or(f32::INFINITY, |z| (z - point.z).abs()),
             );
-            for cell in self.cells {
+            for cell in self.cells.iter().chain(self.object_floors) {
                 let Some(off) = off_the_floor(cell, point) else {
                     continue;
                 };
@@ -581,6 +600,57 @@ impl PointNamer<'_> {
                 .then(|| ground.terrain.sample_z(x, y))
         })
     }
+}
+
+/// The floors of the fixed objects the landblocks place that stand in
+/// interior cells, such as a building's stairs: each object's walkable
+/// faces (facing up, no steeper than a floor), once under the id of every
+/// interior cell the collision files it in. Read on the thread that owns
+/// the physics world.
+fn object_floors_of(physics: &PhysicsEngine, landblock_ids: &[u32]) -> Vec<CellSurface> {
+    let mut floors = Vec::new();
+    for &landblock_id in landblock_ids {
+        for owner in physics
+            .shadows
+            .capture_static_owners_for_landblock(landblock_id)
+        {
+            let mut indoors = physics
+                .shadows
+                .owner_cells(owner)
+                .iter()
+                .copied()
+                .filter(|&cell| cell & 0xFFFF >= 0x0100)
+                .peekable();
+            if indoors.peek().is_none() {
+                continue;
+            }
+            let Some(surfaces) = surfaces_of(physics, owner) else {
+                continue;
+            };
+            let faces: Vec<Vec<Vec3>> = surfaces
+                .triangles
+                .iter()
+                .filter(|t| {
+                    let normal = (t.b - t.a).cross(t.c - t.a);
+                    let length = normal.length();
+                    length > 1e-6 && normal.z / length >= FLOOR_Z
+                })
+                .map(|t| vec![t.a, t.b, t.c])
+                .collect();
+            if faces.is_empty() {
+                continue;
+            }
+            for cell in indoors {
+                floors.push(CellSurface::transformed(
+                    cell,
+                    &faces,
+                    Quat::IDENTITY,
+                    Vec3::ZERO,
+                ));
+            }
+        }
+    }
+    floors
 }
 
 /// The cell whose floor lies nearest a point's height, among those with a
@@ -701,6 +771,7 @@ mod tests {
             global_start: corner + start,
             start_cell,
             cells,
+            object_floors: &[],
             ground,
             sealed_dungeon,
         };
@@ -785,6 +856,46 @@ mod tests {
         );
     }
 
+    /// Where a lower room's ceiling is the floor of the room over it, as
+    /// at the top of a stair, a point on that floor is in the upper room,
+    /// even when the route came up from the lower one and the lower room
+    /// lists its ceiling before its floor: a ceiling faces down and is not
+    /// a floor.
+    #[test]
+    fn a_ceiling_is_not_a_floor() {
+        const UPPER: u32 = 0xCE94_0102;
+        let (x0, x1, y0, y1) = (40.0, 60.0, 40.0, 60.0);
+        let lower = CellSurface::transformed(
+            BUILDING,
+            &[
+                vec![
+                    vec3(x0, y0, 3.5),
+                    vec3(x0, y1, 3.5),
+                    vec3(x1, y1, 3.5),
+                    vec3(x1, y0, 3.5),
+                ],
+                vec![
+                    vec3(x0, y0, 0.5),
+                    vec3(x1, y0, 0.5),
+                    vec3(x1, y1, 0.5),
+                    vec3(x0, y1, 0.5),
+                ],
+            ],
+            Quat::IDENTITY,
+            Vec3::ZERO,
+        );
+        let upper = room(UPPER, (x0, x1), (y0, y1), 3.5);
+        let ground = flat_ground();
+        let outdoors = outdoors_at(50.0, 50.0);
+        let at_the_top = vec3(50.0, 50.0, 3.5);
+        for cells in [[lower.clone(), upper.clone()], [upper, lower]] {
+            assert_eq!(
+                name(at_the_top, BUILDING, &cells, &ground, false, outdoors),
+                UPPER
+            );
+        }
+    }
+
     /// In a sealed dungeon a point is in the cell whose floor lies nearest
     /// its height, however far, else in the start's cell, as before.
     #[test]
@@ -817,5 +928,125 @@ mod tests {
             ),
             DUNGEON_START
         );
+    }
+
+    /// Holtburg's two-storey building north-east of the town's middle climbs
+    /// from its ground floor, at 66 m, to the floor above, at 69 m, by a
+    /// staircase that is an object placed in its ground-floor cell
+    /// (0xA9B40117, model 0x0100082A) rather than the cell's own polygons.
+    /// A route point on any of its treads is inside the building, as the
+    /// cells' own containment puts it, not outdoors: the stairs' treads
+    /// stand up to 3 m over the cell's floor, too far from it, and from the
+    /// ground, to be named for either by the cells' polygons alone.
+    #[test]
+    #[ignore = "needs the retail dat files"]
+    fn a_staircase_object_is_inside_its_building() {
+        use ac_dat::DatCollection;
+        use ac_dat::objects::Region;
+        use ac_physics::CollisionWorld;
+        use ac_physics::content::publish_landblock;
+
+        const HOLTBURG: u32 = 0xA9B4_FFFF;
+        const GROUND_FLOOR: u32 = 0xA9B4_0117;
+        const STAIRS: u32 = 0x0100_082A;
+
+        let dir = std::env::var_os("OPENAC_DAT_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(ac_dat::default_dat_dir)
+            .expect("no dat directory: set OPENAC_DAT_DIR");
+        let dats = DatCollection::open(dir).expect("open the retail dats");
+        let region: Region = dats.get(0x1300_0000).unwrap().expect("the region");
+        let mut engine = PhysicsEngine::new();
+        engine.attach_world(CollisionWorld::new());
+        publish_landblock(
+            &mut engine,
+            &dats,
+            &region.land_defs.land_height_table,
+            HOLTBURG,
+            Vec3::ZERO,
+        )
+        .expect("Holtburg publishes")
+        .expect("Holtburg exists");
+        let landblock = engine.landblock(HOLTBURG).expect("Holtburg is resident");
+        let cells = landblock.cells.clone();
+        let ground = vec![PlacedGround {
+            corner_x: 0.0,
+            corner_y: 0.0,
+            terrain: landblock.terrain.clone(),
+        }];
+        let object_floors = object_floors_of(&engine, &[HOLTBURG]);
+
+        let mut stairs: Vec<u32> = engine
+            .shadows
+            .objects_in_cell(GROUND_FLOOR)
+            .iter()
+            .filter(|entry| entry.gfx_obj_id == STAIRS)
+            .map(|entry| entry.entity_id)
+            .collect();
+        stairs.sort_unstable();
+        stairs.dedup();
+        assert_eq!(stairs.len(), 1, "one staircase stands in the cell");
+        let staircase = stairs[0];
+        let stair_cells = engine.shadows.owner_cells(staircase).to_vec();
+
+        // The middle of each tread, where the cells' containment puts a
+        // point a little above it inside the building.
+        let treads: Vec<(Vec3, u32)> = surfaces_of(&engine, staircase)
+            .expect("the staircase collides")
+            .triangles
+            .iter()
+            .filter(|t| {
+                let normal = (t.b - t.a).cross(t.c - t.a);
+                normal.length() > 1e-6 && normal.z / normal.length() >= FLOOR_Z
+            })
+            .map(|t| (t.a + t.b + t.c) / 3.0)
+            .filter_map(|tread| {
+                let (inside, _) =
+                    engine.adjust_position(GROUND_FLOOR, tread + Vec3::new(0.0, 0.0, 0.5));
+                (inside & 0xFFFF >= 0x0100).then_some((tread, inside))
+            })
+            .collect();
+        let floor = |tread: Vec3| {
+            cells
+                .iter()
+                .filter_map(|cell| cell.sample_level_z_at_or_below(tread.x, tread.y, tread.z))
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        let highest = treads
+            .iter()
+            .map(|&(tread, _)| tread.z - floor(tread))
+            .fold(0.0, f32::max);
+        assert!(treads.len() >= 8, "{} treads", treads.len());
+        assert!(highest > 2.5, "the treads rise {highest} m over the floor");
+
+        let corner = vec3(
+            f32::from(0xA9_u8) * LANDBLOCK_SIZE,
+            f32::from(0xB4_u8) * LANDBLOCK_SIZE,
+            0.0,
+        );
+        let namer = |object_floors| PointNamer {
+            start: Vec3::ZERO,
+            global_start: corner,
+            start_cell: GROUND_FLOOR,
+            cells: &cells,
+            object_floors,
+            ground: &ground,
+            sealed_dungeon: false,
+        };
+        let with_the_stairs = namer(&object_floors);
+        for &(tread, inside) in &treads {
+            let named = with_the_stairs.name(tread, GROUND_FLOOR).cell_id;
+            assert!(
+                named & 0xFFFF >= 0x0100 && stair_cells.contains(&named),
+                "the tread at {tread:?}, inside {inside:08X}, is named {named:08X}"
+            );
+        }
+        // The cells' polygons alone leave treads outdoors.
+        let without = namer(&[]);
+        let outdoors = treads
+            .iter()
+            .filter(|&&(tread, _)| without.name(tread, GROUND_FLOOR).cell_id & 0xFFFF < 0x0100)
+            .count();
+        assert!(outdoors > 0);
     }
 }
