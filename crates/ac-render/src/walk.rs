@@ -1017,11 +1017,14 @@ impl FrameWalk {
         }
         if viewer_cell & 0xFFFF < 0x0100 || !self.cells.contains_key(&viewer_cell) {
             let mut root = PortalView::default();
-            // A degenerate camera (a 0-pixel viewport, an unset position)
-            // leaves the full quad under three points; draw the landscape
-            // unclipped instead of indexing a view that was never added.
-            let full = copy_full_view(&mut root, camera);
-            self.draw_landscape(camera, blocks, buildings, &root, full, sink);
+            // A window one pixel wide or tall collapses the full-screen quad
+            // to a line, so no view is added. The landscape, like the one an
+            // interior sees through no window, is then not drawn at all: the
+            // frame comes out empty instead of asking for a view that does
+            // not exist.
+            if copy_full_view(&mut root, camera) {
+                self.draw_landscape(camera, blocks, buildings, &root, true, sink);
+            }
         } else {
             self.draw_inside(viewer_cell, camera, blocks, buildings, sink);
         }
@@ -1990,7 +1993,6 @@ mod tests {
     #[derive(Default)]
     struct ViewReader {
         landscapes: Vec<(usize, bool)>,
-        cells: Vec<Vec<u32>>,
     }
 
     impl WalkSink for ViewReader {
@@ -2008,9 +2010,7 @@ mod tests {
             true
         }
         fn punch(&mut self, _p: &[Vec3], _v: usize) {}
-        fn draw_cells(&mut self, cells: &[(u32, ViewSet, usize)]) {
-            self.cells.push(cells.iter().map(|c| c.0).collect());
-        }
+        fn draw_cells(&mut self, _cells: &[(u32, ViewSet, usize)]) {}
         fn building_shell(&mut self, _b: usize) {}
         fn interior_landscape_done(&mut self, _seals: &[(Vec<Vec3>, ViewSet, usize)]) {}
     }
@@ -2048,20 +2048,33 @@ mod tests {
         assert!(rec.cells.is_empty());
     }
 
-    /// A 0-pixel viewport collapses the full quad to a line, so no view is
-    /// added. The landscape is still drawn, but the call site must not claim
-    /// "full screen": a sink that takes that at the renderer's word indexes
-    /// view 0, which does not exist.
+    /// A window one pixel wide or tall (the smallest the renderer hands
+    /// the walk) collapses the full-screen quad to a line, so no view is
+    /// added and the outdoor landscape is not begun at all; a window two
+    /// pixels each way still has its view and draws it full screen.
     #[test]
-    fn a_degenerate_full_view_draws_the_landscape_unclipped() {
+    fn a_one_pixel_window_begins_no_landscape() {
         let mut walk = two_rooms();
-        let mut cam = camera(Vec3::new(0.0, -10.0, 1.0), Vec3::new(0.0, 10.0, 1.0));
-        cam.width = 0.0;
-        assert!(!copy_full_view(&mut PortalView::default(), &cam));
+        let base = camera(Vec3::new(0.0, -10.0, 1.0), Vec3::new(0.0, 10.0, 1.0));
+        for (width, height) in [(1.0, 720.0), (720.0, 1.0), (1.0, 1.0)] {
+            let cam = WalkCamera {
+                width,
+                height,
+                ..base
+            };
+            assert!(!copy_full_view(&mut PortalView::default(), &cam));
+            let mut rec = ViewReader::default();
+            walk.walk_frame(0x0101_0001, &cam, &[], &[], &mut rec);
+            assert_eq!(rec.landscapes, vec![], "{width} x {height}");
+        }
+        let cam = WalkCamera {
+            width: 2.0,
+            height: 2.0,
+            ..base
+        };
         let mut rec = ViewReader::default();
         walk.walk_frame(0x0101_0001, &cam, &[], &[], &mut rec);
-        assert_eq!(rec.landscapes, vec![(0, false)]);
-        assert!(rec.cells.is_empty());
+        assert_eq!(rec.landscapes, vec![(1, true)]);
     }
 
     /// The landscape's turns, in order.

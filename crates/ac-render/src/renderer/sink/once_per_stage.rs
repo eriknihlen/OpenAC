@@ -267,9 +267,7 @@ impl Area {
         };
         let mut walk = self.walk();
         walk.walk_frame(root, camera, &[self.block()], &building_refs, &mut sink);
-        if !sink.views.is_empty() {
-            sink.landscape_end();
-        }
+        sink.walk_done();
         sink.out.finish()
     }
 
