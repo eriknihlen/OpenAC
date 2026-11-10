@@ -64,7 +64,7 @@ impl AudioSettings {
 }
 
 /// Startup switches for audio, read from the environment (see
-/// `docs/launch-options.md`).
+/// `content/docs/launch-options.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AudioLaunchOptions {
     /// `OPENAC_NO_AUDIO=1`: create no audio engine at all.

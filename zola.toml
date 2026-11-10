@@ -1,0 +1,65 @@
+# The OpenAC site: the homepage and the guides, built by Zola
+# (https://www.getzola.org) and published to GitHub Pages by docs.yml.
+# Preview locally with `zola serve`.
+
+base_url = "https://eriknihlen.github.io/OpenAC"
+title = "OpenAC"
+description = "An open-source Asheron's Call client, written in Rust."
+default_language = "en"
+
+compile_sass = true
+minify_html = false
+build_search_index = true
+generate_feeds = false
+generate_sitemap = true
+generate_robots_txt = true
+
+[markdown]
+insert_anchor_links = "heading"
+external_links_target_blank = false
+
+[markdown.highlighting]
+error_on_missing_language = false
+light_theme = "github-light"
+dark_theme = "github-dark"
+
+[search]
+include_title = true
+include_content = true
+include_path = true
+index_format = "elasticlunr_javascript"
+
+[link_checker]
+internal_level = "error"
+
+[extra]
+repo = "https://github.com/eriknihlen/OpenAC"
+discord = "https://discord.gg/mBWtvgmuF"
+# The latest release, read when the site is built.
+releases_api = "https://api.github.com/repos/eriknihlen/OpenAC/releases/latest"
+# A screenshot behind the homepage's first screen, a path under static/
+# (for example "img/hero.png"); empty for the painted background.
+hero_image = ""
+
+# The homepage's download links, matched against the latest release's
+# files: `file` is the exact name, or `suffix` the end of a name starting
+# with "OpenAC-" (the Mac files carry the version).
+[[extra.downloads]]
+id = "win"
+label = "Windows"
+file = "launcher-win-x64.zip"
+
+[[extra.downloads]]
+id = "linux"
+label = "Linux"
+file = "launcher-linux-x64.zip"
+
+[[extra.downloads]]
+id = "mac-arm"
+label = "macOS (Apple silicon)"
+suffix = "-osx-arm64.zip"
+
+[[extra.downloads]]
+id = "mac-intel"
+label = "macOS (Intel)"
+suffix = "-osx-x64.zip"

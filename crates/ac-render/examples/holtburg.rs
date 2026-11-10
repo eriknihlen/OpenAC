@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     warn_if_outside_its_cell(dat_dir.as_deref(), &player());
 
     let mut options = HostOptions::with_overrides(dat_dir, None);
-    // The frame diagnostics, as openac reads them (docs/launch-options.md).
+    // The frame diagnostics, as openac reads them (content/docs/launch-options.md).
     let on = |name: &str| std::env::var(name).is_ok_and(|v| v == "1");
     options.graphics.uncapped = on("OPENAC_UNCAPPED_RENDER");
     options.graphics.frame_profiler = on("OPENAC_FRAME_PROF");

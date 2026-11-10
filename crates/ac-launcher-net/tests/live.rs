@@ -3,7 +3,7 @@
 //! probe against the local ACE server. Ignored by default, and even when
 //! ignored tests run (`scripts/check.*` runs them when the retail dats are
 //! present) they do nothing unless `OPENAC_LIVE_TESTS=1`
-//! (see `docs/launch-options.md`).
+//! (see `content/docs/launch-options.md`).
 
 use std::sync::Arc;
 use std::time::Duration;

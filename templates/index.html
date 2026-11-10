@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}OpenAC: Asheron's Call, rebuilt in Rust{% endblock title %}
+{% block body_class %}home{% endblock body_class %}
+
+{% block content %}
+{#- The latest release, read when the site is built. Every download link
+    comes from its own list of files, so a link always names a file that
+    exists; a missing file stops the build. -#}
+{%- set token = get_env(name="GITHUB_TOKEN", default="") -%}
+{%- if token -%}
+  {%- set release = load_data(url=config.extra.releases_api, format="json", headers=["Authorization=Bearer " ~ token]) -%}
+{%- else -%}
+  {%- set release = load_data(url=config.extra.releases_api, format="json") -%}
+{%- endif -%}
+{%- set_global links = [] -%}
+{%- for d in config.extra.downloads -%}
+  {%- set_global url = "" -%}
+  {%- for asset in release.assets -%}
+    {%- if d?.file and asset.name == d.file -%}{%- set_global url = asset.browser_download_url -%}
+    {%- elif d?.suffix and asset.name is starting_with(pat="OpenAC-") and asset.name is ending_with(pat=d.suffix) -%}{%- set_global url = asset.browser_download_url -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if url == "" -%}{{ throw(message="The latest release has no download for " ~ d.label) }}{%- endif -%}
+  {%- set_global links = [...links, {"id": d.id, "label": d.label, "url": url}] -%}
+{%- endfor -%}
+{%- set getting_started = get_url(path="@/docs/getting-started.md") -%}
+
+<section class="hero"{% if config.extra.hero_image %} style="--hero-image: url('{{ get_url(path=config.extra.hero_image) }}')"{% endif %}>
+  <div class="hero-inner">
+    <p class="eyebrow">Open source · MIT licensed</p>
+    <h1>Asheron's Call, rebuilt in Rust</h1>
+    <p class="lede">The original game's behavior, in code built to be read, tested and changed.
+      For players who want to play, and for developers who want to build on it.</p>
+
+    <div class="hero-actions">
+      <div class="download" id="download"
+        {%- for l in links %} data-{{ l.id }}="{{ l.url }}" data-{{ l.id }}-label="{{ l.label }}"{% endfor %}>
+        <a class="button primary" id="download-button" href="{{ getting_started }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M11 4h2v9.2l3.3-3.3 1.4 1.4L12 17l-5.7-5.7 1.4-1.4 3.3 3.3zM5 19h14v2H5z"/></svg>
+          <span id="download-label">Download the launcher</span>
+        </a>
+      </div>
+      <a class="button secondary" href="#build">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8.6 16.6 4 12l4.6-4.6L10 8.8 6.8 12l3.2 3.2zm6.8 0L14 15.2l3.2-3.2L14 8.8l1.4-1.4L20 12z"/></svg>
+        <span>Build with OpenAC</span>
+      </a>
+    </div>
+
+    <p class="platforms">
+      <span>All downloads:</span>
+      {%- for l in links %}
+      <a href="{{ l.url }}">{{ l.label }}</a>{% if not loop.last %}<span aria-hidden="true">·</span>{% endif %}
+      {%- endfor %}
+    </p>
+    <p class="release">
+      <a href="{{ release.html_url }}">Latest release {{ release.tag_name }}</a>,
+      {{ release.published_at | date(format="%-d %B %Y") }} ·
+      <a href="{{ get_url(path='@/docs/whats-new.md') }}">What's new</a>
+    </p>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2 class="section-title">Why OpenAC</h2>
+    <div class="cards four">
+      <article class="card">
+        <h3>The original game's behavior</h3>
+        <p>Movement, physics, combat, spells and the interface behave as the original client's did.
+          The code is modern; the behavior is the original's.</p>
+      </article>
+      <article class="card">
+        <h3>Windows, Linux and macOS</h3>
+        <p>Native builds for Windows, Linux and Macs with Apple silicon or Intel, drawing through
+          Direct3D 12, Vulkan or Metal.</p>
+      </article>
+      <article class="card">
+        <h3>Plugins in WebAssembly</h3>
+        <p>Plugins are sandboxed, get only the permissions they ask for, and work the same with or
+          without a window.</p>
+      </article>
+      <article class="card">
+        <h3>Many sessions, one program</h3>
+        <p>Run any number of characters at once. Open a window onto any of them and close it again;
+          the session plays on without one.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="band alt" id="play-and-build">
+  <div class="wrap paths">
+    <div class="path" id="play">
+      <p class="eyebrow">Play</p>
+      <h2>Up and running in three steps</h2>
+      <ol class="steps">
+        <li><strong>Download the launcher.</strong> It installs the game client and keeps both up to date.</li>
+        <li><strong>Point it at your game data.</strong> OpenAC ships no game data; it uses your own Asheron's Call files.</li>
+        <li><strong>Pick a server and play.</strong> OpenAC connects to <a href="https://github.com/ACEmulator/ACE">ACEmulator</a> servers.</li>
+      </ol>
+      <a class="button secondary" href="{{ getting_started }}">Getting started</a>
+    </div>
+    <div class="path" id="build">
+      <p class="eyebrow">Build</p>
+      <h2>Make it yours</h2>
+      <ul class="link-list">
+        <li>
+          <a href="{{ get_url(path='@/docs/plugin-development.md') }}"><strong>Write a plugin</strong></a>
+          <span>An ordinary Rust crate built for WebAssembly, against the <code>openac-plugin</code> SDK: set up, test, publish and get listed.</span>
+        </li>
+        <li>
+          <a href="{{ get_url(path='@/docs/building-and-running.md') }}"><strong>Work on the client</strong></a>
+          <span>Build from source with stable Rust, run one session or many, and find your way around.</span>
+        </li>
+        <li>
+          <a href="{{ config.extra.repo }}/blob/main/CONTRIBUTING.md"><strong>Contribute</strong></a>
+          <span>How changes are made, tested and reviewed.</span>
+        </li>
+      </ul>
+      <a class="button secondary" href="{{ config.extra.repo }}">The source on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="plugins">
+  <div class="wrap">
+    <h2 class="section-title">Plugins</h2>
+    <p class="section-lede">Install them from the launcher's plugin list.
+      <a href="{{ get_url(path='@/docs/plugin-development.md') }}">Write your own</a> and get it listed.</p>
+    <div class="cards three">
+      {%- set plugins = load_data(path="data/plugins.toml") %}
+      {%- for p in plugins.plugin %}
+      <article class="card plugin">
+        <h3><a href="https://github.com/{{ p.repo }}">{{ p.name }}</a></h3>
+        <p>{{ p.summary }}</p>
+        <p class="meta">{{ p.repo }}</p>
+      </article>
+      {%- endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="band alt">
+  <div class="wrap">
+    <h2 class="section-title">Latest releases</h2>
+    {%- set news = get_page(path="docs/whats-new.md") %}
+    <ul class="releases">
+      {%- for h in news.toc[:3] %}
+      <li><a href="{{ h.permalink | safe }}">{{ h.title }}</a></li>
+      {%- endfor %}
+    </ul>
+    <a class="button secondary" href="{{ news.permalink | safe }}">Every release</a>
+  </div>
+</section>
+
+<section class="band community">
+  <div class="wrap">
+    <h2 class="section-title">Come and talk</h2>
+    <p class="section-lede">Questions, bug reports and plugin ideas are welcome.</p>
+    <div class="hero-actions">
+      <a class="button primary" href="{{ config.extra.discord }}">Join the Discord</a>
+      <a class="button secondary" href="{{ config.extra.repo }}/issues">Open an issue</a>
+    </div>
+  </div>
+</section>
+{% endblock content %}

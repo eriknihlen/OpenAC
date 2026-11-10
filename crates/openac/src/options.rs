@@ -1,5 +1,5 @@
 //! Startup options: the one place command-line flags and environment
-//! variables are read. Every option is documented in `docs/launch-options.md`.
+//! variables are read. Every option is documented in `content/docs/launch-options.md`.
 
 use std::fmt;
 use std::net::{SocketAddr, ToSocketAddrs};

@@ -1,5 +1,8 @@
-# What's new
-
++++
+title = "What's new"
+weight = 20
+aliases = ["docs/whats-new.html"]
++++
 The latest releases, with credits. Every release, with its downloads and full
 changelog, is on GitHub:
 [releases](https://github.com/eriknihlen/OpenAC/releases) (the Rust client
@@ -90,7 +93,7 @@ OpenAC from here on.
 
 The last release of the C# client. **OpenAC (C#) is retired**: the Rust
 client, OpenAC for Rust, replaces it. Get it from the
-[Rust client page](rust-client.md).
+[Rust client page](@/docs/rust-client.md).
 
 - The launcher shows the retirement notice at all times, with a **Get the
   Rust client** button that opens
