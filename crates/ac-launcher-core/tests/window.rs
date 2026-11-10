@@ -4511,9 +4511,11 @@ fn a_launcher_update_stages_then_restarts_without_touching_the_client() {
     assert!(window.should_exit());
 }
 
-// OpenAC LauncherUpdateViewModelTests.ALauncherUpdateThatCannotRestartTellsTheUserToReopen.
+// From OpenAC LauncherUpdateViewModelTests.ALauncherUpdateThatCannotRestartTellsTheUserToReopen;
+// changed: the text names what can hold the install, and Update again
+// hands the staged release over.
 #[test]
-fn a_launcher_update_that_cannot_restart_tells_the_user_to_reopen() {
+fn a_launcher_update_that_cannot_hand_over_says_the_install_is_in_use() {
     let feed = UpdateFeed::new(true);
     let mut window = feed.window(
         &batch(),
@@ -4527,15 +4529,105 @@ fn a_launcher_update_that_cannot_restart_tells_the_user_to_reopen() {
 
     assert!(feed.pending_launcher_update());
     assert!(!window.is_shutdown_requested());
+    let status = window.update_prompt.status.to_lowercase();
     assert!(
-        window
-            .update_prompt
-            .status
-            .to_lowercase()
-            .contains("reopen"),
+        status.contains("close every client")
+            && status.contains("plugin install")
+            && status.contains("update again"),
         "{}",
         window.update_prompt.status
     );
+}
+
+// What a launcher update left for the window (it failed before changing
+// anything, or waits for the install) is a dialog shown once.
+#[test]
+fn a_launcher_update_notice_is_shown_once_and_dismissed() {
+    use ac_launcher_core::updates::LauncherSelfUpdateManager;
+    let feed = UpdateFeed::new(true);
+    let manager = LauncherSelfUpdateManager::new(&feed.root.path_set(), feed.server.transport());
+    manager.keep_update_notice("Launcher 2.0.0 could not be installed. Nothing was changed.");
+    let mut window = feed.window(&batch(), "2.0.0", None);
+    window.self_update_notice = manager.take_update_notice();
+    assert!(window.is_modal_open());
+    assert!(!window.can_interact());
+
+    window.dismiss_self_update_notice();
+
+    assert!(!window.is_modal_open());
+    assert_eq!(manager.take_update_notice(), None);
+}
+
+// A launcher update that waits for the install is a status line: the
+// window stays usable (no dialog), as the launcher's start wires it.
+#[test]
+fn a_waiting_launcher_update_is_a_status_line_not_a_dialog() {
+    use ac_launcher_core::updates::{LauncherSelfUpdateManager, self_update_bootstrap};
+    let feed = UpdateFeed::new(true);
+    let mut window = feed.window(
+        &batch(),
+        "1.0.0",
+        Some(Arc::new(|_: &CancelToken| Ok(false))),
+    );
+    auto_opening(&mut window);
+    startup_check(&mut window);
+    window.install_update();
+    window.poll();
+    assert!(feed.pending_launcher_update());
+
+    let manager = LauncherSelfUpdateManager::new(&feed.root.path_set(), feed.server.transport());
+    let mut window = feed.window(&batch(), "1.0.0", None);
+    window.launcher_update_waiting = self_update_bootstrap::waiting_update_text(&manager);
+    window.self_update_notice = manager.take_update_notice();
+
+    let waiting = window
+        .launcher_update_waiting
+        .clone()
+        .expect("a status line");
+    assert!(waiting.contains("2.0.0"), "{waiting}");
+    assert_eq!(window.self_update_notice, None);
+    assert!(!window.is_modal_open());
+    assert!(window.can_interact());
+}
+
+// A 0.2.2 launcher: the update staged, but its
+// helper could not be started; Update again said the release was "already
+// Staged" and to restart the launcher, and a start that found a client of
+// the install running left it staged. Update again now hands the staged
+// release to its helper.
+#[test]
+fn update_again_hands_over_a_launcher_update_whose_helper_did_not_start() {
+    let feed = UpdateFeed::new(true);
+    let attempts = Arc::new(Mutex::new(0));
+    let calls = Arc::clone(&attempts);
+    let mut window = feed.window(
+        &batch(),
+        "1.0.0",
+        Some(Arc::new(move |_: &CancelToken| {
+            let mut attempts = calls.lock().unwrap();
+            *attempts += 1;
+            if *attempts == 1 {
+                Err("The launcher self-update helper could not be started.".to_owned())
+            } else {
+                Ok(true)
+            }
+        })),
+    );
+    auto_opening(&mut window);
+    startup_check(&mut window);
+    window.install_update();
+    window.poll();
+    assert!(feed.pending_launcher_update());
+    assert!(!window.is_shutdown_requested());
+    assert!(window.update_prompt.error.is_some());
+
+    window.install_update();
+    window.poll();
+
+    assert_eq!(window.update_prompt.error, None);
+    assert_eq!(*attempts.lock().unwrap(), 2);
+    assert!(window.is_shutdown_requested());
+    assert!(feed.pending_launcher_update());
 }
 
 // OpenAC LauncherUpdateViewModelTests.AnUnreachableFeedStaysSilent.

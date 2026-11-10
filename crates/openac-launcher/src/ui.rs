@@ -267,6 +267,14 @@ fn banners(app: &mut LauncherApp, ui: &mut Ui) {
                 });
             });
     }
+    if let Some(waiting) = &window.launcher_update_waiting {
+        Frame::new()
+            .fill(theme::BANNER)
+            .inner_margin(Margin::symmetric(14, 6))
+            .show(ui, |ui| {
+                ui.label(muted(waiting.clone()));
+            });
+    }
     if window.show_update_banner() {
         Frame::new()
             .fill(theme::BANNER)
@@ -1644,6 +1652,21 @@ fn dialogs(app: &mut LauncherApp, ctx: &egui::Context) {
                 }
                 if ui.button("Cancel").clicked() {
                     window.cancel_close();
+                }
+            });
+        });
+    }
+    if let Some(notice) = window.self_update_notice.clone() {
+        modal(ctx, "self-update-notice", 560.0, |ui| {
+            dialog_title(ui, "Launcher update not installed");
+            egui::ScrollArea::vertical()
+                .max_height(360.0)
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(notice).selectable(true).wrap());
+                });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary(ui, "OK", true, true) {
+                    window.dismiss_self_update_notice();
                 }
             });
         });

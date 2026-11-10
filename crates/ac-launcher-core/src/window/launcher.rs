@@ -342,6 +342,12 @@ pub struct LauncherWindow {
     /// What the profile load could not carry over from an older file,
     /// shown once.
     pub profile_migration_notice: Option<String>,
+    /// Why the last launcher update was not installed (it changed nothing),
+    /// shown once.
+    pub self_update_notice: Option<String>,
+    /// A downloaded launcher update waits for the install to be free: a
+    /// line under the header, never a dialog (clients may run all day).
+    pub launcher_update_waiting: Option<String>,
     /// The profile tag the accounts are filtered by, or `None` for all.
     pub profile_filter: Option<String>,
     /// "All" and one chip per profile tag, in the order the tags first
@@ -646,6 +652,8 @@ impl LauncherWindow {
             character_uses_account_plugins: false,
             remove_character_target: None,
             profile_migration_notice: None,
+            self_update_notice: None,
+            launcher_update_waiting: None,
             profile_filter: None,
             profile_filters: Vec::new(),
             checked_accounts: parts.checked_accounts,
@@ -983,10 +991,16 @@ impl LauncherWindow {
                 self.update_prompt.is_progress_indeterminate = false;
                 match result {
                     Ok(true) => self.shutdown_requested = true,
+                    // Staging took the install, but something took it again
+                    // before the helper could (staging itself refuses while
+                    // the install is in use); Update hands the staged
+                    // release over once it is free.
                     Ok(false) => {
-                        self.update_prompt.status = "The launcher update is ready. Close and \
-                                                     reopen the launcher to finish it."
-                            .into();
+                        self.update_prompt.status = format!(
+                            "The launcher update is ready, but {}. Close every client (and let \
+                             other updates finish), then choose Update again.",
+                            crate::updates::self_update_bootstrap::INSTALL_IN_USE
+                        );
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {
                         self.update_prompt.status = "Update cancelled.".into();
@@ -1809,6 +1823,7 @@ impl LauncherWindow {
             || self.remove_character_target.is_some()
             || self.profiles_dialog.is_open
             || self.profile_migration_notice.is_some()
+            || self.self_update_notice.is_some()
             || self.close_prompt.is_some()
     }
 
@@ -3300,6 +3315,11 @@ impl LauncherWindow {
     /// Dismisses the one-time profile migration notice.
     pub fn dismiss_migration_notice(&mut self) {
         self.profile_migration_notice = None;
+    }
+
+    /// Dismisses the notice of a launcher update that was not installed.
+    pub fn dismiss_self_update_notice(&mut self) {
+        self.self_update_notice = None;
     }
 
     /// Opens the session log.
