@@ -3,6 +3,12 @@
 //! stairs are often such objects) that faces up and is no steeper than a
 //! floor, stairs and ramps included, filed by where it lies seen from above,
 //! so the floor under a point is found without walking every face.
+//!
+//! The index holds the camera's collision neighbourhood: the 3 by 3
+//! landblocks around the player's (see
+//! [`crate::camera_collision::NEIGHBOURHOOD_RADIUS`]), rebuilt when the
+//! player enters another landblock. Past them there are no floors, so a
+//! world line there falls back to following the terrain.
 
 use std::collections::HashMap;
 
@@ -212,10 +218,14 @@ mod tests {
             ),
         ];
         let lift = 0.1;
+        let near = ac_nav::walk::ON_THE_FLOOR;
         for (a, b) in corners {
             for corner in [a, b] {
-                let z = floor(corner.x, corner.y, corner.z + 0.5).expect("a floor at a corner");
-                assert!((corner.z - z).abs() <= 0.5, "{corner}: floor at {z}");
+                // The line's end, lifted off the corner, still stands on
+                // the corner's floor.
+                let end = corner.z + lift;
+                let z = floor(corner.x, corner.y, end + near).expect("a floor at a corner");
+                assert!((end - z).abs() <= near, "{corner}: floor at {z}");
             }
             let line = PlacedLine {
                 start: a + Vec3::Z * lift,

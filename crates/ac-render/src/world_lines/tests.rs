@@ -167,10 +167,13 @@ fn widths_are_clamped_and_a_bad_width_draws_at_the_default() {
     assert_eq!(thickness(f32::INFINITY), 0.25);
 }
 
-// OpenAC `PluginWorldLineRenderer.Ground`: each piece end is raised to
-// 0.05 m over the ground under it, never lowered.
+// OpenAC `PluginWorldLineRenderer.Ground` raised each piece end to 0.05 m
+// over the ground under it and never lowered one. That still holds for a
+// line with an end above the ground (here the end over the pit at -4 m); a
+// line with both ends on the ground follows dips as well (the hug tests
+// below).
 #[test]
-fn a_terrain_following_line_is_raised_just_above_the_ground_and_never_lowered() {
+fn a_line_with_an_end_above_the_ground_is_raised_just_above_it_and_never_lowered() {
     let ground = |x: f32, _: f32| Some(if x < 5.0 { 10.0 } else { -4.0 });
     let mut l = line(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), true);
     l.width_metres = 0.1;
@@ -292,17 +295,17 @@ fn a_line_between_two_ground_points_hugs_a_dip() {
     let lowest = points.iter().map(|p| p.z).fold(f32::MAX, f32::min);
     assert!(lowest < -4.9, "{lowest}");
     // Ends a little off the ground still count as on it, and the line keeps
-    // their heights over the ground, taken evenly along it: 0.5 m at the
+    // their heights over the ground, taken evenly along it: 1 m at the
     // start, the least lift at the buried end.
     let mut l = line(
-        Vec3::new(0.0, 0.0, ON_GROUND_METRES),
+        Vec3::new(0.0, 0.0, ON_THE_LAND_METRES),
         Vec3::new(100.0, 0.0, -2.0),
         true,
     );
     l.width_metres = 0.1;
     for p in draw_over(l, &dip) {
         let t = (p.x / 100.0).clamp(0.0, 1.0);
-        let lift = ON_GROUND_METRES + (GROUND_LIFT_METRES - ON_GROUND_METRES) * t;
+        let lift = ON_THE_LAND_METRES + (GROUND_LIFT_METRES - ON_THE_LAND_METRES) * t;
         let centre = dip(p.x, p.y).unwrap() + lift;
         assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
     }
@@ -326,8 +329,8 @@ fn a_line_with_an_end_on_a_bridge_is_never_lowered() {
     }
     // An end just over the on-the-ground height is above the ground, too.
     let mut l = line(
-        Vec3::new(10.0, 0.0, ON_GROUND_METRES + 0.1),
-        Vec3::new(50.0, 0.0, ON_GROUND_METRES + 0.1),
+        Vec3::new(10.0, 0.0, ON_THE_LAND_METRES + 0.1),
+        Vec3::new(50.0, 0.0, ON_THE_LAND_METRES + 0.1),
         true,
     );
     l.width_metres = 0.1;
@@ -335,7 +338,7 @@ fn a_line_with_an_end_on_a_bridge_is_never_lowered() {
         .iter()
         .map(|p| p.z)
         .fold(f32::MAX, f32::min);
-    assert!(lowest >= ON_GROUND_METRES + 0.1 - 0.05 - 1e-4, "{lowest}");
+    assert!(lowest >= ON_THE_LAND_METRES + 0.1 - 0.05 - 1e-4, "{lowest}");
     // Where the ground under an end is not known, it is not on the ground.
     let unknown_far_end = |x: f32, y: f32| if x < 45.0 { dip(x, y) } else { None };
     let mut l = line(Vec3::new(10.0, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0), true);
@@ -548,5 +551,57 @@ fn a_line_on_a_bridge_deck_lies_on_the_deck() {
     l.width_metres = 0.1;
     for p in draw_indoors(l, &dip, &floors) {
         assert!((p.z - 1.1).abs() <= 0.05 + 1e-4, "{p}");
+    }
+}
+
+// Between two porches (or bridge ends) raised above the terrain, with a hill
+// between them and no floor over it, the line goes over the hill, not
+// through it: where nothing is under a piece end it keeps the line's height,
+// but never below the terrain. A cellar floor under the hill does not pull it
+// under the terrain either.
+#[test]
+fn a_line_between_raised_floors_goes_over_a_hill_between_them() {
+    let hill = bump(5.0);
+    let floors = slabs(&[(0.0, 10.0, 1.5), (45.0, 55.0, -3.0), (90.0, 100.0, 1.5)]);
+    let mut l = line(Vec3::new(5.0, 0.0, 1.6), Vec3::new(95.0, 0.0, 1.6), true);
+    l.width_metres = 0.1;
+    let points = draw_indoors(l, &hill, &floors);
+    for p in &points {
+        let ground = hill(p.x, p.y).unwrap() + GROUND_LIFT_METRES;
+        assert!(
+            p.z >= ground - 0.05 - 0.03,
+            "{p} under the hill at {ground}"
+        );
+        // Over the flat ground between a porch and the hill, the line keeps
+        // the porches' height.
+        if (10.5..19.5).contains(&p.x) || (80.5..89.5).contains(&p.x) {
+            assert!((p.z - 1.6).abs() <= 0.05 + 1e-4, "{p}");
+        }
+    }
+    let highest = points.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+    assert!(highest > 5.0, "{highest}");
+}
+
+/// Ground flat at 0 to x = 40, rising 3 m over the next metre, flat at 3
+/// after.
+fn rise(x: f32, _: f32) -> Option<f32> {
+    Some((3.0 * (x - 40.0)).clamp(0.0, 3.0))
+}
+
+// Between two ends on paving level with the terrain, a rise steeper than a
+// floor can climb in a piece is still climbed: the line stays on the terrain
+// over it and after it, not in the hill behind it.
+#[test]
+fn a_line_between_floors_level_with_the_terrain_climbs_a_steep_rise() {
+    let floors = slabs(&[(0.0, 2.0, 0.0), (98.0, 100.0, 3.0)]);
+    let mut l = line(Vec3::new(1.0, 0.0, 0.1), Vec3::new(99.0, 0.0, 3.1), true);
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, rise, &floors) {
+        // The bar across the rise itself cuts its corners.
+        if (39.0..42.0).contains(&p.x) {
+            continue;
+        }
+        let centre = rise(p.x, p.y).unwrap() + 0.1;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
     }
 }

@@ -481,7 +481,10 @@ impl CameraCollision {
 
     /// The height of the highest floor under the drawing-frame point (`x`,
     /// `y`) no higher than `at_most`, among the resident neighbourhood's
-    /// interior cells and static objects; `None` where there is none.
+    /// interior cells and static objects; `None` where there is none. The
+    /// neighbourhood is the landblocks within [`NEIGHBOURHOOD_RADIUS`] of
+    /// the player's (3 by 3): past them there are no floors, so a world
+    /// line there follows the terrain.
     #[must_use]
     pub fn floor_under(
         &self,
