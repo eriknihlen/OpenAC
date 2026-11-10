@@ -886,6 +886,7 @@ impl SessionState {
             self.drive_approaches(outbox, in_world, clocks);
             self.enforce_vendor_range(outbox, in_world, clocks);
             self.enforce_house_purchase_range();
+            self.enforce_open_container_object(outbox, in_world, clocks);
         }
         self.forward();
     }
@@ -2048,6 +2049,25 @@ impl SessionState {
         self.inventory.close_vendor(&mut ctx);
     }
 
+    /// Once a frame: the open outside container (a corpse, a chest) closes
+    /// when its object is not in the world.
+    fn enforce_open_container_object(&mut self, outbox: &mut Outbox, active: bool, clocks: Clocks) {
+        if self.inventory.external_containers().current_container_id() == 0 {
+            return;
+        }
+        let mut ctx = ItemContext {
+            world: &mut self.world,
+            outbox,
+            options: &self.options,
+            active,
+            now_ms: clocks.session_ms(),
+            in_peace: self.gameplay.combat_mode() == CombatMode::NON_COMBAT,
+            approach: None,
+        };
+        self.inventory
+            .close_external_container_without_object(&mut ctx);
+    }
+
     /// Once a frame: the slumlord window closes when the player is more
     /// than its fixed reach from the slumlord (measured as the vendor's
     /// is), or the slumlord left the world.
@@ -2334,6 +2354,24 @@ mod tests {
         let facts = crate::session::interface::InterfaceState::of(&state, true);
         assert_eq!(facts.external_container, 0);
         assert!(facts.external_container_in_range);
+    }
+
+    #[test]
+    fn the_frame_closes_an_open_container_that_has_no_object() {
+        // The session's once-a-frame step runs the check on every host,
+        // with or without a window: a container opened by a contents list
+        // that arrived after its object left closes, and nothing is sent.
+        const CORPSE: u32 = 0x8000_D171;
+        let (mut state, mut outbox) = state();
+        let external = state.inventory.external_containers_mut();
+        external.request_open(CORPSE, true);
+        assert!(external.apply_view_contents(CORPSE).is_some());
+        state.advance_movement(&mut outbox, true, CLOCKS);
+        assert_eq!(
+            state.inventory.external_containers().current_container_id(),
+            0
+        );
+        assert!(bodies(&mut outbox).is_empty());
     }
 
     #[test]

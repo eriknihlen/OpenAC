@@ -8,7 +8,7 @@
 //!
 //! The item verbs (`/inv`, `/use`, `/appraise`, `/move`, ...) and the
 //! option verbs (`/options`, `/option`, `/saveoptions`) become session
-//! commands; see [`HELP`] and `docs/launch-options.md`.
+//! commands; see [`HELP`] and `content/docs/launch-options.md`.
 
 use crate::stdio::errln;
 use std::borrow::Cow;

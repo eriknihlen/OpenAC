@@ -22,6 +22,7 @@ use ac_core::items::{
     ClientObject, ItemType, PublicWeenieFlags, ShortcutEntry, ShortcutStore, StackSplitQuantity,
     ToolbarAmmo,
 };
+use ac_runtime::gameplay::{GameplayCommand, SelectionSource};
 use ac_runtime::inventory::{ItemCommand, ObjectRef};
 use ac_runtime::session::SessionCommand;
 
@@ -371,6 +372,18 @@ impl ToolbarController {
         emit(ui, PanelOutput::SelectObject(id));
     }
 
+    /// A quick-slot key's select: as the keyboard, not as a click.
+    fn select_by_key(&mut self, ui: &mut UiRoot, id: u32) {
+        self.selection.select(id);
+        emit(
+            ui,
+            PanelOutput::Session(SessionCommand::Gameplay(GameplayCommand::SelectAs(
+                ObjectRef::Guid(id),
+                SelectionSource::Keyboard,
+            ))),
+        );
+    }
+
     fn use_item(ui: &mut UiRoot, id: u32) {
         emit(
             ui,
@@ -399,7 +412,7 @@ impl ToolbarController {
         if use_it {
             Self::use_item(ui, id);
         } else {
-            self.select(ui, id);
+            self.select_by_key(ui, id);
         }
         true
     }

@@ -777,7 +777,7 @@ impl VendorController {
         ui.with::<ItemList, _>(list, |l, ui| l.end_defer_layout(ui, list));
         if reselect_first {
             match first {
-                Some(g) => self.select(ui, g),
+                Some(g) => self.select_on_its_own(ui, g),
                 None => {
                     self.selection = SelectionEcho::default();
                     session(
@@ -995,6 +995,24 @@ impl VendorController {
         }
         if self.selection.get() != Some(guid) {
             emit(ui, PanelOutput::SelectObject(guid));
+        }
+        self.selection.select(guid);
+    }
+
+    /// The window picks a listing itself (the first one, on opening, a
+    /// refresh or a new category): the client's selection, not a click.
+    fn select_on_its_own(&mut self, ui: &mut UiRoot, guid: u32) {
+        if guid == 0 {
+            return;
+        }
+        if self.selection.get() != Some(guid) {
+            session(
+                ui,
+                SessionCommand::Gameplay(ac_runtime::gameplay::GameplayCommand::SelectAs(
+                    ObjectRef::Guid(guid),
+                    ac_runtime::gameplay::SelectionSource::System,
+                )),
+            );
         }
         self.selection.select(guid);
     }

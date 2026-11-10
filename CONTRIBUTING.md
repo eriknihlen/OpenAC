@@ -24,7 +24,7 @@ fork it, ship it, or build something else on it without asking either.
 Install Rust with [rustup](https://rustup.rs); `rust-toolchain.toml` pins the
 toolchain (Rust 1.95.0 with `rustfmt`, `clippy` and the
 `wasm32-unknown-unknown` target). See
-[docs/building-and-running.md](docs/building-and-running.md) for the
+[content/docs/building-and-running.md](content/docs/building-and-running.md) for the
 platform prerequisites. Short version:
 
 ```bash
@@ -59,7 +59,7 @@ The workspace is split into crates under `crates/`:
 | `ac-render`, `ac-ui`, `ac-audio` | presentation: the window and GPU renderer, the original interface, sound |
 | `ac-host-core`, `ac-host` | configuration, paths, the session-config document (`ac-host-core`: the part the launcher shares) |
 | `ac-plugin-abi`, `ac-plugin`, `ac-plugin-ui`, `ac-plugin-net` | the WebAssembly plugin host and its calling convention |
-| `ac-plugin-version`, `ac-plugin-manifest`, `ac-plugin-icon` | the API version rules and permissions, the `plugin.json` parser, the icon rules: shared by the client and the launcher |
+| `ac-plugin-version`, `ac-plugin-manifest`, `ac-plugin-icon` | the API version type, the client's `plugin-api.json` and the permissions, the `plugin.json` parser, the icon rules: shared by the client and the launcher (which API versions the client loads is in `ac-plugin-abi`, which the launcher does not link) |
 | `openac-plugin`, `openac-plugin-compat` | the plugin SDK and its compatibility kit (MIT) |
 | `ac-launcher-core`, `ac-launcher-net`, `ac-proxy` | the launcher's logic, its HTTPS, the system proxy |
 | `openac`, `openac-launcher`, `actool`, `plugincheck` | the programs |
@@ -75,7 +75,7 @@ A few rules keep the design honest:
   each `unsafe` block carries a `// SAFETY:` comment.
 - Parsers return typed errors and never panic on malformed input.
 - Startup options come in through one options struct and are documented in
-  [docs/launch-options.md](docs/launch-options.md) in the same commit.
+  [content/docs/launch-options.md](content/docs/launch-options.md) in the same commit.
 - Tests live beside the crate they test, and golden values name their source.
 
 ## Faithfulness and provenance
@@ -108,7 +108,7 @@ layouts differ. So:
 - **Versioned additions keep older plugins loading.** A new event kind, or a
   new field at the end of a record, added in a new API minor version is
   marked with that version (`since (MAJOR, MINOR)` in `wire_union!` and
-  `wire_record!`) and `API_CURRENT` (in `ac-plugin-version`) moves to it. A
+  `wire_record!`) and `API_CURRENT` (in `ac-plugin-abi`) moves to it. A
   plugin built for an older version is compared with that version's shapes,
   is never sent the new event, and is sent the record without the new field,
   so it keeps loading unrebuilt; pin the older version's shapes in the layout
@@ -138,5 +138,5 @@ original client doing it right is gold.
 Most people who want to extend OpenAC do not need to change the client
 at all. A plugin is a Rust crate in its own repository, built against the
 `openac-plugin` SDK, and it installs through the launcher.
-**[docs/plugin-development.md](docs/plugin-development.md)** is the full
+**[content/docs/plugin-development.md](content/docs/plugin-development.md)** is the full
 path.

@@ -14,8 +14,7 @@ use super::installer::contract_limits;
 use super::manifest::{InstallRules, ManifestError, PluginManifest, is_built_for_csharp};
 use super::record_store::{InstalledPluginRecordStore, PluginInstallSource};
 use super::rules::{
-    CLIENT_NOT_INSTALLED, ICON_FILE_NAME, ICON_MAXIMUM_BYTES, describe, validate_icon,
-    validate_plugin_content,
+    ICON_FILE_NAME, ICON_MAXIMUM_BYTES, describe, validate_icon, validate_plugin_content,
 };
 use crate::fsutil;
 use crate::updates::{
@@ -82,12 +81,12 @@ const DUPLICATE_REFUSAL: &str = "Another copy of this plugin is installed.";
 pub const BUILT_FOR_CSHARP_REFUSAL: &str =
     "Built for OpenAC (C#): this client loads WebAssembly plugins only.";
 
-/// The version-only verdict against the installed client (min, max, skip).
+/// The verdict against the installed client (min, max, skip, plugin API).
 pub fn evaluate_version_compatibility(
     manifest: &PluginManifest,
-    client_version: Option<&LauncherVersion>,
+    client: Option<&ClientVersionResolution>,
 ) -> Option<String> {
-    super::rules::version_only_reason(manifest, client_version)
+    super::rules::version_only_reason(manifest, client)
 }
 
 /// The reason the list blocks this exact version of this client's build, if
@@ -186,12 +185,12 @@ fn build_info(
     repo: Option<String>,
     listed_source: Option<PluginInstallSource>,
     catalog: Option<&PluginCatalog>,
-    client_version: Option<&LauncherVersion>,
+    client: Option<&ClientVersionResolution>,
     refusal: Option<String>,
 ) -> InstalledPluginInfo {
     let blocked = LauncherVersion::try_parse(&manifest.version)
         .and_then(|version| find_block_reason(catalog, &manifest.id, &version));
-    let compatibility = describe(manifest, client_version);
+    let compatibility = describe(manifest, client);
     InstalledPluginInfo {
         id: manifest.id.clone(),
         display_name: manifest.display_name.clone(),
@@ -240,7 +239,6 @@ impl PluginInventory {
         client_resolution: Option<&ClientVersionResolution>,
         catalog: Option<&PluginCatalog>,
     ) -> Vec<InstalledPluginInfo> {
-        let client_version = client_resolution.and_then(|resolution| resolution.version.as_ref());
         let bundled_directory = client_resolution
             .filter(|resolution| resolution.is_verified())
             .and_then(|resolution| resolution.directory.as_ref())
@@ -270,7 +268,7 @@ impl PluginInventory {
                 Some(record.repo.clone()),
                 Some(record.source),
                 catalog,
-                client_version,
+                client_resolution,
                 None,
             ));
         }
@@ -297,7 +295,7 @@ impl PluginInventory {
                 None,
                 None,
                 catalog,
-                client_version,
+                client_resolution,
                 refusal,
             ));
         }
@@ -319,7 +317,7 @@ impl PluginInventory {
                         None,
                         None,
                         catalog,
-                        client_version,
+                        client_resolution,
                         None,
                     ));
                 } else {
@@ -365,11 +363,6 @@ impl PluginInventory {
             .into_iter()
             .find(|info| info.id.eq_ignore_ascii_case(id))
     }
-}
-
-/// Whether the client-not-installed reason is the only verdict.
-pub fn is_client_not_installed(reason: &str) -> bool {
-    reason == CLIENT_NOT_INSTALLED
 }
 
 // --- Direct installs -------------------------------------------------------------

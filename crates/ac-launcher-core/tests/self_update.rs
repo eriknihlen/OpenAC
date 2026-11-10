@@ -560,6 +560,242 @@ fn verified_stage_is_durable_and_does_not_touch_running_target() {
     assert!(!pending.to_lowercase().contains("cmd"));
 }
 
+// A staged update that was never handed to its helper (the helper could not
+// be started, or a client held the install when the launcher started) is
+// staged again by Update, not refused with "Restart the launcher": the
+// same release keeps its verified transaction, so Update can hand it over.
+// An addition over OpenAC, which refused any second stage.
+#[test]
+fn staging_the_same_release_again_reuses_the_staged_transaction() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let first = harness.pending();
+
+    let again = harness.stage().unwrap();
+    let plan = harness.pending();
+
+    assert_eq!(again.version.value(), "2.0.0");
+    assert_eq!(plan, first);
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+    assert_eq!(
+        read(&harness.manager.staged_launcher_path(&plan).unwrap()),
+        "new-launcher"
+    );
+}
+
+// A staged release that is not the one being staged (an older one, or one
+// whose payload no longer verifies) never touched the installation, so it
+// is dropped with its transaction and the new release is staged.
+#[test]
+fn staging_another_release_replaces_a_staged_one() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let older = harness.pending();
+
+    let newer = harness
+        .stage_archive("3.0.0", &launcher_zip(&harness.rid, "newer-launcher"))
+        .unwrap();
+    let plan = harness.pending();
+
+    assert_eq!(newer.version.value(), "3.0.0");
+    assert_eq!(plan.version, "3.0.0");
+    assert_eq!(plan.state, SelfUpdatePlanState::Staged);
+    assert_ne!(plan.transaction_id, older.transaction_id);
+    assert!(
+        !harness
+            .manager
+            .transaction_directory(&older.transaction_id)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+
+    // A damaged payload of the same release is staged afresh too.
+    let damaged = harness.manager.staged_launcher_path(&plan).unwrap();
+    std::fs::write(&damaged, "tampered").unwrap();
+    harness
+        .stage_archive("3.0.0", &launcher_zip(&harness.rid, "newer-launcher"))
+        .unwrap();
+    let restaged = harness.pending();
+    assert_ne!(restaged.transaction_id, plan.transaction_id);
+    assert_eq!(
+        read(&harness.manager.staged_launcher_path(&restaged).unwrap()),
+        "newer-launcher"
+    );
+}
+
+// What an install holds after a 0.2.2 launcher installed itself: no plan, and
+// the helper's own transaction (its payload kept by the helper's running
+// executable). Staging the next release reclaims it.
+#[test]
+fn staging_reclaims_the_previous_updates_helper_transaction() {
+    let harness = Harness::new();
+    let previous = harness
+        .manager
+        .payload_directory(&ac_launcher_core::ids::unique_hex32())
+        .unwrap();
+    std::fs::create_dir_all(&previous).unwrap();
+    std::fs::write(previous.join(&harness.launcher_name), "previous-helper").unwrap();
+    std::fs::write(previous.join("THIRD-PARTY-LICENSES.html"), "licenses").unwrap();
+
+    harness.stage().unwrap();
+
+    assert!(!previous.parent().unwrap().exists());
+    assert_eq!(harness.pending().state, SelfUpdatePlanState::Staged);
+}
+
+// A notice an earlier attempt left is stale once an update is confirmed:
+// the confirming launcher drops it before its window reads it, and so does
+// an ordinary start that confirms the update itself, and a new staging.
+#[test]
+fn a_confirmed_or_new_update_forgets_an_earlier_attempts_notice() {
+    let stale = "Launcher 1.9.0 could not be installed.";
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let applied = harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    harness.manager.keep_update_notice(stale);
+    {
+        let _helper_lease = harness.manager.barrier().acquire_exclusive().unwrap();
+        let confirmation = harness
+            .handle(&[CONFIRM_ARGUMENT, &applied.transaction_id])
+            .unwrap();
+        assert!(!confirmation.should_exit);
+    }
+    assert_eq!(harness.manager.take_update_notice(), None);
+
+    // An ordinary start that confirms the update itself.
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    harness.manager.keep_update_notice(stale);
+    assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+    assert!(!harness.manager.pending_plan_path().exists());
+    assert_eq!(harness.manager.take_update_notice(), None);
+
+    // A new staging.
+    let harness = Harness::new();
+    harness.manager.keep_update_notice(stale);
+    harness.stage().unwrap();
+    assert_eq!(harness.manager.take_update_notice(), None);
+}
+
+// The helper could not be started from the staged payload (security
+// software removed it, say): nothing was changed and the next start could
+// not start it either. The plan goes, and the start opens the launcher as
+// it is with the reason, instead of failing on every start.
+#[test]
+fn a_start_whose_helper_cannot_start_drops_the_plan_and_opens_with_why() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    std::fs::remove_file(harness.manager.staged_launcher_path(&plan).unwrap()).unwrap();
+
+    let startup = harness.handle(&["ordinary", "argument"]).unwrap();
+
+    assert!(!startup.should_exit);
+    assert_eq!(startup.remaining_arguments, ["ordinary", "argument"]);
+    assert!(!harness.manager.pending_plan_path().exists());
+    assert!(
+        !harness
+            .manager
+            .transaction_directory(&plan.transaction_id)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(read(&harness.launcher_path), "old-launcher");
+    let notice = harness.manager.take_update_notice().expect("why");
+    assert!(
+        notice.contains("Launcher 2.0.0 could not be installed"),
+        "{notice}"
+    );
+    assert!(notice.contains("Nothing was changed"), "{notice}");
+    assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+}
+
+// A start that finds the install in use leaves the staged update waiting,
+// as before. The window says so on a status line, not in a dialog: clients
+// may run all day, and a dialog would greet every start.
+#[test]
+fn a_start_with_the_install_in_use_says_the_update_waits_without_a_dialog() {
+    let harness = Harness::new();
+    assert_eq!(
+        self_update_bootstrap::waiting_update_text(&harness.manager),
+        None
+    );
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    {
+        let _client = harness.manager.barrier().acquire_session().unwrap();
+        assert!(!harness.handle(&["ordinary"]).unwrap().should_exit);
+    }
+    assert_eq!(harness.pending(), plan);
+    assert_eq!(harness.manager.take_update_notice(), None, "no dialog");
+    let line = self_update_bootstrap::waiting_update_text(&harness.manager).expect("a line");
+    assert!(line.contains("Launcher 2.0.0 is downloaded"), "{line}");
+    assert!(line.contains("no client running"), "{line}");
+    assert!(line.contains("plugin install"), "{line}");
+}
+// The plan goes before the notice is written: a notice that cannot be
+// written must not leave the plan for every start to retry.
+#[test]
+fn abandoning_drops_the_plan_even_when_the_notice_cannot_be_written() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    let plan = harness.pending();
+    std::fs::create_dir_all(harness.manager.update_notice_path().join("blocked")).unwrap();
+    let lease = harness.manager.barrier().acquire_exclusive().unwrap();
+
+    harness
+        .manager
+        .abandon_unapplied_under_lease(&plan.transaction_id, "why", &lease)
+        .unwrap();
+
+    assert!(!harness.manager.pending_plan_path().exists());
+}
+
+// A plan past staging changes the installation; only a start finishes or
+// undoes it, so staging over it is refused, and so is staging over a
+// release staged for another copy of the launcher.
+#[test]
+fn staging_refuses_an_applied_plan_and_another_launchers_staged_plan() {
+    let harness = Harness::new();
+    harness.stage().unwrap();
+    harness
+        .manager
+        .apply_pending(&harness.target, &none())
+        .unwrap();
+    let refused = harness.stage().unwrap_err().to_string();
+    assert!(refused.contains("AwaitingConfirmation"), "{refused}");
+    assert!(refused.contains("Restart the launcher"), "{refused}");
+
+    let other = Harness::new();
+    let elsewhere = other.root.join("another copy");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    other
+        .manager
+        .stage_artifact(
+            &version("2.0.0"),
+            &other.rid,
+            &other.artifact,
+            &LauncherInstallationLayout::flat(&elsewhere, &other.rid).unwrap(),
+            &mut |_| {},
+            &none(),
+        )
+        .unwrap();
+    let refused = other.stage().unwrap_err().to_string();
+    assert!(refused.contains("another copy"), "{refused}");
+    assert_eq!(
+        other.pending().target_directory.file_name().unwrap(),
+        "another copy"
+    );
+}
+
 // OpenAC LauncherSelfUpdateManagerTests.ApplyConfirmAndCompletionUseMoveJournalAndRemoveTransaction.
 #[test]
 fn apply_confirm_and_completion_use_move_journal_and_remove_transaction() {

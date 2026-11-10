@@ -233,6 +233,7 @@ impl Probe {
                 step_distance: 0.7,
                 maximum_collision_checks: 500,
                 diagnostics: false,
+                launch_speed: None,
             })
             .status
         });

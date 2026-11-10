@@ -1,5 +1,5 @@
 //! Startup options: command-line flags and environment variables, parsed
-//! into one struct. Every option is listed in `docs/launch-options.md`.
+//! into one struct. Every option is listed in `content/docs/launch-options.md`.
 
 use std::ffi::OsString;
 use std::path::PathBuf;

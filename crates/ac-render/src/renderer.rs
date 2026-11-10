@@ -2372,9 +2372,7 @@ impl WorldRenderer {
         // however far the near tier still reaches.
         walk.object_ring_limit = self.near_radius;
         walk.walk_frame(self.viewer_cell, camera, &blocks, &building_refs, &mut sink);
-        if !sink.views.is_empty() {
-            sink.landscape_end();
-        }
+        sink.walk_done();
         let portals_drawn_count = sink.portals_drawn_count;
         let missing = std::mem::take(&mut sink.missing);
         let selection_parts = std::mem::take(&mut sink.selection_parts);

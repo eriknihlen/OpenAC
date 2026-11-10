@@ -38,6 +38,10 @@ pub const ROLLED_BACK_EXIT_CODE: i32 = 74;
 /// The helper could not establish a safe state and started nothing.
 pub const AMBIGUOUS_EXIT_CODE: i32 = 75;
 
+/// The helper could not install the update, changed nothing, dropped the
+/// plan and started the launcher as it was, which shows why.
+pub const NOT_INSTALLED_EXIT_CODE: i32 = 76;
+
 const INTERNAL_ARGUMENT_PREFIX: &str = "--acdream-self-update-";
 const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -131,6 +135,10 @@ pub fn handle(
             ));
         }
         manager.confirm(&arguments[1], &base_directory, &executable, &cancel)?;
+        // The update is in: a notice an earlier attempt left is stale. It
+        // goes here, before this launcher's window reads it, not when the
+        // helper completes the update.
+        manager.clear_update_notice();
         return Ok(SelfUpdateStartupResult::continue_with(&arguments[2..]));
     }
 
@@ -162,6 +170,8 @@ pub fn handle(
                 blocked.state
             )));
         }
+        // Nothing was changed; the update waits, and the window says so
+        // (`waiting_update_text`).
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     };
 
@@ -178,6 +188,7 @@ pub fn handle(
         }
         manager.complete_confirmed(&plan.transaction_id, &base_directory)?;
         manager.cleanup_owned_residue_under_lease(None, &base_directory, &lease)?;
+        manager.clear_update_notice();
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     }
 
@@ -198,7 +209,18 @@ pub fn handle(
         return Ok(SelfUpdateStartupResult::continue_with(arguments));
     }
 
-    start_staged_helper(manager, &plan, &base_directory, arguments)?;
+    if let Err(error) = start_staged_helper(manager, &plan, &base_directory, arguments) {
+        // Nothing was changed, and the next start could not start the
+        // helper either (security software may have removed or blocked
+        // it): the plan goes, and this launcher opens as it is and says
+        // why.
+        manager.abandon_unapplied_under_lease(
+            &plan.transaction_id,
+            &unapplied_notice(&plan.version, &error),
+            &lease,
+        )?;
+        return Ok(SelfUpdateStartupResult::continue_with(arguments));
+    }
     Ok(SelfUpdateStartupResult::exit(0))
 }
 
@@ -320,6 +342,19 @@ fn run_helper(
 
     wait_for_parent_exit(parent_pid)?;
     let Some(lease) = manager.barrier().try_acquire_exclusive()? else {
+        // Something took the install after the launcher closed. Nothing
+        // was changed: the plan stays for a start with the install free.
+        // When only clients hold it, the launcher opens as it is (its start
+        // finds the install in use and says the update waits); the shared
+        // hold lasts until it is started. Another update (a second helper
+        // for this plan, say) is left to finish, and nothing is started.
+        if let Some(_clients) = manager.barrier().try_acquire_session()? {
+            let mut prior = Command::new(&launcher_path);
+            prior
+                .args(public_arguments)
+                .current_dir(&launcher_directory);
+            let _ = prior.spawn();
+        }
         return Ok(UPDATE_LEASE_BUSY_EXIT_CODE);
     };
 
@@ -372,9 +407,10 @@ fn run_helper(
             }
             manager.complete_confirmed(transaction_id, target_directory)
         })();
-        if applied.is_ok() {
-            return Ok(0);
-        }
+        let error = match applied {
+            Ok(()) => return Ok(0),
+            Err(error) => error,
+        };
 
         if let Some(child) = replacement.as_mut()
             && child.try_wait().ok().flatten().is_none()
@@ -383,8 +419,35 @@ fn run_helper(
             let _ = child.wait();
         }
         let none = CancelToken::new();
+        let pending = manager.load_pending();
+        if let Ok(Some(plan)) = &pending
+            && plan.state == SelfUpdatePlanState::Staged
+            && plan.transaction_id == transaction_id
+        {
+            // The apply stopped before it changed anything beside the
+            // launcher. Retrying it on every start would only fail again
+            // with nothing on screen: the plan goes, the reason is kept for
+            // the launcher to show, and the launcher starts as it was.
+            let notice = unapplied_notice(&plan.version, &error);
+            if manager
+                .abandon_unapplied_under_lease(transaction_id, &notice, &lease)
+                .is_err()
+            {
+                return Ok(AMBIGUOUS_EXIT_CODE);
+            }
+            drop(lease);
+            let mut prior = Command::new(&launcher_path);
+            prior
+                .args(public_arguments)
+                .current_dir(&launcher_directory);
+            return Ok(if prior.spawn().is_ok() {
+                NOT_INSTALLED_EXIT_CODE
+            } else {
+                AMBIGUOUS_EXIT_CODE
+            });
+        }
         let receipt = (|| -> Result<Option<SelfUpdatePlan>, UpdateError> {
-            let pending = manager.load_pending()?;
+            let pending = pending?;
             Ok(match pending.as_ref().map(|plan| plan.state) {
                 Some(SelfUpdatePlanState::Applying) => {
                     Some(manager.recover_applying(target_directory, &none)?)
@@ -419,6 +482,37 @@ fn run_helper(
         return Ok(AMBIGUOUS_EXIT_CODE);
     }
     Ok(ROLLED_BACK_EXIT_CODE)
+}
+
+/// What holds the install while an update waits.
+pub const INSTALL_IN_USE: &str = "a running client, another update or a plugin install is using \
+                                  this install";
+
+/// The line the window shows while a downloaded launcher update waits for
+/// the install (a start found it in use): `None` when nothing is staged.
+/// A status line, not a dialog: clients may run all day.
+pub fn waiting_update_text(manager: &LauncherSelfUpdateManager) -> Option<String> {
+    let plan = manager
+        .load_pending()
+        .ok()
+        .flatten()
+        .filter(|plan| plan.state == SelfUpdatePlanState::Staged)?;
+    Some(format!(
+        "Launcher {} is downloaded and installs when the launcher starts with no client \
+         running: {INSTALL_IN_USE}.",
+        plan.version
+    ))
+}
+
+/// What the launcher shows after an update that could not be installed and
+/// changed nothing.
+fn unapplied_notice(version: &str, error: &UpdateError) -> String {
+    format!(
+        "Launcher {version} could not be installed. Nothing was changed: this launcher runs \
+         as before.\n\n{error}\n\nChoose Update to try again. If it fails the same way, \
+         reinstall the launcher: unpack the release into a new, empty folder and start it \
+         from there."
+    )
 }
 
 fn validate_canonical_startup(

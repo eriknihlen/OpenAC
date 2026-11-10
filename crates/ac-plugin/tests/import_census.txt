@@ -27,6 +27,7 @@ ui_canvas_set -
 ui_canvas_state -
 ui_canvas_available - window
 ui_canvas_remove -
+ui_canvas_resize -
 ui_measure_text -
 ui_font_bundled -
 ui_font_load -

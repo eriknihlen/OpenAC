@@ -17,6 +17,7 @@ use ac_launcher_core::net::HttpTransport;
 use ac_launcher_core::orchestration::{
     LauncherExecutableSet, LauncherOrchestrator, OrchestratorParts,
 };
+use ac_launcher_core::plugins::beside_launcher_plugin_api;
 use ac_launcher_core::profiles::LauncherProfileStore;
 use ac_launcher_core::status::{KnownServerCatalog, ServerHealthService};
 use ac_launcher_core::updates::{
@@ -77,6 +78,8 @@ pub struct Prepared {
     apply_launcher_update: Option<ApplyLauncherUpdate>,
     install_folder: Option<InstallFolderParts>,
     control: Option<control::ControlServer>,
+    self_update_notice: Option<String>,
+    launcher_update_waiting: Option<String>,
 }
 
 /// The updater over the release feed: the client and the launcher's own
@@ -199,9 +202,12 @@ impl RescueUpdate {
                         rescue.handed_over.store(true, Ordering::Release);
                         Ok("Installing the launcher update…".to_owned())
                     } else {
-                        Ok("The launcher update is ready; start the launcher again to \
-                            install it."
-                            .to_owned())
+                        Ok(format!(
+                            "The launcher update is ready, but {}. Close every client (and \
+                             let other updates finish), then start the launcher again to \
+                             install it.",
+                            self_update_bootstrap::INSTALL_IN_USE
+                        ))
                     }
                 })();
                 let text = outcome.unwrap_or_else(|error| {
@@ -227,6 +233,15 @@ impl RescueUpdate {
 pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
     let paths = &context.paths;
     let log = &context.log;
+    // A launcher update that was not installed (it failed before changing
+    // anything, or waits for the install to be free) left why; shown once.
+    let self_update_notice = context.self_updates.take_update_notice();
+    if let Some(notice) = &self_update_notice {
+        log.line(&format!(
+            "launcher update not installed: {}",
+            notice.replace('\n', " ")
+        ));
+    }
     // A move of the install folder can leave the install record naming the
     // old folder's content; the install check that follows would reject it.
     match ac_launcher_core::installation::repair_content_records(paths) {
@@ -306,6 +321,11 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
             .join(format!("openac{}", suffix_for_current_os()));
         let directory = context.launcher_directory.clone();
         let version = launcher_version.clone();
+        // Read once: the launcher's own folder does not change while it runs.
+        let plugin_api = beside
+            .is_file()
+            .then(|| beside_launcher_plugin_api(&directory, Some(&version)))
+            .flatten();
         Arc::new(move || {
             let resolution = versions.cached_resolution();
             if resolution.is_verified() || !beside.is_file() {
@@ -319,6 +339,7 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
                 directory: Some(directory.clone()),
                 previous_version: None,
                 record: None,
+                plugin_api,
             })
         })
     };
@@ -387,6 +408,8 @@ pub fn prepare(context: &StartContext) -> Result<Prepared, String> {
         apply_launcher_update,
         install_folder,
         control,
+        self_update_notice,
+        launcher_update_waiting: self_update_bootstrap::waiting_update_text(&context.self_updates),
     })
 }
 
@@ -429,6 +452,8 @@ impl Prepared {
             )),
         });
         window.initialize();
+        window.self_update_notice = self.self_update_notice;
+        window.launcher_update_waiting = self.launcher_update_waiting;
         Running {
             app: LauncherApp::new(window, self.shared, self.script),
             _control: self.control,

@@ -1,19 +1,35 @@
 name: docs
 
-# Builds the documentation site (the home page and the guides under docs/,
-# from Markdown alone) and publishes it to GitHub Pages on every push to main
-# that touches them.
+# Builds the site (the homepage and the guides under content/docs/) with
+# Zola and publishes it to GitHub Pages. A pull request that touches the site
+# builds it without publishing, so a broken link or template shows before
+# the merge. A finished release rebuilds it too: the homepage reads the
+# latest release's version and downloads when it is built.
 
 on:
   push:
     branches: [ main ]
     paths:
-      - "docs/**"
-      - "docfx.json"
-      - "toc.yml"
-      - "index.md"
-      - ".config/dotnet-tools.json"
+      - "content/**"
+      - "templates/**"
+      - "sass/**"
+      - "static/**"
+      - "data/**"
+      - "zola.toml"
       - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "content/**"
+      - "templates/**"
+      - "sass/**"
+      - "static/**"
+      - "data/**"
+      - "zola.toml"
+      - ".github/workflows/docs.yml"
+  workflow_run:
+    workflows: [ Release ]
+    types: [ completed ]
   workflow_dispatch:
 
 permissions:
@@ -22,26 +38,40 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
   cancel-in-progress: true
+
+env:
+  ZOLA_VERSION: "0.23.6"
+  ZOLA_SHA256: "8f5132b3522412d04e395e0b25f6d68613ad272a873e54a2b3ebf664873024a4"
 
 jobs:
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - name: Restore tools
-        run: dotnet tool restore
+      - name: Install Zola
+        run: |
+          archive="zola-v${ZOLA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/${archive}"
+          echo "${ZOLA_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$archive" -C "$HOME/.local/bin" zola
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the site
-        run: dotnet docfx docfx.json --warningsAsErrors
-      - uses: actions/upload-pages-artifact@v3
+        # The token lets the homepage read the latest release without
+        # sharing the runner's anonymous rate limit.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: zola build
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: public
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

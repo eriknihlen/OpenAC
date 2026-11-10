@@ -1017,8 +1017,14 @@ impl FrameWalk {
         }
         if viewer_cell & 0xFFFF < 0x0100 || !self.cells.contains_key(&viewer_cell) {
             let mut root = PortalView::default();
-            copy_full_view(&mut root, camera);
-            self.draw_landscape(camera, blocks, buildings, &root, true, sink);
+            // A window one pixel wide or tall collapses the full-screen quad
+            // to a line (or, at 1x1, a point), so no view is added. The
+            // landscape, like the one an interior sees through no window, is
+            // then not drawn at all: the frame comes out empty instead of
+            // asking for a view that does not exist.
+            if copy_full_view(&mut root, camera) {
+                self.draw_landscape(camera, blocks, buildings, &root, true, sink);
+            }
         } else {
             self.draw_inside(viewer_cell, camera, blocks, buildings, sink);
         }
@@ -1981,6 +1987,34 @@ mod tests {
         }
     }
 
+    /// A sink that takes `full_screen` at the renderer's word: it asks for
+    /// view 0's planes the way `FrameSink::landscape_begin` does, and records
+    /// what it was handed.
+    #[derive(Default)]
+    struct ViewReader {
+        landscapes: Vec<(usize, bool)>,
+    }
+
+    impl WalkSink for ViewReader {
+        fn landscape_begin(&mut self, views: &ViewSet, count: usize, full_screen: bool) {
+            if full_screen {
+                let _ = views.planes(0);
+            }
+            self.landscapes.push((count, full_screen));
+        }
+        fn land_block(&mut self, _b: usize) {}
+        fn land_cell_terrain(&mut self, _b: usize, _c: usize) {}
+        fn land_cell(&mut self, _b: usize, _c: usize) {}
+        fn sort_cell_exit(&mut self, _b: usize, _c: usize) {}
+        fn building_drawable(&mut self, _b: usize) -> bool {
+            true
+        }
+        fn punch(&mut self, _p: &[Vec3], _v: usize) {}
+        fn draw_cells(&mut self, _cells: &[(u32, ViewSet, usize)]) {}
+        fn building_shell(&mut self, _b: usize) {}
+        fn interior_landscape_done(&mut self, _seals: &[(Vec<Vec3>, ViewSet, usize)]) {}
+    }
+
     #[test]
     fn the_flood_reaches_through_doorways_and_out_of_windows() {
         let mut walk = two_rooms();
@@ -2012,6 +2046,35 @@ mod tests {
         walk.walk_frame(0x0101_0001, &cam, &[], &[], &mut rec);
         assert_eq!(rec.landscape_views, vec![1]);
         assert!(rec.cells.is_empty());
+    }
+
+    /// A window one pixel wide or tall (the smallest the renderer hands
+    /// the walk) collapses the full-screen quad to a line, so no view is
+    /// added and the outdoor landscape is not begun at all; a window two
+    /// pixels each way still has its view and draws it full screen.
+    #[test]
+    fn a_one_pixel_window_begins_no_landscape() {
+        let mut walk = two_rooms();
+        let base = camera(Vec3::new(0.0, -10.0, 1.0), Vec3::new(0.0, 10.0, 1.0));
+        for (width, height) in [(1.0, 720.0), (720.0, 1.0), (1.0, 1.0)] {
+            let cam = WalkCamera {
+                width,
+                height,
+                ..base
+            };
+            assert!(!copy_full_view(&mut PortalView::default(), &cam));
+            let mut rec = ViewReader::default();
+            walk.walk_frame(0x0101_0001, &cam, &[], &[], &mut rec);
+            assert_eq!(rec.landscapes, vec![], "{width} x {height}");
+        }
+        let cam = WalkCamera {
+            width: 2.0,
+            height: 2.0,
+            ..base
+        };
+        let mut rec = ViewReader::default();
+        walk.walk_frame(0x0101_0001, &cam, &[], &[], &mut rec);
+        assert_eq!(rec.landscapes, vec![(1, true)]);
     }
 
     /// The landscape's turns, in order.

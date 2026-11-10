@@ -1,5 +1,5 @@
 //! Startup options: the one place command-line flags and environment
-//! variables are read. Every option is documented in `docs/launch-options.md`.
+//! variables are read. Every option is documented in `content/docs/launch-options.md`.
 
 use std::fmt;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -28,6 +28,9 @@ Options:
   --landblock-radius <n>  Landblocks drawn around the player's, 0 to 10 (env
                           OPENAC_LANDBLOCK_RADIUS, default 2: a 5 x 5 square).
   --help                 Show this text.
+
+`openac plugin-api` prints the plugin API versions this client loads, as the
+plugin-api.json its release carries beside it.
 
 The password comes only from the environment variable OPENAC_PASSWORD.
 Chat logs (/log) and journals go under OPENAC_DATA_DIR (default: the platform
