@@ -255,6 +255,10 @@ pub struct LocalRefusal {
     pub roster_full: bool,
     /// No heritage or gender chosen.
     pub heritage_or_gender_unset: bool,
+    /// A look slot is not one of its gender's choices (nothing chosen, for
+    /// instance) or a shade is outside 0..=1. Only the headgear may be
+    /// none.
+    pub look_invalid: bool,
 }
 
 impl LocalRefusal {
@@ -266,6 +270,7 @@ impl LocalRefusal {
             || self.already_pending
             || self.roster_full
             || self.heritage_or_gender_unset
+            || self.look_invalid
     }
 }
 
@@ -444,6 +449,8 @@ pub struct CharacterCreation {
     start_area: i32,
     slot: u32,
     verification_pending: bool,
+    /// A creation is under way: the character was rolled when it began.
+    under_way: bool,
     last_local_refusal: LocalRefusal,
     last_rejection: Option<CreationRejection>,
     last_created: Option<CreatedIdentity>,
@@ -477,6 +484,7 @@ impl CharacterCreation {
             start_area: -1,
             slot: 0,
             verification_pending: false,
+            under_way: false,
             last_local_refusal: LocalRefusal::default(),
             last_rejection: None,
             last_created: None,
@@ -553,6 +561,7 @@ impl CharacterCreation {
     pub fn begin(&mut self, generation: Generation) {
         self.generation = generation;
         self.active = true;
+        self.under_way = false;
         self.clear_session_state();
         self.revision += 1;
         self.publish(CreationDeltaKind::Reset);
@@ -572,6 +581,7 @@ impl CharacterCreation {
     pub fn reset(&mut self, generation: Generation) {
         self.generation = generation;
         self.active = false;
+        self.under_way = false;
         self.clear_session_state();
         self.revision += 1;
         self.publish(CreationDeltaKind::Reset);
@@ -954,9 +964,10 @@ impl CharacterCreation {
 
     // -- Appearance --------------------------------------------------------
 
-    /// Choose an index for a look slot ([`UNSET`] clears it).
+    /// Choose an index for a look slot. [`UNSET`] takes the headgear off;
+    /// every other slot always holds one of its choices.
     pub fn try_set_appearance_index(&mut self, slot: AppearanceSlot, index: u32) -> bool {
-        if !self.active {
+        if !self.active || (index == UNSET && slot != AppearanceSlot::HeadgearStyle) {
             return false;
         }
         let Some(count) = self.gender().map(|g| slot_count(slot, g)) else {
@@ -1156,6 +1167,7 @@ impl CharacterCreation {
 
     fn randomize_character_inner(&mut self) {
         self.clear_session_state();
+        self.under_way = true;
         let heritage_id = self.roll_dice(1, 4).cast_unsigned();
         self.heritage_id = heritage_id;
         let options = Arc::clone(&self.options);
@@ -1203,6 +1215,17 @@ impl CharacterCreation {
         self.randomize_shirt_trousers_footwear();
         self.changed();
         true
+    }
+
+    /// The creation screen opens: a creation not yet under way starts from
+    /// a whole rolled character, as the screen rolls one when it opens, so
+    /// nothing is left unchosen. Once one is under way nothing changes.
+    /// True when it rolled.
+    pub fn open(&mut self) -> bool {
+        if self.under_way {
+            return false;
+        }
+        self.try_randomize_character()
     }
 
     // -- Town, name, slot --------------------------------------------------
@@ -1270,6 +1293,11 @@ impl CharacterCreation {
                 heritage_or_gender_unset: true,
                 ..LocalRefusal::default()
             }
+        } else if self.invalid_look_part().is_some() {
+            LocalRefusal {
+                look_invalid: true,
+                ..LocalRefusal::default()
+            }
         } else if !confirmed_unspent_credits && self.remaining_attribute_credits > 0 {
             LocalRefusal {
                 attribute_credits_unspent: true,
@@ -1304,12 +1332,11 @@ impl CharacterCreation {
         let a = &self.appearance;
         let b = &self.attributes;
         let attribute = |v: i32| u32::try_from(v).unwrap_or(0);
-        // The server indexes the CharGen option lists by these values, so a
-        // slot the player never chose becomes the first option and an
-        // unchosen shade the first palette of its set. `headgear_style`
-        // keeps UNSET: the server reads `uint.MaxValue` as "no headgear".
-        let index = |v: u32| if v == UNSET { 0 } else { v };
-        let shade = |v: f64| if v == UNSET_SHADE { 0.0 } else { v };
+        // The four clothing colors go out as 0 when out of range (a hat's
+        // color while no hat is worn, for instance); everything else goes
+        // out as chosen. 0xFFFFFFFF in the headgear style means no headgear.
+        let colors = self.gender().map_or(0, |g| g.clothing_colors.len());
+        let color = |v: u32| if (v as usize) < colors { v } else { 0 };
         let mut classes = [0u32; SKILL_ADVANCEMENT_CLASS_COUNT];
         for (slot, value) in classes.iter_mut().zip(self.skills.to_wire_classes()) {
             *slot = value;
@@ -1319,26 +1346,26 @@ impl CharacterCreation {
                 heritage: self.heritage_id,
                 gender: self.gender_key,
                 appearance: CharacterAppearance {
-                    eyes_strip: index(a.eyes_strip),
-                    nose_strip: index(a.nose_strip),
-                    mouth_strip: index(a.mouth_strip),
-                    hair_color: index(a.hair_color),
-                    eye_color: index(a.eye_color),
-                    hair_style: index(a.hair_style),
+                    eyes_strip: a.eyes_strip,
+                    nose_strip: a.nose_strip,
+                    mouth_strip: a.mouth_strip,
+                    hair_color: a.hair_color,
+                    eye_color: a.eye_color,
+                    hair_style: a.hair_style,
                     headgear_style: a.headgear_style,
-                    headgear_color: index(a.headgear_color),
-                    shirt_style: index(a.shirt_style),
-                    shirt_color: index(a.shirt_color),
-                    trousers_style: index(a.trousers_style),
-                    trousers_color: index(a.trousers_color),
-                    footwear_style: index(a.footwear_style),
-                    footwear_color: index(a.footwear_color),
-                    skin_shade: shade(a.skin_shade),
-                    hair_shade: shade(a.hair_shade),
-                    headgear_shade: shade(a.headgear_shade),
-                    shirt_shade: shade(a.shirt_shade),
-                    trousers_shade: shade(a.trousers_shade),
-                    footwear_shade: shade(a.footwear_shade),
+                    headgear_color: color(a.headgear_color),
+                    shirt_style: a.shirt_style,
+                    shirt_color: color(a.shirt_color),
+                    trousers_style: a.trousers_style,
+                    trousers_color: color(a.trousers_color),
+                    footwear_style: a.footwear_style,
+                    footwear_color: color(a.footwear_color),
+                    skin_shade: a.skin_shade,
+                    hair_shade: a.hair_shade,
+                    headgear_shade: a.headgear_shade,
+                    shirt_shade: a.shirt_shade,
+                    trousers_shade: a.trousers_shade,
+                    footwear_shade: a.footwear_shade,
                 },
                 template: self.template,
                 attributes: CharacterAttributes {
@@ -1360,6 +1387,54 @@ impl CharacterCreation {
         }
     }
 
+    /// The first part of the look that is not one of its gender's choices
+    /// (nothing chosen, for instance), or a shade outside 0..=1: a create
+    /// with one is not sent. Only the headgear may be none, and its color
+    /// is not checked then.
+    #[must_use]
+    pub fn invalid_look_part(&self) -> Option<&'static str> {
+        use AppearanceSlot as S;
+        let Some(gender) = self.gender() else {
+            return Some("heritage and gender");
+        };
+        let a = &self.appearance;
+        let no_headgear = a.headgear_style == UNSET;
+        let indexes = [
+            (S::EyesStrip, "eyes"),
+            (S::NoseStrip, "nose"),
+            (S::MouthStrip, "mouth"),
+            (S::HairColor, "hair color"),
+            (S::EyeColor, "eye color"),
+            (S::HairStyle, "hair style"),
+            (S::HeadgearStyle, "headgear"),
+            (S::HeadgearColor, "headgear color"),
+            (S::ShirtStyle, "shirt"),
+            (S::ShirtColor, "shirt color"),
+            (S::TrousersStyle, "trousers"),
+            (S::TrousersColor, "trousers color"),
+            (S::FootwearStyle, "footwear"),
+            (S::FootwearColor, "footwear color"),
+        ];
+        for (slot, name) in indexes {
+            let unchecked = no_headgear && matches!(slot, S::HeadgearStyle | S::HeadgearColor);
+            if !unchecked && a.get(slot) as usize >= slot_count(slot, gender) {
+                return Some(name);
+            }
+        }
+        let shades = [
+            (a.skin_shade, "skin shade"),
+            (a.hair_shade, "hair shade"),
+            (a.headgear_shade, "headgear shade"),
+            (a.shirt_shade, "shirt shade"),
+            (a.trousers_shade, "trousers shade"),
+            (a.footwear_shade, "footwear shade"),
+        ];
+        shades
+            .into_iter()
+            .find(|(v, _)| !(0.0..=1.0).contains(v))
+            .map(|(_, name)| name)
+    }
+
     /// The server's answer to the create.
     pub fn apply_creation_response(&mut self, response: &CharGenVerificationResponse) {
         if !self.active || !self.verification_pending {
@@ -1368,6 +1443,7 @@ impl CharacterCreation {
         self.verification_pending = false;
         let kind = match (&response.character, response.is_ok()) {
             (Some(created), true) => {
+                self.under_way = false;
                 self.last_created = Some(CreatedIdentity {
                     guid: created.guid,
                     name: created.name.clone(),

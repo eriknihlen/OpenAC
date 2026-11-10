@@ -2078,6 +2078,7 @@ impl Drive<'_> {
             LifecycleCommand::Cancel => self.flow.cancel(),
             LifecycleCommand::SetNextLogin(selector) => self.flow.set_next_login(selector.as_ref()),
             LifecycleCommand::Create(CreationCommand::Show) => {
+                self.flow.open_creation();
                 let snapshot = self.flow.creation().snapshot();
                 let _ = self
                     .events

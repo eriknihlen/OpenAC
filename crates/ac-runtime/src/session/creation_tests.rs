@@ -213,6 +213,9 @@ fn chosen(template_index: u32) -> CharacterCreation {
     assert!(state.try_select_heritage(ALUVIAN));
     assert!(state.try_select_gender(MALE));
     assert!(state.try_select_template(template_index));
+    // A look, as the roll when creation opens leaves one.
+    assert!(state.try_randomize_appearance());
+    assert!(state.try_randomize_clothing());
     state
 }
 
@@ -519,43 +522,156 @@ fn an_accepted_finish_trims_the_name_and_sends_55_skill_slots() {
 }
 
 #[test]
-fn an_unchosen_appearance_defaults_to_the_first_options_on_the_wire() {
-    // The console/headless flow never touches the appearance; the server
-    // indexes the CharGen lists by every one of these, so UNSET (the
-    // console default) must become the first option, not `0xFFFFFFFF`.
-    let mut state = ready_to_finish();
+fn opening_a_creation_rolls_every_slot_and_only_once() {
+    for seed in 0..50 {
+        let mut state = with_random(Box::new(SeededRandom::new(seed)));
+        assert!(state.open(), "seed {seed}");
+        assert_eq!(state.invalid_look_part(), None, "seed {seed}");
+        let s = state.snapshot();
+        assert_ne!(s.template, TEMPLATE_UNSET);
+        assert_ne!(s.start_area, -1);
+        // Under way: opening again changes nothing.
+        assert!(!state.open());
+        assert_eq!(state.snapshot().appearance, s.appearance);
+    }
+    // Inactive, nothing opens.
+    let mut state = CharacterCreation::new(Arc::new(fixture()), Box::new(SeededRandom::new(1)));
+    assert!(!state.open());
+}
+
+#[test]
+fn a_new_creation_opens_with_a_new_roll() {
+    let mut state = active();
+    assert!(state.open());
+    state.begin(Generation(2));
     assert_eq!(state.snapshot().appearance.hair_style, UNSET);
+    assert!(state.open());
+    assert_ne!(state.snapshot().appearance.hair_style, UNSET);
+}
+
+#[test]
+fn only_the_headgear_can_be_set_to_none() {
+    let mut state = ready_to_finish();
+    assert!(!state.try_set_appearance_index(AppearanceSlot::HairStyle, UNSET));
+    assert!(!state.try_set_appearance_index(AppearanceSlot::ShirtColor, UNSET));
+    assert_ne!(state.snapshot().appearance.hair_style, UNSET);
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, UNSET));
+    assert_eq!(state.snapshot().appearance.headgear_style, UNSET);
+}
+
+#[test]
+fn a_look_slot_not_chosen_is_refused_and_nothing_is_sent() {
+    // Heritage, gender and template chosen, the look never touched: every
+    // slot is unset, which the server cannot index.
+    let mut state = active();
+    assert!(state.try_select_heritage(ALUVIAN));
+    assert!(state.try_select_gender(MALE));
+    assert!(state.try_select_template(PRESET));
+    state.try_set_name("Adventurer");
+    assert_eq!(state.invalid_look_part(), Some("eyes"));
+    let refusal = state.try_begin_finish(0, 11, false).unwrap_err();
+    assert!(refusal.look_invalid);
+    assert!(!state.snapshot().verification_pending);
+    assert!(state.snapshot().last_local_refusal.look_invalid);
+
+    let mut state = ready_to_finish();
+    state.appearance.trousers_style = UNSET;
+    assert_eq!(state.invalid_look_part(), Some("trousers"));
+    assert!(
+        state
+            .try_begin_finish(0, 11, false)
+            .unwrap_err()
+            .look_invalid
+    );
+}
+
+#[test]
+fn a_shade_outside_zero_to_one_is_refused() {
+    for bad in [UNSET_SHADE, 1.5, f64::NAN] {
+        let mut state = ready_to_finish();
+        state.appearance.footwear_shade = bad;
+        assert_eq!(state.invalid_look_part(), Some("footwear shade"));
+        assert!(
+            state
+                .try_begin_finish(0, 11, false)
+                .unwrap_err()
+                .look_invalid
+        );
+    }
+    let mut state = ready_to_finish();
+    state.appearance.skin_shade = 1.0;
+    state.appearance.hair_shade = 0.0;
+    assert!(state.try_begin_finish(0, 11, false).is_ok());
+}
+
+#[test]
+fn a_finish_sends_the_look_as_chosen_and_no_headgear_as_all_ones() {
+    let mut state = ready_to_finish();
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, UNSET));
+    let chosen = state.snapshot().appearance;
     let finish = state.try_begin_finish(0, 11, false).unwrap();
     let a = &finish.request.appearance;
-    for value in [
-        a.eyes_strip,
-        a.nose_strip,
-        a.mouth_strip,
-        a.hair_style,
-        a.hair_color,
-        a.eye_color,
-        a.headgear_color,
-        a.shirt_style,
-        a.shirt_color,
-        a.trousers_style,
-        a.trousers_color,
-        a.footwear_style,
-        a.footwear_color,
-    ] {
-        assert_eq!(value, 0);
+    assert_eq!(
+        [a.eyes_strip, a.nose_strip, a.mouth_strip],
+        [chosen.eyes_strip, chosen.nose_strip, chosen.mouth_strip]
+    );
+    assert_eq!(
+        [a.hair_style, a.hair_color, a.eye_color],
+        [chosen.hair_style, chosen.hair_color, chosen.eye_color]
+    );
+    assert_eq!(
+        [a.shirt_style, a.trousers_style, a.footwear_style],
+        [
+            chosen.shirt_style,
+            chosen.trousers_style,
+            chosen.footwear_style
+        ]
+    );
+    assert_eq!(
+        [a.shirt_color, a.trousers_color, a.footwear_color],
+        [
+            chosen.shirt_color,
+            chosen.trousers_color,
+            chosen.footwear_color
+        ]
+    );
+    assert_eq!(a.headgear_style, 0xFFFF_FFFF);
+    assert_eq!(a.skin_shade.to_bits(), chosen.skin_shade.to_bits());
+    assert_eq!(a.footwear_shade.to_bits(), chosen.footwear_shade.to_bits());
+}
+
+#[test]
+fn a_clothing_color_out_of_range_goes_out_as_zero() {
+    // No hat, and its color never chosen: the hat's color is not checked
+    // and goes out as 0.
+    let mut state = ready_to_finish();
+    state.appearance.headgear_style = UNSET;
+    state.appearance.headgear_color = UNSET;
+    let finish = state.try_begin_finish(0, 11, false).unwrap();
+    assert_eq!(finish.request.appearance.headgear_color, 0);
+
+    // The fixture's gender has three clothing colors.
+    let mut state = ready_to_finish();
+    for (value, sent) in [(2, 2), (3, 0), (UNSET, 0), (0x8000_0000, 0)] {
+        state.appearance.shirt_color = value;
+        state.appearance.trousers_color = value;
+        state.appearance.footwear_color = value;
+        state.appearance.headgear_color = value;
+        let a = state.build_request().request.appearance;
+        assert_eq!(
+            [
+                a.shirt_color,
+                a.trousers_color,
+                a.footwear_color,
+                a.headgear_color
+            ],
+            [sent; 4],
+            "{value:#x}"
+        );
     }
-    // `uint.MaxValue` means "no headgear" to the server.
-    assert_eq!(a.headgear_style, UNSET);
-    for shade in [
-        a.skin_shade,
-        a.hair_shade,
-        a.headgear_shade,
-        a.shirt_shade,
-        a.trousers_shade,
-        a.footwear_shade,
-    ] {
-        assert_eq!(shade, 0.0);
-    }
+    // Only the colors: an out-of-range style goes out as it is.
+    state.appearance.shirt_style = 9;
+    assert_eq!(state.build_request().request.appearance.shirt_style, 9);
 }
 
 fn pending() -> CharacterCreation {
