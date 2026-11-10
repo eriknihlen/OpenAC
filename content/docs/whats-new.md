@@ -12,6 +12,32 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.4 (2026-11-10)
+
+- The launcher no longer gets stuck on "update is already Staged": pressing
+  Update again finishes the update, and an update that fails before
+  anything changed opens the launcher as it was and says why. While a client
+  is running, the launcher shows that the update waits instead of a pop-up.
+- The launcher checks plugins against the plugin API of the client you have
+  installed, so a new plugin API version needs only a client update, not a
+  launcher update.
+- New characters wear the clothing colours you picked. The client sent a
+  colour's place in the list where the server expects the colour itself, so
+  the dye came out different.
+- Creating a character with `/create` console commands no longer hangs: like
+  the creation window, it starts from a random character, so no part is left
+  unchosen. *(code by fartwhif)*
+- The client no longer crashes when its window is squeezed to one pixel.
+  *(code by fartwhif)*
+- Walking routes name a point indoors only when it stands on a room's floor
+  or its stairs, so a route over a cellar is no longer taken for the cellar.
+  *(code by David Smith)*
+- Plugin route lines follow dips in the ground, and floors and stairs
+  indoors. *(code by David Smith)*
+- Plugin API 1.12: a bow or crossbow aiming check can use the launcher's
+  real arrow speed, plugins can draw canvases inside their own windows, and
+  a canvas can be resized. *(code by David Smith)*
+
 ## OpenAC (Rust) 0.2.3 (2026-11-09)
 
 - A corpse or chest that disappeared just as it was opened stayed open for
