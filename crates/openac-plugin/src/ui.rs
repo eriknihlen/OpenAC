@@ -718,7 +718,7 @@ impl Canvas {
 
     /// Width, pixels: as registered or last resized through this handle
     /// (a copy made before a [`Self::resize`] keeps the old size). The
-    /// client's current size, and an in-markup canvas's laid-out size, is
+    /// client's current size, and an in-markup canvas's laid-out size, are
     /// its [`Self::state`].
     #[must_use]
     pub fn width(self) -> i32 {
@@ -818,10 +818,9 @@ impl Canvas {
     /// this handle report the new size at once; a `Canvas` is `Copy`, so
     /// another copy of the handle keeps the size it had. [`Self::state`]
     /// asks the client for the size it has now, whichever copy asks. The
-    /// size it already has changes nothing
-    /// and answers true. False, and nothing changes, for a width or height
-    /// below 1, a removed canvas, or an in-markup canvas (its element
-    /// decides its size).
+    /// size it already has changes nothing and answers true. False, and
+    /// nothing changes, for a width or height below 1, a removed canvas, or
+    /// an in-markup canvas (its element decides its size).
     pub fn resize(&mut self, host: &mut Host<'_>, width: i32, height: i32) -> bool {
         let request = ac_plugin_abi::ui::CanvasResize {
             canvas: self.id,

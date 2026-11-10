@@ -43,20 +43,21 @@ const MAXIMUM_LAUNCH_SPEED: f32 = MAX_VELOCITY;
 /// Gravity's pull on a curved flight, metres per second squared. The
 /// physics constant points down (negative); the arc formulas here take its
 /// size.
-const GRAVITY: f32 = -ac_physics::globals::GRAVITY;
+const GRAVITY_PULL: f32 = -ac_physics::globals::GRAVITY;
 
 /// The launch of a missile or arc at a total `speed`, as a server
-/// launches one: the lower of the two arcs under [`GRAVITY`] that reach a
+/// launches one: the lower of the two arcs under [`GRAVITY_PULL`] that reach a
 /// point `across` metres away along the ground and `rise` metres higher.
 /// The velocity across and up, and the launch angle in radians; `None`
 /// when no arc reaches the point at this speed.
 pub(super) fn ballistic_launch(speed: f32, across: f32, rise: f32) -> Option<(f32, f32, f32)> {
     let speed2 = speed * speed;
-    let root = speed2 * speed2 - GRAVITY * (GRAVITY * across * across + 2.0 * rise * speed2);
+    let root =
+        speed2 * speed2 - GRAVITY_PULL * (GRAVITY_PULL * across * across + 2.0 * rise * speed2);
     if !root.is_finite() || root < 0.0 {
         return None;
     }
-    let angle = (speed2 - root.sqrt()).atan2(GRAVITY * across);
+    let angle = (speed2 - root.sqrt()).atan2(GRAVITY_PULL * across);
     Some((speed * angle.cos(), speed * angle.sin(), angle))
 }
 
@@ -247,7 +248,7 @@ fn fly(
         cell_id = resolved.cell_id;
         elapsed += quantum;
         if query.kind != ProjectilePathKind::Straight {
-            velocity.z -= GRAVITY * quantum;
+            velocity.z -= GRAVITY_PULL * quantum;
         }
     }
     (
@@ -299,7 +300,7 @@ fn launch(
     };
     let total_time = across / speed;
     let up = if curved {
-        (rise + 0.5 * GRAVITY * total_time * total_time) / total_time
+        (rise + 0.5 * GRAVITY_PULL * total_time * total_time) / total_time
     } else {
         rise / total_time
     };
